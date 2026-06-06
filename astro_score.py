@@ -11,7 +11,7 @@ from astropy.coordinates import SkyCoord, get_body, EarthLocation, AltAz
 from astropy.time import Time
 import astropy.units as u
 from astropy.coordinates.baseframe import NonRotationTransformationWarning
-
+from astropilot.catalog import CATALOG
 
 warnings.filterwarnings(
     "ignore",
@@ -23,13 +23,13 @@ TIMEZONE = "Europe/Zurich"
 TARGET = "deep_sky"
 
 TARGET_OBJECTS = {
-    "M31": {"ra": 10.6847, "dec": 41.2692},
-    "M42": {"ra": 83.8221, "dec": -5.3911},
-    "M51": {"ra": 202.4842, "dec": 47.2306},
-    "M81": {"ra": 148.8882, "dec": 69.0653},
-    "M101": {"ra": 210.8023, "dec": 54.3489},
-    "Rosette": {"ra": 97.5, "dec": 4.95},
-    "NorthAmerica": {"ra": 314.75, "dec": 44.33},
+    key: {
+        "ra": value["ra"],
+        "dec": value["dec"],
+        "size_arcmin": value["size_arcmin"],
+    }
+    for key, value in CATALOG.items()
+    if "ra" in value and "dec" in value
 }
 
 OBJECT_SIZES = {
