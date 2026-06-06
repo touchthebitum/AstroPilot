@@ -22,8 +22,6 @@ TIMEZONE = "Europe/Zurich"
 
 TARGET = "deep_sky"
 
-TARGET_OBJECT = "M31"
-
 TARGET_OBJECTS = {
     "M31": {"ra": 10.6847, "dec": 41.2692},
     "M42": {"ra": 83.8221, "dec": -5.3911},
@@ -33,6 +31,47 @@ TARGET_OBJECTS = {
     "Rosette": {"ra": 97.5, "dec": 4.95},
     "NorthAmerica": {"ra": 314.75, "dec": 44.33},
 }
+
+OBJECT_SIZES = {
+    "M31": 190,
+    "M42": 85,
+    "M51": 11,
+    "M81": 27,
+    "M101": 28,
+    "Rosette": 80,
+    "NorthAmerica": 120,
+}
+
+EQUIPMENT_PROFILES = {
+    "seestar_s50": {
+        "name": "Seestar S50",
+        "focal_length_mm": 250,
+        "aperture_mm": 50,
+        "sensor_width_mm": 5.6,
+        "sensor_height_mm": 3.2,
+    },
+
+    "widefield_135mm": {
+        "name": "APS-C + 135 mm",
+        "focal_length_mm": 135,
+        "aperture_mm": 50,
+        "sensor_width_mm": 22.3,
+        "sensor_height_mm": 14.9,
+    },
+
+    "newton_150_750": {
+        "name": "Newton 150/750 APS-C",
+        "focal_length_mm": 750,
+        "aperture_mm": 150,
+        "sensor_width_mm": 22.3,
+        "sensor_height_mm": 14.9,
+    },
+}
+
+
+
+CURRENT_EQUIPMENT = "seestar_s50"
+
 
 TARGETS = {
     "milky_way": {
@@ -83,7 +122,33 @@ TARGETS = {
 },
 }
 
-    
+def framing_bonus(target_object):
+    equipment = EQUIPMENT_PROFILES[CURRENT_EQUIPMENT]
+
+    sensor_width = equipment["sensor_width_mm"]
+    focal = equipment["focal_length_mm"]
+
+    fov_deg = 57.3 * sensor_width / focal
+
+    object_deg = OBJECT_SIZES[target_object] / 60
+
+    ratio = object_deg / fov_deg
+
+    if 0.2 <= ratio <= 0.8:
+        return 10
+
+    elif 0.1 <= ratio < 0.2:
+        return 5
+
+    elif 0.8 < ratio <= 1.2:
+        return 5
+
+    elif ratio > 1.2:
+        return -10
+
+    else:
+        return -5
+ 
 
 def safe_moonrise(observer, date, tz):
     try:
@@ -392,7 +457,7 @@ def estimated_sqm(bortle, moon_illumination, moon_elevation, moon_target_sep):
 
     return round(base - moon_loss, 2)
 
-def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_target_sep, target_altitude, bortle=4, target="deep_sky"):
+def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_target_sep, target_altitude, bortle=4, target="deep_sky", target_object=None):
     penalty = 0
 
     bp = bortle_penalty(bortle)
@@ -485,12 +550,14 @@ def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_targe
     else:
         sqm_bonus = -5
         
+    frame_bonus = framing_bonus(target_object)if target_object else 0
+    
     score = round(
     max(
         0,
         min(
             100,
-            75 - penalty + tb + target_bonus + sqm_bonus
+            75 - penalty + tb + target_bonus + sqm_bonus + frame_bonus
         )
     )
 )
@@ -625,6 +692,7 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
             )
 
             target_obj = TARGET_OBJECTS[target_object]
+            equipment = EQUIPMENT_PROFILES[CURRENT_EQUIPMENT]
 
             target_alt = target_altitude(
                 target_obj["ra"],
@@ -653,7 +721,8 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
                 moon_sep,
                 target_alt,
                 bortle,
-                target
+                target,
+                target_object
             )
 
             scores.append(result["score"])
