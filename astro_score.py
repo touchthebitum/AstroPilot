@@ -733,6 +733,40 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
                 target_object
             )
 
+            obj_meta = CATALOG.get(target_object, {})
+
+            difficulty = obj_meta.get("difficulty", 2)
+            magnitude = obj_meta.get("magnitude", 8)
+            obj_type = obj_meta.get("type", "unknown")
+
+            object_bonus = 0
+
+            # Bonus difficulté : objets faciles favorisés
+            if difficulty == 1:
+                object_bonus += 4
+            elif difficulty == 2:
+                object_bonus += 2
+            elif difficulty >= 4:
+                object_bonus -= 4
+
+            # Bonus magnitude : objets brillants favorisés
+            if magnitude <= 4:
+                object_bonus += 4
+            elif magnitude <= 7:
+                object_bonus += 2
+            elif magnitude >= 9:
+                object_bonus -= 3
+
+            # Bonus type selon la lune
+            if obj_type == "galaxy" and moon_illumination > 50:
+                object_bonus -= 5
+            elif obj_type in ["nebula", "planetary_nebula"] and moon_illumination > 50:
+                object_bonus -= 2
+            elif obj_type == "cluster" and moon_illumination > 50:
+                object_bonus += 2
+
+            result["score"] = max(0, min(100, result["score"] + object_bonus))
+
             scores.append(result["score"])
             hour_details.append(result["details"])
             moon_impacts.append(result["moon_impact"])
