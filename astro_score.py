@@ -130,8 +130,8 @@ def framing_bonus(target_object):
 
     fov_deg = 57.3 * sensor_width / focal
 
-    object_deg = OBJECT_SIZES[target_object] / 60
-
+    object_deg = CATALOG[target_object]["size_arcmin"] / 60
+    
     ratio = object_deg / fov_deg
 
 
@@ -765,6 +765,22 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
             elif obj_type == "cluster" and moon_illumination > 50:
                 object_bonus += 2
 
+
+            #print(
+                #target_object,
+                #"base=", result["score"],
+                #"bonus=", object_bonus,
+                #"final=", result["score"] + object_bonus
+#)
+
+            #if target_object in ["IC1396", "NorthAmerica", "M13", "M101"]:
+                #print(
+                    #target_object,
+                    #"base=", result["score"],
+                    #"bonus=", object_bonus,
+                    #"final=", result["score"] + object_bonus
+    #)
+
             result["score"] = max(0, min(100, result["score"] + object_bonus))
 
             scores.append(result["score"])
@@ -908,13 +924,44 @@ def forecast_astro(lat: float, lon: float, name: str = "Lieu choisi", bortle: in
                 "window": best
             })
 
-        all_results.sort(
-            key=lambda x: x["score"],
-            reverse=True
+            print("\nClassement objets :")
+
+            for r in sorted(all_results,
+                key=lambda x: x["score"],
+                reverse=True):
+
+                w = r["window"]
+
+                print(
+                    f"{r['object']:12s}"
+                    f" score={r['score']:3d}"
+                    f" alt={w['target_altitude']:4.1f}"
+                    f" moon={w['moon_sep']:5.1f}"
+                    f" sqm={w['sqm']:4.2f}"
+            )
+
+            print("\nTop 10 objets :")
+
+            for r in all_results[:10]:
+
+                obj = CATALOG[r["object"]]
+                w = r["window"]
+
+                print(
+                    f"{r['object']:10s}"
+                    f"{obj['name']:30s}"
+                    f" score={r['score']:3d}"
+                    f" alt={w['target_altitude']:4.1f}"
+                    f" moon={w['moon_sep']:5.1f}"
+                    f" sqm={w['sqm']:4.2f}"
         )
-        
         if len(all_results) == 0:
             continue
+
+        all_results.sort(
+        key=lambda x: x["score"],
+        reverse=True
+        )
 
         best = all_results[0]["window"]
         best_object = all_results[0]["object"]
