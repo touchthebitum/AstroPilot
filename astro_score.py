@@ -70,7 +70,7 @@ EQUIPMENT_PROFILES = {
 
 
 
-CURRENT_EQUIPMENT = "seestar_s50"
+CURRENT_EQUIPMENT = "newton_150_750"
 
 
 TARGETS = {
@@ -134,21 +134,26 @@ def framing_bonus(target_object):
 
     ratio = object_deg / fov_deg
 
-    if 0.2 <= ratio <= 0.8:
+
+    if 0.25 <= ratio <= 0.8:
         return 10
 
-    elif 0.1 <= ratio < 0.2:
+    elif 0.15 <= ratio < 0.25:
         return 5
 
-    elif 0.8 < ratio <= 1.2:
-        return 5
-
-    elif ratio > 1.2:
+    elif 0.1 < ratio <= 0.15:
+        return 0
+    
+    elif 0.8 < ratio <= 1.0:
+        return 0
+    
+    elif 1.0 < ratio <= 1.2:
         return -10
-
+    
+    elif ratio > 1.2:
+        return -20
     else:
-        return -5
- 
+         return -5
 
 def safe_moonrise(observer, date, tz):
     try:
