@@ -1,0 +1,26 @@
+{
+  "redcat51_asi2600": {
+    "name": "RedCat 51 + ASI2600MC",
+    "focal_length_mm": 250,
+    "sensor_width_mm": 23.5,
+    "sensor_height_mm": 15.7
+  },
+  "seestar_s50": {
+    "name": "Seestar S50",
+    "focal_length_mm": 250,
+    "sensor_width_mm": 5.6,
+    "sensor_height_mm": 3.2
+  },
+  "fra400_asi2600": {
+    "name": "FRA400 + ASI2600MC",
+    "focal_length_mm": 400,
+    "sensor_width_mm": 23.5,
+    "sensor_height_mm": 15.7
+  },
+  "newton_200_1000_apsc": {
+    "name": "Newton 200/1000 + APS-C",
+    "focal_length_mm": 1000,
+    "sensor_width_mm": 23.5,
+    "sensor_height_mm": 15.7
+  }
+}

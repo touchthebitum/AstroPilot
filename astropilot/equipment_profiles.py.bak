@@ -1,15 +1,5 @@
 import math
 
-import json
-import math
-from pathlib import Path
-
-json_path = Path(__file__).parent / "equipment_profiles.json"
-
-with open(json_path, "r", encoding="utf-8") as f:
-    EQUIPMENT_PROFILES = json.load(f)
-
-CURRENT_EQUIPMENT = "redcat51_asi2600"
 EQUIPMENT_PROFILES = {
     "redcat51_2600": {
         "name": "RedCat 51 + ASI2600MC",
@@ -63,16 +53,4 @@ def get_fov(equipment=None):
             equipment["focal_length_mm"],
             equipment["sensor_height_mm"]
         ),
-        }
-
-def set_current_equipment(profile_name):
-    global CURRENT_EQUIPMENT
-
-    if profile_name not in EQUIPMENT_PROFILES:
-        raise ValueError(f"Profil inconnu : {profile_name}")
-
-    CURRENT_EQUIPMENT = profile_name
-
-def list_equipment():
-    return list(EQUIPMENT_PROFILES.keys())
-    
+    }

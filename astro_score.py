@@ -13,7 +13,12 @@ import astropy.units as u
 from astropy.coordinates.baseframe import NonRotationTransformationWarning
 from astropilot.catalog import CATALOG
 from astropilot.equipment_profiles import CURRENT_EQUIPMENT, get_fov
-
+from astropilot.equipment_profiles import (
+    get_fov,
+    set_current_equipment,
+    get_current_equipment,
+    list_equipment
+)
 
 warnings.filterwarnings(
     "ignore",
@@ -871,8 +876,15 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
         })
     return sorted(candidates, key=lambda x: x["score"], reverse=True)[:limit]
 
-def forecast_astro(lat: float, lon: float, name: str = "Lieu choisi", bortle: int = 4, target="deep_sky"):
-    weather = fetch_weather(lat, lon)
+def forecast_astro(
+    lat,
+    lon,
+    city,
+    bortle,
+    target="deep_sky",
+    equipment="redcat51_2600"
+):
+    set_current_equipment(equipment)
 
     if weather is None:
         print("Prévisions météo indisponibles.")
@@ -894,8 +906,8 @@ def forecast_astro(lat: float, lon: float, name: str = "Lieu choisi", bortle: in
         phase = moon_phase(current_date.date())
         illumination = round(moon_illumination_from_phase(phase))
 
-        city = LocationInfo(
-            name,
+        city_info = LocationInfo(
+            city,
             "Switzerland",
             TIMEZONE,
             lat,
@@ -905,18 +917,18 @@ def forecast_astro(lat: float, lon: float, name: str = "Lieu choisi", bortle: in
         target_date = current_date.date()
 
         moon_rise = safe_moonrise(
-            city.observer,
+            city_info.observer,
             target_date,
             ZoneInfo(TIMEZONE)
         )
 
         moon_set = safe_moonset(
-            city.observer,
+            city_info.observer,
             target_date,
             ZoneInfo(TIMEZONE)
         )
 
-        hours = night_hours_rough(rows, current_date, lat, lon, name)
+        hours = night_hours_rough(rows, current_date, lat, lon, city)
 
         if not hours:
             continue
@@ -929,7 +941,7 @@ def forecast_astro(lat: float, lon: float, name: str = "Lieu choisi", bortle: in
                 illumination,
                 moon_rise,
                 moon_set,
-                city.observer,
+                city_info.observer,
                 bortle,
                 target,
                 obj_name
@@ -1061,7 +1073,14 @@ if __name__ == "__main__":
     
         bortle = 3
         target = "deep_sky"
-        nights = forecast_astro(lat, lon, city, bortle, TARGET)
+        nights = forecast_astro(
+            lat,
+            lon,
+            city,
+            bortle,
+            TARGET,
+            equipment="redcat51_2600"
+        )
 
     top_nights = sorted(
     nights,
