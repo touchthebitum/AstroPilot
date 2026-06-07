@@ -19,6 +19,7 @@ from astropilot.equipment_profiles import (
     get_current_equipment,
     list_equipment
 )
+import argparse
 
 warnings.filterwarnings(
     "ignore",
@@ -141,6 +142,7 @@ def framing_bonus(target_object):
 
     ratio_w = object_width / frame_width
     ratio_h = object_height / frame_height
+    ratio = max(ratio_w, ratio_h)
 
     print(
         target_object,
@@ -148,22 +150,19 @@ def framing_bonus(target_object):
         "ratio=", round(ratio, 2)
     )
 
-    ratio = max(ratio_w, ratio_h)
-
-    if 0.25 <= ratio <= 0.8:
+    
+    if 0.3 <= ratio <= 1.0:
         return 10
-    elif 0.15 <= ratio < 0.25:
+    elif 0.15 <= ratio < 0.3:
         return 5
-    elif 0.1 <= ratio < 0.15:
+    elif 1.0 <= ratio < 1.5:
         return 0
-    elif 0.8 < ratio <= 1.0:
+    elif 1.5 < ratio <= 2.0:
         return 0
-    elif 1.0 < ratio <= 1.2:
-        return -10
-    elif ratio > 1.2:
-        return -20
-    else:
+    elif 2.0 < ratio <= 3.0:
         return -5
+    else:
+        return -20
 
 
 def safe_moonrise(observer, date, tz):
@@ -885,6 +884,7 @@ def forecast_astro(
     equipment="redcat51_2600"
 ):
     set_current_equipment(equipment)
+    weather = fetch_weather(lat, lon)
 
     if weather is None:
         print("Prévisions météo indisponibles.")
@@ -1053,8 +1053,58 @@ def get_location_by_ip():
             "city": "Sion",
             "country": "Switzerland",
         }
-
+    
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+            "--equipment",
+            default="redcat51_2600",
+            help="Profil matériel à utiliser"
+    )
+
+    parser.add_argument(
+        "--compare",
+        action="store_true",
+        help="Comparer tous les profils matériels"
+    )
+    
+    args = parser.parse_args()
+
+    if args.compare:
+
+        print("\n=== COMPARAISON MATÉRIEL ===")
+
+        for profile in list_equipment():
+            set_current_equipment(profile)
+
+            print(f"\n--- {profile} ---")
+
+            nights = forecast_astro(
+                46.2333,
+                7.3667,
+                "Sion",
+                3,
+                "deep_sky",
+                equipment=profile
+    )
+            print ("nuits trouvées :", len(nights))
+
+            top = sorted(
+                nights,
+                key=lambda x: x["score"],
+                reverse=True
+            )[:3]
+
+            for night in top:
+                print(
+                    night["date"],
+                    night["object"],
+                    night["best_object_score"],
+                    night["score"]
+                )
+
+    exit()
 
     lat = 46.2333
     lon = 7.3667
@@ -1079,7 +1129,7 @@ if __name__ == "__main__":
             city,
             bortle,
             TARGET,
-            equipment="redcat51_2600"
+            equipment=args.equipment
         )
 
     top_nights = sorted(
