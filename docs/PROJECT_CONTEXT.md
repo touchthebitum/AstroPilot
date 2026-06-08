@@ -1,9 +1,13 @@
 PROJECT_CONTEXT - AstroPilot
+
 Official Product Name : AstroPilot
+
 Vision
+
 Créer une application mobile Android/iOS destinée aux astrophotographes permettant de
 recommander automatiquement les meilleures nuits et les meilleurs objets à photographier selon la
 météo, la Lune, la qualité du ciel, le matériel utilisé et la position GPS.
+
 Architecture cible
 AstroPilot Engine (Python) → FastAPI → Android / iOS
 État actuel
