@@ -52,3 +52,11 @@ synchronisation cloud.
 
 Question centrale
 « Que puis-je photographier ce soir avec MON matériel depuis MA position ? »
+
+Nom officiel : AstroPilot
+
+Domaine officiel :
+https://astropilot.io
+
+Dépôt GitHub :
+https://github.com/touchthebitum/astropilot
