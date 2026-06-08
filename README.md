@@ -1,12 +1,17 @@
 # AstroPilot
 
-AstroPilot is an intelligent astrophotography planning engine designed to recommend the best targets and observing windows based on:
+AI-powered astrophotography planning platform.
 
-- Equipment
-- Weather
-- Moon conditions
-- Sky quality
-- GPS location
+Current targets:
+- macOS
+- Android
+- iOS
 
-Long-term goal:
-Android/iOS mobile application for astrophotographers.
+Features:
+- Sky quality analysis
+- Object recommendation engine
+- Weather integration
+- Moon impact analysis
+- SQM prediction
+- GPS-based location detection
+- Astrophotography session planning
