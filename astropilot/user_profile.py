@@ -25,3 +25,6 @@ def get_default_location():
             return loc
 
     raise ValueError(f"Localisation inconnue : {location_id}")
+
+def favorite_targets():
+    return load_user_profile()["preferences"]["favorite_targets"]

@@ -9,7 +9,7 @@ CATALOG = {
          "difficulty": 1,
     },
     "M42": {
-	"ra": 83.8221,
+	    "ra": 83.8221,
         "dec": -5.3911,
         "name": "Nébuleuse d’Orion",
         "type": "nebula",
@@ -18,7 +18,7 @@ CATALOG = {
         "difficulty": 1,
     },
     "M51": {
-	"ra": 202.4842,
+	    "ra": 202.4842,
         "dec": 47.2306,
         "size_arcmin": 11,
         "name": "Galaxie du Tourbillon",
@@ -27,7 +27,7 @@ CATALOG = {
         "difficulty": 3,
     },
     "M81": {
-	"ra": 148.8882,
+	    "ra": 148.8882,
         "dec": 69.0653,
         "size_arcmin": 27,
         "name": "Galaxie de Bode",
@@ -36,7 +36,7 @@ CATALOG = {
         "difficulty": 2,
     },
     "M101": {
-	"ra": 210.8023,
+	    "ra": 210.8023,
         "dec": 54.3489,
         "size_arcmin": 28,
         "name": "Galaxie du Moulinet",
@@ -45,7 +45,7 @@ CATALOG = {
         "difficulty": 3,
     },
     "Rosette": {
-	"ra": 97.5,
+	    "ra": 97.5,
         "dec": 4.95,
         "size_arcmin": 80,
         "name": "Nébuleuse de la Rosette",
@@ -54,7 +54,7 @@ CATALOG = {
         "difficulty": 2,
     },
     "NorthAmerica": {
-	"ra": 314.75,
+	    "ra": 314.75,
         "dec": 44.33,
         "size_arcmin": 120,
         "name": "Nébuleuse North America",
@@ -121,27 +121,27 @@ CATALOG = {
     },
 
     "M17": {
-        "name": "Omega",
-        "type": "nebula",
         "ra": 275.100,
         "dec": -16.171,
+        "name": "Omega",
+        "type": "nebula",
         "size_arcmin": 46,
         "magnitude": 6.0,
         "difficulty": 2,
     },
 
     "IC1396": {
-        "name": "Trompe d'Éléphant",
-        "type": "nebula",
         "ra": 324.750,
         "dec": 57.500,
+        "name": "Trompe d'Éléphant",
+        "type": "nebula",
         "size_arcmin": 170,
         "magnitude": 7.0,
         "difficulty": 3,
     },
 
     "IC1805": {
-         "ra": 38.500,
+        "ra": 38.500,
         "dec": 61.400,
         "name": "Heart Nebula",
         "type": "nebula",

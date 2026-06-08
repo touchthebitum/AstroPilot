@@ -13,7 +13,7 @@ import astropy.units as u
 from astropy.coordinates.baseframe import NonRotationTransformationWarning
 from astropilot.catalog import CATALOG
 from astropilot.equipment_profiles import CURRENT_EQUIPMENT, get_fov
-from astropilot.user_profile import get_default_location, load_user_profile
+from astropilot.user_profile import get_default_location, load_user_profile, favorite_targets
 from astropilot.equipment_profiles import (
     get_fov,
     set_current_equipment,
@@ -497,20 +497,29 @@ def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_targe
     
     target_bonus = 0
 
+    if target_object is not None:
+        obj = CATALOG.get(target_object)
+
+        if obj and obj["type"] in favorite_targets():
+            target_bonus += 10
+            if obj and obj["type"] in favorite_targets():
+                target_bonus += 10
+                
+
     if target_altitude > 80:
-        target_bonus = 10
+        target_bonus += 15
     elif target_altitude > 70:
-        target_bonus = 7
+        target_bonus += 7
     elif target_altitude > 60:
-        target_bonus = 4
+        target_bonus += 4
     elif target_altitude > 45:
-        target_bonus = 2
+        target_bonus += 2
     elif target_altitude > 30:
-        target_bonus = -0
+        target_bonus += -0
     elif target_altitude > 20:
-        target_bonus = -5
+        target_bonus += -5
     else:
-        target_bonus = -15
+        target_bonus += -15
           
     if moon_elevation <= 0:
         mp = 0
@@ -730,7 +739,6 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
 
             profile = load_user_profile()
             min_alt = profile["preferences"]["min_altitude_deg"]
-
             if target_alt < min_alt:
                 continue
 
@@ -745,7 +753,7 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
             result = hour_score(
                 h,
                 moon_illumination,
-                visible,
+                True,
                 moon_elevation,
                 moon_sep,
                 target_alt,

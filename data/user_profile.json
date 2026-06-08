@@ -11,14 +11,13 @@
 
   "preferences": {
     "favorite_targets": [
-      "galaxies",
-      "nebulae"
+        "galaxy",
+        "nebula"
     ],
-
     "min_altitude_deg": 30,
-    "min_sqm": 20.0,
-    "bortle": 3
-  },
+    "bortle": 3,
+    "min_sqm": 20.0
+},
 
-  "default_location": "buttes"
+    "default_location": "buttes"
 }
