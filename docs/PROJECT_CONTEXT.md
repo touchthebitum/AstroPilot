@@ -34,24 +34,29 @@ Outils de développement
 - GitHub
 Dépôt GitHub
 https://github.com/touchthebitum/astropilot.git
+
 Priorités court terme
 1. Stabiliser astro_score.py
 2. Étendre le catalogue d'objets
 3. Ajouter des tests automatiques
 4. Améliorer le score de cadrage
 5. Préparer une API FastAPI
+6. 
 Priorités moyen terme
 1. API REST
 2. Gestion GPS
 3. Détection automatique du fuseau horaire
 4. Support multilingue
 5. Gestion utilisateurs
+6. 
 Priorités long terme
+
 Application Android/iOS avec GPS automatique, recommandations, favoris, notifications et
 synchronisation cloud.
 
 Question centrale
 « Que puis-je photographier ce soir avec MON matériel depuis MA position ? »
+
 
 Nom officiel : AstroPilot
 
@@ -60,3 +65,24 @@ https://astropilot.io
 
 Dépôt GitHub :
 https://github.com/touchthebitum/astropilot
+
+
+
+
+
+Nom officiel du projet : AstroPilot
+
+Objectif final :
+Application mobile Android/iOS permettant de recommander automatiquement les meilleures cibles astrophotographiques en fonction :
+
+- du lieu d'observation
+- du matériel
+- de la météo
+- de la lune
+- de la saison
+- de la qualité du ciel
+
+Le moteur Python constitue le cœur du produit.
+
+L'application mobile constitue l'interface utilisateur principale.
+
