@@ -1,4 +1,4 @@
-PROJECT_CONTEXT - AstroPilot
+AstroPilot
 
 Official Product Name : AstroPilot
 
