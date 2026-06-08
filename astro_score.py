@@ -709,6 +709,9 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
         moon_impacts = []
         moon_penalties = []
 
+        profile = load_user_profile()
+        min_alt = profile["preferences"]["min_altitude_deg"]
+
         for h in window:
             moon_elevation = moon.elevation(
                 observer,
@@ -725,7 +728,10 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
                 observer.longitude
             )
 
-            if target_alt < 15:
+            profile = load_user_profile()
+            min_alt = profile["preferences"]["min_altitude_deg"]
+
+            if target_alt < min_alt:
                 continue
 
             moon_sep = moon_target_separation(
