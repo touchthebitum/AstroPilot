@@ -583,14 +583,14 @@ def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_targe
     obj_meta.get("type", "unknown")
 )
 
-    frame_bonus = round((equipment_score - 50) / 5)
+    frame_bonus = round((equipment_score - 50) / 10)
     
     score = round(
     max(
         0,
         min(
             100,
-            55 - penalty + tb + target_bonus + sqm_bonus + frame_bonus
+            45 - penalty + tb + target_bonus + sqm_bonus + frame_bonus
         )
     )
 )
@@ -1019,14 +1019,22 @@ def forecast_astro(
 
         if not all_results:
                 continue
-
+        
         all_results.sort(
             key=lambda x: x["score"],
             reverse=True
         )
 
-        best = all_results[0]["window"]
-        best_object = all_results[0]["object"]
+        best_score = all_results[0]["score"]
+
+        best_results = [
+            r for r in all_results
+            if r["score"] == best_score
+]
+
+        best = best_results[0]["window"]
+        best_object = best_results[0]["object"]
+        best_objects = [r["object"] for r in best_results]
 
         night_score = round(
             sum(r["score"] for r in all_results[:3]) / len(all_results[:3])
@@ -1041,6 +1049,11 @@ def forecast_astro(
             "verdict": verdict(night_score),
             "bortle": bortle,
             "object": best_object,
+            "best_objects": [
+                r["object"]
+                for r in all_results[:3]
+                if r["score"] == best_score
+            ],
             "top_objects": [
                 {
                     "name": r["object"],
@@ -1223,85 +1236,84 @@ if nights is None:
 
 top_nights = sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
 
-for night in top_nights:
+#for night in top_nights:
    
-        print("\n======================")
-        print("Date :", night["date"])
-        print("Score :", night["score"], "/100")
-        print("Verdict :", night["verdict"])
-        print("Bortle :", night["bortle"])
+        #####print("\n======================")
+        ####print("Date :", night["date"])
+        ###print("Score :", night["score"], "/100")
+        ##print("Verdict :", night["verdict"])
+        #print("Bortle :", night["bortle"])
 
-        print(
-        "Meilleur créneau :",
-        night["best_window"]["start"],
-        "-",
-        night["best_window"]["end"]
-    )
+        #print(
+        #"Meilleur créneau :",
+        #night["best_window"]["start"],
+        ##"-",
+        #night["best_window"]["end"]
+    #)
 
-        print("Top objets :")
-        for obj in night["top_objects"][:3]:
-            print(
-                f"  {obj['name']} | "
-                f"score={obj['score']} | "
-                f"alt={obj['altitude']}° | "
-                f"sep lune={obj['moon_sep']}° | "
-                f"sqm={obj['sqm']}"
-    )
+        #print("Top objets :")
+        #for obj in night["top_objects"][:3]:
+            #print(
+                #f"  {obj['name']} | "
+                #####f"score={obj['score']} | "
+                ####f"alt={obj['altitude']}° | "
+                ###f"sep lune={obj['moon_sep']}° | "
+                ##f"sqm={obj['sqm']}"
+    #)
     
-        print(
-        "Score créneau :",
-        night["best_window"]["score"],
-        "/100"
-    )
-        print(
-        "Lune :",
-        night["moon"]["illumination"],
-        "%"
-    )
+        #print(
+        #"Score créneau :",
+        #night["best_window"]["score"],
+        #"/100"
+    #)
+        #print(
+        #"Lune :",
+        #night["moon"]["illumination"],
+        #"%"
+    #)
         
-        print("Impact lune :", night["moon_impact"], f"({night['moon_penalty']}/100)")
+        #print("Impact lune :", night["moon_impact"], f"({night['moon_penalty']}/100)")
         
-        night["moon_impact"],
-        f"({night['moon_penalty']}/100)"
+        #night["moon_impact"],
+        #f"({night['moon_penalty']}/100)"
        
         
-        print(
-        "Nuages :",
-        night["weather_summary"]["cloud_cover_percent"],
-        "%"
-    )
-        print("Altitude lune :", round(night["top_windows"][0]["moon_elevation"], 1), "°")
-        print("Distance lune-cible :", round(night["top_windows"][0]["moon_sep"], 1), "°")
-        print("Distance lune-cible :",night["top_windows"][0]["moon_sep"],"°")
-        print(
-    "Altitude cible :",
-    night["top_windows"][0]["target_altitude"],
-    "°"
-    ) 
-        print(
-        "Humidité :",
-        night["weather_summary"]["humidity_percent"],
-        "%"
-    )
-        print(
-    "Lever lune :",
-    night["moon"]["rise"]
-    )
+        #print(
+        ##############################"Nuages :",
+        #############################night["weather_summary"]["cloud_cover_percent"],
+        ############################"%"
+    ###########################)
+        ##########################print("Altitude lune :", round(night["top_windows"][0]["moon_elevation"], 1), "°")
+        #########################print("Distance lune-cible :", round(night["top_windows"][0]["moon_sep"], 1), "°")
+        ########################print("Distance lune-cible :",night["top_windows"][0]["moon_sep"],"°")
+        #######################print(
+    ######################"Altitude cible :",
+    #####################night["top_windows"][0]["target_altitude"],
+    ####################"°"
+    ###################) 
+        ##################print(
+        #################"Humidité :",
+        ################night["weather_summary"]["humidity_percent"],
+        ###############"%"
+    ##############)
+        #############print(
+    ############"Lever lune :",
+    ###########night["moon"]["rise"]
+    ##########)
 
-        print(
-    "Coucher lune :",
-    night["moon"]["set"]
-    )
-        print(
-        "Vent :",
-        night["weather_summary"]["wind_kmh"],
-        "km/h"
+        #########print(
+    ########"Coucher lune :",
+    #######night["moon"]["set"]
+    ######)
+        #####print(
+        ####"Vent :",
+        ###night["weather_summary"]["wind_kmh"],
+        ##"km/h"
         
-    )
+    #)
 
             
 top_nights = sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
-
 
 for i, night in enumerate(top_nights, 1):
     print(f"#{i} - {night['date']}")
@@ -1309,26 +1321,45 @@ for i, night in enumerate(top_nights, 1):
     obj_key = night["object"]
     obj = CATALOG.get(obj_key, {"name": obj_key})
 
-    print(
-        f"Objet recommandé : "
-        f"{obj['name']} ({obj_key})"
+    best_objects = night.get(
+    "best_objects",
+    [night["object"]]
+)
+
+    if len(best_objects) == 1:
+        obj_key = best_objects[0]
+        obj = CATALOG.get(obj_key, {"name": obj_key})
+
+        print(
+            f"Objet recommandé : "
+            f"{obj['name']} ({obj_key})"
     )
-    print(f"Score objet      : {night['best_object_score']}/100")
-    print(f"Score nuit       : {night['score']}/100")
-    print(f"SQM              : {night['top_windows'][0]['sqm']:.2f}")
-    print("Top objets :")
-    for obj in night["top_objects"][:3]:
+    else:
+        print("Objets recommandés (ex æquo) :")
+
+        for obj_key in best_objects:
+            obj = CATALOG.get(
+            obj_key,
+            {"name": obj_key}
+        )
 
             print(
-                f"  {obj['name']} | "
-                f"score={obj['score']} | "
-                f"alt={obj['altitude']}° | "
-                f"sep lune={obj['moon_sep']}° | "
-                f"sqm={obj['sqm']}"
-            )   
+                f"  - {obj['name']} ({obj_key})"
+        )
+    #####print(f"Score objet      : {night['best_object_score']}/100")
+    ####print(f"Score nuit       : {night['score']}/100")
+    ###print(f"SQM              : {night['top_windows'][0]['sqm']:.2f}")
+    ##print("Top objets :")
+    #for obj in night["top_objects"][:3]:
 
-                    
-
+            #######print(
+                ######f"  {obj['name']} | "
+                #####f"score={obj['score']} | "
+                ####f"alt={obj['altitude']}° | "
+                ###f"sep lune={obj['moon_sep']}° | "
+                ##f"sqm={obj['sqm']}"
+            #)   
+                  
     print()
 
         

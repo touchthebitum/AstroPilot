@@ -1185,13 +1185,13 @@ if __name__ == "__main__":
     reverse=True
     )[:3]
 
-    for night in top_nights:
+    ######for night in top_nights:
    
-        print("\n======================")
-        print("Date :", night["date"])
-        print("Score :", night["score"], "/100")
-        print("Verdict :", night["verdict"])
-        print("Bortle :", night["bortle"])
+        #####print("\n======================")
+        ####print("Date :", night["date"])
+        ###print("Score :", night["score"], "/100")
+        ##print("Verdict :", night["verdict"])
+        #print("Bortle :", night["bortle"])
 
         print(
         "Meilleur créneau :",
