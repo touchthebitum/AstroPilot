@@ -585,6 +585,14 @@ def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_targe
 
     equipment_score = equipment_result["equipment_score"]
     frame_bonus = equipment_result["frame_bonus"]
+
+    print(
+    target_object,
+    obj_meta.get("size_arcmin"),
+    equipment_score,
+    frame_bonus
+    )
+
     
     score = round(
     max(
