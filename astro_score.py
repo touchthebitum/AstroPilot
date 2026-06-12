@@ -30,7 +30,6 @@ warnings.filterwarnings(
 )
 TIMEZONE = "Europe/Zurich"
 
-
 TARGET = "deep_sky"
 
 TARGET_OBJECTS = {
@@ -1223,82 +1222,6 @@ if nights is None:
 
 
 top_nights = sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
-
-#for night in top_nights:
-   
-        #####print("\n======================")
-        ####print("Date :", night["date"])
-        ###print("Score :", night["score"], "/100")
-        ##print("Verdict :", night["verdict"])
-        #print("Bortle :", night["bortle"])
-
-        #print(
-        #"Meilleur créneau :",
-        #night["best_window"]["start"],
-        ##"-",
-        #night["best_window"]["end"]
-    #)
-
-        #print("Top objets :")
-        #for obj in night["top_objects"][:3]:
-            #print(
-                #f"  {obj['name']} | "
-                #####f"score={obj['score']} | "
-                ####f"alt={obj['altitude']}° | "
-                ###f"sep lune={obj['moon_sep']}° | "
-                ##f"sqm={obj['sqm']}"
-    #)
-    
-        #print(
-        #"Score créneau :",
-        #night["best_window"]["score"],
-        #"/100"
-    #)
-        #print(
-        #"Lune :",
-        #night["moon"]["illumination"],
-        #"%"
-    #)
-        
-        #print("Impact lune :", night["moon_impact"], f"({night['moon_penalty']}/100)")
-        
-        #night["moon_impact"],
-        #f"({night['moon_penalty']}/100)"
-       
-        
-        #print(
-        ##############################"Nuages :",
-        #############################night["weather_summary"]["cloud_cover_percent"],
-        ############################"%"
-    ###########################)
-        ##########################print("Altitude lune :", round(night["top_windows"][0]["moon_elevation"], 1), "°")
-        #########################print("Distance lune-cible :", round(night["top_windows"][0]["moon_sep"], 1), "°")
-        ########################print("Distance lune-cible :",night["top_windows"][0]["moon_sep"],"°")
-        #######################print(
-    ######################"Altitude cible :",
-    #####################night["top_windows"][0]["target_altitude"],
-    ####################"°"
-    ###################) 
-        ##################print(
-        #################"Humidité :",
-        ################night["weather_summary"]["humidity_percent"],
-        ###############"%"
-    ##############)
-        #############print(
-    ############"Lever lune :",
-    ###########night["moon"]["rise"]
-    ##########)
-
-        #########print(
-    ########"Coucher lune :",
-    #######night["moon"]["set"]
-    ######)
-        #####print(
-        ####"Vent :",
-        ###night["weather_summary"]["wind_kmh"],
-        ##"km/h"
-        
-    #)
                 
 top_nights = sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
 
