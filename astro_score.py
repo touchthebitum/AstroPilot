@@ -576,8 +576,22 @@ def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_targe
         
     obj_meta = CATALOG.get(target_object, {})
 
-    #if target_object in ["M81", "M101", "NorthAmerica", "IC1396"]:
-    
+    obj_type = obj_meta.get("type", "unknown")
+
+    target_bonus = 0
+
+    if goal in ["nebulae", "nebula"] and "nebula" in obj_type:
+        target_bonus += 12
+
+    elif goal in ["galaxies", "galaxy"] and "galaxies" in obj_type:
+        target_bonus += 12
+
+    elif goal in ["clusters", "cluster"] and "clusters" in obj_type:
+        target_bonus += 12
+
+    #print("GOAL =", goal, "TYPE =", obj_type, "TARGET_BONUS =", target_bonus)
+
+
     equipment_result = compare_object_to_equipment(
     obj_meta.get("size_arcmin", 20),
     obj_meta.get("type", "unknown")
@@ -772,11 +786,23 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
             obj_type = obj_meta.get("type", "unknown")
 
             object_bonus = 0
+
+
+            target_bonus = 0
+
+            if goal == "nebulae" and obj_type == "nebula":
+                target_bonus += 12
+
+            elif goal == "galaxies" and obj_type == "galaxy":
+                target_bonus += 12
+
+            ######elif goal == "clusters" and obj_type == "cluster":
+                #####target_bonus += 12
             
-            from astropilot.equipment_profiles import (
-                CURRENT_EQUIPMENT,
-                get_fov
-            )
+            ####from astropilot.equipment_profiles import (
+                ###CURRENT_EQUIPMENT,
+                ##get_fov
+            #)
         
             fov = get_fov()
 
@@ -925,7 +951,7 @@ def forecast_astro(
     bortle,
     target="deep_sky",
     equipment=None,
-    goal="balanced"
+    goal="nebulae"
 ):
     if equipment is None:
         equipment = load_user_profile()["equipment"]["primary"]
