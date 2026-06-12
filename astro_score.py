@@ -978,8 +978,13 @@ def forecast_astro(
             best = top_windows[0]
 
             all_results.append({
-                "object": obj_name,
+                "name": obj_name,
                 "score": best["score"],
+                "altitude": best.get("target_altitude"),
+                "moon_sep": best.get("moon_sep"),
+                "sqm": best.get("sqm"),
+                "moon_score": best.get("moon_score"),
+                "frame_bonus": best.get("frame_bonus"),
                 "window": best
             })
 
@@ -1301,12 +1306,15 @@ for i, night in enumerate(top_nights, 1):
     print(f"#{i} - {night['date']}")
 
 print("Top objets :")
-##for obj in night["top_objects"]:
-    #print(obj)
+
 for j, obj in enumerate(night["top_objects"], start=1):
     print(
-        f"  {j}. {obj['name']} "
-        f"({obj['score']:.1f})"
+        f"{j}. {obj['name']} "
+        f"score={obj['score']:.1f} "
+        f"alt={obj['altitude']:.0f}° "
+        f"moon_sep={obj['moon_sep']:.0f}° "
+        f"sqm={obj['sqm']:.1f} "
+        f"frame={obj['frame_bonus']}"
     )
 
 best_objects = night.get("best_objects") or [night["object"]]
