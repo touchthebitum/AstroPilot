@@ -809,8 +809,8 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
                 ideal_min = 0.10
                 ideal_max = 0.60
             else:  # nebula
-                ideal_min = 0.20
-                ideal_max = 0.60
+                ideal_min = 0.25
+                ideal_max = 0.45
 
             if ideal_min <= ratio <= ideal_max:
                 object_bonus += 20
