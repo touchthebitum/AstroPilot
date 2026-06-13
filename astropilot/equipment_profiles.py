@@ -1,5 +1,4 @@
 import math
-
 import json
 import math
 from pathlib import Path
@@ -76,7 +75,7 @@ def get_fov(equipment=None):
             equipment["sensor_height_mm"]
         ),
         }
-def compare_object_to_equipment(object_size_arcmin, object_type="unknown", equipment=None):
+def compare_object_to_equipment(object_size_arcmin, object_type="unknown", object_scale="medium", equipment=None):
     if equipment is None:
         equipment = get_current_equipment()
 
@@ -103,13 +102,19 @@ def compare_object_to_equipment(object_size_arcmin, object_type="unknown", equip
     if object_type == "planetary_nebula":
         ideal_min, ideal_max = 0.02, 0.20
     elif object_type == "galaxy":
-        ideal_min, ideal_max = 0.08, 0.25
+        if object_scale == "huge":
+            ideal_min, ideal_max = 0.08, 0.45
+        else:
+            ideal_min, ideal_max = 0.08, 0.25
     elif object_type == "cluster":
         ideal_min, ideal_max = 0.10, 0.60
     elif object_type == "nebula":
-        ideal_min, ideal_max = 0.20, 0.55
-    else:
-        ideal_min, ideal_max = 0.15, 0.90
+        if object_scale == "huge":
+            ideal_min, ideal_max = 0.05, 0.45
+        elif object_scale == "large":
+            ideal_min, ideal_max = 0.08, 0.55
+        else:
+            ideal_min, ideal_max = 0.15, 0.60
 
     if ideal_min <= ratio <= ideal_max:
         score = 100
@@ -121,6 +126,24 @@ def compare_object_to_equipment(object_size_arcmin, object_type="unknown", equip
     score = max(0, min(100, round(score)))
     frame_bonus = round((score - 50) / 10)
 
+    if object_type == "galaxy":
+        resolution_weight = 0.50
+
+    elif object_type == "planetary_nebula":
+        resolution_weight = 0.70
+
+    elif object_type == "cluster":
+        resolution_weight = 0.35
+
+    else:   # nebula
+        resolution_weight = 0.10
+
+    framing_weight = 1 - resolution_weight
+    res_score = resolution_score(arcsec_pixel, object_type)
+    combined_score =round(
+        framing_weight * score + resolution_weight * res_score)
+    
+
     return {
         "equipment_score": score,
         "frame_bonus": frame_bonus,
@@ -128,7 +151,10 @@ def compare_object_to_equipment(object_size_arcmin, object_type="unknown", equip
         "object_size_deg": round(object_size_deg, 2),
         "frame_diag_deg": round(frame_diag, 2),
         "arcsec_pixel": arcsec_pixel,
-        "resolution_score": resolution_score(arcsec_pixel, object_type),
+        "resolution_score": res_score,
+        "combined_score": combined_score,
+        "resolution_weight": resolution_weight,
+        "framing_weight": framing_weight,
     }
 def resolution_score(arcsec_pixel, object_type="unknown"):
     """

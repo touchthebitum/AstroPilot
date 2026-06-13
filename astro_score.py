@@ -956,16 +956,12 @@ def compare_equipment_for_object(object_name):
         result = compare_object_to_equipment(
             obj.get("size_arcmin", 20),
             obj.get("type", "unknown"),
+            obj.get("scale", "medium"),
         )
 
-
-        combined_score = round(
-            0.7 * result["equipment_score"]
-            + 0.3 * result["resolution_score"]
-        )
         results.append({
             "equipment": eq_name,
-            "score": combined_score,
+            "score": result["combined_score"],
             "equipment_score": result["equipment_score"],
             "resolution_score": result["resolution_score"],
             "ratio": result["ratio"],

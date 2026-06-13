@@ -7,6 +7,7 @@ CATALOG = {
          "size_arcmin": 140,
          "magnitude": 3.4,
          "difficulty": 1,
+         "scale": "huge",
     },
     "M42": {
 	    "ra": 83.8221,
@@ -52,6 +53,7 @@ CATALOG = {
         "type": "nebula",
         "magnitude": 9.0,
         "difficulty": 2,
+        "scale": "large",
     },
     "NorthAmerica": {
 	    "ra": 314.75,
@@ -61,6 +63,7 @@ CATALOG = {
         "type": "nebula",
         "magnitude": 4.0,
         "difficulty": 2,
+        "scale": "huge",
     },
     "M45": {
         "ra": 56.750,
@@ -108,6 +111,7 @@ CATALOG = {
         "type": "planetary_nebula",
         "magnitude": 8.8,
         "difficulty": 3,
+        "scale": "small",
     },
 
     "M16": {
@@ -138,6 +142,7 @@ CATALOG = {
         "size_arcmin": 170,
         "magnitude": 7.0,
         "difficulty": 3,
+        "scale": "huge",
     },
 
     "IC1805": {
