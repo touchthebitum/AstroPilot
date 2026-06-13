@@ -8,6 +8,8 @@ CATALOG = {
          "magnitude": 3.4,
          "difficulty": 1,
          "scale": "huge",
+         "surface_brightness": 5,
+         "imaging_difficulty": 1,
     },
     "M42": {
 	    "ra": 83.8221,
@@ -27,6 +29,8 @@ CATALOG = {
         "magnitude": 8.4,
         "difficulty": 3,
         "scale":"tiny",
+        "surface_brightness": 3,
+        "imaging_difficulty": 3,
     },
     "M81": {
 	    "ra": 148.8882,
@@ -55,6 +59,8 @@ CATALOG = {
         "magnitude": 9.0,
         "difficulty": 2,
         "scale": "large",
+        "surface_brightness": 2,
+        "imaging_difficulty": 2,
     },
     "NorthAmerica": {
 	    "ra": 314.75,
@@ -113,6 +119,8 @@ CATALOG = {
         "magnitude": 8.8,
         "difficulty": 3,
         "scale": "small",
+        "surface_brightness": 4,
+        "imaging_difficulty": 2,
     },
 
     "M16": {

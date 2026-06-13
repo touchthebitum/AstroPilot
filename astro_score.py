@@ -15,6 +15,7 @@ from astropy.coordinates.baseframe import NonRotationTransformationWarning
 from astropilot.catalog import CATALOG
 from astropilot.equipment_profiles import CURRENT_EQUIPMENT, get_fov
 from astropilot.equipment_profiles import equipment_match_score
+from astropilot.equipment_profiles import capture_score
 from astropilot.user_profile import get_default_location, load_user_profile, favorite_targets
 from astropilot.equipment_profiles import (
     get_fov,
@@ -958,17 +959,25 @@ def compare_equipment_for_object(object_name):
             obj.get("type", "unknown"),
             obj.get("scale", "medium"),
         )
+        img_score = imaging_score(obj)
+        cap_score = capture_score(eq_name)
 
+        final_score = (
+            result["combined_score"] * 0.7 +
+            img_score * 0.2 +
+            cap_score * 0.1
+        )
         results.append({
             "equipment": eq_name,
-            "score": result["combined_score"],
+            "score": round(final_score),
             "equipment_score": result["equipment_score"],
             "resolution_score": result["resolution_score"],
             "ratio": result["ratio"],
             "frame_bonus": result["frame_bonus"],
             "arcsec_pixel": result["arcsec_pixel"],
+            "imaging_score": img_score,
+            "cap_score": cap_score,
         })
-
     results.sort(key=lambda x: x["score"], reverse=True)
 
     print(f"Object : {CATALOG[object_name]['name']}")
@@ -983,7 +992,9 @@ def compare_equipment_for_object(object_name):
             f"res={r['arcsec_pixel']}"
             f"eq={r['equipment_score']}"
             f" resS={r['resolution_score']}"
-    )
+            f" img={r['imaging_score']}",
+            f" cap={r['cap_score']}",
+        )
 def best_setup_for_object(object_name):
     obj = CATALOG.get(object_name)
 
@@ -1016,7 +1027,21 @@ def best_setup_for_object(object_name):
 
     return results
 
+def imaging_score(obj):
+    """
+    Score 0-100 basé sur la facilité d'imagerie.
+    """
 
+    difficulty = obj.get("imaging_difficulty", 3)
+    surface = obj.get("surface_brightness", 3)
+
+    diff_score = 100 - ((difficulty - 1) * 20)
+    surf_score = surface * 20
+
+    return round(
+        0.6 * diff_score +
+        0.4 * surf_score
+    )
 def forecast_astro(
     lat,
     lon,

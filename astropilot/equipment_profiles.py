@@ -16,6 +16,9 @@ EQUIPMENT_PROFILES = {
         "sensor_width_mm": 23.5,
         "sensor_height_mm": 15.7,
         "pixel_size_mm": 3.76,
+        "camera_type": "mono",
+        "f_ratio": 4.9,
+        "mount_class": "light",
     },
     "evostar72_533": {
         "name": "Evostar 72ED + ASI533MC",
@@ -23,6 +26,9 @@ EQUIPMENT_PROFILES = {
         "sensor_width_mm": 11.3,
         "sensor_height_mm": 11.3,
         "pixel_size_mm": 3.76,
+        "camera_type": "color",
+        "f_ratio": 5.8,
+        "mount_class": "light",
     },
     "c8_hyperstar_2600": {
         "name": "C8 HyperStar + ASI2600MC",
@@ -30,6 +36,9 @@ EQUIPMENT_PROFILES = {
         "focal_length_mm": 390,
         "sensor_width_mm": 23.5,
         "sensor_height_mm": 15.7,
+        "camera_type": "mono",
+        "f_ratio": 2.0,
+        "mount_class": "medium",
     },
     "rc8_294": {
         "name": "RC8 + ASI294MC",
@@ -37,6 +46,9 @@ EQUIPMENT_PROFILES = {
         "sensor_width_mm": 19.1,
         "sensor_height_mm": 13.0,
         "pixel_size_mm": 4.63,
+        "camera_type": "mono",
+        "f_ratio": 8.0,
+        "mount_class": "medium",
     },
 
     "samyang135_2600": {
@@ -45,6 +57,9 @@ EQUIPMENT_PROFILES = {
         "sensor_width_mm": 23.5,
         "sensor_height_mm": 15.7,
         "pixel_size_mm": 3.76,
+        "camera_type": "mono",
+        "f_ratio": 2.8,
+        "mount_class": "light",
     },
 }
 
@@ -256,4 +271,17 @@ def set_current_equipment(profile_name):
 
 def list_equipment():
     return list(EQUIPMENT_PROFILES.keys())
+def capture_score(equipment):
+    profile = EQUIPMENT_PROFILES[equipment]
+
+    score = 50
+
+    f_ratio = profile.get("f_ratio", 5)
+
+    score += max(0, 20 - (f_ratio - 2) * 5)
+
+    if profile.get("camera_type") == "mono":
+        score += 10
+
+    return round(max(0, min(100, score)))
     
