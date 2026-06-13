@@ -975,6 +975,34 @@ def compare_equipment_for_object(object_name):
             f"ratio={r['ratio']:.3f}"
         )
 
+def best_setup_for_object(object_name):
+    obj = CATALOG.get(object_name)
+
+    if not obj:
+        return []
+
+    results = []
+
+    for eq_name in list_equipment():
+        set_current_equipment(eq_name)
+
+        result = compare_object_to_equipment(
+            obj.get("size_arcmin", 20),
+            obj.get("type", "unknown")
+        )
+
+        results.append({
+            "equipment": eq_name,
+            "score": result["equipment_score"],
+            "frame_bonus": result["frame_bonus"],
+            "ratio": result["ratio"],
+        })
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+
+    return results
+
+
 def forecast_astro(
     lat,
     lon,
@@ -1201,7 +1229,8 @@ if __name__ == "__main__":
         "nebulae",
         "widefield",
         "small_targets",
-        "highest_score"
+        "highest_score",
+        "best_setup"
     ],
         default="balanced",
         help="Préférence de sélection des objets"
@@ -1239,7 +1268,7 @@ if __name__ == "__main__":
                 location["name"],
                 load_user_profile()["preferences"]["bortle"],
                 "deep_sky",
-                equipment=selected_equipment, goal=args.goal
+                equipment=None, goal=args.goal
             )
 
             if nights is None:
@@ -1287,7 +1316,7 @@ if __name__ == "__main__":
         city,
         bortle=3,
         target=TARGET,
-        equipment=selected_equipment,
+        equipment=args.equipment,
         goal=args.goal
 )
 
@@ -1314,23 +1343,30 @@ for j, obj in enumerate(night["top_objects"], start=1):
         f"sqm={obj['sqm']:.1f} "
         f"frame={obj['frame_bonus']}"
     )
-
 best_objects = night.get("best_objects") or [night["object"]]
+obj_key = best_objects[0]
+obj = CATALOG.get(obj_key, {"name": obj_key})
 
-if len(best_objects) == 1:
-        obj_key = best_objects[0]
+print(f"Objet recommandé : {obj['name']} ({obj_key})")
+
+if args.goal == "best_setup":
+    print("\nMatériels conseillés :")
+
+    for i, r in enumerate(best_setup_for_object(obj_key)[:5], start=1):
+        print(
+            f"{i}. {r['equipment']} "
+            f"score={r['score']} "
+            f"frame={r['frame_bonus']} "
+            f"ratio={r['ratio']}"
+        )
+
+elif len(best_objects) > 1:
+    print("Objets recommandés (ex aequo) :")
+    
+    for obj_key in best_objects:
         obj = CATALOG.get(obj_key, {"name": obj_key})
+        print(f" - {obj['name']} ({obj_key})")
 
-        print(f"Objet recommandé : {obj['name']} ({obj_key})")
-
-else:
-        print("Objets recommandés (ex aequo) :")
-
-        for obj_key in best_objects:
-            obj = CATALOG.get(obj_key, {"name": obj_key})
-            print(f" - {obj['name']} ({obj_key})")
-
-                  
 print()
 
         
