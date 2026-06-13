@@ -1177,6 +1177,20 @@ def forecast_astro(
         best = best_results[0]["window"]
         best_object = best_results[0]["name"]
 
+
+        best_setup = best_setup_for_object(best_object)
+
+        if best_setup:
+            setup_name = best_setup[0]["equipment"]
+
+            exposure = recommended_exposure(
+                CATALOG[best_object],
+                bortle=bortle
+            )
+        else:
+            setup_name = "inconnu"
+            exposure = "?"
+
         top3 = all_results[:3]
         top5 = all_results[:5]
         night_score = round(
@@ -1469,6 +1483,8 @@ if best_setup:
         f"{best_setup['equipment']} "
         f"(score {best_setup['score']})"
     )
+    exposure = recommended_exposure(CATALOG[obj_key])
+    print(f"Temps de pose conseillé : {exposure} h")
 
 if args.goal == "best_setup":
     print("\nMatériels conseillés :")
