@@ -111,7 +111,14 @@ def compare_object_to_equipment(object_size_arcmin, object_type="unknown", objec
     object_size_deg = object_size_arcmin / 60
     ratio = object_size_deg / frame_diag
 
-    #print("DEBUG SCALE =", object_type, object_scale)
+    if object_size_arcmin >= 100:
+        object_scale = "very_large"
+    elif object_size_arcmin >= 40:
+        object_scale = "large"
+    elif object_size_arcmin >= 10:
+        object_scale = "medium"
+    else:
+        object_scale = "small"
 
     if object_type == "planetary_nebula":
         ideal_min, ideal_max = 0.02, 0.20
@@ -239,18 +246,38 @@ def equipment_match_score(object_size_arcmin, object_type="unknown", equipment=N
         ideal_min = 0.02
         ideal_max = 0.20
     elif object_type == "galaxy":
-        ideal_min = 0.08
-        ideal_max = 0.25
+
+        if object_scale == "tiny":
+            ideal_min = 0.03
+            ideal_max = 0.12
+
+        elif object_scale == "small":
+            ideal_min = 0.05
+            ideal_max = 0.18
+
+        elif object_scale == "medium":
+            ideal_min = 0.08
+            ideal_max = 0.25
+
+        else:   # large / huge
+            ideal_min = 0.15
+            ideal_max = 0.45
     elif object_type == "cluster":
         ideal_min = 0.10
         ideal_max = 0.60
     elif object_type == "nebula":
-        ideal_min = 0.20
-        ideal_max = 0.60
-    else:
-        ideal_min = 0.15
-        ideal_max = 0.90
 
+        if object_scale == "huge":
+            ideal_min = 0.05
+            ideal_max = 0.20
+
+        elif object_scale == "large":
+            ideal_min = 0.10
+            ideal_max = 0.35
+
+        else:
+            ideal_min = 0.20
+            ideal_max = 0.60
     if ideal_min <= ratio <= ideal_max:
         return 100
 

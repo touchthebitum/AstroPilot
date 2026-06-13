@@ -963,9 +963,9 @@ def compare_equipment_for_object(object_name):
         cap_score = capture_score(eq_name)
 
         final_score = (
-            result["combined_score"] * 0.7 +
-            img_score * 0.2 +
-            cap_score * 0.1
+            result["combined_score"] * 0.55 +
+            img_score * 0.20 +
+            cap_score * 0.25
         )
         results.append({
             "equipment": eq_name,
@@ -1012,9 +1012,18 @@ def best_setup_for_object(object_name):
             obj.get("scale", "medium"),
         )
 
+        img_score = imaging_score(obj)
+        cap_score = capture_score(eq_name)
+
+        final_score = (
+            result["combined_score"] * 0.70 +
+            img_score * 0.15 +
+            cap_score * 0.15
+        )
+
         results.append({
             "equipment": eq_name,
-            "score": result["combined_score"],
+            "score": round(final_score),
             "equipment_score": 
         result["equipment_score"],
             "resolution_score":
@@ -1042,6 +1051,44 @@ def imaging_score(obj):
         0.6 * diff_score +
         0.4 * surf_score
     )
+
+def recommended_exposure(obj, bortle=4):
+    """
+    Retourne le temps de pose recommandé en heures.
+    """
+
+    difficulty = obj.get("imaging_difficulty", 3)
+
+    base_hours = {
+        1: 2,
+        2: 4,
+        3: 6,
+        4: 10,
+        5: 15,
+    }
+
+    bortle_factor = {
+        1: 0.7,
+        2: 0.8,
+        3: 0.9,
+        4: 1.0,
+        5: 1.2,
+        6: 1.5,
+        7: 2.0,
+        8: 3.0,
+    }
+
+    hours = (
+        base_hours.get(difficulty, 6)
+        * bortle_factor.get(bortle, 1.0)
+    )
+
+    return round(hours, 1)
+print(
+    "TEST M31 =",
+    recommended_exposure(CATALOG["M31"])
+)
+
 def forecast_astro(
     lat,
     lon,
