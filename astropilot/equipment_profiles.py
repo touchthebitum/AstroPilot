@@ -88,9 +88,6 @@ def compare_object_to_equipment(object_size_arcmin, object_type="unknown", objec
     focal_mm = equipment.get("focal_length_mm")
     pixel_um = equipment.get("pixel_size_um") or equipment.get("pixel_size_mm")
 
-    print("DEBUG", equipment ["name"], focal_mm, pixel_um)
-    print(equipment)
-
     if focal_mm and pixel_um:
         arcsec_pixel = round(206.265 * pixel_um / focal_mm, 2)
     else:
@@ -99,13 +96,21 @@ def compare_object_to_equipment(object_size_arcmin, object_type="unknown", objec
     object_size_deg = object_size_arcmin / 60
     ratio = object_size_deg / frame_diag
 
+    print("DEBUG SCALE =", object_type, object_scale)
+
     if object_type == "planetary_nebula":
         ideal_min, ideal_max = 0.02, 0.20
+
     elif object_type == "galaxy":
         if object_scale == "huge":
             ideal_min, ideal_max = 0.08, 0.45
+        elif object_scale == "small":
+            ideal_min, ideal_max = 0.03, 0.18
+        elif object_scale == "tiny":
+            ideal_min, ideal_max = 0.015, 0.12
         else:
             ideal_min, ideal_max = 0.08, 0.25
+        
     elif object_type == "cluster":
         ideal_min, ideal_max = 0.10, 0.60
     elif object_type == "nebula":
@@ -127,7 +132,14 @@ def compare_object_to_equipment(object_size_arcmin, object_type="unknown", objec
     frame_bonus = round((score - 50) / 10)
 
     if object_type == "galaxy":
-        resolution_weight = 0.50
+        if object_scale == "tiny":
+            resolution_weight = 0.80
+        elif object_scale == "small":
+            resolution_weight = 0.70
+        elif object_scale == "medium":
+            resolution_weight = 0.60
+        else:
+            resolution_weight = 0.40
 
     elif object_type == "planetary_nebula":
         resolution_weight = 0.70
@@ -139,7 +151,7 @@ def compare_object_to_equipment(object_size_arcmin, object_type="unknown", objec
         resolution_weight = 0.10
 
     framing_weight = 1 - resolution_weight
-    res_score = resolution_score(arcsec_pixel, object_type)
+    res_score = resolution_score(arcsec_pixel, object_type, object_scale)
     combined_score =round(
         framing_weight * score + resolution_weight * res_score)
     
@@ -156,7 +168,7 @@ def compare_object_to_equipment(object_size_arcmin, object_type="unknown", objec
         "resolution_weight": resolution_weight,
         "framing_weight": framing_weight,
     }
-def resolution_score(arcsec_pixel, object_type="unknown"):
+def resolution_score(arcsec_pixel, object_type="unknown", object_scale="medium"):
     """
     Score 0-100 basé sur l'échantillonnage.
     """
@@ -168,7 +180,12 @@ def resolution_score(arcsec_pixel, object_type="unknown"):
         ideal = 0.8
 
     elif object_type == "galaxy":
-        ideal = 1.2
+        if object_scale == "tiny":
+            ideal = 0.6
+        elif object_scale == "small":
+            ideal = 0.8
+        else:
+            ideal = 1.2
 
     elif object_type == "cluster":
         ideal = 2.0
@@ -181,6 +198,13 @@ def resolution_score(arcsec_pixel, object_type="unknown"):
 
     score = 100 * min(ideal / arcsec_pixel,
                       arcsec_pixel / ideal)
+
+    print(
+        "RESDEBUG",
+        object_type,
+        arcsec_pixel,
+        score
+    )
 
     return max(0, min(100, round(score)))
 

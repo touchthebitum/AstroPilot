@@ -26,6 +26,7 @@ CATALOG = {
         "type": "galaxy",
         "magnitude": 8.4,
         "difficulty": 3,
+        "scale":"tiny",
     },
     "M81": {
 	    "ra": 148.8882,

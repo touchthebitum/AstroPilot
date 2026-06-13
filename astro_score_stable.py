@@ -1292,7 +1292,7 @@ top_nights = sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
         ##"km/h"
         
     #)
-print("DEBUG nights =", len(nights))
+#print("DEBUG nights =", len(nights))
                 
 top_nights = sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
 
