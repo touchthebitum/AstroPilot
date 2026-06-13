@@ -1,4 +1,4 @@
-
+import sys
 import requests
 import warnings
 from datetime import datetime, timedelta
@@ -575,34 +575,32 @@ def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_targe
         sqm_bonus = -5
         
     obj_meta = CATALOG.get(target_object, {})
-
     obj_type = obj_meta.get("type", "unknown")
 
-    target_bonus = 0
+    equipment_result = compare_object_to_equipment(
+    obj_meta.get("size_arcmin", 20),
+    obj_type
+    )
+    equipment_score = equipment_result["equipment_score"]
+    frame_bonus = equipment_result["frame_bonus"]
+
+    target_bonus = frame_bonus
 
     if goal in ["nebulae", "nebula"] and "nebula" in obj_type:
         target_bonus += 12
 
-    elif goal in ["galaxies", "galaxy"] and "galaxies" in obj_type:
+    elif goal in ["galaxies", "galaxy"] and "galaxy" in obj_type:
         target_bonus += 12
 
-    elif goal in ["clusters", "cluster"] and "clusters" in obj_type:
+    elif goal in ["clusters", "cluster"] and "cluster" in obj_type:
         target_bonus += 12
-
-    equipment_result = compare_object_to_equipment(
-    obj_meta.get("size_arcmin", 20),
-    obj_meta.get("type", "unknown")
-    )
-
-    equipment_score = equipment_result["equipment_score"]
-    frame_bonus = equipment_result["frame_bonus"]
  
     score = round(
     max(
         0,
         min(
             100,
-            45 - penalty + tb + target_bonus + sqm_bonus + frame_bonus
+            45 - penalty + tb + target_bonus + sqm_bonus
         )
     )
 )
@@ -941,6 +939,42 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
             })
     return sorted(candidates, key=lambda x: x["score"], reverse=True)[:limit]
 
+def compare_equipment_for_object(object_name):
+    obj = CATALOG.get(object_name)
+
+    if not obj:
+        print(f"Objet inconnu : {object_name}")
+        return
+
+    print(f"\nComparaison matériel pour {object_name}\n")
+
+    results = []
+
+    for eq_name in list_equipment():
+        set_current_equipment(eq_name)
+
+        result = compare_object_to_equipment(
+            obj.get("size_arcmin", 20),
+            obj.get("type", "unknown"),
+        )
+
+        results.append({
+            "equipment": eq_name,
+            "score": result["equipment_score"],
+            "ratio": result["ratio"],
+            "frame_bonus": result["frame_bonus"],
+        })
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+
+    for r in results:
+        print(
+            f"{r['equipment']:25} "
+            f"score={r['score']:3} "
+            f"frame={r['frame_bonus']:2} "
+            f"ratio={r['ratio']:.3f}"
+        )
+
 def forecast_astro(
     lat,
     lon,
@@ -1171,9 +1205,19 @@ if __name__ == "__main__":
     ],
         default="balanced",
         help="Préférence de sélection des objets"
-)
+    )
+
+    parser.add_argument(
+        "--object",
+        type=str,
+        help="Comparer les matériels pour un objet"
     
+    )
     args = parser.parse_args()
+
+    if args.object:
+        compare_equipment_for_object(args.object)
+        sys.exit(0)
 
     if args.compare:
 
