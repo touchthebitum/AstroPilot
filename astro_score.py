@@ -589,9 +589,6 @@ def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_targe
     elif goal in ["clusters", "cluster"] and "clusters" in obj_type:
         target_bonus += 12
 
-    #print("GOAL =", goal, "TYPE =", obj_type, "TARGET_BONUS =", target_bonus)
-
-
     equipment_result = compare_object_to_equipment(
     obj_meta.get("size_arcmin", 20),
     obj_meta.get("type", "unknown")
