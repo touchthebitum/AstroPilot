@@ -1352,7 +1352,9 @@ print(f"Objet recommandé : {obj['name']} ({obj_key})")
 if args.goal == "best_setup":
     print("\nMatériels conseillés :")
 
-    for i, r in enumerate(best_setup_for_object(obj_key)[:5], start=1):
+    setups = best_setup_for_object(obj_key)
+
+    for i, r in enumerate(setups[:5], start=1):
         print(
             f"{i}. {r['equipment']} "
             f"score={r['score']} "
@@ -1362,7 +1364,7 @@ if args.goal == "best_setup":
 
 elif len(best_objects) > 1:
     print("Objets recommandés (ex aequo) :")
-    
+
     for obj_key in best_objects:
         obj = CATALOG.get(obj_key, {"name": obj_key})
         print(f" - {obj['name']} ({obj_key})")
