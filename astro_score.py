@@ -1084,10 +1084,6 @@ def recommended_exposure(obj, bortle=4):
     )
 
     return round(hours, 1)
-print(
-    "TEST M31 =",
-    recommended_exposure(CATALOG["M31"])
-)
 
 def forecast_astro(
     lat,
