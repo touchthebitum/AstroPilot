@@ -856,6 +856,30 @@ def estimate_completion_date(hours_needed, nights):
 
     return "Au-delà des prévisions"
 
+def estimate_portfolio_completion_date(total_remaining, nights):
+    remaining = total_remaining
+
+    for night in sorted(nights, key=lambda x: x["date"]):
+
+        window = night.get("best_window")
+
+        if not window:
+            continue
+
+        start = int(window["start"].split(":")[0])
+        end = int(window["end"].split(":")[0])
+        available = end - start
+
+        if available <= 0:
+            continue
+
+        remaining -= available
+
+        if remaining <= 0:
+            return night["date"]
+
+    return None
+
 def next_project_after(current_project):
     projects = get_projects()
 
@@ -1268,6 +1292,19 @@ def show_completion_forecast():
 
     total_remaining = sum(p["remaining"] for p in roadmap)
 
+    portfolio_completion_date = estimate_portfolio_completion_date(
+    total_remaining,
+    best_nights
+)
+
+    print("\n===== OBJECTIF GLOBAL =====\n")
+    print(f"Heures restantes : {total_remaining:.1f} h")
+
+    if portfolio_completion_date:
+        print(f"Date de fin estimée : {portfolio_completion_date}")
+    else:
+        print("Date de fin estimée : Au-delà des prévisions")
+
     print(f"Temps restant portefeuille : {total_remaining:.1f} h")
     print(f"Nuits restantes estimées : {total_remaining / 2.0:.1f}")
 
@@ -1309,6 +1346,7 @@ def build_astro_calendar(projects, nights):
             window = night.get("best_window")
 
             if not window:
+                night_index += 1
                 continue
 
             start = int(window["start"].split(":")[0])
@@ -1316,6 +1354,7 @@ def build_astro_calendar(projects, nights):
             available = end - start
 
             if available <= 0:
+                night_index += 1
                 continue
 
             used = min(available, remaining)
@@ -2513,5 +2552,6 @@ if project:
     print(f"Bonus saison : {project['season_window']}")
     print(f"Progression : {project['progress']} %")
     print(f"Bonus clôture : {project.get('completion_bonus', 0):.1f}")
+    #print("\n=== FIN DU PROGRAMME. ===")
 
     
