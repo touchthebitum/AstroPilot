@@ -488,6 +488,33 @@ def estimated_sqm(bortle, moon_illumination, moon_elevation, moon_target_sep):
 
     return round(base - moon_loss, 2)
 
+def season_bonus(obj):
+
+    month = datetime.now().month
+    name = obj.get("catalog_key", "").upper()
+
+    if name == "M31":
+        if month in [8, 9, 10, 11]:
+            return 25
+        elif month in [6, 7]:
+            return 10
+        else:
+            return -20
+
+    elif name == "IC1396":
+        if month in [6, 7, 8, 9, 10]:
+            return 25
+        else:
+            return -20
+
+    elif name == "ROSETTE":
+        if month in [11, 12, 1, 2, 3]:
+            return 25
+        else:
+            return -20
+
+    return 0
+
 def project_progress_bonus(object_name):
     projects = get_projects()
 
@@ -507,6 +534,66 @@ def project_progress_bonus(object_name):
         return -50
 
     return round(progress * 20, 1)
+
+
+def closure_bonus(name):
+    progress = project_progress(name)
+    remaining = project_remaining_hours(name)
+
+    if remaining <= 0:
+        return 0
+
+    if progress >= 90:
+        return 40
+
+    if progress >= 80:
+        return 25
+
+    if progress >= 60:
+        return 10
+
+    return 0
+
+def season_bonus(obj):
+    """
+    Bonus saisonnier selon le mois actuel.
+    """
+    month = datetime.now().month
+
+    name = obj.get("catalog_key", "").upper()
+
+    bonus = 0
+
+    # M31 : août → novembre
+    if name == "M31":
+        if month in [8, 9, 10, 11]:
+            bonus += 25
+        elif month in [6, 7]:
+            bonus += 10
+        elif month in [12, 1]:
+            bonus += 5
+        else:
+            bonus -= 20
+
+    # Rosette : novembre → mars
+    elif "ROSETTE" in name:
+        if month in [11, 12, 1, 2, 3]:
+            bonus += 25
+        elif month in [10, 4]:
+            bonus += 10
+        else:
+            bonus -= 20
+
+    # IC1396 : juin → octobre
+    elif name == "IC1396":
+        if month in [6, 7, 8, 9, 10]:
+            bonus += 25
+        elif month in [5, 11]:
+            bonus += 10
+        else:
+            bonus -= 20
+
+    return bonus
 
 def estimate_portfolio_nights():
     projects = get_projects()
@@ -757,6 +844,7 @@ def recommend_project():
         key=lambda x: x["portfolio_score"],
         reverse=True
         )
+    print (f"Bonus clotûre : {closure_bonus(name)}")
     
     return candidates[0]
 
@@ -1175,12 +1263,15 @@ def portfolio_score(name):
     progress = project_progress(name)
     completion = progress / 5
 
+    closure = closure_bonus(name)
+
     return (
         priority * 0.6
         + altitude
         + season
         + roi * 15
         + completion
+        + closure
     )
 
 def show_portfolio_ranking():
@@ -1205,13 +1296,14 @@ def show_portfolio_ranking():
 
         progress = project_progress(name)
         completion = progress / 5
-
+        closure = closure_bonus(name)
         score = (
             priority * 0.6
             + altitude
             + season
             + roi * 15
             + completion
+            + closure
         )
 
         rows.append({
@@ -1220,7 +1312,8 @@ def show_portfolio_ranking():
             "priority": priority,
             "progress": progress,
             "remaining": remaining,
-            "roi": roi
+            "roi": roi,
+            "closure": closure
         })
 
     rows.sort(
@@ -1519,12 +1612,16 @@ def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_targe
     priority_bonus=( 
     project_priority(target_object) * 0.3)
 
+    season = season_bonus({
+        "catalog_key": target_object
+    })
+
     score = round(
         max(
         0,
         min(
             100,
-            45 - penalty + tb + target_bonus + sqm_bonus + project_bonus + priority_bonus
+            45 - penalty + tb + target_bonus + sqm_bonus + project_bonus + priority_bonus + season
         )
     )
 )
@@ -1547,6 +1644,7 @@ def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_targe
     "penalty": round(penalty, 1),
     "project_bonus": project_bonus,
     "priority_bonus": round(priority_bonus, 1),
+    "season_bonus" : season,
     
 }
     
@@ -2538,6 +2636,8 @@ show_completion_forecast()
 show_astro_calendar()
 
 if project:
+    score = portfolio_score(project["name"])
+    closure = closure_bonus(project["name"])
     print("\n===== PROJET RECOMMANDÉ =====\n")
     print(f"Projet : {project['name']}")
     print(
@@ -2547,11 +2647,12 @@ if project:
     print(f"Priorité : {project['priority']:.1f}")
     print(f"Bonus altitude : {project['season_bonus']}")
     print(f"ROI : {project['roi']}")
-    print(f"Score portefeuille : {project['portfolio_score']:.1f}")
+    print(f"Score portefeuille : {score:.1f}")
+    print(f"Bonus clôture : {closure:.1f}")
     print(f"Mois restants : {project['months_left']}")
     print(f"Bonus saison : {project['season_window']}")
     print(f"Progression : {project['progress']} %")
-    print(f"Bonus clôture : {project.get('completion_bonus', 0):.1f}")
+    #print(f"Bonus clôture : {project.get('completion_bonus', 0):.1f}")
     #print("\n=== FIN DU PROGRAMME. ===")
 
     
