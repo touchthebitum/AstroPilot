@@ -698,6 +698,19 @@ def season_remaining_months(obj):
 
     return max(1, 12 - diff)
 
+def season_urgency_bonus(obj):
+    months_left = season_months_left(obj)
+
+    if months_left <= 1:
+        return 30
+
+    if months_left <= 2:
+        return 20
+
+    if months_left <= 3:
+        return 10
+
+    return 0
 
 def season_window_bonus(obj):
     months = season_remaining_months(obj)
@@ -807,16 +820,17 @@ def recommend_project():
         progress = project_progress(name)
         completion_bonus = progress / 5
 
-        season_bonus = altitude_bonus(
-            CATALOG.get(name, {})
-        )
-        season_window = season_window_bonus(CATALOG.get(name, {}))
+        season_bonus = altitude_bonus(obj)
+        season_window = season_window_bonus(obj)
+        obj = CATALOG.get(name,{})
+        urgency = season_urgency_bonus(obj)
         roi = project_roi(name)
 
         portfolio_score = (
             priority * 0.6
             + season_bonus
             + season_window
+            + urgency
             + roi * 15
             + completion_bonus
         )
@@ -831,9 +845,11 @@ def recommend_project():
             "roi": roi,
             "portfolio_score": portfolio_score,
             "season_window": season_window,
+            "urgency" : urgency,
             "months_left": season_remaining_months(CATALOG.get(name,{})),
             "progress" : progress,
             "comnpletion_bonus": completion_bonus,
+            
         })
 
 
