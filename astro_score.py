@@ -767,6 +767,30 @@ def project_roi(object_name):
 
     return round(importance / remaining, 2)
 
+def session_portfolio_gain(project_name, session_hours):
+
+    project = get_projects().get(project_name, {})
+
+    target = project.get("target_hours", 0)
+
+    if target <= 0:
+        return 0
+
+    current_hours = project.get("hours", 0)
+
+    current_progress = (current_hours / target) * 100
+
+    future_hours = min(
+        current_hours + session_hours,
+        target
+    )
+
+    future_progress = (future_hours / target) * 100
+
+    return round(
+        future_progress - current_progress,
+        1
+    )
 def save_user_profile(profile):
     with open("data/user_profile.json", "w", encoding="utf-8") as f:
         json.dump(profile, f, indent=4, ensure_ascii=False)
@@ -849,6 +873,10 @@ def recommend_project():
             "months_left": season_remaining_months(CATALOG.get(name,{})),
             "progress" : progress,
             "comnpletion_bonus": completion_bonus,
+            "session_gain": session_portfolio_gain(
+                name,
+                min(2.0, remaining)
+            ),
             
         })
 
@@ -2674,6 +2702,9 @@ if project:
     print(f"Priorité : {project['priority']:.1f}")
     print(f"Bonus altitude : {project['season_bonus']}")
     print(f"ROI : {project['roi']}")
+    print(
+    f"Gain portefeuille prévu : "
+    f"+{project['session_gain']:.1f} %")
     print(f"Score portefeuille : {score:.1f}")
     print(f"Bonus clôture : {closure:.1f}")
     print(f"Mois restants : {project['months_left']}")
