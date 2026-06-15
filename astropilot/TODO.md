@@ -83,3 +83,54 @@ TODO:
 3. Fin estimée IC1396 : 8 nuits
 4. Ensuite Rosette
 5. Portefeuille terminé estimé : septembre 2026
+
+
+
+===== ROADMAP ASTROPILOT =====
+
+[✓] Météo astro
+[✓] Score météo
+[✓] Score lune
+[✓] Classement objets
+[✓] Recommandation objet
+[✓] Gestion portefeuille
+[✓] ROI projets
+[✓] Priorités utilisateur
+[✓] Historique projets
+[✓] Classement portefeuille
+[✓] Prévision clôture projets
+[✓] Plan de nuit
+[✓] Que faire ce soir ?
+[✓] Gain portefeuille global
+[✓] Projet suivant recommandé
+
+----------------------------
+
+[ ] Roadmap portefeuille complète
+[ ] Historique détaillé des sessions
+[ ] Mise à jour automatique après une nuit
+[ ] Planification multi-nuits
+[ ] Gestion avancée des saisons
+[ ] Comparaison automatique des setups
+[ ] Allocation intelligente des filtres
+[ ] Estimation date de fin du portefeuille
+[ ] Tableau de bord graphique
+[ ] Export PDF des recommandations
+
+----------------------------
+
+VERSION MOBILE
+
+[ ] API FastAPI
+[ ] Backend AstroPilot
+[ ] Interface Flutter
+[ ] Android
+[ ] iOS
+[ ] Synchronisation cloud
+
+----------------------------
+
+VISION FINALE
+
+[ ] Assistant décisionnel complet
+

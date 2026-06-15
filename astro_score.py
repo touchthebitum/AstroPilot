@@ -847,16 +847,8 @@ def next_project_after(current_project):
         if remaining <= 0:
             continue
 
-        priority = project_priority(name)
-        progress = project_progress(name)
-        roi = project_roi(name)
-
-        score = (
-            priority * 0.6
-            + roi * 15
-            + progress / 5
-        )
-
+        score = portfolio_score(name)
+        
         ranking.append(
             {
                 "name": name,
@@ -1120,6 +1112,26 @@ def show_portfolio_dashboard():
     print(f"Nuits restantes estimées : {nights}")
     print(f"Progression globale : {global_progress:.1f}%")
 
+def portfolio_score(name):
+    priority = project_priority(name)
+
+    obj = CATALOG.get(name, {})
+
+    altitude = altitude_bonus(obj)
+    season = season_window_bonus(obj)
+    roi = project_roi(name)
+
+    progress = project_progress(name)
+    completion = progress / 5
+
+    return (
+        priority * 0.6
+        + altitude
+        + season
+        + roi * 15
+        + completion
+    )
+
 def show_portfolio_ranking():
 
     projects = get_projects()
@@ -1188,27 +1200,29 @@ def show_completion_forecast():
     )
 
     print("\n===== PRÉVISION DE CLÔTURE =====\n")
+    ranking = []
 
-    for name, project in projects.items():
+    for name in projects:
+        score = portfolio_score(name)
+        progress = project_progress(name)
+        remaining = project_remaining_hours(name)
 
-        target = project.get("target_hours", 0)
-        done = project.get("hours", 0)
+        ranking.append(
+            (
+                score,
+                name,
+                progress,
+                remaining
+            )
+    )
 
-        remaining = max(0, target - done)
+    ranking.sort(reverse=True)
 
-        if remaining <= 0:
-            status = "TERMINÉ"
-        elif remaining <= capacity:
-            status = "TERMINABLE CETTE SEMAINE"
-        else:
-            nights_needed = remaining / 2.0
-            status = f"≈ {nights_needed:.1f} nuits nécessaires"
+    for score, name, progress, remaining in ranking:
+        project = projects[name]
+        target = project.get("taarget_hours",0)
+        done = project.get ("hours",0)
 
-        print(
-            f"{name:15} "
-            f"reste={remaining:5.1f} h  "
-            f"{status}"
-        )
 
 def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_target_sep, target_altitude, bortle=4, target="deep_sky", target_object=None, goal="balanced"):
     penalty = 0
