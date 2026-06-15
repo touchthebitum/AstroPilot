@@ -699,7 +699,7 @@ def season_remaining_months(obj):
     return max(1, 12 - diff)
 
 def season_urgency_bonus(obj):
-    months_left = season_months_left(obj)
+    months_left = season_remaining_months(obj)
 
     if months_left <= 1:
         return 30
@@ -816,13 +816,13 @@ def recommend_project():
         if remaining is None or remaining <= 0:
             continue
 
+        obj = CATALOG.get(name,{})
+
         priority = project_priority(name)
         progress = project_progress(name)
         completion_bonus = progress / 5
-
         season_bonus = altitude_bonus(obj)
         season_window = season_window_bonus(obj)
-        obj = CATALOG.get(name,{})
         urgency = season_urgency_bonus(obj)
         roi = project_roi(name)
 
