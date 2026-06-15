@@ -1489,6 +1489,17 @@ def show_astro_calendar():
         return
 
     calendar = build_astro_calendar(projects, nights)
+    calendar.sort(key=lambda x: x["date"])
+
+    remaining_by_project = {}
+
+    for name in projects:
+        remaining_by_project[name] = project_remaining_hours(name)
+
+    for item in calendar:
+        name = item["project"]
+        remaining_by_project[name] -= item["hours"]
+        item["remaining_after"] = max(0, remaining_by_project[name])
 
     if not calendar:
         return
