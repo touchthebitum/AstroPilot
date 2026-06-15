@@ -863,6 +863,7 @@ def recommend_project():
             "name": name,
             "remaining": remaining,
             "priority": priority,
+            "session_gain": session_portfolio_gain(name, min(2.0, remaining)),
             "hours_done": project.get("hours", 0),
             "target_hours": project.get("target_hours", 0),
             "season_bonus": season_bonus,
@@ -873,7 +874,7 @@ def recommend_project():
             "months_left": season_remaining_months(CATALOG.get(name,{})),
             "progress" : progress,
             "comnpletion_bonus": completion_bonus,
-            "session_gain": session_portfolio_gain(
+            "portfolio_gain": session_portfolio_gain(
                 name,
                 min(2.0, remaining)
             ),
@@ -889,7 +890,16 @@ def recommend_project():
         reverse=True
         )
     print (f"Bonus clotûre : {closure_bonus(name)}")
-    
+    print("\n===== TOP GAINS CE SOIR =====\n")
+
+    for i, c in enumerate(candidates[:3], start=1):
+        print(
+            f"{i}. {c['name']}  "
+            f"gain=+{c['portfolio_gain']:.1f}%  "
+            f"roi={c['roi']:.2f}  "
+            f"reste={c['remaining']:.1f}h"
+        )
+
     return candidates[0]
 
 def recommend_project_for_night(top_objects):
@@ -2703,7 +2713,7 @@ if project:
     print(f"Bonus altitude : {project['season_bonus']}")
     print(f"ROI : {project['roi']}")
     print(
-    f"Gain portefeuille prévu : "
+    f"Gain projet prévu : "
     f"+{project['session_gain']:.1f} %")
     print(f"Score portefeuille : {score:.1f}")
     print(f"Bonus clôture : {closure:.1f}")
