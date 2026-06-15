@@ -134,3 +134,11 @@ VISION FINALE
 
 [ ] Assistant décisionnel complet
 
+
+## Version suivante
+
+- [ ] Roadmap séquentielle réelle
+- [ ] Dates de fin tenant compte de l'ordre des projets
+- [ ] Calendrier de clôture complet du portefeuille
+- [ ] Afficher le dernier projet du portefeuille
+- [ ] Afficher la date de fin totale du portefeuille
