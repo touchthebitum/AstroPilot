@@ -1,4 +1,5 @@
 import sys
+import math
 import json
 import requests
 import warnings
@@ -271,9 +272,10 @@ def moon_illumination_from_phase(phase: float) -> float:
     0 = nouvelle lune
     14-15 = pleine lune
     """
+
     normalized = phase / 29.53
-    import math
     illum = (1 - math.cos(2 * math.pi * normalized)) / 2
+
     return illum * 100
 
 def moon_target_separation(target_ra, target_dec, obs_time, lat, lon):
@@ -829,6 +831,31 @@ def forecast_available_hours(nights):
 
     return round(total, 1)
 
+def estimate_completion_date(hours_needed, nights):
+    remaining = hours_needed
+
+    for night in sorted(nights, key=lambda x: x["date"]):
+
+        window = night.get("best_window")
+
+        if not window:
+            continue
+
+        start = int(window["start"].split(":")[0])
+        end = int(window["end"].split(":")[0])
+
+        available = end - start
+
+        if available <= 0:
+            continue
+
+        remaining -= available
+
+        if remaining <= 0:
+            return night["date"]
+
+    return "Au-delà des prévisions"
+
 def next_project_after(current_project):
     projects = get_projects()
 
@@ -1192,37 +1219,55 @@ def show_completion_forecast():
 
     projects = get_projects()
 
+    roadmap = []
+
     if not projects:
         return
 
     capacity = forecast_available_hours(
         sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
     )
-
-    print("\n===== PRÉVISION DE CLÔTURE =====\n")
-    ranking = []
+    best_nights = sorted(
+        nights,
+        key=lambda x: x["score"],
+        reverse=True
+    )
 
     for name in projects:
         score = portfolio_score(name)
         progress = project_progress(name)
         remaining = project_remaining_hours(name)
 
-        ranking.append(
-            (
-                score,
-                name,
-                progress,
-                remaining
-            )
-    )
+        progress = project_progress(name)
+        nights_needed = math.ceil (remaining / 2.0)
+        completion_date = estimate_completion_date(
+            remaining,
+            best_nights
+        )
 
-    ranking.sort(reverse=True)
+        roadmap.append({
+            "name": name,
+            "progress": progress,
+            "remaining": remaining,
+            "nights": nights_needed,
+            "completion_date" : completion_date
+        })
 
-    for score, name, progress, remaining in ranking:
-        project = projects[name]
-        target = project.get("taarget_hours",0)
-        done = project.get ("hours",0)
+    roadmap.sort(key=lambda x: x["nights"])
 
+    print("\n===== ROADMAP ASTRO =====\n")
+
+    for i, p in enumerate(roadmap, start=1):
+        print(f"{i}. {p['name']}")
+        print(f"   Progression : {p['progress']:.1f} %")
+        print(f"   Reste : {p['remaining']:.1f} h")
+        print(f"   Fin estimée : {p['completion_date']}")
+        print()
+
+    total_remaining = sum(p["remaining"] for p in roadmap)
+
+    print(f"Temps restant portefeuille : {total_remaining:.1f} h")
+    print(f"Nuits restantes estimées : {total_remaining / 2.0:.1f}")
 
 def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_target_sep, target_altitude, bortle=4, target="deep_sky", target_object=None, goal="balanced"):
     penalty = 0
