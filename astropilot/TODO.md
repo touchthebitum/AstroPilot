@@ -142,3 +142,26 @@ VISION FINALE
 - [ ] Calendrier de clôture complet du portefeuille
 - [ ] Afficher le dernier projet du portefeuille
 - [ ] Afficher la date de fin totale du portefeuille
+
+
+# AstroPilot V2
+
+## Priorité 1
+
+- [ ] Calendrier intelligent basé sur la visibilité réelle des objets
+- [ ] Vérifier altitude minimale de l'objet pour chaque nuit
+- [ ] Vérifier séparation lunaire minimale
+- [ ] Vérifier saison optimale
+- [ ] Ne planifier un projet que lorsqu'il est réellement observable
+
+## Priorité 2
+
+- [ ] Estimation date de fin du portefeuille complet
+- [ ] Détection automatique des projets terminés
+- [ ] Suggestion automatique d'un nouveau projet depuis le catalogue
+
+## Priorité 3
+
+- [ ] Score scientifique des objets
+- [ ] Diversification du portefeuille
+- [ ] Rendement annuel astrophotographique
