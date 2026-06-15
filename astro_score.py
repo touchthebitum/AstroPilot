@@ -1253,8 +1253,10 @@ def show_completion_forecast():
             "completion_date" : completion_date
         })
 
-    roadmap.sort(key=lambda x: x["nights"])
-
+        roadmap.sort(
+            key=lambda x: portfolio_score(x["name"]),
+            reverse=True
+    )
     print("\n===== ROADMAP ASTRO =====\n")
 
     for i, p in enumerate(roadmap, start=1):
@@ -1268,6 +1270,91 @@ def show_completion_forecast():
 
     print(f"Temps restant portefeuille : {total_remaining:.1f} h")
     print(f"Nuits restantes estimées : {total_remaining / 2.0:.1f}")
+
+def build_astro_calendar(projects, nights):
+    calendar = []
+
+    sorted_nights = sorted(
+        nights,
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    project_order = []
+
+    for name in projects:
+        project_order.append(
+            {
+                "name": name,
+                "score": portfolio_score(name),
+                "remaining": project_remaining_hours(name),
+            }
+        )
+
+    project_order.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
+    night_index = 0
+    for project in project_order:
+        remaining = project["remaining"]
+
+        if remaining <= 0:
+            continue
+
+        while remaining > 0 and night_index < len(sorted_nights):
+
+            night = sorted_nights[night_index]
+
+            window = night.get("best_window")
+
+            if not window:
+                continue
+
+            start = int(window["start"].split(":")[0])
+            end = int(window["end"].split(":")[0])
+            available = end - start
+
+            if available <= 0:
+                continue
+
+            used = min(available, remaining)
+
+            calendar.append(
+                {
+                    "date": night["date"],
+                    "project": project["name"],
+                    "hours": used,
+                    "remaining_after": remaining - used,
+                }
+            )
+
+            remaining -= used
+            night_index += 1
+
+    return calendar
+
+def show_astro_calendar():
+    projects = get_projects()
+
+    if not projects:
+        return
+
+    calendar = build_astro_calendar(projects, nights)
+
+    if not calendar:
+        return
+
+    print("\n===== CALENDRIER ASTRO =====\n")
+
+    for item in calendar:
+        print(
+            f"{item['date']}  "
+            f"{item['project']:10}  "
+            f"{item['hours']:.1f} h  "
+            f"reste après : {item['remaining_after']:.1f} h"
+        )
+
 
 def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_target_sep, target_altitude, bortle=4, target="deep_sky", target_object=None, goal="balanced"):
     penalty = 0
@@ -2409,6 +2496,7 @@ show_portfolio_dashboard()
 project = recommend_project()
 show_portfolio_ranking()
 show_completion_forecast()
+show_astro_calendar()
 
 if project:
     print("\n===== PROJET RECOMMANDÉ =====\n")
