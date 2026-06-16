@@ -858,12 +858,15 @@ def recommend_project():
             + roi * 15
             + completion_bonus
         )
-
+        project_gain = session_portfolio_gain(
+           name,
+           min(2.0, remaining) 
+        )
         candidates.append({
             "name": name,
             "remaining": remaining,
             "priority": priority,
-            "session_gain": session_portfolio_gain(name, min(2.0, remaining)),
+            "project_gain": project_gain,
             "hours_done": project.get("hours", 0),
             "target_hours": project.get("target_hours", 0),
             "season_bonus": season_bonus,
@@ -874,12 +877,8 @@ def recommend_project():
             "months_left": season_remaining_months(CATALOG.get(name,{})),
             "progress" : progress,
             "comnpletion_bonus": completion_bonus,
-            "portfolio_gain": session_portfolio_gain(
-                name,
-                min(2.0, remaining)
-            ),
+        }),
             
-        })
 
 
     if not candidates:
@@ -895,7 +894,7 @@ def recommend_project():
     for i, c in enumerate(candidates[:3], start=1):
         print(
             f"{i}. {c['name']}  "
-            f"gain=+{c['portfolio_gain']:.1f}%  "
+            f"gain=+{c['project_gain']:.1f}%  "
             f"roi={c['roi']:.2f}  "
             f"reste={c['remaining']:.1f}h"
         )
@@ -2714,7 +2713,7 @@ if project:
     print(f"ROI : {project['roi']}")
     print(
     f"Gain projet prévu : "
-    f"+{project['session_gain']:.1f} %")
+    f"+{project['project_gain']:.1f} %")
     print(f"Score portefeuille : {score:.1f}")
     print(f"Bonus clôture : {closure:.1f}")
     print(f"Mois restants : {project['months_left']}")
