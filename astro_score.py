@@ -1364,19 +1364,30 @@ def show_portfolio_dashboard():
             f"{progress:5.1f}% "
             f"reste {remaining:5.1f} h"
         )
+        total_done = 0
+        total_target = 0
 
-    total_remaining = max(0, total_target - total_done)
+    for name, project in projects.items():
+        done = project.get("hours", 0)
+        target = project.get("target_hours", 0)
 
-    global_progress = 0
+        total_done += done
+        total_target += target
+        total_remaining = max(0, total_target - total_done)
+
+        global_progress = 0
     if total_target > 0:
         global_progress = round(total_done / total_target * 100, 1)
+    print(f"Heures cibles : {total_target:.1f} h")
 
     print("\n----- TOTAL -----")
     print(f"Heures réalisées : {total_done:.1f} h")
+    print(f"Heures cibles : {total_target:.1f} h")
     print(f"Heures restantes : {total_remaining:.1f} h")
     nights = estimate_portfolio_nights()
     print(f"Nuits restantes estimées : {nights}")
     print(f"Progression globale : {global_progress:.1f}%")
+
 
 def portfolio_score(name):
     priority = project_priority(name)
