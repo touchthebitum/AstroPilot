@@ -955,6 +955,66 @@ def recommend_project_for_night(top_objects):
 
     return candidates
 
+def build_night_schedule(top_objects, available_hours):
+    """
+    Remplit une nuit avec plusieurs projets.
+    """
+
+    schedule = []
+    remaining = available_hours
+
+    for obj in top_objects:
+
+        project = recommend_project_for_object(
+            obj.get("catalog_key", obj.get("name"))
+        )
+
+        if not project:
+            continue
+
+        needed = min(project["remaining"], remaining)
+
+        if needed <= 0:
+            continue
+
+        schedule.append({
+            "object": obj["name"],
+            "project": project["name"],
+            "hours": round(needed, 1),
+        })
+
+        remaining -= needed
+
+        if remaining <= 0:
+            break
+
+    return schedule
+
+def recommend_project_for_object(object_key):
+
+    projects = get_projects()
+
+    candidates = []
+
+    for name, project in projects.items():
+
+        if name != object_key:
+            continue
+
+        remaining = project_remaining_hours(name)
+
+        if remaining <= 0:
+            continue
+
+        candidates.append({
+            "name": name,
+            "remaining": remaining,
+        })
+
+    if not candidates:
+        return None
+
+    return candidates[0]
 
 def forecast_available_hours(nights):
     total = 0
@@ -1113,6 +1173,20 @@ def show_tonight_recommendation(night):
         print(
             f"{i}. {project['name']} "
             f"(score {project['final_score']:.1f})"
+        )
+    print("\n===== PLAN MULTI-OBJETS =====")
+
+    schedule = build_night_schedule(
+        night["top_objects"],
+        2.0
+    )
+
+
+    for item in schedule:
+        print(
+            f"{item['object']}  "
+            f"{item['hours']:.1f} h  "
+            f"({item['project']})"
         )
 
     night_project = night_projects[0]
