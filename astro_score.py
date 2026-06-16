@@ -1627,7 +1627,12 @@ def show_astro_calendar():
 
 def simulate_portfolio_calendar(nights):
 
-    simulated_projects = get_projects()
+    projects = get_projects()
+
+    remaining_by_name = {
+        name: project_remaining_hours(name)
+        for name in projects
+    }
 
     print("\n===== CALENDRIER OPTIMISÉ =====\n")
 
@@ -1640,18 +1645,42 @@ def simulate_portfolio_calendar(nights):
         if not recommendations:
             continue
 
-        project = recommendations[0]
+        best_project = None
+        best_score = -9999
 
-        session_hours = min(
-            2.0,
-            project.get("remaining",
-            project.get("remaining_hours", 2.0))
-        )
+        for p in recommendations[:3]:
+
+            name = p["name"]
+            remaining = remaining_by_name.get(name, 0)
+
+            if remaining <= 0:
+                continue
+
+            score = p["final_score"]
+
+            if remaining <= 2.0:
+                score += 25
+
+            if score > best_score:
+                best_score = score
+                best_project = p
+
+        if not best_project:
+            continue
+
+        name = best_project["name"]
+        remaining = remaining_by_name[name]
+
+        session_hours = min(2.0, remaining)
+
+        remaining_by_name[name] -= session_hours
 
         print(
             f"{night['date']} | "
-            f"{project['name']} | "
-            f"{session_hours:.1f} h"
+            f"{name} | "
+            f"{session_hours:.1f} h | "
+            f"reste après : {remaining_by_name[name]:.1f} h | "
+            f"score={best_score:.1f}"
         )
 
 def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_target_sep, target_altitude, bortle=4, target="deep_sky", target_object=None, goal="balanced"):
@@ -2822,7 +2851,6 @@ if project:
     print(f"Mois restants : {project['months_left']}")
     print(f"Bonus saison : {project['season_window']}")
     print(f"Progression : {project['progress']} %")
-    #print(f"Bonus clôture : {project.get('completion_bonus', 0):.1f}")
-    #print("\n=== FIN DU PROGRAMME. ===")
+
 
     
