@@ -1625,6 +1625,34 @@ def show_astro_calendar():
             f"reste après : {item['remaining_after']:.1f} h"
         )
 
+def simulate_portfolio_calendar(nights):
+
+    simulated_projects = get_projects()
+
+    print("\n===== CALENDRIER OPTIMISÉ =====\n")
+
+    for night in nights:
+
+        recommendations = recommend_project_for_night(
+            night["top_objects"]
+        )
+
+        if not recommendations:
+            continue
+
+        project = recommendations[0]
+
+        session_hours = min(
+            2.0,
+            project.get("remaining",
+            project.get("remaining_hours", 2.0))
+        )
+
+        print(
+            f"{night['date']} | "
+            f"{project['name']} | "
+            f"{session_hours:.1f} h"
+        )
 
 def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_target_sep, target_altitude, bortle=4, target="deep_sky", target_object=None, goal="balanced"):
     penalty = 0
@@ -2772,6 +2800,7 @@ project = recommend_project()
 show_portfolio_ranking()
 show_completion_forecast()
 show_astro_calendar()
+simulate_portfolio_calendar(nights)
 
 if project:
     score = portfolio_score(project["name"])
