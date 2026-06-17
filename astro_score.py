@@ -916,7 +916,10 @@ def recommend_project_for_night(top_objects):
 
     candidates = []
 
+    available_hours = 2.0
+
     for obj in top_objects:
+
         catalog_key = obj.get("catalog_key",obj["name"])
 
         remaining = project_remaining_hours(catalog_key)
@@ -936,6 +939,9 @@ def recommend_project_for_night(top_objects):
             + season_bonus
             + roi * 5
         )
+        remaining = project_remaining_hours(catalog_key)
+
+        if remaining is not None and remaining <= available_hours : final_score += 30
 
         candidates.append({
             "name": obj["name"],
