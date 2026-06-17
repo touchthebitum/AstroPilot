@@ -1737,15 +1737,16 @@ def simulate_portfolio_calendar(nights):
 
     print("\n===== DATES DE FIN SIMULÉES =====")
 
-    portfolio_end = None
+    unfinished_projects = [
+        name
+        for name, project in projects.items()
+        if project.get("remaining", 0) > 0
+]
 
-    for date in completion_dates.values():
-        if date == "Au-delà des prévisions":
-            portfolio_end = "Au-delà des prévisions"
-            break
-
-        if portfolio_end is None or date > portfolio_end:
-            portfolio_end = date
+    if unfinished_projects:
+        portfolio_end = "Au-delà des prévisions"
+    else:
+        portfolio_end = max(completion_dates.values())
 
     for name, date in completion_dates.items():
             print(f"{name} -> {date}")
@@ -2904,11 +2905,15 @@ simulate_portfolio_calendar(nights)
 if project:
     score = portfolio_score(project["name"])
     closure = closure_bonus(project["name"])
+
     print("\n===== PROJET RECOMMANDÉ =====\n")
     print(f"Projet : {project['name']}")
     print(
         f"Progression : "
         f"{project['hours_done']} / {project['target_hours']} h")
+    print(
+        f"Terminable ce soir : "
+        f"{'OUI' if project['remaining'] <= 2.0 else 'NON'}")
     print(f"Reste : {project['remaining']:.1f} h")
     print(f"Priorité : {project['priority']:.1f}")
     print(f"Bonus altitude : {project['season_bonus']}")
@@ -2921,6 +2926,8 @@ if project:
     print(f"Mois restants : {project['months_left']}")
     print(f"Bonus saison : {project['season_window']}")
     print(f"Progression : {project['progress']} %")
+    
 
-
+    
+    
     
