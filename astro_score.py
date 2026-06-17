@@ -1669,10 +1669,6 @@ def simulate_portfolio_calendar(nights):
     for name in projects
     }
 
-    #import copy
-    #projects_state =
-    #copy.deepcopy(get_projects())
-
     for night in nights:
 
         recommendations = recommend_project_for_night(
@@ -1708,8 +1704,6 @@ def simulate_portfolio_calendar(nights):
         name = best_project["name"]
         remaining = remaining_by_name[name]
 
-        #print(night.keys())
-
         window = night.get("best_window")
 
         if window:
@@ -1717,9 +1711,12 @@ def simulate_portfolio_calendar(nights):
             end = int(window["end"].split(":")[0])
             available_hours = max(0, end - start)
         else:
-            available_hours = min(available_hours, remaining)
+            available_hours = 0
 
-        session_hours = min(2.0, remaining)
+        session_hours = min(available_hours,remaining)
+        
+        if session_hours <=0:
+            continue
 
         print(
             f"{night['date']} "
@@ -1753,11 +1750,16 @@ def simulate_portfolio_calendar(nights):
 
     print("\n===== DATES DE FIN SIMULÉES =====")
 
-    unfinished_projects = [
-        name
-        for name, project in projects.items()
-        if project.get("remaining", 0) > 0
-]
+    unfinished_projects = []
+
+    for name, project in projects.items():
+        done = project.get("hours_done", project.get("hours", 0))
+        target = project.get("target_hours", 0)
+        remaining = max(0, target - done)
+
+        if remaining > 0:
+            unfinished_projects.append(name)
+
 
     if unfinished_projects:
         portfolio_end = "Au-delà des prévisions"
@@ -2018,6 +2020,9 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
 
 
     profile = load_user_profile()
+
+    print("PROFILE =", profile)
+    print("PREFERENCES =", profile.get("preferences", {}))
 
     if window_size is None:
         window_size = profile.get("preferences", {}).get("window_size", 2)
