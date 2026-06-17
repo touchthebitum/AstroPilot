@@ -1638,34 +1638,25 @@ def show_astro_calendar():
         )
 
 def apply_virtual_session(project, hours):
-    project["hours_done"] = project.get(
-        "hours_done",
-        project.get("hours", 0)
-    ) + hours
-
     target = project.get("target_hours", 0)
+
+    project["hours_done"] = min(target, project.get("hours_done",project.get("hours",0)) + hours)
+    
+    project.get("hours", 0)+ hours
 
     project["remaining"] = max(
         0,
         target - project["hours_done"]
     )
-
-    if target > 0:
-        project["progress"] = round(
-            project["hours_done"] / target * 100,
-            1
-        )
-    else:
-        project["progress"] = 0
-
-    if project["remaining"] <= 0:
-        project["completed"] = True
+    project["progress"] = round(project["hours_done"] / target *100, 1) if target > 0 else 0
+    project["completed"] = project["remaining"] <= 0
 
     return project
 
 def simulate_portfolio_calendar(nights):
 
     projects = copy.deepcopy(get_projects())
+    completion_dates = {}
 
     remaining_by_name = {
     name: project_remaining_hours(name)
@@ -1717,8 +1708,11 @@ def simulate_portfolio_calendar(nights):
             projects[name],
             session_hours)
         
-
-        remaining_by_name[name] -= session_hours
+        remaining_by_name[name] = projects[name]["remaining"]
+        
+        if projects[name].get("completed") and name not in completion_dates:
+            completion_dates[name] = night["date"]
+            print(f"✓ Projet terminé : {name}")
 
         print(
             f"Après session : "
@@ -1727,9 +1721,6 @@ def simulate_portfolio_calendar(nights):
             f"reste={projects[name]['remaining']:.1f} h"
         )
 
-    if projects[name].get("completed"):
-        print(f"✓ Projet terminé : {name}")
-
         print(
             f"{night['date']} | "
             f"{name} | "
@@ -1737,6 +1728,12 @@ def simulate_portfolio_calendar(nights):
             f"reste après : {remaining_by_name[name]:.1f} h | "
             f"score={best_score:.1f}"
         )
+
+
+    print("\n===== DATES DE FIN SIMULÉES =====")
+
+    for name, date in completion_dates.items():
+            print(f"{name} -> {date}")
 
 def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_target_sep, target_altitude, bortle=4, target="deep_sky", target_object=None, goal="balanced"):
     penalty = 0
