@@ -1729,11 +1729,23 @@ def simulate_portfolio_calendar(nights):
             f"score={best_score:.1f}"
         )
 
-
     print("\n===== DATES DE FIN SIMULÉES =====")
+
+    portfolio_end = None
+
+    for date in completion_dates.values():
+        if date == "Au-delà des prévisions":
+            portfolio_end = "Au-delà des prévisions"
+            break
+
+        if portfolio_end is None or date > portfolio_end:
+            portfolio_end = date
 
     for name, date in completion_dates.items():
             print(f"{name} -> {date}")
+
+    print("\n===== FIN PORTEFEUILLE =====")
+    print(f"Date estimée : {portfolio_end}")
 
 def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_target_sep, target_altitude, bortle=4, target="deep_sky", target_object=None, goal="balanced"):
     penalty = 0
