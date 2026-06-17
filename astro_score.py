@@ -1708,8 +1708,24 @@ def simulate_portfolio_calendar(nights):
         name = best_project["name"]
         remaining = remaining_by_name[name]
 
+        #print(night.keys())
+
+        window = night.get("best_window")
+
+        if window:
+            start = int(window["start"].split(":")[0])
+            end = int(window["end"].split(":")[0])
+            available_hours = max(0, end - start)
+        else:
+            available_hours = min(available_hours, remaining)
+
         session_hours = min(2.0, remaining)
 
+        print(
+            f"{night['date']} "
+            f"fenêtre={available_hours:.1f}h "
+            f"session={session_hours:.1f}h"
+        )
         apply_virtual_session(
             projects[name],
             session_hours)
