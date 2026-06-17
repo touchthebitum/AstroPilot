@@ -768,6 +768,46 @@ def project_roi(object_name):
 
     return round(importance / remaining, 2)
 
+def setup_score(setup, project):
+    score = 0
+
+    focal = setup.get("focal_length", 135)
+    f_ratio = setup.get("f_ratio", 5.6)
+
+    project_type = project.get("type", "")
+
+    project_type = project.get("type", "")
+
+    if not project_type:
+        name = project.get("name", "")
+        project_type = CATALOG.get(name, {}).get("type", "")
+
+    if project_type in ["nebula", "nebulae"]:
+        if focal <= 200:
+            score += 20
+        elif focal <= 500:
+            score += 10
+        else:
+            score -= 10
+
+    elif project_type in ["galaxy", "galaxies"]:
+        if focal >= 400:
+            score += 20
+        elif focal >= 200:
+            score += 10
+        else:
+            score -= 10
+
+    if f_ratio <= 3:
+        score += 15
+    elif f_ratio <= 5:
+        score += 8
+    else:
+        score -= 5
+
+    return score
+
+
 def session_portfolio_gain(project_name, session_hours):
 
     project = get_projects().get(project_name, {})
@@ -1714,7 +1754,7 @@ def simulate_portfolio_calendar(nights):
             available_hours = 0
 
         session_hours = min(available_hours,remaining)
-        
+
         if session_hours <=0:
             continue
 
@@ -2021,8 +2061,8 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
 
     profile = load_user_profile()
 
-    print("PROFILE =", profile)
-    print("PREFERENCES =", profile.get("preferences", {}))
+    #print("PROFILE =", profile)
+    #print("PREFERENCES =", profile.get("preferences", {}))
 
     if window_size is None:
         window_size = profile.get("preferences", {}).get("window_size", 2)
@@ -2934,26 +2974,44 @@ if project:
     score = portfolio_score(project["name"])
     closure = closure_bonus(project["name"])
 
-    print("\n===== PROJET RECOMMANDÉ =====\n")
-    print(f"Projet : {project['name']}")
-    print(
-        f"Progression : "
-        f"{project['hours_done']} / {project['target_hours']} h")
-    print(
-        f"Terminable ce soir : "
-        f"{'OUI' if project['remaining'] <= 2.0 else 'NON'}")
-    print(f"Reste : {project['remaining']:.1f} h")
-    print(f"Priorité : {project['priority']:.1f}")
-    print(f"Bonus altitude : {project['season_bonus']}")
-    print(f"ROI : {project['roi']}")
-    print(
-    f"Gain projet prévu : "
-    f"+{project['project_gain']:.1f} %")
-    print(f"Score portefeuille : {score:.1f}")
-    print(f"Bonus clôture : {closure:.1f}")
-    print(f"Mois restants : {project['months_left']}")
-    print(f"Bonus saison : {project['season_window']}")
-    print(f"Progression : {project['progress']} %")
+print("DEBUG SETUP STSRT")
+
+profile = load_user_profile()
+
+best_setup = None
+best_setup_score = -999
+
+for setup_name, setup in profile.get("setups", {}).items():
+
+    score = setup_score(setup, project)
+
+    if score > best_setup_score:
+        best_setup_score = score
+        best_setup = setup_name
+
+print(f"Setup recommandé : {best_setup}")
+print(f"Score setup : {best_setup_score:.1f}")
+
+print("\n===== PROJET RECOMMANDÉ =====\n")
+print(f"Projet : {project['name']}")
+print(
+    f"Progression : "
+    f"{project['hours_done']} / {project['target_hours']} h")
+print(
+    f"Terminable ce soir : "
+    f"{'OUI' if project['remaining'] <= 2.0 else 'NON'}")
+print(f"Reste : {project['remaining']:.1f} h")
+print(f"Priorité : {project['priority']:.1f}")
+print(f"Bonus altitude : {project['season_bonus']}")
+print(f"ROI : {project['roi']}")
+print(
+f"Gain projet prévu : "
+f"+{project['project_gain']:.1f} %")
+print(f"Score portefeuille : {score:.1f}")
+print(f"Bonus clôture : {closure:.1f}")
+print(f"Mois restants : {project['months_left']}")
+print(f"Bonus saison : {project['season_window']}")
+print(f"Progression : {project['progress']} %")
     
 
     

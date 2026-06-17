@@ -165,3 +165,15 @@ VISION FINALE
 - [ ] Score scientifique des objets
 - [ ] Diversification du portefeuille
 - [ ] Rendement annuel astrophotographique
+
+[ ] Calcul réaliste des nuits restantes
+[ ] Date de fin portefeuille basée sur completion_dates
+[ ] Terminable ce soir (dynamique)
+[ ] ROI basé sur gain/heures restantes
+[ ] Probabilité de complétion portefeuille
+[ ] Recommandation complète de la nuit
+[ ] Choix automatique du setup optimal
+[ ] Choix automatique du filtre optimal
+[ ] Gestion des changements de setup
+[ ] Historique réel des sessions
+[ ] Dashboard portefeuille

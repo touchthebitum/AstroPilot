@@ -19,6 +19,32 @@
         "project_weight": 0.3,
         "window_size": 3
     },
+    "setups": {
+    "Samyang135": {
+        "focal_length": 135,
+        "f_ratio": 2.8
+    },
+
+    "FRA400": {
+        "focal_length": 400,
+        "f_ratio": 5.6
+    },
+
+    "RedCat51": {
+        "focal_length": 250,
+        "f_ratio": 4.9
+    },
+
+    "RC8": {
+        "focal_length": 1625,
+        "f_ratio": 8.0
+    },
+
+    "HyperstarC8": {
+        "focal_length": 390,
+        "f_ratio": 1.9
+    }
+    },
     "projects": {
         "M31": {
             "hours": 17.5,
