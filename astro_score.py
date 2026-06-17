@@ -3,6 +3,7 @@ import math
 import json
 import requests
 import warnings
+import copy
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from astral import LocationInfo
@@ -1636,16 +1637,44 @@ def show_astro_calendar():
             f"reste après : {item['remaining_after']:.1f} h"
         )
 
+def apply_virtual_session(project, hours):
+    project["hours_done"] = project.get(
+        "hours_done",
+        project.get("hours", 0)
+    ) + hours
+
+    target = project.get("target_hours", 0)
+
+    project["remaining"] = max(
+        0,
+        target - project["hours_done"]
+    )
+
+    if target > 0:
+        project["progress"] = round(
+            project["hours_done"] / target * 100,
+            1
+        )
+    else:
+        project["progress"] = 0
+
+    if project["remaining"] <= 0:
+        project["completed"] = True
+
+    return project
+
 def simulate_portfolio_calendar(nights):
 
-    projects = get_projects()
+    projects = copy.deepcopy(get_projects())
 
     remaining_by_name = {
-        name: project_remaining_hours(name)
-        for name in projects
+    name: project_remaining_hours(name)
+    for name in projects
     }
 
-    print("\n===== CALENDRIER OPTIMISÉ =====\n")
+    #import copy
+    #projects_state =
+    #copy.deepcopy(get_projects())
 
     for night in nights:
 
@@ -1684,7 +1713,22 @@ def simulate_portfolio_calendar(nights):
 
         session_hours = min(2.0, remaining)
 
+        apply_virtual_session(
+            projects[name],
+            session_hours)
+        
+
         remaining_by_name[name] -= session_hours
+
+        print(
+            f"Après session : "
+            f"{name} "
+            f"progression={projects[name]['progress']:.1f}% "
+            f"reste={projects[name]['remaining']:.1f} h"
+        )
+
+    if projects[name].get("completed"):
+        print(f"✓ Projet terminé : {name}")
 
         print(
             f"{night['date']} | "
