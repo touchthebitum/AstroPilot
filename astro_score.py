@@ -2014,7 +2014,13 @@ def night_hours_rough(rows: list[dict], date: datetime, lat: float, lon: float, 
 
     return night_rows
 
-def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_set, observer, bortle=4, target="deep_sky", target_object="M31", goal="balanced", window_size: int = 2, limit: int = 3):
+def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_set, observer, bortle=4, target="deep_sky", target_object="M31", goal="balanced", window_size: int = None, limit: int = 3):
+
+
+    profile = load_user_profile()
+
+    if window_size is None:
+        window_size = profile.get("preferences", {}).get("window_size", 2)
 
     if len(hours) < window_size:
         return []
@@ -2037,6 +2043,7 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
         moon_penalties = []
 
         profile = load_user_profile()
+
         min_alt = profile.get("preference",{}).get("min_altitude_deg",30)
 
         for h in window:

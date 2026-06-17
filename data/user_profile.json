@@ -16,7 +16,8 @@
         "prefer_existing_projects": true,
         "max_setup_changes_per_night": 1,
         "astro_weight": 0.7,
-        "project_weight": 0.3
+        "project_weight": 0.3,
+        "window_size": 3
     },
     "projects": {
         "M31": {
@@ -45,6 +46,15 @@
             "date": "2026-06-14",
             "object": "M31",
             "hours": 2.0
+        },
+    {
+   
+            
+        
         }
+    
+    
     ]
 }
+
+        
