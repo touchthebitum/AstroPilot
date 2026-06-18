@@ -1028,7 +1028,8 @@ def recommend_project_for_night(top_objects):
             continue
 
 
-        astro_score = obj["score"]
+        astro_score = obj.get("score",0)
+        print("DEBUG PROJECT OBJ =", catalog_key, obj)
         priority = project_priority(catalog_key)
         season_bonus = altitude_bonus(obj)
         roi = project_roi(catalog_key)
