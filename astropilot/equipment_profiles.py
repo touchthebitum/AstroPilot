@@ -1,14 +1,27 @@
 import math
-import json
 import math
 from pathlib import Path
+import json
+
+def load_equipment_catalog():
+    with open(
+        "data/equipment_catalog.json",
+        "r",
+        encoding="utf-8"
+    ) as f:
+        return json.load(f)
+    
+    EQUIPMENT_CATALOG= load_equipment_catalog()
+
+    print("\n\n********** CATALOG CHARGE **********")
+    print(EQUIPMENT_CATALOG)
+    print("***********************************\n\n")
 
 json_path = Path(__file__).parent / "equipment_profiles.json"
 
 with open(json_path, "r", encoding="utf-8") as f:
     EQUIPMENT_PROFILES = json.load(f)
 
-CURRENT_EQUIPMENT = "redcat51_asi2600"
 EQUIPMENT_PROFILES = {
     "redcat51_2600": {
         "name": "RedCat 51 + ASI2600MC",

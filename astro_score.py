@@ -73,35 +73,33 @@ OBJECT_SIZES = {
 }
 
 EQUIPMENT_PROFILES = {
-    "seestar_s50": {
-        "name": "Seestar S50",
-        "focal_length_mm": 250,
-        "aperture_mm": 50,
-        "sensor_width_mm": 5.6,
-        "sensor_height_mm": 3.2,
-    },
+    "samyang_183": {
+    "name": "Samyang 135 + ASI183MM",
+    "focal_length_mm": 135,
+    "aperture_mm": 67,
+    "sensor_width_mm": 13.2,
+    "sensor_height_mm": 8.8,
+},
 
-    "widefield_135mm": {
-        "name": "APS-C + 135 mm",
-        "focal_length_mm": 135,
-        "aperture_mm": 50,
-        "sensor_width_mm": 22.3,
-        "sensor_height_mm": 14.9,
-    },
+"fra400_2600": {
+    "name": "FRA400 + ASI2600MM",
+    "focal_length_mm": 400,
+    "aperture_mm": 72,
+    "sensor_width_mm": 23.5,
+    "sensor_height_mm": 15.7,
+},
 
-    "newton_150_750": {
-        "name": "Newton 150/750 APS-C",
-        "focal_length_mm": 750,
-        "aperture_mm": 150,
-        "sensor_width_mm": 22.3,
-        "sensor_height_mm": 14.9,
-    },
+"hyperstar_c8": {
+    "name": "Hyperstar C8 + ASI2600MM",
+    "focal_length_mm": 390,
+    "aperture_mm": 203,
+    "sensor_width_mm": 23.5,
+    "sensor_height_mm": 15.7,
+},
 }
+CURRENT_EQUIPMENT = get_active_equipment()
 
-
-
-CURRENT_EQUIPMENT = "widefield_135mm"
-
+print("\nSetup actif :", CURRENT_EQUIPMENT)
 
 TARGETS = {
     "milky_way": {
@@ -538,19 +536,19 @@ def project_progress_bonus(object_name):
 
 
 def closure_bonus(name):
-    progress = project_progress(name)
+    
     remaining = project_remaining_hours(name)
+
+    if remaining is None:
+        return 0
 
     if remaining <= 0:
         return 0
 
-    if progress >= 90:
-        return 40
-
-    if progress >= 80:
+    if remaining <= 2:
         return 25
 
-    if progress >= 60:
+    if remaining <= 5:
         return 10
 
     return 0
@@ -768,21 +766,59 @@ def project_roi(object_name):
 
     return round(importance / remaining, 2)
 
-def setup_score(setup, project):
-    score = 0
+
+def framing_score(setup, project_name):
+
+    object_size = OBJECT_SIZES.get(project_name)
+
+    if not object_size:
+        return 0
 
     focal = setup.get("focal_length", 135)
+    sensor_width = setup.get("sensor_width", 23.5)
+
+    fov_width_deg = 57.3 * sensor_width / focal
+    fov_width_arcmin = fov_width_deg * 60
+
+    fill_ratio = object_size / fov_width_arcmin
+
+    ######print(
+    #####project_name,
+    ####"size=", object_size,
+    ###"fov=", round(fov_width_arcmin, 1),
+    ##"fill=", round(fill_ratio, 2)
+    #)
+
+    if 0.4 <= fill_ratio <= 0.8:
+        return 25
+
+    elif 0.2 <= fill_ratio < 0.4:
+        return 15
+
+    elif 0.8 < fill_ratio <= 1.0:
+        return 15
+
+    elif 1.0 < fill_ratio <= 1.5:
+        return 5
+
+    else:
+        return -20
+
+
+def setup_score(setup, project):
+
+    score = 0
+
+    focal = setup.get("focal_length_mm", setup.get("focal_length", 135))
     f_ratio = setup.get("f_ratio", 5.6)
 
     project_type = project.get("type", "")
-
-    project_type = project.get("type", "")
-
     if not project_type:
         name = project.get("name", "")
         project_type = CATALOG.get(name, {}).get("type", "")
 
-    if project_type in ["nebula", "nebulae"]:
+
+    if project_type in ["nebula", "nebulae", "supernova_remnant", "emission_nebula"]:
         if focal <= 200:
             score += 20
         elif focal <= 500:
@@ -805,8 +841,12 @@ def setup_score(setup, project):
     else:
         score -= 5
 
-    return score
+    if setup.get("camera_type") == "mono":
+        score += 10
 
+    score += framing_score(setup, project["name"])
+
+    return score
 
 def session_portfolio_gain(project_name, session_hours):
 
@@ -958,13 +998,33 @@ def recommend_project_for_night(top_objects):
 
     available_hours = 2.0
 
+    projects = get_projects()
+
+    project_objects = []
+
+    for name in projects:
+        obj = CATALOG.get(name)
+        if obj:
+            project_objects.append({
+                "name": obj.get("name", name),
+                "catalog_key": name,
+                "score": 0,
+                "altitude": obj.get("altitude", 0),
+                "moon_sep": 0,
+                "sqm": 0,
+                "moon_score": 0,
+                "frame_bonus": 0,
+                "project_bonus": 0,
+                "remaining_hours": project_remaining_hours(name),
+                "priority_bonus": project_priority(name),
+            })
+
+    top_objects = top_objects + project_objects
+
     for obj in top_objects:
+        catalog_key = obj.get("catalog_key", obj["name"])
 
-        catalog_key = obj.get("catalog_key",obj["name"])
-
-        remaining = project_remaining_hours(catalog_key)
-
-        if remaining is not None and remaining <= 0:
+        if catalog_key not in projects:
             continue
 
 
@@ -972,16 +1032,21 @@ def recommend_project_for_night(top_objects):
         priority = project_priority(catalog_key)
         season_bonus = altitude_bonus(obj)
         roi = project_roi(catalog_key)
+        closure =closure_bonus(catalog_key)
+
+        portfolio =portfolio_score(catalog_key)
 
         final_score = (
             astro_score * astro_weight
             + priority * project_weight
             + season_bonus
             + roi * 5
+            + closure
         )
         remaining = project_remaining_hours(catalog_key)
 
         if remaining is not None and remaining <= available_hours : final_score += 30
+
 
         candidates.append({
             "name": obj["name"],
@@ -989,12 +1054,24 @@ def recommend_project_for_night(top_objects):
             "priority": priority,
             "final_score": final_score,
             "season_bonus": season_bonus,
-            "roi": roi
+            "roi": roi,
+            "portfolio_score": portfolio
         })
 
         if not candidates:
             return None
         
+        #print("\n=== CANDIDATS PROJET ===")
+
+        #for c in candidates:
+            #print(
+            ######f"{c['name']} "
+            #####f"astro={c['astro_score']:.1f} "
+            ####f"priority={c['priority']:.1f} "
+            ###f"roi={c['roi']:.1f} "
+            ##f"final={c['final_score']:.1f}"
+        #)
+
     candidates.sort(
         key=lambda x: x["final_score"],
         reverse=True
@@ -1304,20 +1381,23 @@ def show_action_plan(
 
     progress = project_progress(night_project["name"])
     projects = get_projects()
-    target_hours = projects[night_project["name"]].get("target_hours", 0)
+    project_data = projects.get(night_project["name"], {})
 
-    future_progress = min(
+    target_hours = project_data.get("target_hours", 0)
+
+    if target_hours > 0:
+        future_progress = min(
         100,
-        progress + (
-            100 * duration / target_hours
-        )
+        progress + (100 * duration / target_hours)
     )
+    else:
+        future_progress = progress
 
     print(
         f"8. Progression après session : "
         f"{future_progress:.1f} %"
     )
-    current_hours = projects[night_project["name"]]["hours"]
+    current_hours = project_data.get("hours", 0)
 
     remaining_after = max(
     0,
@@ -1712,8 +1792,12 @@ def simulate_portfolio_calendar(nights):
     for night in nights:
 
         recommendations = recommend_project_for_night(
-            night["top_objects"]
-        )
+            night["top_objects"] + [
+        {"name": name, "catalog_key": name, "score": 0}
+                for name in projects.keys()
+    ]
+)
+
 
         if not recommendations:
             continue
@@ -1730,9 +1814,6 @@ def simulate_portfolio_calendar(nights):
                 continue
 
             score = p["final_score"]
-
-            if remaining <= 2.0:
-                score += 25
 
             if score > best_score:
                 best_score = score
@@ -2555,28 +2636,55 @@ def forecast_astro(
             top_windows.sort(key=lambda x: x["score"], reverse=True)
             best = top_windows[0]
 
-            all_results.append({
-                "name": obj_name,
-                "score": best["score"],
-                "altitude": best.get("target_altitude"),
-                "moon_sep": best.get("moon_sep"),
-                "sqm": best.get("sqm"),
-                "moon_score": best.get("moon_score"),
-                "frame_bonus": best.get("frame_bonus"),
-                "window": best,
-                "catalog_key": obj_name,
-            })
+        profile = load_user_profile()
+
+        best_setup = None
+        best_setup_score = -999
+
+        for setup_name in profile.get("available_equipment", []):
+            setup = EQUIPMENT_PROFILES.get(setup_name)
+
+            if not setup:
+                continue
+
+            s = setup_score(
+                setup,
+                {
+            "name": obj_name,
+            "type": CATALOG.get(obj_name, {}).get("type", "")
+                }
+        )
+            if s > best_setup_score:
+                best_setup_score = s
+                best_setup = setup_name
+
+        best["best_setup"] = best_setup
+        best["setup_score"] = best_setup_score
+        best["global_score"] = best["score"] + best_setup_score
+
+
+        all_results.append({
+            "name": obj_name,
+            "score": best["score"],
+            "altitude": best.get("target_altitude"),
+            "moon_sep": best.get("moon_sep"),
+            "sqm": best.get("sqm"),
+            "moon_score": best.get("moon_score"),
+            "frame_bonus": best.get("frame_bonus"),
+            "window": best,
+            "catalog_key": obj_name,
+            "best_setup" : best_setup,
+            "setup_score" : best_setup_score,
+            "global_score" : best["score"] + best_setup_score,
+        })
 
         if not all_results:
             continue
 
-        all_results.sort(key=lambda x: x["score"], reverse=True)
-        best_score = all_results[0]["score"]
+        all_results.sort(key=lambda x: x["global_score"], reverse=True)
+        best_score = all_results[0]["global_score"]
 
-        best_results = [
-            r for r in all_results
-            if r["score"] == best_score
-        ]
+        best_results = [all_results[0]]
 
         best = best_results[0]["window"]
         best_object = best_results[0]["name"]
@@ -2584,37 +2692,55 @@ def forecast_astro(
 
         best_setup = best_setup_for_object(best_object)
 
-        if best_setup:
-            setup_name = best_setup[0]["equipment"]
+        setup_name = best_results[0].get("best_setup", "inconnu")
 
-            exposure = recommended_exposure(
-                CATALOG[best_object],
-                bortle=bortle
+        exposure = recommended_exposure(
+            CATALOG[best_object],
+            bortle=bortle
+        )       
+
+        all_results = sorted(
+            all_results,
+            key=lambda x: x["global_score"],
+            reverse=True
+        )
+
+        print("\n=== CLASSEMENT GLOBAL ===")
+        for r in all_results:
+            print(
+                f"{r['name']} "
+                f"astro={r['score']:.1f} "
+                f"setup={r['setup_score']:.1f} "
+                f"global={r['global_score']:.1f} "
+                f"setup={r['best_setup']}"
             )
-        else:
-            setup_name = "inconnu"
-            exposure = "?"
 
         top3 = all_results[:3]
         top5 = all_results[:5]
         night_score = round(
-            sum(r["score"] for r in top3) / len(top3)
-        )
+            sum(r["global_score"] for r in top3) / len(top3)
+)
 
         results.append({
             "date": str(night_date),
             "score": night_score,
             "moon_impact": best["moon_impact"],
             "moon_penalty": best["moon_penalty"],
-            "best_object_score": all_results[0]["score"],
             "verdict": verdict(night_score),
             "bortle": bortle,
+
             "object": best_object,
+            "best_setup": setup_name,
+            "setup_score": best_results[0].get("setup_score", 0),
+            "global_score": best_results[0].get("global_score", 0),
+            "best_object_score": all_results[0]["global_score"],
+    
             "best_objects": [
                 r["name"]
                 for r in top3
                 if r["score"] == best_score
             ],
+
             "top_objects": [
                 {
                     "name": r["name"],
@@ -2628,6 +2754,9 @@ def forecast_astro(
                     "project_bonus": round(float(r["window"]["details"][0].get("project_bonus", 0)), 1),
                     "remaining_hours":project_remaining_hours(r["catalog_key"]),
                     "priority_bonus": round(float(r["window"]["details"][0].get("priority_bonus", 0)),),
+                    "best_setup": r.get("best_setup"),
+                    "setup_score": r.get("setup_score", 0),
+                    "global_score": r.get("global_score", r["score"]),
                 }
                 for r in all_results[:5]
             ],
@@ -2872,6 +3001,9 @@ if __name__ == "__main__":
             )[:10]
 
             for night in top:
+
+                print("NIGHT KEYS =", night.keys())
+                print("TOP_OBJECTS =", night.get("top_objects")) 
                 print(
                 f'{night["date"]} '
                 f'{night["object"]:<18} '
@@ -2932,86 +3064,108 @@ for night in top_nights:
 
     print(f"{night['date']} : {duration:.1f} h")
 
-print(
-    f"Total prévisionnel : "
-    f"{forecast_available_hours(top_nights):.1f} h"
-)
+    print(
+        f"Total prévisionnel : "
+        f"{forecast_available_hours(top_nights):.1f} h"
+    )
 
 
 for i, night in enumerate(top_nights, 1):
     print(f"#{i} - {night['date']}")
+    
+    print("Top objets :")
 
-print("Top objets :")
+    for j, obj in enumerate(night["top_objects"], start=1):
+        print(
+            f"{j}. {obj['name']} "
+            f"score={obj['score']:.1f} "
+            f"alt={obj['altitude']:.0f}° "
+            f"moon_sep={obj['moon_sep']:.0f}° "
+            f"sqm={obj['sqm']:.1f} "
+            f"frame={obj['frame_bonus']} "
+            f"project={obj.get('project_bonus', 0)}"
+            f"remaining={obj.get('remaining_hours','-')}"
+            f"prio={obj.get('priority_bonus',0)}"
+            f" setup={obj.get('best_setup')}"
+            f" setup_score={obj.get('setup_score', 0):.1f}"
+            f" global={obj.get('global_score', 0):.1f}"
+    )
+        best_objects = night.get("best_objects") or [night["object"]]
+        obj_key = best_objects[0]
+        obj = CATALOG.get(obj_key, {"name": obj_key})
 
-for j, obj in enumerate(night["top_objects"], start=1):
-    print(
-        f"{j}. {obj['name']} "
-        f"score={obj['score']:.1f} "
-        f"alt={obj['altitude']:.0f}° "
-        f"moon_sep={obj['moon_sep']:.0f}° "
-        f"sqm={obj['sqm']:.1f} "
-        f"frame={obj['frame_bonus']} "
-        f"project={obj.get('project_bonus', 0)}"
-        f"remaining={obj.get('remaining_hours','-')}"
-        f"prio={obj.get('priority_bonus',0)}"
-)
-best_objects = night.get("best_objects") or [night["object"]]
-obj_key = best_objects[0]
-obj = CATALOG.get(obj_key, {"name": obj_key})
-
-print(f"Objet recommandé : {obj['name']} ({obj_key})")
-show_tonight_recommendation(night)
+        print(f"Objet recommandé : {obj['name']} ({obj_key})")
+        if top_nights:
+            show_tonight_recommendation(top_nights[0])
+        else:
+            print("Aucune nuit exploitable pour recommandation ce soir.")
 #log_project_session("M31", 2)
 #show_project_stats()
 show_portfolio_dashboard()
-project = recommend_project()
+if top_nights:
+    night_projects = recommend_project_for_night(top_nights[0]["top_objects"])
+
+    if night_projects:
+        project = night_projects[0]
+    else:
+        project = None
+
+    print(type(project))
+    print(project)
+else:
+    project = recommend_project()
 show_portfolio_ranking()
 show_completion_forecast()
 show_astro_calendar()
 simulate_portfolio_calendar(nights)
 
-if project:
-    score = portfolio_score(project["name"])
-    closure = closure_bonus(project["name"])
+#if project:
+    ##score = 0
+    #closure = 0
+    #score = portfolio_score(project["name"])
+    #closure = closure_bonus(project["name"])
 
-print("DEBUG SETUP STSRT")
+#########profile = load_user_profile()
 
-profile = load_user_profile()
+########best_setup = None
+######best_setup_score = -999
 
-best_setup = None
-best_setup_score = -999
+#####for setup_name, setup in profile.get("setups", {}).items():
 
-for setup_name, setup in profile.get("setups", {}).items():
+    ####score = setup_score(setup, project)
 
-    score = setup_score(setup, project)
+    ###if score > best_setup_score:
+        ##best_setup_score = score
+        #best_setup = setup_name
 
-    if score > best_setup_score:
-        best_setup_score = score
-        best_setup = setup_name
-
-print(f"Setup recommandé : {best_setup}")
-print(f"Score setup : {best_setup_score:.1f}")
+print(f"Setup recommandé : {project.get('best_setup')}")
+print(f"Score setup : {project.get('setup_score', 0):.1f}")
 
 print("\n===== PROJET RECOMMANDÉ =====\n")
 print(f"Projet : {project['name']}")
-print(
-    f"Progression : "
-    f"{project['hours_done']} / {project['target_hours']} h")
-print(
-    f"Terminable ce soir : "
-    f"{'OUI' if project['remaining'] <= 2.0 else 'NON'}")
-print(f"Reste : {project['remaining']:.1f} h")
-print(f"Priorité : {project['priority']:.1f}")
-print(f"Bonus altitude : {project['season_bonus']}")
-print(f"ROI : {project['roi']}")
-print(
-f"Gain projet prévu : "
-f"+{project['project_gain']:.1f} %")
-print(f"Score portefeuille : {score:.1f}")
-print(f"Bonus clôture : {closure:.1f}")
-print(f"Mois restants : {project['months_left']}")
-print(f"Bonus saison : {project['season_window']}")
-print(f"Progression : {project['progress']} %")
+print(f"Priorité : {project.get('priority', 0):.1f}")
+print(f"Score final : {project.get('final_score', 0):.1f}")
+print(f"Score portefeuille : {project.get('portfolio_score', 0):.1f}")
+print(f"ROI : {project.get('roi', 0):.2f}")
+print(f"Bonus saison : {project.get('season_bonus', 0)}")
+##########print(
+    #########f"Progression : "
+    ########f"{project['hours_done']} / {project['target_hours']} h")
+#######print(
+    ######f"Terminable ce soir : "
+    #####f"{'OUI' if project['remaining'] <= 2.0 else 'NON'}")
+####print(f"Reste : {project['remaining']:.1f} h")
+########print(f"Priorité : {project['priority']:.1f}")
+#######print(f"Bonus altitude : {project['season_bonus']}")
+######print(f"ROI : {project['roi']}")
+###print(
+##f"Gain projet prévu : "
+#f"+{project['project_gain']:.1f} %")
+#####print(f"Score portefeuille : {score:.1f}")
+####print(f"Bonus clôture : {closure_bonus(project['name']):.1f}")
+###print(f"Mois restants : {project['months_left']}")
+##print(f"Bonus saison : {project['season_window']}")
+#print(f"Progression : {project['progress']} %")
     
 
     

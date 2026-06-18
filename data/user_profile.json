@@ -3,13 +3,11 @@
         "name": "Buttes",
         "bortle": 4
     },
-    "active_equipment": "samyang135_2600",
+    "active_equipment": "samyang_183",
     "available_equipment": [
-        "samyang135_2600",
-        "redcat51_2600",
-        "evostar72_533",
-        "c8_hyperstar_2600",
-        "rc8_294"
+        "samyang_183",
+        "fra400_2600",
+        "hyperstar_c8"
     ],
     "preferences": {
         "default_goal": "balanced",
@@ -20,30 +18,42 @@
         "window_size": 3
     },
     "setups": {
+
     "Samyang135": {
         "focal_length": 135,
-        "f_ratio": 2.8
-    },
+        "f_ratio": 2.8,
+        "sensor_width": 23.5,
+        "sensor_height": 15.7
+},
 
     "FRA400": {
         "focal_length": 400,
-        "f_ratio": 5.6
+        "f_ratio": 5.6,
+        "sensor_width": 23.5,
+        "sensor_height": 15.7
     },
 
     "RedCat51": {
         "focal_length": 250,
-        "f_ratio": 4.9
+        "f_ratio": 4.9,
+        "sensor_width": 23.5,
+        "sensor_height": 15.7
     },
 
     "RC8": {
         "focal_length": 1625,
-        "f_ratio": 8.0
+        "f_ratio": 8.0,
+        "sensor_width": 23.5,
+        "sensor_height": 15.7
     },
 
     "HyperstarC8": {
         "focal_length": 390,
-        "f_ratio": 1.9
+        "f_ratio": 1.9,
+        "sensor_width": 23.5,
+        "sensor_height": 15.7
     }
+
     },
     "projects": {
         "M31": {

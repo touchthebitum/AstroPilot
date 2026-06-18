@@ -1,4 +1,27 @@
 EQUIPMENT_PROFILES = {
+    
+    "samyang_135_183mm": {
+        "name": "Samyang 135 + ASI183MM",
+        "focal_length_mm": 135,
+        "aperture_mm": 67,
+        "sensor_width_mm": 13.2,
+        "sensor_height_mm": 8.8,
+    },
+    "hyperstar_c8_2600": {
+        "name": "Hyperstar C8 + ASI2600MM",
+        "focal_length_mm": 390,
+        "aperture_mm": 203,
+        "sensor_width_mm": 23.5,
+        "sensor_height_mm": 15.7,
+    },
+
+    "fra400_2600": {
+        "name": "FRA400 + ASI2600MM",
+        "focal_length_mm": 400,
+        "aperture_mm": 72,
+        "sensor_width_mm": 23.5,
+        "sensor_height_mm": 15.7,
+    },
     "seestar_s30": {
         "name": "Seestar S30",
         "focal_length_mm": 150,

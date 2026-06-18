@@ -1,0 +1,56 @@
+{
+  "telescopes": {
+    "samyang135": {
+      "brand": "Samyang",
+      "model": "135mm F2",
+      "type": "camera_lens",
+      "focal_length_mm": 135,
+      "aperture_mm": 67.5,
+      "weight_kg": 0.8
+    },
+
+    "fra400": {
+      "brand": "Askar",
+      "model": "FRA400",
+      "type": "refractor",
+      "focal_length_mm": 400,
+      "aperture_mm": 72,
+      "weight_kg": 2.6
+    },
+
+    "redcat51": {
+      "brand": "William Optics",
+      "model": "Redcat 51",
+      "type": "refractor",
+      "focal_length_mm": 250,
+      "aperture_mm": 51,
+      "weight_kg": 1.8
+    }
+  },
+
+  "cameras": {
+    "asi183mm": {
+      "brand": "ZWO",
+      "model": "ASI183MM Pro",
+      "sensor_width_mm": 13.2,
+      "sensor_height_mm": 8.8,
+      "pixel_size_um": 2.4
+    },
+
+    "asi2600mm": {
+      "brand": "ZWO",
+      "model": "ASI2600MM Pro",
+      "sensor_width_mm": 23.5,
+      "sensor_height_mm": 15.7,
+      "pixel_size_um": 3.76
+    }
+  },
+
+  "mounts": {
+    "am3": {
+      "brand": "ZWO",
+      "model": "AM3",
+      "payload_kg": 8
+    }
+  }
+}
