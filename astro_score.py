@@ -1019,7 +1019,10 @@ def recommend_project_for_night(top_objects):
                 "priority_bonus": project_priority(name),
             })
 
-    top_objects = top_objects + project_objects
+    existing_keys = {
+        obj.get("catalog_key", obj.get("name"))
+        for obj in top_objects
+    }
 
     for obj in top_objects:
         catalog_key = obj.get("catalog_key", obj["name"])
@@ -1027,8 +1030,13 @@ def recommend_project_for_night(top_objects):
         if catalog_key not in projects:
             continue
 
-
         astro_score = obj.get("score",0)
+
+        if astro_score <=0:
+            continue
+        
+        
+
         print("DEBUG PROJECT OBJ =", catalog_key, obj)
         priority = project_priority(catalog_key)
         season_bonus = altitude_bonus(obj)
@@ -1047,6 +1055,11 @@ def recommend_project_for_night(top_objects):
             + roi * 5
             + closure
         )
+
+        if astro_score<=0:
+            final_score -= 30
+            decision_score -= 30
+
         remaining = project_remaining_hours(catalog_key)
 
         if remaining is not None and remaining <= available_hours : final_score += 30
@@ -2668,7 +2681,6 @@ def forecast_astro(
         best["setup_score"] = best_setup_score
         best["global_score"] = best["score"] + best_setup_score
 
-
         all_results.append({
             "name": obj_name,
             "score": best["score"],
@@ -2689,6 +2701,17 @@ def forecast_astro(
 
         all_results.sort(key=lambda x: x["global_score"], reverse=True)
         best_score = all_results[0]["global_score"]
+
+        top3 = all_results[:3]
+
+        print("TOP3 BEFORE SAVE")
+        for r in top3:
+            print(
+                r["name"],
+                r.get("score"),
+                r.get("global_score"),
+                r.get("best_setup")
+            )
 
         best_results = [all_results[0]]
 
@@ -2734,12 +2757,12 @@ def forecast_astro(
             "moon_penalty": best["moon_penalty"],
             "verdict": verdict(night_score),
             "bortle": bortle,
-
             "object": best_object,
             "best_setup": setup_name,
             "setup_score": best_results[0].get("setup_score", 0),
             "global_score": best_results[0].get("global_score", 0),
             "best_object_score": all_results[0]["global_score"],
+            "all_objects": all_results,
     
             "best_objects": [
                 r["name"]
@@ -3118,7 +3141,15 @@ for i, night in enumerate(top_nights, 1):
 #show_project_stats()
 show_portfolio_dashboard()
 if top_nights:
-    night_projects = recommend_project_for_night(top_nights[0]["top_objects"])
+
+    print("NIGHT KEYS =", list(top_nights[0].keys()))
+    print("ALL OBJECTS LEN =", len(top_nights[0].get("all_objects", [])))
+    print("TOP OBJECTS LEN =", len(top_nights[0].get("top_objects", [])))
+
+    night_projects = recommend_project_for_night(
+        top_nights[0].get("all_objects",
+    top_nights[0]["top_objects"])
+)
 
     if night_projects:
         project = night_projects[0]
@@ -3153,18 +3184,24 @@ simulate_portfolio_calendar(nights)
         ##best_setup_score = score
         #best_setup = setup_name
 
-print(f"Setup recommandé : {project.get('best_setup')}")
-print(f"Score setup : {project.get('setup_score', 0):.1f}")
+if project:
+    print(f"Setup recommandé : {project.get('best_setup')}")
+    print(f"Score setup : {project.get('setup_score', 0):.1f}")
 
-print("\n===== PROJET RECOMMANDÉ =====\n")
-print(f"Projet : {project['name']}")
-print(f"Priorité : {project.get('priority', 0):.1f}")
-print(f"Score final : {project.get('final_score', 0):.1f}")
-print(f"Score portefeuille : {project.get('portfolio_score', 0):.1f}")
-print(f"Decision score : {project.get('decision_score',0):.1f}")
-print(f"ROI : {project.get('roi', 0):.2f}")
-print(f"Bonus saison : {project.get('season_bonus', 0)}")
-print(f"Score astro : {project.get('astro_score',0):.1f}")
+    print("\n===== PROJET RECOMMANDÉ =====\n")
+    print(f"Projet : {project['name']}")
+    print(f"Priorité : {project.get('priority', 0):.1f}")
+    print(f"Score final : {project.get('final_score', 0):.1f}")
+    print(f"Score portefeuille : {project.get('portfolio_score', 0):.1f}")
+    print(f"Decision score : {project.get('decision_score', 0):.1f}")
+    print(f"ROI : {project.get('roi', 0):.2f}")
+    print(f"Bonus saison : {project.get('season_bonus', 0)}")
+    print(f"Score astro : {project.get('astro_score', 0):.1f}")
+else:
+    print("\n===== PROJET RECOMMANDÉ =====\n")
+    print("Aucun projet portefeuille observable ce soir.")
+
+
 ##########print(
     #########f"Progression : "
     ########f"{project['hours_done']} / {project['target_hours']} h")
