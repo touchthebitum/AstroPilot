@@ -1035,6 +1035,9 @@ def recommend_project_for_night(top_objects):
         closure =closure_bonus(catalog_key)
 
         portfolio =portfolio_score(catalog_key)
+        decision_score = (
+            astro_score * astro_weight+ portfolio * project_weight
+        )
 
         final_score = (
             astro_score * astro_weight
@@ -1053,6 +1056,7 @@ def recommend_project_for_night(top_objects):
             "astro_score": astro_score,
             "priority": priority,
             "final_score": final_score,
+            "decision_score": decision_score,
             "season_bonus": season_bonus,
             "roi": roi,
             "portfolio_score": portfolio
@@ -1070,12 +1074,13 @@ def recommend_project_for_night(top_objects):
             ####f"priority={c['priority']:.1f} "
             ###f"roi={c['roi']:.1f} "
             ##f"final={c['final_score']:.1f}"
+            # f"decision={c['decision_score']:.1f} "
         #)
 
     candidates.sort(
-        key=lambda x: x["final_score"],
-        reverse=True
-    )
+    key=lambda x: x["decision_score"],
+    reverse=True
+)
 
     return candidates
 
@@ -2839,7 +2844,16 @@ def get_location_by_ip():
             "city": "Sion",
             "country": "Switzerland",
         }
-    
+def decision_score(astro_score, portfolio_score, profile):
+    prefs = profile.get("preferences", {})
+
+    astro_weight = prefs.get("astro_weight", 0.7)
+    project_weight = prefs.get("project_weight", 0.3)
+
+    return (
+        astro_score * astro_weight +
+        portfolio_score * project_weight
+    )
 def best_equipment_for_object(object_name):
     obj = CATALOG.get(object_name)
 
@@ -3146,8 +3160,10 @@ print(f"Projet : {project['name']}")
 print(f"Priorité : {project.get('priority', 0):.1f}")
 print(f"Score final : {project.get('final_score', 0):.1f}")
 print(f"Score portefeuille : {project.get('portfolio_score', 0):.1f}")
+print(f"Decision score : {project.get('decision_score',0):.1f}")
 print(f"ROI : {project.get('roi', 0):.2f}")
 print(f"Bonus saison : {project.get('season_bonus', 0)}")
+print(f"Score astro : {project.get('astro_score',0):.1f}")
 ##########print(
     #########f"Progression : "
     ########f"{project['hours_done']} / {project['target_hours']} h")
