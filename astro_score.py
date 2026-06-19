@@ -1037,7 +1037,7 @@ def recommend_project_for_night(top_objects):
         
         
 
-        print("DEBUG PROJECT OBJ =", catalog_key, obj)
+        #print("DEBUG PROJECT OBJ =", catalog_key, obj)
         priority = project_priority(catalog_key)
         season_bonus = altitude_bonus(obj)
         roi = project_roi(catalog_key)
@@ -2776,6 +2776,8 @@ def forecast_astro(
                     "global_score": r.get("global_score", r["score"]),
                 }
                 for r in all_results[:5]
+
+    
             ],
             "best_window": {
                 "start": best["start"].strftime("%H:%M"),
