@@ -670,6 +670,21 @@ def project_priority(object_name):
     base_priority = progress_score + remaining_score
     return round(base_priority * (importance / 5), 1)
 
+def season_bonus(obj):
+    """
+    Bonus saisonnier simple basé sur l'altitude actuelle de l'objet.
+    Version provisoire pour valider le pipeline.
+    """
+    alt = obj.get("altitude", 0)
+
+    if alt >= 70:
+        return 15
+    elif alt >= 50:
+        return 10
+    elif alt >= 30:
+        return 5
+    return 0
+
 def altitude_bonus(obj):
 
     altitude = obj.get("altitude", 0)
@@ -1038,7 +1053,8 @@ def recommend_project_for_night(top_objects):
 
         #print("DEBUG PROJECT OBJ =", catalog_key, obj)
         priority = project_priority(catalog_key)
-        season_bonus = altitude_bonus(obj)
+        altitude = altitude_bonus(obj)
+        season = season_bonus(obj)
         roi = project_roi(catalog_key)
         closure =closure_bonus(catalog_key)
 
@@ -1050,7 +1066,8 @@ def recommend_project_for_night(top_objects):
         final_score = (
             astro_score * astro_weight
             + priority * project_weight
-            + season_bonus
+            + altitude
+            + season
             + roi * 5
             + closure
         )
@@ -1070,7 +1087,8 @@ def recommend_project_for_night(top_objects):
             "astro_score": astro_score,
             "final_score": final_score,
             "decision_score": decision_score,
-            "season_bonus": season_bonus,
+            "season_bonus": season,
+            "altitude_bonus": altitude,
             "roi": roi,
             "portfolio_score": portfolio,
             "astro_score": obj.get("score", 0),
