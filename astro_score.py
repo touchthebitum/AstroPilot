@@ -2945,6 +2945,13 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--mode",
+        choices=["tonight", "portfolio", "calendar", "full"],
+        default="tonight",
+        help="Mode d'affichage"
+    )
+
+    parser.add_argument(
         "--object",
         type=str,
         help="Comparer les matériels pour un objet"
