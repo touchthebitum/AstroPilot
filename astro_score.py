@@ -3089,11 +3089,11 @@ for i, night in enumerate(top_nights, 1):
             f" setup_score={obj.get('setup_score', 0):.1f}"
             f" global={obj.get('global_score', 0):.1f}"
         )
-        best_objects = night.get("best_objects") or [night["object"]]
-        obj_key = best_objects[0]
-        obj = CATALOG.get(obj_key, {"name": obj_key})
+best_objects = night.get("best_objects") or [night["object"]]
+obj_key = best_objects[0]
+obj = CATALOG.get(obj_key, {"name": obj_key})
 
-        print(f"Objet recommandé : {obj['name']} ({obj_key})")
+print(f"Objet recommandé : {obj['name']} ({obj_key})")
 
 
         ####show_portfolio_ranking()
