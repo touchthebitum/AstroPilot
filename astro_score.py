@@ -56,7 +56,20 @@ value.get("width_arcmin", 30)),
     for key, value in CATALOG.items()
     if "ra" in value and "dec" in value
 }
-
+SEASON_WINDOWS = {
+    "M31": {
+        "best_months": [8, 9, 10, 11],
+        "ok_months": [7, 12],
+    },
+    "IC1396": {
+        "best_months": [6, 7, 8, 9],
+        "ok_months": [5, 10],
+    },
+    "Rosette": {
+        "best_months": [12, 1, 2, 3],
+        "ok_months": [11, 4],
+    },
+}
 OBJECT_SIZES = {
     "M31": 140,
     "M42": 85,
@@ -487,52 +500,25 @@ def estimated_sqm(bortle, moon_illumination, moon_elevation, moon_target_sep):
     return round(base - moon_loss, 2)
 
 def season_bonus(obj):
+    """
+    Bonus saisonnier basé sur le mois courant.
+    Version simple mais déjà plus réaliste que l'altitude.
+    """
+    month = datetime.now(ZoneInfo(TIMEZONE)).month
 
-    month = datetime.now().month
-    name = obj.get("catalog_key", "").upper()
+    name = obj.get("catalog_key") or obj.get("name")
 
-    if name == "M31":
-        if month in [8, 9, 10, 11]:
-            return 25
-        elif month in [6, 7]:
-            return 10
-        else:
-            return -20
-
-    elif name == "IC1396":
-        if month in [6, 7, 8, 9, 10]:
-            return 25
-        else:
-            return -20
-
-    elif name == "ROSETTE":
-        if month in [11, 12, 1, 2, 3]:
-            return 25
-        else:
-            return -20
-
-    return 0
-
-def project_progress_bonus(object_name):
-    projects = get_projects()
-
-    if object_name not in projects:
+    season = SEASON_WINDOWS.get(name)
+    if not season:
         return 0
 
-    project = projects[object_name]
-    hours = project.get("hours", 0)
-    target_hours = project.get("target_hours", 1)
+    if month in season.get("best_months", []):
+        return 15
 
-    if target_hours <= 0:
-        return 0
+    if month in season.get("ok_months", []):
+        return 5
 
-    progress = hours / target_hours
-
-    if progress >= 1:
-        return -50
-
-    return round(progress * 20, 1)
-
+    return -10
 
 def closure_bonus(name):
     
@@ -1057,7 +1043,6 @@ def recommend_project_for_night(top_objects):
         season = season_bonus(obj)
         roi = project_roi(catalog_key)
         closure =closure_bonus(catalog_key)
-
         portfolio =portfolio_score(catalog_key)
         decision_score = (
             astro_score * astro_weight+ portfolio * project_weight
@@ -1083,6 +1068,7 @@ def recommend_project_for_night(top_objects):
 
         candidates.append({
             "name": obj["name"],
+            "catalog_key": catalog_key,
             "priority": priority,
             "astro_score": astro_score,
             "final_score": final_score,
@@ -2054,7 +2040,7 @@ def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_targe
     elif goal in ["clusters", "cluster"] and "cluster" in obj_type:
         target_bonus += 12
 
-    project_bonus = project_progress_bonus(target_object)
+    project_bonus = portfolio_score(target_object)
 
     priority_bonus=( 
     project_priority(target_object) * 0.3)
