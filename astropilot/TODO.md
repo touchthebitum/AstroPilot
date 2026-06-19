@@ -177,3 +177,17 @@ VISION FINALE
 [ ] Gestion des changements de setup
 [ ] Historique réel des sessions
 [ ] Dashboard portefeuille
+
+[OK] Simulation portefeuille
+[OK] Calendrier prévisionnel
+[OK] Dates de fin projet
+[OK] Classement portefeuille
+[OK] Détection absence de projet observable
+
+TODO:
+- Afficher les raisons d'exclusion d'un projet
+- Afficher les projets portefeuille visibles mais non retenus
+- Afficher le gain attendu de la nuit
+- Ajouter pondération saisonnière avancée
+- Ajouter ROI astrophotographique global
+- Ajouter recommandations multi-nuits
