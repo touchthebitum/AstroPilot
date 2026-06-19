@@ -1029,12 +1029,7 @@ def recommend_project_for_night(top_objects):
 
         if catalog_key not in projects:
 
-            print(
-                "REJET",
-                catalog_key,
-                "portfolio=",
-                projects
-            )
+            
             continue
 
         astro_score = obj.get("global_score", obj.get("score", 0))
@@ -1313,8 +1308,6 @@ def show_project_stats():
             f"{best[0]} ({best[1]['hours']:.1f} h)"
         )
 def show_tonight_recommendation(night):
-
-    print("SHOW NIGHT TOP_OBJECTS =", night["top_objects"])
 
     night_projects = recommend_project_for_night(
         night["top_objects"]
@@ -2764,16 +2757,6 @@ def forecast_astro(
         for r in portfolio_objects:
             if r not in top_objects_for_night:
                 top_objects_for_night.append(r)
-
-        print("PORTFOLIO OBJECTS =", [
-            r.get("catalog_key", r.get("name"))
-            for r in portfolio_objects
-        ])
-
-        print("TOP OBJECTS FOR NIGHT =", [
-            r.get("catalog_key", r.get("name"))
-            for r in top_objects_for_night
-        ])
 
         results.append({
             "date": str(night_date),
