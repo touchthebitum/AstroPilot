@@ -926,6 +926,7 @@ def recommend_project():
         priority = project_priority(name)
         progress = project_progress(name)
         completion_bonus = progress / 5
+        closure = closure_bonus(name)
         season_bonus = altitude_bonus(obj)
         season_window = season_window_bonus(obj)
         urgency = season_urgency_bonus(obj)
@@ -938,6 +939,7 @@ def recommend_project():
             + urgency
             + roi * 15
             + completion_bonus
+            + closure
         )
         project_gain = session_portfolio_gain(
            name,
@@ -958,6 +960,7 @@ def recommend_project():
             "months_left": season_remaining_months(CATALOG.get(name,{})),
             "progress" : progress,
             "comnpletion_bonus": completion_bonus,
+            "closure_bonus" : closure
         }),
             
 
@@ -1047,7 +1050,6 @@ def recommend_project_for_night(top_objects):
         decision_score = (
             astro_score * astro_weight+ portfolio * project_weight
         )
-
         final_score = (
             astro_score * astro_weight
             + priority * project_weight
@@ -1066,6 +1068,11 @@ def recommend_project_for_night(top_objects):
         if remaining is not None and remaining <= available_hours : final_score += 30
 
 
+        progress = project_progress(catalog_key)
+        completion_bonus = progress / 5
+        closure = closure_bonus(catalog_key)
+
+
         candidates.append({
             "name": obj["name"],
             "catalog_key": catalog_key,
@@ -1077,10 +1084,11 @@ def recommend_project_for_night(top_objects):
             "altitude_bonus": altitude,
             "roi": roi,
             "portfolio_score": portfolio,
-            "astro_score": obj.get("score", 0),
             "global_score": obj.get("global_score", astro_score),
             "setup_score": obj.get("setup_score", 0),
             "best_setup": obj.get("best_setup"),
+            "completion_bonus" : completion_bonus,
+            "closure_bonus" : closure,
         })
 
         if not candidates:
@@ -1352,6 +1360,10 @@ def show_tonight_recommendation(night):
     print(f"Projet : {night_project['name']}")
     print(f"Score astro : {night_project['astro_score']:.1f}")
     print(f"Priorité projet : {night_project['priority']:.1f}")
+    print(f"Bonus saison : +{night_project.get('season_bonus',0):.1f}")
+    print(f"Fenêtre saison : +{night_project.get('season_window',0):.1f}")
+    print(f"Urgence saison : +{night_project.get('urgency',0):.1f}")
+    print(f"Bonus progression : +{night_project.get('completion_bonus',0):.1f}")
     print(f"Score final : {night_project['final_score']:.1f}")
 
     print("\n===== PLAN DE NUIT =====")
@@ -1362,6 +1374,11 @@ def show_tonight_recommendation(night):
         print(f"Fenêtre optimale : {window['start']} → {window['end']}")
 
     print(f"Action recommandée : terminer {night_project['name']}")
+
+    print(f"Bonus saison : +{night_project.get('season_bonus', 0):.1f}")
+    print(f"ROI projet : {night_project.get('roi', 0):.2f}")
+    print(f"Bonus clôture : +{night_project.get('closure_bonus', 0):.1f}")
+
 
     if best_setup:
         print(f"Setup : {best_setup['equipment']}")
