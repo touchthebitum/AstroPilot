@@ -520,20 +520,18 @@ def season_bonus(obj):
 
     return -10
 
-def closure_bonus(name):
-    
+def closure_bonus(name, available_hours=3.0):
     remaining = project_remaining_hours(name)
 
-    if remaining is None:
+    if remaining is None or remaining <= 0:
         return 0
 
-    if remaining <= 0:
-        return 0
+    # Projet terminable cette nuit
+    if remaining <= available_hours:
+        return 20
 
-    if remaining <= 2:
-        return 25
-
-    if remaining <= 5:
+    # Projet terminable en environ deux nuits
+    if remaining <= available_hours * 2:
         return 10
 
     return 0
@@ -985,7 +983,7 @@ def recommend_project():
 
     return candidates[0]
 
-def recommend_project_for_night(top_objects):
+def recommend_project_for_night (top_objects, available_hours=3.0):
 
     profile = load_user_profile()
 
@@ -998,8 +996,6 @@ def recommend_project_for_night(top_objects):
     )
 
     candidates = []
-
-    available_hours = 2.0
 
     projects = get_projects()
 
@@ -1045,11 +1041,12 @@ def recommend_project_for_night(top_objects):
         altitude = altitude_bonus(obj)
         season = season_bonus(obj)
         roi = project_roi(catalog_key)
-        closure =closure_bonus(catalog_key)
+        closure =closure_bonus(catalog_key, available_hours)
         portfolio =portfolio_score(catalog_key)
         decision_score = (
             astro_score * astro_weight+ portfolio * project_weight
         )
+
         final_score = (
             astro_score * astro_weight
             + priority * project_weight
@@ -1058,7 +1055,7 @@ def recommend_project_for_night(top_objects):
             + roi * 5
             + closure
         )
-
+        
         if astro_score<=0:
             final_score -= 30
             decision_score -= 30
@@ -1320,7 +1317,9 @@ def show_project_stats():
 def show_tonight_recommendation(night):
 
     night_projects = recommend_project_for_night(
-        night["top_objects"]
+        night["top_objects"],
+        available_hours=night.get("duration",
+                                  3.0)
     )
 
     if not night_projects:
@@ -1835,14 +1834,14 @@ def simulate_portfolio_calendar(nights):
     }
 
     for night in nights:
-
+        available_hours=night.get("duration", 3.0)
         recommendations = recommend_project_for_night(
-            night["top_objects"] + [
+        night["top_objects"] + [
         {"name": name, "catalog_key": name, "score": 0}
-                for name in projects.keys()
-    ]
+        for name in projects.keys()
+    ],
+    
 )
-
 
         if not recommendations:
             continue
