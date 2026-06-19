@@ -1392,6 +1392,32 @@ def show_tonight_recommendation(night):
         best_filters
     )
 
+def show_roadmap(roadmap):
+
+    print("\n===== ROADMAP ASTRO =====")
+
+    completion_dates = roadmap.get("completion_dates", {})
+    remaining_hours = roadmap.get("remaining_hours", {})
+
+    for name, date in completion_dates.items():
+
+        remaining = remaining_hours.get(name,0)
+
+        print(f"\n{name}")
+        print(f"  reste : {remaining:.1f} h")
+        print(f"  fin estimée : {date}")
+
+    unfinished = roadmap.get("unfinished_projects", [])
+
+    if unfinished:
+        print("\nProjets non planifiés :")
+    for name in unfinished:
+        remaining = project_remaining_hours(name)
+        print(f"  {name} : {remaining:.1f} h restantes")
+
+    print("\n===== FIN PORTEFEUILLE =====")
+    print(f"Date estimée : {roadmap.get('portfolio_end')}")
+
 def show_action_plan(
     night,
     night_project,
@@ -1834,15 +1860,14 @@ def simulate_portfolio_calendar(nights):
     }
 
     for night in nights:
-        available_hours=night.get("duration", 3.0)
+        
         recommendations = recommend_project_for_night(
         night["top_objects"] + [
         {"name": name, "catalog_key": name, "score": 0}
-        for name in projects.keys()
-    ],
-    
-)
 
+                for name in projects.keys()],
+            available_hours=night.get("duration", 3.0))
+        
         if not recommendations:
             continue
 
@@ -1925,7 +1950,6 @@ def simulate_portfolio_calendar(nights):
         if remaining > 0:
             unfinished_projects.append(name)
 
-
     if unfinished_projects:
         portfolio_end = "Au-delà des prévisions"
     else:
@@ -1936,6 +1960,13 @@ def simulate_portfolio_calendar(nights):
 
     print("\n===== FIN PORTEFEUILLE =====")
     print(f"Date estimée : {portfolio_end}")
+
+    return {
+    "completion_dates": completion_dates,
+    "portfolio_end": portfolio_end,
+    "unfinished_projects": unfinished_projects,
+    "remaining_hours": remaining_by_name,
+    }
 
 def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_target_sep, target_altitude, bortle=4, target="deep_sky", target_object=None, goal="balanced"):
     penalty = 0
@@ -3134,17 +3165,22 @@ if args.mode == "portfolio":
 
 elif args.mode == "calendar":
     show_astro_calendar()
-    simulate_portfolio_calendar(nights)
+    roadmap = simulate_portfolio_calendar(nights)
 
 elif args.mode == "tonight":
     if top_nights:
+        roadmap = simulate_portfolio_calendar(nights)
+
+        show_roadmap(roadmap)
+
         show_tonight_recommendation(top_nights[0])
 
 elif args.mode == "full":
     show_portfolio_ranking()
-    show_completion_forecast()
+    #show_completion_forecast()
     show_astro_calendar()
-    simulate_portfolio_calendar(nights)
+    roadmap = simulate_portfolio_calendar(nights)
+    show_roadmap(roadmap)
 
     if top_nights:
         show_tonight_recommendation(top_nights[0])
