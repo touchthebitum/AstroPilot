@@ -3071,29 +3071,29 @@ for night in top_nights:
     )
 
 
-for i, night in enumerate(top_nights, 1):
-    print(f"#{i} - {night['date']}")
+##for i, night in enumerate(top_nights, 1):
+    #print(f"#{i} - {night['date']}")
     
-    for j, obj in enumerate(night["top_objects"], start=1):
-        print(
-            f"{j}. {obj['name']} "
-            f"score={obj['score']:.1f} "
-            f"alt={obj['altitude']:.0f}° "
-            f"moon_sep={obj['moon_sep']:.0f}° "
-            f"sqm={obj['sqm']:.1f} "
-            f"frame={obj['frame_bonus']} "
-            f"project={obj.get('project_bonus', 0)}"
-            f"remaining={obj.get('remaining_hours','-')}"
-            f"prio={obj.get('priority_bonus',0)}"
-            f" setup={obj.get('best_setup')}"
-            f" setup_score={obj.get('setup_score', 0):.1f}"
-            f" global={obj.get('global_score', 0):.1f}"
-        )
-best_objects = night.get("best_objects") or [night["object"]]
-obj_key = best_objects[0]
-obj = CATALOG.get(obj_key, {"name": obj_key})
+    ###################for j, obj in enumerate(night["top_objects"], start=1):
+        ##################print(
+            #################f"{j}. {obj['name']} "
+            ################f"score={obj['score']:.1f} "
+            ###############f"alt={obj['altitude']:.0f}° "
+            ##############f"moon_sep={obj['moon_sep']:.0f}° "
+            #############f"sqm={obj['sqm']:.1f} "
+            ############f"frame={obj['frame_bonus']} "
+            ###########f"project={obj.get('project_bonus', 0)}"
+            ##########f"remaining={obj.get('remaining_hours','-')}"
+            #########f"prio={obj.get('priority_bonus',0)}"
+            ########f" setup={obj.get('best_setup')}"
+            #######f" setup_score={obj.get('setup_score', 0):.1f}"
+            ######f" global={obj.get('global_score', 0):.1f}"
+        #####)
+####best_objects = night.get("best_objects") or [night["object"]]
+###obj_key = best_objects[0]
+#obj = CATALOG.get(obj_key, {"name": obj_key})
 
-print(f"Objet recommandé : {obj['name']} ({obj_key})")
+#print(f"Objet recommandé : {obj['name']} ({obj_key})")
 
 
         ####show_portfolio_ranking()
