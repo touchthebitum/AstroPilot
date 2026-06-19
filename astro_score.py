@@ -1000,24 +1000,24 @@ def recommend_project_for_night(top_objects):
 
     projects = get_projects()
 
-    project_objects = []
+    #################project_objects = []
 
-    for name in projects:
-        obj = CATALOG.get(name)
-        if obj:
-            project_objects.append({
-                "name": obj.get("name", name),
-                "catalog_key": name,
-                "score": 0,
-                "altitude": obj.get("altitude", 0),
-                "moon_sep": 0,
-                "sqm": 0,
-                "moon_score": 0,
-                "frame_bonus": 0,
-                "project_bonus": 0,
-                "remaining_hours": project_remaining_hours(name),
-                "priority_bonus": project_priority(name),
-            })
+    ################for name in projects:
+        ###############obj = CATALOG.get(name)
+        ##############if obj:
+            #############project_objects.append({
+                ############"name": obj.get("name", name),
+                ###########"catalog_key": name,
+                ##########"score": 0,
+                #########"altitude": obj.get("altitude", 0),
+                ########"moon_sep": 0,
+                #######"sqm": 0,
+                ######"moon_score": 0,
+                #####"frame_bonus": 0,
+                ####"project_bonus": 0,
+                ###"remaining_hours": project_remaining_hours(name),
+                ##"priority_bonus": project_priority(name),
+            #})
 
     existing_keys = {
         obj.get("catalog_key", obj.get("name"))
@@ -1028,11 +1028,18 @@ def recommend_project_for_night(top_objects):
         catalog_key = obj.get("catalog_key", obj["name"])
 
         if catalog_key not in projects:
+
+            print(
+                "REJET",
+                catalog_key,
+                "portfolio=",
+                projects
+            )
             continue
 
-        astro_score = obj.get("score", 0)
+        astro_score = obj.get("global_score", obj.get("score", 0))
 
-        if astro_score <=0:
+        if astro_score <= 0:
             continue
         
         
@@ -1067,13 +1074,17 @@ def recommend_project_for_night(top_objects):
 
         candidates.append({
             "name": obj["name"],
-            "astro_score": astro_score,
             "priority": priority,
+            "astro_score": astro_score,
             "final_score": final_score,
             "decision_score": decision_score,
             "season_bonus": season_bonus,
             "roi": roi,
-            "portfolio_score": portfolio
+            "portfolio_score": portfolio,
+            "astro_score": obj.get("score", 0),
+            "global_score": obj.get("global_score", astro_score),
+            "setup_score": obj.get("setup_score", 0),
+            "best_setup": obj.get("best_setup"),
         })
 
         if not candidates:
@@ -1302,6 +1313,9 @@ def show_project_stats():
             f"{best[0]} ({best[1]['hours']:.1f} h)"
         )
 def show_tonight_recommendation(night):
+
+    print("SHOW NIGHT TOP_OBJECTS =", night["top_objects"])
+
     night_projects = recommend_project_for_night(
         night["top_objects"]
     )
@@ -2738,6 +2752,29 @@ def forecast_astro(
             sum(r["global_score"] for r in top3) / len(top3)
 )
 
+        portfolio_keys = set(get_projects().keys())
+
+        top_objects_for_night = all_results[:5]
+
+        portfolio_objects = [
+        r for r in all_results
+        if r.get("catalog_key", r.get("name")) in portfolio_keys
+        ]
+
+        for r in portfolio_objects:
+            if r not in top_objects_for_night:
+                top_objects_for_night.append(r)
+
+        print("PORTFOLIO OBJECTS =", [
+            r.get("catalog_key", r.get("name"))
+            for r in portfolio_objects
+        ])
+
+        print("TOP OBJECTS FOR NIGHT =", [
+            r.get("catalog_key", r.get("name"))
+            for r in top_objects_for_night
+        ])
+
         results.append({
             "date": str(night_date),
             "score": night_score,
@@ -2775,9 +2812,8 @@ def forecast_astro(
                     "setup_score": r.get("setup_score", 0),
                     "global_score": r.get("global_score", r["score"]),
                 }
-                for r in all_results[:5]
+                for r in top_objects_for_night
 
-    
             ],
             "best_window": {
                 "start": best["start"].strftime("%H:%M"),
@@ -3099,8 +3135,6 @@ for night in top_nights:
 for i, night in enumerate(top_nights, 1):
     print(f"#{i} - {night['date']}")
     
-    print("Top objets :")
-
     for j, obj in enumerate(night["top_objects"], start=1):
         print(
             f"{j}. {obj['name']} "
@@ -3139,9 +3173,6 @@ if top_nights:
         project = night_projects[0]
     else:
         project = None
-
-    print(type(project))
-    print(project)
 else:
     project = recommend_project()
 show_portfolio_ranking()
