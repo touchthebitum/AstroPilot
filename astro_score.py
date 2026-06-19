@@ -181,13 +181,13 @@ def framing_bonus(target_object):
 
 def safe_moonrise(observer, date, tz):
     try:
-        return moonrise(observer, date, tzinfo=tz)
+        return moonrise(observer=observer, date=date, tzinfo=tz)
     except ValueError:
         return None
 
 def safe_moonset(observer, date, tz):
     try:
-        return moonset(observer, date, tzinfo=tz)
+        return moonset(observer=observer, date=date, tzinfo=tz)
     except ValueError:
         return None
 
@@ -376,7 +376,13 @@ def moon_phase_name(illumination):
 
 
 def moon_visible_during_window(window_start, window_end, moonrise_time, moonset_time):
-   
+    from datetime import datetime
+
+    if not isinstance(moonrise_time, datetime):
+        moonrise_time = None
+
+    if not isinstance(moonset_time, datetime):
+        moonset_time = None
 
     if moonrise_time is None and moonset_time is None:
         return False
@@ -388,13 +394,6 @@ def moon_visible_during_window(window_start, window_end, moonrise_time, moonset_
         return moonrise_time <= window_end
 
     return moonrise_time <= window_end and moonset_time >= window_start
-
-def safe_moonrise(observer, date, tz):
-    try:
-        return moonrise(observer, date, tzinfo=tz)
-    except ValueError:
-        return None
-
 
 def safe_moonset(observer, date, tz):
     try:
@@ -1028,8 +1027,6 @@ def recommend_project_for_night(top_objects):
         catalog_key = obj.get("catalog_key", obj["name"])
 
         if catalog_key not in projects:
-
-            
             continue
 
         astro_score = obj.get("global_score", obj.get("score", 0))
@@ -1307,6 +1304,7 @@ def show_project_stats():
             f"Projet principal : "
             f"{best[0]} ({best[1]['hours']:.1f} h)"
         )
+
 def show_tonight_recommendation(night):
 
     night_projects = recommend_project_for_night(
@@ -1324,13 +1322,13 @@ def show_tonight_recommendation(night):
             f"{i}. {project['name']} "
             f"(score {project['final_score']:.1f})"
         )
+
     print("\n===== PLAN MULTI-OBJETS =====")
 
     schedule = build_night_schedule(
         night["top_objects"],
         2.0
-    )
-
+        )
 
     for item in schedule:
         print(
@@ -2617,6 +2615,9 @@ def forecast_astro(
         rows = parse_hourly_weather(weather)
 
     results = []
+
+    #print("TARGET_OBJECTS = ", TARGET_OBJECTS)
+
     today = datetime.now(ZoneInfo(TIMEZONE)).date()
 
     for d in range(7):
@@ -2641,64 +2642,71 @@ def forecast_astro(
         all_results = []
 
         for obj_name in TARGET_OBJECTS:
+
+            #print("TEST OBJ =", obj_name)
+
             top_windows = best_windows(
-                hours,
-                illumination,
-                moon_rise,
-                moon_set,
-                city_info.observer,
-                bortle,
-                target,
-                obj_name,
-                goal=goal
+                hours=hours,
+                bortle = bortle,
+                moon_rise = moon_rise,
+                moon_set = moon_set,
+                observer=city_info.observer,
+                moon_illumination = illumination,
+                target = target,
+                target_object=obj_name,
             )
 
             if not top_windows:
+                #print("NO WINDOW =", obj_name)
                 continue
+
+            #print("WINDOW OK =", obj_name, "score=", top_windows[0]["score"])
 
             top_windows.sort(key=lambda x: x["score"], reverse=True)
             best = top_windows[0]
 
-        profile = load_user_profile()
+            profile = load_user_profile()
 
-        best_setup = None
-        best_setup_score = -999
+            best_setup = None
+            best_setup_score = -999
 
-        for setup_name in profile.get("available_equipment", []):
-            setup = EQUIPMENT_PROFILES.get(setup_name)
+            for setup_name in profile.get("available_equipment", []):
+                setup = EQUIPMENT_PROFILES.get(setup_name)
 
-            if not setup:
-                continue
+                if not setup:
+                    continue
 
-            s = setup_score(
-                setup,
-                {
-            "name": obj_name,
-            "type": CATALOG.get(obj_name, {}).get("type", "")
-                }
-        )
-            if s > best_setup_score:
-                best_setup_score = s
-                best_setup = setup_name
+                s = setup_score(
+                    setup,
+                    {
+                        "name": obj_name,
+                        "type": CATALOG.get(obj_name, {}).get("type", ""),
+                    },
+                )
 
-        best["best_setup"] = best_setup
-        best["setup_score"] = best_setup_score
-        best["global_score"] = best["score"] + best_setup_score
+                if s > best_setup_score:
+                    best_setup_score = s
+                    best_setup = setup_name
 
-        all_results.append({
-            "name": obj_name,
-            "score": best["score"],
-            "altitude": best.get("target_altitude"),
-            "moon_sep": best.get("moon_sep"),
-            "sqm": best.get("sqm"),
-            "moon_score": best.get("moon_score"),
-            "frame_bonus": best.get("frame_bonus"),
-            "window": best,
-            "catalog_key": obj_name,
-            "best_setup" : best_setup,
-            "setup_score" : best_setup_score,
-            "global_score" : best["score"] + best_setup_score,
-        })
+            best["best_setup"] = best_setup
+            best["setup_score"] = best_setup_score
+            best["global_score"] = best["score"] + best_setup_score
+
+            all_results.append({
+                "name": obj_name,
+                "score": best["score"],
+                "altitude": best.get("target_altitude"),
+                "moon_sep": best.get("moon_sep"),
+                "sqm": best.get("sqm"),
+                "moon_score": best.get("moon_score"),
+                "frame_bonus": best.get("frame_bonus"),
+                "window": best,
+                "catalog_key": obj_name,
+                "best_setup": best_setup,
+                "setup_score": best_setup_score,
+                "global_score": best["score"] + best_setup_score,
+            })
+
 
         if not all_results:
             continue
@@ -2728,16 +2736,6 @@ def forecast_astro(
             key=lambda x: x["global_score"],
             reverse=True
         )
-
-        print("\n=== CLASSEMENT GLOBAL ===")
-        for r in all_results:
-            print(
-                f"{r['name']} "
-                f"astro={r['score']:.1f} "
-                f"setup={r['setup_score']:.1f} "
-                f"global={r['global_score']:.1f} "
-                f"setup={r['best_setup']}"
-            )
 
         top3 = all_results[:3]
         top5 = all_results[:5]
@@ -3014,49 +3012,6 @@ if __name__ == "__main__":
 
         exit()
 
-
-    if args.compare:
-
-        print("Nombre objets :", len(CATALOG))
-
-
-        for profile in get_available_equipment():
-            set_current_equipment(profile)
-
-            fov = get_fov()
-            location = get_default_location()
-
-            user_profile = load_user_profile()
-
-
-            nights = forecast_astro(
-                location["latitude"],
-                location["longitude"],
-                location["name"],
-                load_user_profile().get("preferences", {}).get("bortle", 4),
-                "deep_sky",
-                equipment=None, goal=args.goal
-            )
-
-            if nights is None:
-                nights = []
-
-            top = sorted(
-                    nights,
-                    key=lambda x: x["score"],
-                    reverse=True
-            )[:10]
-
-            for night in top:
-
-                print(
-                f'{night["date"]} '
-                f'{night["object"]:<18} '
-                f'objet={night["best_object_score"]:>3} '
-                f'nuit={night["score"]:>3}'
-            )
-
-    #exit()
     location = get_default_location()
     lat = location["latitude"]
     lon = location["longitude"]
@@ -3077,6 +3032,7 @@ if __name__ == "__main__":
         target = "deep_sky"
     user_profile = load_user_profile()
     selected_equipment = args.equipment or get_active_equipment()
+    
     nights = forecast_astro(
         lat,
         lon,
@@ -3132,93 +3088,29 @@ for i, night in enumerate(top_nights, 1):
             f" setup={obj.get('best_setup')}"
             f" setup_score={obj.get('setup_score', 0):.1f}"
             f" global={obj.get('global_score', 0):.1f}"
-    )
+        )
         best_objects = night.get("best_objects") or [night["object"]]
         obj_key = best_objects[0]
         obj = CATALOG.get(obj_key, {"name": obj_key})
 
         print(f"Objet recommandé : {obj['name']} ({obj_key})")
-        if top_nights:
-            show_tonight_recommendation(top_nights[0])
-        else:
-            print("Aucune nuit exploitable pour recommandation ce soir.")
-#log_project_session("M31", 2)
-#show_project_stats()
-show_portfolio_dashboard()
+
+
+        ####show_portfolio_ranking()
+        ###show_completion_forecast()
+        ##show_astro_calendar()
+        #simulate_portfolio_calendar(nights)
+
+print("### AVANT RECO FINALE ###")
+
 if top_nights:
+    show_tonight_recommendation(top_nights[0])
 
-    night_projects = recommend_project_for_night(
-        top_nights[0].get("all_objects",
-    top_nights[0]["top_objects"])
-)
-
-    if night_projects:
-        project = night_projects[0]
-    else:
-        project = None
+    print("### APRES RECO FINALE ###")
+        
 else:
-    project = recommend_project()
-show_portfolio_ranking()
-show_completion_forecast()
-show_astro_calendar()
-simulate_portfolio_calendar(nights)
-
-#if project:
-    ##score = 0
-    #closure = 0
-    #score = portfolio_score(project["name"])
-    #closure = closure_bonus(project["name"])
-
-#########profile = load_user_profile()
-
-########best_setup = None
-######best_setup_score = -999
-
-#####for setup_name, setup in profile.get("setups", {}).items():
-
-    ####score = setup_score(setup, project)
-
-    ###if score > best_setup_score:
-        ##best_setup_score = score
-        #best_setup = setup_name
-
-if project:
-    print(f"Setup recommandé : {project.get('best_setup')}")
-    print(f"Score setup : {project.get('setup_score', 0):.1f}")
-
-    print("\n===== PROJET RECOMMANDÉ =====\n")
-    print(f"Projet : {project['name']}")
-    print(f"Priorité : {project.get('priority', 0):.1f}")
-    print(f"Score final : {project.get('final_score', 0):.1f}")
-    print(f"Score portefeuille : {project.get('portfolio_score', 0):.1f}")
-    print(f"Decision score : {project.get('decision_score', 0):.1f}")
-    print(f"ROI : {project.get('roi', 0):.2f}")
-    print(f"Bonus saison : {project.get('season_bonus', 0)}")
-    print(f"Score astro : {project.get('astro_score', 0):.1f}")
-else:
-    print("\n===== PROJET RECOMMANDÉ =====\n")
-    print("Aucun projet portefeuille observable ce soir.")
-
-
-##########print(
-    #########f"Progression : "
-    ########f"{project['hours_done']} / {project['target_hours']} h")
-#######print(
-    ######f"Terminable ce soir : "
-    #####f"{'OUI' if project['remaining'] <= 2.0 else 'NON'}")
-####print(f"Reste : {project['remaining']:.1f} h")
-########print(f"Priorité : {project['priority']:.1f}")
-#######print(f"Bonus altitude : {project['season_bonus']}")
-######print(f"ROI : {project['roi']}")
-###print(
-##f"Gain projet prévu : "
-#f"+{project['project_gain']:.1f} %")
-#####print(f"Score portefeuille : {score:.1f}")
-####print(f"Bonus clôture : {closure_bonus(project['name']):.1f}")
-###print(f"Mois restants : {project['months_left']}")
-##print(f"Bonus saison : {project['season_window']}")
-#print(f"Progression : {project['progress']} %")
-    
+    print("Aucune nuit exploitable pour recommandation ce soir.")
+        #exit()
 
     
     

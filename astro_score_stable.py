@@ -375,14 +375,13 @@ def moon_visible_during_window(window_start, window_end, moonrise_time, moonset_
 
 def safe_moonrise(observer, date, tz):
     try:
-        return moonrise(observer, date, tzinfo=tz)
+        return moonrise(observer=observer, date=date, tzinfo=tz)
     except ValueError:
         return None
 
-
 def safe_moonset(observer, date, tz):
     try:
-        return moonset(observer, date, tzinfo=tz)
+        return moonset(observer=observer, date=date, tzinfo=tz)
     except ValueError:
         return None
 
