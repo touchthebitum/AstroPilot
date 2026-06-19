@@ -3108,12 +3108,28 @@ for night in top_nights:
         ##show_astro_calendar()
         #simulate_portfolio_calendar(nights)
 
-if top_nights:
-    show_tonight_recommendation(top_nights[0])
-        
-else:
-    print("Aucune nuit exploitable pour recommandation ce soir.")
-        #exit()
+if args.mode == "portfolio":
+    show_portfolio_ranking()
+    show_completion_forecast()
+
+elif args.mode == "calendar":
+    show_astro_calendar()
+    simulate_portfolio_calendar(nights)
+
+elif args.mode == "tonight":
+    if top_nights:
+        show_tonight_recommendation(top_nights[0])
+
+elif args.mode == "full":
+    show_portfolio_ranking()
+    show_completion_forecast()
+    show_astro_calendar()
+    simulate_portfolio_calendar(nights)
+
+    if top_nights:
+        show_tonight_recommendation(top_nights[0])
+
+
 
     
     
