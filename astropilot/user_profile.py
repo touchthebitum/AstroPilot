@@ -28,15 +28,12 @@ def load_locations():
 
 def get_default_location():
     profile = load_user_profile()
-    locations = load_locations()
+    return profile.get("location", {
+        "name": "Buttes",
+        "latitude": 46.7508,
+        "longitude": 6.5495
+    })
 
-    location_id = profile["default_location"]
-
-    for loc in locations:
-        if loc["id"] == location_id:
-            return loc
-
-    raise ValueError(f"Localisation inconnue : {location_id}")
 
 def favorite_targets():
     return (

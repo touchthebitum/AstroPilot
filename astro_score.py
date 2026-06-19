@@ -1030,7 +1030,7 @@ def recommend_project_for_night(top_objects):
         if catalog_key not in projects:
             continue
 
-        astro_score = obj.get("score",0)
+        astro_score = obj.get("score", 0)
 
         if astro_score <=0:
             continue
@@ -2161,9 +2161,6 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
 
     profile = load_user_profile()
 
-    #print("PROFILE =", profile)
-    #print("PREFERENCES =", profile.get("preferences", {}))
-
     if window_size is None:
         window_size = profile.get("preferences", {}).get("window_size", 2)
 
@@ -2704,15 +2701,6 @@ def forecast_astro(
 
         top3 = all_results[:3]
 
-        print("TOP3 BEFORE SAVE")
-        for r in top3:
-            print(
-                r["name"],
-                r.get("score"),
-                r.get("global_score"),
-                r.get("best_setup")
-            )
-
         best_results = [all_results[0]]
 
         best = best_results[0]["window"]
@@ -2863,9 +2851,9 @@ def get_location_by_ip():
 
     except Exception:
         return {
-            "lat": 46.2333,
-            "lon": 7.3667,
-            "city": "Sion",
+            "lat": 46.7508,
+            "lon": 6.5495,
+            "city": "Buttes",
             "country": "Switzerland",
         }
 def decision_score(astro_score, portfolio_score, profile):
@@ -3040,8 +3028,6 @@ if __name__ == "__main__":
 
             for night in top:
 
-                print("NIGHT KEYS =", night.keys())
-                print("TOP_OBJECTS =", night.get("top_objects")) 
                 print(
                 f'{night["date"]} '
                 f'{night["object"]:<18} '
@@ -3050,10 +3036,10 @@ if __name__ == "__main__":
             )
 
     #exit()
-
-    lat = 46.2333
-    lon = 7.3667
-    city = "sion"
+    location = get_default_location()
+    lat = location["latitude"]
+    lon = location["longitude"]
+    city = location["name"]
 
     print(f"\nLieu détecté : {city} ({lat}, {lon})\n")
 
@@ -3141,10 +3127,6 @@ for i, night in enumerate(top_nights, 1):
 #show_project_stats()
 show_portfolio_dashboard()
 if top_nights:
-
-    print("NIGHT KEYS =", list(top_nights[0].keys()))
-    print("ALL OBJECTS LEN =", len(top_nights[0].get("all_objects", [])))
-    print("TOP OBJECTS LEN =", len(top_nights[0].get("top_objects", [])))
 
     night_projects = recommend_project_for_night(
         top_nights[0].get("all_objects",

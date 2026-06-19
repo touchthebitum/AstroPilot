@@ -1,8 +1,10 @@
 {
-    "default_location": {
+    "location": {
         "name": "Buttes",
-        "bortle": 4
+        "latitude": 46.7508,
+        "longitude": 6.5495
     },
+
     "active_equipment": "samyang_183",
     "available_equipment": [
         "samyang_183",
