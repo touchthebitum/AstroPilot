@@ -3101,12 +3101,8 @@ for i, night in enumerate(top_nights, 1):
         ##show_astro_calendar()
         #simulate_portfolio_calendar(nights)
 
-print("### AVANT RECO FINALE ###")
-
 if top_nights:
     show_tonight_recommendation(top_nights[0])
-
-    print("### APRES RECO FINALE ###")
         
 else:
     print("Aucune nuit exploitable pour recommandation ce soir.")
