@@ -1548,7 +1548,37 @@ def show_action_plan(
             f"    Temps restant : "
             f"{next_project['remaining']:.1f} h"
         )
-    
+        estimated_nights = next_project["remaining"] / 3.0
+
+        print(
+            f"Nuits restantes estimées : "
+            f"{estimated_nights:.1f}"
+        )
+
+        print("Pourquoi ?")
+        print(f"- Score portefeuille : {next_project['score']:.1f}")
+        print(f"- ROI : {next_roi:.2f}")
+        print(f"- Temps restant : {next_project['remaining']:.1f} h")
+        print(f"- Nuits estimées : {estimated_nights:.1f}")
+
+        visible_obj = None
+
+    for obj in night.get("top_objects", []):
+        obj_key = obj.get("catalog_key", obj.get("name"))
+
+        if obj_key == next_project["name"]:
+            visible_obj = obj
+            break
+
+    print(
+        f"- Visible ce soir : "
+        f"{'OUI' if visible_obj else 'NON'}"
+    )
+
+    if visible_obj:
+        print(f"- Altitude : {visible_obj.get('altitude', 0):.1f}°")
+        print(f"- Score ciel : {visible_obj.get('global_score', 0):.1f}")
+
 def show_portfolio_dashboard():
     
     projects = get_projects()
