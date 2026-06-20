@@ -1693,16 +1693,7 @@ def show_portfolio_completion_forecast(roadmap):
         return
 
     print("\n===== FIN DU PORTEFEUILLE =====")
-    print("\nDEBUG ROADMAP COMPLETION")
-    print(f"Nombre étapes = {len(roadmap)}")
-
-    for s in roadmap:
-        print(
-            s.get("night"),
-            s.get("date"),
-            s.get("project"),
-            s.get("hours")
-        )
+    
     last_step = roadmap[-1]
 
     final_date = last_step.get("date", "?")
@@ -1716,12 +1707,11 @@ def show_portfolio_completion_forecast(roadmap):
     print(f"Nuits restantes : {len(roadmap)}")
     print(f"Fin estimée du portefeuille : {final_date}")
 
-    print("\n===== DÉTAIL =====")
+    print("\n===== PROGRESSION DU PORTEFEUILLE =====")
 
     displayed = set()
 
     for step in roadmap:
-
         project = step["project"]
 
         if project in displayed:
@@ -1742,11 +1732,19 @@ def show_portfolio_completion_forecast(roadmap):
             for s in project_steps
         )
 
-        print(
-            f"{project} : "
-            f"{hours:.1f} h | "
-            f"{start_date} -> {end_date}"
-        )
+        nights = len(project_steps)
+
+        print(f"\n{project}")
+        print(f"  Reste : {hours:.1f} h")
+        print(f"  Début prévu : {start_date}")
+        print(f"  Fin prévue : {end_date}")
+        print(f"  Nuits nécessaires : {nights}")
+
+        if project_steps[-1].get("completed"):
+            print("  Statut : terminé")
+        else:
+            print("  Statut : incomplet")
+
 
 def show_action_plan(
     night,
