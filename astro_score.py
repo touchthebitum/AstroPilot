@@ -1523,10 +1523,10 @@ def show_action_plan(
     )
 
     print(
-    f"Portefeuille : "
-    f"{portfolio_before:.1f}% -> "
-    f"{portfolio_after:.1f}%"
-)
+        f"Portefeuille : "
+        f"{portfolio_before:.1f}% -> "
+        f"{portfolio_after:.1f}%"
+    )
     next_project = next_project_after(
         night_project["name"]
     )
@@ -1568,7 +1568,43 @@ def show_action_plan(
             f"- Rang portefeuille : "
             f"#{next_project['rank']} / {next_project['total_projects']}"
         )
+        print("\n=== APRÈS CETTE NUIT ===") 
 
+        projects = get_projects()
+
+        future_projects = []
+
+        for name, project in projects.items():
+
+            remaining = max(
+                0,
+                project["target_hours"] - project["hours"]
+            )
+
+            if remaining <= 0:
+                continue
+
+            if name == night_project["name"]:
+                continue
+
+            future_projects.append(
+                (name, remaining, portfolio_score(name))
+            )
+
+        future_projects.sort(
+            key=lambda x: x[2],
+            reverse=True
+        )
+
+        for idx, (name, remaining, score) in enumerate(
+            future_projects,
+            start=1
+        ):
+            print(
+                f"{idx}. {name} "
+                f"(score {score:.1f}) "
+                f"reste {remaining:.1f} h"
+            )
 
         visible_obj = None
 
