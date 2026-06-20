@@ -797,83 +797,89 @@ def simulated_portfolio_score(project):
 
 
 
-def simulate_dynamic_portfolio_roadmap(avg_night_hours=5):
-
+def simulate_dynamic_portfolio_roadmap(night_capacities=None, avg_night_hours=5):
     projects = copy.deepcopy(get_projects())
 
     simulated = []
-
     current_night = 1
-    
+
     while True:
+        if night_capacities and current_night > len(night_capacities):
+            break
 
         if current_night > 50:
-                    print("STOP sécurité roadmap dynamique")
-                    break
+            print("STOP sécurité roadmap dynamique")
+            break
+
         active_projects = {}
 
         for name, project in projects.items():
-
-            remaining = (
-                project["target_hours"]
-                - project["hours"]
-            )
+            remaining = project["target_hours"] - project["hours"]
 
             if remaining > 0:
                 active_projects[name] = project
-        
+
         if not active_projects:
             break
 
         best_name = None
         best_score = -9999
 
-        for name in active_projects:
-
-            score = (
-                active_projects[name].get("importance", 5) * 10
-            )
+        for name, project in active_projects.items():
+            score = simulated_portfolio_score(project)
 
             if score > best_score:
                 best_score = score
                 best_name = name
-
 
         project = projects[best_name]
 
         remaining = (
             project["target_hours"]
             - project["hours"]
-    )
+        )
+
+        if night_capacities:
+            capacity = night_capacities[current_night - 1]
+            hours_available = capacity.get("hours", avg_night_hours)
+        else:
+            capacity = None
+            hours_available = avg_night_hours
 
         hours_this_night = min(
-            avg_night_hours,
+            hours_available,
             remaining
         )
+
+        if hours_this_night <= 0:
+            current_night += 1
+            continue
 
         project["hours"] += hours_this_night
 
         simulated.append({
-                "night": current_night,
-                "project": best_name,
-                "score": best_score,
-                "hours": hours_this_night,
-                "remaining_after": max(
-                    0,
-                    remaining - hours_this_night
-                ),
-                "completed":
-                    remaining - hours_this_night <= 0
-            })
+            "night": current_night,
+            "date": capacity.get("date") if capacity else None,
+            "capacity": hours_available,
+            "project": best_name,
+            "score": best_score,
+            "hours": hours_this_night,
+            "remaining_after": max(
+                0,
+                remaining - hours_this_night
+            ),
+            "completed": remaining - hours_this_night <= 0
+        })
 
         current_night += 1
-              
+
     return simulated
 
-def show_multi_night_portfolio_roadmap(avg_night_hours=5):
+
+def show_multi_night_portfolio_roadmap(night_capacities=None, avg_night_hours=5):
 
     simulated = simulate_dynamic_portfolio_roadmap(
-        avg_night_hours
+        night_capacities=night_capacities,avg_night_hours = avg_night_hours
     )
 
     print("\n===== ROADMAP MULTI-NUITS DYNAMIQUE =====")
@@ -1668,9 +1674,11 @@ def show_tonight_recommendation(night):
         best_filters
     )
 
-def show_roadmap(roadmap):
+def show_roadmap(roadmap, night_capacities=None):
 
-    show_multi_night_portfolio_roadmap()
+    show_multi_night_portfolio_roadmap(
+    night_capacities=night_capacities
+)
 
 def show_action_plan(
     night,
@@ -3297,6 +3305,35 @@ def decision_score(astro_score, portfolio_score, profile):
         astro_score * astro_weight +
         portfolio_score * project_weight
     )
+
+def get_future_night_capacities(nights, max_nights=10):
+    top_nights = sorted(
+        nights,
+        key=lambda x: x["score"],
+        reverse=True
+
+    )[:max_nights]
+
+    capacities = []
+
+    for night in top_nights:
+        window = night.get("best_window")
+
+        if window:
+            start = int(window["start"].split(":")[0])
+            end = int(window["end"].split(":")[0])
+            duration = end - start
+        else:
+            duration = 0
+
+        capacities.append({
+            "date": night.get("date"),
+            "hours": max(0, duration),
+            "score": night.get("score", 0),
+        })
+
+    return capacities
+
 def best_equipment_for_object(object_name):
     obj = CATALOG.get(object_name)
 
@@ -3469,6 +3506,8 @@ if nights is None:
 
 top_nights = sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
 
+night_capacities = get_future_night_capacities(nights)
+
 print("\n===== CAPACITÉ À VENIR =====")
 
 for night in top_nights:
@@ -3532,7 +3571,7 @@ elif args.mode == "tonight":
     if top_nights:
         roadmap = simulate_portfolio_calendar(nights)
 
-        show_roadmap(roadmap)
+        show_roadmap(roadmap, night_capacities=night_capacities)
 
         show_tonight_recommendation(top_nights[0])
 
@@ -3541,7 +3580,7 @@ elif args.mode == "full":
     #show_completion_forecast()
     show_astro_calendar()
     roadmap = simulate_portfolio_calendar(nights)
-    show_roadmap(roadmap)
+    show_roadmap(roadmap, night_capacities=night_capacities)
 
     if top_nights:
         show_tonight_recommendation(top_nights[0])
