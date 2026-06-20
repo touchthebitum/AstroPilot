@@ -1922,6 +1922,23 @@ def show_action_plan(
             - alternative["final_score"]
         )
 
+        print("\nComparaison détaillée :")
+
+        print(
+            f"Score choisi      : "
+            f"{night_project['final_score']:.1f}"
+        )
+
+        print(
+            f"Score alternative : "
+            f"{alternative['final_score']:.1f}"
+        )
+
+        print(
+            f"Différence        : "
+            f"+{score_gap:.1f}"
+        )
+
         print(f"Projet choisi : {night_project['name']}")
         print(f"Alternative : {alternative['name']}")
         print(f"Écart de score : +{score_gap:.1f}")
