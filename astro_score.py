@@ -620,6 +620,32 @@ def project_progress(object_name):
 
     return round((hours_done / target_hours) * 100, 1)
 
+def portfolio_gain_if_shot(object_name, session_hours=3.0):
+    projects = get_projects()
+
+    if object_name not in projects:
+        return 0
+
+    before = project_progress(object_name)
+
+    project = projects[object_name]
+
+    current_hours = project.get("hours", 0)
+    target_hours = project.get("target_hours", 1)
+
+    simulated_hours = min(
+        current_hours + session_hours,
+        target_hours
+    )
+
+    after = round(
+        simulated_hours / target_hours * 100,
+        1
+    )
+
+    return round(after - before, 1)
+
+
 def estimate_remaining_nights(object_name, avg_night_hours=5):
 
     remaining = project_remaining_hours(object_name)
@@ -1333,9 +1359,15 @@ def show_tonight_recommendation(night):
     print("\n===== TOP PROJETS CE SOIR =====")
 
     for i, project in enumerate(night_projects[:3], start=1):
+        gain = portfolio_gain_if_shot(
+        project["name"],
+        session_hours=night.get("duration", 3.0)
+    )
+
         print(
             f"{i}. {project['name']} "
-            f"(score {project['final_score']:.1f})"
+            f"(score {project['final_score']:.1f}) "
+            f"gain +{gain:.1f}%"
         )
 
     print("\n===== PLAN MULTI-OBJETS =====")
