@@ -1703,7 +1703,25 @@ def show_portfolio_completion_forecast(roadmap):
         for step in roadmap
     )
 
+    active_projects = len({
+        step["project"]
+        for step in roadmap
+    })
+
+    planned_capacity = sum(
+        step.get("hours", 0)
+        for step in roadmap
+    )
+
+    coverage = (
+        planned_capacity / total_hours * 100
+        if total_hours > 0 else 0
+    )
+
+    print(f"Projets actifs : {active_projects}")
     print(f"Temps total restant : {total_hours:.1f} h")
+    print(f"Capacité future connue : {planned_capacity:.1f} h")
+    print(f"Couverture : {coverage:.1f} %")
     print(f"Nuits restantes : {len(roadmap)}")
     print(f"Fin estimée du portefeuille : {final_date}")
 
@@ -1735,16 +1753,17 @@ def show_portfolio_completion_forecast(roadmap):
         nights = len(project_steps)
 
         print(f"\n{project}")
-        print(f"  Reste : {hours:.1f} h")
+        print(f"  Temps planifié : {hours:.1f} h")
         print(f"  Début prévu : {start_date}")
         print(f"  Fin prévue : {end_date}")
         print(f"  Nuits nécessaires : {nights}")
 
-        if project_steps[-1].get("completed"):
-            print("  Statut : terminé")
-        else:
-            print("  Statut : incomplet")
+        remaining_after = project_steps[-1].get("remaining_after", 0)
 
+        if remaining_after <= 0:
+            print(" Statut : terminé")
+        else:
+            print(f" Statut : reste {remaining_after:.1f} h")
 
 def show_action_plan(
     night,
