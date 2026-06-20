@@ -728,6 +728,70 @@ def show_portfolio_completion_roadmap():
         f"{estimate_portfolio_nights()}"
     )
 
+def simulate_multi_night_portfolio_roadmap(avg_night_hours=5):
+    roadmap = portfolio_completion_roadmap()
+
+    simulated = []
+
+    current_night = 1
+
+    for project in roadmap:
+
+        remaining = project["remaining"]
+
+        while remaining > 0:
+
+            hours_this_night = min(
+                avg_night_hours,
+                remaining
+            )
+
+            simulated.append({
+                "night": current_night,
+                "project": project["name"],
+                "hours": hours_this_night,
+                "remaining_after": max(
+                    0,
+                    remaining - hours_this_night
+                ),
+                "completed":
+                    remaining - hours_this_night <= 0
+            })
+
+            remaining -= hours_this_night
+            current_night += 1
+
+    return simulated
+
+
+def show_multi_night_portfolio_roadmap(
+    avg_night_hours=5
+):
+    simulated = simulate_multi_night_portfolio_roadmap(
+        avg_night_hours
+    )
+
+    print("\n===== ROADMAP MULTI-NUITS =====")
+
+    if not simulated:
+        print(
+            "Tous les projets du portefeuille "
+            "sont déjà terminés."
+        )
+        return
+
+    for step in simulated:
+
+        print(
+            f"Nuit {step['night']} : "
+            f"{step['project']} "
+            f"({step['hours']:.1f} h)"
+        )
+
+        if step["completed"]:
+            print(
+                f"✓ {step['project']} terminé"
+            )
 
 
 def project_priority(object_name):
@@ -1534,6 +1598,7 @@ def show_roadmap(roadmap):
         print(f"Date estimée : {roadmap.get('portfolio_end')}")
 
         show_portfolio_completion_roadmap()
+        show_multi_night_portfolio_roadmap()
 
 def show_action_plan(
     night,
