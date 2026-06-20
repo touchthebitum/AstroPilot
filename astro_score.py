@@ -1686,6 +1686,68 @@ def show_roadmap(roadmap, night_capacities=None):
     night_capacities=night_capacities
 )
 
+def show_portfolio_completion_forecast(roadmap):
+
+    if not roadmap:
+        print("\nAucune prévision disponible.")
+        return
+
+    print("\n===== FIN DU PORTEFEUILLE =====")
+    print("\nDEBUG ROADMAP COMPLETION")
+    print(f"Nombre étapes = {len(roadmap)}")
+
+    for s in roadmap:
+        print(
+            s.get("night"),
+            s.get("date"),
+            s.get("project"),
+            s.get("hours")
+        )
+    last_step = roadmap[-1]
+
+    final_date = last_step.get("date", "?")
+
+    total_hours = sum(
+        step.get("hours", 0)
+        for step in roadmap
+    )
+
+    print(f"Temps total restant : {total_hours:.1f} h")
+    print(f"Nuits restantes : {len(roadmap)}")
+    print(f"Fin estimée du portefeuille : {final_date}")
+
+    print("\n===== DÉTAIL =====")
+
+    displayed = set()
+
+    for step in roadmap:
+
+        project = step["project"]
+
+        if project in displayed:
+            continue
+
+        displayed.add(project)
+
+        project_steps = [
+            s for s in roadmap
+            if s["project"] == project
+        ]
+
+        start_date = project_steps[0].get("date", "?")
+        end_date = project_steps[-1].get("date", "?")
+
+        hours = sum(
+            s.get("hours", 0)
+            for s in project_steps
+        )
+
+        print(
+            f"{project} : "
+            f"{hours:.1f} h | "
+            f"{start_date} -> {end_date}"
+        )
+
 def show_action_plan(
     night,
     night_project,
@@ -3337,7 +3399,7 @@ def get_future_night_capacities(nights, max_nights=10):
             "hours": max(0, duration),
             "score": night.get("score", 0),
         })
-        
+
     capacities.sort(
         key=lambda x: x["date"]
     )
@@ -3582,6 +3644,10 @@ elif args.mode == "tonight":
 
         show_roadmap(roadmap, night_capacities=night_capacities)
 
+        
+        dynamic_roadmap = simulate_dynamic_portfolio_roadmap(
+            night_capacities=night_capacities)
+        show_portfolio_completion_forecast(dynamic_roadmap)
         show_tonight_recommendation(top_nights[0])
 
 elif args.mode == "full":
@@ -3590,7 +3656,9 @@ elif args.mode == "full":
     show_astro_calendar()
     roadmap = simulate_portfolio_calendar(nights)
     show_roadmap(roadmap, night_capacities=night_capacities)
-
+    dynamic_roadmap = simulate_dynamic_portfolio_roadmap(
+    night_capacities=night_capacities)
+    show_portfolio_completion_forecast(dynamic_roadmap)
     if top_nights:
         show_tonight_recommendation(top_nights[0])
 
