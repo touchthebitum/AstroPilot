@@ -1610,16 +1610,21 @@ def show_tonight_recommendation(night):
 
     print("\n===== TOP PROJETS CE SOIR =====")
 
+    session_hours = night.get("duration", 3.0)
+
     for i, project in enumerate(night_projects[:3], start=1):
         gain = portfolio_gain_if_shot(
-        project["name"],
-        session_hours=night.get("duration", 3.0)
-    )
+            project["name"],
+            session_hours=session_hours
+        )
+
+        roi = gain / session_hours if session_hours > 0 else 0
 
         print(
             f"{i}. {project['name']} "
             f"(score {project['final_score']:.1f}) "
-            f"gain +{gain:.1f}%"
+            f"gain +{gain:.1f}% "
+            f"ROI {roi:.2f}/h"
         )
 
     print("\n===== PLAN MULTI-OBJETS =====")
@@ -1848,7 +1853,9 @@ def show_action_plan(
         total_done_after += min(done, target)
 
     portfolio_gain = 0
-    next_project = None
+    next_project = next_project_after(
+    night_project["name"]
+)
 
     if total_target > 0:
         portfolio_before = total_done_before / total_target * 100
@@ -1865,47 +1872,113 @@ def show_action_plan(
         f"{portfolio_before:.1f}% -> "
         f"{portfolio_after:.1f}%"
     )
-    next_project = next_project_after(
-        night_project["name"]
+
+    hours_before = max(0, total_target - total_done_before)
+    hours_after = max(0, total_target - total_done_after)
+
+    avg_night_hours = max(duration, 1)
+
+    nights_before = hours_before / avg_night_hours
+    nights_after = hours_after / avg_night_hours
+
+    print("\n===== IMPACT DE CETTE NUIT =====")
+    print(
+        f"Progression portefeuille : "
+        f"{portfolio_before:.1f}% → {portfolio_after:.1f}%"
     )
-    
-    if next_project:
 
-        print(
-            f"12. Projet suivant recommandé : "
-            f"{next_project['name']}"
-            )
+    print("\nDEBUG IMPACT")
+
+    print(f"Projet actuel : {night_project['name']}")
+    print(f"Durée session : {duration}")
+
+    print(f"Portfolio avant : {portfolio_before:.1f}")
+    print(f"Portfolio après : {portfolio_after:.1f}")
+    print(f"Gain : +{portfolio_gain:.1f}%")
+
+    print(
+        f"Temps restant : "
+        f"{hours_before:.1f} h → {hours_after:.1f} h"
+    )
+
+    print(
+        f"Nuits restantes : "
+        f"{nights_before:.1f} → {nights_after:.1f}"
+    )
+    print("\n===== POURQUOI CE CHOIX ? =====")
+
+    night_projects = recommend_project_for_night(
+        night["top_objects"],
+        available_hours=night.get("duration", 3.0)
+    )
+
+    if len(night_projects) > 1:
+        alternative = night_projects[1]
+
+        chosen_gain = portfolio_gain_if_shot(
+            night_project["name"],
+            session_hours=night.get("duration", 3.0)
+        )
+
+        alt_gain = portfolio_gain_if_shot(
+            alternative["name"],
+            session_hours=night.get("duration", 3.0)
+        )
+
+        score_gap = (
+            night_project["final_score"]
+            - alternative["final_score"]
+        )
+
+        print(f"Projet choisi : {night_project['name']}")
+        print(f"Alternative : {alternative['name']}")
+        print(f"Écart de score : +{score_gap:.1f}")
+        print(f"Gain portefeuille choisi : +{chosen_gain:.1f}%")
+        print(f"Gain portefeuille alternative : +{alt_gain:.1f}%")
+
+        if score_gap > 0:
+            print(f"Décision : privilégier {night_project['name']}")
+        else:
+            print(f"Décision : alternative compétitive")
+
+        
+        if next_project:
+
+            print(
+                f"12. Projet suivant recommandé : "
+                f"{next_project['name']}"
+                )
   
-        next_roi = project_roi(next_project["name"])
+            next_roi = project_roi(next_project["name"])
 
-        print(
-            f"ROI : {next_roi:.2f}"
-        )
-        print(
-            f"    Score : "
-            f"{next_project['score']:.1f}"
-        )
+            print(
+                f"ROI : {next_roi:.2f}"
+            )
+            print(
+                f"    Score : "
+                f"{next_project['score']:.1f}"
+            )
 
-        print(
-            f"    Temps restant : "
-            f"{next_project['remaining']:.1f} h"
-        )
-        estimated_nights = next_project["remaining"] / 3.0
+            print(
+                f"    Temps restant : "
+                f"{next_project['remaining']:.1f} h"
+            )
+            estimated_nights = next_project["remaining"] / 3.0
 
-        print(
-            f"Nuits restantes estimées : "
-            f"{estimated_nights:.1f}"
-        )
+            print(
+                f"Nuits restantes estimées : "
+                f"{estimated_nights:.1f}"
+            )
 
-        print("Pourquoi ?")
-        print(f"- Score portefeuille : {next_project['score']:.1f}")
-        print(f"- ROI : {next_roi:.2f}")
-        print(f"- Temps restant : {next_project['remaining']:.1f} h")
-        print(f"- Nuits estimées : {estimated_nights:.1f}")
-        print(
-            f"- Rang portefeuille : "
-            f"#{next_project['rank']} / {next_project['total_projects']}"
-        )
+            print("Pourquoi ?")
+            print(f"- Score portefeuille : {next_project['score']:.1f}")
+            print(f"- ROI : {next_roi:.2f}")
+            print(f"- Temps restant : {next_project['remaining']:.1f} h")
+            print(f"- Nuits estimées : {estimated_nights:.1f}")
+            print(
+                f"- Rang portefeuille : "
+                f"#{next_project['rank']} / {next_project['total_projects']}"
+            )
         print("\n=== APRÈS CETTE NUIT ===") 
 
         projects = get_projects()
