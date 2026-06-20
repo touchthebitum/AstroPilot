@@ -1267,10 +1267,14 @@ def next_project_after(current_project):
     ranking.sort(
         key=lambda x: x["score"],
         reverse=True
-    )
+)
 
-    if ranking:
-        return ranking[0]
+    for idx, p in enumerate(ranking, start=1):
+        p["rank"] = idx
+
+        if ranking:
+            ranking[0]["total_projects"] = len(ranking)
+            return ranking[0]
 
     return None
 
@@ -1560,6 +1564,11 @@ def show_action_plan(
         print(f"- ROI : {next_roi:.2f}")
         print(f"- Temps restant : {next_project['remaining']:.1f} h")
         print(f"- Nuits estimées : {estimated_nights:.1f}")
+        print(
+            f"- Rang portefeuille : "
+            f"#{next_project['rank']} / {next_project['total_projects']}"
+        )
+
 
         visible_obj = None
 
