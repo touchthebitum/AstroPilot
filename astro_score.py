@@ -1410,13 +1410,18 @@ def show_roadmap(roadmap):
     unfinished = roadmap.get("unfinished_projects", [])
 
     if unfinished:
-        print("\nProjets non planifiés :")
-    for name in unfinished:
-        remaining = project_remaining_hours(name)
-        print(f"  {name} : {remaining:.1f} h restantes")
+        portfolio_end = roadmap.get("portfolio_end")
+        remaining_hours = roadmap.get("remaining_hours", {})
 
-    print("\n===== FIN PORTEFEUILLE =====")
-    print(f"Date estimée : {roadmap.get('portfolio_end')}")
+        for name in unfinished:
+            remaining = remaining_hours.get(name, project_remaining_hours(name))
+
+            print(f"\n{name}")
+            print(f"  reste : {remaining:.1f} h")
+            print(f"  fin estimée : {portfolio_end}")
+            
+        print("\n===== FIN PORTEFEUILLE =====")
+        print(f"Date estimée : {roadmap.get('portfolio_end')}")
 
 def show_action_plan(
     night,
@@ -1473,7 +1478,7 @@ def show_action_plan(
     0,
         target_hours - (current_hours + duration)
     )
-
+    portfolio_gain = 0
     print(
         f"9. Temps restant après session : "
         f"{remaining_after:.1f} h"
@@ -1482,6 +1487,7 @@ def show_action_plan(
         print("10. Projet terminable ce soir : OUI")
     else:
         print("10. Projet terminable ce soir : NON")
+
 
     total_target = 0
     total_done_before = 0
@@ -1499,27 +1505,40 @@ def show_action_plan(
 
         total_done_after += min(done, target)
 
+    portfolio_gain = 0
+    next_project = None
+
     if total_target > 0:
         portfolio_before = total_done_before / total_target * 100
         portfolio_after = total_done_after / total_target * 100
         portfolio_gain = portfolio_after - portfolio_before
-
-    
-        print(
-            f"11. Gain portefeuille global : "
-            f"+{portfolio_gain:.1f} %"
-        )
-        next_project = next_project_after(
-            night_project["name"]
+        
+    print(
+        f"11. Gain portefeuille global : "
+        f"+{portfolio_gain:.1f} %"
     )
 
+    print(
+    f"Portefeuille : "
+    f"{portfolio_before:.1f}% -> "
+    f"{portfolio_after:.1f}%"
+)
+    next_project = next_project_after(
+        night_project["name"]
+    )
+    
     if next_project:
 
         print(
             f"12. Projet suivant recommandé : "
             f"{next_project['name']}"
             )
+  
+        next_roi = project_roi(next_project["name"])
 
+        print(
+            f"ROI : {next_roi:.2f}"
+        )
         print(
             f"    Score : "
             f"{next_project['score']:.1f}"
@@ -1950,10 +1969,29 @@ def simulate_portfolio_calendar(nights):
         if remaining > 0:
             unfinished_projects.append(name)
 
-    if unfinished_projects:
-        portfolio_end = "Au-delà des prévisions"
-    else:
-        portfolio_end = max(completion_dates.values())
+        avg_night_hours = (
+            sum(n.get("duration", 3.0) for n in nights) / len(nights)
+            if nights else 3.0
+        )
+
+        unfinished_hours = sum(
+            remaining_by_name.get(name, 0)
+            for name in unfinished_projects
+        )
+
+        extra_nights = math.ceil(unfinished_hours / avg_night_hours) if avg_night_hours > 0 else 0
+
+        if unfinished_projects and completion_dates:
+            last_known_date = max(completion_dates.values())
+            portfolio_end = (
+                datetime.strptime(last_known_date, "%Y-%m-%d")
+                + timedelta(days=extra_nights)
+            ).strftime("%Y-%m-%d")
+        elif completion_dates:
+            portfolio_end = max(completion_dates.values())
+        else:
+            portfolio_end = "Indéterminée"
+
 
     for name, date in completion_dates.items():
             print(f"{name} -> {date}")
@@ -1966,6 +2004,9 @@ def simulate_portfolio_calendar(nights):
     "portfolio_end": portfolio_end,
     "unfinished_projects": unfinished_projects,
     "remaining_hours": remaining_by_name,
+    "unfinished_hours": unfinished_hours,
+    "extra_nights": extra_nights,
+    "avg_night_hours": avg_night_hours,
     }
 
 def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_target_sep, target_altitude, bortle=4, target="deep_sky", target_object=None, goal="balanced"):

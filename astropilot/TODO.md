@@ -191,3 +191,19 @@ TODO:
 - Ajouter pondération saisonnière avancée
 - Ajouter ROI astrophotographique global
 - Ajouter recommandations multi-nuits
+
+[OK] Classement portefeuille
+[OK] Roadmap projets
+[OK] Calendrier astro simulé
+[OK] Dates de fin par projet
+[OK] Gestion projets non planifiés
+[OK] Plan de nuit basé sur portefeuille
+
+[TODO] Date de fin portefeuille complète
+[TODO] Nuits restantes estimées
+[TODO] ROI portefeuille global
+[TODO] Stratégie multi-projets optimisée
+[TODO] Décideur AstroPilot "Que faire ce soir ?"
+[TODO] Historique des sessions
+[TODO] Interface graphique
+[TODO] Application Android/iOS
