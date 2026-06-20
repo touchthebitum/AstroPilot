@@ -892,17 +892,23 @@ def show_multi_night_portfolio_roadmap(night_capacities=None, avg_night_hours=5)
         return
 
     for step in simulated:
+        date_txt = step.get("date")
 
-        print(
-            f"Nuit {step['night']} : "
-            f"{step['project']} "
-            f"({step['hours']:.1f} h)"
-        )
+        if date_txt:
+            print(
+                f"Nuit {step['night']} ({date_txt}) : "
+                f"{step['project']} "
+                f"({step['hours']:.1f} h)"
+            )
+        else:
+            print(
+                f"Nuit {step['night']} : "
+                f"{step['project']} "
+                f"({step['hours']:.1f} h)"
+            )
 
         if step["completed"]:
-            print(
-                f"✓ {step['project']} terminé"
-            )
+            print(f"✓ {step['project']} terminé")
 
 
 def project_priority(object_name):
@@ -3331,7 +3337,10 @@ def get_future_night_capacities(nights, max_nights=10):
             "hours": max(0, duration),
             "score": night.get("score", 0),
         })
-
+        
+    capacities.sort(
+        key=lambda x: x["date"]
+    )
     return capacities
 
 def best_equipment_for_object(object_name):
