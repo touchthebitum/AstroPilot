@@ -763,15 +763,120 @@ def simulate_multi_night_portfolio_roadmap(avg_night_hours=5):
 
     return simulated
 
+def simulated_portfolio_score(project):
 
-def show_multi_night_portfolio_roadmap(
-    avg_night_hours=5
-):
-    simulated = simulate_multi_night_portfolio_roadmap(
+    remaining = (
+        project["target_hours"]
+        - project["hours"]
+    )
+
+    progress = (
+        project["hours"]
+        / project["target_hours"]
+        * 100
+    )
+
+    importance = project.get(
+        "importance",
+        5
+    )
+
+    closure_bonus = 0
+
+    if remaining <= 3:
+        closure_bonus = 40
+
+    elif remaining <= 5:
+        closure_bonus = 20
+
+    return (
+        importance * 10
+        + progress * 0.5
+        + closure_bonus
+    )
+
+
+
+def simulate_dynamic_portfolio_roadmap(avg_night_hours=5):
+
+    projects = copy.deepcopy(get_projects())
+
+    simulated = []
+
+    current_night = 1
+    
+    while True:
+
+        if current_night > 50:
+                    print("STOP sécurité roadmap dynamique")
+                    break
+        active_projects = {}
+
+        for name, project in projects.items():
+
+            remaining = (
+                project["target_hours"]
+                - project["hours"]
+            )
+
+            if remaining > 0:
+                active_projects[name] = project
+        
+        if not active_projects:
+            break
+
+        best_name = None
+        best_score = -9999
+
+        for name in active_projects:
+
+            score = (
+                active_projects[name].get("importance", 5) * 10
+            )
+
+            if score > best_score:
+                best_score = score
+                best_name = name
+
+
+        project = projects[best_name]
+
+        remaining = (
+            project["target_hours"]
+            - project["hours"]
+    )
+
+        hours_this_night = min(
+            avg_night_hours,
+            remaining
+        )
+
+        project["hours"] += hours_this_night
+
+        simulated.append({
+                "night": current_night,
+                "project": best_name,
+                "score": best_score,
+                "hours": hours_this_night,
+                "remaining_after": max(
+                    0,
+                    remaining - hours_this_night
+                ),
+                "completed":
+                    remaining - hours_this_night <= 0
+            })
+
+        current_night += 1
+              
+    return simulated
+
+def show_multi_night_portfolio_roadmap(avg_night_hours=5):
+
+    simulated = simulate_dynamic_portfolio_roadmap(
         avg_night_hours
     )
 
-    print("\n===== ROADMAP MULTI-NUITS =====")
+    print("\n===== ROADMAP MULTI-NUITS DYNAMIQUE =====")
 
     if not simulated:
         print(
@@ -1198,9 +1303,6 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
         if astro_score <= 0:
             continue
         
-        
-
-        #print("DEBUG PROJECT OBJ =", catalog_key, obj)
         priority = project_priority(catalog_key)
         altitude = altitude_bonus(obj)
         season = season_bonus(obj)
@@ -1568,37 +1670,7 @@ def show_tonight_recommendation(night):
 
 def show_roadmap(roadmap):
 
-    print("\n===== FIN SIMULÈE DES PROJETS =====")
-
-    completion_dates = roadmap.get("completion_dates", {})
-    remaining_hours = roadmap.get("remaining_hours", {})
-
-    for name, date in completion_dates.items():
-
-        remaining = remaining_hours.get(name,0)
-
-        print(f"\n{name}")
-        print(f"  reste : {remaining:.1f} h")
-        print(f"  fin estimée : {date}")
-
-    unfinished = roadmap.get("unfinished_projects", [])
-
-    if unfinished:
-        portfolio_end = roadmap.get("portfolio_end")
-        remaining_hours = roadmap.get("remaining_hours", {})
-
-        for name in unfinished:
-            remaining = remaining_hours.get(name, project_remaining_hours(name))
-
-            print(f"\n{name}")
-            print(f"  reste : {remaining:.1f} h")
-            print(f"  fin estimée : {portfolio_end}")
-            
-        print("\n===== FIN PORTEFEUILLE =====")
-        print(f"Date estimée : {roadmap.get('portfolio_end')}")
-
-        show_portfolio_completion_roadmap()
-        show_multi_night_portfolio_roadmap()
+    show_multi_night_portfolio_roadmap()
 
 def show_action_plan(
     night,
@@ -2205,57 +2277,57 @@ def simulate_portfolio_calendar(nights):
             f"score={best_score:.1f}"
         )
 
-    print("\n===== DATES DE FIN SIMULÉES =====")
+    ###############################print("\n===== DATES DE FIN SIMULÉES =====")
 
-    unfinished_projects = []
+    ##############################unfinished_projects = []
 
-    for name, project in projects.items():
-        done = project.get("hours_done", project.get("hours", 0))
-        target = project.get("target_hours", 0)
-        remaining = max(0, target - done)
+    #############################for name, project in projects.items():
+        ############################done = project.get("hours_done", project.get("hours", 0))
+        ###########################target = project.get("target_hours", 0)
+        ##########################remaining = max(0, target - done)
 
-        if remaining > 0:
-            unfinished_projects.append(name)
+        #########################if remaining > 0:
+            #####################unfinished_projects.append(name)
 
-        avg_night_hours = (
-            sum(n.get("duration", 3.0) for n in nights) / len(nights)
-            if nights else 3.0
-        )
+        ########################avg_night_hours = (
+            ####################sum(n.get("duration", 3.0) for n in nights) / len(nights)
+            ###################if nights else 3.0
+        ##################)
 
-        unfinished_hours = sum(
-            remaining_by_name.get(name, 0)
-            for name in unfinished_projects
-        )
+        #################unfinished_hours = sum(
+            ################remaining_by_name.get(name, 0)
+            ###############for name in unfinished_projects
+        ##############)
 
-        extra_nights = math.ceil(unfinished_hours / avg_night_hours) if avg_night_hours > 0 else 0
+        #############extra_nights = math.ceil(unfinished_hours / avg_night_hours) if avg_night_hours > 0 else 0
 
-        if unfinished_projects and completion_dates:
-            last_known_date = max(completion_dates.values())
-            portfolio_end = (
-                datetime.strptime(last_known_date, "%Y-%m-%d")
-                + timedelta(days=extra_nights)
-            ).strftime("%Y-%m-%d")
-        elif completion_dates:
-            portfolio_end = max(completion_dates.values())
-        else:
-            portfolio_end = "Indéterminée"
+        ############if unfinished_projects and completion_dates:
+            ###########last_known_date = max(completion_dates.values())
+            ##########portfolio_end = (
+                #########datetime.strptime(last_known_date, "%Y-%m-%d")
+                ########+ timedelta(days=extra_nights)
+            #######).strftime("%Y-%m-%d")
+        ######elif completion_dates:
+            #####portfolio_end = max(completion_dates.values())
+        ####else:
+            ###portfolio_end = "Indéterminée"
 
 
-    for name, date in completion_dates.items():
-            print(f"{name} -> {date}")
+    ##for name, date in completion_dates.items():
+            #print(f"{name} -> {date}")
 
-    print("\n===== FIN PORTEFEUILLE =====")
-    print(f"Date estimée : {portfolio_end}")
+    #print("\n===== FIN PORTEFEUILLE =====")
+    #print(f"Date estimée : {portfolio_end}")
 
     return {
     "completion_dates": completion_dates,
-    "portfolio_end": portfolio_end,
-    "unfinished_projects": unfinished_projects,
-    "remaining_hours": remaining_by_name,
-    "unfinished_hours": unfinished_hours,
-    "extra_nights": extra_nights,
-    "avg_night_hours": avg_night_hours,
-    }
+    "portfolio_end": None,
+    "unfinished_projects": [],
+    "remaining_hours": {},
+    "unfinished_hours": 0,
+    "extra_nights": 0,
+    "avg_night_hours": nights,
+}
 
 def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_target_sep, target_altitude, bortle=4, target="deep_sky", target_object=None, goal="balanced"):
     penalty = 0
