@@ -1784,6 +1784,7 @@ def show_action_plan(
         print(f"1. Monter setup {best_setup['equipment']}")
 
     if best_filters:
+
         print(f"2. Charger filtre {best_filters[0]}")
 
     print(f"3. Pointer {night_project['name']}")
@@ -1886,15 +1887,6 @@ def show_action_plan(
         f"Progression portefeuille : "
         f"{portfolio_before:.1f}% → {portfolio_after:.1f}%"
     )
-
-    print("\nDEBUG IMPACT")
-
-    print(f"Projet actuel : {night_project['name']}")
-    print(f"Durée session : {duration}")
-
-    print(f"Portfolio avant : {portfolio_before:.1f}")
-    print(f"Portfolio après : {portfolio_after:.1f}")
-    print(f"Gain : +{portfolio_gain:.1f}%")
 
     print(
         f"Temps restant : "
