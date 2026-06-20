@@ -655,6 +655,80 @@ def estimate_remaining_nights(object_name, avg_night_hours=5):
 
     return max(1, round(remaining / avg_night_hours))
 
+def portfolio_completion_roadmap():
+    projects = get_projects()
+
+    roadmap = []
+
+    for name, project in projects.items():
+
+        remaining = max(
+            0,
+            project["target_hours"] - project["hours"]
+        )
+
+        if remaining <= 0:
+            continue
+
+        roadmap.append({
+            "name": name,
+            "remaining": remaining,
+            "score": portfolio_score(name)
+        })
+
+    roadmap.sort(
+        key=lambda p: p["score"],
+        reverse=True
+    )
+
+    return roadmap
+
+def show_portfolio_completion_roadmap():
+
+    roadmap = portfolio_completion_roadmap()
+
+    print("\n===== ROADMAP PORTEFEUILLE =====")
+
+    for idx, project in enumerate(roadmap, start=1):
+
+        nights = estimate_remaining_nights(
+            project["name"]
+        )
+
+        print(
+            f"\n{idx}. {project['name']}"
+        )
+
+        print(
+            f"   score : {project['score']:.1f}"
+        )
+
+        print(
+            f"   reste : {project['remaining']:.1f} h"
+        )
+
+        print(
+            f"   nuits : {nights}"
+        )
+
+    print("\n===== FIN DU PORTEFEUILLE =====")
+
+    total_hours = sum(
+        p["remaining"]
+        for p in roadmap
+    )
+
+    print(
+        f"Temps restant total : "
+        f"{total_hours:.1f} h"
+    )
+
+    print(
+        f"Nuits estimées : "
+        f"{estimate_portfolio_nights()}"
+    )
+
+
 
 def project_priority(object_name):
     projects = get_projects()
@@ -1430,7 +1504,7 @@ def show_tonight_recommendation(night):
 
 def show_roadmap(roadmap):
 
-    print("\n===== ROADMAP ASTRO =====")
+    print("\n===== FIN SIMULÈE DES PROJETS =====")
 
     completion_dates = roadmap.get("completion_dates", {})
     remaining_hours = roadmap.get("remaining_hours", {})
@@ -1458,6 +1532,8 @@ def show_roadmap(roadmap):
             
         print("\n===== FIN PORTEFEUILLE =====")
         print(f"Date estimée : {roadmap.get('portfolio_end')}")
+
+        show_portfolio_completion_roadmap()
 
 def show_action_plan(
     night,
