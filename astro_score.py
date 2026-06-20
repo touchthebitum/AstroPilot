@@ -1929,9 +1929,19 @@ def show_action_plan(
         print(f"Gain portefeuille alternative : +{alt_gain:.1f}%")
 
         if score_gap > 0:
-            print(f"Décision : privilégier {night_project['name']}")
+            print(
+                f"Décision : privilégier {night_project['name']} "
+                f"(score supérieur de {score_gap:.1f} points)"
+            )
+
+            if alt_gain > chosen_gain:
+                print(
+                    "Note : l'alternative apporte davantage de progression "
+                    "au portefeuille, mais le score global reste inférieur."
+                )
+
         else:
-            print(f"Décision : alternative compétitive")
+            print("Décision : alternative compétitive")
 
         
         if next_project:
@@ -2026,6 +2036,8 @@ def show_action_plan(
     if visible_obj:
         print(f"- Altitude : {visible_obj.get('altitude', 0):.1f}°")
         print(f"- Score ciel : {visible_obj.get('global_score', 0):.1f}")
+        print(f"\nTemps total restant : {hours_after:.1f} h")
+        print(f"Nuits restantes estimées : {nights_after:.1f}")
 
 def show_portfolio_dashboard():
     

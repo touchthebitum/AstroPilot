@@ -16,3 +16,12 @@ PRIORITÉ 3
 PRIORITÉ 4
 [ ] Interface graphique
 [ ] Android / iOS
+
+[ ] Planificateur multi-nuits intelligent
+
+- Simuler les prochaines nuits observables
+- Répartir automatiquement les projets
+- Calculer la date optimale de fin du portefeuille
+- Gérer les projets terminés
+- Gérer les fenêtres saisonnières
+- Afficher un calendrier astro prévisionnel
