@@ -25,3 +25,9 @@ PRIORITÉ 4
 - Gérer les projets terminés
 - Gérer les fenêtres saisonnières
 - Afficher un calendrier astro prévisionnel
+
+[ ] Analyse décision avancée
+    - expliquer pourquoi un projet est choisi
+    - comparer score astro vs ROI
+    - afficher coût d'opportunité
+    - afficher impact si la nuit est manquée
