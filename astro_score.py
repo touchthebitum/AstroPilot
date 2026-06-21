@@ -499,6 +499,30 @@ def estimated_sqm(bortle, moon_illumination, moon_elevation, moon_target_sep):
 
     return round(base - moon_loss, 2)
 
+
+def season_days_remaining(obj):
+    month = datetime.now(ZoneInfo(TIMEZONE)).month
+
+    name = obj.get("catalog_key") or obj.get("name")
+    season = SEASON_WINDOWS.get(name)
+
+    if not season:
+        return None
+
+    months = season.get("best_months", []) + season.get("ok_months", [])
+    if not months:
+        return None
+
+    remaining_months = [m for m in months if m >= month]
+
+    if not remaining_months:
+        return 0
+
+    last_month = max(remaining_months)
+
+    return max(0, (last_month - month + 1) * 30)
+
+
 def season_bonus(obj):
     """
     Bonus saisonnier basé sur le mois courant.
@@ -1941,6 +1965,32 @@ def show_tonight_recommendation(night):
         print(
             "Raison : décision serrée, plusieurs choix valables"
         )
+
+
+        print("\n===== RISQUE DE REPORT =====")
+
+    for project in night_projects[:3]:
+        catalog_key = project["name"]
+        obj = CATALOG.get(catalog_key, {}).copy()
+        obj["catalog_key"] = catalog_key
+
+        days_left = season_days_remaining(obj)
+
+        if days_left is None:
+            risk = "inconnu"
+            text = "fenêtre saison non définie"
+        elif days_left <= 30:
+            risk = "ÉLEVÉ"
+            text = f"fin de fenêtre estimée dans {days_left} jours"
+        elif days_left <= 60:
+            risk = "MOYEN"
+            text = f"fenêtre restante estimée : {days_left} jours"
+        else:
+            risk = "FAIBLE"
+            text = f"fenêtre restante estimée : {days_left} jours"
+
+        print(f"{project['name']} : risque {risk}")
+        print(f"  {text}")
 
 def show_roadmap(roadmap, night_capacities=None):
 
