@@ -502,7 +502,7 @@ def estimated_sqm(bortle, moon_illumination, moon_elevation, moon_target_sep):
 def season_bonus(obj):
     """
     Bonus saisonnier basé sur le mois courant.
-    Version simple mais déjà plus réaliste que l'altitude.
+    Plus fin que l'ancien système best/ok/hors saison.
     """
     month = datetime.now(ZoneInfo(TIMEZONE)).month
 
@@ -512,19 +512,27 @@ def season_bonus(obj):
     if not season:
         return 0
 
-    if month in season.get("best_months", []):
+    best_months = season.get("best_months", [])
+    ok_months = season.get("ok_months", [])
+
+    if month in best_months:
         return 15
 
-    if month in season.get("ok_months", []):
+    if month in ok_months:
         return 5
+
+    # Mois adjacent à une fenêtre correcte = faible bonus
+    adjacent_months = set()
+
+    for m in best_months + ok_months:
+        adjacent_months.add(12 if m == 1 else m - 1)
+        adjacent_months.add(1 if m == 12 else m + 1)
+
+    if month in adjacent_months:
+        return 0
 
     return -10
 
-def closure_bonus(name, available_hours=3.0):
-    remaining = project_remaining_hours(name)
-
-    if remaining is None or remaining <= 0:
-        return 0
 
     # Projet terminable cette nuit
     if remaining <= available_hours:
@@ -1194,6 +1202,20 @@ def log_project_session(object_name, session_hours):
     if remaining is not None:
         print(f"Reste : {remaining} h")
 
+def closure_bonus(name, available_hours=3.0):
+    remaining = project_remaining_hours(name)
+
+    if remaining is None or remaining <= 0:
+        return 0
+
+    if remaining <= available_hours:
+        return 20
+
+    if remaining <= available_hours * 2:
+        return 10
+
+    return 0
+
 def recommend_project():
     projects = get_projects()
 
@@ -1209,7 +1231,14 @@ def recommend_project():
 
         priority = project_priority(name)
         progress = project_progress(name)
-        completion_bonus = progress / 5
+        if progress >= 95:
+            completion_bonus = 30
+        elif progress >= 85:
+            completion_bonus = 20
+        elif progress >= 70:
+            completion_bonus = 10
+        else:
+            completion_bonus = 0
         closure = closure_bonus(name)
         season_bonus = altitude_bonus(obj)
         season_window = season_window_bonus(obj)
@@ -1331,19 +1360,39 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
         )
 
         progress = project_progress(catalog_key)
-        completion_bonus = progress / 5
+        if progress >= 95:
+            completion_bonus = 30
+        elif progress >= 85:
+            completion_bonus = 20
+        elif progress >= 70:
+            completion_bonus = 10
+        else:
+            completion_bonus = 0
         closure = closure_bonus(catalog_key, available_hours)
 
 
-        final_score = (
-            astro_score * astro_weight
-            + priority * project_weight
-            + altitude
-            + season
-            + roi * 5
+        astro_part = astro_score * astro_weight
+        project_part = priority * project_weight
+        roi_bonus = roi * 2
+
+        portfolio_bonus = (
+            project_part
+            + roi_bonus
             + closure
             + completion_bonus
         )
+
+        final_score = (
+            astro_part
+            + altitude
+            + season
+            + portfolio_bonus
+        )
+
+        # Option B : si l'objet est surtout choisi grâce au portefeuille,
+        # on limite l'avantage portefeuille.
+        if portfolio_bonus > astro_part * 0.5:
+            final_score -= portfolio_bonus * 0.3
         
         if astro_score<=0:
             final_score -= 30
@@ -1954,7 +2003,7 @@ def show_action_plan(
         priority_weighted = night_project.get("priority", 0) * project_weight
         altitude_bonus = night_project.get("altitude_bonus", 0)
         season_bonus = night_project.get("season_bonus", 0)
-        roi_bonus = night_project.get("roi", 0) * 5
+        roi_bonus = night_project.get("roi", 0) * 2
         closure_bonus = night_project.get("closure_bonus", 0)
         completion_bonus = night_project.get("completion_bonus", 0)
 
@@ -1962,12 +2011,37 @@ def show_action_plan(
         print(f"Priorité pondérée   : {priority_weighted:.1f}")
         print(f"Bonus altitude      : {altitude_bonus:+.1f}")
         print(f"Bonus saison        : {season_bonus:+.1f}")
+        setup_bonus = night_project.get("setup_score", 0)
+        print(f"Score setup         : {setup_bonus:+.1f}")
         print(f"Bonus ROI           : {roi_bonus:+.1f}")
         print(f"Bonus clôture       : {closure_bonus:+.1f}")
         print(f"Bonus complétion    : {completion_bonus:+.1f}")
 
         print("-" * 30)
         print(f"Score final calculé : {night_project['final_score']:.1f}")
+
+        alt_score_astro_weighted = alternative.get("astro_score", 0) * astro_weight
+        alt_priority_weighted = alternative.get("priority", 0) * project_weight
+        alt_setup_bonus = alternative.get("setup_score", 0)
+        alt_altitude_bonus = alternative.get("altitude_bonus", 0)
+        alt_season_bonus = alternative.get("season_bonus", 0)
+        alt_roi_bonus = alternative.get("roi", 0) * 2
+        alt_closure_bonus = alternative.get("closure_bonus", 0)
+        alt_completion_bonus = alternative.get("completion_bonus", 0)
+
+        print("\n===== DETAIL ALTERNATIVE =====")
+        print(f"Nom                  : {alternative['name']}")
+        print(f"Score astro pondéré  : {alt_score_astro_weighted:.1f}")
+        print(f"Priorité pondérée    : {alt_priority_weighted:.1f}")
+        print(f"Bonus altitude       : {alt_altitude_bonus:+.1f}")
+        print(f"Bonus saison         : {alt_season_bonus:+.1f}")
+        print(f"Score setup          : {alt_setup_bonus:+.1f}")
+        print(f"Bonus ROI            : {alt_roi_bonus:+.1f}")
+        print(f"Bonus clôture        : {alt_closure_bonus:+.1f}")
+        print(f"Bonus complétion     : {alt_completion_bonus:+.1f}")
+        print("-" * 30)
+        print(f"Score final          : {alternative.get('final_score', 0):.1f}")
+
 
         if score_gap > 0:
             print(
