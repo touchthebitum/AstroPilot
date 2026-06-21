@@ -19,7 +19,7 @@ from astropilot.catalog import CATALOG
 from astropilot.equipment_profiles import CURRENT_EQUIPMENT, get_fov
 from astropilot.equipment_profiles import equipment_match_score
 from astropilot.equipment_profiles import capture_score
-from astropilot.user_profile import (get_default_location, load_user_profile, favorite_targets, get_available_equipment, get_preferences, get_projects,)
+from astropilot.user_profile import (get_default_location, load_user_profile, favorite_targets, get_available_equipment, get_preferences, get_projects, get_decision_weights)
 from astropilot.equipment_profiles import (
     get_fov,
     set_current_equipment,
@@ -1995,8 +1995,7 @@ def show_action_plan(
         profile = load_user_profile()
         prefs = profile.get("preferences", {})
 
-        astro_weight = prefs.get("astro_weight", 0.7)
-        project_weight = prefs.get("project_weight", 0.3)
+        astro_weight, project_weight = get_decision_weights()
 
         print("\nFacteurs dominants :")
         score_astro_weighted = night_project.get("astro_score", 0) * astro_weight

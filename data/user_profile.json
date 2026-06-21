@@ -17,7 +17,8 @@
         "max_setup_changes_per_night": 1,
         "astro_weight": 0.7,
         "project_weight": 0.3,
-        "window_size": 3
+        "window_size": 3,
+        "decision_mode": "balanced"
     },
     "setups": {
 

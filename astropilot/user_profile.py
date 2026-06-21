@@ -8,6 +8,20 @@ def load_user_profile():
     with open(DATA_DIR / "user_profile.json", "r") as f:
         return json.load(f)
     
+def get_decision_weights():
+    profile = load_user_profile()
+    prefs = profile.get("preferences", {})
+
+    mode = prefs.get("decision_mode", "balanced")
+
+    if mode == "science":
+        return 0.8, 0.2
+
+    elif mode == "finisher":
+        return 0.5, 0.5
+
+    return 0.7, 0.3
+    
 def get_active_equipment():
     return load_user_profile().get("active_equipment")
 
