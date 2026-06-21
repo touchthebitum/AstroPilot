@@ -1800,6 +1800,21 @@ def show_tonight_recommendation(night):
             f"✓ ROI supérieur de {roi_gap:.2f}/h"
         )
 
+        print("\n===== SI JE RATE CETTE NUIT =====")
+
+        missed_gain = portfolio_gain_if_shot(
+            best_score["name"],
+            session_hours=session_hours
+        )
+
+        print(f"Projet recommandé : {best_score['name']}")
+        print(f"Progression perdue : -{missed_gain:.1f}%")
+
+        if best_score.get("closure_bonus", 0) > 0:
+            print("Impact : projet non terminé ce soir")
+            print("Impact : bonus clôture perdu")
+
+        print("Décision : cette nuit a une valeur forte" if missed_gain >= 10 else "Décision : impact modéré")
 
     print("\n===== PLAN MULTI-OBJETS =====")
 
@@ -1858,6 +1873,74 @@ def show_tonight_recommendation(night):
         best_setup,
         best_filters
     )
+
+    print("\n===== COÛT D'OPPORTUNITÉ =====")
+
+    print(f"Si vous photographiez {best_score['name']} :")
+    print(
+        f"+{portfolio_gain_if_shot(best_score['name'], session_hours):.1f}% portefeuille"
+    )
+
+    if best_score.get("closure_bonus", 0) > 0:
+        print("Projet terminé")
+
+    print(
+        f"ROI "
+        f"{portfolio_gain_if_shot(best_score['name'], session_hours)/session_hours:.2f}/h"
+    )
+
+    print()
+
+    print(f"Si vous photographiez {best_roi['name']} :")
+    print(
+        f"+{portfolio_gain_if_shot(best_roi['name'], session_hours):.1f}% portefeuille"
+    )
+
+    print(
+        f"ROI "
+        f"{portfolio_gain_if_shot(best_roi['name'], session_hours)/session_hours:.2f}/h"
+    )
+
+    print()
+
+    gain_diff = (
+        portfolio_gain_if_shot(best_roi['name'], session_hours)
+        - portfolio_gain_if_shot(best_score['name'], session_hours)
+    )
+
+    print(
+        f"Différence progression : {gain_diff:+.1f}%"
+    )
+
+    print(
+        f"Différence score : {score_gap:+.1f} points"
+    )
+
+    print()
+
+    if score_gap >= 30:
+        confidence = "ÉLEVÉE"
+    elif score_gap >= 10:
+        confidence = "MOYENNE"
+    else:
+        confidence = "FAIBLE"
+
+    print("Recommandation finale :")
+    print(f"Choisir {best_score['name']}")
+    print(f"Confiance : {confidence}")   
+
+    if score_gap >= 30:
+        print(
+            f"Raison : avantage score de {score_gap:.1f} points"
+        )
+    elif score_gap >= 10:
+        print(
+            f"Raison : avantage score modéré de {score_gap:.1f} points"
+        )
+    else:
+        print(
+            "Raison : décision serrée, plusieurs choix valables"
+        )
 
 def show_roadmap(roadmap, night_capacities=None):
 
