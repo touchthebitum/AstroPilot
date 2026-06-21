@@ -1042,8 +1042,13 @@ def project_roi(object_name):
         return 0
 
     importance = details["importance"]
+    progress = details["progress"]
 
-    return round(importance / remaining, 2)
+    completion_multiplier = 1 + progress / 100
+
+    roi = importance * completion_multiplier / remaining
+
+    return round(roi, 2)
 
 
 def framing_score(setup, project_name):
@@ -1943,20 +1948,26 @@ def show_action_plan(
 
         astro_weight = prefs.get("astro_weight", 0.7)
         project_weight = prefs.get("project_weight", 0.3)
-        
+
         print("\nFacteurs dominants :")
-        print(f"- Score astro pondéré : {night_project.get('astro_score', 0) * astro_weight:.1f}")
-        print(f"- Priorité pondérée   : {night_project.get('priority', 0) * project_weight:.1f}")
-        print(f"- Bonus altitude      : {night_project.get('altitude_bonus', 0):+.1f}")
-        print(f"- Bonus saison        : {night_project.get('season_bonus', 0):+.1f}")
-        print(f"- Bonus ROI           : {night_project.get('roi', 0) * 5:+.1f}")
-        print(f"- Bonus clôture       : {night_project.get('closure_bonus', 0):+.1f}")
-        print(f"- Bonus conplétion : "f"{night_project.get('completion_bonus', 0):+.1f}")
-        print(f"Projet choisi : {night_project['name']}")
-        print(f"Alternative : {alternative['name']}")
-        print(f"Écart de score : +{score_gap:.1f}")
-        print(f"Gain portefeuille choisi : +{chosen_gain:.1f}%")
-        print(f"Gain portefeuille alternative : +{alt_gain:.1f}%")
+        score_astro_weighted = night_project.get("astro_score", 0) * astro_weight
+        priority_weighted = night_project.get("priority", 0) * project_weight
+        altitude_bonus = night_project.get("altitude_bonus", 0)
+        season_bonus = night_project.get("season_bonus", 0)
+        roi_bonus = night_project.get("roi", 0) * 5
+        closure_bonus = night_project.get("closure_bonus", 0)
+        completion_bonus = night_project.get("completion_bonus", 0)
+
+        print(f"Score astro pondéré : {score_astro_weighted:.1f}")
+        print(f"Priorité pondérée   : {priority_weighted:.1f}")
+        print(f"Bonus altitude      : {altitude_bonus:+.1f}")
+        print(f"Bonus saison        : {season_bonus:+.1f}")
+        print(f"Bonus ROI           : {roi_bonus:+.1f}")
+        print(f"Bonus clôture       : {closure_bonus:+.1f}")
+        print(f"Bonus complétion    : {completion_bonus:+.1f}")
+
+        print("-" * 30)
+        print(f"Score final calculé : {night_project['final_score']:.1f}")
 
         if score_gap > 0:
             print(
