@@ -1216,6 +1216,32 @@ def closure_bonus(name, available_hours=3.0):
 
     return 0
 
+def portfolio_roadmap():
+    projects = get_projects()
+
+    roadmap = []
+
+    for name, project in projects.items():
+
+        remaining = project_remaining_hours(name)
+
+        if remaining is None or remaining <= 0:
+            continue
+
+        roi = project_roi(name)
+
+        roadmap.append({
+            "name": name,
+            "remaining": remaining,
+            "roi": roi,
+            "nights": round(remaining / 3, 1)
+        })
+
+    roadmap.sort(key=lambda x: x["roi"], reverse=True)
+
+    return roadmap
+
+
 def recommend_project():
     projects = get_projects()
 
@@ -2152,6 +2178,25 @@ def show_action_plan(
         print(f"- Score ciel : {visible_obj.get('global_score', 0):.1f}")
         print(f"\nTemps total restant : {hours_after:.1f} h")
         print(f"Nuits restantes estimées : {nights_after:.1f}")
+
+    print("\n===== ROADMAP AVANT CETTE NUIT =====")
+
+    roadmap = portfolio_roadmap()
+
+    total_remaining = 0
+
+    for i, project in enumerate(roadmap, start=1):
+
+        print(f"\n{i}. {project['name']}")
+        print(f"   Reste : {project['remaining']:.1f} h")
+        print(f"   ROI : {project['roi']:.2f}")
+        print(f"   Nuits estimées : {project['nights']:.1f}")
+
+        total_remaining += project["remaining"]
+
+    print("\n=============================")
+    print(f"Temps total restant : {total_remaining:.1f} h")
+    print(f"Nuits restantes estimées : {total_remaining / 3:.1f}")
 
 def show_portfolio_dashboard():
     
