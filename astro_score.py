@@ -1804,18 +1804,39 @@ def show_tonight_recommendation(night):
 
         roi_gap = best_roi_value - best_score_roi
 
+    progress = project_progress(best_score["name"])
+    remaining = project_remaining_hours(best_score["name"])
+
+    print("\nUrgence portefeuille :")
+
+    print(
+        f"✓ Progression actuelle : "
+        f"{progress:.1f}%"
+    )
+
+    print(
+        f"✓ Temps restant : "
+        f"{remaining:.1f} h"
+    )
+
+    if best_score.get("closure_bonus", 0) > 0:
         print(
-            f"Pourquoi {best_score['name']} ?"
+            f"✓ Bonus clôture disponible : "
+            f"+{best_score['closure_bonus']:.0f}"
         )
 
-        print(
-            f"✓ Score astro supérieur de {score_gap:.1f} points"
-        )
+    print(
+        f"Pourquoi {best_score['name']} ?"
+    )
 
-        if best_score.get("closure_bonus", 0) > 0:
-            print(
-                f"✓ Permet de terminer le projet"
-            )
+    print(
+        f"✓ Score astro supérieur de {score_gap:.1f} points"
+    )
+
+    if best_score.get("closure_bonus", 0) > 0:
+        print(
+            f"✓ Permet de terminer le projet"
+        )
 
         print("\nAlternative :")
         print(f"→ {best_roi['name']}")
@@ -1948,6 +1969,17 @@ def show_tonight_recommendation(night):
         confidence = "MOYENNE"
     else:
         confidence = "FAIBLE"
+
+    progress = project_progress(best_score["name"])
+    remaining = project_remaining_hours(best_score["name"])
+
+    print("\nUrgence portefeuille :")
+    print(f"✓ Progression actuelle : {progress:.1f}%")
+    print(f"✓ Temps restant : {remaining:.1f} h")
+
+    if best_score.get("closure_bonus", 0) > 0:
+        print(f"✓ Bonus clôture disponible : +{best_score['closure_bonus']:.0f}")
+
 
     print("Recommandation finale :")
     print(f"Choisir {best_score['name']}")
