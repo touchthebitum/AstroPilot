@@ -2179,13 +2179,16 @@ def show_action_plan(
         print(f"\nTemps total restant : {hours_after:.1f} h")
         print(f"Nuits restantes estimées : {nights_after:.1f}")
 
+    roadmap_before = portfolio_roadmap()
+    roadmap_after = []
+
     print("\n===== ROADMAP AVANT CETTE NUIT =====")
 
     roadmap = portfolio_roadmap()
 
     total_remaining = 0
 
-    for i, project in enumerate(roadmap, start=1):
+    for i, project in enumerate(roadmap_before, start=1):
 
         print(f"\n{i}. {project['name']}")
         print(f"   Reste : {project['remaining']:.1f} h")
@@ -2194,9 +2197,47 @@ def show_action_plan(
 
         total_remaining += project["remaining"]
 
+    print("\n===== ROADMAP APRÈS CETTE NUIT =====")
+
+    available_hours = night_project.get("available_hours", 3.0)
+
+    recommended_name = night_project["name"]
+
+    for project in roadmap_before:
+
+        remaining = project["remaining"]
+
+        if project["name"] == recommended_name:
+            remaining = max(
+                0,
+                remaining - available_hours
+            )
+
+        if remaining <= 0:
+            continue
+
+        roadmap_after.append({
+            "name": project["name"],
+            "remaining": remaining,
+            "roi": project["roi"],
+            "nights": remaining / available_hours
+        })
+
+    hours_after = 0
+
+    for i, project in enumerate(roadmap_after, start=1):
+        print(f"\n{i}. {project['name']}")
+        print(f"   Reste : {project['remaining']:.1f} h")
+        print(f"   ROI : {project['roi']:.2f}")
+        print(f"   Nuits estimées : {project['nights']:.1f}")
+
+        hours_after += project["remaining"]
+
+    print("\n==============================")
+    print(f"Temps total restant : {hours_after:.1f} h")
+    print(f"Nuits restantes estimées : {hours_after / available_hours:.1f}")
+
     print("\n=============================")
-    print(f"Temps total restant : {total_remaining:.1f} h")
-    print(f"Nuits restantes estimées : {total_remaining / 3:.1f}")
 
 def show_portfolio_dashboard():
     
