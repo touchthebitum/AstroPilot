@@ -638,28 +638,34 @@ def project_remaining_hours(object_name):
 
 
 def estimate_future_opportunities(project_name, days=7):
-    """
-    Estimation simplifiée du nombre de nuits favorables
-    disponibles dans les prochains jours.
-    """
 
-    remaining = project_remaining_hours(project_name)
+    project = CATALOG.get(project_name, {}).copy()
+    project["catalog_key"] = project_name
 
-    if remaining <= 3:
-        good_nights = 5
+    if not project:
+        return {
+            "good_nights": 0,
+            "risk": "INCONNU"
+        }
 
-    elif remaining <= 10:
-        good_nights = 3
+    season_days = season_days_remaining(project)
 
-    else:
-        good_nights = 2
+    if season_days is None:
+        return {
+            "good_nights": 0,
+            "risk": "INCONNU"
+        }
 
-    if good_nights >= 5:
+    good_nights = max(1, int(season_days * 0.35))
+
+    if good_nights > 50:
         risk = "FAIBLE"
-    elif good_nights >= 3:
+    elif good_nights > 20:
         risk = "MOYEN"
-    else:
+    elif good_nights > 10:
         risk = "ÉLEVÉ"
+    else:
+        risk = "CRITIQUE"
 
     return {
         "good_nights": good_nights,
