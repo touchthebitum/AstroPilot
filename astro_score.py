@@ -636,6 +636,36 @@ def project_remaining_hours(object_name):
 
     return max(0, round(target_hours - hours, 1))
 
+
+def estimate_future_opportunities(project_name, days=7):
+    """
+    Estimation simplifiée du nombre de nuits favorables
+    disponibles dans les prochains jours.
+    """
+
+    remaining = project_remaining_hours(project_name)
+
+    if remaining <= 3:
+        good_nights = 5
+
+    elif remaining <= 10:
+        good_nights = 3
+
+    else:
+        good_nights = 2
+
+    if good_nights >= 5:
+        risk = "FAIBLE"
+    elif good_nights >= 3:
+        risk = "MOYEN"
+    else:
+        risk = "ÉLEVÉ"
+
+    return {
+        "good_nights": good_nights,
+        "risk": risk
+    }
+
 def project_progress(object_name):
     projects = get_projects()
 
@@ -1981,6 +2011,18 @@ def show_tonight_recommendation(night):
         print(f"✓ Bonus clôture disponible : +{best_score['closure_bonus']:.0f}")
 
 
+    future = estimate_future_opportunities(
+    best_score["name"]
+    )
+    print(
+        f'{best_score["name"]} : risque '
+        f'{future["risk"]}'
+    )
+
+    print(
+        f'Fenêtres favorables estimées : '
+        f'{future["good_nights"]}'
+    )
     print("Recommandation finale :")
     print(f"Choisir {best_score['name']}")
     print(f"Confiance : {confidence}")   
