@@ -31,3 +31,12 @@ PRIORITÉ 4
     - comparer score astro vs ROI
     - afficher coût d'opportunité
     - afficher impact si la nuit est manquée
+
+    [ ] Analyse décision avancée
+    - expliquer le choix du projet recommandé
+    - comparer score astro vs ROI
+    - afficher coût d'opportunité
+    - afficher impact d'une nuit manquée
+    - expliquer bonus saison
+    - expliquer bonus clôture
+    - expliquer bonus progression portefeuille
