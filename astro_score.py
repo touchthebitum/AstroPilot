@@ -1325,6 +1325,11 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
             astro_score * astro_weight+ portfolio * project_weight
         )
 
+        progress = project_progress(catalog_key)
+        completion_bonus = progress / 5
+        closure = closure_bonus(catalog_key, available_hours)
+
+
         final_score = (
             astro_score * astro_weight
             + priority * project_weight
@@ -1332,6 +1337,7 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
             + season
             + roi * 5
             + closure
+            + completion_bonus
         )
         
         if astro_score<=0:
@@ -1341,12 +1347,6 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
         remaining = project_remaining_hours(catalog_key)
 
         if remaining is not None and remaining <= available_hours : final_score += 30
-
-
-        progress = project_progress(catalog_key)
-        completion_bonus = progress / 5
-        closure = closure_bonus(catalog_key)
-
 
         candidates.append({
             "name": obj["name"],
@@ -1937,28 +1937,21 @@ def show_action_plan(
         print(f"Score final alternative : {alternative['final_score']:.1f}")
         print(f"Différence finale       : {score_gap:+.1f}")
 
+
+        profile = load_user_profile()
+        prefs = profile.get("preferences", {})
+
+        astro_weight = prefs.get("astro_weight", 0.7)
+        project_weight = prefs.get("project_weight", 0.3)
+        
         print("\nFacteurs dominants :")
-
-        print(
-            f"- Score astro      : "
-            f"{night_project.get('astro_score', 0):.1f}"
-        )
-
-        print(
-            f"- Priorité projet  : "
-            f"{night_project.get('priority', 0):.1f}"
-        )
-
-        print(
-            f"- Bonus clôture    : "
-            f"{night_project.get('closure_bonus', 0):+.1f}"
-        )
-
-        print(
-            f"- Bonus conplétion : "
-            f"{night_project.get('completion_bonus', 0):+.1f}"
-        )
-
+        print(f"- Score astro pondéré : {night_project.get('astro_score', 0) * astro_weight:.1f}")
+        print(f"- Priorité pondérée   : {night_project.get('priority', 0) * project_weight:.1f}")
+        print(f"- Bonus altitude      : {night_project.get('altitude_bonus', 0):+.1f}")
+        print(f"- Bonus saison        : {night_project.get('season_bonus', 0):+.1f}")
+        print(f"- Bonus ROI           : {night_project.get('roi', 0) * 5:+.1f}")
+        print(f"- Bonus clôture       : {night_project.get('closure_bonus', 0):+.1f}")
+        print(f"- Bonus conplétion : "f"{night_project.get('completion_bonus', 0):+.1f}")
         print(f"Projet choisi : {night_project['name']}")
         print(f"Alternative : {alternative['name']}")
         print(f"Écart de score : +{score_gap:.1f}")
