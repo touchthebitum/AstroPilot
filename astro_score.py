@@ -1709,6 +1709,98 @@ def show_tonight_recommendation(night):
         gain = session_portfolio_gain(project["name"], session_hours)
         print(f"   Gain session : +{gain:.1f}%")
 
+
+    print("\n===== TOP ROI SESSION =====")
+
+    roi_projects = []
+
+    for project in night_projects[:]:
+        gain = portfolio_gain_if_shot(
+            project["name"],
+            session_hours=session_hours
+        )
+
+        roi = gain / session_hours if session_hours > 0 else 0
+
+        roi_projects.append({
+        "name": project["name"],
+        "gain": gain,
+        "roi": roi
+        })
+
+    roi_projects.sort(
+        key=lambda x: x["roi"],
+        reverse=True
+    )
+
+    for i, p in enumerate(roi_projects[:5], start=1):
+        print(
+            f"{i}. {p['name']} "
+            f"ROI {p['roi']:.2f}/h "
+            f"(gain +{p['gain']:.1f}%)"
+        )
+
+    print("\n===== ANALYSE DECISION =====")
+
+    best_score = night_projects[0]
+    best_roi = max(
+        night_projects,
+        key=lambda p: portfolio_gain_if_shot(
+            p["name"],
+            session_hours=session_hours
+        ) / session_hours
+    )
+
+    if best_score["name"] == best_roi["name"]:
+        print(
+            f"✓ {best_score['name']} est à la fois "
+            f"le meilleur score astro et le meilleur ROI."
+        )
+    else:
+        score_gap = (
+            best_score["final_score"]
+            - best_roi["final_score"]
+        )
+
+        best_roi_value = (
+            portfolio_gain_if_shot(
+                best_roi["name"],
+                session_hours=session_hours
+            )
+            / session_hours
+        )
+
+        best_score_roi = (
+            portfolio_gain_if_shot(
+                best_score["name"],
+                session_hours=session_hours
+            )
+            / session_hours
+        )
+
+        roi_gap = best_roi_value - best_score_roi
+
+        print(
+            f"Pourquoi {best_score['name']} ?"
+        )
+
+        print(
+            f"✓ Score astro supérieur de {score_gap:.1f} points"
+        )
+
+        if best_score.get("closure_bonus", 0) > 0:
+            print(
+                f"✓ Permet de terminer le projet"
+            )
+
+        print("\nAlternative :")
+        print(f"→ {best_roi['name']}")
+
+        print(
+            f"✓ ROI supérieur de {roi_gap:.2f}/h"
+        )
+
+
     print("\n===== PLAN MULTI-OBJETS =====")
 
     schedule = build_night_schedule(
@@ -2378,7 +2470,7 @@ def show_portfolio_ranking():
             priority * 0.6
             + altitude
             + season
-            + roi * 15
+            + min(roi * 5, 20)
             + completion
             + closure
         )
