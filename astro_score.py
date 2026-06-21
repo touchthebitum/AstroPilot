@@ -1705,7 +1705,9 @@ def show_tonight_recommendation(night):
             f"(score {project['final_score']:.1f}) "
             f"gain +{gain:.1f}% "
             f"ROI {roi:.2f}/h"
-        )
+            )
+        gain = session_portfolio_gain(project["name"], session_hours)
+        print(f"   Gain session : +{gain:.1f}%")
 
     print("\n===== PLAN MULTI-OBJETS =====")
 
@@ -2182,9 +2184,9 @@ def show_action_plan(
     roadmap_before = portfolio_roadmap()
     roadmap_after = []
 
-    print("\n===== ROADMAP AVANT CETTE NUIT =====")
+    available_hours = night_project.get("available_hours", 3.0)
 
-    roadmap = portfolio_roadmap()
+    print("\n===== ROADMAP AVANT CETTE NUIT =====")
 
     total_remaining = 0
 
@@ -2193,13 +2195,13 @@ def show_action_plan(
         print(f"\n{i}. {project['name']}")
         print(f"   Reste : {project['remaining']:.1f} h")
         print(f"   ROI : {project['roi']:.2f}")
+        gain = session_portfolio_gain(project["name"], available_hours)
+        print(f"   Gain projet session : +{gain:.1f}%")
         print(f"   Nuits estimées : {project['nights']:.1f}")
 
         total_remaining += project["remaining"]
 
     print("\n===== ROADMAP APRÈS CETTE NUIT =====")
-
-    available_hours = night_project.get("available_hours", 3.0)
 
     recommended_name = night_project["name"]
 
@@ -2214,23 +2216,36 @@ def show_action_plan(
             )
 
         if remaining <= 0:
+            roadmap_after.append({
+                "name": project["name"],
+                "remaining": 0,
+                "roi": project["roi"],
+                "nights": 0,
+                "completed": True
+            })
             continue
 
         roadmap_after.append({
-            "name": project["name"],
-            "remaining": remaining,
-            "roi": project["roi"],
-            "nights": remaining / available_hours
-        })
-
+                "name": project["name"],
+                "remaining": remaining,
+                "roi": project["roi"],
+                "nights": remaining / available_hours,
+                "completed": False
+            })
     hours_after = 0
 
     for i, project in enumerate(roadmap_after, start=1):
         print(f"\n{i}. {project['name']}")
+
+        if project.get("completed"):
+            print("   TERMINÉ CETTE NUIT")
+            continue
+
         print(f"   Reste : {project['remaining']:.1f} h")
         print(f"   ROI : {project['roi']:.2f}")
+        gain = session_portfolio_gain(project["name"], available_hours)
+        print(f"   Gain projet session : +{gain:.1f}%")
         print(f"   Nuits estimées : {project['nights']:.1f}")
-
         hours_after += project["remaining"]
 
     print("\n==============================")
@@ -2294,6 +2309,24 @@ def show_portfolio_dashboard():
     print(f"Nuits restantes estimées : {nights}")
     print(f"Progression globale : {global_progress:.1f}%")
 
+
+def session_portfolio_gain(name, session_hours=3.0):
+    remaining = project_remaining_hours(name)
+
+    if remaining is None or remaining <= 0:
+        return 0
+
+    gain_hours = min(session_hours, remaining)
+
+    project = get_projects().get(name, {})
+    project_total = project.get("target_hours", 0)
+
+    if project_total <= 0:
+        return 0
+
+    gain_percent = (gain_hours / project_total) * 100
+
+    return gain_percent
 
 def portfolio_score(name):
     priority = project_priority(name)
