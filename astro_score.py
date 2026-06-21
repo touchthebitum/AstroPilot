@@ -1924,19 +1924,39 @@ def show_action_plan(
 
         print("\nComparaison détaillée :")
 
+        astro_gap = (
+            night_project.get("astro_score", 0)
+            - alternative.get("astro_score", 0)
+        )
+
+        print(f"Score astro choisi      : {night_project.get('astro_score', 0):.1f}")
+        print(f"Score astro alternative : {alternative.get('astro_score', 0):.1f}")
+        print(f"Différence astro        : {astro_gap:+.1f}")
+
+        print(f"Score final choisi      : {night_project['final_score']:.1f}")
+        print(f"Score final alternative : {alternative['final_score']:.1f}")
+        print(f"Différence finale       : {score_gap:+.1f}")
+
+        print("\nFacteurs dominants :")
+
         print(
-            f"Score choisi      : "
-            f"{night_project['final_score']:.1f}"
+            f"- Score astro      : "
+            f"{night_project.get('astro_score', 0):.1f}"
         )
 
         print(
-            f"Score alternative : "
-            f"{alternative['final_score']:.1f}"
+            f"- Priorité projet  : "
+            f"{night_project.get('priority', 0):.1f}"
         )
 
         print(
-            f"Différence        : "
-            f"+{score_gap:.1f}"
+            f"- Bonus clôture    : "
+            f"{night_project.get('closure_bonus', 0):+.1f}"
+        )
+
+        print(
+            f"- Bonus conplétion : "
+            f"{night_project.get('completion_bonus', 0):+.1f}"
         )
 
         print(f"Projet choisi : {night_project['name']}")
