@@ -242,6 +242,42 @@ def fetch_weather(lat: float, lon: float) -> dict | None:
         print(f"Erreur météo : {e}")
         return None
 
+def estimate_weather_good_night_ratio(weather):
+    if not weather or "hourly" not in weather:
+        return 0.35
+
+    hourly = weather["hourly"]
+    times = hourly.get("time", [])
+    clouds = hourly.get("cloud_cover", [])
+    humidity = hourly.get("relative_humidity_2m", [])
+    wind = hourly.get("wind_speed_10m", [])
+    precipitation = hourly.get("precipitation", [])
+
+    good_hours = 0
+    total_night_hours = 0
+
+    for i, t in enumerate(times):
+        hour = int(t[11:13])
+
+        if hour < 22 and hour > 4:
+            continue
+
+        total_night_hours += 1
+
+        cloud = clouds[i] if i < len(clouds) else 100
+        hum = humidity[i] if i < len(humidity) else 100
+        wnd = wind[i] if i < len(wind) else 99
+        rain = precipitation[i] if i < len(precipitation) else 99
+
+        if cloud <= 40 and hum <= 85 and wnd <= 25 and rain == 0:
+            good_hours += 1
+
+    if total_night_hours == 0:
+        return 0.35
+
+    return max(0.05, min(0.8, good_hours / total_night_hours))
+
+
 def cloud_penalty(total, low, mid, high):
 
     weighted = (
@@ -656,7 +692,18 @@ def estimate_future_opportunities(project_name, days=7):
             "risk": "INCONNU"
         }
 
-    good_nights = max(1, int(season_days * 0.35))
+    profile = load_user_profile()
+    location = profile.get("location", {})
+    lat = location.get("latitude")
+    lon = location.get("longitude")
+
+    weather_ratio = 0.35
+
+    if lat is not None and lon is not None:
+        weather = fetch_weather(lat, lon)
+        weather_ratio = estimate_weather_good_night_ratio(weather)
+
+    good_nights = max(1, int(season_days * weather_ratio))
 
     if good_nights > 50:
         risk = "FAIBLE"
@@ -668,8 +715,9 @@ def estimate_future_opportunities(project_name, days=7):
         risk = "CRITIQUE"
 
     return {
-        "good_nights": good_nights,
-        "risk": risk
+    "good_nights": good_nights,
+    "risk": risk,
+    "weather_ratio": weather_ratio
     }
 
 def project_progress(object_name):
@@ -2029,6 +2077,10 @@ def show_tonight_recommendation(night):
         f'Fenêtres favorables estimées : '
         f'{future["good_nights"]}'
     )
+    print(
+    f'Taux météo utilisé : '
+    f'{future.get("weather_ratio", 0.35) * 100:.0f}%'
+)
     print("Recommandation finale :")
     print(f"Choisir {best_score['name']}")
     print(f"Confiance : {confidence}")   
