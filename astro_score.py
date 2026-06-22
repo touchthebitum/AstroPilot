@@ -1590,6 +1590,20 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
         roi = project_roi(catalog_key)
         closure =closure_bonus(catalog_key, available_hours)
         portfolio =portfolio_score(catalog_key)
+        future = estimate_future_opportunities(catalog_key)
+        opportunity_ratio = future.get("opportunity_ratio", 10)
+
+        if opportunity_ratio <= 1:
+            opportunity_bonus = 25
+        elif opportunity_ratio <= 2:
+            opportunity_bonus = 18
+        elif opportunity_ratio <= 5:
+            opportunity_bonus = 10
+        elif opportunity_bonus <= 10:
+            opportunity_bonus = 5
+        else:
+            opportunity_bonus = 0
+            
         decision_score = (
             astro_score * astro_weight+ portfolio * project_weight
         )
@@ -1613,6 +1627,7 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
             + roi_bonus
             + closure
             + completion_bonus
+            + opportunity_bonus
         )
     
         final_score = (
@@ -1633,6 +1648,7 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
         print(f"Urgence saison     : {season_urgency:+.1f}")
         print(f"Bonus ROI          : {roi_bonus:+.1f}")
         print(f"Bonus clôture      : {closure:+.1f}")
+        print(f"Bonus opportunité : +{opportunity_bonus:.1f}")
         print(f"Bonus complétion   : {completion_bonus:+.1f}")
         print("-" * 35)
         print(f"Score final calculé : {final_score:.1f}")
