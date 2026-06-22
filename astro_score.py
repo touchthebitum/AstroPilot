@@ -999,11 +999,11 @@ def simulated_portfolio_score(project):
 
     closure_bonus = 0
 
-    if remaining <= 3:
-        closure_bonus = 40
-
-    elif remaining <= 5:
-        closure_bonus = 20
+    if remaining > 0:
+        closure_bonus = min(
+        40,
+        round(120 / remaining, 1)
+    )
 
     return (
         importance * 10
@@ -1582,14 +1582,12 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
         )
 
         progress = project_progress(catalog_key)
-        if progress >= 95:
-            completion_bonus = 30
-        elif progress >= 85:
-            completion_bonus = 20
-        elif progress >= 70:
-            completion_bonus = 10
-        else:
-            completion_bonus = 0
+        completion_bonus = max(
+            0,
+            round((progress - 60) * 0.8, 1)
+        )
+
+        completion_bonus = min(completion_bonus, 30)
         closure = closure_bonus(catalog_key, available_hours)
 
 
