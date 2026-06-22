@@ -204,6 +204,67 @@ def safe_moonset(observer, date, tz):
     except ValueError:
         return None
 
+def forecast_night_capacities(lat, lon, days=14):
+
+    weather = fetch_weather(lat, lon)
+
+    if not weather:
+        return []
+
+    hourly = parse_hourly_weather(weather)
+
+    nights = {}
+
+    for h in hourly:
+        
+        hour = h["time"].hour
+
+        if hour < 22 and hour > 4:
+            continue
+
+        date = h["time"].date().isoformat()
+
+        cloud = h.get("cloud_cover", 100)
+        humidity = h.get("relative_humidity_2m", 100)
+
+        score = 100
+
+        score -= cloud * 0.6
+        score -= max(0, humidity - 70) * 0.3
+
+        score = max(0, score)
+
+        if score >= 80:
+            hours = 6.0
+        elif score >= 60:
+            hours = 4.0
+        elif score >= 40:
+            hours = 2.0
+        elif score >= 20:
+            hours = 1.0
+        else:
+            hours = 0.0
+
+        if date not in nights:
+            nights[date] = {
+                "date": date,
+                "quality": score,
+                "hours": hours
+            }
+        else:
+            nights[date]["quality"] = max(
+                nights[date]["quality"],
+                score
+            )
+
+            nights[date]["hours"] = max(
+                nights[date]["hours"],
+                hours
+            )
+
+    return list(nights.values())[:days]
+
+
 def fetch_weather(lat: float, lon: float) -> dict | None:
     url = "https://api.open-meteo.com/v1/forecast"
 
@@ -1778,6 +1839,10 @@ def forecast_available_hours(nights):
     total = 0
 
     for night in nights:
+        if "hours" in night:
+            total += night["hours"]
+            continue
+
         window = night.get("best_window")
 
         if not window:
@@ -1786,7 +1851,7 @@ def forecast_available_hours(nights):
         start = int(window["start"].split(":")[0])
         end = int(window["end"].split(":")[0])
 
-        total += end - start
+        total += max(0, end - start)
 
     return round(total, 1)
 
@@ -2137,7 +2202,8 @@ def show_tonight_recommendation(night):
         night,
         night_project,
         best_setup,
-        best_filters
+        best_filters,
+        night_capacities=night_capacities
     )
 
     print("\n===== COÛT D'OPPORTUNITÉ =====")
@@ -2355,8 +2421,14 @@ def show_action_plan(
     night,
     night_project,
     best_setup,
-    best_filters
+    best_filters,
+    night_capacities=None
 ):
+    
+    if night_capacities is None :
+        night_capacities = []
+    print("show_action_plan_v2")
+
     print("\n===== QUE FAIRE CE SOIR ? =====")
 
     window = night.get("best_window")
@@ -2437,7 +2509,7 @@ def show_action_plan(
     portfolio_gain = 0
     next_project = next_project_after(
     night_project["name"]
-)
+    )
 
     if total_target > 0:
         portfolio_before = total_done_before / total_target * 100
@@ -2458,7 +2530,12 @@ def show_action_plan(
     hours_before = max(0, total_target - total_done_before)
     hours_after = max(0, total_target - total_done_after)
 
-    avg_night_hours = max(duration, 1)
+    if night_capacities:
+        avg_night_hours = forecast_available_hours(night_capacities) / max(1, len(night_capacities))
+    else:
+        avg_night_hours = max(duration, 1)
+
+    print("[DEBUG AVG]", "capacities=", len(night_capacities), "avg=", avg_night_hours)
 
     nights_before = hours_before / avg_night_hours
     nights_after = hours_after / avg_night_hours
@@ -2606,7 +2683,10 @@ def show_action_plan(
                 f"    Temps restant : "
                 f"{next_project['remaining']:.1f} h"
             )
-            estimated_nights = next_project["remaining"] / 3.0
+            avg_capacity = forecast_available_hours(night_capacities) / max(1, len(night_capacities))
+
+            estimated_nights = next_project["remaining"] / max(1, avg_capacity)
+
 
             print(
                 f"Nuits restantes estimées : "
@@ -2689,6 +2769,13 @@ def show_action_plan(
 
     total_remaining = 0
 
+    avg_capacity = (
+    forecast_available_hours(night_capacities) / max(1, len(night_capacities))
+        if night_capacities
+        else 3.0
+    )
+
+
     for i, project in enumerate(roadmap_before, start=1):
 
         print(f"\n{i}. {project['name']}")
@@ -2696,7 +2783,7 @@ def show_action_plan(
         print(f"   ROI : {project['roi']:.2f}")
         gain = session_portfolio_gain(project["name"], available_hours)
         print(f"   Gain projet session : +{gain:.1f}%")
-        print(f"   Nuits estimées : {project['nights']:.1f}")
+        print(f"  Nuits estimées : {project['remaining'] / max(1, avg_capacity):.1f}")
 
         total_remaining += project["remaining"]
 
@@ -2728,7 +2815,7 @@ def show_action_plan(
                 "name": project["name"],
                 "remaining": remaining,
                 "roi": project["roi"],
-                "nights": remaining / available_hours,
+                "nights": remaining / max(1, avg_capacity),
                 "completed": False
             })
     hours_after = 0
@@ -2749,7 +2836,7 @@ def show_action_plan(
 
     print("\n==============================")
     print(f"Temps total restant : {hours_after:.1f} h")
-    print(f"Nuits restantes estimées : {hours_after / available_hours:.1f}")
+    print(f"Nuits restantes estimées : {hours_after / max(1, avg_capacity):.1f}")
 
     print("\n=============================")
 
@@ -2975,7 +3062,9 @@ def show_completion_forecast():
         print("Date de fin estimée : Au-delà des prévisions")
 
     print(f"Temps restant portefeuille : {total_remaining:.1f} h")
-    print(f"Nuits restantes estimées : {total_remaining / 2.0:.1f}")
+    avg_capacity = forecast_available_hours(best_nights) / max(1, len(best_nights))
+    print(f"Nuits restantes estimées : {total_remaining / max(1, avg_capacity):.1f}")
+
 
 def build_astro_calendar(projects, nights):
     calendar = []
@@ -4396,6 +4485,24 @@ if __name__ == "__main__":
         goal=args.goal
 )
 
+
+    print("DEBUG AVANT TEST")
+        
+    print("\n[TEST] appel forecast_night_capacities")
+    caps = forecast_night_capacities(lat, lon)
+
+    print("\n===== CAPACITES FUTURES =====")
+    print("Nombre de nuits :", len(caps))
+
+    for c in caps:
+        print(
+            c["date"],
+            f"{c['hours']} h",
+            f"qualité={c['quality']:.0f}"
+        )
+    
+
+
 if nights is None:
     print("ERREUR: forecast_astro a retourné None")
     exit()
@@ -4403,27 +4510,27 @@ if nights is None:
 
 top_nights = sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
 
-night_capacities = get_future_night_capacities(nights)
+night_capacities = forecast_night_capacities(lat, lon)
+
+print("\nANCIEN SYSTEME")
+print(night_capacities)
+
+print("\nNOUVEAU SYSTEME")
+print(forecast_night_capacities(lat, lon))
 
 print("\n===== CAPACITÉ À VENIR =====")
 
-for night in top_nights:
+total_capacity = sum(c["hours"] for c in night_capacities)
 
-    window = night.get("best_window")
+for c in night_capacities:
+    print(f"{c['date']} : {c['hours']:.1f} h qualité={c['quality']:.0f}")
 
-    if window:
-        start = int(window["start"].split(":")[0])
-        end = int(window["end"].split(":")[0])
-        duration = end - start
-    else:
-        duration = 0
+print(f"Total prévisionnel : {total_capacity:.1f} h")
 
-    print(f"{night['date']} : {duration:.1f} h")
-
-    print(
-        f"Total prévisionnel : "
-        f"{forecast_available_hours(top_nights):.1f} h"
-    )
+####print(
+    ###f"Total prévisionnel : "
+    ##f"{forecast_available_hours(top_nights):.1f} h"
+#)
 
 
 ##for i, night in enumerate(top_nights, 1):
@@ -4488,8 +4595,4 @@ elif args.mode == "full":
     if top_nights:
         show_tonight_recommendation(top_nights[0])
 
-
-
-    
-    
     
