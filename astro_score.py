@@ -1058,7 +1058,24 @@ def simulate_dynamic_portfolio_roadmap(night_capacities=None, avg_night_hours=5)
         best_score = -9999
 
         for name, project in active_projects.items():
-            score = simulated_portfolio_score(project)
+
+            future = estimate_future_opportunities(name)
+            base_score =simulated_portfolio_score(project)
+
+            ratio = future.get("opportunity_ratio", 10)
+
+            if ratio <= 1:
+                opportunity_bonus = 25
+            elif ratio <= 2:
+                opportunity_bonus = 18
+            elif ratio <= 5:
+                opportunity_bonus = 10
+            elif ratio <= 10:
+                opportunity_bonus = 5
+            else:
+                opportunity_bonus = 0
+
+            score = base_score + opportunity_bonus
 
             if score > best_score:
                 best_score = score
@@ -1603,7 +1620,7 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
             opportunity_bonus = 5
         else:
             opportunity_bonus = 0
-            
+
         decision_score = (
             astro_score * astro_weight+ portfolio * project_weight
         )
