@@ -40,3 +40,25 @@ PRIORITÉ 4
     - expliquer bonus saison
     - expliquer bonus clôture
     - expliquer bonus progression portefeuille
+
+
+[ ] Planification multi-nuits (3 à 10 nuits)
+
+Objectif :
+Construire une stratégie optimale de progression du portefeuille.
+
+Exemple :
+
+Nuit 1 : M31
+Nuit 2 : Rosette
+Nuit 3 : Rosette
+Nuit 4 : IC1396
+Nuit 5 : IC1396
+
+Afficher :
+
+- progression portefeuille actuelle
+- progression projet par projet
+- temps restant
+- date estimée de fin
+- gain portefeuille attendu
