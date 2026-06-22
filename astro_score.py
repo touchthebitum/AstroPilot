@@ -747,20 +747,36 @@ def estimate_future_opportunities(project_name, days=7):
 
     good_nights = max(1, int(season_days * weather_ratio))
 
-    if good_nights > 50:
-        risk = "FAIBLE"
-    elif good_nights > 20:
-        risk = "MOYEN"
-    elif good_nights > 10:
-        risk = "ÉLEVÉ"
-    else:
+    remaining = project_remaining_hours(project_name)
+
+    if remaining is None:
+        remaining = 10
+
+    needed_nights = max(
+        1,
+        math.ceil(remaining / 3)
+    )
+
+    opportunity_ratio = round(
+        good_nights / needed_nights,
+        1
+    )
+    if good_nights == 0:
         risk = "CRITIQUE"
+    elif good_nights <= 2:
+        risk = "ÉLEVÉ"
+    elif opportunity_ratio > 5:
+        risk = "FAIBLE"
+    else:
+        risk = "MOYEN"
 
     return {
-    "good_nights": good_nights,
-    "risk": risk,
-    "weather_ratio": weather_ratio
-    }
+        "good_nights": good_nights,
+        "risk": risk,
+        "weather_ratio": weather_ratio,
+        "needed_nights": needed_nights,
+        "opportunity_ratio": opportunity_ratio,
+        }
 
 def marginal_gain_factor(progress):
     """
@@ -2177,6 +2193,10 @@ def show_tonight_recommendation(night):
         f'{future["good_nights"]}'
     )
     print(
+    f"Ratio opportunité : "
+    f"{future['opportunity_ratio']:.1f}"
+)
+    print(
     f'Taux météo utilisé : '
     f'{future.get("weather_ratio", 0.35) * 100:.0f}%'
 )
@@ -2207,18 +2227,19 @@ def show_tonight_recommendation(night):
 
         days_left = season_days_remaining(obj)
 
-        if days_left is None:
-            risk = "inconnu"
-            text = "fenêtre saison non définie"
-        elif days_left <= 30:
-            risk = "ÉLEVÉ"
+        future = estimate_future_opportunities(catalog_key)
+
+        risk = future["risk"]
+
+        if future["risk"] == "CRITIQUE":
             text = f"fin de fenêtre estimée dans {days_left} jours"
-        elif days_left <= 60:
-            risk = "MOYEN"
-            text = f"fenêtre restante estimée : {days_left} jours"
+
         else:
-            risk = "FAIBLE"
-            text = f"fenêtre restante estimée : {days_left} jours"
+            text = (
+                f"fenêtre restante estimée : "
+                f"{future['good_nights']} nuits favorables "
+                f"(ratio {future['opportunity_ratio']:.1f})"
+            )
 
         print(f"{project['name']} : risque {risk}")
         print(f"  {text}")
