@@ -537,7 +537,8 @@ def estimated_sqm(bortle, moon_illumination, moon_elevation, moon_target_sep):
 
 
 def season_days_remaining(obj):
-    month = datetime.now(ZoneInfo(TIMEZONE)).month
+    today = datetime.now(ZoneInfo(TIMEZONE)).date()
+    current_month = today.month
 
     name = obj.get("catalog_key") or obj.get("name")
     season = SEASON_WINDOWS.get(name)
@@ -546,17 +547,32 @@ def season_days_remaining(obj):
         return None
 
     months = season.get("best_months", []) + season.get("ok_months", [])
+
     if not months:
         return None
 
-    remaining_months = [m for m in months if m >= month]
-
-    if not remaining_months:
+    if current_month not in months:
         return 0
 
-    last_month = max(remaining_months)
+    future_months = [m for m in months if m >= current_month]
 
-    return max(0, (last_month - month + 1) * 30)
+    if future_months:
+        last_month = max(future_months)
+    else:
+        last_month = max(months)
+
+    year = today.year
+
+    if last_month < current_month:
+        year += 1
+
+    if last_month == 12:
+        season_end = datetime(year + 1, 1, 1).date()
+    else:
+        season_end = datetime(year, last_month + 1, 1).date()
+
+    return max(0, (season_end - today).days)
+
 
 
 def season_bonus(obj):
@@ -601,6 +617,32 @@ def season_bonus(obj):
     # Projet terminable en environ deux nuits
     if remaining <= available_hours * 2:
         return 10
+
+    return 0
+
+
+def season_urgency_bonus(obj):
+    days = season_days_remaining(obj)
+
+    name = obj.get("catalog_key") or obj.get("name")
+    
+    if days is None:
+        return 0
+
+    if days <= 0:
+        return 0
+
+    if days <= 30:
+        return 25
+
+    if days <= 60:
+        return 15
+
+    if days <= 90:
+        return 8
+
+    if days <= 150:
+        return 3
 
     return 0
 
@@ -720,6 +762,29 @@ def estimate_future_opportunities(project_name, days=7):
     "weather_ratio": weather_ratio
     }
 
+def marginal_gain_factor(progress):
+    """
+    Pondère la valeur de la prochaine session selon l'avancement du projet.
+    Début de projet : chaque heure structure beaucoup le projet.
+    Fin de projet : les heures restantes servent surtout à clôturer.
+    """
+
+    if progress >= 95:
+        return 0.5
+
+    elif progress >= 80:
+        return 0.8
+
+    elif progress >= 50:
+        return 1.0
+
+    elif progress >= 20:
+        return 1.2
+
+    else:
+        return 1.4
+
+
 def project_progress(object_name):
     projects = get_projects()
 
@@ -743,6 +808,7 @@ def portfolio_gain_if_shot(object_name, session_hours=3.0):
         return 0
 
     before = project_progress(object_name)
+    marginal_factor = marginal_gain_factor(before)
 
     project = projects[object_name]
 
@@ -759,7 +825,11 @@ def portfolio_gain_if_shot(object_name, session_hours=3.0):
         1
     )
 
-    return round(after - before, 1)
+    gain = after - before
+
+    gain *= marginal_factor
+
+    return round(gain, 1)
 
 
 def estimate_remaining_nights(object_name, avg_night_hours=5):
@@ -1092,19 +1162,6 @@ def season_remaining_months(obj):
 
     return max(1, 12 - diff)
 
-def season_urgency_bonus(obj):
-    months_left = season_remaining_months(obj)
-
-    if months_left <= 1:
-        return 30
-
-    if months_left <= 2:
-        return 20
-
-    if months_left <= 3:
-        return 10
-
-    return 0
 
 def season_window_bonus(obj):
     months = season_remaining_months(obj)
@@ -1486,6 +1543,7 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
         priority = project_priority(catalog_key)
         altitude = altitude_bonus(obj)
         season = season_bonus(obj)
+        season_urgency = season_urgency_bonus (obj)
         roi = project_roi(catalog_key)
         closure =closure_bonus(catalog_key, available_hours)
         portfolio =portfolio_score(catalog_key)
@@ -1515,13 +1573,29 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
             + closure
             + completion_bonus
         )
-
+    
         final_score = (
             astro_part
             + altitude
             + season
+            + season_urgency
             + portfolio_bonus
         )
+
+        print("\n===== DETAIL SCORE =====")
+        print(f"Objet              : {catalog_key}")
+        print(f"Score astro brut   : {astro_score:.1f}")
+        print(f"Score astro pondéré: {astro_part:.1f}")
+        print(f"Priorité pondérée  : {project_part:.1f}")
+        print(f"Bonus altitude     : {altitude:+.1f}")
+        print(f"Bonus saison       : {season:+.1f}")
+        print(f"Urgence saison     : {season_urgency:+.1f}")
+        print(f"Bonus ROI          : {roi_bonus:+.1f}")
+        print(f"Bonus clôture      : {closure:+.1f}")
+        print(f"Bonus complétion   : {completion_bonus:+.1f}")
+        print("-" * 35)
+        print(f"Score final calculé : {final_score:.1f}")
+        print()
 
         # Option B : si l'objet est surtout choisi grâce au portefeuille,
         # on limite l'avantage portefeuille.
