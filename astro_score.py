@@ -1403,13 +1403,10 @@ def closure_bonus(name, available_hours=3.0):
     if remaining is None or remaining <= 0:
         return 0
 
-    if remaining <= available_hours:
-        return 20
-
-    if remaining <= available_hours * 2:
-        return 10
-
-    return 0
+    return min(
+        20,
+        round((60 / remaining), 1)
+    )
 
 def portfolio_roadmap():
     projects = get_projects()
