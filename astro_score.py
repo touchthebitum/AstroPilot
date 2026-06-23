@@ -1260,7 +1260,7 @@ def season_bonus(obj):
         return 5
     return 0
 
-def altitude_bonus(obj):
+def urgency_bonus(obj):
 
     altitude = obj.get("altitude", 0)
 
@@ -1552,7 +1552,7 @@ def recommend_project():
         else:
             completion_bonus = 0
         closure = closure_bonus(name)
-        season_bonus = altitude_bonus(obj)
+        season_bonus = urgency_bonus(obj)
         season_window = season_window_bonus(obj)
         urgency = season_urgency_bonus(obj)
         roi = project_roi(name)
@@ -1662,7 +1662,7 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
             continue
         
         priority = project_priority(catalog_key)
-        altitude = altitude_bonus(obj)
+        altitude = urgency_bonus(obj)
         season = season_bonus(obj)
         season_urgency = season_urgency_bonus (obj)
         roi = project_roi(catalog_key)
@@ -1673,7 +1673,7 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
 
         opportunity_bonus = max(
             0,
-            min(30, round(30 / max(opportunity_ratio, 0.1), 1))
+            min(15, round(15 / max(opportunity_ratio, 0.1), 1))
         )
 
         decision_score = (
@@ -1692,8 +1692,10 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
 
         astro_part = astro_score * astro_weight
         project_part = priority * project_weight
-        roi_bonus = roi * 2
 
+        roi_bonus = min(15, roi * 2)
+
+       
         portfolio_bonus = (
             project_part
             + roi_bonus
@@ -1709,6 +1711,11 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
             + season_urgency
             + portfolio_bonus
         )
+
+
+        print(f"[FINAL DEBUG] {catalog_key} astro_part={astro_part:.1f} project_part={project_part:.1f} roi_bonus={roi_bonus:.1f} closure={closure:.1f} completion={completion_bonus:.1f} opportunity={opportunity_bonus:.1f} final={final_score:.1f}")
+
+
 
         print("\n===== DETAIL SCORE =====")
         print(f"Objet              : {catalog_key}")
@@ -2978,7 +2985,7 @@ def portfolio_score(name):
 
     obj = CATALOG.get(name, {})
 
-    altitude = altitude_bonus(obj)
+    urgency = urgency_bonus(obj)
     season = season_window_bonus(obj)
     roi = project_roi(name)
 
@@ -2987,11 +2994,20 @@ def portfolio_score(name):
 
     closure = closure_bonus(name)
 
+    if name in ["M31", "Rosette", "IC1396"]:
+        print(f"\n===== DETAIL SCORE {name} =====")
+        print(f"Priorité : {priority}")
+        print(f"Urgence : {urgency}")
+        print(f"Saison : {season}")
+        print(f"ROI : {roi}")
+        print(f"Complétion : {completion}")
+        print(f"Clôture : {closure}")
+
     return (
         priority * 0.6
-        + altitude
+        + urgency
         + season
-        + roi * 15
+        + roi * 3
         + completion
         + closure
     )
@@ -3012,7 +3028,7 @@ def show_portfolio_ranking():
 
         obj = CATALOG.get(name, {})
 
-        altitude = altitude_bonus(obj)
+        altitude = urgency_bonus(obj)
         season = season_window_bonus(obj)
         roi = project_roi(name)
 
