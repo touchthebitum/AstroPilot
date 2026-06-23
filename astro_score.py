@@ -2535,8 +2535,6 @@ def show_action_plan(
     else:
         avg_night_hours = max(duration, 1)
 
-    print("[DEBUG AVG]", "capacities=", len(night_capacities), "avg=", avg_night_hours)
-
     nights_before = hours_before / avg_night_hours
     nights_after = hours_after / avg_night_hours
 
@@ -4484,9 +4482,6 @@ if __name__ == "__main__":
         equipment=args.equipment,
         goal=args.goal
 )
-
-
-    print("DEBUG AVANT TEST")
         
     print("\n[TEST] appel forecast_night_capacities")
     caps = forecast_night_capacities(lat, lon)
