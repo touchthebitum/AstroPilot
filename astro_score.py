@@ -1498,8 +1498,8 @@ def closure_bonus(name, available_hours=3.0):
         return 0
 
     return min(
-        20,
-        round((60 / remaining), 1)
+        10,
+        round((30 / remaining), 1)
     )
 
 def portfolio_roadmap():
