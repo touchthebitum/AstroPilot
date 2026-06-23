@@ -909,14 +909,19 @@ def portfolio_gain_if_shot(object_name, session_hours=3.0):
     return round(gain, 1)
 
 
-def estimate_remaining_nights(object_name, avg_night_hours=5):
+def estimate_remaining_nights(hours_remaining, nights=None):
+    if hours_remaining is None:
+        return 0
 
-    remaining = project_remaining_hours(object_name)
+    if isinstance(hours_remaining, str):
+        hours_remaining = project_remaining_hours(hours_remaining)
 
-    if remaining is None:
-        return None
+    if hours_remaining is None:
+        return 0
 
-    return max(1, round(remaining / avg_night_hours))
+    avg_capacity = average_night_capacity(nights) if nights else 3.0
+
+    return hours_remaining / max(1, avg_capacity)
 
 def evaluate_project_session(project, session_hours):
     remaining_before = project_remaining_hours(project["catalog_key"])
@@ -2457,6 +2462,15 @@ def build_dashboard_data(
         "average_night_capacity": round(avg_capacity, 1),
     }
 
+def average_night_capacity(nights):
+    if not nights:
+        return 1
+
+    return (
+        forecast_available_hours(nights)
+        / max(1, len(nights))
+    )
+
 def show_action_plan(
     night,
     night_project,
@@ -2475,9 +2489,6 @@ def show_action_plan(
     best_filters,
     night_capacities=night_capacities
 )
-
-    print("\n===== DASHBOARD DATA =====")
-    print(dashboard_data)
 
     print("\n===== QUE FAIRE CE SOIR ? =====")
 
@@ -2731,7 +2742,7 @@ def show_action_plan(
                 f"    Temps restant : "
                 f"{next_project['remaining']:.1f} h"
             )
-            avg_capacity = forecast_available_hours(night_capacities) / max(1, len(night_capacities))
+            avg_capacity = average_night_capacity(night_capacities)
 
             estimated_nights = next_project["remaining"] / max(1, avg_capacity)
 
@@ -2863,7 +2874,7 @@ def show_action_plan(
                 "name": project["name"],
                 "remaining": remaining,
                 "roi": project["roi"],
-                "nights": remaining / max(1, avg_capacity),
+                "nights": estimate_remaining_nights(remaining, night_capacities),
                 "completed": False
             })
     hours_after = 0
@@ -3110,7 +3121,7 @@ def show_completion_forecast():
         print("Date de fin estimée : Au-delà des prévisions")
 
     print(f"Temps restant portefeuille : {total_remaining:.1f} h")
-    avg_capacity = forecast_available_hours(best_nights) / max(1, len(best_nights))
+    avg_capacity = averaage_night_capacity(best_nights)
     print(f"Nuits restantes estimées : {total_remaining / max(1, avg_capacity):.1f}")
 
 
