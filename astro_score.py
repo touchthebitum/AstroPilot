@@ -41,6 +41,9 @@ warnings.filterwarnings(
     "ignore",
     category=NonRotationTransformationWarning
 )
+
+DEBUG_PORTFOLIO = False
+
 TIMEZONE = "Europe/Zurich"
 
 TARGET = "deep_sky"
@@ -1729,11 +1732,12 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
             + portfolio_bonus
         )
 
-
+    if DEBUG_PORTFOLIO :
+        
         print(f"[FINAL DEBUG] {catalog_key} astro_part={astro_part:.1f} project_part={project_part:.1f} roi_bonus={roi_bonus:.1f} closure={closure:.1f} completion={completion_bonus:.1f} opportunity={opportunity_bonus:.1f} final={final_score:.1f}")
 
 
-
+    if DEBUG_PORTFOLIO :
         print("\n===== DETAIL SCORE =====")
         print(f"Objet              : {catalog_key}")
         print(f"Score astro brut   : {astro_score:.1f}")
@@ -1748,7 +1752,7 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
         print(f"Bonus complétion   : {completion_bonus:+.1f}")
         print("-" * 35)
         print(f"Score final calculé : {final_score:.1f}")
-        print(f"regret : {regret_bonus:.1f}")
+        print(f"Bonus_regret : {regret_bonus:.1f}")
         print()
 
         # Option B : si l'objet est surtout choisi grâce au portefeuille,
@@ -3012,7 +3016,7 @@ def portfolio_score(name):
 
     closure = closure_bonus(name)
 
-    if name in ["M31", "Rosette", "IC1396"]:
+    if DEBUG_PORTFOLIO and name in ["M31", "Rosette", "IC1396"]:
         print(f"\n===== DETAIL SCORE {name} =====")
         print(f"Priorité : {priority}")
         print(f"Urgence : {urgency}")
