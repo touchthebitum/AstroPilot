@@ -839,6 +839,19 @@ def estimate_future_opportunities(project_name, days=7):
         "opportunity_ratio": opportunity_ratio,
         }
 
+def regret_score(project_name):
+    future = estimate_future_opportunities(project_name)
+
+    good_nights = max(1, future.get("good_nights", 1))
+    remaining = project_remaining_hours(project_name)
+
+    if remaining is None or remaining <= 0:
+        return 0
+
+    regret = remaining / good_nights
+
+    return round(min(10, regret), 1)
+
 def marginal_gain_factor(progress):
     """
     Pondère la valeur de la prochaine session selon l'avancement du projet.
@@ -1666,8 +1679,8 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
         season = season_bonus(obj)
         season_urgency = season_urgency_bonus (obj)
         roi = project_roi(catalog_key)
-        closure =closure_bonus(catalog_key, available_hours)
-        portfolio =portfolio_score(catalog_key)
+        closure = closure_bonus(catalog_key, available_hours)
+        portfolio = portfolio_score(catalog_key)
         future = estimate_future_opportunities(catalog_key)
         opportunity_ratio = future.get("opportunity_ratio", 10)
 
@@ -1675,6 +1688,9 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
             0,
             min(15, round(15 / max(opportunity_ratio, 0.1), 1))
         )
+
+        regret = regret_score(catalog_key)
+        regret_bonus = regret * 3
 
         decision_score = (
             astro_score * astro_weight+ portfolio * project_weight
@@ -1702,6 +1718,7 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
             + closure
             + completion_bonus
             + opportunity_bonus
+            + regret_bonus
         )
     
         final_score = (
@@ -1731,6 +1748,7 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
         print(f"Bonus complétion   : {completion_bonus:+.1f}")
         print("-" * 35)
         print(f"Score final calculé : {final_score:.1f}")
+        print(f"regret : {regret_bonus:.1f}")
         print()
 
         # Option B : si l'objet est surtout choisi grâce au portefeuille,
