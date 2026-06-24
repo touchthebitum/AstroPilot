@@ -1255,8 +1255,18 @@ def project_priority(object_name):
     completion = hours / target
     remaining = max(0, target - hours)
 
-    start_bonus = 15 if completion == 0 else 0
-    completion_bonus = completion * 30
+    if completion < 0.20:
+        completion_bonus = 0
+    elif completion < 0.50:
+        completion_bonus = 3
+    elif completion < 0.75:
+        completion_bonus = 7
+    elif completion < 0.90:
+        completion_bonus = 12
+    else:
+        completion_bonus = 20
+
+    start_bonus = 0
     remaining_pressure = min(remaining, 20)
 
     base_priority = start_bonus + completion_bonus + remaining_pressure
