@@ -62,7 +62,7 @@
         "M31": {
             "hours": 0,
             "target_hours": 20,
-            "importance": 10
+            "importance": 8
         },
         "Rosette": {
             "hours": 0,

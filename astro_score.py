@@ -270,6 +270,7 @@ def forecast_night_capacities(lat, lon, days=14):
 
 def fetch_weather(lat: float, lon: float) -> dict | None:
     url = "https://api.open-meteo.com/v1/forecast"
+    #url = "https://api.open-meteo.com_BUG/v1/forecast"
 
     params = {
         "latitude": lat,
@@ -290,7 +291,7 @@ def fetch_weather(lat: float, lon: float) -> dict | None:
     }
 
     try:
-        response = requests.get(url, params=params, timeout=5)
+        response = requests.get(url, params=params, timeout=15)
         response.raise_for_status()
         return response.json()
 
@@ -303,8 +304,11 @@ def fetch_weather(lat: float, lon: float) -> dict | None:
         return None
 
     except Exception as e:
-        print(f"Erreur météo : {e}")
-        return None
+        print("Prévisions météo indisponibles.")
+    if DEBUG_PORTFOLIO:
+        print(f"[DEBUG météo] {repr(e)}")
+    return None
+
 
 def estimate_weather_good_night_ratio(weather):
     if not weather or "hourly" not in weather:
@@ -1525,10 +1529,18 @@ def closure_bonus(name, available_hours=3.0):
     if remaining is None or remaining <= 0:
         return 0
 
-    return min(
-        10,
-        round((30 / remaining), 1)
-    )
+    # Vrai bonus de clôture uniquement si le projet peut être fini ce soir
+    if remaining <= available_hours:
+        return 15
+
+    # Petit bonus si le projet est proche de la fin
+    if remaining <= available_hours * 2:
+        return 6
+
+    if remaining <= available_hours * 3:
+        return 3
+
+    return 0
 
 def diversification_bonus(name):
     remaining = project_remaining_hours(name)
@@ -2264,8 +2276,14 @@ def show_tonight_recommendation(night):
     if window:
         print(f"Fenêtre optimale : {window['start']} → {window['end']}")
 
-    print(f"Action recommandée : terminer {night_project['name']}")
+    remaining_action = project_remaining_hours(night_project["name"])
 
+    if remaining_action is not None and remaining_action <= session_hours:
+        action = "terminer"
+    else:
+        action = "poursuivre"
+
+    print(f"Action recommandée : {action} {night_project['name']}")
     print(f"Bonus saison : +{night_project.get('season_bonus', 0):.1f}")
     print(f"ROI projet : {night_project.get('roi', 0):.2f}")
     print(f"Bonus clôture : +{night_project.get('closure_bonus', 0):.1f}")
@@ -4172,8 +4190,9 @@ def forecast_astro(
         weather = None
 
     if weather is None:
-        print("Prévisions météo indisponibles, utilisation météo fallback.")
-        rows = fake_clear_weather()
+        print("ERREUR : prévisions météo indisponibles.")
+        print("Recommandation météo réelle impossible.")
+        return []
     else:
         rows = parse_hourly_weather(weather)
 
