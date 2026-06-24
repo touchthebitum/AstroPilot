@@ -1255,10 +1255,12 @@ def project_priority(object_name):
     completion = hours / target
     remaining = max(0, target - hours)
 
-    progress_score = (1 - completion) * 50
-    remaining_score = min(remaining, 20)
+    start_bonus = 15 if completion == 0 else 0
+    completion_bonus = completion * 30
+    remaining_pressure = min(remaining, 20)
 
-    base_priority = progress_score + remaining_score
+    base_priority = start_bonus + completion_bonus + remaining_pressure
+
     return round(base_priority * (importance / 5), 1)
 
 def season_bonus(obj):
@@ -1518,6 +1520,30 @@ def closure_bonus(name, available_hours=3.0):
         round((30 / remaining), 1)
     )
 
+def diversification_bonus(name):
+    remaining = project_remaining_hours(name)
+    project = get_projects().get(name, {})
+
+    target = project.get("target_hours", 0)
+    hours = project.get("hours", 0)
+
+    if target <= 0:
+        return 0
+
+    progress = hours / target * 100
+
+    if progress <= 0:
+        return 12
+
+    if progress < 20:
+        return 8
+
+    if progress < 50:
+        return 4
+
+    return 0
+
+
 def portfolio_roadmap():
     projects = get_projects()
 
@@ -1586,6 +1612,7 @@ def recommend_project():
            name,
            min(2.0, remaining) 
         )
+
         candidates.append({
             "name": name,
             "remaining": remaining,
@@ -1626,48 +1653,17 @@ def recommend_project():
 
     return candidates[0]
 
-def recommend_project_for_night (top_objects, available_hours=3.0):
-
+def recommend_project_for_night(top_objects, available_hours=3.0):
     profile = load_user_profile()
 
-    astro_weight = profile["preferences"].get(
-        "astro_weight", 0.7
-    )
-
-    project_weight = profile["preferences"].get(
-        "project_weight", 0.3
-    )
-
-    candidates = []
+    astro_weight = profile["preferences"].get("astro_weight", 0.7)
+    project_weight = profile["preferences"].get("project_weight", 0.3)
 
     projects = get_projects()
-
-    #################project_objects = []
-
-    ################for name in projects:
-        ###############obj = CATALOG.get(name)
-        ##############if obj:
-            #############project_objects.append({
-                ############"name": obj.get("name", name),
-                ###########"catalog_key": name,
-                ##########"score": 0,
-                #########"altitude": obj.get("altitude", 0),
-                ########"moon_sep": 0,
-                #######"sqm": 0,
-                ######"moon_score": 0,
-                #####"frame_bonus": 0,
-                ####"project_bonus": 0,
-                ###"remaining_hours": project_remaining_hours(name),
-                ##"priority_bonus": project_priority(name),
-            #})
-
-    existing_keys = {
-        obj.get("catalog_key", obj.get("name"))
-        for obj in top_objects
-    }
+    candidates = []
 
     for obj in top_objects:
-        catalog_key = obj.get("catalog_key", obj["name"])
+        catalog_key = obj.get("catalog_key", obj.get("name"))
 
         if catalog_key not in projects:
             continue
@@ -1676,45 +1672,42 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
 
         if astro_score <= 0:
             continue
-        
+
         priority = project_priority(catalog_key)
         altitude = urgency_bonus(obj)
         season = season_bonus(obj)
-        season_urgency = season_urgency_bonus (obj)
+        season_urgency = season_urgency_bonus(obj)
         roi = project_roi(catalog_key)
+
+        completion_bonus = marginal_gain_factor(project_progress(catalog_key)) * 10
+        completion_bonus = min(completion_bonus, 30)
+
         closure = closure_bonus(catalog_key, available_hours)
-        portfolio = portfolio_score(catalog_key)
+
         future = estimate_future_opportunities(catalog_key)
         opportunity_ratio = future.get("opportunity_ratio", 10)
 
         opportunity_bonus = max(
             0,
-            min(15, round(15 / max(opportunity_ratio, 0.1), 1))
+            min(8, round(8 / max(opportunity_ratio, 0.1), 1))
         )
+
+        ####print(f"DEBUG {catalog_key}")
+        ###print(f"good_nights = {future.get('good_nights')}")
+        ##print(f"opportunity_ratio = {opportunity_ratio}")
+        #print(f"opportunity_bonus = {opportunity_bonus}")
+
 
         regret = regret_score(catalog_key)
-        regret_bonus = regret * 3
+        regret_bonus = min(5, regret * 1.2)
 
-        decision_score = (
-            astro_score * astro_weight+ portfolio * project_weight
-        )
-
-        progress = project_progress(catalog_key)
-        completion_bonus = max(
-            0,
-            round((progress - 60) * 0.8, 1)
-        )
-
-        completion_bonus = min(completion_bonus, 30)
-        closure = closure_bonus(catalog_key, available_hours)
-
+        diversity_bonus = diversification_bonus(catalog_key)
 
         astro_part = astro_score * astro_weight
         project_part = priority * project_weight
 
         roi_bonus = min(15, roi * 2)
 
-       
         portfolio_bonus = (
             project_part
             + roi_bonus
@@ -1722,8 +1715,9 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
             + completion_bonus
             + opportunity_bonus
             + regret_bonus
+            + diversity_bonus
         )
-    
+
         final_score = (
             astro_part
             + altitude
@@ -1732,41 +1726,60 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
             + portfolio_bonus
         )
 
-    if DEBUG_PORTFOLIO :
-        
-        print(f"[FINAL DEBUG] {catalog_key} astro_part={astro_part:.1f} project_part={project_part:.1f} roi_bonus={roi_bonus:.1f} closure={closure:.1f} completion={completion_bonus:.1f} opportunity={opportunity_bonus:.1f} final={final_score:.1f}")
+        decision_score = final_score
 
-
-    if DEBUG_PORTFOLIO :
-        print("\n===== DETAIL SCORE =====")
-        print(f"Objet              : {catalog_key}")
-        print(f"Score astro brut   : {astro_score:.1f}")
-        print(f"Score astro pondéré: {astro_part:.1f}")
-        print(f"Priorité pondérée  : {project_part:.1f}")
-        print(f"Bonus altitude     : {altitude:+.1f}")
-        print(f"Bonus saison       : {season:+.1f}")
-        print(f"Urgence saison     : {season_urgency:+.1f}")
-        print(f"Bonus ROI          : {roi_bonus:+.1f}")
-        print(f"Bonus clôture      : {closure:+.1f}")
-        print(f"Bonus opportunité : +{opportunity_bonus:.1f}")
-        print(f"Bonus complétion   : {completion_bonus:+.1f}")
-        print("-" * 35)
-        print(f"Score final calculé : {final_score:.1f}")
-        print(f"Bonus_regret : {regret_bonus:.1f}")
-        print()
-
-        # Option B : si l'objet est surtout choisi grâce au portefeuille,
-        # on limite l'avantage portefeuille.
+        # Limite l’avantage portefeuille si l’objet est surtout choisi grâce au portefeuille
         if portfolio_bonus > astro_part * 0.5:
             final_score -= portfolio_bonus * 0.3
-        
-        if astro_score<=0:
+
+        if astro_score <= 0:
             final_score -= 30
             decision_score -= 30
 
         remaining = project_remaining_hours(catalog_key)
 
-        if remaining is not None and remaining <= available_hours : final_score += 30
+        if remaining is not None and remaining <= available_hours:
+            final_score += 30
+
+        if DEBUG_PORTFOLIO:
+            print(
+                f"[FINAL DEBUG] {catalog_key} "
+                f"astro_part={astro_part:.1f} "
+                f"project_part={project_part:.1f} "
+                f"roi_bonus={roi_bonus:.1f} "
+                f"closure={closure:.1f} "
+                f"completion={completion_bonus:.1f} "
+                f"opportunity={opportunity_bonus:.1f} "
+                f"final={final_score:.1f}"
+            )
+
+            print("\n===== DETAIL SCORE =====")
+            print(f"Objet              : {catalog_key}")
+            print(f"Score astro brut   : {astro_score:.1f}")
+            print(f"Score astro pondéré: {astro_part:.1f}")
+            print(f"Priorité pondérée  : {project_part:.1f}")
+            print(f"Bonus altitude     : {altitude:+.1f}")
+            print(f"Bonus saison       : {season:+.1f}")
+            print(f"Urgence saison     : {season_urgency:+.1f}")
+            print(f"Bonus ROI          : {roi_bonus:+.1f}")
+            print(f"Bonus clôture      : {closure:+.1f}")
+            print(f"Bonus opportunité  : {opportunity_bonus:+.1f}")
+            print(f"Bonus complétion   : {completion_bonus:+.1f}")
+            print("-" * 35)
+            print(f"Bonus_regret       : {regret_bonus:.1f}")
+            print(f"Bonus diversité    : {diversity_bonus:.1f}")
+            print(f"Score final calculé: {final_score:.1f}")
+            print()
+
+            #########print(f"DEBUG astro_part       = {astro_part:.1f}")
+            ########print(f"DEBUG project_part     = {project_part:.1f}")
+            #######print(f"DEBUG roi_bonus        = {roi_bonus:.1f}")
+            ######print(f"DEBUG closure          = {closure:.1f}")
+            #####print(f"DEBUG opportunity_bonus= {opportunity_bonus:.1f}")
+            ####print(f"DEBUG regret_bonus     = {regret_bonus:.1f}")
+            ###print(f"DEBUG diversity_bonus  = {diversity_bonus:.1f}")
+            ##print(f"DEBUG portfolio_bonus  = {portfolio_bonus:.1f}")
+            #print(f"DEBUG final_score      = {final_score:.1f}")
 
         candidates.append({
             "name": obj["name"],
@@ -1778,35 +1791,24 @@ def recommend_project_for_night (top_objects, available_hours=3.0):
             "season_bonus": season,
             "altitude_bonus": altitude,
             "roi": roi,
-            "portfolio_score": portfolio,
+            "portfolio_score": portfolio_bonus,
             "global_score": obj.get("global_score", astro_score),
             "setup_score": obj.get("setup_score", 0),
             "best_setup": obj.get("best_setup"),
-            "completion_bonus" : completion_bonus,
-            "closure_bonus" : closure,
+            "completion_bonus": completion_bonus,
+            "closure_bonus": closure,
         })
 
-        if not candidates:
-            return None
-        
-        #print("\n=== CANDIDATS PROJET ===")
-
-        #for c in candidates:
-            #print(
-            ######f"{c['name']} "
-            #####f"astro={c['astro_score']:.1f} "
-            ####f"priority={c['priority']:.1f} "
-            ###f"roi={c['roi']:.1f} "
-            ##f"final={c['final_score']:.1f}"
-            # f"decision={c['decision_score']:.1f} "
-        #)
+    if not candidates:
+        return None
 
     candidates.sort(
-    key=lambda x: x["decision_score"],
-    reverse=True
-)
+        key=lambda x: x["decision_score"],
+        reverse=True
+    )
 
     return candidates
+
 
 def build_night_schedule(top_objects, available_hours):
     """
@@ -2134,10 +2136,11 @@ def show_tonight_recommendation(night):
         f"{progress:.1f}%"
     )
 
-    print(
-        f"✓ Temps restant : "
-        f"{remaining:.1f} h"
-    )
+
+    if remaining is not None :
+        print(f"✓ Temps restant : {remaining:.1f} h")
+    else:
+        print(f"✓ Temps restant : inconnu ")
 
     if best_score.get("closure_bonus", 0) > 0:
         print(
@@ -2148,6 +2151,8 @@ def show_tonight_recommendation(night):
     print(
         f"Pourquoi {best_score['name']} ?"
     )
+
+    score_gap = locals().get("score_gap", 0)
 
     print(
         f"✓ Score astro supérieur de {score_gap:.1f} points"
@@ -2160,6 +2165,8 @@ def show_tonight_recommendation(night):
 
         print("\nAlternative :")
         print(f"→ {best_roi['name']}")
+
+        roi_gap = locals().get("roi_gap", 0)
 
         print(
             f"✓ ROI supérieur de {roi_gap:.2f}/h"
@@ -2240,6 +2247,9 @@ def show_tonight_recommendation(night):
         night_capacities=night_capacities
     )
 
+    remaining_best = project_remaining_hours(best_score["name"])
+    remaining_roi = project_remaining_hours(best_roi["name"])
+
     print("\n===== COÛT D'OPPORTUNITÉ =====")
 
     print(f"Si vous photographiez {best_score['name']} :")
@@ -2247,8 +2257,12 @@ def show_tonight_recommendation(night):
         f"+{portfolio_gain_if_shot(best_score['name'], session_hours):.1f}% portefeuille"
     )
 
-    if best_score.get("closure_bonus", 0) > 0:
+    if remaining_best is not None and remaining_best <= session_hours:
         print("Projet terminé")
+    else:
+        remaining_after = max(0, remaining_best - session_hours)
+
+        print(f"Reste après session : {remaining_after:.1f} h")
 
     print(
         f"ROI "
@@ -2296,7 +2310,11 @@ def show_tonight_recommendation(night):
 
     print("\nUrgence portefeuille :")
     print(f"✓ Progression actuelle : {progress:.1f}%")
-    print(f"✓ Temps restant : {remaining:.1f} h")
+
+    if remaining is not None:
+        print(f"✔ Temps restant : {remaining:.1f} h")
+    else:
+        print("✔ Temps restant : inconnu")
 
     if best_score.get("closure_bonus", 0) > 0:
         print(f"✓ Bonus clôture disponible : +{best_score['closure_bonus']:.0f}")
@@ -2306,22 +2324,25 @@ def show_tonight_recommendation(night):
     best_score["name"]
     )
     print(
-        f'{best_score["name"]} : risque '
-        f'{future["risk"]}'
+    f"{best_score['name']} : risque "
+    f"{future.get('risk', 'INCONNU')}"
     )
 
     print(
-        f'Fenêtres favorables estimées : '
-        f'{future["good_nights"]}'
+    f"Fenêtres favorables estimées : "
+    f"{future.get('good_nights', 0)}"
     )
+
     print(
-    f"Ratio opportunité : "
-    f"{future['opportunity_ratio']:.1f}"
-)
+        f"Ratio opportunité : "
+        f"{future.get('opportunity_ratio', 0):.1f}"
+    )
+
     print(
-    f'Taux météo utilisé : '
-    f'{future.get("weather_ratio", 0.35) * 100:.0f}%'
-)
+        f"Taux météo utilisé : "
+        f"{future.get('weather_ratio', 0.35) * 100:.0f}%"
+    )
+    
     print("Recommandation finale :")
     print(f"Choisir {best_score['name']}")
     print(f"Confiance : {confidence}")   
@@ -2351,17 +2372,16 @@ def show_tonight_recommendation(night):
 
         future = estimate_future_opportunities(catalog_key)
 
-        risk = future["risk"]
+        risk = future.get("risk", "INCONNU")
 
-        if future["risk"] == "CRITIQUE":
-            text = f"fin de fenêtre estimée dans {days_left} jours"
-
-        else:
-            text = (
-                f"fenêtre restante estimée : "
-                f"{future['good_nights']} nuits favorables "
-                f"(ratio {future['opportunity_ratio']:.1f})"
-            )
+    if risk == "CRITIQUE":
+        text = f"fin de fenêtre estimée dans {days_left} jours"
+    else:
+        text = (
+            f"fenêtre restante estimée : "
+            f"{future.get('good_nights', 0)} nuits favorables "
+            f"(ratio: {future.get('opportunity_ratio', 0):.1f})"
+        )
 
         print(f"{project['name']} : risque {risk}")
         print(f"  {text}")
@@ -2822,10 +2842,15 @@ def show_action_plan(
             future_projects,
             start=1
         ):
+            if remaining is None:
+                remaining_txt = "inconnu"
+            else:
+                remaining_txt = f"{remaining:.1f} h"
+
             print(
                 f"{idx}. {name} "
                 f"(score {score:.1f}) "
-                f"reste {remaining:.1f} h"
+                f"reste {remaining_txt}"
             )
 
         visible_obj = None
@@ -3857,7 +3882,7 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
             sum(moon.elevation(observer, h["time"]) for h in window) / len(window),
             1
         )
-            
+
         candidates.append({
                 "start": window[0]["time"],
                 "end": window[-1]["time"] + timedelta(hours=1),

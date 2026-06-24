@@ -60,12 +60,12 @@
     },
     "projects": {
         "M31": {
-            "hours": 17.5,
+            "hours": 0,
             "target_hours": 20,
             "importance": 10
         },
         "Rosette": {
-            "hours": 3,
+            "hours": 0,
             "target_hours": 12,
             "importance": 6
         },
