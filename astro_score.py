@@ -1708,6 +1708,30 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
 
         roi_bonus = min(15, roi * 2)
 
+
+        portfolio_rank_bonus = 0
+
+        portfolio_ranking = sorted(
+            projects.keys(),
+            key=lambda name: (
+                project_roi(name) * 20
+                + session_portfolio_gain(name, available_hours)
+                + closure_bonus(name, available_hours)
+            ),
+            reverse=True
+        )
+
+
+        if catalog_key in portfolio_ranking:
+            rank = portfolio_ranking.index(catalog_key) + 1
+
+            if rank == 1:
+                portfolio_rank_bonus = 12
+            elif rank == 2:
+                portfolio_rank_bonus = 6
+            elif rank == 3:
+                portfolio_rank_bonus = 3
+
         portfolio_bonus = (
             project_part
             + roi_bonus
@@ -1716,6 +1740,7 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             + opportunity_bonus
             + regret_bonus
             + diversity_bonus
+            + portfolio_rank_bonus
         )
 
         final_score = (
@@ -1768,6 +1793,7 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             print("-" * 35)
             print(f"Bonus_regret       : {regret_bonus:.1f}")
             print(f"Bonus diversité    : {diversity_bonus:.1f}")
+            print(f"Bonus rang portefeuille  : {portfolio_rank_bonus:.1f}")
             print(f"Score final calculé: {final_score:.1f}")
             print()
 
@@ -2158,10 +2184,12 @@ def show_tonight_recommendation(night):
         f"✓ Score astro supérieur de {score_gap:.1f} points"
     )
 
-    if best_score.get("closure_bonus", 0) > 0:
-        print(
-            f"✓ Permet de terminer le projet"
-        )
+    remaining = project_remaining_hours(best_score["name"])
+
+    if remaining <= session_hours:
+        print("✓ Projet terminable cette nuit")
+    elif remaining <= 10:
+        print(f"✓ Plus que {remaining:.1f} h avant achèvement")
 
         print("\nAlternative :")
         print(f"→ {best_roi['name']}")
