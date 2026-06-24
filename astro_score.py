@@ -1358,6 +1358,70 @@ def project_details(object_name):
         "remaining": remaining,
         "remaining_nights": estimate_remaining_nights(object_name)
     }
+def risk_label_to_score(risk):
+    mapping = {
+        "FAIBLE": 20,
+        "MOYEN": 50,
+        "ÉLEVÉ": 80,
+        "CRITIQUE": 100,
+    }
+
+    return mapping.get(str(risk).upper(), 50)
+def compute_postponement_impact(
+    postponement_risk,
+    confidence="MOYENNE",
+    project_priority=50,
+    astro_score=0,
+):
+    """
+    Convertit le risque de report en impact réel sur le score final.
+
+    Logique :
+    - mauvais soir + gros risque => pénalité prudente
+    - bon soir + gros risque => bonus d'urgence
+    - confiance basse => impact plus fort
+    """
+
+    if postponement_risk is None:
+        postponement_risk = 0
+
+    risk = max(0, min(float(postponement_risk), 100))
+    priority = max(0, min(float(project_priority), 100))
+
+    confidence_factor = {
+        "HAUTE": 0.8,
+        "MOYENNE": 1.0,
+        "BASSE": 1.2,
+    }.get(str(confidence).upper(), 1.0)
+
+    priority_factor = 1.0 + priority / 200  # max x1.5
+
+    penalty = 0
+    urgency_bonus = 0
+    reason = "Risque de report faible ou neutre."
+
+    if risk >= 70 and astro_score >= 70:
+        urgency_bonus = risk * 0.10 * priority_factor
+        reason = "Bonne nuit et risque de report élevé : bonus d'urgence."
+    elif risk >= 70:
+        penalty = risk * 0.20 * confidence_factor * priority_factor
+        reason = "Risque de report élevé mais conditions insuffisantes : pénalité prudente."
+    elif risk >= 40:
+        penalty = risk * 0.08 * confidence_factor
+        reason = "Risque de report modéré : légère pénalité."
+    else:
+        penalty = risk * 0.03
+        reason = "Risque de report faible : impact minimal."
+
+    net_impact = urgency_bonus - penalty
+
+    return {
+        "postponement_penalty": round(penalty, 2),
+        "urgency_bonus": round(urgency_bonus, 2),
+        "postponement_net_impact": round(net_impact, 2),
+        "postponement_reason": reason,
+    }
+
 
 def project_roi(object_name):
     details = project_details(object_name)
@@ -1701,6 +1765,19 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         season_urgency = season_urgency_bonus(obj)
         roi = project_roi(catalog_key)
 
+        future = estimate_future_opportunities(catalog_key)
+
+        risk_label = future.get("risk", "MOYEN")
+
+        postponement_risk = risk_label_to_score(risk_label)
+
+        postponement_impact = compute_postponement_impact(
+            postponement_risk=postponement_risk,
+            confidence=obj.get("confidence", "MOYENNE"),
+            project_priority=priority,
+            astro_score=astro_score,
+        )
+
         completion_bonus = marginal_gain_factor(project_progress(catalog_key)) * 10
         completion_bonus = min(completion_bonus, 30)
 
@@ -1765,15 +1842,29 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             + portfolio_rank_bonus
         )
 
+        postponement_impact = compute_postponement_impact(
+            postponement_risk=postponement_risk,
+            confidence=obj.get("confidence", "MOYENNE"),
+            project_priority=priority,
+            astro_score=astro_score,
+        )
+
         final_score = (
             astro_part
             + altitude
             + season
             + season_urgency
             + portfolio_bonus
+        + postponement_impact["postponement_net_impact"]
         )
 
         decision_score = final_score
+
+        print(
+            f"[REPORT] risk={postponement_risk:.0f}% "
+            f"impact={postponement_impact['postponement_net_impact']:+.1f}"
+        )
+
 
         # Limite l’avantage portefeuille si l’objet est surtout choisi grâce au portefeuille
         if portfolio_bonus > astro_part * 0.5:
@@ -1845,6 +1936,11 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             "best_setup": obj.get("best_setup"),
             "completion_bonus": completion_bonus,
             "closure_bonus": closure,
+            "postponement_risk": postponement_risk,
+            "postponement_penalty": postponement_impact["postponement_penalty"],
+            "urgency_bonus": postponement_impact["urgency_bonus"],
+            "postponement_net_impact": postponement_impact["postponement_net_impact"],
+            "postponement_reason": postponement_impact["postponement_reason"],
         })
 
     if not candidates:
@@ -2352,11 +2448,9 @@ def show_tonight_recommendation(night):
         f"Différence score : {score_gap:+.1f} points"
     )
 
-    print()
-
-    if score_gap >= 30:
+    if score_gap >= 15:
         confidence = "ÉLEVÉE"
-    elif score_gap >= 10:
+    elif score_gap >= 3:
         confidence = "MOYENNE"
     else:
         confidence = "FAIBLE"
@@ -2364,6 +2458,14 @@ def show_tonight_recommendation(night):
     progress = project_progress(best_score["name"])
     remaining = project_remaining_hours(best_score["name"])
 
+    chosen_future = estimate_future_opportunities(best_score["name"])
+    alt_future = estimate_future_opportunities(best_roi["name"])
+    chosen_risk = chosen_future.get("risk", "INCONNU")
+    alt_risk = alt_future.get("risk", "INCONNU")
+
+    print("\nFacteurs stratégiques :")
+    print(f"{best_score['name']} : risque {chosen_risk}, fenêtres favorables estimées : {chosen_future.get('good_nights', '?')}")
+    print(f"{best_roi['name']} : risque {alt_risk}, fenêtres favorables estimées : {alt_future.get('good_nights', '?')}")
     print("\nUrgence portefeuille :")
     print(f"✓ Progression actuelle : {progress:.1f}%")
 
@@ -2375,28 +2477,9 @@ def show_tonight_recommendation(night):
     if best_score.get("closure_bonus", 0) > 0:
         print(f"✓ Bonus clôture disponible : +{best_score['closure_bonus']:.0f}")
 
-
-    future = estimate_future_opportunities(
-    best_score["name"]
-    )
-    print(
-    f"{best_score['name']} : risque "
-    f"{future.get('risk', 'INCONNU')}"
-    )
-
-    print(
-    f"Fenêtres favorables estimées : "
-    f"{future.get('good_nights', 0)}"
-    )
-
-    print(
-        f"Ratio opportunité : "
-        f"{future.get('opportunity_ratio', 0):.1f}"
-    )
-
     print(
         f"Taux météo utilisé : "
-        f"{future.get('weather_ratio', 0.35) * 100:.0f}%"
+        f"{chosen_future.get('weather_ratio', 0.35) * 100:.0f}%"
     )
     
     print("Recommandation finale :")
