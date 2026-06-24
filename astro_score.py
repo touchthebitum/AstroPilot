@@ -1791,12 +1791,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             min(8, round(8 / max(opportunity_ratio, 0.1), 1))
         )
 
-        ####print(f"DEBUG {catalog_key}")
-        ###print(f"good_nights = {future.get('good_nights')}")
-        ##print(f"opportunity_ratio = {opportunity_ratio}")
-        #print(f"opportunity_bonus = {opportunity_bonus}")
-
-
         regret = regret_score(catalog_key)
         regret_bonus = min(5, regret * 1.2)
 
@@ -1909,16 +1903,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             print(f"Bonus rang portefeuille  : {portfolio_rank_bonus:.1f}")
             print(f"Score final calculé: {final_score:.1f}")
             print()
-
-            #########print(f"DEBUG astro_part       = {astro_part:.1f}")
-            ########print(f"DEBUG project_part     = {project_part:.1f}")
-            #######print(f"DEBUG roi_bonus        = {roi_bonus:.1f}")
-            ######print(f"DEBUG closure          = {closure:.1f}")
-            #####print(f"DEBUG opportunity_bonus= {opportunity_bonus:.1f}")
-            ####print(f"DEBUG regret_bonus     = {regret_bonus:.1f}")
-            ###print(f"DEBUG diversity_bonus  = {diversity_bonus:.1f}")
-            ##print(f"DEBUG portfolio_bonus  = {portfolio_bonus:.1f}")
-            #print(f"DEBUG final_score      = {final_score:.1f}")
 
         candidates.append({
             "name": obj["name"],
