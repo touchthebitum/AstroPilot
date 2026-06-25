@@ -1393,6 +1393,7 @@ def compute_postponement_risk_score(future, days_left):
     )
 
     return round(max(0, min(risk, 100)), 1)
+
 def compute_postponement_impact(
     postponement_risk,
     confidence="MOYENNE",
@@ -1448,6 +1449,47 @@ def compute_postponement_impact(
         "postponement_reason": reason,
     }
 
+def explain_recommendation(project):
+    """
+    Génère les raisons principales qui justifient une recommandation.
+    Ne modifie pas le score, ne fait qu'expliquer la décision.
+    """
+
+    reasons = []
+
+    astro_score = project.get("astro_score", 0)
+    roi = project.get("roi", 0)
+    postponement_risk = project.get("postponement_risk", 0)
+    completion_bonus = project.get("completion_bonus", 0)
+    closure_bonus = project.get("closure_bonus", 0)
+    season_bonus = project.get("season_bonus", 0)
+
+    if astro_score >= 90:
+        reasons.append("Conditions astronomiques excellentes.")
+    elif astro_score >= 75:
+        reasons.append("Très bonnes conditions astronomiques.")
+
+    if roi >= 1.0:
+        reasons.append("Rendement projet élevé pour cette session.")
+
+    if postponement_risk >= 70:
+        reasons.append("Risque de report élevé : cette cible ne doit pas être trop repoussée.")
+    elif postponement_risk >= 40:
+        reasons.append("Risque de report modéré à prendre en compte.")
+
+    if completion_bonus >= 10:
+        reasons.append("Cette session apporte une forte progression du projet.")
+
+    if closure_bonus > 0:
+        reasons.append("Cette nuit rapproche nettement le projet de sa finalisation.")
+
+    if season_bonus > 0:
+        reasons.append("La cible est actuellement dans une période favorable.")
+
+    if not reasons:
+        reasons.append("Choix retenu par équilibre global entre conditions, projet et portefeuille.")
+
+    return reasons
 
 def project_roi(object_name):
     details = project_details(object_name)
@@ -1969,6 +2011,14 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             "urgency_bonus": postponement_impact["urgency_bonus"],
             "postponement_net_impact": postponement_impact["postponement_net_impact"],
             "postponement_reason": postponement_impact["postponement_reason"],
+            "reasons": explain_recommendation({
+            "astro_score": astro_score,
+            "roi": roi,
+            "postponement_risk": postponement_risk,
+            "completion_bonus": completion_bonus,
+            "closure_bonus": closure,
+            "season_bonus": season,
+        }),
         })
 
     if not candidates:
@@ -2830,12 +2880,17 @@ def show_action_plan(
         f"Nuits restantes : "
         f"{nights_before:.1f} → {nights_after:.1f}"
     )
-    print("\n===== POURQUOI CE CHOIX ? =====")
-
+    
     night_projects = recommend_project_for_night(
         night["top_objects"],
         available_hours=night.get("duration", 3.0)
     )
+    recommendation = night_projects[0]
+    
+    print("\n===== POURQUOI CE CHOIX ? =====")
+
+    for reason in recommendation.get("reasons", []):
+        print(f"✓ {reason}")
 
     if len(night_projects) > 1:
         alternative = night_projects[1]
