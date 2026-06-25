@@ -1367,6 +1367,32 @@ def risk_label_to_score(risk):
     }
 
     return mapping.get(str(risk).upper(), 50)
+
+def compute_postponement_risk_score(future, days_left):
+    """
+    Calcule un risque de report continu (0-100)
+    basé sur les opportunités futures réelles.
+    """
+
+    good_nights = future.get("good_nights", 0)
+    opportunity_ratio = future.get("opportunity_ratio", 10)
+
+    # Peu de bonnes nuits => risque élevé
+    window_risk = max(0, 100 - good_nights * 4)
+
+    # Fin de saison proche => risque élevé
+    season_risk = max(0, 100 - days_left)
+
+    # Ratio d'opportunité élevé => risque élevé
+    ratio_risk = min(100, opportunity_ratio * 10)
+
+    risk = (
+        window_risk * 0.5
+        + season_risk * 0.3
+        + ratio_risk * 0.2
+    )
+
+    return round(max(0, min(risk, 100)), 1)
 def compute_postponement_impact(
     postponement_risk,
     confidence="MOYENNE",
@@ -1767,10 +1793,28 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
 
         future = estimate_future_opportunities(catalog_key)
 
+        days_left = season_days_remaining(obj)
+
         risk_label = future.get("risk", "MOYEN")
 
-        postponement_risk = risk_label_to_score(risk_label)
+        # Ancien système
+        risk_v1 = risk_label_to_score(risk_label)
 
+        # Nouveau système
+        risk_v2 = compute_postponement_risk_score(
+            future,
+            days_left,
+        )
+
+        # Pour le moment on conserve V1 comme score utilisé
+        postponement_risk = risk_v1
+
+        print(
+            f"[RISK V1/V2] {catalog_key} | "
+            f"label={risk_label} "
+            f"V1={risk_v1:.0f} "
+            f"V2={risk_v2:.1f}"
+        )
         postponement_impact = compute_postponement_impact(
             postponement_risk=postponement_risk,
             confidence=obj.get("confidence", "MOYENNE"),
