@@ -1674,7 +1674,7 @@ def closure_bonus(name, available_hours=3.0):
 
     return 0
 
-def diversification_bonus(name):
+def progression_bonus(name):
     remaining = project_remaining_hours(name)
     project = get_projects().get(name, {})
 
@@ -1696,6 +1696,74 @@ def diversification_bonus(name):
         return 4
 
     return 0
+
+def diversification_bonus(name):
+    """
+    Bonus stratégique si la catégorie de l'objet est sous-représentée
+    en heures restantes dans le portefeuille.
+    """
+
+    obj = CATALOG.get(name, {})
+    category = obj.get("type", "").lower()
+
+    if not category:
+        return 0
+
+    loads = portfolio_category_load()
+
+    if not loads:
+        return 0
+
+    total_load = sum(loads.values())
+
+    if total_load <= 0:
+        return 0
+
+    category_load = loads.get(category, 0)
+    category_share = category_load / total_load
+
+    # Si la catégorie représente moins de 20 % de la charge restante,
+    # elle est fortement sous-représentée.
+    if category_share < 0.20:
+        return 8
+
+    # Entre 20 % et 35 %, elle est modérément sous-représentée.
+    if category_share < 0.35:
+        return 4
+
+    return 0
+
+
+def portfolio_category_load():
+    """
+    Charge restante du portefeuille par catégorie.
+    Retourne par exemple :
+    {
+        "nebula": 37,
+        "galaxy": 8,
+        "cluster": 3,
+    }
+    """
+
+    loads = {}
+
+    for name, project in get_projects().items():
+
+        remaining = project_remaining_hours(name)
+
+        if remaining <= 0:
+            continue
+
+        obj = CATALOG.get(name, {})
+
+        category = obj.get("type", "").lower()
+
+        if not category:
+            continue
+
+        loads[category] = loads.get(category, 0) + remaining
+
+    return loads
 
 
 def portfolio_roadmap():
@@ -1880,7 +1948,10 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         regret = regret_score(catalog_key)
         regret_bonus = min(5, regret * 1.2)
 
+        progression = progression_bonus(catalog_key)
         diversity_bonus = diversification_bonus(catalog_key)
+
+        category_loads = portfolio_category_load()
 
         astro_part = astro_score * astro_weight
         project_part = priority * project_weight
@@ -1918,6 +1989,7 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             + completion_bonus
             + opportunity_bonus
             + regret_bonus
+            + progression
             + diversity_bonus
             + portfolio_rank_bonus
         )
@@ -2018,6 +2090,9 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             "completion_bonus": completion_bonus,
             "closure_bonus": closure,
             "season_bonus": season,
+            "progression_bonus": progression,
+            "diversity_bonus" : diversity_bonus
+            
         }),
         })
 
@@ -2886,7 +2961,7 @@ def show_action_plan(
         available_hours=night.get("duration", 3.0)
     )
     recommendation = night_projects[0]
-    
+
     print("\n===== POURQUOI CE CHOIX ? =====")
 
     for reason in recommendation.get("reasons", []):
