@@ -1734,6 +1734,58 @@ def diversification_bonus(name):
     return 0
 
 
+def strategy_weights(mode="balanced"):
+    """
+    Pondérations utilisées par les différentes stratégies
+    de décision d'AstroPilot.
+    """
+
+    strategies = {
+
+        "balanced": {
+            "astro": 1.0,
+            "roi": 1.0,
+            "report": 1.0,
+            "completion": 1.0,
+            "diversity": 1.0,
+        },
+
+        "roi": {
+            "astro": 0.8,
+            "roi": 2.0,
+            "report": 0.8,
+            "completion": 0.7,
+            "diversity": 0.5,
+        },
+
+        "completion": {
+            "astro": 0.8,
+            "roi": 0.7,
+            "report": 1.0,
+            "completion": 2.0,
+            "diversity": 0.5,
+        },
+
+        "diversification": {
+            "astro": 0.8,
+            "roi": 0.7,
+            "report": 0.8,
+            "completion": 0.5,
+            "diversity": 2.0,
+        },
+
+        "risk": {
+            "astro": 0.9,
+            "roi": 0.6,
+            "report": 2.0,
+            "completion": 1.0,
+            "diversity": 0.8,
+        },
+    }
+
+    return strategies.get(mode, strategies["balanced"])
+
+
 def portfolio_category_load():
     """
     Charge restante du portefeuille par catégorie.
