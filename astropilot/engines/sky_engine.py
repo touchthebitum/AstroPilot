@@ -1,4 +1,8 @@
 import math
+from astral.moon import moonrise, moonset
+from astropy.coordinates import SkyCoord, get_body, EarthLocation
+from astropy.time import Time
+import astropy.units as u
 class SkyEngine:
     """
     Analyse uniquement le ciel.
@@ -81,6 +85,37 @@ class SkyEngine:
             return moonrise_time <= window_end
 
         return moonrise_time <= window_end and moonset_time >= window_start
+    
+    def safe_moonrise(self, observer, date, tz):
+        try:
+            return moonrise(observer=observer, date=date, tzinfo=tz)
+        except ValueError:
+            return None
+        
+    def safe_moonset(self,observer, date, tz):
+        try:
+            return moonset(observer=observer, date=date, tzinfo=tz)
+        except ValueError:
+            return None
+        
+    def moon_target_separation(self, target_ra, target_dec, obs_time, lat, lon):
+        location = EarthLocation(
+            lat=lat * u.deg,
+            lon=lon * u.deg
+        )
+
+        target = SkyCoord(
+            ra=target_ra * u.deg,
+            dec=target_dec * u.deg
+        )
+
+        moon_pos = get_body(
+            "moon",
+            Time(obs_time),
+            location=location
+        )
+
+        return target.separation(moon_pos).deg
     
     def cloud_score(self):
         pass

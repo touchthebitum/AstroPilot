@@ -195,19 +195,6 @@ def framing_bonus(target_object):
     else:
         return -20
 
-
-def safe_moonrise(observer, date, tz):
-    try:
-        return moonrise(observer=observer, date=date, tzinfo=tz)
-    except ValueError:
-        return None
-
-def safe_moonset(observer, date, tz):
-    try:
-        return moonset(observer=observer, date=date, tzinfo=tz)
-    except ValueError:
-        return None
-
 def forecast_night_capacities(lat, lon, days=14):
 
     weather = fetch_weather(lat, lon)
@@ -383,26 +370,6 @@ def temperature_bonus(temp):
 
     return 0
 
-
-def moon_target_separation(target_ra, target_dec, obs_time, lat, lon):
-    location = EarthLocation(
-        lat=lat * u.deg,
-        lon=lon * u.deg
-    )
-
-    target = SkyCoord(
-        ra=target_ra * u.deg,
-        dec=target_dec * u.deg
-    )
-
-    moon_pos = get_body(
-        "moon",
-        Time(obs_time),
-        location=location
-    )
-
-    return target.separation(moon_pos).deg
-
 def target_altitude(target_ra, target_dec, obs_time, lat, lon):
 
     location = EarthLocation(
@@ -464,17 +431,6 @@ def moon_penalty(illumination, moon_elevation, moon_sep):
         sep_factor = 1.0
 
     return round(35 * illum_factor * elev_factor * sep_factor, 1)
-
-
-
-
-
-
-def safe_moonset(observer, date, tz):
-    try:
-        return moonset(observer, date, tzinfo=tz)
-    except ValueError:
-        return None
 
 def humidity_penalty(humidity: float) -> float:
     if humidity < 70:
@@ -4005,12 +3961,13 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
             if target_alt < min_alt:
                 continue
 
-            moon_sep = moon_target_separation(
+            sky = SkyEngine()
+            moon_sep = sky.moon_target_separation(
                 target_obj["ra"],
                 target_obj["dec"],
                 h["time"],
-                observer.latitude,
-                observer.longitude
+                lat,
+                lon
             )
 
             result = hour_score(
@@ -4425,8 +4382,11 @@ def forecast_astro(
 
         target_date = current_date.date()
 
-        moon_rise = safe_moonrise(city_info.observer, target_date, ZoneInfo(TIMEZONE))
-        moon_set = safe_moonset(city_info.observer, target_date, ZoneInfo(TIMEZONE))
+        sky = SkyEngine()
+
+        moon_rise = sky.safe_moonrise(city_info.observer, target_date, ZoneInfo(TIMEZONE))
+        moon_set  = sky.safe_moonset(city_info.observer, target_date, ZoneInfo(TIMEZONE))
+
 
         hours = night_hours_rough(rows, current_date, lat, lon, city)
 
