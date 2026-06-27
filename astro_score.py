@@ -332,106 +332,7 @@ def estimate_weather_good_night_ratio(weather):
         return 0.35
 
     return max(0.05, min(0.8, good_hours / total_night_hours))
-
-
-def cloud_penalty(total, low, mid, high):
-
-    weighted = (
-        low * 0.2 +
-        mid * 0.3 +
-        high * 0.5
-    )
-
-    if weighted < 10:
-        return 0
-    if weighted < 20:
-        return 3
-    if weighted < 30:
-        return 8
-    if weighted < 40:
-        return 15
-    if weighted < 60:
-        return 22
-    if weighted < 80:
-        return 35
-    return 50
-
-
-def temperature_bonus(temp):
-
-    if 8 <= temp <= 18:
-        return 5
-
-    if 0 <= temp < 8:
-        return 2
-
-    if temp > 18:
-        return 2
-
-    return 0
-
-def target_altitude(target_ra, target_dec, obs_time, lat, lon):
-
-    location = EarthLocation(
-        lat=lat * u.deg,
-        lon=lon * u.deg
-    )
-
-    target = SkyCoord(
-        ra=target_ra * u.deg,
-        dec=target_dec * u.deg
-    )
-
-    frame = AltAz(
-        obstime=Time(obs_time),
-        location=location
-    )
-
-    return target.transform_to(frame).alt.deg
-
-def target_altitude_bonus(alt):
-    if alt >= 75:
-        return 25
-    elif alt >= 60:
-        return 18
-    elif alt >= 45:
-        return 10
-    elif alt >= 20:
-        return -15
-    else:
-        return -35
     
-def moon_penalty(illumination, moon_elevation, moon_sep):
-
-    if moon_elevation <= -6:
-        return 0
-
-    illum_factor = illumination / 100.0
-
-    if moon_elevation <= 0:
-        elev_factor = 0.05
-    elif moon_elevation < 10:
-        elev_factor = 0.20
-    elif moon_elevation < 25:
-        elev_factor = 0.45
-    elif moon_elevation < 45:
-        elev_factor = 0.75
-    else:
-        elev_factor = 1.0
-
-    if moon_sep >= 150:
-        sep_factor = 0.15
-    elif moon_sep >= 120:
-        sep_factor = 0.30
-    elif moon_sep >= 90:
-        sep_factor = 0.55
-    elif moon_sep >= 60:
-        sep_factor = 0.80
-    else:
-        sep_factor = 1.0
-
-    return round(35 * illum_factor * elev_factor * sep_factor, 1)
-
 def humidity_penalty(humidity: float) -> float:
     if humidity < 70:
         return 0
@@ -3665,15 +3566,17 @@ def simulate_portfolio_calendar(nights):
 def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_target_sep, target_altitude, bortle=4, target="deep_sky", target_object=None, goal="balanced"):
     penalty = 0
 
+    sky = SkyEngine()
+
     bp = bortle_penalty(bortle)
-    cp = cloud_penalty(
+    cp = sky.cloud_penalty(
     hour["cloud_cover"],
     hour["cloud_cover_low"],
     hour["cloud_cover_mid"],
     hour["cloud_cover_high"]
     )
     
-    mp = moon_penalty(moon_illumination, moon_elevation, moon_target_sep)
+    mp = sky.moon_penalty(moon_illumination, moon_elevation, moon_target_sep)
 
     sqm = estimated_sqm(
     bortle,
@@ -3734,7 +3637,7 @@ def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_targe
     pp = precipitation_penalty(hour["precipitation"])
     wp = wind_penalty(hour["wind_speed_10m"])
     vp = visibility_penalty(hour.get("visibility"))
-    tb = temperature_bonus(hour["temperature_2m"])
+    tb = sky.temperature_bonus(hour["temperature_2m"])
    
     profile = TARGETS[target]
 
@@ -3948,7 +3851,7 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
 
             target_obj = TARGET_OBJECTS[target_object]
 
-            target_alt = target_altitude(
+            target_alt = sky.target_altitude(
                 target_obj["ra"],
                 target_obj["dec"],
                 h["time"],
@@ -3961,7 +3864,6 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
             if target_alt < min_alt:
                 continue
 
-            sky = SkyEngine()
             moon_sep = sky.moon_target_separation(
                 target_obj["ra"],
                 target_obj["dec"],

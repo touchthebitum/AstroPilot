@@ -1,6 +1,6 @@
 import math
 from astral.moon import moonrise, moonset
-from astropy.coordinates import SkyCoord, get_body, EarthLocation
+from astropy.coordinates import SkyCoord, get_body, EarthLocation, AltAz
 from astropy.time import Time
 import astropy.units as u
 class SkyEngine:
@@ -117,6 +117,105 @@ class SkyEngine:
 
         return target.separation(moon_pos).deg
     
+    def target_altitude(self, target_ra, target_dec, obs_time, lat, lon):
+
+        location = EarthLocation(
+            lat=lat * u.deg,
+            lon=lon * u.deg
+        )
+
+        target = SkyCoord(
+            ra=target_ra * u.deg,
+            dec=target_dec * u.deg
+        )
+
+        frame = AltAz(
+            obstime=Time(obs_time),
+            location=location
+        )
+
+        return target.transform_to(frame).alt.deg
+    
+    def target_altitude_bonus(self, alt):
+        if alt >= 75:
+            return 25
+        elif alt >= 60:
+            return 18
+        elif alt >= 45:
+            return 10
+        elif alt >= 20:
+            return -15
+        else:
+            return -35
+        
+
+    def cloud_penalty(self, total, low, mid, high):
+
+        weighted = (
+            low * 0.2 +
+            mid * 0.3 +
+            high * 0.5
+        )
+
+        if weighted < 10:
+            return 0
+        if weighted < 20:
+            return 3
+        if weighted < 30:
+            return 8
+        if weighted < 40:
+            return 15
+        if weighted < 60:
+            return 22
+        if weighted < 80:
+            return 35
+        return 50
+
+
+    def temperature_bonus(self, temp):
+
+        if 8 <= temp <= 18:
+            return 5
+
+        if 0 <= temp < 8:
+            return 2
+
+        if temp > 18:
+            return 2
+
+        return 0
+    
+    def moon_penalty(self, illumination, moon_elevation, moon_sep):
+
+        if moon_elevation <= -6:
+            return 0
+
+        illum_factor = illumination / 100.0
+
+        if moon_elevation <= 0:
+            elev_factor = 0.05
+        elif moon_elevation < 10:
+            elev_factor = 0.20
+        elif moon_elevation < 25:
+            elev_factor = 0.45
+        elif moon_elevation < 45:
+            elev_factor = 0.75
+        else:
+            elev_factor = 1.0
+
+        if moon_sep >= 150:
+            sep_factor = 0.15
+        elif moon_sep >= 120:
+            sep_factor = 0.30
+        elif moon_sep >= 90:
+            sep_factor = 0.55
+        elif moon_sep >= 60:
+            sep_factor = 0.80
+        else:
+            sep_factor = 1.0
+
+        return round(35 * illum_factor * elev_factor * sep_factor, 1)
+        
     def cloud_score(self):
         pass
 
