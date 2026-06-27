@@ -272,6 +272,8 @@ class SkyEngine:
             9: 80,
         }
         return penalties.get(bortle, 40)
+    
+    
         
     def cloud_score(self):
         pass
@@ -287,3 +289,98 @@ class SkyEngine:
 
     def sqm_score(self):
         pass
+
+    def estimated_sqm(
+        self,
+        bortle,
+        moon_illumination,
+        moon_elevation,
+        moon_target_sep,
+    ):
+        base = {
+        1: 21.9,
+        2: 21.7,
+        3: 21.3,
+        4: 20.8,
+        5: 20.2,
+        6: 19.5,
+        7: 18.8,
+        8: 18.2,
+        9: 17.5,
+        }.get(bortle, 20.0)
+
+        if moon_elevation <= 0:
+            moon_loss = 0
+        else:
+            sep_factor = max(0.3, 1 - moon_target_sep / 180)
+
+            moon_loss = (
+            (moon_illumination / 100)**1.4
+            * (moon_elevation / 90)
+            * sep_factor
+            * 2.5
+        )
+
+        return round(base - moon_loss, 2)
+    
+    def score_hour(self, hour,moon_illumination,moon_elevation,moon_target_sep, target_altitude, bortle,):
+
+        bp = self.bortle_penalty(bortle)
+
+        cp = self.cloud_penalty(
+            hour["cloud_cover"],
+            hour["cloud_cover_low"],
+            hour["cloud_cover_mid"],
+            hour["cloud_cover_high"],
+        )
+
+        mp = self.moon_penalty(
+            moon_illumination,
+            moon_elevation,
+            moon_target_sep,
+        )
+
+        hp = self.humidity_penalty(
+            hour["relative_humidity_2m"]
+        )
+
+        wp = self.wind_penalty(
+            hour["wind_speed_10m"]
+        )
+
+        vp = self.visibility_penalty(
+            hour.get("visibility")
+        )
+
+        pp = self.precipitation_penalty(
+            hour["precipitation"]
+        )
+
+        tb = self.temperature_bonus(
+            hour["temperature_2m"]
+        )
+
+        ab = self.target_altitude_bonus(
+            target_altitude
+        )
+
+        sqm = self.estimated_sqm(
+            bortle,
+            moon_illumination,
+            moon_elevation,
+            moon_target_sep,
+        )
+
+        return {
+            "bp": bp,
+            "cp": cp,
+            "mp": mp,
+            "hp": hp,
+            "wp": wp,
+            "vp": vp,
+            "pp": pp,
+            "tb": tb,
+            "ab": ab,
+            "sqm": sqm,
+        }
+                
