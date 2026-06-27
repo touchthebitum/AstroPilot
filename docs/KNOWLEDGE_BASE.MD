@@ -1,0 +1,1 @@
+La qualité des décisions d'AstroPilot dépend davantage de la qualité de ses connaissances que de la complexité de ses algorithmes.

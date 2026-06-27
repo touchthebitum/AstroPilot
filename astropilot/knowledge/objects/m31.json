@@ -1,0 +1,63 @@
+{
+  "id": "m31",
+  "name": "M31",
+  "common_name": "Galaxie d'Andromède",
+  "catalogs": [
+    "Messier 31",
+    "NGC 224"
+  ],
+
+  "type": "galaxy",
+  "subtype": "spiral",
+
+  "constellation": "Andromeda",
+
+  "coordinates": {
+    "ra": "00h42m44.3s",
+    "dec": "+41°16′09″"
+  },
+
+  "size": {
+    "arcmin": 190,
+    "degrees": 3.17
+  },
+
+  "magnitude": 3.4,
+
+  "surface_brightness": 13.5,
+
+  "best_months": [
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+
+  "recommended_focal_lengths": {
+    "wide": [100, 200],
+    "medium": [250, 500],
+    "close": [600, 1200]
+  },
+
+  "recommended_filters": [
+    "L",
+    "RGB"
+  ],
+
+  "sho_recommended": false,
+
+  "difficulty": 2,
+
+  "recommended_exposure_hours": {
+    "beginner": 4,
+    "intermediate": 10,
+    "advanced": 20
+  },
+
+  "notes": [
+    "Très grande galaxie.",
+    "Le noyau brûle facilement.",
+    "Les extensions externes nécessitent beaucoup de signal."
+  ]
+}

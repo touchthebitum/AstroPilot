@@ -20,7 +20,7 @@ def get_decision_weights():
     elif mode == "finisher":
         return 0.5, 0.5
 
-    return 0.7, 0.3
+    return 0.7, 0.30
     
 def get_active_equipment():
     return load_user_profile().get("active_equipment")

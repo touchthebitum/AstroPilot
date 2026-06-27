@@ -1,0 +1,64 @@
+{
+  "id": "ic1396",
+  "name": "IC1396",
+  "common_name": "Elephant's Trunk Nebula",
+
+  "catalogs": [
+    "IC 1396",
+    "Sh2-131"
+  ],
+
+  "type": "nebula",
+  "subtype": "emission",
+
+  "constellation": "Cepheus",
+
+  "coordinates": {
+    "ra": "21h39m",
+    "dec": "+57°30′"
+  },
+
+  "size": {
+    "arcmin": 170
+  },
+
+  "magnitude": null,
+
+  "surface_brightness": null,
+
+  "best_months": [
+    7,
+    8,
+    9,
+    10
+  ],
+
+  "recommended_focal_lengths": {
+    "wide": [100, 250],
+    "medium": [300, 600],
+    "close": [700, 1200]
+  },
+
+  "recommended_filters": [
+    "Ha",
+    "OIII",
+    "SII"
+  ],
+
+  "sho_recommended": true,
+
+  "difficulty": 3,
+
+  "recommended_exposure_hours": {
+    "beginner": 8,
+    "intermediate": 20,
+    "advanced": 40
+  },
+
+  "notes": [
+    "Excellent objet SHO.",
+    "Le Ha domine largement.",
+    "Très bon rendu en palette Hubble.",
+    "Supporte de très longues intégrations."
+  ]
+}

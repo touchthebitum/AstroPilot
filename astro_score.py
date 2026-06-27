@@ -1929,9 +1929,11 @@ def recommend_project():
 
 def recommend_project_for_night(top_objects, available_hours=3.0):
     profile = load_user_profile()
+    prefs = profile.get("preferences", {})
 
-    astro_weight = profile["preferences"].get("astro_weight", 0.7)
-    project_weight = profile["preferences"].get("project_weight", 0.3)
+    astro_weight = prefs.get("astro_weight", 0.7)
+    project_weight = prefs.get("project_weight", 0.3)
+    decision_mode = prefs.get("decision_mode", "balanced")
 
     projects = get_projects()
     candidates = []
@@ -1971,12 +1973,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         # Pour le moment on conserve V1 comme score utilisé
         postponement_risk = risk_v1
 
-        print(
-            f"[RISK V1/V2] {catalog_key} | "
-            f"label={risk_label} "
-            f"V1={risk_v1:.0f} "
-            f"V2={risk_v2:.1f}"
-        )
         postponement_impact = compute_postponement_impact(
             postponement_risk=postponement_risk,
             confidence=obj.get("confidence", "MOYENNE"),
@@ -2062,13 +2058,24 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         + postponement_impact["postponement_net_impact"]
         )
 
-        decision_score = final_score
+        strategy_scores = {}
 
-        print(
-            f"[REPORT] risk={postponement_risk:.0f}% "
-            f"impact={postponement_impact['postponement_net_impact']:+.1f}"
-        )
+        for mode in ["balanced", "roi", "completion", "diversification", "risk"]:
+            weights = strategy_weights(mode)
 
+            strategy_scores[mode] = round(
+                astro_part * weights["astro"]
+                + roi_bonus * weights["roi"]
+                + postponement_impact["postponement_net_impact"] * weights["report"]
+                + completion_bonus * weights["completion"]
+                + diversity_bonus * weights["diversity"],
+                1
+            )
+
+        if decision_mode in strategy_scores:
+            decision_score = strategy_scores[decision_mode]
+        else:
+            decision_score = final_score
 
         # Limite l’avantage portefeuille si l’objet est surtout choisi grâce au portefeuille
         if portfolio_bonus > astro_part * 0.5:
@@ -2136,16 +2143,17 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             "postponement_net_impact": postponement_impact["postponement_net_impact"],
             "postponement_reason": postponement_impact["postponement_reason"],
             "reasons": explain_recommendation({
-            "astro_score": astro_score,
-            "roi": roi,
-            "postponement_risk": postponement_risk,
-            "completion_bonus": completion_bonus,
-            "closure_bonus": closure,
-            "season_bonus": season,
-            "progression_bonus": progression,
-            "diversity_bonus" : diversity_bonus
-            
+                "astro_score": astro_score,
+                "roi": roi,
+                "postponement_risk": postponement_risk,
+                "completion_bonus": completion_bonus,
+                "closure_bonus": closure,
+                "season_bonus": season,
+                "progression_bonus": progression,
+                "diversity_bonus" : diversity_bonus, 
         }),
+
+            "strategy_scores": strategy_scores,
         })
 
     if not candidates:
@@ -3014,10 +3022,15 @@ def show_action_plan(
     )
     recommendation = night_projects[0]
 
-    print("\n===== POURQUOI CE CHOIX ? =====")
-
     for reason in recommendation.get("reasons", []):
         print(f"✓ {reason}")
+
+    print("\n===== STRATÉGIES =====")
+
+    strategy_scores = recommendation.get("strategy_scores", {})
+
+    for mode, score in strategy_scores.items():
+        print(f"{mode:<16} : {score:.1f}")
 
     if len(night_projects) > 1:
         alternative = night_projects[1]
@@ -3089,20 +3102,6 @@ def show_action_plan(
         alt_closure_bonus = alternative.get("closure_bonus", 0)
         alt_completion_bonus = alternative.get("completion_bonus", 0)
 
-        print("\n===== DETAIL ALTERNATIVE =====")
-        print(f"Nom                  : {alternative['name']}")
-        print(f"Score astro pondéré  : {alt_score_astro_weighted:.1f}")
-        print(f"Priorité pondérée    : {alt_priority_weighted:.1f}")
-        print(f"Bonus altitude       : {alt_altitude_bonus:+.1f}")
-        print(f"Bonus saison         : {alt_season_bonus:+.1f}")
-        print(f"Score setup          : {alt_setup_bonus:+.1f}")
-        print(f"Bonus ROI            : {alt_roi_bonus:+.1f}")
-        print(f"Bonus clôture        : {alt_closure_bonus:+.1f}")
-        print(f"Bonus complétion     : {alt_completion_bonus:+.1f}")
-        print("-" * 30)
-        print(f"Score final          : {alternative.get('final_score', 0):.1f}")
-
-
         if score_gap > 0:
             print(
                 f"Décision : privilégier {night_project['name']} "
@@ -3150,7 +3149,6 @@ def show_action_plan(
                 f"{estimated_nights:.1f}"
             )
 
-            print("Pourquoi ?")
             print(f"- Score portefeuille : {next_project['score']:.1f}")
             print(f"- ROI : {next_roi:.2f}")
             print(f"- Temps restant : {next_project['remaining']:.1f} h")
@@ -3226,28 +3224,6 @@ def show_action_plan(
     roadmap_after = []
 
     available_hours = night_project.get("available_hours", 3.0)
-
-    print("\n===== ROADMAP AVANT CETTE NUIT =====")
-
-    total_remaining = 0
-
-    avg_capacity = (
-    forecast_available_hours(night_capacities) / max(1, len(night_capacities))
-        if night_capacities
-        else 3.0
-    )
-
-
-    for i, project in enumerate(roadmap_before, start=1):
-
-        print(f"\n{i}. {project['name']}")
-        print(f"   Reste : {project['remaining']:.1f} h")
-        print(f"   ROI : {project['roi']:.2f}")
-        gain = session_portfolio_gain(project["name"], available_hours)
-        print(f"   Gain projet session : +{gain:.1f}%")
-        print(f"  Nuits estimées : {project['remaining'] / max(1, avg_capacity):.1f}")
-
-        total_remaining += project["remaining"]
 
     print("\n===== ROADMAP APRÈS CETTE NUIT =====")
 
@@ -3709,11 +3685,6 @@ def simulate_portfolio_calendar(nights):
         if session_hours <=0:
             continue
 
-        print(
-            f"{night['date']} "
-            f"fenêtre={available_hours:.1f}h "
-            f"session={session_hours:.1f}h"
-        )
         apply_virtual_session(
             projects[name],
             session_hours)
@@ -3724,21 +3695,7 @@ def simulate_portfolio_calendar(nights):
             completion_dates[name] = night["date"]
             print(f"✓ Projet terminé : {name}")
 
-        print(
-            f"Après session : "
-            f"{name} "
-            f"progression={projects[name]['progress']:.1f}% "
-            f"reste={projects[name]['remaining']:.1f} h"
-        )
-
-        print(
-            f"{night['date']} | "
-            f"{name} | "
-            f"{session_hours:.1f} h | "
-            f"reste après : {remaining_by_name[name]:.1f} h | "
-            f"score={best_score:.1f}"
-        )
-
+        
     ###############################print("\n===== DATES DE FIN SIMULÉES =====")
 
     ##############################unfinished_projects = []
@@ -4957,7 +4914,7 @@ if __name__ == "__main__":
         goal=args.goal
 )
         
-    print("\n[TEST] appel forecast_night_capacities")
+    #print("\n[TEST] appel forecast_night_capacities")
     caps = forecast_night_capacities(lat, lon)
 
     print("\n===== CAPACITES FUTURES =====")
@@ -4981,10 +4938,10 @@ top_nights = sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
 
 night_capacities = forecast_night_capacities(lat, lon)
 
-print("\nANCIEN SYSTEME")
+#print("\nANCIEN SYSTEME")
 print(night_capacities)
 
-print("\nNOUVEAU SYSTEME")
+#print("\nNOUVEAU SYSTEME")
 print(forecast_night_capacities(lat, lon))
 
 print("\n===== CAPACITÉ À VENIR =====")
