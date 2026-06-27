@@ -3801,17 +3801,16 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
             if target_alt < min_alt:
                 continue
 
-            result = hour_score(
+            result = sky.score_hour(
                 h,
                 moon_illumination,
-                True,
-                moon_elevation,
-                moon_sep,
-                target_alt,
+                observer,
+                lat,
+                lon,
+                target_obj,
                 bortle,
                 target,
-                target_object,
-                goal=goal
+                goal,
             )
 
             obj_meta = CATALOG.get(target_object, {})

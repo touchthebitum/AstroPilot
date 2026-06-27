@@ -363,8 +363,21 @@ class SkyEngine:
         }
 
     
-    def score_hour(self, hour,moon_illumination,moon_elevation,moon_target_sep, target_altitude, bortle,):
+    def score_hour(self, hour,moon_illumination,observer,lat,lon,target_obj,bortle,target,goal,):
 
+        geometry = self.hour_geometry(
+            hour,
+            observer,
+            target_obj,
+            lat,
+            lon,
+        )
+
+        moon_elevation = geometry["moon_elevation"]
+        target_altitude = geometry["target_altitude"]
+        moon_target_sep = geometry["moon_target_sep"]
+        
+        
         bp = self.bortle_penalty(bortle)
 
         cp = self.cloud_penalty(
@@ -411,7 +424,34 @@ class SkyEngine:
             moon_target_sep,
         )
 
+        score = 100 - bp - cp - mp - hp - wp - vp - pp + tb + ab
+        score = max(0, min(100, score))
+        
         return {
+            "score": score,
+            "moon_impact": mp,
+            "moon_penalty": mp,
+            "target_altitude": target_altitude,
+            "moon_elevation": moon_elevation,
+            "moon_target": moon_target_sep,
+
+            "details": {
+                "bortle": bp,
+                "cloud": cp,
+                "moon": mp,
+                "humidity": hp,
+                "wind": wp,
+                "visibility": vp,
+                "precipitation": pp,
+                "temperature_bonus": tb,
+                "altitude_bonus": ab,
+                "target_altitude": target_altitude,
+                "moon_sep": moon_target_sep,
+                "moon_target_sep": moon_target_sep,
+                "frame_bonus": 0,
+                "sqm": sqm,
+            },
+
             "bp": bp,
             "cp": cp,
             "mp": mp,
@@ -422,7 +462,8 @@ class SkyEngine:
             "tb": tb,
             "ab": ab,
             "sqm": sqm,
-        }
+                
+            }
     def iter_windows(self, hours, window_size):
         if len(hours) < window_size:
             return []
