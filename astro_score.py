@@ -14,6 +14,7 @@ from astral.sun import sun
 from astropy.coordinates import SkyCoord, get_body, EarthLocation, AltAz
 from astropy.time import Time
 import astropy.units as u
+from astropilot.engines.sky_engine import SkyEngine
 from astropy.coordinates.baseframe import NonRotationTransformationWarning
 from astropilot.catalog import CATALOG
 from astropilot.equipment_profiles import CURRENT_EQUIPMENT, get_fov
@@ -382,17 +383,6 @@ def temperature_bonus(temp):
 
     return 0
 
-def moon_illumination_from_phase(phase: float) -> float:
-    """
-    Astral renvoie une phase entre 0 et environ 29.5 jours.
-    0 = nouvelle lune
-    14-15 = pleine lune
-    """
-
-    normalized = phase / 29.53
-    illum = (1 - math.cos(2 * math.pi * normalized)) / 2
-
-    return illum * 100
 
 def moon_target_separation(target_ra, target_dec, obs_time, lat, lon):
     location = EarthLocation(
@@ -475,42 +465,10 @@ def moon_penalty(illumination, moon_elevation, moon_sep):
 
     return round(35 * illum_factor * elev_factor * sep_factor, 1)
 
-def moon_phase_name(illumination):
-
-    if illumination < 5:
-        return "🌑 Nouvelle lune"
-
-    if illumination < 25:
-        return "🌒 Premier croissant"
-
-    if illumination < 45:
-        return "🌓 Premier quartier"
-
-    if illumination < 75:
-        return "🌔 Gibbeuse"
-
-    return "🌕 Pleine lune"
 
 
-def moon_visible_during_window(window_start, window_end, moonrise_time, moonset_time):
-    from datetime import datetime
 
-    if not isinstance(moonrise_time, datetime):
-        moonrise_time = None
 
-    if not isinstance(moonset_time, datetime):
-        moonset_time = None
-
-    if moonrise_time is None and moonset_time is None:
-        return False
-
-    if moonrise_time is None:
-        return moonset_time >= window_start
-
-    if moonset_time is None:
-        return moonrise_time <= window_end
-
-    return moonrise_time <= window_end and moonset_time >= window_start
 
 def safe_moonset(observer, date, tz):
     try:
@@ -4005,10 +3963,12 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
     
     candidates = []
 
+    sky = SkyEngine()
+
     for i in range(0, len(hours) - window_size + 1):
         window = hours[i:i + window_size]
 
-        visible = moon_visible_during_window(
+        visible = sky.moon_visible_during_window(
             window[0]["time"],
             window[-1]["time"] + timedelta(hours=1),
             moon_rise,
@@ -4457,7 +4417,9 @@ def forecast_astro(
         current_date = datetime.combine(night_date, datetime.min.time())
 
         phase = moon_phase(current_date.date())
-        illumination = round(moon_illumination_from_phase(phase))
+        sky = SkyEngine()
+        illumination = round(sky.moon_illumination_from_phase(phase))
+
 
         city_info = LocationInfo(city, "Switzerland", TIMEZONE, lat, lon)
 
