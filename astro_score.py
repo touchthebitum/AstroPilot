@@ -333,64 +333,6 @@ def estimate_weather_good_night_ratio(weather):
 
     return max(0.05, min(0.8, good_hours / total_night_hours))
     
-def humidity_penalty(humidity: float) -> float:
-    if humidity < 70:
-        return 0
-    if humidity < 85:
-        return 8
-    return 18
-
-
-def precipitation_penalty(precipitation: float) -> float:
-    if precipitation <= 0:
-        return 0
-    if precipitation < 0.1:
-        return 3
-    if precipitation <0.3:
-        return 10
-    if precipitation <0.8:
-        return 35
-    return 80
-
-
-def wind_penalty(wind: float) -> float:
-    if wind < 10:
-        return 0
-    if wind < 20:
-        return 6
-    if wind < 30:
-        return 14
-    return 25
-
-
-def visibility_penalty(visibility: float | None) -> float:
-    if visibility is None:
-        return 0
-
-    # Open-Meteo donne souvent la visibilité en mètres.
-    
-    if visibility > 20000:
-        return 0
-    if visibility > 10000:
-        return 4
-    if visibility > 5000:
-        return 10
-    return 25
-
-def bortle_penalty(bortle: int) -> float:
-    penalties = {
-        1: 0,
-        2: 0,
-        3: 0,
-        4: 5,
-        5: 12,
-        6: 25,
-        7: 40,
-        8: 60,
-        9: 80,
-    }
-    return penalties.get(bortle, 40)
-
 def estimated_sqm(bortle, moon_illumination, moon_elevation, moon_target_sep):
     base = {
         1: 21.9,
@@ -3568,7 +3510,7 @@ def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_targe
 
     sky = SkyEngine()
 
-    bp = bortle_penalty(bortle)
+    bp = sky.bortle_penalty(bortle)
     cp = sky.cloud_penalty(
     hour["cloud_cover"],
     hour["cloud_cover_low"],
@@ -3633,10 +3575,10 @@ def hour_score(hour, moon_illumination, moon_visible, moon_elevation, moon_targe
     else:
         moon_impact = "très fort"
     
-    hp = humidity_penalty(hour["relative_humidity_2m"])
-    pp = precipitation_penalty(hour["precipitation"])
-    wp = wind_penalty(hour["wind_speed_10m"])
-    vp = visibility_penalty(hour.get("visibility"))
+    hp = sky.humidity_penalty(hour["relative_humidity_2m"])
+    pp = sky.precipitation_penalty(hour["precipitation"])
+    wp = sky.wind_penalty(hour["wind_speed_10m"])
+    vp = sky.visibility_penalty(hour.get("visibility"))
     tb = sky.temperature_bonus(hour["temperature_2m"])
    
     profile = TARGETS[target]

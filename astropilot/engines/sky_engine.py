@@ -215,6 +215,63 @@ class SkyEngine:
             sep_factor = 1.0
 
         return round(35 * illum_factor * elev_factor * sep_factor, 1)
+    
+    def humidity_penalty(self, humidity: float) -> float:
+        if humidity < 70:
+            return 0
+        if humidity < 85:
+            return 8
+        return 18
+    
+    def precipitation_penalty(self,precipitation: float) -> float:
+        if precipitation <= 0:
+            return 0
+        if precipitation < 0.1:
+            return 3
+        if precipitation <0.3:
+            return 10
+        if precipitation <0.8:
+            return 35
+        return 80
+
+
+    def wind_penalty(self,wind: float) -> float:
+        if wind < 10:
+            return 0
+        if wind < 20:
+            return 6
+        if wind < 30:
+            return 14
+        return 25
+
+
+    def visibility_penalty(self,visibility: float | None) -> float:
+        if visibility is None:
+            return 0
+
+        # Open-Meteo donne souvent la visibilité en mètres.
+        
+        if visibility > 20000:
+            return 0
+        if visibility > 10000:
+            return 4
+        if visibility > 5000:
+            return 10
+        return 25
+
+    def bortle_penalty(self,bortle: int) -> float:
+        penalties = {
+            1: 0,
+            2: 0,
+            3: 0,
+            4: 5,
+            5: 12,
+            6: 25,
+            7: 40,
+            8: 60,
+            9: 80,
+        }
+        return penalties.get(bortle, 40)
         
     def cloud_score(self):
         pass
