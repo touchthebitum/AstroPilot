@@ -3747,8 +3747,6 @@ def night_hours_rough(rows: list[dict], date: datetime, lat: float, lon: float, 
 
     night_rows = [r for r in rows if start <= r["time"] <= end]
 
-
-
     return night_rows
 
 def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_set, observer, bortle=4, target="deep_sky", target_object="M31", goal="balanced", window_size: int = None, limit: int = 3):
@@ -3759,15 +3757,16 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
     if window_size is None:
         window_size = profile.get("preferences", {}).get("window_size", 2)
 
-    if len(hours) < window_size:
-        return []
-    
-    candidates = []
-
     sky = SkyEngine()
 
-    for i in range(0, len(hours) - window_size + 1):
-        window = hours[i:i + window_size]
+    windows = sky.iter_windows(hours, window_size)
+
+    if not windows:
+        return []
+
+    candidates = []
+
+    for window in windows:
 
         visible = sky.moon_visible_during_window(
             window[0]["time"],
@@ -3786,33 +3785,21 @@ def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_se
         min_alt = profile.get("preference",{}).get("min_altitude_deg",30)
 
         for h in window:
-            moon_elevation = moon.elevation(
-                observer,
-                h["time"]
-            )
-
             target_obj = TARGET_OBJECTS[target_object]
 
-            target_alt = sky.target_altitude(
-                target_obj["ra"],
-                target_obj["dec"],
-                h["time"],
-                observer.latitude,
-                observer.longitude
-            )
-
-            profile = load_user_profile()
-            min_alt = profile.get("preferences", {}).get("min_altitude_deg", 30)
-            if target_alt < min_alt:
-                continue
-
-            moon_sep = sky.moon_target_separation(
-                target_obj["ra"],
-                target_obj["dec"],
-                h["time"],
+            geometry = sky.hour_geometry(
+                h,
+                observer,
+                target_obj,
                 lat,
                 lon
             )
+
+            moon_elevation = geometry["moon_elevation"]
+            target_alt = geometry["target_altitude"]
+            moon_sep = geometry["moon_target_sep"]
+            if target_alt < min_alt:
+                continue
 
             result = hour_score(
                 h,

@@ -1,5 +1,8 @@
 import math
+from astral import moon
 from astral.moon import moonrise, moonset
+from astral.sun import sun
+from astral import moon
 from astropy.coordinates import SkyCoord, get_body, EarthLocation, AltAz
 from astropy.time import Time
 import astropy.units as u
@@ -323,6 +326,43 @@ class SkyEngine:
 
         return round(base - moon_loss, 2)
     
+
+    def hour_geometry(
+        self,
+        hour,
+        observer,
+        target_obj,
+        lat,
+        lon,
+    ):
+        moon_elevation = moon.elevation(
+            observer,
+            hour["time"]
+        )
+
+        target_alt = self.target_altitude(
+            target_obj["ra"],
+            target_obj["dec"],
+            hour["time"],
+            observer.latitude,
+            observer.longitude
+        )
+
+        moon_sep = self.moon_target_separation(
+            target_obj["ra"],
+            target_obj["dec"],
+            hour["time"],
+            lat,
+            lon
+        )
+
+        return {
+            "moon_elevation": moon_elevation,
+            "target_altitude": target_alt,
+            "moon_target_sep": moon_sep,
+        }
+
+    
     def score_hour(self, hour,moon_illumination,moon_elevation,moon_target_sep, target_altitude, bortle,):
 
         bp = self.bortle_penalty(bortle)
@@ -383,4 +423,14 @@ class SkyEngine:
             "ab": ab,
             "sqm": sqm,
         }
+    def iter_windows(self, hours, window_size):
+        if len(hours) < window_size:
+            return []
+
+        windows = []
+
+        for i in range(0, len(hours) - window_size + 1):
+            windows.append(hours[i:i + window_size])
+
+        return windows
                 
