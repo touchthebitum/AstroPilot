@@ -3936,6 +3936,61 @@ def recommend_filter(obj):
         ]
 
     return []
+
+def compute_best_window_for_object(
+    sky,
+    hours,
+    illumination,
+    moon_rise,
+    moon_set,
+    city_info,
+    lat,
+    lon,
+    bortle,
+    target,
+    obj_name,
+):
+    top_windows = sky.best_windows(
+        hours=hours,
+        moon_illumination=illumination,
+        moon_rise=moon_rise,
+        moon_set=moon_set,
+        observer=city_info.observer,
+        lat=lat,
+        lon=lon,
+        bortle=bortle,
+        target=target,
+        target_object=obj_name,
+        target_obj=TARGET_OBJECTS[obj_name],
+    )
+
+    if not top_windows:
+        return None
+
+    top_windows.sort(key=lambda x: x["score"], reverse=True)
+    return top_windows[0]
+
+def build_night_result():
+    return {
+        "date": str(night_date),
+            "score": night_score,
+            "moon_impact": best["moon_impact"],
+            "moon_penalty": best["moon_penalty"],
+            "verdict": verdict(night_score),
+            "bortle": bortle,
+            "object": best_object,
+            "best_setup": setup_name,
+            "setup_score": best_results[0].get("setup_score", 0),
+            "global_score": best_results[0].get("global_score", 0),
+            "best_object_score": all_results[0]["global_score"],
+            "all_objects": all_results,
+    
+            "best_objects": [
+                r["name"]
+                for r in top3
+                if r["score"] == best_score
+            ]
+    }
     
 def forecast_astro(
     lat,
@@ -3973,7 +4028,9 @@ def forecast_astro(
         current_date = datetime.combine(night_date, datetime.min.time())
 
         phase = moon_phase(current_date.date())
+
         sky = SkyEngine()
+
         illumination = round(sky.moon_illumination_from_phase(phase))
 
 
@@ -3998,28 +4055,22 @@ def forecast_astro(
 
             sky = SkyEngine()
 
-            top_windows = sky.best_windows(
-                hours=hours,
-                moon_illumination=illumination,
-                moon_rise=moon_rise,
-                moon_set=moon_set,
-                observer=city_info.observer,
-                lat=lat,
-                lon=lon,
-                bortle=bortle,
-                target=target,
-                target_object=obj_name,
-                target_obj=TARGET_OBJECTS[obj_name],
+            best = compute_best_window_for_object(
+                sky,
+                hours,
+                illumination,
+                moon_rise,
+                moon_set,
+                city_info,
+                lat,
+                lon,
+                bortle,
+                target,
+                obj_name,
             )
 
-            if not top_windows:
-                #print("NO WINDOW =", obj_name)
+            if best is None:
                 continue
-
-            #print("WINDOW OK =", obj_name, "score=", top_windows[0]["score"])
-
-            top_windows.sort(key=lambda x: x["score"], reverse=True)
-            best = top_windows[0]
 
             profile = load_user_profile()
 
