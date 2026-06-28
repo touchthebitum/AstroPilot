@@ -4159,7 +4159,18 @@ def forecast_astro(
 
         top3 = all_results[:3]
 
-        best_results = [all_results[0]]
+        best_results = all_results[:3]
+
+        print("\n===== MEILLEUR SETUP PAR OBJET =====")
+
+        for r in best_results:
+            print(f"\n{r['name']}")
+
+            for i, s in enumerate(r["setup_ranking"], 1):
+                print(
+                    f"  {i}. {s['setup']} : {s['score']:.1f}"
+                )
+
 
         best = best_results[0]["window"]
         best_object = best_results[0]["name"]
