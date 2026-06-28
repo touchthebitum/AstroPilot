@@ -3970,6 +3970,78 @@ def compute_best_window_for_object(
     top_windows.sort(key=lambda x: x["score"], reverse=True)
     return top_windows[0]
 
+def evaluate_object(
+    obj_name,
+    sky,
+    hours,
+    illumination,
+    moon_rise,
+    moon_set,
+    city_info,
+    lat,
+    lon,
+    bortle,
+    target,
+    profile,
+):
+    best = compute_best_window_for_object(
+        sky,
+        hours,
+        illumination,
+        moon_rise,
+        moon_set,
+        city_info,
+        lat,
+        lon,
+        bortle,
+        target,
+        obj_name,
+    )
+
+    if best is None:
+        return None
+
+    best_setup = None
+    best_setup_score = -999
+
+    for setup_name in profile.get("available_equipment", []):
+        setup = EQUIPMENT_PROFILES.get(setup_name)
+
+        if not setup:
+            continue
+
+        s = setup_score(
+            setup,
+            {
+                "name": obj_name,
+                "type": CATALOG.get(obj_name, {}).get("type", ""),
+            },
+        )
+
+        if s > best_setup_score:
+            best_setup_score = s
+            best_setup = setup_name
+
+    best["best_setup"] = best_setup
+    best["setup_score"] = best_setup_score
+    best["global_score"] = best["score"] + best_setup_score
+
+    return {
+        "name": obj_name,
+        "score": best["score"],
+        "altitude": best.get("target_altitude"),
+        "moon_sep": best.get("moon_sep"),
+        "sqm": best.get("sqm"),
+        "moon_score": best.get("moon_score"),
+        "frame_bonus": best.get("frame_bonus"),
+        "window": best,
+        "catalog_key": obj_name,
+        "best_setup": best_setup,
+        "setup_score": best_setup_score,
+        "global_score": best["score"] + best_setup_score,
+    }
+
+
 def build_night_result():
     return {
         "date": str(night_date),
@@ -4049,71 +4121,29 @@ def forecast_astro(
         if not hours:
             continue
 
+        profile = load_user_profile()
+    
         all_results = []
 
         for obj_name in TARGET_OBJECTS:
 
-            sky = SkyEngine()
-
-            best = compute_best_window_for_object(
-                sky,
-                hours,
-                illumination,
-                moon_rise,
-                moon_set,
-                city_info,
-                lat,
-                lon,
-                bortle,
-                target,
-                obj_name,
+            result = evaluate_object(
+                obj_name=obj_name,
+                sky=sky,
+                hours=hours,
+                illumination=illumination,
+                moon_rise=moon_rise,
+                moon_set=moon_set,
+                city_info=city_info,
+                lat=lat,
+                lon=lon,
+                bortle=bortle,
+                target=target,
+                profile=profile,
             )
 
-            if best is None:
-                continue
-
-            profile = load_user_profile()
-
-            best_setup = None
-            best_setup_score = -999
-
-            for setup_name in profile.get("available_equipment", []):
-                setup = EQUIPMENT_PROFILES.get(setup_name)
-
-                if not setup:
-                    continue
-
-                s = setup_score(
-                    setup,
-                    {
-                        "name": obj_name,
-                        "type": CATALOG.get(obj_name, {}).get("type", ""),
-                    },
-                )
-
-                if s > best_setup_score:
-                    best_setup_score = s
-                    best_setup = setup_name
-
-            best["best_setup"] = best_setup
-            best["setup_score"] = best_setup_score
-            best["global_score"] = best["score"] + best_setup_score
-
-            all_results.append({
-                "name": obj_name,
-                "score": best["score"],
-                "altitude": best.get("target_altitude"),
-                "moon_sep": best.get("moon_sep"),
-                "sqm": best.get("sqm"),
-                "moon_score": best.get("moon_score"),
-                "frame_bonus": best.get("frame_bonus"),
-                "window": best,
-                "catalog_key": obj_name,
-                "best_setup": best_setup,
-                "setup_score": best_setup_score,
-                "global_score": best["score"] + best_setup_score,
-            })
-
+            if result is not None:
+                all_results.append(result)
 
         if not all_results:
             continue
