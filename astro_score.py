@@ -3747,28 +3747,6 @@ def night_hours_rough(rows: list[dict], date: datetime, lat: float, lon: float, 
 
     return night_rows
 
-def best_windows(hours: list[dict], moon_illumination: float, moon_rise, moon_set, observer, bortle=4, target="deep_sky", target_object="M31", goal="balanced", window_size: int = None, limit: int = 3):
-
-
-    sky = SkyEngine()
-
-    return sky.best_windows(
-        hours=hours,
-        moon_illumination=moon_illumination,
-        moon_rise=moon_rise,
-        moon_set=moon_set,
-        observer=observer,
-        lat=lat,
-        lon=lon,
-        bortle=bortle,
-        target=target,
-        target_object=target_object,
-        target_obj=TARGET_OBJECTS[target_object],
-        goal=goal,
-        window_size=window_size,
-        limit=limit,
-    )
-
 def compare_equipment_for_object(object_name):
     obj = CATALOG.get(object_name)
 
@@ -4018,17 +3996,20 @@ def forecast_astro(
 
         for obj_name in TARGET_OBJECTS:
 
-            #print("TEST OBJ =", obj_name)
+            sky = SkyEngine()
 
-            top_windows = best_windows(
+            top_windows = sky.best_windows(
                 hours=hours,
-                bortle = bortle,
-                moon_rise = moon_rise,
-                moon_set = moon_set,
+                moon_illumination=illumination,
+                moon_rise=moon_rise,
+                moon_set=moon_set,
                 observer=city_info.observer,
-                moon_illumination = illumination,
-                target = target,
+                lat=lat,
+                lon=lon,
+                bortle=bortle,
+                target=target,
                 target_object=obj_name,
+                target_obj=TARGET_OBJECTS[obj_name],
             )
 
             if not top_windows:

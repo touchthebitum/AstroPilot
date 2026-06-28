@@ -471,7 +471,6 @@ class SkyEngine:
                 
             }
     
-    
     def best_windows(self,hours, moon_illumination, moon_rise, moon_set, observer, lat, lon,bortle=4, target="deep_sky", target_object="M31",target_obj=None, goal="balanced", window_size= 2,min_altitude_deg=30, limit= 3):
 
         if target_obj is None:
