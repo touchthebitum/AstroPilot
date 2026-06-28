@@ -4003,6 +4003,7 @@ def evaluate_object(
 
     best_setup = None
     best_setup_score = -999
+    setup_ranking = []
 
     for setup_name in profile.get("available_equipment", []):
         setup = EQUIPMENT_PROFILES.get(setup_name)
@@ -4017,11 +4018,15 @@ def evaluate_object(
                 "type": CATALOG.get(obj_name, {}).get("type", ""),
             },
         )
+        setup_ranking.append({
+            "setup": setup_name,
+            "score": s,
+        })
 
         if s > best_setup_score:
             best_setup_score = s
             best_setup = setup_name
-
+    setup_ranking.sort(key=lambda x: x["score"], reverse=True)
     best["best_setup"] = best_setup
     best["setup_score"] = best_setup_score
     best["global_score"] = best["score"] + best_setup_score
@@ -4039,6 +4044,7 @@ def evaluate_object(
         "best_setup": best_setup,
         "setup_score": best_setup_score,
         "global_score": best["score"] + best_setup_score,
+        "setup_ranking": setup_ranking,
     }
 
 
