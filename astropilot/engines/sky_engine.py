@@ -7,6 +7,10 @@ from astral import moon
 from astropilot.user_profile import load_user_profile
 from astropy.coordinates import SkyCoord, get_body, EarthLocation, AltAz
 from astropy.time import Time
+from astropy.utils import iers
+iers.conf.auto_download = False
+iers.conf.auto_max_age = None
+
 import astropy.units as u
 class SkyEngine:
     """
@@ -468,7 +472,7 @@ class SkyEngine:
             }
     
     
-    def best_windows(self,hours, moon_illumination, moon_rise, moon_set, observer, lat, lon,bortle=4, target="deep_sky", target_object="M31",target_obj=None, goal="balanced", window_size= None, limit= 3):
+    def best_windows(self,hours, moon_illumination, moon_rise, moon_set, observer, lat, lon,bortle=4, target="deep_sky", target_object="M31",target_obj=None, goal="balanced", window_size= 2,min_altitude_deg=30, limit= 3):
 
         if target_obj is None:
             raise ValueError("target_obj is required")
@@ -503,7 +507,7 @@ class SkyEngine:
 
             profile = load_user_profile()
 
-            min_alt = profile.get("preference",{}).get("min_altitude_deg",30)
+            min_alt = profile.get("preferences",{}).get("min_altitude_deg",30)
 
             for h in window:
                 #target_obj = TARGET_OBJECTS[target_object]
