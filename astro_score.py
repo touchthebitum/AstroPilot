@@ -1308,6 +1308,7 @@ def framing_score(setup, project_name):
 def setup_score(setup, project):
 
     score = 0
+    reasons =[]
 
     focal = setup.get("focal_length_mm", setup.get("focal_length", 135))
     f_ratio = setup.get("f_ratio", 5.6)
@@ -1321,32 +1322,50 @@ def setup_score(setup, project):
     if project_type in ["nebula", "nebulae", "supernova_remnant", "emission_nebula"]:
         if focal <= 200:
             score += 20
+            reasons.append("Focale idéale pour les grandes nébuleuses")
         elif focal <= 500:
             score += 10
+            reasons.append("Focale correcte pour les nébuleuses")
         else:
             score -= 10
+            reasons.append("Focale trop longue pour une grande nébuleuse")
 
     elif project_type in ["galaxy", "galaxies"]:
         if focal >= 400:
             score += 20
+            reasons.append("Focale adaptée aux galaxies")
         elif focal >= 200:
             score += 10
+            reasons.append("Focale correcte pour les galaxies")
         else:
             score -= 10
-
-    if f_ratio <= 3:
-        score += 15
-    elif f_ratio <= 5:
-        score += 8
-    else:
-        score -= 5
-
-    if setup.get("camera_type") == "mono":
-        score += 10
+            reasons.append("Focale trop courte pour les galaxies")
 
     score += framing_score(setup, project["name"])
 
     return score
+
+def explain_setup_choice(setup, obj):
+    reasons = []
+
+    obj_type = obj.get("type", "")
+
+    if setup.get("f_ratio", 99) <= 2.8:
+        reasons.append("Optique très lumineuse")
+
+    if setup.get("camera", "").lower().endswith("2600"):
+        reasons.append("Capteur haute résolution")
+
+    if setup.get("camera", "").lower().endswith("183"):
+        reasons.append("Très bon échantillonnage")
+
+    if obj_type == "galaxy":
+        reasons.append("Adapté aux objets compacts")
+
+    if obj_type == "nebula":
+        reasons.append("Champ adapté aux nébuleuses")
+
+    return reasons
 
 def session_portfolio_gain(project_name, session_hours):
 
@@ -4030,6 +4049,13 @@ def evaluate_object(
     best["best_setup"] = best_setup
     best["setup_score"] = best_setup_score
     best["global_score"] = best["score"] + best_setup_score
+    best["setup_reasons"] = explain_setup_choice(
+    EQUIPMENT_PROFILES[best_setup],
+    {
+        "name": obj_name,
+        "type": CATALOG.get(obj_name, {}).get("type", "")
+    }
+)
 
     return {
         "name": obj_name,
@@ -4045,6 +4071,7 @@ def evaluate_object(
         "setup_score": best_setup_score,
         "global_score": best["score"] + best_setup_score,
         "setup_ranking": setup_ranking,
+        "setup_reasons": best["setup_reasons"],
     }
 
 
@@ -4162,6 +4189,11 @@ def forecast_astro(
         best_results = all_results[:3]
 
         print("\n===== MEILLEUR SETUP PAR OBJET =====")
+
+        print("Pourquoi ce setup :")
+
+        for reason in best_results[0]["setup_reasons"]:
+            print(f"  • {reason}")
 
         for r in best_results:
             print(f"\n{r['name']}")
