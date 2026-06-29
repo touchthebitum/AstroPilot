@@ -69,14 +69,31 @@ if __name__ == "__main__":
 
     planner = NightPlanner()
 
-    events = planner.build_plan(
-    [
+    projects = [
         {
             "name": "IC1396",
-            "hours": 2.0,
+            "hours": 4.0,
             "setup": "Samyang135_2600",
             "filter": "Ha",
-        }
-    ],
-    2.0,
-)
+            "progress": 35,
+            "remaining_hours": 15,
+            "roi": 9.3,
+        },
+        {
+            "name": "M31",
+            "hours": 4.0,
+            "setup": "Samyang135_2600",
+            "filter": "LRGB",
+            "progress": 92,
+            "remaining_hours": 2,
+            "roi": 6.8,
+        },
+    ]
+
+    events = planner.build_plan(
+        projects,
+        available_hours=4.0,
+    )
+
+    for event in events:
+        print(event)

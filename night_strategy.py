@@ -28,7 +28,15 @@ class NightStrategy:
                 "expected_roi": None,
             }
 
-        best = recommended_objects[0]
+        finish_candidates = [
+        p for p in recommended_objects
+        if p.get("progress", 0) >= 85
+    ]
+
+        if finish_candidates:
+            best = finish_candidates[0]
+        else:
+            best = recommended_objects[0]
 
         remaining = best.get("remaining_hours", 999)
         progress = best.get("progress", 0)
@@ -46,9 +54,17 @@ class NightStrategy:
             strategy = StrategyType.BALANCED
             reason = "Compromis entre rendement et progression."
 
+        if strategy in (
+            StrategyType.FINISH_PROJECT,
+            StrategyType.ROI_MAX,
+        ):
+            selected_projects = [best]
+        else:
+            selected_projects = recommended_objects
+
         return {
             "strategy": strategy,
-            "projects": recommended_objects,
+            "projects": selected_projects,
             "available_hours": available_hours,
             "reason": reason,
             "confidence": 0.85,
