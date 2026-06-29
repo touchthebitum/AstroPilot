@@ -1,3 +1,10 @@
+class StrategyType:
+    FINISH_PROJECT = "FINISH_PROJECT"
+    BALANCED = "BALANCED"
+    DISCOVERY = "DISCOVERY"
+    ROI_MAX = "ROI_MAX"
+    WEATHER_OPPORTUNITY = "WEATHER_OPPORTUNITY"
+
 class NightStrategy:
 
     def __init__(self, profile=None):
@@ -14,17 +21,39 @@ class NightStrategy:
 
         if not recommended_objects:
             return {
-                "strategy": "NONE",
-                "projects": []
+                "strategy": StrategyType.BALANCED,
+                "projects": [],
+                "reason": "Aucun projet disponible.",
+                "confidence": 0.0,
+                "expected_roi": None,
             }
 
-        strategy = {
-            "strategy": "BALANCED",
-            "projects": recommended_objects,
-            "available_hours": available_hours
-        }
+        best = recommended_objects[0]
 
-        return strategy
+        remaining = best.get("remaining_hours", 999)
+        progress = best.get("progress", 0)
+        roi = best.get("roi", 0)
+
+        if progress >= 85:
+            strategy = StrategyType.FINISH_PROJECT
+            reason = "Projet presque terminé."
+
+        elif roi >= 8:
+            strategy = StrategyType.ROI_MAX
+            reason = "ROI exceptionnel."
+
+        else:
+            strategy = StrategyType.BALANCED
+            reason = "Compromis entre rendement et progression."
+
+        return {
+            "strategy": strategy,
+            "projects": recommended_objects,
+            "available_hours": available_hours,
+            "reason": reason,
+            "confidence": 0.85,
+            "expected_roi": roi,
+        }
 
 if __name__ == "__main__":
 
@@ -38,4 +67,10 @@ if __name__ == "__main__":
         4.0
     )
 
-    print(result)
+    print("\n===== NIGHT STRATEGY =====")
+    print(f"Stratégie : {result['strategy']}")
+    print(f"Confiance : {result['confidence']:.0%}")
+    print(f"Raison : {result['reason']}")
+    print("Projets :")
+    for p in result["projects"]:
+        print(f" - {p['name']}")
