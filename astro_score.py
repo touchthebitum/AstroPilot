@@ -2335,7 +2335,7 @@ def show_tonight_recommendation(night):
         print(
             f"{item['object']}  "
             f"{item['hours']:.1f} h  "
-            f"({item['project']})"
+            f"({item.get('project', item.get('object', ''))})"
         )
 
     night_project = night_projects[0]
@@ -4100,6 +4100,31 @@ def build_night_result():
             ]
     }
     
+
+def build_night_schedule(objects, available_hours, profile=None):
+    schedule = []
+    remaining = available_hours
+
+    for obj in objects:
+        if remaining <= 0:
+            break
+
+        duration = min(
+            obj.get("remaining_hours", remaining),
+            remaining
+        )
+
+        schedule.append({
+            "object": obj["name"],
+            "hours": duration,
+            "score": obj.get("global_score", obj.get("score", 0)),
+            "setup": obj.get("best_setup"),
+        })
+
+        remaining -= duration
+
+    return schedule
+
 def forecast_astro(
     lat,
     lon,
