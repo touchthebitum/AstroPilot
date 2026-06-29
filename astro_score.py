@@ -4,6 +4,7 @@ import json
 import requests
 import warnings
 import copy
+from night_scheduler import build_night_schedule
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from astral import LocationInfo
@@ -1944,7 +1945,7 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
     return candidates
 
 
-def build_night_schedule(top_objects, available_hours):
+def build_night_schedule_legacy_old(top_objects, available_hours):
     """
     Remplit une nuit avec plusieurs projets.
     """
@@ -2333,9 +2334,9 @@ def show_tonight_recommendation(night):
 
     for item in schedule:
         print(
-            f"{item['object']}  "
-            f"{item['hours']:.1f} h  "
-            f"({item.get('project', item.get('object', ''))})"
+            f"{item['start']:.1f}h -> {item['end']:.1f}h   "
+            f"{item['object']}   "
+            f"{item['hours']:.1f} h"
         )
 
     night_project = night_projects[0]
@@ -4101,9 +4102,10 @@ def build_night_result():
     }
     
 
-def build_night_schedule(objects, available_hours, profile=None):
+def build_night_schedule_legacy(objects, available_hours, profile=None):
     schedule = []
     remaining = available_hours
+    current_time = 0
 
     for obj in objects:
         if remaining <= 0:
@@ -4117,11 +4119,14 @@ def build_night_schedule(objects, available_hours, profile=None):
         schedule.append({
             "object": obj["name"],
             "hours": duration,
+            "start" : current_time,
+            "end": current_time + duration,
             "score": obj.get("global_score", obj.get("score", 0)),
             "setup": obj.get("best_setup"),
         })
 
         remaining -= duration
+        current_time += duration
 
     return schedule
 
