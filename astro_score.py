@@ -1343,7 +1343,10 @@ def setup_score(setup, project):
 
     score += framing_score(setup, project["name"])
 
-    return score
+    return {
+    "score": score,
+    "reasons": reasons,
+}
 
 def explain_setup_choice(setup, obj):
     reasons = []
@@ -4030,32 +4033,32 @@ def evaluate_object(
         if not setup:
             continue
 
-        s = setup_score(
+        setup_result = setup_score(
             setup,
             {
                 "name": obj_name,
                 "type": CATALOG.get(obj_name, {}).get("type", ""),
             },
         )
+        s= setup_result["score"]
+        reasons = setup_result["reasons"]
+
         setup_ranking.append({
             "setup": setup_name,
             "score": s,
+            "reasons": reasons,
         })
 
         if s > best_setup_score:
             best_setup_score = s
             best_setup = setup_name
+
     setup_ranking.sort(key=lambda x: x["score"], reverse=True)
     best["best_setup"] = best_setup
     best["setup_score"] = best_setup_score
     best["global_score"] = best["score"] + best_setup_score
-    best["setup_reasons"] = explain_setup_choice(
-    EQUIPMENT_PROFILES[best_setup],
-    {
-        "name": obj_name,
-        "type": CATALOG.get(obj_name, {}).get("type", "")
-    }
-)
+
+    best["setup_reasons"] = setup_ranking[0].get("reasons", []) if setup_ranking else []
 
     return {
         "name": obj_name,
@@ -4190,18 +4193,18 @@ def forecast_astro(
 
         print("\n===== MEILLEUR SETUP PAR OBJET =====")
 
-        print("Pourquoi ce setup :")
-
-        for reason in best_results[0]["setup_reasons"]:
-            print(f"  • {reason}")
-
         for r in best_results:
             print(f"\n{r['name']}")
+            print(f"Meilleur setup : {r.get('best_setup')}")
+            print(f"Score setup : {r.get('setup_score')}")
 
-            for i, s in enumerate(r["setup_ranking"], 1):
-                print(
-                    f"  {i}. {s['setup']} : {s['score']:.1f}"
-                )
+            print("Pourquoi ce setup :")
+            for reason in r.get("setup_reasons", []):
+                print(f"  ✓ {reason}")
+
+            print("Classement setups :")
+            for i, s in enumerate(r.get("setup_ranking", []), 1):
+                print(f"  {i}. {s['setup']} : {s['score']:.1f}")
 
 
         best = best_results[0]["window"]
