@@ -536,6 +536,12 @@ class SkyEngine:
                     target,
                     goal,
                 )
+                
+                seeing = self.estimate_seeing(
+                    h.get("wind_speed_10m", 0),
+                    h.get("relative_humidity_2m", 0),
+                )
+                print("DEBUG seeing :", seeing)
 
                 obj_meta = target_obj or {}
 
@@ -663,6 +669,21 @@ class SkyEngine:
                 1
             )
 
+            avg_humidity = round(
+                sum(h["relative_humidity_2m"] for h in window) / len(window),
+                1
+            )
+
+            avg_wind = round(
+                sum(h["wind_speed_10m"] for h in window) / len(window),
+                1
+            )
+
+            seeing = self.estimate_seeing(
+                avg_wind,
+                avg_humidity,
+            )
+
             candidates.append({
                     "start": window[0]["time"],
                     "end": window[-1]["time"] + timedelta(hours=1),
@@ -689,6 +710,8 @@ class SkyEngine:
                         sum(h["visibility"] for h in window) / len(window),
                         1
                     ),
+
+                    "seeing" : seeing,
                     "moon_impact": moon_impacts[0],
                     "moon_penalty": round(
                         sum(moon_penalties) / len(moon_penalties),
@@ -722,4 +745,26 @@ class SkyEngine:
 
         return windows
     
+    def estimate_seeing(self, wind, humidity):
+        """
+        Estimation simple du seeing (arcsec).
+        Plus la valeur est basse, meilleur est le seeing.
+        """
+
+        seeing = 1.5
+
+        # Vent
+        if wind > 20:
+            seeing += 1.0
+        elif wind > 10:
+            seeing += 0.5
+
+        # Humidité
+        if humidity > 90:
+            seeing += 0.8
+        elif humidity > 80:
+            seeing += 0.4
+
+        return round(seeing, 1)
+        
     

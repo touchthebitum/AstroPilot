@@ -4107,6 +4107,7 @@ def evaluate_object(
             "humidity" : best.get("humidity", 0),
             "wind": best.get("wind", 0),
             "visibility": best.get("visibility", best.get("visibility_m",0)),
+            "seeing" : best.get("seeing"),
         }
 
         contributions, decision_score = decision_engine.evaluate(
