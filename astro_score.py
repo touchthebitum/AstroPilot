@@ -4,6 +4,7 @@ import json
 import requests
 import warnings
 import copy
+from decision.rules.cloud_rule import CloudRule
 from decision.rules.moon_rule import MoonRule
 from decision.decision_engine import DecisionEngine
 from decision.rules.altitude_rule import AltitudeRule
@@ -4081,12 +4082,20 @@ def evaluate_object(
         decision_engine = DecisionEngine()
         decision_engine.add_rule(AltitudeRule())
         decision_engine.add_rule(MoonRule())
+        decision_engine.add_rule(CloudRule())
+
+        clouds = best.get("clouds", 0)
 
         context = {
             "altitude": altitude,
             "illumination": illumination,
             "moon_elevation": best.get("moon_elevation"),
             "moon_sep": best.get("moon_sep"),
+
+            "cloud_cover": clouds,
+            "cloud_cover_low": clouds,
+            "cloud_cover_mid": clouds,
+            "cloud_cover_high": clouds,
         }
 
         contributions, decision_score = decision_engine.evaluate(
@@ -4095,11 +4104,20 @@ def evaluate_object(
         )
 
         print(f"\n===== DECISION ENGINE : {obj_name} =====")
-        print(f"Score DecisionEngine :{decision_score:.1f}")
-        print(f"Nombre de règles : {len(contributions)}")
+        print(f"Score DecisionEngine : {decision_score:+.1f}\n")
 
         for c in contributions:
-            print(c)
+
+            icon = "✓" if c.score >= 0 else "✗"
+
+            print(f"{icon} {c.rule}")
+            print(f"   {c.score:+.1f}")
+            print(f"   {c.reason}")
+
+            if c.details:
+                print(f"   {c.details}")
+
+            print()
 
     priority = profile.get("project_priorities", {}).get(obj_name, 0)
     
