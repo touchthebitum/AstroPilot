@@ -9,13 +9,17 @@ class DecisionEngine:
     def add_rule(self, rule):
         self.rules.append(rule)
 
-    def evaluate(self, project, context):
+    def evaluate(self, context, profile):
+        total_score = 0
         contributions = []
 
         for rule in self.rules:
-            result = rule.evaluate(project, context)
+            contribution = rule.evaluate(context, profile)
 
-            if result is not None:
-                contributions.append(result)
+            if contribution is None:
+                continue
 
-        return contributions
+            total_score += contribution.score * contribution.weight
+            contributions.append(contribution)
+
+        return contributions, total_score

@@ -4089,12 +4089,13 @@ def evaluate_object(
             "moon_sep": best.get("moon_sep"),
         }
 
-        contributions = decision_engine.evaluate(
+        contributions, decision_score = decision_engine.evaluate(
             context,
             profile,
         )
 
         print(f"\n===== DECISION ENGINE : {obj_name} =====")
+        print(f"Score DecisionEngine :{decision_score:.1f}")
         print(f"Nombre de règles : {len(contributions)}")
 
         for c in contributions:
