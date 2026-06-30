@@ -4,11 +4,13 @@ import json
 import requests
 import warnings
 import copy
+from decision.rules.wind_rule import WindRule
 from decision.rules.humidity_rule import HumidityRule
 from decision.rules.cloud_rule import CloudRule
 from decision.rules.moon_rule import MoonRule
 from decision.decision_engine import DecisionEngine
 from decision.rules.altitude_rule import AltitudeRule
+from decision.rules.visibility_rule import VisibilityRule
 from night_scheduler import build_night_schedule
 from night_strategy import NightStrategy
 from datetime import datetime, timedelta
@@ -4085,6 +4087,8 @@ def evaluate_object(
         decision_engine.add_rule(MoonRule())
         decision_engine.add_rule(CloudRule())
         decision_engine.add_rule(HumidityRule())
+        decision_engine.add_rule(WindRule())
+        decision_engine.add_rule(VisibilityRule())
 
         clouds = best.get("clouds", 0)
 
@@ -4098,6 +4102,8 @@ def evaluate_object(
             "cloud_cover_mid": clouds,
             "cloud_cover_high": clouds,
             "humidity" : best.get("humidity", 0),
+            "wind": best.get("wind", 0),
+            "visibility": best.get("visibility", best.get("visibility_m",0)),
         }
 
         contributions, decision_score = decision_engine.evaluate(

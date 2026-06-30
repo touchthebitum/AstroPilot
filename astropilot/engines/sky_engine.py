@@ -684,6 +684,11 @@ class SkyEngine:
                         sum(h["wind_speed_10m"] for h in window) / len(window),
                         1
                     ),
+
+                    "visibility": round(
+                        sum(h["visibility"] for h in window) / len(window),
+                        1
+                    ),
                     "moon_impact": moon_impacts[0],
                     "moon_penalty": round(
                         sum(moon_penalties) / len(moon_penalties),
