@@ -4081,8 +4081,16 @@ def evaluate_object(
         decision_engine = DecisionEngine()
         decision_engine.add_rule(AltitudeRule())
         decision_engine.add_rule(MoonRule())
+
+        context = {
+            "altitude": altitude,
+            "illumination": illumination,
+            "moon_elevation": best.get("moon_elevation"),
+            "moon_sep": best.get("moon_sep"),
+        }
+
         contributions = decision_engine.evaluate(
-            {"altitude": altitude},
+            context,
             profile,
         )
 
