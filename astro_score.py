@@ -4066,6 +4066,11 @@ def evaluate_object(
     remaining_hours = project_remaining_hours(obj_name)
     roi = project_roi(obj_name)
 
+    priority = profile.get("project_priorities", {}).get(obj_name, 0)
+    progress = project_progress(obj_name)
+    remaining_hours = project_remaining_hours(obj_name)
+    roi = project_roi(obj_name)
+
     return {
         "name": obj_name,
         "score": best["score"],
@@ -4084,7 +4089,7 @@ def evaluate_object(
         "progress": progress,
         "remaining_hours": remaining_hours,
         "roi": roi,
-        "priority": best.get("priority", 0),
+        "priority": priority,
         "season_bonus": best.get("season_bonus", 0),
         "weather_bonus": best.get("weather_bonus", 0),
     }
@@ -4233,6 +4238,23 @@ def forecast_astro(
         best_results = all_results[:3]
 
         strategy_engine = NightStrategy(profile)
+
+        print("\n===== OBJETS ENVOYÉS À NIGHTSTRATEGY =====")
+
+        for r in best_results:
+            print(
+                r["name"],
+                "remaining =", r.get("remaining_hours"),
+                "priority =", r.get("priority"),
+                "progress =", r.get("progress"),
+                "roi =", r.get("roi"),
+            )
+
+        strategy = strategy_engine.choose_strategy(
+            best_results,
+            sum(h.get("hours", 0) for h in hours)
+        )
+
         strategy = strategy_engine.choose_strategy(
             best_results,
             sum(h.get("hours", 0) for h in hours)
