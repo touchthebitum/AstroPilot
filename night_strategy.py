@@ -10,6 +10,23 @@ class NightStrategy:
     def __init__(self, profile=None):
         self.profile = profile
 
+    def compute_strategic_score(self, project):
+        score = 0
+
+        score += project.get("roi", 0) * 10
+        score += project.get("progress", 0) * 0.5
+
+        remaining = project.get("remaining_hours")
+        if remaining is None:
+            remaining = 0
+
+        score -= remaining
+
+        score += project.get("season_bonus", 0)
+        score += project.get("weather_bonus", 0)
+
+        return score
+
     def choose_strategy(
         self,
         recommended_objects,
@@ -18,7 +35,14 @@ class NightStrategy:
         """
         Retourne la stratégie optimale pour cette nuit.
         """
+        for p in recommended_objects:
+            p["strategic_score"] = self.compute_strategic_score(p)
 
+        recommended_objects = sorted(
+            recommended_objects,
+            key=lambda p: p["strategic_score"],
+            reverse=True,
+)
         if not recommended_objects:
             return {
                 "strategy": StrategyType.BALANCED,
@@ -31,7 +55,7 @@ class NightStrategy:
         finish_candidates = [
         p for p in recommended_objects
         if p.get("progress", 0) >= 85
-    ]
+        ]
 
         if finish_candidates:
             best = finish_candidates[0]
@@ -90,3 +114,21 @@ if __name__ == "__main__":
     print("Projets :")
     for p in result["projects"]:
         print(f" - {p['name']}")
+
+
+    def compute_strategic_score(self, project):
+        """
+        Calcule le score stratégique d'un projet.
+        """
+
+        score = 0
+
+        score += project.get("roi", 0) * 10
+        score += project.get("progress", 0) * 0.5
+
+        score -= project.get("remaining_hours", 0)
+
+        score += project.get("season_bonus", 0)
+        score += project.get("weather_bonus", 0)
+
+        return score

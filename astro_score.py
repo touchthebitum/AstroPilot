@@ -5,6 +5,7 @@ import requests
 import warnings
 import copy
 from night_scheduler import build_night_schedule
+from night_strategy import NightStrategy
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from astral import LocationInfo
@@ -4061,6 +4062,10 @@ def evaluate_object(
 
     best["setup_reasons"] = setup_ranking[0].get("reasons", []) if setup_ranking else []
 
+    progress = project_progress(obj_name)
+    remaining_hours = project_remaining_hours(obj_name)
+    roi = project_roi(obj_name)
+
     return {
         "name": obj_name,
         "score": best["score"],
@@ -4076,6 +4081,12 @@ def evaluate_object(
         "global_score": best["score"] + best_setup_score,
         "setup_ranking": setup_ranking,
         "setup_reasons": best["setup_reasons"],
+        "progress": progress,
+        "remaining_hours": remaining_hours,
+        "roi": roi,
+        "priority": best.get("priority", 0),
+        "season_bonus": best.get("season_bonus", 0),
+        "weather_bonus": best.get("weather_bonus", 0),
     }
 
 
@@ -4220,6 +4231,25 @@ def forecast_astro(
         top3 = all_results[:3]
 
         best_results = all_results[:3]
+
+        strategy_engine = NightStrategy(profile)
+        strategy = strategy_engine.choose_strategy(
+            best_results,
+            sum(h.get("hours", 0) for h in hours)
+        )
+
+        print("\n===== NIGHT STRATEGY =====")
+        print(f"Stratégie : {strategy['strategy']}")
+        print(f"Raison : {strategy['reason']}")
+        print(f"Confiance : {strategy['confidence']:.0%}")
+        print("Projets retenus :")
+        for p in strategy["projects"]:
+            print(
+                f"- {p['name']} | "
+                f"score stratégique {p.get('strategic_score', 0):.1f} | "
+                f"ROI {p.get('roi', 0)} | "
+                f"reste {p.get('remaining_hours')}"
+            )
 
         print("\n===== MEILLEUR SETUP PAR OBJET =====")
 
