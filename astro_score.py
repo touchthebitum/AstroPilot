@@ -11,6 +11,8 @@ from decision.rules.moon_rule import MoonRule
 from decision.decision_engine import DecisionEngine
 from decision.rules.altitude_rule import AltitudeRule
 from decision.rules.visibility_rule import VisibilityRule
+from decision.rules.seeing_rule import SeeingRule
+from decision.rules.base_rule import BaseRule
 from night_scheduler import build_night_schedule
 from night_strategy import NightStrategy
 from datetime import datetime, timedelta
@@ -4089,6 +4091,7 @@ def evaluate_object(
         decision_engine.add_rule(HumidityRule())
         decision_engine.add_rule(WindRule())
         decision_engine.add_rule(VisibilityRule())
+        decision_engine.add_rule(SeeingRule())
 
         clouds = best.get("clouds", 0)
 
