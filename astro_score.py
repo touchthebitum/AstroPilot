@@ -4,6 +4,9 @@ import json
 import requests
 import warnings
 import copy
+from decision.rules.moon_rule import MoonRule
+from decision.decision_engine import DecisionEngine
+from decision.rules.altitude_rule import AltitudeRule
 from night_scheduler import build_night_schedule
 from night_strategy import NightStrategy
 from datetime import datetime, timedelta
@@ -4066,11 +4069,31 @@ def evaluate_object(
     remaining_hours = project_remaining_hours(obj_name)
     roi = project_roi(obj_name)
 
-    priority = profile.get("project_priorities", {}).get(obj_name, 0)
+   
     progress = project_progress(obj_name)
     remaining_hours = project_remaining_hours(obj_name)
     roi = project_roi(obj_name)
 
+    altitude = best.get("target_altitude")
+
+    if altitude is not None:
+
+        decision_engine = DecisionEngine()
+        decision_engine.add_rule(AltitudeRule())
+        decision_engine.add_rule(MoonRule())
+        contributions = decision_engine.evaluate(
+            {"altitude": altitude},
+            profile,
+        )
+
+        print(f"\n===== DECISION ENGINE : {obj_name} =====")
+        print(f"Nombre de règles : {len(contributions)}")
+
+        for c in contributions:
+            print(c)
+
+    priority = profile.get("project_priorities", {}).get(obj_name, 0)
+    
     return {
         "name": obj_name,
         "score": best["score"],
@@ -4204,6 +4227,8 @@ def forecast_astro(
             continue
 
         profile = load_user_profile()
+        decision_engine = DecisionEngine()
+        decision_engine.add_rule(AltitudeRule())
     
         all_results = []
 
@@ -4226,6 +4251,19 @@ def forecast_astro(
 
             if result is not None:
                 all_results.append(result)
+
+            if result is not None:
+                altitude = result.get("target_altitude")
+
+                if altitude is not None:
+                    contributions = decision_engine.evaluate(
+                        {"altitude": altitude},
+                        profile,
+                    )
+
+                    print(f"\n===== DECISION ENGINE : {obj_name} =====")
+                    for c in contributions:
+                        print(c)
 
         if not all_results:
             continue
