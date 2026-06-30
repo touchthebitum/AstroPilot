@@ -7,8 +7,19 @@ def build_night_schedule(objects, available_hours, profile=None):
         if remaining <= 0:
             break
 
+
+        print("\nDEBUG Scheduler")
+        print(obj["name"])
+        print("remaining_hours =", obj.get("remaining_hours"))
+        print("remaining =", remaining)
+
+        remaining_hours = obj.get("remaining_hours")
+
+        if remaining_hours is None:
+            remaining_hours = remaining
+
         duration = min(
-            obj.get("remaining_hours", remaining),
+            remaining_hours,
             remaining
         )
 
