@@ -4,6 +4,7 @@ import json
 import requests
 import warnings
 import copy
+from decision.rules.humidity_rule import HumidityRule
 from decision.rules.cloud_rule import CloudRule
 from decision.rules.moon_rule import MoonRule
 from decision.decision_engine import DecisionEngine
@@ -4083,6 +4084,7 @@ def evaluate_object(
         decision_engine.add_rule(AltitudeRule())
         decision_engine.add_rule(MoonRule())
         decision_engine.add_rule(CloudRule())
+        decision_engine.add_rule(HumidityRule())
 
         clouds = best.get("clouds", 0)
 
@@ -4091,11 +4093,11 @@ def evaluate_object(
             "illumination": illumination,
             "moon_elevation": best.get("moon_elevation"),
             "moon_sep": best.get("moon_sep"),
-
             "cloud_cover": clouds,
             "cloud_cover_low": clouds,
             "cloud_cover_mid": clouds,
             "cloud_cover_high": clouds,
+            "humidity" : best.get("humidity", 0),
         }
 
         contributions, decision_score = decision_engine.evaluate(
