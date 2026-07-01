@@ -8,6 +8,13 @@ class SamplingRule:
 
         sampling = context.get("sampling")
 
+        evaluation = SamplingModel.evaluate(
+        object_type=context.get("object_type"),
+        object_size_arcmin=context.get("object_size_arcmin"),
+        seeing_arcsec=context.get("seeing"),
+        sampling_arcsec_pixel=sampling,
+    )
+
         if sampling is None:
             return RuleContribution(
                 rule=self.name,
@@ -17,31 +24,14 @@ class SamplingRule:
                 details="Sampling : None",
             )
 
-        if sampling < 0.6:
-            score = -8
-            reason = "Sur-échantillonnage"
-
-        elif sampling < 1.5:
-            score = 8
-            reason = "Excellent sampling"
-
-        elif sampling < 2.5:
-            score = 5
-            reason = "Bon sampling"
-
-        elif sampling < 4:
-            score = 2
-            reason = "Sampling correct"
-
-        else:
-            score = -5
-            reason = "Sous-échantillonnage"
+        score = evaluation.score
+        reason = evaluation.diagnostic
 
         return RuleContribution(
             rule=self.name,
             score=score,
             confidence=1.0,
             reason=reason,
-            details=f"Sampling : {sampling:.2f}\"/pixel",
+            details=evaluation.suggestion
         )
 
