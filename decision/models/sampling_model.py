@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 
-
 @dataclass
 class SamplingEvaluation:
     adequacy: float
@@ -8,8 +7,59 @@ class SamplingEvaluation:
     diagnostic: str
     suggestion: str
 
-
 class SamplingModel:
+
+    @staticmethod
+    def evaluate_large_object(ratio):
+
+        if ratio < 0.8:
+            return SamplingEvaluation(
+                adequacy=20,
+                score=-8,
+                diagnostic="Sous-échantillonnage très important",
+                suggestion="Le seeing est largement meilleur que la résolution du setup."
+            )
+
+        elif ratio < 1.2:
+            return SamplingEvaluation(
+                adequacy=60,
+                score=-2,
+                diagnostic="Sous-échantillonnage modéré",
+                suggestion="Le setup reste exploitable."
+            )
+
+        elif ratio < 2.2:
+            return SamplingEvaluation(
+                adequacy=100,
+                score=6,
+                diagnostic="Sampling optimal",
+                suggestion="Excellent compromis seeing/résolution."
+            )
+
+        elif ratio < 3.2:
+            return SamplingEvaluation(
+                adequacy=85,
+                score=4,
+                diagnostic="Léger sur-échantillonnage",
+                suggestion="Très bon pour les grandes nébuleuses."
+            )
+
+        else:
+            return SamplingEvaluation(
+                adequacy=40,
+                score=-4,
+                diagnostic="Sur-échantillonnage important",
+                suggestion="Le seeing limitera la résolution."
+            )
+
+
+    @staticmethod
+    def evaluate_medium_object(ratio):
+        pass
+
+    @staticmethod
+    def evaluate_small_object(ratio):
+        pass
 
     @staticmethod
     def evaluate(
@@ -29,6 +79,9 @@ class SamplingModel:
 
         ratio = seeing_arcsec / sampling_arcsec_pixel
 
+        if object_size_arcmin >= 90:
+            return SamplingModel.evaluate_large_object(ratio)
+
         # Score de base
         score = 0
         diagnostic = ""
@@ -44,35 +97,53 @@ class SamplingModel:
 
         print(f"DEBUG Sampling ratio : {ratio:.2f}")
 
-        if ratio < 0.5:
-            adequacy = 20
-            score = -6
-            diagnostic = "Sous-échantillonnage important"
-            suggestion = "Le seeing est nettement meilleur que la résolution de votre setup."
+        if size_factor == "large":
 
-        elif ratio < 1.0:
-            adequacy = 50
-            score = -2
-            diagnostic = "Sous-échantillonnage modéré"
-            suggestion = "Le setup perd une partie des détails."
+            if ratio < 0.3:
+                adequacy = 30
+                score = -4
+                diagnostic = "Sous-échantillonnage marqué"
+                suggestion = "Objet très large : le setup reste exploitable malgré une résolution limitée."
 
-        elif ratio < 2.0:
-            adequacy = 100
-            score = 8
-            diagnostic = "Sampling optimal"
-            suggestion = "Excellent compromis entre résolution et sensibilité."
+            elif ratio < 0.7:
+                adequacy = 70
+                score = 2
+                diagnostic = "Sampling acceptable pour grande cible"
+                suggestion = "Le sampling est grossier mais adapté à une grande nébuleuse."
 
-        elif ratio < 3.0:
-            adequacy = 85
-            score = 4
-            diagnostic = "Léger sur-échantillonnage"
-            suggestion = "Résolution élevée, mais au prix d'une baisse de SNR."
+            else:
+                adequacy = 90
+                score = 5
+                diagnostic = "Sampling adapté aux grandes cibles"
+                suggestion = "Bon choix pour les grandes nébuleuses."
 
         else:
-            adequacy = 60
-            score = -4
-            diagnostic = "Sur-échantillonnage important"
-            suggestion = "Le seeing ne permet pas d'exploiter cette résolution."
+            # ancienne logique provisoire
+            if ratio < 0.5:
+                adequacy = 20
+                score = -6
+                diagnostic = "Sous-échantillonnage important"
+                suggestion = "Le seeing est nettement meilleur que la résolution de votre setup."
+            elif ratio < 1.0:
+                adequacy = 50
+                score = -2
+                diagnostic = "Sous-échantillonnage modéré"
+                suggestion = "Le setup perd une partie des détails."
+            elif ratio < 2.0:
+                adequacy = 100
+                score = 8
+                diagnostic = "Sampling optimal"
+                suggestion = "Excellent compromis entre résolution et sensibilité."
+            elif ratio < 3.0:
+                adequacy = 85
+                score = 4
+                diagnostic = "Léger sur-échantillonnage"
+                suggestion = "Résolution élevée, mais au prix d'une baisse de SNR."
+            else:
+                adequacy = 60
+                score = -4
+                diagnostic = "Sur-échantillonnage important"
+                suggestion = "Le seeing ne permet pas d'exploiter cette résolution."
 
         return SamplingEvaluation(
             adequacy=adequacy,
