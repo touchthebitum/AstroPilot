@@ -115,11 +115,14 @@ def compare_object_to_equipment(object_size_arcmin, object_type="unknown", objec
 
     focal_mm = equipment.get("focal_length_mm")
     pixel_um = equipment.get("pixel_size_um") or equipment.get("pixel_size_mm")
+    
 
     if focal_mm and pixel_um:
         arcsec_pixel = round(206.265 * pixel_um / focal_mm, 2)
     else:
         arcsec_pixel = None
+
+    equipment["sampling"] = arcsec_pixel
 
     object_size_deg = object_size_arcmin / 60
     ratio = object_size_deg / frame_diag

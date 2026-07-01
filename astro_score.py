@@ -4051,6 +4051,18 @@ def evaluate_object(
                 "type": CATALOG.get(obj_name, {}).get("type", ""),
             },
         )
+
+        pixel_um = setup.get("pixel_size_um") or setup.get("pixel_size_mm")
+
+        if pixel_um is None and setup_name == "samyang_183":
+            pixel_um = 2.4
+
+        arcsec_pixel = (
+            round(206.265 * pixel_um / setup.get("focal_length_mm"), 2)
+            if setup.get("focal_length_mm") and pixel_um
+            else None
+        )
+
         s= setup_result["score"]
         reasons = setup_result["reasons"]
 
@@ -4058,6 +4070,8 @@ def evaluate_object(
             "setup": setup_name,
             "score": s,
             "reasons": reasons,
+            "arcsec_pixel": arcsec_pixel,
+
         })
 
         if s > best_setup_score:
@@ -4070,6 +4084,8 @@ def evaluate_object(
     best["global_score"] = best["score"] + best_setup_score
 
     best["setup_reasons"] = setup_ranking[0].get("reasons", []) if setup_ranking else []
+
+    best["arcsec_pixel"] = setup_ranking[0].get("arcsec_pixel") if setup_ranking else None
 
     progress = project_progress(obj_name)
     remaining_hours = project_remaining_hours(obj_name)
@@ -4095,6 +4111,9 @@ def evaluate_object(
 
         clouds = best.get("clouds", 0)
 
+        print(best.keys())
+        print(best.get("setup_ranking"))
+
         context = {
             "altitude": altitude,
             "illumination": illumination,
@@ -4108,6 +4127,7 @@ def evaluate_object(
             "wind": best.get("wind", 0),
             "visibility": best.get("visibility", best.get("visibility_m",0)),
             "seeing" : best.get("seeing"),
+            "sampling": best.get("arcsec_pixel"),
         }
 
         contributions, decision_score = decision_engine.evaluate(

@@ -541,7 +541,7 @@ class SkyEngine:
                     h.get("wind_speed_10m", 0),
                     h.get("relative_humidity_2m", 0),
                 )
-                print("DEBUG seeing :", seeing)
+                
 
                 obj_meta = target_obj or {}
 
