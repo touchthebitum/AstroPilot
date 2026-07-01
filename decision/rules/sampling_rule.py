@@ -8,6 +8,11 @@ class SamplingRule:
 
         sampling = context.get("sampling")
 
+        print("DEBUG object_type :", context.get("object_type"))
+        print("DEBUG object_size :", context.get("object_size_arcmin"))
+        print("DEBUG seeing :", context.get("seeing"))
+        print("DEBUG sampling :", sampling)
+
         evaluation = SamplingModel.evaluate(
         object_type=context.get("object_type"),
         object_size_arcmin=context.get("object_size_arcmin"),

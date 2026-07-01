@@ -4130,6 +4130,8 @@ def evaluate_object(
             "visibility": best.get("visibility", best.get("visibility_m",0)),
             "seeing" : best.get("seeing"),
             "sampling": best.get("arcsec_pixel"),
+            "object_type": CATALOG.get(obj_name, {}).get("type"),
+            "object_size_arcmin": CATALOG.get(obj_name, {}).get("size_arcmin"),
         }
 
         contributions, decision_score = decision_engine.evaluate(
