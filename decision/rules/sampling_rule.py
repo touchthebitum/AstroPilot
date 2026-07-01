@@ -1,4 +1,5 @@
 from decision.rule_contribution import RuleContribution
+from decision.models.sampling_model import SamplingModel
 
 class SamplingRule:
     name = "Sampling"
