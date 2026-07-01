@@ -1,4 +1,6 @@
 from decision.rule_contribution import RuleContribution
+from decision.rules.sampling_rule import SamplingRule
+from decision.rules.seeing_rule import SeeingRule
 
 
 class DecisionEngine:

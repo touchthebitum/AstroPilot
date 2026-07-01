@@ -4,6 +4,7 @@ import json
 import requests
 import warnings
 import copy
+from decision.rules.sampling_rule import SamplingRule
 from decision.rules.wind_rule import WindRule
 from decision.rules.humidity_rule import HumidityRule
 from decision.rules.cloud_rule import CloudRule
@@ -4108,6 +4109,7 @@ def evaluate_object(
         decision_engine.add_rule(WindRule())
         decision_engine.add_rule(VisibilityRule())
         decision_engine.add_rule(SeeingRule())
+        decision_engine.add_rule(SamplingRule())
 
         clouds = best.get("clouds", 0)
 
