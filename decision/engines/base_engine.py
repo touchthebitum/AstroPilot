@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from decision.models.engine_result import EngineResult
+from decision.models.results.engine_result import EngineResult
 
 
 class BaseEngine(ABC):

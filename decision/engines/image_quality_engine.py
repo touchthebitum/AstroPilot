@@ -1,4 +1,4 @@
-from decision.models.image_quality_result import ImageQualityResult
+from decision.models.results.engine_result import EngineResult
 from decision.models.sampling_model import SamplingModel
 from decision.models.resolution_model import ResolutionModel
 
@@ -25,15 +25,19 @@ class ImageQualityEngine:
         score = (sampling.score + resolution.score) / 2
         adequacy = (sampling.adequacy + resolution.adequacy) / 2
 
-        return ImageQualityResult(
+        return EngineResult(
             score=score,
-            sampling_score=sampling.score,
-            resolution_score=resolution.score,
-            adequacy=adequacy,
-            pixels=resolution.pixels,
-            size_factor=resolution.size_factor,
-            ratio=0,
-            detail_level="À calculer",
-            limiting_factor="À calculer",
+            confidence=1.0,
+            explanation="Image quality evaluated from sampling and resolution.",
             recommendation="À calculer",
+            limiting_factor="À calculer",
+            metrics={
+                "sampling_score": sampling.score,
+                "resolution_score": resolution.score,
+                "adequacy": adequacy,
+                "pixels": resolution.pixels,
+                "size_factor": resolution.size_factor,
+                "ratio": 0,
+                "detail_level": "À calculer",
+            },
         )
