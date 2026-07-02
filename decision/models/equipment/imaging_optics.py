@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class Optics:
+class ImagingOptics:
     """
     Represents the main imaging optics.
     """

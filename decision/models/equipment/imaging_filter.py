@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class Filter:
+class ImagingFilter:
     """
     Represents an astrophotography filter.
     """
