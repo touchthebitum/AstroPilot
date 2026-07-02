@@ -1,6 +1,7 @@
 from decision.models.results.engine_result import EngineResult
 from decision.models.sampling_model import SamplingModel
 from decision.models.resolution_model import ResolutionModel
+from decision.calculators.setup_calculator import SetupCalculator
 
 
 class ImageQualityEngine:
@@ -11,12 +12,13 @@ class ImageQualityEngine:
         if hasattr(context, "sky"):
             target = context.sky.target
             weather = context.weather
+            setup = context.equipment.setup
+            sampling_value = SetupCalculator.compute_sampling(setup)
 
             object_name = target.name
             object_type = target.object_type
             object_size_arcmin = target.angular_size_arcmin
             seeing = weather.seeing_arcsec
-            sampling_value = None
 
         else:
             object_name = context.get("object_name")
