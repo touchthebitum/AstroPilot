@@ -15,8 +15,17 @@ class DecisionEngine:
         total_score = 0
         contributions = []
 
+        print("===== RULES =====")
         for rule in self.rules:
+            print(rule.__class__.__name__)
+        print("=================")
+
+        for rule in self.rules:
+            print(f"--> {rule.__class__.__name__}")
+
             contribution = rule.evaluate(context, profile)
+
+            print(f"<-- {rule.__class__.__name__}")
 
             if contribution is None:
                 continue

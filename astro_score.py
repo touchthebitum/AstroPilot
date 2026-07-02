@@ -4,6 +4,8 @@ import json
 import requests
 import warnings
 import copy
+from decision.rules.image_quality_rule import ImageQualityRule
+from decision.rules.resolution_rule import ResolutionRule
 from decision.rules.sampling_rule import SamplingRule
 from decision.rules.wind_rule import WindRule
 from decision.rules.humidity_rule import HumidityRule
@@ -4110,6 +4112,11 @@ def evaluate_object(
         decision_engine.add_rule(VisibilityRule())
         decision_engine.add_rule(SeeingRule())
         decision_engine.add_rule(SamplingRule())
+        decision_engine.add_rule(ResolutionRule())
+        decision_engine.add_rule(ImageQualityRule())
+
+        print(">>> ResolutionRule ajoutée")
+        print(decision_engine.rules)
 
         clouds = best.get("clouds", 0)
 
@@ -4132,6 +4139,7 @@ def evaluate_object(
             "sampling": best.get("arcsec_pixel"),
             "object_type": CATALOG.get(obj_name, {}).get("type"),
             "object_size_arcmin": CATALOG.get(obj_name, {}).get("size_arcmin"),
+            "object_name": obj_name,
         }
 
         contributions, decision_score = decision_engine.evaluate(

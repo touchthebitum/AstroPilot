@@ -11,45 +11,28 @@ class SamplingModel:
 
     @staticmethod
     def evaluate_large_object(ratio):
-
-        if ratio < 0.8:
+        if ratio < 0.3:
             return SamplingEvaluation(
-                adequacy=20,
-                score=-8,
-                diagnostic="Sous-échantillonnage très important",
-                suggestion="Le seeing est largement meilleur que la résolution du setup."
+                adequacy=30,
+                score=-4,
+                diagnostic="Sous-échantillonnage marqué",
+                suggestion="Objet très large : le setup reste exploitable malgré une résolution limitée.",
             )
 
-        elif ratio < 1.2:
+        elif ratio < 0.7:
             return SamplingEvaluation(
-                adequacy=60,
-                score=-2,
-                diagnostic="Sous-échantillonnage modéré",
-                suggestion="Le setup reste exploitable."
-            )
-
-        elif ratio < 2.2:
-            return SamplingEvaluation(
-                adequacy=100,
-                score=6,
-                diagnostic="Sampling optimal",
-                suggestion="Excellent compromis seeing/résolution."
-            )
-
-        elif ratio < 3.2:
-            return SamplingEvaluation(
-                adequacy=85,
-                score=4,
-                diagnostic="Léger sur-échantillonnage",
-                suggestion="Très bon pour les grandes nébuleuses."
+                adequacy=70,
+                score=2,
+                diagnostic="Sampling acceptable pour grande cible",
+                suggestion="Le sampling est grossier mais adapté à une grande nébuleuse.",
             )
 
         else:
             return SamplingEvaluation(
-                adequacy=40,
-                score=-4,
-                diagnostic="Sur-échantillonnage important",
-                suggestion="Le seeing limitera la résolution."
+                adequacy=90,
+                score=5,
+                diagnostic="Sampling adapté aux grandes cibles",
+                suggestion="Bon choix pour les grandes nébuleuses.",
             )
 
 
@@ -63,10 +46,13 @@ class SamplingModel:
 
     @staticmethod
     def evaluate(
+        object_name: str | None,
         object_type: str,
         object_size_arcmin: float,
         seeing_arcsec: float | None,
         sampling_arcsec_pixel: float | None,
+        
+        
     ) -> SamplingEvaluation:
         
         if sampling_arcsec_pixel is None or seeing_arcsec is None:
@@ -78,6 +64,16 @@ class SamplingModel:
             )
 
         ratio = seeing_arcsec / sampling_arcsec_pixel
+
+        object_size_pixels = (object_size_arcmin * 60) / sampling_arcsec_pixel
+
+        print(
+            f"DEBUG SAMPLING | "
+            f"obj={object_name} | "
+            f"seeing={seeing_arcsec} | "
+            f"sampling={sampling_arcsec_pixel} | "
+            f"ratio={ratio:.2f}"
+        )
 
         if object_size_arcmin >= 90:
             return SamplingModel.evaluate_large_object(ratio)
@@ -94,8 +90,6 @@ class SamplingModel:
             size_factor = "medium"
         else:
             size_factor = "small"
-
-        print(f"DEBUG Sampling ratio : {ratio:.2f}")
 
         if size_factor == "large":
 

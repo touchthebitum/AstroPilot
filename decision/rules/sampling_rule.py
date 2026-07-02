@@ -1,5 +1,6 @@
 from decision.rule_contribution import RuleContribution
 from decision.models.sampling_model import SamplingModel
+from decision.models.resolution_model import ResolutionModel
 
 class SamplingRule:
     name = "Sampling"
@@ -7,18 +8,6 @@ class SamplingRule:
     def evaluate(self, context, profile):
 
         sampling = context.get("sampling")
-
-        print("DEBUG object_type :", context.get("object_type"))
-        print("DEBUG object_size :", context.get("object_size_arcmin"))
-        print("DEBUG seeing :", context.get("seeing"))
-        print("DEBUG sampling :", sampling)
-
-        evaluation = SamplingModel.evaluate(
-        object_type=context.get("object_type"),
-        object_size_arcmin=context.get("object_size_arcmin"),
-        seeing_arcsec=context.get("seeing"),
-        sampling_arcsec_pixel=sampling,
-    )
 
         if sampling is None:
             return RuleContribution(
@@ -29,14 +18,31 @@ class SamplingRule:
                 details="Sampling : None",
             )
 
-        score = evaluation.score
-        reason = evaluation.diagnostic
+        resolution = ResolutionModel.evaluate(
+            object_type=context.get("object_type"),
+            object_size_arcmin=context.get("object_size_arcmin"),
+            pixel_size=sampling,
+        )
+
+        print(
+            f"DEBUG RESOLUTION | "
+            f"pixels={resolution.pixels:.0f} | "
+            f"factor={resolution.size_factor}"
+        )
+
+        evaluation = SamplingModel.evaluate(
+            object_type=context.get("object_type"),
+            object_size_arcmin=context.get("object_size_arcmin"),
+            seeing_arcsec=context.get("seeing"),
+            sampling_arcsec_pixel=sampling,
+            object_name=context.get("object_name"),
+        )
 
         return RuleContribution(
             rule=self.name,
-            score=score,
+            score=evaluation.score,
             confidence=1.0,
-            reason=reason,
-            details=evaluation.suggestion
+            reason=evaluation.diagnostic,
+            details=evaluation.suggestion,
         )
 
