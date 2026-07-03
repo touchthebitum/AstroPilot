@@ -13,6 +13,7 @@ class WeatherContext:
 
     seeing_arcsec: float | None = None
     transparency: float | None = None
+    visibility: float | None = None
     temperature_c: float | None = None
 
     forecast_confidence: float | None = None

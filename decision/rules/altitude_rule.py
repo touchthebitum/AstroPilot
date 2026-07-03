@@ -9,7 +9,7 @@ class AltitudeRule(BaseRule):
 
     def evaluate(self, project, context):
 
-        altitude = project.get("altitude", 0)
+        altitude = project.sky.target_altitude_deg
 
         if altitude >= 70:
             return RuleContribution(

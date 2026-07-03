@@ -7,11 +7,10 @@ class MoonRule(BaseRule):
     def evaluate(self, context, profile):
 
         score = SkyEngine().moon_penalty(
-            context["illumination"],
-            context["moon_elevation"],
-            context["moon_sep"],
-        )
-
+            context.sky.moon_illumination,
+            0,  # moon_elevation temporaire
+            context.sky.moon_separation_deg,
+)
         return RuleContribution(
             rule="Moon",
             score=-score,

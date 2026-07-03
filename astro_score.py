@@ -4,6 +4,7 @@ import json
 import requests
 import warnings
 import copy
+from decision.rules.object_fit_rule import ObjectFitRule
 from datetime import datetime, timedelta
 from decision.models.context.decision_context import DecisionContext
 from decision.models.context.session_context import SessionContext
@@ -4129,6 +4130,7 @@ def evaluate_object(
         decision_engine.add_rule(SamplingRule())
         decision_engine.add_rule(ResolutionRule())
         decision_engine.add_rule(ImageQualityRule())
+        decision_engine.add_rule(ObjectFitRule())
 
         print(">>> ResolutionRule ajoutée")
         print(decision_engine.rules)
@@ -4205,6 +4207,7 @@ def evaluate_object(
             transparency=None,
             temperature_c=None,
             forecast_confidence=None,
+            visibility=best.get("visibility", best.get("visibility_m", 0)),
         )
 
         sky_context = SkyContext(
@@ -4265,7 +4268,7 @@ def evaluate_object(
         }
 
         contributions, decision_score = decision_engine.evaluate(
-            context,
+            decision_context,
             profile,
         )
 

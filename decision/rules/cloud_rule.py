@@ -6,10 +6,12 @@ class CloudRule(BaseRule):
 
     def evaluate(self, context, profile):
 
-        total = context["cloud_cover"]
-        low = context["cloud_cover_low"]
-        mid = context["cloud_cover_mid"]
-        high = context["cloud_cover_high"]
+        total = context.weather.cloud_cover
+
+        # Temporaire : nous n'avons pas encore les couches de nuages
+        low = total
+        mid = total
+        high = total
 
         weighted = (
             low * 0.2 +

@@ -10,7 +10,7 @@ class HumidityRule(BaseRule):
 
     def evaluate(self, context, profile):
 
-        humidity = context.get("humidity", 0)
+        humidity = context.weather.humidity
 
         score = -SkyEngine().humidity_penalty(humidity)
 

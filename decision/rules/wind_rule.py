@@ -10,7 +10,7 @@ class WindRule(BaseRule):
 
     def evaluate(self, context, profile):
 
-        wind = context.get("wind", 0)
+        wind = context.weather.wind_speed_kmh
 
         score = -SkyEngine().wind_penalty(wind)
 

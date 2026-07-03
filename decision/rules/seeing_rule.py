@@ -6,7 +6,7 @@ class SeeingRule(BaseRule):
 
     def evaluate(self, context, profile):
 
-        seeing = context.get("seeing")
+        seeing = context.weather.seeing_arcsec
 
         if seeing is None:
             return RuleContribution(

@@ -10,7 +10,7 @@ class VisibilityRule(BaseRule):
 
     def evaluate(self, context, profile):
 
-        visibility = context.get("visibility", 0)
+        visibility = context.weather.visibility
 
         score = -SkyEngine().visibility_penalty(visibility)
 

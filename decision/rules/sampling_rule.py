@@ -1,13 +1,15 @@
 from decision.rule_contribution import RuleContribution
 from decision.models.sampling_model import SamplingModel
 from decision.models.resolution_model import ResolutionModel
+from decision.calculators.setup_calculator import SetupCalculator
 
 class SamplingRule:
     name = "Sampling"
 
     def evaluate(self, context, profile):
 
-        sampling = context.get("sampling")
+        capabilities = SetupCalculator.compute(context.equipment.setup)
+        sampling = capabilities.sampling_arcsec_per_pixel
 
         if sampling is None:
             return RuleContribution(
@@ -19,8 +21,8 @@ class SamplingRule:
             )
 
         resolution = ResolutionModel.evaluate(
-            object_type=context.get("object_type"),
-            object_size_arcmin=context.get("object_size_arcmin"),
+            object_type = context.sky.target.object_type,
+            object_size_arcmin=context.sky.target.angular_size_arcmin,
             pixel_size=sampling,
         )
 
@@ -31,11 +33,11 @@ class SamplingRule:
         )
 
         evaluation = SamplingModel.evaluate(
-            object_type=context.get("object_type"),
-            object_size_arcmin=context.get("object_size_arcmin"),
-            seeing_arcsec=context.get("seeing"),
+            object_type = context.sky.target.object_type,
+            object_size_arcmin=context.sky.target.angular_size_arcmin,
+            seeing_arcsec=context.weather.seeing_arcsec,
             sampling_arcsec_pixel=sampling,
-            object_name=context.get("object_name"),
+            object_name=context.sky.target.name,
         )
 
         return RuleContribution(

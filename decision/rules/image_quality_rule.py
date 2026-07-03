@@ -10,8 +10,6 @@ class ImageQualityRule:
 
         result = ImageQualityEngine.evaluate(context)
 
-        print("DEBUG IMAGE QUALITY RULE CALLED")
-
         return RuleContribution(
             rule=self.name,
             score=result.score,

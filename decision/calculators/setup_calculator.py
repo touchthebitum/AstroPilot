@@ -27,9 +27,21 @@ class SetupCalculator:
             / 1000
             / setup.optics.focal_length_mm
         ) * 57.2958
-       
+
+        field_diagonal_deg = (field_width_deg ** 2 + field_height_deg ** 2) ** 0.5
+
+        focal_ratio = setup.optics.focal_ratio
+
+        collecting_area_mm2 = 3.141592653589793 * (setup.optics.aperture_mm / 2) ** 2
+
+        relative_speed = 1 / (focal_ratio ** 2)
+
         return SetupCapabilities(
             sampling_arcsec_per_pixel=sampling,
             field_width_deg=field_width_deg,
             field_height_deg=field_height_deg,
+            field_diagonal_deg=field_diagonal_deg,
+            focal_ratio=focal_ratio,
+            collecting_area_mm2=collecting_area_mm2,
+            relative_speed=relative_speed
         )

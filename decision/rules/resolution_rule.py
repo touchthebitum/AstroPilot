@@ -1,5 +1,7 @@
 from decision.rule_contribution import RuleContribution
 from decision.models.resolution_model import ResolutionModel
+from decision.calculators.setup_calculator import SetupCalculator
+
 
 
 class ResolutionRule:
@@ -8,12 +10,12 @@ class ResolutionRule:
 
     def evaluate(self, context, profile):
 
-        print("DEBUG RESOLUTION RULE CALLED")
+        capabilities = SetupCalculator.compute(context.equipment.setup)
 
         resolution = ResolutionModel.evaluate(
-            object_type=context.get("object_type"),
-            object_size_arcmin=context.get("object_size_arcmin"),
-            pixel_size=context.get("sampling"),
+            object_type=context.sky.target.object_type,
+            object_size_arcmin=context.sky.target.angular_size_arcmin,
+            pixel_size = capabilities.sampling_arcsec_per_pixel
         )
 
         return RuleContribution(

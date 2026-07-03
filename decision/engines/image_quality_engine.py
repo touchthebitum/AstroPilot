@@ -28,22 +28,22 @@ class ImageQualityEngine:
             sampling_value = context.get("sampling")
 
 
-            sampling = SamplingModel.evaluate(
-                object_name=object_name,
-                object_type=object_type,
-                object_size_arcmin=object_size_arcmin,
-                seeing_arcsec=seeing,
-                sampling_arcsec_pixel=sampling_value,
-            )
+        sampling = SamplingModel.evaluate(
+            object_name=object_name,
+            object_type=object_type,
+            object_size_arcmin=object_size_arcmin,
+            seeing_arcsec=seeing,
+            sampling_arcsec_pixel=sampling_value,
+        )
 
-            resolution = ResolutionModel.evaluate(
-                object_type=object_type,
-                object_size_arcmin=object_size_arcmin,
-                pixel_size=sampling_value,
-            )
+        resolution = ResolutionModel.evaluate(
+            object_type=object_type,
+            object_size_arcmin=object_size_arcmin,
+            pixel_size=sampling_value,
+        )
 
-            score = (sampling.score + resolution.score) / 2
-            adequacy = (sampling.adequacy + resolution.adequacy) / 2
+        score = (sampling.score + resolution.score) / 2
+        adequacy = (sampling.adequacy + resolution.adequacy) / 2
 
         return EngineResult(
             score=score,
