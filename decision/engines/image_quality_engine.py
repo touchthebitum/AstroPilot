@@ -48,16 +48,40 @@ class ImageQualityEngine:
         return EngineResult(
             score=score,
             confidence=1.0,
-            explanation="Image quality evaluated from sampling and resolution.",
-            recommendation="À calculer",
-            limiting_factor="À calculer",
+
+            explanation=f"Qualité d'image globale : {score:.1f}/10.",
+
+            recommendation=(
+                "Excellente qualité d'image."
+                if score >= 8 else
+                "Bonne qualité d'image."
+                if score >= 6 else
+                "Qualité d'image moyenne."
+                if score >= 4 else
+                "Qualité d'image insuffisante."
+            ),
+
+            limiting_factor=(
+                "Sampling"
+                if sampling.score < resolution.score
+                else "Résolution"
+            ),
+
             metrics={
                 "sampling_score": sampling.score,
                 "resolution_score": resolution.score,
                 "adequacy": adequacy,
                 "pixels": resolution.pixels,
                 "size_factor": resolution.size_factor,
-                "ratio": 0,
-                "detail_level": "À calculer",
+                "ratio": adequacy,
+                "detail_level": (
+                    "Excellent"
+                    if adequacy >= 0.9 else
+                    "Bon"
+                    if adequacy >= 0.7 else
+                    "Moyen"
+                    if adequacy >= 0.5 else
+                    "Faible"
+                ),
             },
         )

@@ -12,6 +12,9 @@ class NightStrategy:
 
     def compute_strategic_score(self, project):
 
+        if project.get("remaining_hours") is None:
+            return 0
+
         score = 0
 
         # Score astro
@@ -95,10 +98,18 @@ class NightStrategy:
         ):
             selected_projects = [best]
         else:
-            selected_projects = recommended_objects
+            selected_projects = [
+                p for p in recommended_objects
+                if p.get("strategic_score", 0) > 0
+            ]
+
+            if not selected_projects:
+                selected_projects = [best]
             
         print("\nClassement stratégique")
         for p in recommended_objects:
+            if p.get("strategic_score", 0) <= 0:
+                continue
             print(
                 f"{p['name']:15}"
                 f"{p['strategic_score']:6.1f}"

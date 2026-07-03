@@ -1666,6 +1666,7 @@ def recommend_project():
 
         priority = project_priority(name)
         progress = project_progress(name)
+
         if progress >= 95:
             completion_bonus = 30
         elif progress >= 85:
@@ -4470,6 +4471,13 @@ def forecast_astro(
         top3 = all_results[:3]
 
         best_results = all_results[:3]
+
+        for r in best_results:
+            name = r["name"]
+            r["priority"] = project_priority(name)
+            r["progress"] = project_progress(name)
+            r["remaining_hours"] = project_remaining_hours(name)
+            r["roi"] = project_roi(name)
 
         strategy_engine = NightStrategy(profile)
 

@@ -1,6 +1,7 @@
 from decision.rule_contribution import RuleContribution
 from decision.rules.sampling_rule import SamplingRule
 from decision.rules.seeing_rule import SeeingRule
+from astropilot.user_profile import get_rule_weights
 
 
 class DecisionEngine:
@@ -14,6 +15,9 @@ class DecisionEngine:
     def evaluate(self, context, profile):
         total_score = 0
         contributions = []
+
+        weights = get_rule_weights()
+
         for rule in self.rules:
 
             contribution = rule.evaluate(context, profile)
@@ -29,7 +33,12 @@ class DecisionEngine:
             if contribution is None:
                 continue
 
-            total_score += contribution.score * contribution.weight
+            rule_key = contribution.rule.lower().replace(" ", "_")
+
+            weight = weights.get(rule_key, contribution.weight)
+            contribution.weight = weight
+
+            total_score += contribution.score * weight
             contributions.append(contribution)
 
             
@@ -40,7 +49,7 @@ class DecisionEngine:
 
             if abs(c.score) <1:
                 continue
-            
+
             signe = "+" if c.score >= 0 else "-"
             print(f"{signe}{abs(c.score):5.1f} | {c.rule}")
             if c.reason:

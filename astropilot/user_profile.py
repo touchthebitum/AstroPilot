@@ -9,6 +9,7 @@ def load_user_profile():
         return json.load(f)
     
 def get_decision_weights():
+
     profile = load_user_profile()
     prefs = profile.get("preferences", {})
 
@@ -35,10 +36,13 @@ def get_preferences():
 def get_projects():
     return load_user_profile().get("projects", {})
 
+def get_rule_weights():
+    profile = load_user_profile()
+    return profile.get("decision_weights", {})
+
 def load_locations():
     with open(DATA_DIR / "locations.json", "r") as f:
         return json.load(f)
-
 
 def get_default_location():
     profile = load_user_profile()
@@ -47,7 +51,6 @@ def get_default_location():
         "latitude": 46.7508,
         "longitude": 6.5495
     })
-
 
 def favorite_targets():
     return (
