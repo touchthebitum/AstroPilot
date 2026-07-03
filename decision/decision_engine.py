@@ -32,4 +32,20 @@ class DecisionEngine:
             total_score += contribution.score * contribution.weight
             contributions.append(contribution)
 
+            
+
+        print("\n===== EXPLICATION DE LA DECISION =====")
+
+        for c in sorted(contributions, key=lambda x: abs(x.score), reverse=True):
+
+            if abs(c.score) <1:
+                continue
+            
+            signe = "+" if c.score >= 0 else "-"
+            print(f"{signe}{abs(c.score):5.1f} | {c.rule}")
+            if c.reason:
+                print(f"       {c.reason}")
+
+        print("===============================\n")
+
         return contributions, total_score
