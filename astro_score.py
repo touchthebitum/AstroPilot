@@ -4,6 +4,21 @@ import json
 import requests
 import warnings
 import copy
+from datetime import datetime, timedelta
+from decision.models.context.decision_context import DecisionContext
+from decision.models.context.session_context import SessionContext
+from decision.models.context.site_context import SiteContext
+from decision.models.context.weather_context import WeatherContext
+from decision.models.context.sky_context import SkyContext
+from decision.models.context.equipment_context import EquipmentContext
+from decision.models.context.portfolio_context import PortfolioContext
+from decision.models.context.preferences_context import PreferencesContext
+from decision.models.sky.celestial_object import CelestialObject
+from decision.models.equipment.camera import Camera
+from decision.models.equipment.mount import Mount
+from decision.models.equipment.imaging_optics import ImagingOptics
+from decision.models.equipment.imaging_filter import ImagingFilter
+from decision.models.equipment.imaging_setup import ImagingSetup
 from decision.rules.image_quality_rule import ImageQualityRule
 from decision.rules.resolution_rule import ResolutionRule
 from decision.rules.sampling_rule import SamplingRule
@@ -4122,6 +4137,113 @@ def evaluate_object(
 
         print(best.keys())
         print(best.get("setup_ranking"))
+
+
+        camera = Camera(
+            manufacturer="ZWO",
+            model="ASI183MM",
+            pixel_size_um=2.4,
+            sensor_width_px=5496,
+            sensor_height_px=3672,
+            monochrome=True,
+        )
+
+        optics = ImagingOptics(
+            manufacturer="Samyang",
+            model="135mm",
+            focal_length_mm=135,
+            aperture_mm=48,
+            focal_ratio=2.8,
+        )
+
+        mount = Mount(
+            manufacturer="ZWO",
+            model="AM3",
+        )
+
+        imaging_filter = ImagingFilter(
+            manufacturer="Baader",
+            name="H-alpha 6.5nm",
+            filter_type="narrowband",
+            bandwidth_nm=6.5,
+            central_wavelength_nm=656.3,
+        )
+
+        setup = ImagingSetup(
+            mount=mount,
+            optics=optics,
+            camera=camera,
+            filter=imaging_filter,
+        )
+
+        target = CelestialObject(
+            name=obj_name,
+            object_type=CATALOG.get(obj_name, {}).get("type"),
+            angular_size_arcmin=CATALOG.get(obj_name, {}).get("size_arcmin"),
+        )
+
+        session_context = SessionContext(
+            start_time=datetime.now(),
+            end_time=datetime.now() + timedelta(hours=3),
+            available_duration=timedelta(hours=3),
+        )
+
+        site_context = SiteContext(
+            name="Buttes",
+            latitude=lat,
+            longitude=lon,
+            elevation=0,
+            bortle=profile.get("preferences", {}).get("bortle", 4),
+            sqm=best.get("sqm"),
+        )
+
+        weather_context = WeatherContext(
+            cloud_cover=clouds,
+            humidity=best.get("humidity", 0),
+            wind_speed_kmh=best.get("wind", 0),
+            seeing_arcsec=best.get("seeing"),
+            transparency=None,
+            temperature_c=None,
+            forecast_confidence=None,
+        )
+
+        sky_context = SkyContext(
+            target=target,
+            moon_illumination=illumination,
+            moon_separation_deg=best.get("moon_sep", 180),
+            target_altitude_deg=altitude,
+            astronomical_darkness=True,
+        )
+
+        equipment_context = EquipmentContext(
+            setup=setup,
+        )
+
+        portfolio_context = PortfolioContext(
+            active_projects=0,
+            total_remaining_hours=0,
+            highest_priority=0,
+            average_progress=0,
+        )
+
+        preferences_context = PreferencesContext(
+            astro_weight=profile.get("preferences", {}).get("astro_weight", 0.7),
+            project_weight=profile.get("preferences", {}).get("project_weight", 0.3),
+            minimum_altitude_deg=profile.get("preferences", {}).get("minimum_altitude_deg", 30),
+            minimum_sqm=profile.get("preferences", {}).get("min_sqm", 20),
+        )
+
+        decision_context = DecisionContext(
+            session=session_context,
+            site=site_context,
+            equipment=equipment_context,
+            weather=weather_context,
+            sky=sky_context,
+            portfolio=portfolio_context,
+            preferences=preferences_context,
+        )
+
+
 
         context = {
             "altitude": altitude,
