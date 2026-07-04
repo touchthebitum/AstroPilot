@@ -11,6 +11,13 @@ class MissionAssembler:
         timeline,
         alternatives,
     ):
+        from decision.risk.risk_engine import RiskEngine
+
+        risk = RiskEngine.evaluate(
+            project_priority=90,
+            remaining_hours=12,
+        )
+
 
         return NightMission(
             target=target,
@@ -23,4 +30,5 @@ class MissionAssembler:
             expected_gain=0,
             alternative_target=None,
             timeline=timeline,
+            risk_report=risk,
         )

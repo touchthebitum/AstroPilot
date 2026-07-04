@@ -57,6 +57,5 @@ class MissionPresenter:
             for step in mission.timeline:
                 print(f"{step.time}  {step.title}")
 
-        if mission.next_mission:
-            print(f"\n➡ Mission suivante : {mission.next_mission}")
-
+        if mission.alternative_target:
+            print(f"\nMission suivante : {mission.alternative_target}")
