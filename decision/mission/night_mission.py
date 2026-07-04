@@ -25,3 +25,14 @@ class NightMission:
 
     expected_gain: float = 0.0
     next_mission: str | None = None
+
+    window_start: str | None = None
+    window_end: str | None = None
+
+    recommended_hours: float = 0.0
+
+    expected_gain: float = 0.0
+
+    alternative_target: str | None = None
+
+    

@@ -5,7 +5,7 @@ from typing import Any
 @dataclass
 class EngineResult:
     """
-    Standard interface returned by every AstroPilot Engine.
+    Standard result returned by every AstroPilot engine.
     """
 
     score: float

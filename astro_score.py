@@ -4247,8 +4247,6 @@ def evaluate_object(
             preferences=preferences_context,
         )
 
-
-
         context = {
             "altitude": altitude,
             "illumination": illumination,
@@ -4277,16 +4275,20 @@ def evaluate_object(
 
         summary = DecisionSummaryEngine.build(contributions)
 
+        from decision.recommendation.alternative_target_engine import AlternativeTargetEngine
+
         from decision.mission.mission_builder import NightMissionBuilder
 
         mission = NightMissionBuilder.build(
             target=obj_name,
             summary=summary,
+            context=decision_context,
         )
 
         print("\n===== NIGHT MISSION =====")
-        print(mission)
+        from decision.mission.mission_presenter import MissionPresenter
 
+        MissionPresenter.present(mission)
 
         print(f"\n===== DECISION ENGINE : {obj_name} =====")
         print(f"Score DecisionEngine : {decision_score:+.1f}\n")
@@ -4486,6 +4488,22 @@ def forecast_astro(
         top3 = all_results[:3]
 
         best_results = all_results[:3]
+
+        print(best_results[0])
+        print(best_results[0].keys())
+
+        from decision.recommendation.alternative_target_engine import AlternativeTargetEngine
+
+        best_object = best_results[0]["name"]
+
+        alternatives = AlternativeTargetEngine.recommend(
+            current_target=best_object,
+            ranked_targets=best_results,
+        )
+
+        print("\n===== ALTERNATIVES =====")
+        for i, alt in enumerate(alternatives, 1):
+            print(f"{i}. {alt['name']}  (score {alt['score']:.1f})")
 
         for r in best_results:
             name = r["name"]
