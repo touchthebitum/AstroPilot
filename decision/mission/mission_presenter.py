@@ -13,6 +13,17 @@ class MissionPresenter:
 
         print(f"\nConfiance : {mission.confidence:.0%}")
 
+        if mission.risk_report:
+
+            print("\n⚠️ Risque de report")
+
+            print(f"Niveau : {mission.risk_report.level}")
+
+            print(f"Score : {mission.risk_report.score}")
+
+            for line in mission.risk_report.explanation:
+                print(f"• {line}")
+
         if mission.window_start and mission.window_end:
             print(f"\n🕒 Fenêtre optimale : {mission.window_start} → {mission.window_end}")
 
