@@ -1,6 +1,7 @@
 from decision.mission.night_mission import (
     NightMission,
     MissionReason,
+    MissionEvent,
 )
 from decision.mission.equipment_builder import EquipmentBuilder
 
@@ -27,6 +28,13 @@ class NightMissionBuilder:
                 )
             )
 
+        timeline = [
+            MissionEvent("22:00", "Installation"),
+            MissionEvent("22:10", "Mise en station"),
+            MissionEvent("22:20", "Autofocus"),
+            MissionEvent("22:30", "Début des poses"),
+        ]
+
         return NightMission(
             target=target,
             confidence=summary.confidence,
@@ -40,4 +48,5 @@ class NightMissionBuilder:
 
             expected_gain=0,
             alternative_target=None,
+            timeline=timeline,
         )

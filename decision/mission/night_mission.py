@@ -35,4 +35,9 @@ class NightMission:
 
     alternative_target: str | None = None
 
+@dataclass(frozen=True)
+class MissionEvent:
+    time: str
+    title: str
+
     
