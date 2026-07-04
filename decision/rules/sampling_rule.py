@@ -16,8 +16,8 @@ class SamplingRule:
                 rule=self.name,
                 score=0,
                 confidence=0.5,
-                reason="Sampling inconnu",
-                details="Sampling : None",
+                reason="Sampling indisponible",
+                details="",
             )
 
         resolution = ResolutionModel.evaluate(
@@ -40,11 +40,14 @@ class SamplingRule:
             object_name=context.sky.target.name,
         )
 
+        reason = f"{evaluation.diagnostic} ({sampling:.2f}\"/px)"
+        details = ""
+
         return RuleContribution(
             rule=self.name,
             score=evaluation.score,
             confidence=1.0,
-            reason=evaluation.diagnostic,
-            details=evaluation.suggestion,
+            reason=reason,
+            details=details,
         )
 

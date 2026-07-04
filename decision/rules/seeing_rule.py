@@ -19,28 +19,28 @@ class SeeingRule(BaseRule):
 
         if seeing <= 1.2:
             score = 15
-            reason = "Seeing excellent"
+            reason = f"Seeing exceptionnel ({seeing:.1f}\")"
 
         elif seeing <= 1.8:
             score = 10
-            reason = "Très bon seeing"
+            reason = f"Très bon seeing ({seeing:.1f}\")"
 
         elif seeing <= 2.3:
             score = 5
-            reason = "Bon seeing"
+            reason = f"Bon seeing ({seeing:.1f}\")"
 
         elif seeing <= 3.0:
             score = 0
-            reason = "Seeing moyen"
+            reason = f"Seeing moyen ({seeing:.1f}\")"
 
         else:
             score = -10
-            reason = "Seeing médiocre"
+            reason = f"Seeing médiocre ({seeing:.1f}\")"
 
         return RuleContribution(
             rule=self.name,
             score=score,
             confidence=1.0,
             reason=reason,
-            details=f'Seeing : {seeing:.1f}"',
+            details=""
         )

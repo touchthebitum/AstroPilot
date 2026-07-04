@@ -4273,6 +4273,21 @@ def evaluate_object(
             profile,
         )
 
+        from decision.engines.decision_summary_engine import DecisionSummaryEngine
+
+        summary = DecisionSummaryEngine.build(contributions)
+
+        from decision.mission.mission_builder import NightMissionBuilder
+
+        mission = NightMissionBuilder.build(
+            target=obj_name,
+            summary=summary,
+        )
+
+        print("\n===== NIGHT MISSION =====")
+        print(mission)
+
+
         print(f"\n===== DECISION ENGINE : {obj_name} =====")
         print(f"Score DecisionEngine : {decision_score:+.1f}\n")
 
