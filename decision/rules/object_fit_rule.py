@@ -16,5 +16,7 @@ class ObjectFitRule(BaseRule):
             score=result.score * 0.15,
             weight=1.0,
             reason=result.explanation,
-            details=result.metrics,
-        )
+            details={
+            "occupation": round(result.metrics.get("occupation_percent", 0), 1)
+        },
+                )

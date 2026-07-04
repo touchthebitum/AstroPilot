@@ -42,7 +42,16 @@ class ImageQualityEngine:
             pixel_size=sampling_value,
         )
 
-        score = (sampling.score + resolution.score) / 2
+        sampling_score = sampling.score
+        resolution_score = resolution.score
+
+        seeing_match = 10 if abs(sampling.score - resolution.score) <= 2 else 7
+
+        score = (
+            sampling_score * 0.40 +
+            resolution_score * 0.40 +
+            seeing_match * 0.20
+        )
         adequacy = (sampling.adequacy + resolution.adequacy) / 2
 
         return EngineResult(
@@ -74,6 +83,7 @@ class ImageQualityEngine:
                 "pixels": resolution.pixels,
                 "size_factor": resolution.size_factor,
                 "ratio": adequacy,
+                "seeing_match" : seeing_match,
                 "detail_level": (
                     "Excellent"
                     if adequacy >= 0.9 else
