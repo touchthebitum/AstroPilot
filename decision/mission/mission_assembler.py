@@ -38,6 +38,7 @@ class MissionAssembler:
         )
 
         risk = RiskEngine.evaluate(risk_context)
+        
         return NightMission(
             target=target,
             confidence=summary.confidence,
@@ -51,3 +52,5 @@ class MissionAssembler:
             timeline=timeline,
             risk_report=risk,
         )
+    
+       
