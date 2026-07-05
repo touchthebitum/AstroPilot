@@ -15,6 +15,12 @@ class RiskEngine:
         season_remaining_days = context.season_remaining_days
         favorable_nights = context.favorable_nights
 
+        if season_remaining_days is None:
+            season_remaining_days = 999
+
+        if favorable_nights is None:
+            favorable_nights = 999
+
         score = 0
         explanation = []
 

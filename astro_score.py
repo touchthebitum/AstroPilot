@@ -4926,7 +4926,7 @@ if __name__ == "__main__":
         target=TARGET,
         equipment=args.equipment,
         goal=args.goal
-)
+    )
         
     #print("\n[TEST] appel forecast_night_capacities")
     caps = forecast_night_capacities(lat, lon)
@@ -4940,15 +4940,12 @@ if __name__ == "__main__":
             f"{c['hours']} h",
             f"qualité={c['quality']:.0f}"
         )
-    
 
+    if nights is None:
+        print("ERREUR: forecast_astro a retourné None")
+        exit()
 
-if nights is None:
-    print("ERREUR: forecast_astro a retourné None")
-    exit()
-
-
-top_nights = sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
+    top_nights = sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
 
 night_capacities = forecast_night_capacities(lat, lon)
 

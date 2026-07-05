@@ -1,6 +1,6 @@
 from decision.mission.night_mission import NightMission, MissionReason
 from decision.risk.risk_engine import RiskEngine
-from decision.risk.project_risk_context import ProjectRiskContext
+from decision.risk.project_risk_context_builder import ProjectRiskContextBuilder
 
 class MissionAssembler:
 
@@ -32,12 +32,9 @@ class MissionAssembler:
                 )
             )
 
-        risk_context = ProjectRiskContext(
-            priority=context.portfolio.highest_priority or 50,
-            remaining_hours=context.portfolio.total_remaining_hours or 5,
-            completion=context.portfolio.average_progress or 0,
-            season_remaining_days=30,
-            favorable_nights=10,
+        risk_context = ProjectRiskContextBuilder.build(
+            target=target,
+            context=context,
         )
 
         risk = RiskEngine.evaluate(risk_context)
