@@ -21,6 +21,8 @@ class MissionPresenter:
 
             print(f"Score : {mission.risk_report.score}")
 
+            print(f"Nuits nécessaires estimées : {mission.risk_report.context.required_nights}")
+
             for line in mission.risk_report.explanation:
                 print(f"• {line}")
 
