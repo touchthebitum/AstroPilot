@@ -1,6 +1,11 @@
 from decision.mission.night_mission import NightMission, MissionReason
 from decision.risk.risk_engine import RiskEngine
 from decision.risk.project_risk_context_builder import ProjectRiskContextBuilder
+from decision.night_productivity.night_productivity_engine import NightProductivityEngine
+from decision.night_productivity.night_productivity_context import NightProductivityContext
+from decision.mission.night_planner import NightPlanner
+
+
 
 class MissionAssembler:
 
@@ -12,6 +17,7 @@ class MissionAssembler:
         equipment,
         timeline,
         alternatives,
+        weather=None
     ):
 
         reasons = []
@@ -32,12 +38,31 @@ class MissionAssembler:
                 )
             )
 
+        productivity = NightProductivityEngine.evaluate(
+            NightProductivityContext(
+                astronomical_hours=6.0,
+                cloud_cover=20,
+                moon_penalty=0.2,
+                altitude_score=8,
+                humidity=60,
+                wind=5,
+                seeing=1.5,
+                weather=weather,
+                hourly_clouds=None,
+                hourly_humidity=None,
+                hourly_wind=None,
+                hourly_seeing=None,
+                hourly_moon_penalty=None,
+                )
+        )
+        
         risk_context = ProjectRiskContextBuilder.build(
             target=target,
             context=context,
         )
 
         risk = RiskEngine.evaluate(risk_context)
+        tasks = NightPlanner.build(productivity)
         
         return NightMission(
             target=target,
@@ -51,6 +76,8 @@ class MissionAssembler:
             alternative_target=None,
             timeline=timeline,
             risk_report=risk,
+            productivity=productivity,
+            tasks=tasks
         )
     
        

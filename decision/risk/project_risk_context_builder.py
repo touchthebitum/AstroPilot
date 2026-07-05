@@ -1,7 +1,7 @@
 from decision.risk.project_risk_context import ProjectRiskContext
 from decision.season.season_engine import SeasonEngine
 import math
-
+from decision.productivity.productivity_engine import ProductivityEngine
 
 class ProjectRiskContextBuilder:
 
@@ -11,11 +11,10 @@ class ProjectRiskContextBuilder:
         remaining_hours = context.portfolio.total_remaining_hours or 5
         good_nights = SeasonEngine.remaining_good_nights(target)
 
-        average_productive_hours = 4.0
-
-        required_nights = math.ceil(
-            remaining_hours / average_productive_hours
+        productivity = ProductivityEngine.evaluate(
+            remaining_hours
         )
+        required_nights = productivity.required_nights
 
         pressure = remaining_hours / max(good_nights, 1)
 

@@ -234,6 +234,17 @@ def forecast_night_capacities(lat, lon, days=14):
 
     hourly = parse_hourly_weather(weather)
 
+    from decision.weather.weather_forecast import WeatherForecast
+
+    forecast = WeatherForecast(
+    hourly=hourly,
+    hourly_clouds=[h.get("cloud_cover", 100) for h in hourly],
+    hourly_humidity=[h.get("relative_humidity_2m", 100) for h in hourly],
+    hourly_wind=[h.get("wind_speed_10m", 0) for h in hourly],
+    hourly_temperature=[h.get("temperature_2m", 0) for h in hourly],
+    hourly_visibility=[h.get("visibility", 10000) for h in hourly],
+)
+
     nights = {}
 
     for h in hourly:
@@ -4036,6 +4047,7 @@ def evaluate_object(
     bortle,
     target,
     profile,
+    weather=None,
 ):
     best = compute_best_window_for_object(
         sky,
@@ -4133,13 +4145,13 @@ def evaluate_object(
         decision_engine.add_rule(ImageQualityRule())
         decision_engine.add_rule(ObjectFitRule())
 
-        print(">>> ResolutionRule ajoutée")
-        print(decision_engine.rules)
+        ####print(">>> ResolutionRule ajoutée")
+        ###print(decision_engine.rules)
 
         clouds = best.get("clouds", 0)
 
-        print(best.keys())
-        print(best.get("setup_ranking"))
+        ##print(best.keys())
+        #print(best.get("setup_ranking"))
 
 
         camera = Camera(
@@ -4283,6 +4295,7 @@ def evaluate_object(
             target=obj_name,
             summary=summary,
             context=decision_context,
+            weather=weather,
         )
 
         print("\n===== NIGHT MISSION =====")
@@ -4408,6 +4421,17 @@ def forecast_astro(
     else:
         rows = parse_hourly_weather(weather)
 
+        from decision.weather.weather_forecast import WeatherForecast
+        caps=WeatherForecast(
+            hourly=rows,
+            hourly_clouds=[h.get("cloud_cover",
+                100) for h in rows],
+            hourly_temperature=[h.get("temperature_2m",0) for h in rows],
+            hourly_visibility=[h.get("visibiility", 10000) for h in rows],
+            hourly_humidity=[h.get("relative_humidity_2m", 100) for h in rows],
+            hourly_wind=[h.get("wind_speed_10m", 0) for h in rows],
+        )
+
     results = []
 
     #print("TARGET_OBJECTS = ", TARGET_OBJECTS)
@@ -4446,12 +4470,24 @@ def forecast_astro(
     
         all_results = []
 
+        from decision.weather.weather_forecast import WeatherForecast
+
+        caps = WeatherForecast(
+            hourly=rows,
+            hourly_clouds=[h.get("cloud_cover", 100) for h in rows],
+            hourly_humidity=[h.get("relative_humidity_2m", 100) for h in rows],
+            hourly_wind=[h.get("wind_speed_10m", 0) for h in rows],
+            hourly_temperature=[h.get("temperature_2m", 0) for h in rows],
+            hourly_visibility=[h.get("visibility", 10000) for h in rows],
+        )
+
         for obj_name in TARGET_OBJECTS:
 
             result = evaluate_object(
                 obj_name=obj_name,
                 sky=sky,
                 hours=hours,
+                weather=caps,
                 illumination=illumination,
                 moon_rise=moon_rise,
                 moon_set=moon_set,

@@ -6,11 +6,12 @@ from decision.mission.night_mission import (
 from decision.mission.equipment_builder import EquipmentBuilder
 from decision.mission.mission_assembler import MissionAssembler
 from decision.mission.timeline_builder import TimelineBuilder
+from decision.weather.weather_forecast import WeatherForecast
 
 class NightMissionBuilder:
 
     @staticmethod
-    def build(target, summary, context):
+    def build(target, summary, context, weather: WeatherForecast | None = None,):
 
         reasons = []
 
@@ -43,4 +44,5 @@ class NightMissionBuilder:
         equipment=equipment,
         timeline=timeline,
         alternatives=alternatives,
+        weather=weather,
     )

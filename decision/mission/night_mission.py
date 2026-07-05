@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
 from decision.risk.risk_report import RiskReport
+from decision.night_productivity.night_productivity_result import NightProductivityResult
+from decision.mission.night_planner import NightTask
 
 @dataclass(frozen=True)
 class MissionReason:
@@ -22,15 +24,14 @@ class MissionEvent:
 class NightMission:
     target: str
     confidence: str
-
     reasons: list[MissionReason] = field(default_factory=list)
     equipment: list[str] = field(default_factory=list)
     timeline: list[MissionEvent] = field(default_factory=list)
-    
     window_start: str | None = None
     window_end: str | None = None
     recommended_hours: float = 0.0
     expected_gain: float = 0.0
     alternative_target: str | None = None
     risk_report: RiskReport | None = None
-
+    productivity: NightProductivityResult | None = None
+    tasks: list[NightTask] = field(default_factory=list)

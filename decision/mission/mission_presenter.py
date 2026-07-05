@@ -13,6 +13,35 @@ class MissionPresenter:
 
         print(f"\nConfiance : {mission.confidence:.0%}")
 
+        print()
+        print("🌙 Productivité prévue")
+        print(f"Heures astronomiques : {mission.productivity.astronomical_hours:.1f} h")
+        print(f"Heures productives : {mission.productivity.productive_hours:.1f} h")
+        print(f"Confiance productivité : {mission.productivity.confidence:.0%}")
+        print()
+
+        if mission.productivity.windows:
+            print()
+            print("🌙 Fenêtres optimales")
+
+            for w in mission.productivity.windows:
+                base = mission.productivity.display_start_hour
+
+                start = base + w.start_hour
+                end = base + w.end_hour
+
+                start_h = int(start) % 24
+                start_m = int((start - int(start)) * 60)
+
+                end_h = int(end) % 24
+                end_m = int((end - int(end)) * 60)
+                
+                print(
+                    f"{start_h:02d}:{start_m:02d} → {end_h:02d}:{end_m:02d}   "
+                    f"productivité {w.productivity:.0%}   "
+                    f"{w.reason}"
+                )
+
         if mission.risk_report:
 
             print("\n⚠️ Risque de report")
@@ -59,6 +88,12 @@ class MissionPresenter:
 
             if mission.expected_gain:
                 print(f"\n📈 Gain attendu : +{mission.expected_gain:.1f}%")
+
+        print("\n🗓️ Plan de nuit")
+
+        for task in mission.tasks:
+            print(f"{task.start} → {task.end}  {task.title}")
+
 
         if mission.equipment:
             print("\n🎒 Matériel conseillé")
