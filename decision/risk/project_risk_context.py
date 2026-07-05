@@ -5,5 +5,6 @@ class ProjectRiskContext:
     priority: float
     remaining_hours: float
     completion: float
-    season_remaining_days: int
-    favorable_nights: int
+    season_remaining_days: int | None
+    favorable_nights: int | None
+    season_urgency: float = 0.0 

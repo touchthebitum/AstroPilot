@@ -13,4 +13,5 @@ class ProjectRiskContextBuilder:
             completion=context.portfolio.average_progress or 0,
             season_remaining_days=SeasonEngine.remaining_days(target),
             favorable_nights=SeasonEngine.remaining_good_nights(target),
+            season_urgency=SeasonEngine.urgency_score(target),
         )

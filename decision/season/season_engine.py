@@ -6,6 +6,39 @@ from decision.season.season_data import SEASON_WINDOWS, TIMEZONE
 class SeasonEngine:
 
     @staticmethod
+    def summary(target):
+        days = SeasonEngine.remaining_days(target)
+        good_nights = SeasonEngine.remaining_good_nights(target)
+
+        if days is None:
+            urgency = "UNKNOWN"
+        elif days <= 14:
+            urgency = "HIGH"
+        elif days <= 45:
+            urgency = "MEDIUM"
+        else:
+            urgency = "LOW"
+
+        return {
+            "target": target,
+            "remaining_days": days,
+            "remaining_good_nights": good_nights,
+            "urgency": urgency,
+            "urgency_score":SeasonEngine.urgency_score(target),
+        }
+        
+    @staticmethod
+    def urgency_score(target):
+        days = SeasonEngine.remaining_days(target)
+
+        if days is None:
+            return 0
+
+        score = max(0, 100 - days / 2)
+
+        return round(score, 1)
+
+    @staticmethod
     def remaining_good_nights(target):
         days = SeasonEngine.remaining_days(target)
 
