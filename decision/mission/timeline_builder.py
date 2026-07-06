@@ -8,7 +8,7 @@ class TimelineBuilder:
     @staticmethod
     def build(best_window):
 
-        print("DEBUG TimelineBuilder V2")
+        #print("DEBUG TimelineBuilder V2")
 
         if not best_window:
             return []

@@ -1,4 +1,5 @@
 from decision.night_productivity.night_window import NightWindow
+from decision.night_productivity.night_conditions_provider import NightConditionsProvider
 
 
 class NightWindowBuilder:
@@ -14,9 +15,9 @@ class NightWindowBuilder:
 
             night_progress = current / context.astronomical_hours if context.astronomical_hours else 0
 
-            dynamic_altitude = context.altitude_score + (night_progress - 0.5) * 2
-            dynamic_cloud = max(0, context.cloud_cover - night_progress * 10)
-            dynamic_moon = max(0, context.moon_penalty - night_progress * 0.2)
+            dynamic_altitude = NightConditionsProvider.altitude(current, context)
+            dynamic_cloud = NightConditionsProvider.cloud(current, context)
+            dynamic_moon = NightConditionsProvider.moon_penalty(current, context)
 
             productivity = 1.0
             productivity -= dynamic_cloud / 100 * 0.7
