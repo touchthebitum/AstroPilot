@@ -18,15 +18,25 @@ class NightTimelineBuilder:
 
             end = min(current + step, context.astronomical_hours)
             time_slice = NightSlice(
-                start_hour=current,
-                end_hour=end,
-                altitude=NightConditionsProvider.altitude(current, context),
-                cloud_cover=NightConditionsProvider.cloud(current, context),
-                humidity=NightConditionsProvider.humidity(current, context),
-                wind=NightConditionsProvider.wind(current, context),
-                seeing=NightConditionsProvider.seeing(current, context),
-                moon_penalty=NightConditionsProvider.moon_penalty(current, context),
-            )
+                        start_hour=current,
+                        end_hour=end,
+
+                        target_altitude=0.0,
+                        target_azimuth=0.0,
+
+                        moon_altitude=0.0,
+                        moon_separation=0.0,
+
+                        cloud_cover=0.0,
+                        humidity=0.0,
+                        wind=0.0,
+                        seeing=0.0,
+                        sqm=0.0,
+
+                        astro_score=0.0,
+                        conditions_score=0.0,
+                        productivity_score=0.0,
+                    )
 
             productivity = NightSliceEvaluator.evaluate(time_slice)
 

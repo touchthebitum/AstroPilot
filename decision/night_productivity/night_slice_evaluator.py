@@ -7,11 +7,11 @@ class NightSliceEvaluator:
         productivity = 1.0
 
         productivity -= slice.cloud_cover / 100 * 0.7
-        productivity -= slice.moon_penalty * 0.2
+        productivity -= getattr(slice,"moon_penalty", 0.0) * 0.2
 
-        if slice.altitude < 5:
+        if slice.target_altitude < 5:
             productivity -= 0.25
-        elif slice.altitude < 7:
+        elif slice.target_altitude < 7:
             productivity -= 0.10
 
         if slice.humidity > 85:

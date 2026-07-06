@@ -6,12 +6,18 @@ class NightSlice:
     start_hour: float
     end_hour: float
 
-    altitude: float
+    target_altitude: float
+    target_azimuth: float
+
+    moon_altitude: float
+    moon_separation: float
+
     cloud_cover: float
     humidity: float
     wind: float
     seeing: float
-
-    moon_penalty: float
-
-    productivity: float = 0.0
+    sqm: float
+    
+    astro_score: float
+    conditions_score: float
+    productivity_score: float
