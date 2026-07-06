@@ -35,3 +35,4 @@ class NightMission:
     risk_report: RiskReport | None = None
     productivity: NightProductivityResult | None = None
     tasks: list[NightTask] = field(default_factory=list)
+    night_slices: list = field(default_factory=list)

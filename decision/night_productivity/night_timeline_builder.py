@@ -17,34 +17,40 @@ class NightTimelineBuilder:
         while current < context.astronomical_hours:
 
             end = min(current + step, context.astronomical_hours)
+
+            dynamic_cloud = NightConditionsProvider.cloud(current, context)
+            dynamic_humidity = NightConditionsProvider.humidity(current, context)
+            dynamic_wind = NightConditionsProvider.wind(current, context)
+            dynamic_seeing = NightConditionsProvider.seeing(current, context)
+            dynamic_altitude = NightConditionsProvider.altitude(current, context)
+
             time_slice = NightSlice(
-                        start_hour=current,
-                        end_hour=end,
+                start_hour=current,
+                end_hour=end,
 
-                        target_altitude=0.0,
-                        target_azimuth=0.0,
+                target_altitude=dynamic_altitude,
+                target_azimuth=0.0,
 
-                        moon_altitude=0.0,
-                        moon_separation=0.0,
+                moon_altitude=0.0,
+                moon_separation=0.0,
 
-                        cloud_cover=0.0,
-                        humidity=0.0,
-                        wind=0.0,
-                        seeing=0.0,
-                        sqm=0.0,
+                cloud_cover=dynamic_cloud,
+                humidity=dynamic_humidity,
+                wind=dynamic_wind,
+                seeing=dynamic_seeing,
+                sqm=0.0,
 
-                        astro_score=0.0,
-                        conditions_score=0.0,
-                        productivity_score=0.0,
-                    )
+                astro_score=0.0,
+                conditions_score=0.0,
+                productivity_score=0.0,
+            )
 
             productivity = NightSliceEvaluator.evaluate(time_slice)
-
-            time_slice.productivity = productivity
+            time_slice.productivity_score = productivity
 
             slices.append(time_slice)
-                        
 
             current = end
+
 
         return NightTimeline(slices)

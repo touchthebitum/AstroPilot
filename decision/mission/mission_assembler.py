@@ -77,7 +77,8 @@ class MissionAssembler:
             timeline=timeline,
             risk_report=risk,
             productivity=productivity,
-            tasks=tasks
+            tasks=tasks,
+            night_slices=productivity.timeline.slices,
         )
     
        

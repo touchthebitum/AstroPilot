@@ -4300,8 +4300,14 @@ def evaluate_object(
 
         print("\n===== NIGHT MISSION =====")
         from decision.mission.mission_presenter import MissionPresenter
+        from decision.night_advisor.night_advisor import NightAdvisor
 
         MissionPresenter.present(mission)
+
+        print("\n===== NIGHT ADVISOR =====")
+
+        for advice in NightAdvisor.build(mission.night_slices):
+            print(advice)
 
         print(f"\n===== DECISION ENGINE : {obj_name} =====")
         print(f"Score DecisionEngine : {decision_score:+.1f}\n")

@@ -35,7 +35,7 @@ class NightProductivityEngine:
         total_loss = cloud_loss + moon_loss + altitude_loss + weather_loss
 
         productive_hours = sum(
-            (s.end_hour - s.start_hour) * s.productivity
+            (s.end_hour - s.start_hour) * s.productivity_score
             for s in timeline.slices
         )
 
@@ -49,12 +49,12 @@ class NightProductivityEngine:
             astronomical_hours=context.astronomical_hours,
             productive_hours=round(productive_hours, 2),
             confidence=round(confidence, 2),
-
             cloud_loss=round(cloud_loss, 2),
             moon_loss=round(moon_loss, 2),
             altitude_loss=round(altitude_loss, 2),
             weather_loss=round(weather_loss, 2),
             windows=NightWindowBuilder.build(context),
             display_start_hour=getattr(context, "display_start_hour", 22),
+            timeline=timeline,
         )
 
