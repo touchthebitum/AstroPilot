@@ -5,25 +5,42 @@ class NightAdvisor:
 
     @staticmethod
     def build(timeline):
+
         actions = []
 
+        previous = None
+
         for s in timeline:
-            time_label = f"{int(s.start_hour):02d}:{int((s.start_hour - int(s.start_hour)) * 60):02d}"
 
-            if s.productivity_score >= 0.90:
+            time_label = (
+                f"{int(s.start_hour):02d}:"
+                f"{int((s.start_hour - int(s.start_hour)) * 60):02d}"
+            )
+
+            # Début d'une excellente fenêtre
+            if (
+                s.productivity_score >= 0.90
+                and (
+                    previous is None
+                    or previous.productivity_score < 0.90
+                )
+            ):
                 actions.append(
-                    f"{time_label} : Conditions excellentes → Continuer les acquisitions"
+                    f"{time_label} : Début d'une excellente fenêtre d'acquisition."
                 )
 
-            elif s.productivity_score >= 0.70:
+            # Fin d'une excellente fenêtre
+            elif (
+                previous is not None
+                and previous.productivity_score >= 0.90
+                and s.productivity_score < 0.90
+            ):
                 actions.append(
-                    f"{time_label} : Conditions correctes → Continuer"
+                    f"{time_label} : Fin de la meilleure fenêtre d'acquisition."
                 )
 
-            else:
-                actions.append(
-                    f"{time_label} : Conditions dégradées → Surveiller / attendre"
-                )
+            previous = s
+
 
         return actions
 

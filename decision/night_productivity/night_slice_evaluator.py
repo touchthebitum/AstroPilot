@@ -20,4 +20,6 @@ class NightSliceEvaluator:
         if slice.wind > 20:
             productivity -= 0.15
 
-        return max(0.0, min(1.0, productivity))
+        productivity = max(0.0, min(1.0, productivity))
+
+        return productivity

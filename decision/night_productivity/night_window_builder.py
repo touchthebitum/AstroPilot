@@ -36,6 +36,13 @@ class NightWindowBuilder:
 
             productivity = max(0.0, min(1.0, productivity))
 
+            print("\n===== WINDOW DEBUG =====")
+            print(f"Heure      : {current:.2f} -> {end:.2f}")
+            print(f"Altitude   : {dynamic_altitude:.2f}")
+            print(f"Nuages     : {dynamic_cloud:.1f}%")
+            print(f"Lune       : {dynamic_moon:.2f}")
+            print(f"Productivité Window : {productivity:.3f}")
+
 
             windows.append(
                 NightWindow(
