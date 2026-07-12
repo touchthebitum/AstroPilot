@@ -86,3 +86,84 @@ Le moteur Python constitue le cœur du produit.
 
 L'application mobile constitue l'interface utilisateur principale.
 
+# Sprint – Intelligence Layer : SeasonAnalysis
+
+## Objectif
+Création de la première couche d'intelligence indépendante capable d'analyser un aspect d'une mission et de produire un résultat structuré.
+
+## Nouveaux composants
+
+### AnalysisResult
+Structure commune utilisée par tous les moteurs d'analyse.
+
+Contient :
+- analysis_name
+- conclusion
+- confidence
+- data
+
+### AnalysisContext
+Contexte partagé entre les analyses.
+
+Premiers champs :
+- target
+- weather
+- productivity
+- risk
+
+Tous les futurs moteurs utiliseront cette structure.
+
+### SeasonAnalysis
+Premier moteur d'analyse implémenté.
+
+Il :
+- interroge SeasonEngine
+- calcule un niveau de confiance
+- génère une conclusion textuelle
+- retourne un AnalysisResult
+
+## Intégration
+
+NightMission contient désormais :
+
+- season_analysis
+
+MissionAssembler construit désormais un véritable AnalysisContext avant d'appeler les moteurs d'intelligence.
+
+MissionPresenter affiche directement les résultats de SeasonAnalysis.
+
+## Architecture actuelle
+
+SeasonEngine
+↓
+SeasonAnalysis
+↓
+AnalysisResult
+↓
+NightMission
+↓
+MissionPresenter
+
+## Limitation actuelle
+
+SeasonEngine repose encore sur une table statique
+(SEASON_WINDOWS).
+
+Les objets absents de cette table retournent actuellement
+UNKNOWN.
+
+## Prochaine évolution
+
+Supprimer complètement SEASON_WINDOWS.
+
+Calculer automatiquement la saison d'un objet à partir :
+
+- RA
+- DEC
+- latitude observateur
+- date
+- durée de nuit
+- altitude utile
+
+Toutes les cibles du catalogue deviendront ainsi compatibles sans maintenance manuelle.
+
