@@ -1,12 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
 class AnalysisResult:
-    """
-    Contrat commun de toutes les analyses AstroPilot.
-    """
-
     analysis_name: str
     conclusion: str
     confidence: float
+    data: dict[str, Any] = field(default_factory=dict)
