@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from decision.risk.risk_report import RiskReport
 from decision.night_productivity.night_productivity_result import NightProductivityResult
 from decision.mission.night_planner import NightTask
+from decision.intelligence.analysis_result import AnalysisResult
 
 @dataclass(frozen=True)
 class MissionReason:
@@ -33,6 +34,7 @@ class NightMission:
     expected_gain: float = 0.0
     alternative_target: str | None = None
     risk_report: RiskReport | None = None
+    season_analysis: AnalysisResult | None = None 
     productivity: NightProductivityResult | None = None
     tasks: list[NightTask] = field(default_factory=list)
     night_slices: list = field(default_factory=list)

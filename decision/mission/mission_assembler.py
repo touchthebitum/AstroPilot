@@ -4,6 +4,8 @@ from decision.risk.project_risk_context_builder import ProjectRiskContextBuilder
 from decision.night_productivity.night_productivity_engine import NightProductivityEngine
 from decision.night_productivity.night_productivity_context import NightProductivityContext
 from decision.mission.night_planner import NightPlanner
+from decision.intelligence.season_analysis import SeasonAnalysis
+from decision.intelligence.analysis_context import AnalysisContext
 
 
 
@@ -63,6 +65,15 @@ class MissionAssembler:
 
         risk = RiskEngine.evaluate(risk_context)
         tasks = NightPlanner.build(productivity)
+
+        analysis_context = AnalysisContext(
+            target=target,
+            weather=weather,
+            productivity=productivity,
+            risk=risk,
+        )
+
+        season_analysis = SeasonAnalysis.analyze(analysis_context)
         
         return NightMission(
             target=target,
@@ -76,6 +87,7 @@ class MissionAssembler:
             alternative_target=None,
             timeline=timeline,
             risk_report=risk,
+            season_analysis=season_analysis,
             productivity=productivity,
             tasks=tasks,
             night_slices=productivity.timeline.slices,

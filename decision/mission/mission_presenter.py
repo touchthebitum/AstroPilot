@@ -89,6 +89,27 @@ class MissionPresenter:
             if mission.expected_gain:
                 print(f"\n📈 Gain attendu : +{mission.expected_gain:.1f}%")
 
+
+            if mission.season_analysis:
+
+                print("\n🌙 Analyse saison")
+
+                print(f"Conclusion : {mission.season_analysis.conclusion}")
+
+                print(
+                    f"Confiance : "
+                    f"{mission.season_analysis.confidence * 100:.0f}%"
+                )
+
+                season = mission.season_analysis.data
+
+                print(f"Jours restants : {season['remaining_days']}")
+                print(
+                    f"Nuits favorables : "
+                    f"{season['remaining_good_nights']}"
+                )
+                print(f"Urgence : {season['urgency']}")
+
         print("\n🗓️ Plan de nuit")
 
         for task in mission.tasks:
