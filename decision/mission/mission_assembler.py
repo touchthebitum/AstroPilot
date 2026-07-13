@@ -6,6 +6,8 @@ from decision.night_productivity.night_productivity_context import NightProducti
 from decision.mission.night_planner import NightPlanner
 from decision.intelligence.season_analysis import SeasonAnalysis
 from decision.intelligence.analysis_context import AnalysisContext
+from decision.season.dynamic_season_engine import DynamicSeasonEngine
+from astropilot.catalog import CATALOG
 
 
 
@@ -55,6 +57,10 @@ class MissionAssembler:
                 hourly_wind=None,
                 hourly_seeing=None,
                 hourly_moon_penalty=None,
+                target=CATALOG[target],
+                latitude=context.site.latitude,
+                longitude=context.site.longitude,
+                observation_time=context.session.start_time,
                 )
         )
         
@@ -66,14 +72,33 @@ class MissionAssembler:
         risk = RiskEngine.evaluate(risk_context)
         tasks = NightPlanner.build(productivity)
 
+
         analysis_context = AnalysisContext(
             target=target,
             weather=weather,
             productivity=productivity,
             risk=risk,
+            latitude=context.site.latitude,
+            longitude=context.site.longitude,
+            observation_time=context.session.start_time,
         )
 
+
         season_analysis = SeasonAnalysis.analyze(analysis_context)
+
+        print("SESSION :", context.session.start_time, "->", context.session.end_time)
+
+        samples = DynamicSeasonEngine.target_visibility_window(
+            CATALOG[target],
+            context.site.latitude,
+            context.site.longitude,
+            context.session.start_time,
+            context.session.end_time,
+        )
+
+        print(f"Nombre d'échantillons : {len(samples)}")
+        print(samples[:5])
+        print(samples[-5:])
         
         return NightMission(
             target=target,

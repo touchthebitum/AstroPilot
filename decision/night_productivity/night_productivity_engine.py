@@ -53,7 +53,7 @@ class NightProductivityEngine:
             moon_loss=round(moon_loss, 2),
             altitude_loss=round(altitude_loss, 2),
             weather_loss=round(weather_loss, 2),
-            windows=NightWindowBuilder.build(context),
+            windows=NightWindowBuilder.build(context, timeline),
             display_start_hour=getattr(context, "display_start_hour", 22),
             timeline=timeline,
         )

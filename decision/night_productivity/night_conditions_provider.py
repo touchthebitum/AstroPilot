@@ -1,3 +1,8 @@
+from datetime import datetime, timedelta
+
+from decision.season.dynamic_season_engine import DynamicSeasonEngine
+
+
 class NightConditionsProvider:
 
     @staticmethod
@@ -74,4 +79,13 @@ class NightConditionsProvider:
 
     @staticmethod
     def altitude(hour, context):
-        return context.altitude_score
+
+        obs_time = context.observation_time + timedelta(hours=hour)
+
+        return DynamicSeasonEngine.target_altitude_at_time(
+            target=context.target,
+            latitude=context.latitude,
+            longitude=context.longitude,
+            obs_time=obs_time,
+        )
+
