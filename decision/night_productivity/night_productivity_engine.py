@@ -6,7 +6,7 @@ from decision.night_productivity.night_productivity_result import (
     NightProductivityResult,
 )
 
-from decision.night_productivity.night_window_builder import NightWindowBuilder
+from decision.night_productivity.night_window_merger import NightWindowMerger
 
 from decision.night_productivity.night_timeline_builder import NightTimelineBuilder
 
@@ -53,7 +53,7 @@ class NightProductivityEngine:
             moon_loss=round(moon_loss, 2),
             altitude_loss=round(altitude_loss, 2),
             weather_loss=round(weather_loss, 2),
-            windows=NightWindowBuilder.build(context, timeline),
+            windows=NightWindowMerger.merge(timeline),
             display_start_hour=getattr(context, "display_start_hour", 22),
             timeline=timeline,
         )

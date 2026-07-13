@@ -11,13 +11,14 @@ class NightSlice:
 
     moon_altitude: float
     moon_separation: float
+    moon_penalty: float
 
     cloud_cover: float
     humidity: float
     wind: float
     seeing: float
     sqm: float
-    
+
     astro_score: float
     conditions_score: float
     productivity_score: float

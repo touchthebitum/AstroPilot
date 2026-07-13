@@ -8,10 +8,10 @@ def build_night_schedule(objects, available_hours, profile=None):
             break
 
 
-        print("\nDEBUG Scheduler")
-        print(obj["name"])
-        print("remaining_hours =", obj.get("remaining_hours"))
-        print("remaining =", remaining)
+        ####print("\nDEBUG Scheduler")
+        ###print(obj["name"])
+        ##print("remaining_hours =", obj.get("remaining_hours"))
+        #print("remaining =", remaining)
 
         remaining_hours = obj.get("remaining_hours")
 
