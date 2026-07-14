@@ -47,9 +47,6 @@ class DynamicSeasonEngine:
         """
         from datetime import timedelta
 
-        print("Début fenêtre :", start_time)
-        print("Fin fenêtre   :", end_time)
-
         current = start_time
 
         samples = []

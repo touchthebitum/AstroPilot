@@ -138,11 +138,11 @@ if __name__ == "__main__":
         4.0
     )
 
-    print("\n===== NIGHT STRATEGY =====")
-    print(f"Stratégie : {result['strategy']}")
-    print(f"Confiance : {result['confidence']:.0%}")
-    print(f"Raison : {result['reason']}")
-    print("Projets :")
+    #####print("\n===== NIGHT STRATEGY =====")
+    ####print(f"Stratégie : {result['strategy']}")
+    ###print(f"Confiance : {result['confidence']:.0%}")
+    ##print(f"Raison : {result['reason']}")
+    #print("Projets :")
     for p in result["projects"]:
         print(f" - {p['name']}")
 

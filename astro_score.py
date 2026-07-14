@@ -2436,49 +2436,72 @@ def show_tonight_recommendation(night):
 
     print("\n===== COÛT D'OPPORTUNITÉ =====")
 
-    print(f"Si vous photographiez {best_score['name']} :")
-    print(
-        f"+{portfolio_gain_if_shot(best_score['name'], session_hours):.1f}% portefeuille"
-    )
+    same_choice = best_score["name"] == best_roi["name"]
 
-    if remaining_best is not None and remaining_best <= session_hours:
-        print("Projet terminé")
+    if same_choice:
+        print(f"Si vous photographiez {best_score['name']} :")
+
+        gain = portfolio_gain_if_shot(
+            best_score["name"],
+            session_hours,
+        )
+        print(f"+{gain:.1f}% portefeuille")
+
+        if remaining_best is not None and remaining_best <= session_hours:
+            print("Projet terminé")
+        else:
+            remaining_after = max(0, remaining_best - session_hours)
+            print(f"Reste après session : {remaining_after:.1f} h")
+
+        print(f"ROI {gain / session_hours:.2f}/h")
+
     else:
-        remaining_after = max(0, remaining_best - session_hours)
+        gain_score = portfolio_gain_if_shot(
+            best_score["name"],
+            session_hours,
+        )
 
-        print(f"Reste après session : {remaining_after:.1f} h")
+        print(f"Si vous photographiez {best_score['name']} :")
+        print(f"+{gain_score:.1f}% portefeuille")
 
-    print(
-        f"ROI "
-        f"{portfolio_gain_if_shot(best_score['name'], session_hours)/session_hours:.2f}/h"
-    )
+        if remaining_best is not None and remaining_best <= session_hours:
+            print("Projet terminé")
+        else:
+            remaining_after = max(0, remaining_best - session_hours)
+            print(f"Reste après session : {remaining_after:.1f} h")
 
-    print()
+        print(f"ROI {gain_score / session_hours:.2f}/h")
+        print()
 
-    print(f"Si vous photographiez {best_roi['name']} :")
-    print(
-        f"+{portfolio_gain_if_shot(best_roi['name'], session_hours):.1f}% portefeuille"
-    )
+        gain_roi = portfolio_gain_if_shot(
+            best_roi["name"],
+            session_hours,
+        )
 
-    print(
-        f"ROI "
-        f"{portfolio_gain_if_shot(best_roi['name'], session_hours)/session_hours:.2f}/h"
-    )
+        print(f"Si vous photographiez {best_roi['name']} :")
+        print(f"+{gain_roi:.1f}% portefeuille")
 
-    print()
+        if remaining_roi is not None and remaining_roi <= session_hours:
+            print("Projet terminé")
+        else:
+            remaining_after_roi = max(0, remaining_roi - session_hours)
+            print(f"Reste après session : {remaining_after_roi:.1f} h")
 
-    gain_diff = (
-        portfolio_gain_if_shot(best_roi['name'], session_hours)
-        - portfolio_gain_if_shot(best_score['name'], session_hours)
-    )
+        print(f"ROI {gain_roi / session_hours:.2f}/h")
 
-    print(
-        f"Différence progression : {gain_diff:+.1f}%"
-    )
 
-    print(
-        f"Différence score : {score_gap:+.1f} points"
-    )
+        if same_choice:
+            gain_diff = 0.0
+        else:
+            gain_diff = gain_roi - gain_score
+
+        print(
+            f"Différence progression : {gain_diff:+.1f}%"
+        )
+
+        print(
+            f"Différence score : {score_gap:+.1f} points"
+        )
 
     if score_gap >= 15:
         confidence = "ÉLEVÉE"
@@ -2496,8 +2519,19 @@ def show_tonight_recommendation(night):
     alt_risk = alt_future.get("risk", "INCONNU")
 
     print("\nFacteurs stratégiques :")
-    print(f"{best_score['name']} : risque {chosen_risk}, fenêtres favorables estimées : {chosen_future.get('good_nights', '?')}")
-    print(f"{best_roi['name']} : risque {alt_risk}, fenêtres favorables estimées : {alt_future.get('good_nights', '?')}")
+
+    print(
+        f"{best_score['name']} : risque {chosen_risk}, "
+        f"fenêtres favorables estimées : "
+        f"{chosen_future.get('good_nights', '?')}"
+    )
+
+    if not same_choice:
+        print(
+            f"{best_roi['name']} : risque {alt_risk}, "
+            f"fenêtres favorables estimées : "
+            f"{alt_future.get('good_nights', '?')}"
+    )
     print("\nUrgence portefeuille :")
     print(f"✓ Progression actuelle : {progress:.1f}%")
 

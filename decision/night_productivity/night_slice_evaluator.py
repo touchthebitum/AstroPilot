@@ -28,6 +28,4 @@ class NightSliceEvaluator:
 
         productivity = max(0.0, min(1.0, productivity))
 
-        print(f"==> productivity={productivity:.3f}")
-
         return productivity
