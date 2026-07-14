@@ -4,6 +4,7 @@ import json
 import requests
 import warnings
 import copy
+from decision.renderer.recommendation_renderer import render_opportunity_cost
 from decision.rules.object_fit_rule import ObjectFitRule
 from datetime import datetime, timedelta
 from decision.models.context.decision_context import DecisionContext
@@ -2431,77 +2432,46 @@ def show_tonight_recommendation(night):
         night_capacities=night_capacities
     )
 
+    same_choice = (
+    best_score["name"].strip().upper()
+    == best_roi["name"].strip().upper()
+    )
     remaining_best = project_remaining_hours(best_score["name"])
     remaining_roi = project_remaining_hours(best_roi["name"])
 
-    print("\n===== COÛT D'OPPORTUNITÉ =====")
+    gain_score = portfolio_gain_if_shot(
+        best_score["name"],
+        session_hours,
+        )
 
-    same_choice = best_score["name"] == best_roi["name"]
+    gain_roi = portfolio_gain_if_shot(
+        best_roi["name"],
+        session_hours,
+    )
 
+    render_opportunity_cost(
+        best_score=best_score,
+        best_roi=best_roi,
+        session_hours=session_hours,
+        remaining_best=remaining_best,
+        remaining_roi=remaining_roi,
+        gain_score=gain_score,
+        gain_roi=gain_roi,
+        same_choice=same_choice,
+    )
+    
     if same_choice:
-        print(f"Si vous photographiez {best_score['name']} :")
-
-        gain = portfolio_gain_if_shot(
-            best_score["name"],
-            session_hours,
-        )
-        print(f"+{gain:.1f}% portefeuille")
-
-        if remaining_best is not None and remaining_best <= session_hours:
-            print("Projet terminé")
-        else:
-            remaining_after = max(0, remaining_best - session_hours)
-            print(f"Reste après session : {remaining_after:.1f} h")
-
-        print(f"ROI {gain / session_hours:.2f}/h")
-
+        gain_diff = 0.0
     else:
-        gain_score = portfolio_gain_if_shot(
-            best_score["name"],
-            session_hours,
-        )
+        gain_diff = gain_roi - gain_score
 
-        print(f"Si vous photographiez {best_score['name']} :")
-        print(f"+{gain_score:.1f}% portefeuille")
+    print(
+        f"Différence progression : {gain_diff:+.1f}%"
+    )
 
-        if remaining_best is not None and remaining_best <= session_hours:
-            print("Projet terminé")
-        else:
-            remaining_after = max(0, remaining_best - session_hours)
-            print(f"Reste après session : {remaining_after:.1f} h")
-
-        print(f"ROI {gain_score / session_hours:.2f}/h")
-        print()
-
-        gain_roi = portfolio_gain_if_shot(
-            best_roi["name"],
-            session_hours,
-        )
-
-        print(f"Si vous photographiez {best_roi['name']} :")
-        print(f"+{gain_roi:.1f}% portefeuille")
-
-        if remaining_roi is not None and remaining_roi <= session_hours:
-            print("Projet terminé")
-        else:
-            remaining_after_roi = max(0, remaining_roi - session_hours)
-            print(f"Reste après session : {remaining_after_roi:.1f} h")
-
-        print(f"ROI {gain_roi / session_hours:.2f}/h")
-
-
-        if same_choice:
-            gain_diff = 0.0
-        else:
-            gain_diff = gain_roi - gain_score
-
-        print(
-            f"Différence progression : {gain_diff:+.1f}%"
-        )
-
-        print(
-            f"Différence score : {score_gap:+.1f} points"
-        )
+    print(
+        f"Différence score : {score_gap:+.1f} points"
+    )
 
     if score_gap >= 15:
         confidence = "ÉLEVÉE"
