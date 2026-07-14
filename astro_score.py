@@ -4,7 +4,9 @@ import json
 import requests
 import warnings
 import copy
-from decision.renderer.recommendation_renderer import render_opportunity_cost
+from decision.renderer.recommendation_renderer import (render_opportunity_cost, render_strategic_summary,)
+from decision.renderer.recommendation_renderer import (render_postponement_risk,)
+from decision.renderer.recommendation_renderer import (render_after_tonight_roadmap,)
 from decision.rules.object_fit_rule import ObjectFitRule
 from datetime import datetime, timedelta
 from decision.models.context.decision_context import DecisionContext
@@ -2488,78 +2490,27 @@ def show_tonight_recommendation(night):
     chosen_risk = chosen_future.get("risk", "INCONNU")
     alt_risk = alt_future.get("risk", "INCONNU")
 
-    print("\nFacteurs stratégiques :")
 
-    print(
-        f"{best_score['name']} : risque {chosen_risk}, "
-        f"fenêtres favorables estimées : "
-        f"{chosen_future.get('good_nights', '?')}"
+    render_strategic_summary(
+    best_score=best_score,
+    best_roi=best_roi,
+    same_choice=same_choice,
+    chosen_future=chosen_future,
+    alt_future=alt_future,
+    chosen_risk=chosen_risk,
+    alt_risk=alt_risk,
+    progress=progress,
+    remaining=remaining,
+    confidence=confidence,
+    score_gap=score_gap,
     )
 
-    if not same_choice:
-        print(
-            f"{best_roi['name']} : risque {alt_risk}, "
-            f"fenêtres favorables estimées : "
-            f"{alt_future.get('good_nights', '?')}"
+    render_postponement_risk(
+    night_projects=night_projects,
+    catalog=CATALOG,
+    season_days_remaining=season_days_remaining,
+    estimate_future_opportunities=estimate_future_opportunities,
     )
-    print("\nUrgence portefeuille :")
-    print(f"✓ Progression actuelle : {progress:.1f}%")
-
-    if remaining is not None:
-        print(f"✔ Temps restant : {remaining:.1f} h")
-    else:
-        print("✔ Temps restant : inconnu")
-
-    if best_score.get("closure_bonus", 0) > 0:
-        print(f"✓ Bonus clôture disponible : +{best_score['closure_bonus']:.0f}")
-
-    print(
-        f"Taux météo utilisé : "
-        f"{chosen_future.get('weather_ratio', 0.35) * 100:.0f}%"
-    )
-    
-    print("Recommandation finale :")
-    print(f"Choisir {best_score['name']}")
-    print(f"Confiance : {confidence}")   
-
-    if score_gap >= 30:
-        print(
-            f"Raison : avantage score de {score_gap:.1f} points"
-        )
-    elif score_gap >= 10:
-        print(
-            f"Raison : avantage score modéré de {score_gap:.1f} points"
-        )
-    else:
-        print(
-            "Raison : décision serrée, plusieurs choix valables"
-        )
-
-
-        print("\n===== RISQUE DE REPORT =====")
-
-    for project in night_projects[:3]:
-        catalog_key = project["name"]
-        obj = CATALOG.get(catalog_key, {}).copy()
-        obj["catalog_key"] = catalog_key
-
-        days_left = season_days_remaining(obj)
-
-        future = estimate_future_opportunities(catalog_key)
-
-        risk = future.get("risk", "INCONNU")
-
-    if risk == "CRITIQUE":
-        text = f"fin de fenêtre estimée dans {days_left} jours"
-    else:
-        text = (
-            f"fenêtre restante estimée : "
-            f"{future.get('good_nights', 0)} nuits favorables "
-            f"(ratio: {future.get('opportunity_ratio', 0):.1f})"
-        )
-
-        print(f"{project['name']} : risque {risk}")
-        print(f"  {text}")
 
 def show_roadmap(roadmap, night_capacities=None):
 
