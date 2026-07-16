@@ -4,9 +4,14 @@ import json
 import requests
 import warnings
 import copy
-from decision.renderer.recommendation_renderer import (render_opportunity_cost, render_strategic_summary,)
-from decision.renderer.recommendation_renderer import (render_postponement_risk,)
-from decision.renderer.recommendation_renderer import (render_after_tonight_roadmap,)
+from decision.renderer.recommendation_renderer import (
+    render_after_tonight_roadmap,
+    render_opportunity_cost,
+    render_postponement_risk,
+    render_strategic_summary,
+    render_top_projects,
+    render_top_roi,
+    render_decision_analysis,)
 from decision.rules.object_fit_rule import ObjectFitRule
 from datetime import datetime, timedelta
 from decision.models.context.decision_context import DecisionContext
@@ -2213,75 +2218,39 @@ def show_tonight_recommendation(night):
         print("\nAucun projet actif trouvé")
         return
 
-    print("\n===== TOP PROJETS CE SOIR =====")
-
     session_hours = night.get("duration", 3.0)
 
-    for i, project in enumerate(night_projects[:3], start=1):
-        gain = portfolio_gain_if_shot(
-            project["name"],
-            session_hours=session_hours
-        )
-
-        roi = gain / session_hours if session_hours > 0 else 0
-
-        print(
-            f"{i}. {project['name']} "
-            f"(score {project['final_score']:.1f}) "
-            f"gain +{gain:.1f}% "
-            f"ROI {roi:.2f}/h"
-            )
-        gain = session_portfolio_gain(project["name"], session_hours)
-        print(f"   Gain session : +{gain:.1f}%")
-
-
-    print("\n===== TOP ROI SESSION =====")
-
-    roi_projects = []
-
-    for project in night_projects[:]:
-        gain = portfolio_gain_if_shot(
-            project["name"],
-            session_hours=session_hours
-        )
-
-        roi = gain / session_hours if session_hours > 0 else 0
-
-        roi_projects.append({
-        "name": project["name"],
-        "gain": gain,
-        "roi": roi
-        })
-
-    roi_projects.sort(
-        key=lambda x: x["roi"],
-        reverse=True
+    render_top_projects(
+        night_projects=night_projects,
+        session_hours=session_hours,
+        portfolio_gain_if_shot=portfolio_gain_if_shot,
+        session_portfolio_gain=session_portfolio_gain,
     )
 
-    for i, p in enumerate(roi_projects[:5], start=1):
-        print(
-            f"{i}. {p['name']} "
-            f"ROI {p['roi']:.2f}/h "
-            f"(gain +{p['gain']:.1f}%)"
-        )
-
-    print("\n===== ANALYSE DECISION =====")
-
+    render_top_roi(
+        night_projects=night_projects,
+        session_hours=session_hours,
+        portfolio_gain_if_shot=portfolio_gain_if_shot,
+    )
+    
     best_score = night_projects[0]
+
     best_roi = max(
         night_projects,
         key=lambda p: portfolio_gain_if_shot(
             p["name"],
-            session_hours=session_hours
-        ) / session_hours
+            session_hours=session_hours,
+        ) / session_hours,
     )
 
-    if best_score["name"] == best_roi["name"]:
-        print(
-            f"✓ {best_score['name']} est à la fois "
-            f"le meilleur score astro et le meilleur ROI."
-        )
-    else:
+    render_decision_analysis(
+        best_score=best_score,
+        best_roi=best_roi,
+    )
+    score_gap = 0.0
+    roi_gap = 0.0
+
+    if best_score["name"] != best_roi["name"]:
         score_gap = (
             best_score["final_score"]
             - best_roi["final_score"]
@@ -2290,7 +2259,7 @@ def show_tonight_recommendation(night):
         best_roi_value = (
             portfolio_gain_if_shot(
                 best_roi["name"],
-                session_hours=session_hours
+                session_hours=session_hours,
             )
             / session_hours
         )
@@ -2298,7 +2267,7 @@ def show_tonight_recommendation(night):
         best_score_roi = (
             portfolio_gain_if_shot(
                 best_score["name"],
-                session_hours=session_hours
+                session_hours=session_hours,
             )
             / session_hours
         )
@@ -2315,7 +2284,6 @@ def show_tonight_recommendation(night):
         f"{progress:.1f}%"
     )
 
-
     if remaining is not None :
         print(f"✓ Temps restant : {remaining:.1f} h")
     else:
@@ -2327,15 +2295,11 @@ def show_tonight_recommendation(night):
             f"+{best_score['closure_bonus']:.0f}"
         )
 
-    print(
-        f"Pourquoi {best_score['name']} ?"
-    )
-
-    score_gap = locals().get("score_gap", 0)
-
-    print(
+    if best_score["name"] != best_roi["name"]:
+        print(f"Pourquoi {best_score['name']} ?")
+        print(
         f"✓ Score astro supérieur de {score_gap:.1f} points"
-    )
+        )
 
     remaining = project_remaining_hours(best_score["name"])
 

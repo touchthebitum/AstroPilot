@@ -155,3 +155,84 @@ def render_after_tonight_roadmap(
 
     print(f"Temps total restant : {total_remaining:.1f} h")
     print(f"Nuits restantes estimées : {total_nights:.1f}")
+
+def render_top_projects(
+    *,
+    night_projects: list[dict],
+    session_hours: float,
+    portfolio_gain_if_shot,
+    session_portfolio_gain,
+) -> None:
+    print("\n===== TOP PROJETS CE SOIR =====")
+
+    for i, project in enumerate(night_projects[:3], start=1):
+        gain = portfolio_gain_if_shot(
+            project["name"],
+            session_hours=session_hours,
+        )
+
+        roi = gain / session_hours if session_hours > 0 else 0
+
+        print(
+            f"{i}. {project['name']} "
+            f"(score {project['final_score']:.1f}) "
+            f"gain +{gain:.1f}% "
+            f"ROI {roi:.2f}/h"
+        )
+
+        session_gain = session_portfolio_gain(
+            project["name"],
+            session_hours,
+        )
+        print(f"   Gain session : +{session_gain:.1f}%")
+
+def render_top_roi(
+    *,
+    night_projects: list[dict],
+    session_hours: float,
+    portfolio_gain_if_shot,
+) -> None:
+    print("\n===== TOP ROI SESSION =====")
+
+    roi_projects = []
+
+    for project in night_projects:
+        gain = portfolio_gain_if_shot(
+            project["name"],
+            session_hours=session_hours,
+        )
+
+        roi = gain / session_hours if session_hours > 0 else 0
+
+        roi_projects.append(
+            {
+                "name": project["name"],
+                "gain": gain,
+                "roi": roi,
+            }
+        )
+
+    roi_projects.sort(
+        key=lambda project: project["roi"],
+        reverse=True,
+    )
+
+    for i, project in enumerate(roi_projects[:5], start=1):
+        print(
+            f"{i}. {project['name']} "
+            f"ROI {project['roi']:.2f}/h "
+            f"(gain +{project['gain']:.1f}%)"
+        )
+
+def render_decision_analysis(
+    *,
+    best_score,
+    best_roi,
+) -> None:
+    print("\n===== ANALYSE DECISION =====")
+
+    if best_score["name"] == best_roi["name"]:
+        print(
+            f"✓ {best_score['name']} est à la fois "
+            f"le meilleur score astro et le meilleur ROI."
+        )
