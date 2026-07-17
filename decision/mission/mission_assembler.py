@@ -9,9 +9,6 @@ from decision.intelligence.analysis_context import AnalysisContext
 from decision.season.dynamic_season_engine import DynamicSeasonEngine
 from astropilot.catalog import CATALOG
 from decision.night_scheduler.night_scheduler import NightScheduler
-from decision.night_scheduler.schedule_renderer import ScheduleRenderer
-
-
 
 class MissionAssembler:
 
@@ -67,7 +64,6 @@ class MissionAssembler:
         )
 
         schedule = NightScheduler.build(productivity)
-        ScheduleRenderer.render(schedule)
 
         risk_context = ProjectRiskContextBuilder.build(
             target=target,
@@ -115,6 +111,7 @@ class MissionAssembler:
             productivity=productivity,
             tasks=tasks,
             night_slices=productivity.timeline.slices,
+            schedule=schedule,
         )
     
        

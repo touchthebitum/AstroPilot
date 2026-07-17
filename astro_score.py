@@ -40,6 +40,9 @@ from decision.rules.altitude_rule import AltitudeRule
 from decision.rules.visibility_rule import VisibilityRule
 from decision.rules.seeing_rule import SeeingRule
 from decision.rules.base_rule import BaseRule
+from decision.mission.mission_builder import NightMissionBuilder
+from decision.mission.mission_presenter import MissionPresenter
+from decision.night_advisor.night_advisor import NightAdvisor
 from night_scheduler import build_night_schedule
 from night_strategy import NightStrategy
 from datetime import datetime, timedelta
@@ -204,6 +207,7 @@ TARGETS = {
     "bortle": 0.4,
 },
 }
+USE_LEGACY_TONIGHT_REPORT = False
 
 def framing_bonus(target_object):
     obj = CATALOG[target_object]
@@ -4208,27 +4212,8 @@ def evaluate_object(
 
         from decision.recommendation.alternative_target_engine import AlternativeTargetEngine
 
-        from decision.mission.mission_builder import NightMissionBuilder
-
-        mission = NightMissionBuilder.build(
-            target=obj_name,
-            summary=summary,
-            context=decision_context,
-            weather=weather,
-        )
-
-        print("\n===== NIGHT MISSION =====")
-        from decision.mission.mission_presenter import MissionPresenter
-        from decision.night_advisor.night_advisor import NightAdvisor
-
-        MissionPresenter.present(mission)
-
-        print("\n===== NIGHT ADVISOR =====")
-
-        for advice in NightAdvisor.build(mission.night_slices):
-            print(advice)
-
         print(f"\n===== DECISION ENGINE : {obj_name} =====")
+
         print(f"Score DecisionEngine : {decision_score:+.1f}\n")
 
         for c in contributions:
@@ -4246,7 +4231,7 @@ def evaluate_object(
 
     priority = profile.get("project_priorities", {}).get(obj_name, 0)
     
-    return {
+    result = {
         "name": obj_name,
         "score": best["score"],
         "altitude": best.get("target_altitude"),
@@ -4267,8 +4252,12 @@ def evaluate_object(
         "priority": priority,
         "season_bonus": best.get("season_bonus", 0),
         "weather_bonus": best.get("weather_bonus", 0),
+        "decision_summary": summary,
+        "decision_context": decision_context,
+        "weather_context": weather,
     }
 
+    return result
 
 def build_night_result():
     return {
@@ -4426,6 +4415,13 @@ def forecast_astro(
 
             if result is not None:
                 all_results.append(result)
+
+                print(
+                f"[DEBUG RESULT] {result.get('name')} | "
+                f"summary={result.get('decision_summary') is not None} | "
+                f"context={result.get('decision_context') is not None} | "
+                f"weather={result.get('weather_context') is not None}"
+                )
 
             if result is not None:
                 altitude = result.get("target_altitude")
@@ -4599,6 +4595,9 @@ def forecast_astro(
                     "best_setup": r.get("best_setup"),
                     "setup_score": r.get("setup_score", 0),
                     "global_score": r.get("global_score", r["score"]),
+                    "decision_summary": r.get("decision_summary"),
+                    "decision_context": r.get("decision_context"),
+                    "weather_context": r.get("weather_context"),
                 }
                 for r in top_objects_for_night
 
@@ -4971,14 +4970,58 @@ elif args.mode == "calendar":
 
 elif args.mode == "tonight":
     if top_nights:
-        roadmap = simulate_portfolio_calendar(nights)
+        winner = top_nights[0]
+        top_objects = winner.get("top_objects") or []
 
-        show_roadmap(roadmap, night_capacities=night_capacities)
+        available_hours = winner.get("duration", 3.0)
 
-        
+        recommended_projects = recommend_project_for_night(
+            top_objects,
+            available_hours=available_hours,
+        )
+
+        if recommended_projects:
+            recommended_project = recommended_projects[0]
+            recommended_key = recommended_project.get(
+                "catalog_key",
+                recommended_project.get("name"),
+            )
+
+            mission_source = next(
+                (
+                    obj
+                    for obj in top_objects
+                    if obj.get("catalog_key", obj.get("name")) == recommended_key
+                ),
+                None,
+            )
+
+            if mission_source is None:
+                print(
+                    f"\nMission impossible à construire : "
+                    f"contextes introuvables pour {recommended_key}"
+                )
+            else:
+                mission = NightMissionBuilder.build(
+                    target=mission_source["name"],
+                    summary=mission_source["decision_summary"],
+                    context=mission_source["decision_context"],
+                    weather=mission_source["weather_context"],
+                )
+
+                MissionPresenter.present(mission)
+
+
+
+
+
+
+
         dynamic_roadmap = simulate_dynamic_portfolio_roadmap(
             night_capacities=night_capacities)
         show_portfolio_completion_forecast(dynamic_roadmap)
+
+    if USE_LEGACY_TONIGHT_REPORT :
         show_tonight_recommendation(top_nights[0])
 
 elif args.mode == "full":
@@ -4991,6 +5034,7 @@ elif args.mode == "full":
     night_capacities=night_capacities)
     show_portfolio_completion_forecast(dynamic_roadmap)
     if top_nights:
-        show_tonight_recommendation(top_nights[0])
+        if USE_LEGACY_TONIGHT_REPORT:
+            show_tonight_recommendation(top_nights[0])
 
     
