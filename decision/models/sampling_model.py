@@ -67,14 +67,6 @@ class SamplingModel:
 
         object_size_pixels = (object_size_arcmin * 60) / sampling_arcsec_pixel
 
-        print(
-            f"DEBUG SAMPLING | "
-            f"obj={object_name} | "
-            f"seeing={seeing_arcsec} | "
-            f"sampling={sampling_arcsec_pixel} | "
-            f"ratio={ratio:.2f}"
-        )
-
         if object_size_arcmin >= 90:
             return SamplingModel.evaluate_large_object(ratio)
 

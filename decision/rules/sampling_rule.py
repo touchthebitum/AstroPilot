@@ -26,12 +26,6 @@ class SamplingRule:
             pixel_size=sampling,
         )
 
-        print(
-            f"DEBUG RESOLUTION | "
-            f"pixels={resolution.pixels:.0f} | "
-            f"factor={resolution.size_factor}"
-        )
-
         evaluation = SamplingModel.evaluate(
             object_type = context.sky.target.object_type,
             object_size_arcmin=context.sky.target.angular_size_arcmin,

@@ -84,8 +84,6 @@ warnings.filterwarnings(
     category=NonRotationTransformationWarning
 )
 
-DEBUG_PORTFOLIO = False
-
 TIMEZONE = "Europe/Zurich"
 
 TARGET = "deep_sky"
@@ -1921,37 +1919,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         if remaining is not None and remaining <= available_hours:
             final_score += 30
 
-        if DEBUG_PORTFOLIO:
-            print(
-                f"[FINAL DEBUG] {catalog_key} "
-                f"astro_part={astro_part:.1f} "
-                f"project_part={project_part:.1f} "
-                f"roi_bonus={roi_bonus:.1f} "
-                f"closure={closure:.1f} "
-                f"completion={completion_bonus:.1f} "
-                f"opportunity={opportunity_bonus:.1f} "
-                f"final={final_score:.1f}"
-            )
-
-            print("\n===== DETAIL SCORE =====")
-            print(f"Objet              : {catalog_key}")
-            print(f"Score astro brut   : {astro_score:.1f}")
-            print(f"Score astro pondéré: {astro_part:.1f}")
-            print(f"Priorité pondérée  : {project_part:.1f}")
-            print(f"Bonus altitude     : {altitude:+.1f}")
-            print(f"Bonus saison       : {season:+.1f}")
-            print(f"Urgence saison     : {season_urgency:+.1f}")
-            print(f"Bonus ROI          : {roi_bonus:+.1f}")
-            print(f"Bonus clôture      : {closure:+.1f}")
-            print(f"Bonus opportunité  : {opportunity_bonus:+.1f}")
-            print(f"Bonus complétion   : {completion_bonus:+.1f}")
-            print("-" * 35)
-            print(f"Bonus_regret       : {regret_bonus:.1f}")
-            print(f"Bonus diversité    : {diversity_bonus:.1f}")
-            print(f"Bonus rang portefeuille  : {portfolio_rank_bonus:.1f}")
-            print(f"Score final calculé: {final_score:.1f}")
-            print()
-
         candidates.append({
             "name": obj["name"],
             "catalog_key": catalog_key,
@@ -2552,18 +2519,23 @@ def show_portfolio_completion_forecast(roadmap):
 
         nights = len(project_steps)
 
-        print(f"\n{project}")
-        print(f"  Temps planifié : {hours:.1f} h")
-        print(f"  Début prévu : {start_date}")
-        print(f"  Fin prévue : {end_date}")
-        print(f"  Nuits nécessaires : {nights}")
-
         remaining_after = project_steps[-1].get("remaining_after", 0)
 
+        completed = max(0.0, hours - remaining_after)
+        progress = completed / hours if hours > 0 else 1.0
+        percent = progress * 100
+
         if remaining_after <= 0:
-            print(" Statut : terminé")
+            icon = "✓"
+            status = "Terminé"
         else:
-            print(f" Statut : reste {remaining_after:.1f} h")
+            icon = "◐"
+            status = (
+                f"{completed:.1f}/{hours:.1f} h "
+                f"({percent:.0f} %) • reste {remaining_after:.1f} h"
+            )
+
+        print(f"{icon} {project:<12} {status}")
 
 def build_dashboard_data(
     night,
@@ -3107,15 +3079,6 @@ def portfolio_score(name):
     completion = progress / 5
 
     closure = closure_bonus(name)
-
-    if DEBUG_PORTFOLIO and name in ["M31", "Rosette", "IC1396"]:
-        print(f"\n===== DETAIL SCORE {name} =====")
-        print(f"Priorité : {priority}")
-        print(f"Urgence : {urgency}")
-        print(f"Saison : {season}")
-        print(f"ROI : {roi}")
-        print(f"Complétion : {completion}")
-        print(f"Clôture : {closure}")
 
     return (
         priority * 0.6
@@ -4212,23 +4175,6 @@ def evaluate_object(
 
         from decision.recommendation.alternative_target_engine import AlternativeTargetEngine
 
-        print(f"\n===== DECISION ENGINE : {obj_name} =====")
-
-        print(f"Score DecisionEngine : {decision_score:+.1f}\n")
-
-        for c in contributions:
-
-            icon = "✓" if c.score >= 0 else "✗"
-
-            print(f"{icon} {c.rule}")
-            print(f"   {c.score:+.1f}")
-            print(f"   {c.reason}")
-
-            if c.details:
-                print(f"   {c.details}")
-
-            print()
-
     priority = profile.get("project_priorities", {}).get(obj_name, 0)
     
     result = {
@@ -4416,13 +4362,6 @@ def forecast_astro(
             if result is not None:
                 all_results.append(result)
 
-                print(
-                f"[DEBUG RESULT] {result.get('name')} | "
-                f"summary={result.get('decision_summary') is not None} | "
-                f"context={result.get('decision_context') is not None} | "
-                f"weather={result.get('weather_context') is not None}"
-                )
-
             if result is not None:
                 altitude = result.get("target_altitude")
 
@@ -4431,10 +4370,6 @@ def forecast_astro(
                         {"altitude": altitude},
                         profile,
                     )
-
-                    print(f"\n===== DECISION ENGINE : {obj_name} =====")
-                    for c in contributions:
-                        print(c)
 
         if not all_results:
             continue
@@ -4446,9 +4381,6 @@ def forecast_astro(
 
         best_results = all_results[:3]
 
-        print(best_results[0])
-        print(best_results[0].keys())
-
         from decision.recommendation.alternative_target_engine import AlternativeTargetEngine
 
         best_object = best_results[0]["name"]
@@ -4457,10 +4389,6 @@ def forecast_astro(
             current_target=best_object,
             ranked_targets=best_results,
         )
-
-        print("\n===== ALTERNATIVES =====")
-        for i, alt in enumerate(alternatives, 1):
-            print(f"{i}. {alt['name']}  (score {alt['score']:.1f})")
 
         for r in best_results:
             name = r["name"]
@@ -4471,17 +4399,6 @@ def forecast_astro(
 
         strategy_engine = NightStrategy(profile)
 
-        print("\n===== OBJETS ENVOYÉS À NIGHTSTRATEGY =====")
-
-        for r in best_results:
-            print(
-                r["name"],
-                "remaining =", r.get("remaining_hours"),
-                "priority =", r.get("priority"),
-                "progress =", r.get("progress"),
-                "roi =", r.get("roi"),
-            )
-
         strategy = strategy_engine.choose_strategy(
             best_results,
             sum(h.get("hours", 0) for h in hours)
@@ -4491,35 +4408,6 @@ def forecast_astro(
             best_results,
             sum(h.get("hours", 0) for h in hours)
         )
-
-        print("\n===== NIGHT STRATEGY =====")
-        print(f"Stratégie : {strategy['strategy']}")
-        print(f"Raison : {strategy['reason']}")
-        print(f"Confiance : {strategy['confidence']:.0%}")
-        print("Projets retenus :")
-        for p in strategy["projects"]:
-            print(
-                f"- {p['name']} | "
-                f"score stratégique {p.get('strategic_score', 0):.1f} | "
-                f"ROI {p.get('roi', 0)} | "
-                f"reste {p.get('remaining_hours')}"
-            )
-
-        print("\n===== MEILLEUR SETUP PAR OBJET =====")
-
-        for r in best_results:
-            print(f"\n{r['name']}")
-            print(f"Meilleur setup : {r.get('best_setup')}")
-            print(f"Score setup : {r.get('setup_score')}")
-
-            print("Pourquoi ce setup :")
-            for reason in r.get("setup_reasons", []):
-                print(f"  ✓ {reason}")
-
-            print("Classement setups :")
-            for i, s in enumerate(r.get("setup_ranking", []), 1):
-                print(f"  {i}. {s['setup']} : {s['score']:.1f}")
-
 
         best = best_results[0]["window"]
         best_object = best_results[0]["name"]
@@ -4887,19 +4775,6 @@ if __name__ == "__main__":
         equipment=args.equipment,
         goal=args.goal
     )
-        
-    #print("\n[TEST] appel forecast_night_capacities")
-    caps = forecast_night_capacities(lat, lon)
-
-    print("\n===== CAPACITES FUTURES =====")
-    print("Nombre de nuits :", len(caps))
-
-    for c in caps:
-        print(
-            c["date"],
-            f"{c['hours']} h",
-            f"qualité={c['quality']:.0f}"
-        )
 
     if nights is None:
         print("ERREUR: forecast_astro a retourné None")
@@ -4909,12 +4784,6 @@ if __name__ == "__main__":
 
 night_capacities = forecast_night_capacities(lat, lon)
 
-#print("\nANCIEN SYSTEME")
-print(night_capacities)
-
-#print("\nNOUVEAU SYSTEME")
-print(forecast_night_capacities(lat, lon))
-
 print("\n===== CAPACITÉ À VENIR =====")
 
 total_capacity = sum(c["hours"] for c in night_capacities)
@@ -4923,42 +4792,6 @@ for c in night_capacities:
     print(f"{c['date']} : {c['hours']:.1f} h qualité={c['quality']:.0f}")
 
 print(f"Total prévisionnel : {total_capacity:.1f} h")
-
-####print(
-    ###f"Total prévisionnel : "
-    ##f"{forecast_available_hours(top_nights):.1f} h"
-#)
-
-
-##for i, night in enumerate(top_nights, 1):
-    #print(f"#{i} - {night['date']}")
-    
-    ###################for j, obj in enumerate(night["top_objects"], start=1):
-        ##################print(
-            #################f"{j}. {obj['name']} "
-            ################f"score={obj['score']:.1f} "
-            ###############f"alt={obj['altitude']:.0f}° "
-            ##############f"moon_sep={obj['moon_sep']:.0f}° "
-            #############f"sqm={obj['sqm']:.1f} "
-            ############f"frame={obj['frame_bonus']} "
-            ###########f"project={obj.get('project_bonus', 0)}"
-            ##########f"remaining={obj.get('remaining_hours','-')}"
-            #########f"prio={obj.get('priority_bonus',0)}"
-            ########f" setup={obj.get('best_setup')}"
-            #######f" setup_score={obj.get('setup_score', 0):.1f}"
-            ######f" global={obj.get('global_score', 0):.1f}"
-        #####)
-####best_objects = night.get("best_objects") or [night["object"]]
-###obj_key = best_objects[0]
-#obj = CATALOG.get(obj_key, {"name": obj_key})
-
-#print(f"Objet recommandé : {obj['name']} ({obj_key})")
-
-
-        ####show_portfolio_ranking()
-        ###show_completion_forecast()
-        ##show_astro_calendar()
-        #simulate_portfolio_calendar(nights)
 
 if args.mode == "portfolio":
     show_portfolio_ranking()
@@ -5010,12 +4843,6 @@ elif args.mode == "tonight":
                 )
 
                 MissionPresenter.present(mission)
-
-
-
-
-
-
 
         dynamic_roadmap = simulate_dynamic_portfolio_roadmap(
             night_capacities=night_capacities)

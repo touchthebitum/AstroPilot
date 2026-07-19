@@ -19,13 +19,4 @@ class DecisionSummaryEngine:
             elif c.score < 0:
                 summary.negatives.append(c.reason)
 
-
-        print("\n===== POURQUOI CETTE RECOMMANDATION ? =====")
-
-        for p in summary.positives:
-            print(f"✓ {p}")
-
-        for n in summary.negatives:
-            print(f"⚠ {n}")
-            
         return summary

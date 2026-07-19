@@ -10,10 +10,6 @@ class EquipmentBuilder:
 
         setup = context.equipment.setup
 
-        #print("\n===== DEBUG SETUP =====")
-        #print(setup)
-        #print(vars(setup))
-
         if not setup:
             return equipment
 

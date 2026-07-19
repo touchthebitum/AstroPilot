@@ -106,17 +106,6 @@ class NightStrategy:
             if not selected_projects:
                 selected_projects = [best]
             
-        print("\nClassement stratégique")
-        for p in recommended_objects:
-            if p.get("strategic_score", 0) <= 0:
-                continue
-            print(
-                f"{p['name']:15}"
-                f"{p['strategic_score']:6.1f}"
-                f"  astro={p.get('score',0):5.1f}"
-                f"  roi={p.get('roi',0):4.2f}"
-                f"  prio={p.get('priority',0)}"
-            )
         return {
             "strategy": strategy,
             "projects": selected_projects,

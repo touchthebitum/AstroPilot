@@ -1,4 +1,5 @@
 from decision.mission.night_mission import NightMission
+from decision.advisor.night_advisor import NightAdvisor
 
 
 class MissionPresenter:
@@ -120,6 +121,14 @@ class MissionPresenter:
             print("\n🎒 Matériel conseillé")
             for item in mission.equipment:
                 print(f"• {item}")
+
+
+        advices = NightAdvisor.build(mission)
+
+        print("\n🌙 Conseils de la nuit")
+
+        for advice in advices:
+            print(f"[{advice.time}] {advice.message}")
 
         if mission.timeline:
             print("\n🕒 Plan")
