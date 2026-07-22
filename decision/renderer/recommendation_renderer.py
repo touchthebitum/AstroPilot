@@ -1,4 +1,6 @@
+from collections.abc import Callable
 
+from decision.models.future_opportunity import FutureOpportunity
 
 def render_opportunity_cost(
     *,
@@ -45,8 +47,8 @@ def render_strategic_summary(
     best_score: dict,
     best_roi: dict,
     same_choice: bool,
-    chosen_future: dict,
-    alt_future: dict,
+    chosen_future : FutureOpportunity,
+    alt_future: FutureOpportunity,
     chosen_risk: str,
     alt_risk: str,
     progress: float,
@@ -57,16 +59,14 @@ def render_strategic_summary(
     print("\nFacteurs stratégiques :")
 
     print(
-        f"{best_score['name']} : risque {chosen_risk}, "
-        f"fenêtres favorables estimées : "
-        f"{chosen_future.get('good_nights', '?')}"
+    f"📌 {best_score['name']} : risque {chosen_risk}, "
+    f"fenêtres favorables estimées : {chosen_future.good_nights}"
     )
 
     if not same_choice:
         print(
-            f"{best_roi['name']} : risque {alt_risk}, "
-            f"fenêtres favorables estimées : "
-            f"{alt_future.get('good_nights', '?')}"
+            f"📌 {best_roi['name']} : risque {alt_risk}, "
+            f"fenêtres favorables estimées : {alt_future.good_nights}"
         )
 
     print("\nUrgence portefeuille :")
@@ -81,7 +81,7 @@ def render_strategic_summary(
     if closure_bonus > 0:
         print(f"✓ Bonus clôture disponible : +{closure_bonus:.0f}")
 
-    weather_ratio = chosen_future.get("weather_ratio", 0.35)
+    weather_ratio = chosen_future.weather_ratio
     print(f"Taux météo utilisé : {weather_ratio * 100:.0f}%")
 
     print("Recommandation finale :")
@@ -114,15 +114,15 @@ def render_postponement_risk(
 
         future = estimate_future_opportunities(catalog_key)
 
-        risk = future.get("risk", "INCONNU")
+        risk = future.risk
 
         if risk == "CRITIQUE":
             text = f"fin de fenêtre estimée dans {days_left} jours"
         else:
             text = (
                 f"fenêtre restante estimée : "
-                f"{future.get('good_nights', 0)} nuits favorables "
-                f"(ratio: {future.get('opportunity_ratio', 0):.1f})"
+                f"{future.good_nights} nuits favorables"
+                f"(ratio : {future.opportunity_ratio:.1f})"
             )
 
         print(f"{project['name']} : risque {risk}")

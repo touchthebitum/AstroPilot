@@ -12,6 +12,8 @@ from decision.renderer.recommendation_renderer import (
     render_top_projects,
     render_top_roi,
     render_decision_analysis,)
+from decision.portfolio.portfolio_presenter import (show_portfolio_completion_forecast,)
+from decision.models.future_opportunity import FutureOpportunity
 from decision.rules.object_fit_rule import ObjectFitRule
 from datetime import datetime, timedelta
 from decision.models.context.decision_context import DecisionContext
@@ -43,6 +45,7 @@ from decision.rules.base_rule import BaseRule
 from decision.mission.mission_builder import NightMissionBuilder
 from decision.mission.mission_presenter import MissionPresenter
 from decision.night_advisor.night_advisor import NightAdvisor
+from decision.engines.future_opportunity_engine import FutureOpportunityEngine
 from night_scheduler import build_night_schedule
 from night_strategy import NightStrategy
 from datetime import datetime, timedelta
@@ -588,74 +591,10 @@ def project_remaining_hours(object_name):
 
     return max(0, round(target_hours - hours, 1))
 
-
-def estimate_future_opportunities(project_name, days=7):
-
-    project = CATALOG.get(project_name, {}).copy()
-    project["catalog_key"] = project_name
-
-    if not project:
-        return {
-            "good_nights": 0,
-            "risk": "INCONNU"
-        }
-
-    season_days = season_days_remaining(project)
-
-    if season_days is None:
-        return {
-            "good_nights": 0,
-            "risk": "INCONNU"
-        }
-
-    profile = load_user_profile()
-    location = profile.get("location", {})
-    lat = location.get("latitude")
-    lon = location.get("longitude")
-
-    weather_ratio = 0.35
-
-    if lat is not None and lon is not None:
-        weather = fetch_weather(lat, lon)
-        weather_ratio = estimate_weather_good_night_ratio(weather)
-
-    good_nights = max(1, int(season_days * weather_ratio))
-
-    remaining = project_remaining_hours(project_name)
-
-    if remaining is None:
-        remaining = 10
-
-    needed_nights = max(
-        1,
-        math.ceil(remaining / 3)
-    )
-
-    opportunity_ratio = round(
-        good_nights / needed_nights,
-        1
-    )
-    if good_nights == 0:
-        risk = "CRITIQUE"
-    elif good_nights <= 2:
-        risk = "ÉLEVÉ"
-    elif opportunity_ratio > 5:
-        risk = "FAIBLE"
-    else:
-        risk = "MOYEN"
-
-    return {
-        "good_nights": good_nights,
-        "risk": risk,
-        "weather_ratio": weather_ratio,
-        "needed_nights": needed_nights,
-        "opportunity_ratio": opportunity_ratio,
-        }
-
 def regret_score(project_name):
-    future = estimate_future_opportunities(project_name)
+    future = future_engine.estimate (project_name)
 
-    good_nights = max(1, future.get("good_nights", 1))
+    good_nights = max(1, future.good_nights)
     remaining = project_remaining_hours(project_name)
 
     if remaining is None or remaining <= 0:
@@ -951,10 +890,10 @@ def simulate_dynamic_portfolio_roadmap(night_capacities=None, avg_night_hours=5)
 
         for name, project in active_projects.items():
 
-            future = estimate_future_opportunities(name)
+            future = future_engine.estimate (name)
             base_score =simulated_portfolio_score(project)
 
-            ratio = future.get("opportunity_ratio", 10)
+            ratio = future.opportunity_ratio
 
             opportunity_bonus = max(
                 0,
@@ -1180,8 +1119,8 @@ def compute_postponement_risk_score(future, days_left):
     basé sur les opportunités futures réelles.
     """
 
-    good_nights = future.get("good_nights", 0)
-    opportunity_ratio = future.get("opportunity_ratio", 10)
+    good_nights = future.good_nights
+    opportunity_ratio = future.opportunity_ratio
 
     # Peu de bonnes nuits => risque élevé
     window_risk = max(0, 100 - good_nights * 4)
@@ -1784,11 +1723,11 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         season_urgency = season_urgency_bonus(obj)
         roi = project_roi(catalog_key)
 
-        future = estimate_future_opportunities(catalog_key)
+        future = future_engine.estimate (catalog_key)
 
         days_left = season_days_remaining(obj)
 
-        risk_label = future.get("risk", "MOYEN")
+        risk_label = future.risk
 
         # Ancien système
         risk_v1 = risk_label_to_score(risk_label)
@@ -1814,8 +1753,8 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
 
         closure = closure_bonus(catalog_key, available_hours)
 
-        future = estimate_future_opportunities(catalog_key)
-        opportunity_ratio = future.get("opportunity_ratio", 10)
+        future = future_engine.estimate (catalog_key)
+        opportunity_ratio = future.opportunity_ratio
 
         opportunity_bonus = max(
             0,
@@ -2420,10 +2359,10 @@ def show_tonight_recommendation(night):
     progress = project_progress(best_score["name"])
     remaining = project_remaining_hours(best_score["name"])
 
-    chosen_future = estimate_future_opportunities(best_score["name"])
-    alt_future = estimate_future_opportunities(best_roi["name"])
-    chosen_risk = chosen_future.get("risk", "INCONNU")
-    alt_risk = alt_future.get("risk", "INCONNU")
+    chosen_future = future_engine.estimate (best_score["name"])
+    alt_future = future_engine.estimate(best_roi["name"])
+    chosen_risk = chosen_future.risk
+    alt_risk = alt_future.risk
 
 
     render_strategic_summary(
@@ -2444,7 +2383,7 @@ def show_tonight_recommendation(night):
     night_projects=night_projects,
     catalog=CATALOG,
     season_days_remaining=season_days_remaining,
-    estimate_future_opportunities=estimate_future_opportunities,
+    estimate_future_opportunities=future_engine.estimate,
     )
 
 def show_roadmap(roadmap, night_capacities=None):
@@ -2452,90 +2391,6 @@ def show_roadmap(roadmap, night_capacities=None):
     show_multi_night_portfolio_roadmap(
     night_capacities=night_capacities
 )
-
-def show_portfolio_completion_forecast(roadmap):
-
-    if not roadmap:
-        print("\nAucune prévision disponible.")
-        return
-
-    print("\n===== FIN DU PORTEFEUILLE =====")
-    
-    last_step = roadmap[-1]
-
-    final_date = last_step.get("date", "?")
-
-    total_hours = sum(
-        step.get("hours", 0)
-        for step in roadmap
-    )
-
-    active_projects = len({
-        step["project"]
-        for step in roadmap
-    })
-
-    planned_capacity = sum(
-        step.get("hours", 0)
-        for step in roadmap
-    )
-
-    coverage = (
-        planned_capacity / total_hours * 100
-        if total_hours > 0 else 0
-    )
-
-    print(f"Projets actifs : {active_projects}")
-    print(f"Temps total restant : {total_hours:.1f} h")
-    print(f"Capacité future connue : {planned_capacity:.1f} h")
-    print(f"Couverture : {coverage:.1f} %")
-    print(f"Nuits restantes : {len(roadmap)}")
-    print(f"Fin estimée du portefeuille : {final_date}")
-
-    print("\n===== PROGRESSION DU PORTEFEUILLE =====")
-
-    displayed = set()
-
-    for step in roadmap:
-        project = step["project"]
-
-        if project in displayed:
-            continue
-
-        displayed.add(project)
-
-        project_steps = [
-            s for s in roadmap
-            if s["project"] == project
-        ]
-
-        start_date = project_steps[0].get("date", "?")
-        end_date = project_steps[-1].get("date", "?")
-
-        hours = sum(
-            s.get("hours", 0)
-            for s in project_steps
-        )
-
-        nights = len(project_steps)
-
-        remaining_after = project_steps[-1].get("remaining_after", 0)
-
-        completed = max(0.0, hours - remaining_after)
-        progress = completed / hours if hours > 0 else 1.0
-        percent = progress * 100
-
-        if remaining_after <= 0:
-            icon = "✓"
-            status = "Terminé"
-        else:
-            icon = "◐"
-            status = (
-                f"{completed:.1f}/{hours:.1f} h "
-                f"({percent:.0f} %) • reste {remaining_after:.1f} h"
-            )
-
-        print(f"{icon} {project:<12} {status}")
 
 def build_dashboard_data(
     night,
@@ -4640,7 +4495,14 @@ def best_equipment_for_object(object_name):
 
     return results[0]
 
-    
+future_engine = FutureOpportunityEngine(
+    catalog=CATALOG,
+    weather_provider=fetch_weather,
+    season_engine=season_days_remaining,
+    profile_provider=load_user_profile,
+    project_provider=project_remaining_hours,
+)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
