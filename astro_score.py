@@ -12,6 +12,8 @@ from decision.renderer.recommendation_renderer import (
     render_top_projects,
     render_top_roi,
     render_decision_analysis,)
+from decision.engines.night_strategy_engine import NightStrategyEngine
+from decision.models.candidate import Candidate
 from decision.portfolio.portfolio_presenter import (show_portfolio_completion_forecast,)
 from decision.models.future_opportunity import FutureOpportunity
 from decision.rules.object_fit_rule import ObjectFitRule
@@ -1695,6 +1697,8 @@ def recommend_project():
 
     return candidates[0]
 
+night_strategy_engine = NightStrategyEngine(strategy_weights)
+
 def recommend_project_for_night(top_objects, available_hours=3.0):
     profile = load_user_profile()
     prefs = profile.get("preferences", {})
@@ -1826,24 +1830,19 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         + postponement_impact["postponement_net_impact"]
         )
 
-        strategy_scores = {}
-
-        for mode in ["balanced", "roi", "completion", "diversification", "risk"]:
-            weights = strategy_weights(mode)
-
-            strategy_scores[mode] = round(
-                astro_part * weights["astro"]
-                + roi_bonus * weights["roi"]
-                + postponement_impact["postponement_net_impact"] * weights["report"]
-                + completion_bonus * weights["completion"]
-                + diversity_bonus * weights["diversity"],
-                1
-            )
-
-        if decision_mode in strategy_scores:
-            decision_score = strategy_scores[decision_mode]
-        else:
-            decision_score = final_score
+        strategy_scores, decision_score = (
+        night_strategy_engine.compute_strategy_scores(
+            astro_part=astro_part,
+            roi_bonus=roi_bonus,
+            postponement_net_impact=postponement_impact[
+                "postponement_net_impact"
+            ],
+            completion_bonus=completion_bonus,
+            diversity_bonus=diversity_bonus,
+            decision_mode=decision_mode,
+            fallback_score=final_score,
+        )
+    )
 
         # Limite l’avantage portefeuille si l’objet est surtout choisi grâce au portefeuille
         if portfolio_bonus > astro_part * 0.5:
@@ -1858,28 +1857,31 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         if remaining is not None and remaining <= available_hours:
             final_score += 30
 
-        candidates.append({
-            "name": obj["name"],
-            "catalog_key": catalog_key,
-            "priority": priority,
-            "astro_score": astro_score,
-            "final_score": final_score,
-            "decision_score": decision_score,
-            "season_bonus": season,
-            "altitude_bonus": altitude,
-            "roi": roi,
-            "portfolio_score": portfolio_bonus,
-            "global_score": obj.get("global_score", astro_score),
-            "setup_score": obj.get("setup_score", 0),
-            "best_setup": obj.get("best_setup"),
-            "completion_bonus": completion_bonus,
-            "closure_bonus": closure,
-            "postponement_risk": postponement_risk,
-            "postponement_penalty": postponement_impact["postponement_penalty"],
-            "urgency_bonus": postponement_impact["urgency_bonus"],
-            "postponement_net_impact": postponement_impact["postponement_net_impact"],
-            "postponement_reason": postponement_impact["postponement_reason"],
-            "reasons": explain_recommendation({
+        candidates.append(
+            Candidate(
+            name = obj["name"],
+            catalog_key = catalog_key,
+            priority= priority,
+            astro_score= astro_score,
+            final_score= final_score,
+            decision_score= decision_score,
+            season_bonus= season,
+            altitude_bonus= altitude,
+            roi= roi,
+            portfolio_score= portfolio_bonus,
+            global_score= obj.get("global_score", astro_score),
+            setup_score= obj.get("setup_score", 0),
+            best_setup= obj.get("best_setup"),
+            completion_bonus= completion_bonus,
+            closure_bonus= closure,
+            postponement_risk= postponement_risk,
+            postponement_penalty= postponement_impact["postponement_penalty"],
+            urgency_bonus= postponement_impact["urgency_bonus"],
+            postponement_net_impact= postponement_impact["postponement_net_impact"],
+            postponement_reason= postponement_impact["postponement_reason"],
+
+            reasons=explain_recommendation(
+            {
                 "astro_score": astro_score,
                 "roi": roi,
                 "postponement_risk": postponement_risk,
@@ -1887,17 +1889,18 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
                 "closure_bonus": closure,
                 "season_bonus": season,
                 "progression_bonus": progression,
-                "diversity_bonus" : diversity_bonus, 
-        }),
-
-            "strategy_scores": strategy_scores,
-        })
+                "diversity_bonus": diversity_bonus,
+            }
+        ),
+            strategy_scores= strategy_scores,
+        )
+    )
 
     if not candidates:
         return None
 
     candidates.sort(
-        key=lambda x: x["decision_score"],
+        key=lambda x: x.decision_score,
         reverse=True
     )
 
