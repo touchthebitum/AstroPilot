@@ -159,9 +159,6 @@ EQUIPMENT_PROFILES = {
     "sensor_height_mm": 15.7,
 },
 }
-CURRENT_EQUIPMENT = get_active_equipment()
-
-print("\nSetup actif :", CURRENT_EQUIPMENT)
 
 TARGETS = {
     "milky_way": {
@@ -4504,7 +4501,23 @@ future_engine = FutureOpportunityEngine(
     project_provider=project_remaining_hours,
 )
 
-if __name__ == "__main__":
+def main(argv=None) -> int:
+    global CURRENT_EQUIPMENT
+    global args
+    global city
+    global lat
+    global lon
+    global night_capacities
+    global nights
+    global rows
+    global selected_equipment
+    global top_nights
+    global user_profile
+    global weather
+
+    CURRENT_EQUIPMENT = get_active_equipment()
+    print("\nSetup actif :", CURRENT_EQUIPMENT)
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
             "--equipment",
@@ -4552,11 +4565,11 @@ if __name__ == "__main__":
         help="Forcer l'analyse complète d'un objet"
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.object:
         compare_equipment_for_object(args.object)
-        exit()
+        return 0
 
     if args.target_object:
         obj_key = args.target_object
@@ -4564,7 +4577,7 @@ if __name__ == "__main__":
 
         if not obj:
             print(f"Objet inconnu : {obj_key}")
-            exit()
+            return 0
 
         print(f"Objet forcé : {obj['name']} ({obj_key})")
 
@@ -4606,7 +4619,7 @@ if __name__ == "__main__":
             print(f"Temps de pose conseillé : {exposure} h")
             print("Filtres conseillés : aucun")
 
-        exit()
+        return 0
 
     location = get_default_location()
     lat = location["latitude"]
@@ -4641,90 +4654,94 @@ if __name__ == "__main__":
 
     if nights is None:
         print("ERREUR: forecast_astro a retourné None")
-        exit()
+        return 0
 
     top_nights = sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
 
-night_capacities = forecast_night_capacities(lat, lon)
+    night_capacities = forecast_night_capacities(lat, lon)
 
-print("\n===== CAPACITÉ À VENIR =====")
+    print("\n===== CAPACITÉ À VENIR =====")
 
-total_capacity = sum(c["hours"] for c in night_capacities)
+    total_capacity = sum(c["hours"] for c in night_capacities)
 
-for c in night_capacities:
-    print(f"{c['date']} : {c['hours']:.1f} h qualité={c['quality']:.0f}")
+    for c in night_capacities:
+        print(f"{c['date']} : {c['hours']:.1f} h qualité={c['quality']:.0f}")
 
-print(f"Total prévisionnel : {total_capacity:.1f} h")
+    print(f"Total prévisionnel : {total_capacity:.1f} h")
 
-if args.mode == "portfolio":
-    show_portfolio_ranking()
-    show_completion_forecast()
+    if args.mode == "portfolio":
+        show_portfolio_ranking()
+        show_completion_forecast()
 
-elif args.mode == "calendar":
-    show_astro_calendar()
-    roadmap = simulate_portfolio_calendar(nights)
+    elif args.mode == "calendar":
+        show_astro_calendar()
+        roadmap = simulate_portfolio_calendar(nights)
 
-elif args.mode == "tonight":
-    if top_nights:
-        winner = top_nights[0]
-        top_objects = winner.get("top_objects") or []
+    elif args.mode == "tonight":
+        if top_nights:
+            winner = top_nights[0]
+            top_objects = winner.get("top_objects") or []
 
-        available_hours = winner.get("duration", 3.0)
+            available_hours = winner.get("duration", 3.0)
 
-        recommended_projects = recommend_project_for_night(
-            top_objects,
-            available_hours=available_hours,
-        )
-
-        if recommended_projects:
-            recommended_project = recommended_projects[0]
-            recommended_key = recommended_project.get(
-                "catalog_key",
-                recommended_project.get("name"),
+            recommended_projects = recommend_project_for_night(
+                top_objects,
+                available_hours=available_hours,
             )
 
-            mission_source = next(
-                (
-                    obj
-                    for obj in top_objects
-                    if obj.get("catalog_key", obj.get("name")) == recommended_key
-                ),
-                None,
-            )
-
-            if mission_source is None:
-                print(
-                    f"\nMission impossible à construire : "
-                    f"contextes introuvables pour {recommended_key}"
-                )
-            else:
-                mission = NightMissionBuilder.build(
-                    target=mission_source["name"],
-                    summary=mission_source["decision_summary"],
-                    context=mission_source["decision_context"],
-                    weather=mission_source["weather_context"],
+            if recommended_projects:
+                recommended_project = recommended_projects[0]
+                recommended_key = recommended_project.get(
+                    "catalog_key",
+                    recommended_project.get("name"),
                 )
 
-                MissionPresenter.present(mission)
+                mission_source = next(
+                    (
+                        obj
+                        for obj in top_objects
+                        if obj.get("catalog_key", obj.get("name")) == recommended_key
+                    ),
+                    None,
+                )
 
-        dynamic_roadmap = simulate_dynamic_portfolio_roadmap(
-            night_capacities=night_capacities)
-        show_portfolio_completion_forecast(dynamic_roadmap)
+                if mission_source is None:
+                    print(
+                        f"\nMission impossible à construire : "
+                        f"contextes introuvables pour {recommended_key}"
+                    )
+                else:
+                    mission = NightMissionBuilder.build(
+                        target=mission_source["name"],
+                        summary=mission_source["decision_summary"],
+                        context=mission_source["decision_context"],
+                        weather=mission_source["weather_context"],
+                    )
 
-    if USE_LEGACY_TONIGHT_REPORT :
-        show_tonight_recommendation(top_nights[0])
+                    MissionPresenter.present(mission)
 
-elif args.mode == "full":
-    show_portfolio_ranking()
-    #show_completion_forecast()
-    show_astro_calendar()
-    roadmap = simulate_portfolio_calendar(nights)
-    show_roadmap(roadmap, night_capacities=night_capacities)
-    dynamic_roadmap = simulate_dynamic_portfolio_roadmap(
-    night_capacities=night_capacities)
-    show_portfolio_completion_forecast(dynamic_roadmap)
-    if top_nights:
-        if USE_LEGACY_TONIGHT_REPORT:
+            dynamic_roadmap = simulate_dynamic_portfolio_roadmap(
+                night_capacities=night_capacities)
+            show_portfolio_completion_forecast(dynamic_roadmap)
+
+        if USE_LEGACY_TONIGHT_REPORT :
             show_tonight_recommendation(top_nights[0])
 
-    
+    elif args.mode == "full":
+        show_portfolio_ranking()
+        #show_completion_forecast()
+        show_astro_calendar()
+        roadmap = simulate_portfolio_calendar(nights)
+        show_roadmap(roadmap, night_capacities=night_capacities)
+        dynamic_roadmap = simulate_dynamic_portfolio_roadmap(
+        night_capacities=night_capacities)
+        show_portfolio_completion_forecast(dynamic_roadmap)
+        if top_nights:
+            if USE_LEGACY_TONIGHT_REPORT:
+                show_tonight_recommendation(top_nights[0])
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
