@@ -13,6 +13,7 @@ from decision.renderer.recommendation_renderer import (
     render_top_roi,
     render_decision_analysis,)
 from decision.engines.night_strategy_engine import NightStrategyEngine
+from decision.engines.project_selection_engine import ProjectSelectionEngine
 from decision.models.candidate import Candidate
 from decision.portfolio.portfolio_presenter import (show_portfolio_completion_forecast,)
 from decision.models.future_opportunity import FutureOpportunity
@@ -1680,10 +1681,8 @@ def recommend_project():
     if not candidates:
         return None
     
-    candidates.sort(
-        key=lambda x: x["portfolio_score"],
-        reverse=True
-        )
+    candidates = project_selection_engine.rank_candidates(candidates)
+
     print (f"Bonus clotûre : {closure_bonus(name)}")
     print("\n===== TOP GAINS CE SOIR =====\n")
 
@@ -1696,6 +1695,8 @@ def recommend_project():
         )
 
     return candidates[0]
+
+project_selection_engine = ProjectSelectionEngine()
 
 night_strategy_engine = NightStrategyEngine(strategy_weights)
 
@@ -1899,11 +1900,8 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
     if not candidates:
         return None
 
-    candidates.sort(
-        key=lambda x: x.decision_score,
-        reverse=True
-    )
-
+    candidates = project_selection_engine.rank_candidates(candidates)
+    
     return candidates
 
 
