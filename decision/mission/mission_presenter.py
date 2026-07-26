@@ -87,10 +87,6 @@ class MissionPresenter:
             else:
                 print(f"{icon} {reason.title}")
 
-            if mission.expected_gain:
-                print(f"\n📈 Gain attendu : +{mission.expected_gain:.1f}%")
-
-
         if mission.season_analysis:
 
             print("\n🌙 Analyse saison")

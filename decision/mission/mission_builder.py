@@ -1,17 +1,20 @@
-from decision.mission.night_mission import (
-    NightMission,
-    MissionReason,
-    MissionEvent,
-)
+from decision.mission.night_mission import MissionReason
 from decision.mission.equipment_builder import EquipmentBuilder
 from decision.mission.mission_assembler import MissionAssembler
-from decision.mission.timeline_builder import TimelineBuilder
+from decision.mission.mission_input import MissionInput
 from decision.weather.weather_forecast import WeatherForecast
+
 
 class NightMissionBuilder:
 
     @staticmethod
-    def build(target, summary, context, weather: WeatherForecast | None = None,):
+    def build(
+        target,
+        summary,
+        context,
+        weather: WeatherForecast | None = None,
+        mission_input: MissionInput | None = None,
+    ):
 
         reasons = []
 
@@ -31,18 +34,17 @@ class NightMissionBuilder:
                 )
             )
 
-        from decision.mission.timeline_builder import TimelineBuilder
-
         equipment = EquipmentBuilder.build(context)
         timeline = []
         alternatives = []
 
         return MissionAssembler.build(
-        target=target,
-        summary=summary,
-        context=context,
-        equipment=equipment,
-        timeline=timeline,
-        alternatives=alternatives,
-        weather=weather,
-    )
+            target=target,
+            summary=summary,
+            context=context,
+            equipment=equipment,
+            timeline=timeline,
+            alternatives=alternatives,
+            weather=weather,
+            mission_input=mission_input,
+        )

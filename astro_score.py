@@ -4,6 +4,7 @@ import json
 import requests
 import warnings
 import copy
+from dataclasses import replace
 from decision.renderer.recommendation_renderer import (
     render_after_tonight_roadmap,
     render_opportunity_cost,
@@ -46,7 +47,9 @@ from decision.rules.visibility_rule import VisibilityRule
 from decision.rules.seeing_rule import SeeingRule
 from decision.rules.base_rule import BaseRule
 from decision.mission.mission_builder import NightMissionBuilder
+from decision.mission.mission_input import MissionInput
 from decision.mission.mission_presenter import MissionPresenter
+from decision.weather.weather_forecast import WeatherForecast
 from decision.night_advisor.night_advisor import NightAdvisor
 from decision.engines.future_opportunity_engine import FutureOpportunityEngine
 from night_scheduler import build_night_schedule
@@ -1050,14 +1053,15 @@ def urgency_bonus(obj):
     return 0
 
 def season_remaining_months(obj):
-    ra = obj.get("ra_hours")
+    ra_deg = obj.get("ra")
 
-    if ra is None:
+    if ra_deg is None:
         return 6
 
+    ra_hours = ra_deg / 15.0
     current_month = datetime.now().month
 
-    optimal_month = int((ra / 2) % 12) + 1
+    optimal_month = int((ra_hours / 2) % 12) + 1
 
     diff = (optimal_month - current_month) % 12
 
@@ -1384,6 +1388,53 @@ def session_portfolio_gain(project_name, session_hours):
         future_progress - current_progress,
         1
     )
+
+
+def build_mission_input(evaluation):
+    window = evaluation["window"]
+    window_start = window["start"]
+    window_end = window["end"]
+    astronomical_hours = (window_end - window_start).total_seconds() / 3600
+    remaining_hours = evaluation.get("remaining_hours")
+    recommended_hours = astronomical_hours
+    if remaining_hours is not None:
+        recommended_hours = min(recommended_hours, max(0, remaining_hours))
+
+    catalog_key = evaluation.get(
+        "catalog_key",
+        evaluation.get("name"),
+    )
+
+    selected_weather = evaluation.get("selected_window_weather")
+    if selected_weather is not None:
+        selected_weather = replace(
+            selected_weather,
+            hourly_moon_penalty=[
+                min(1.0, max(0.0, value / 35.0))
+                for value in selected_weather.hourly_moon_penalty
+            ]
+            if selected_weather.hourly_moon_penalty is not None
+            else None,
+        )
+
+    moon_penalty = window.get("moon_penalty")
+    if moon_penalty is not None:
+        moon_penalty = min(1.0, max(0.0, moon_penalty / 35.0))
+
+    return MissionInput(
+        window_start=window_start,
+        window_end=window_end,
+        astronomical_hours=astronomical_hours,
+        weather=selected_weather,
+        moon_penalty=moon_penalty,
+        recommended_hours=recommended_hours,
+        expected_gain=session_portfolio_gain(
+            catalog_key,
+            recommended_hours,
+        ),
+    )
+
+
 def save_user_profile(profile):
     with open("data/user_profile.json", "w", encoding="utf-8") as f:
         json.dump(profile, f, indent=4, ensure_ascii=False)
@@ -4054,6 +4105,49 @@ def evaluate_object(
         "decision_summary": summary,
         "decision_context": decision_context,
         "weather_context": weather,
+        "selected_window_weather": WeatherForecast(
+            hourly=[
+                h for h in hours
+                if best["start"] <= h["time"] < best["end"]
+            ],
+            hourly_clouds=[
+                h.get("cloud_cover", 100)
+                for h in hours
+                if best["start"] <= h["time"] < best["end"]
+            ],
+            hourly_humidity=[
+                h.get("relative_humidity_2m", 100)
+                for h in hours
+                if best["start"] <= h["time"] < best["end"]
+            ],
+            hourly_wind=[
+                h.get("wind_speed_10m", 0)
+                for h in hours
+                if best["start"] <= h["time"] < best["end"]
+            ],
+            hourly_seeing=[
+                sky.estimate_seeing(
+                    h.get("wind_speed_10m", 0),
+                    h.get("relative_humidity_2m", 0),
+                )
+                for h in hours
+                if best["start"] <= h["time"] < best["end"]
+            ],
+            hourly_moon_penalty=[
+                detail["moon"]
+                for detail in best.get("details", [])
+            ],
+            hourly_temperature=[
+                h.get("temperature_2m", 0)
+                for h in hours
+                if best["start"] <= h["time"] < best["end"]
+            ],
+            hourly_visibility=[
+                h.get("visibility", 10000)
+                for h in hours
+                if best["start"] <= h["time"] < best["end"]
+            ],
+        ),
     }
 
     return result
@@ -4072,7 +4166,6 @@ def build_night_result():
             "global_score": best_results[0].get("global_score", 0),
             "best_object_score": all_results[0]["global_score"],
             "all_objects": all_results,
-    
             "best_objects": [
                 r["name"]
                 for r in top3
@@ -4313,6 +4406,10 @@ def forecast_astro(
             "global_score": best_results[0].get("global_score", 0),
             "best_object_score": all_results[0]["global_score"],
             "all_objects": all_results,
+            "object_evaluations": {
+                r["catalog_key"]: r
+                for r in top_objects_for_night
+            },
     
             "best_objects": [
                 r["name"]
@@ -4711,11 +4808,12 @@ def main(argv=None) -> int:
                         f"contextes introuvables pour {recommended_key}"
                     )
                 else:
+                    evaluation = winner["object_evaluations"][recommended_key]
                     mission = NightMissionBuilder.build(
                         target=mission_source["name"],
                         summary=mission_source["decision_summary"],
                         context=mission_source["decision_context"],
-                        weather=mission_source["weather_context"],
+                        mission_input=build_mission_input(evaluation),
                     )
 
                     MissionPresenter.present(mission)
