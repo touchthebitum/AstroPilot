@@ -165,8 +165,8 @@ CATALOG = {
     },
 
     "IC1848": {
-        "ra": 39.750,
-        "dec": 60.400,
+        "ra": 42.825,
+        "dec": 60.408333,
         "name": "Soul Nebula",
         "type": "nebula",
         "size_arcmin": 150,
@@ -175,7 +175,7 @@ CATALOG = {
     },
 
     "Heart": {
-        "ra": 2.55,
+        "ra": 38.25,
         "dec": 61.43,
         "size_arcmin": 120,
         "name": "Heart Nebula",
@@ -184,7 +184,7 @@ CATALOG = {
         "difficulty": 3,
     },
     "Soul": {
-        "ra": 2.85,
+        "ra": 42.75,
         "dec": 60.43,
         "size_arcmin": 150,
         "name": "Soul Nebula",
@@ -193,7 +193,7 @@ CATALOG = {
         "difficulty": 3,
     },
     "Veil": {
-        "ra": 20.75,
+        "ra": 311.25,
         "dec": 30.7,
         "size_arcmin": 180,
         "name": "Veil Nebula",

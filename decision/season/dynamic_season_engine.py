@@ -26,7 +26,7 @@ class DynamicSeasonEngine:
         sky = SkyEngine()
 
         return sky.target_altitude(
-            target["ra"] * 15.0,      # RA en heures -> degrés
+            target["ra"],
             target["dec"],
             Time(obs_time),
             latitude,
