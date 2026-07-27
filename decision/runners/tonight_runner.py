@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 class TonightRunner:
 
     def __init__(
@@ -8,6 +7,7 @@ class TonightRunner:
         report_runner,
         portfolio_forecast_engine,
         build_mission_input,
+        recommend_project_for_night,
     ):
         self.report_runner = report_runner
         self.portfolio_forecast_engine = (
@@ -15,6 +15,9 @@ class TonightRunner:
         )
         self.build_mission_input = (
             build_mission_input
+        )
+        self.recommend_project_for_night = (
+            recommend_project_for_night
         )
 
     def show_completion_forecast(
@@ -30,4 +33,65 @@ class TonightRunner:
 
         self.report_runner.show_portfolio_completion_forecast(
             dynamic_roadmap
+        )
+
+    def present_recommended_mission(
+        self,
+        winner,
+        top_objects,
+        top_nights,
+        use_legacy_report,
+    ):
+        available_hours = winner.get(
+            "duration",
+            3.0,
+        )
+
+        recommended_projects = (
+            self.recommend_project_for_night(
+                top_objects,
+                available_hours=available_hours,
+            )
+        )
+
+        if not recommended_projects:
+            return
+
+        recommended_project = recommended_projects[0]
+
+        recommended_key = recommended_project.get(
+            "catalog_key",
+            recommended_project.get("name"),
+        )
+
+        self.report_runner.run_tonight(
+            winner=winner,
+            objects=top_objects,
+            recommended_key=recommended_key,
+            build_mission_input=self.build_mission_input,
+            top_nights=top_nights,
+            use_legacy_report=use_legacy_report,
+        )
+
+    def run(
+        self,
+        top_nights,
+        night_capacities,
+        use_legacy_report,
+    ):
+        if not top_nights:
+            return
+
+        winner = top_nights[0]
+        top_objects = winner.get("top_objects") or []
+
+        self.present_recommended_mission(
+            winner=winner,
+            top_objects=top_objects,
+            top_nights=top_nights,
+            use_legacy_report=use_legacy_report,
+        )
+
+        self.show_completion_forecast(
+            night_capacities
         )

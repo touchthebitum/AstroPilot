@@ -4563,6 +4563,7 @@ tonight_runner = TonightRunner(
     report_runner=report_runner,
     portfolio_forecast_engine=portfolio_forecast_engine,
     build_mission_input=build_mission_input,
+    recommend_project_for_night=recommend_project_for_night,
 )
 
 def main(argv=None) -> int:
@@ -4741,37 +4742,14 @@ def main(argv=None) -> int:
 
     elif args.mode == "tonight":
         if top_nights:
-            winner = top_nights[0]
-            top_objects = winner.get("top_objects") or []
 
-            available_hours = winner.get("duration", 3.0)
-
-            recommended_projects = recommend_project_for_night(
-                top_objects,
-                available_hours=available_hours,
+            tonight_runner.run(
+                top_nights=top_nights,
+                night_capacities=night_capacities,
+                use_legacy_report=USE_LEGACY_TONIGHT_REPORT,
             )
 
-            if recommended_projects:
-                recommended_project = recommended_projects[0]
-                recommended_key = recommended_project.get(
-                    "catalog_key",
-                    recommended_project.get("name"),
-                )
-
-                report_runner.run_tonight(
-                    winner=winner,
-                    objects=top_objects,
-                    recommended_key=recommended_key,
-                    build_mission_input=build_mission_input,
-                    top_nights=top_nights,
-                    use_legacy_report=USE_LEGACY_TONIGHT_REPORT,
-                )
-
-            tonight_runner.show_completion_forecast(
-                night_capacities
-            )
-
-        if USE_LEGACY_TONIGHT_REPORT :
+        if USE_LEGACY_TONIGHT_REPORT and top_nights:
             show_tonight_recommendation(top_nights[0])
 
     elif args.mode == "full":
