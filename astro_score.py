@@ -16,6 +16,7 @@ from decision.renderer.recommendation_renderer import (
 from decision.services.tonight_mission_service import (
     TonightMissionService,
 )
+from decision.runners.tonight_runner import TonightRunner
 from decision.portfolio.portfolio_forecast_engine import PortfolioForecastEngine
 from decision.runners.report_runner import ReportRunner
 from decision.engines.night_strategy_engine import NightStrategyEngine
@@ -4542,7 +4543,26 @@ report_runner = ReportRunner(
     show_tonight_recommendation=show_tonight_recommendation,
     present_mission=MissionPresenter.present,
     build_mission=NightMissionBuilder.build,
+    tonight_mission_service=tonight_mission_service,    
+)
+report_runner = ReportRunner(
+    portfolio_forecast_engine=portfolio_forecast_engine,
+    show_portfolio_ranking=show_portfolio_ranking,
+    show_completion_forecast=show_completion_forecast,
+    show_astro_calendar=show_astro_calendar,
+    simulate_portfolio_calendar=simulate_portfolio_calendar,
+    show_roadmap=show_roadmap,
+    show_portfolio_completion_forecast=show_portfolio_completion_forecast,
+    show_tonight_recommendation=show_tonight_recommendation,
+    present_mission=MissionPresenter.present,
+    build_mission=NightMissionBuilder.build,
     tonight_mission_service=tonight_mission_service,
+)
+
+tonight_runner = TonightRunner(
+    report_runner=report_runner,
+    portfolio_forecast_engine=portfolio_forecast_engine,
+    build_mission_input=build_mission_input,
 )
 
 def main(argv=None) -> int:
@@ -4747,10 +4767,9 @@ def main(argv=None) -> int:
                     use_legacy_report=USE_LEGACY_TONIGHT_REPORT,
                 )
 
-            dynamic_roadmap = portfolio_forecast_engine.simulate_dynamic_portfolio_roadmap(
-                night_capacities=night_capacities
+            tonight_runner.show_completion_forecast(
+                night_capacities
             )
-            show_portfolio_completion_forecast(dynamic_roadmap)
 
         if USE_LEGACY_TONIGHT_REPORT :
             show_tonight_recommendation(top_nights[0])
