@@ -13,6 +13,11 @@ from decision.renderer.recommendation_renderer import (
     render_top_projects,
     render_top_roi,
     render_decision_analysis,)
+from decision.services.tonight_mission_service import (
+    TonightMissionService,
+)
+from decision.portfolio.portfolio_forecast_engine import PortfolioForecastEngine
+from decision.runners.report_runner import ReportRunner
 from decision.engines.night_strategy_engine import NightStrategyEngine
 from decision.engines.project_selection_engine import ProjectSelectionEngine
 from decision.models.candidate import Candidate
@@ -120,6 +125,10 @@ SEASON_WINDOWS = {
     "Rosette": {
         "best_months": [12, 1, 2, 3],
         "ok_months": [11, 4],
+    },
+        "Sh2-129": {
+        "best_months": [7, 8, 9],
+        "ok_months": [6, 10],
     },
 }
 OBJECT_SIZES = {
@@ -861,103 +870,15 @@ def simulated_portfolio_score(project):
         + closure_bonus
     )
 
+def show_multi_night_portfolio_roadmap(
+    forecast_engine,
+    night_capacities=None,
+    avg_night_hours=5,
+):
 
-
-def simulate_dynamic_portfolio_roadmap(night_capacities=None, avg_night_hours=5):
-    projects = copy.deepcopy(get_projects())
-
-    simulated = []
-    current_night = 1
-
-    while True:
-        if night_capacities and current_night > len(night_capacities):
-            break
-
-        if current_night > 50:
-            print("STOP sécurité roadmap dynamique")
-            break
-
-        active_projects = {}
-
-        for name, project in projects.items():
-            remaining = project["target_hours"] - project["hours"]
-
-            if remaining > 0:
-                active_projects[name] = project
-
-        if not active_projects:
-            break
-
-        best_name = None
-        best_score = -9999
-
-        for name, project in active_projects.items():
-
-            future = future_engine.estimate (name)
-            base_score =simulated_portfolio_score(project)
-
-            ratio = future.opportunity_ratio
-
-            opportunity_bonus = max(
-                0,
-                min(30, round(30 / max(ratio, 0.1), 1))
-            )
-
-
-            score = base_score + opportunity_bonus
-
-            if score > best_score:
-                best_score = score
-                best_name = name
-
-        project = projects[best_name]
-
-        remaining = (
-            project["target_hours"]
-            - project["hours"]
-        )
-
-        if night_capacities:
-            capacity = night_capacities[current_night - 1]
-            hours_available = capacity.get("hours", avg_night_hours)
-        else:
-            capacity = None
-            hours_available = avg_night_hours
-
-        hours_this_night = min(
-            hours_available,
-            remaining
-        )
-
-        if hours_this_night <= 0:
-            current_night += 1
-            continue
-
-        project["hours"] += hours_this_night
-
-        simulated.append({
-            "night": current_night,
-            "date": capacity.get("date") if capacity else None,
-            "capacity": hours_available,
-            "project": best_name,
-            "score": best_score,
-            "hours": hours_this_night,
-            "remaining_after": max(
-                0,
-                remaining - hours_this_night
-            ),
-            "completed": remaining - hours_this_night <= 0
-        })
-
-        current_night += 1
-
-    return simulated
-
-
-def show_multi_night_portfolio_roadmap(night_capacities=None, avg_night_hours=5):
-
-    simulated = simulate_dynamic_portfolio_roadmap(
-        night_capacities=night_capacities,avg_night_hours = avg_night_hours
+    simulated = forecast_engine.simulate_dynamic_portfolio_roadmap(
+    night_capacities=night_capacities,
+    avg_night_hours=avg_night_hours,
     )
 
     print("\n===== ROADMAP MULTI-NUITS DYNAMIQUE =====")
@@ -2435,11 +2356,16 @@ def show_tonight_recommendation(night):
     estimate_future_opportunities=future_engine.estimate,
     )
 
-def show_roadmap(roadmap, night_capacities=None):
+def show_roadmap(
+    roadmap,
+    forecast_engine,
+    night_capacities=None,
+    ):
 
     show_multi_night_portfolio_roadmap(
-    night_capacities=night_capacities
-)
+    forecast_engine=forecast_engine,
+    night_capacities=night_capacities,
+    )
 
 def build_dashboard_data(
     night,
@@ -3118,7 +3044,7 @@ def show_completion_forecast():
         print("Date de fin estimée : Au-delà des prévisions")
 
     print(f"Temps restant portefeuille : {total_remaining:.1f} h")
-    avg_capacity = averaage_night_capacity(best_nights)
+    avg_capacity = average_night_capacity(best_nights)
     print(f"Nuits restantes estimées : {total_remaining / max(1, avg_capacity):.1f}")
 
 
@@ -4597,6 +4523,27 @@ future_engine = FutureOpportunityEngine(
     profile_provider=load_user_profile,
     project_provider=project_remaining_hours,
 )
+portfolio_forecast_engine = PortfolioForecastEngine(
+    future_engine=future_engine,
+    score_project=simulated_portfolio_score,
+)
+tonight_mission_service = TonightMissionService(
+    build_mission=NightMissionBuilder.build,
+)
+
+report_runner = ReportRunner(
+    portfolio_forecast_engine=portfolio_forecast_engine,
+    show_portfolio_ranking=show_portfolio_ranking,
+    show_completion_forecast=show_completion_forecast,
+    show_astro_calendar=show_astro_calendar,
+    simulate_portfolio_calendar=simulate_portfolio_calendar,
+    show_roadmap=show_roadmap,
+    show_portfolio_completion_forecast=show_portfolio_completion_forecast,
+    show_tonight_recommendation=show_tonight_recommendation,
+    present_mission=MissionPresenter.present,
+    build_mission=NightMissionBuilder.build,
+    tonight_mission_service=tonight_mission_service,
+)
 
 def main(argv=None) -> int:
     global CURRENT_EQUIPMENT
@@ -4767,12 +4714,10 @@ def main(argv=None) -> int:
     print(f"Total prévisionnel : {total_capacity:.1f} h")
 
     if args.mode == "portfolio":
-        show_portfolio_ranking()
-        show_completion_forecast()
+        report_runner.run_portfolio()
 
     elif args.mode == "calendar":
-        show_astro_calendar()
-        roadmap = simulate_portfolio_calendar(nights)
+        roadmap = report_runner.run_calendar(nights)
 
     elif args.mode == "tonight":
         if top_nights:
@@ -4793,50 +4738,33 @@ def main(argv=None) -> int:
                     recommended_project.get("name"),
                 )
 
-                mission_source = next(
-                    (
-                        obj
-                        for obj in top_objects
-                        if obj.get("catalog_key", obj.get("name")) == recommended_key
-                    ),
-                    None,
+                report_runner.run_tonight(
+                    winner=winner,
+                    objects=top_objects,
+                    recommended_key=recommended_key,
+                    build_mission_input=build_mission_input,
+                    top_nights=top_nights,
+                    use_legacy_report=USE_LEGACY_TONIGHT_REPORT,
                 )
 
-                if mission_source is None:
-                    print(
-                        f"\nMission impossible à construire : "
-                        f"contextes introuvables pour {recommended_key}"
-                    )
-                else:
-                    evaluation = winner["object_evaluations"][recommended_key]
-                    mission = NightMissionBuilder.build(
-                        target=mission_source["name"],
-                        summary=mission_source["decision_summary"],
-                        context=mission_source["decision_context"],
-                        mission_input=build_mission_input(evaluation),
-                    )
-
-                    MissionPresenter.present(mission)
-
-            dynamic_roadmap = simulate_dynamic_portfolio_roadmap(
-                night_capacities=night_capacities)
+            dynamic_roadmap = portfolio_forecast_engine.simulate_dynamic_portfolio_roadmap(
+                night_capacities=night_capacities
+            )
             show_portfolio_completion_forecast(dynamic_roadmap)
 
         if USE_LEGACY_TONIGHT_REPORT :
             show_tonight_recommendation(top_nights[0])
 
     elif args.mode == "full":
-        show_portfolio_ranking()
-        #show_completion_forecast()
-        show_astro_calendar()
-        roadmap = simulate_portfolio_calendar(nights)
-        show_roadmap(roadmap, night_capacities=night_capacities)
-        dynamic_roadmap = simulate_dynamic_portfolio_roadmap(
-        night_capacities=night_capacities)
-        show_portfolio_completion_forecast(dynamic_roadmap)
-        if top_nights:
-            if USE_LEGACY_TONIGHT_REPORT:
-                show_tonight_recommendation(top_nights[0])
+        report_runner.run_full(
+            nights=nights,
+            night_capacities=night_capacities,
+    )
+
+        report_runner.run_tonight(
+    top_nights=top_nights,
+    use_legacy_report=USE_LEGACY_TONIGHT_REPORT,
+    )
 
     return 0
 
