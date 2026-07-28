@@ -4157,19 +4157,8 @@ def forecast_astro(
         print("ERREUR : prévisions météo indisponibles.")
         print("Recommandation météo réelle impossible.")
         return []
-    else:
-        rows = parse_hourly_weather(weather)
 
-        from decision.weather.weather_forecast import WeatherForecast
-        caps=WeatherForecast(
-            hourly=rows,
-            hourly_clouds=[h.get("cloud_cover",
-                100) for h in rows],
-            hourly_temperature=[h.get("temperature_2m",0) for h in rows],
-            hourly_visibility=[h.get("visibility", 10000) for h in rows],
-            hourly_humidity=[h.get("relative_humidity_2m", 100) for h in rows],
-            hourly_wind=[h.get("wind_speed_10m", 0) for h in rows],
-        )
+    rows = parse_hourly_weather(weather)
 
     results = []
 
@@ -4213,11 +4202,26 @@ def forecast_astro(
 
         caps = WeatherForecast(
             hourly=rows,
-            hourly_clouds=[h.get("cloud_cover", 100) for h in rows],
-            hourly_humidity=[h.get("relative_humidity_2m", 100) for h in rows],
-            hourly_wind=[h.get("wind_speed_10m", 0) for h in rows],
-            hourly_temperature=[h.get("temperature_2m", 0) for h in rows],
-            hourly_visibility=[h.get("visibility", 10000) for h in rows],
+            hourly_clouds=[
+                h.get("cloud_cover", 100)
+                for h in rows
+            ],
+            hourly_humidity=[
+                h.get("relative_humidity_2m", 100)
+                for h in rows
+            ],
+            hourly_wind=[
+                h.get("wind_speed_10m", 0)
+                for h in rows
+            ],
+            hourly_temperature=[
+                h.get("temperature_2m", 0)
+                for h in rows
+            ],
+            hourly_visibility=[
+                h.get("visibility", 10000)
+                for h in rows
+            ],
         )
 
         for obj_name in TARGET_OBJECTS:
@@ -4735,7 +4739,7 @@ def main(argv=None) -> int:
         lon,
         weather=weather,
     )
-    
+
     print("\n===== CAPACITÉ À VENIR =====")
 
     total_capacity = sum(c["hours"] for c in night_capacities)
