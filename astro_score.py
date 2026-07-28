@@ -251,10 +251,14 @@ def framing_bonus(target_object):
     else:
         return -20
 
-def forecast_night_capacities(lat, lon, days=14):
-
-    weather = fetch_weather(lat, lon)
-
+def forecast_night_capacities(
+    lat,
+    lon,
+    days=14,
+    weather=None,
+):
+    if weather is None:
+        weather = fetch_weather(lat, lon)
     if not weather:
         return []
 
@@ -4136,16 +4140,18 @@ def forecast_astro(
     bortle,
     target="deep_sky",
     equipment=None,
-    goal="nebulae"
+    goal="nebulae",
+    weather=None,
 ):
     if equipment is None:
         equipment = equipment or get_active_equipment()
 
-    try:
-        weather = fetch_weather(lat, lon)
-    except Exception as e:
-        print("ERREUR fetch_weather =", repr(e))
-        weather = None
+    if weather is None:
+        try:
+            weather = fetch_weather(lat, lon)
+        except Exception as e:
+            print("ERREUR fetch_weather =", repr(e))
+            weather = None
 
     if weather is None:
         print("ERREUR : prévisions météo indisponibles.")
@@ -4160,7 +4166,7 @@ def forecast_astro(
             hourly_clouds=[h.get("cloud_cover",
                 100) for h in rows],
             hourly_temperature=[h.get("temperature_2m",0) for h in rows],
-            hourly_visibility=[h.get("visibiility", 10000) for h in rows],
+            hourly_visibility=[h.get("visibility", 10000) for h in rows],
             hourly_humidity=[h.get("relative_humidity_2m", 100) for h in rows],
             hourly_wind=[h.get("wind_speed_10m", 0) for h in rows],
         )
@@ -4714,7 +4720,8 @@ def main(argv=None) -> int:
         bortle=3,
         target=TARGET,
         equipment=args.equipment,
-        goal=args.goal
+        goal=args.goal,
+        weather=weather,
     )
 
     if nights is None:
@@ -4723,8 +4730,12 @@ def main(argv=None) -> int:
 
     top_nights = sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
 
-    night_capacities = forecast_night_capacities(lat, lon)
-
+    night_capacities = forecast_night_capacities(
+        lat,
+        lon,
+        weather=weather,
+    )
+    
     print("\n===== CAPACITÉ À VENIR =====")
 
     total_capacity = sum(c["hours"] for c in night_capacities)
