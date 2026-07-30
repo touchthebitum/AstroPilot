@@ -4149,6 +4149,55 @@ def prepare_forecast_weather(lat, lon, weather=None):
 
     return parse_hourly_weather(weather)
 
+def evaluate_targets_for_night(
+    *,
+    sky,
+    hours,
+    weather,
+    illumination,
+    moon_rise,
+    moon_set,
+    city_info,
+    lat,
+    lon,
+    bortle,
+    target,
+    profile,
+    decision_engine,
+):
+    all_results = []
+
+    for obj_name in TARGET_OBJECTS:
+        result = evaluate_object(
+            obj_name=obj_name,
+            sky=sky,
+            hours=hours,
+            weather=weather,
+            illumination=illumination,
+            moon_rise=moon_rise,
+            moon_set=moon_set,
+            city_info=city_info,
+            lat=lat,
+            lon=lon,
+            bortle=bortle,
+            target=target,
+            profile=profile,
+        )
+
+        if result is not None:
+            all_results.append(result)
+
+        if result is not None:
+            altitude = result.get("target_altitude")
+
+            if altitude is not None:
+                contributions = decision_engine.evaluate(
+                    {"altitude": altitude},
+                    profile,
+                )
+
+    return all_results
+
 def forecast_astro(
     lat,
     lon,
@@ -4235,35 +4284,21 @@ def forecast_astro(
             ],
         )
 
-        for obj_name in TARGET_OBJECTS:
-
-            result = evaluate_object(
-                obj_name=obj_name,
-                sky=sky,
-                hours=hours,
-                weather=caps,
-                illumination=illumination,
-                moon_rise=moon_rise,
-                moon_set=moon_set,
-                city_info=city_info,
-                lat=lat,
-                lon=lon,
-                bortle=bortle,
-                target=target,
-                profile=profile,
-            )
-
-            if result is not None:
-                all_results.append(result)
-
-            if result is not None:
-                altitude = result.get("target_altitude")
-
-                if altitude is not None:
-                    contributions = decision_engine.evaluate(
-                        {"altitude": altitude},
-                        profile,
-                    )
+        all_results = evaluate_targets_for_night(
+            sky=sky,
+            hours=hours,
+            weather=caps,
+            illumination=illumination,
+            moon_rise=moon_rise,
+            moon_set=moon_set,
+            city_info=city_info,
+            lat=lat,
+            lon=lon,
+            bortle=bortle,
+            target=target,
+            profile=profile,
+            decision_engine=decision_engine,
+        )
 
         if not all_results:
             continue
