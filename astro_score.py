@@ -16,6 +16,7 @@ from decision.renderer.recommendation_renderer import (
 from decision.services.tonight_mission_service import (
     TonightMissionService,
 )
+from decision.forecast.forecast_engine import ForecastEngine
 from decision.runners.tonight_runner import TonightRunner
 from decision.portfolio.portfolio_forecast_engine import PortfolioForecastEngine
 from decision.runners.report_runner import ReportRunner
@@ -4133,6 +4134,21 @@ def build_night_schedule_legacy(objects, available_hours, profile=None):
 
     return schedule
 
+def prepare_forecast_weather(lat, lon, weather=None):
+    if weather is None:
+        try:
+            weather = fetch_weather(lat, lon)
+        except Exception as e:
+            print("ERREUR fetch_weather =", repr(e))
+            weather = None
+
+    if weather is None:
+        print("ERREUR : prévisions météo indisponibles.")
+        print("Recommandation météo réelle impossible.")
+        return None
+
+    return parse_hourly_weather(weather)
+
 def forecast_astro(
     lat,
     lon,
@@ -4146,20 +4162,15 @@ def forecast_astro(
     if equipment is None:
         equipment = equipment or get_active_equipment()
 
-    if weather is None:
-        try:
-            weather = fetch_weather(lat, lon)
-        except Exception as e:
-            print("ERREUR fetch_weather =", repr(e))
-            weather = None
+    rows = prepare_forecast_weather(
+    lat,
+    lon,
+    weather,
+    )
 
-    if weather is None:
-        print("ERREUR : prévisions météo indisponibles.")
-        print("Recommandation météo réelle impossible.")
+    if rows is None:
         return []
-
-    rows = parse_hourly_weather(weather)
-
+    
     results = []
 
     #print("TARGET_OBJECTS = ", TARGET_OBJECTS)
@@ -4555,6 +4566,9 @@ report_runner = ReportRunner(
     build_mission=NightMissionBuilder.build,
     tonight_mission_service=tonight_mission_service,    
 )
+
+#forecast_engine = ForecastEngine()
+
 report_runner = ReportRunner(
     portfolio_forecast_engine=portfolio_forecast_engine,
     show_portfolio_ranking=show_portfolio_ranking,
