@@ -4134,6 +4134,50 @@ def build_night_schedule_legacy(objects, available_hours, profile=None):
 
     return schedule
 
+
+def build_forecast_result(
+    *,
+    night_date,
+    night_score,
+    best,
+    best_object,
+    top3,
+    top5,
+    all_results,
+    top_objects_for_night,
+    illumination,
+    moon_rise,
+    moon_set,
+    hours,
+    bortle,
+    setup_name,
+    best_score,
+):
+    return {
+    
+    "date": str(night_date),
+    "score": night_score,
+    "moon_impact": best["moon_impact"],
+    "moon_penalty": best["moon_penalty"],
+    "verdict": verdict(night_score),
+    "bortle": bortle,
+    "object": best_object,
+    "best_setup": setup_name,
+    "setup_score": top3[0].get("setup_score", 0),
+    "global_score": top3[0].get("global_score", 0),
+    "best_object_score": all_results[0]["global_score"],
+    "all_objects": all_results,
+    "object_evaluations": {
+        r["catalog_key"]: r
+        for r in top_objects_for_night
+    },
+    "best_objects": [
+    r["name"]
+    for r in top3
+    if r["score"] == best_score
+],
+    }
+
 def forecast_astro(
     lat,
     lon,
