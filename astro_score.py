@@ -4134,55 +4134,6 @@ def build_night_schedule_legacy(objects, available_hours, profile=None):
 
     return schedule
 
-def evaluate_targets_for_night(
-    *,
-    sky,
-    hours,
-    weather,
-    illumination,
-    moon_rise,
-    moon_set,
-    city_info,
-    lat,
-    lon,
-    bortle,
-    target,
-    profile,
-    decision_engine,
-):
-    all_results = []
-
-    for obj_name in TARGET_OBJECTS:
-        result = evaluate_object(
-            obj_name=obj_name,
-            sky=sky,
-            hours=hours,
-            weather=weather,
-            illumination=illumination,
-            moon_rise=moon_rise,
-            moon_set=moon_set,
-            city_info=city_info,
-            lat=lat,
-            lon=lon,
-            bortle=bortle,
-            target=target,
-            profile=profile,
-        )
-
-        if result is not None:
-            all_results.append(result)
-
-        if result is not None:
-            altitude = result.get("target_altitude")
-
-            if altitude is not None:
-                contributions = decision_engine.evaluate(
-                    {"altitude": altitude},
-                    profile,
-                )
-
-    return all_results
-
 def forecast_astro(
     lat,
     lon,
@@ -4269,7 +4220,7 @@ def forecast_astro(
             ],
         )
 
-        all_results = evaluate_targets_for_night(
+        all_results = forecast_engine.evaluate_targets(
             sky=sky,
             hours=hours,
             weather=caps,
@@ -4283,7 +4234,7 @@ def forecast_astro(
             target=target,
             profile=profile,
             decision_engine=decision_engine,
-        )
+            )
 
         if not all_results:
             continue
@@ -4590,6 +4541,8 @@ report_runner = ReportRunner(
 forecast_engine = ForecastEngine(
     fetch_weather=fetch_weather,
     parse_hourly_weather=parse_hourly_weather,
+    evaluate_object=evaluate_object,
+    target_objects=TARGET_OBJECTS,
 )
 
 report_runner = ReportRunner(
