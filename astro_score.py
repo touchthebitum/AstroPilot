@@ -4244,18 +4244,16 @@ def forecast_astro(
 
         top3 = all_results[:3]
 
-        best_results = all_results[:3]
-
         from decision.recommendation.alternative_target_engine import AlternativeTargetEngine
 
-        best_object = best_results[0]["name"]
+        best_object = top3[0]["name"] 
 
         alternatives = AlternativeTargetEngine.recommend(
             current_target=best_object,
-            ranked_targets=best_results,
+            ranked_targets=top3,
         )
 
-        for r in best_results:
+        for r in top3:
             name = r["name"]
             r["priority"] = project_priority(name)
             r["progress"] = project_progress(name)
@@ -4265,35 +4263,21 @@ def forecast_astro(
         strategy_engine = NightStrategy(profile)
 
         strategy = strategy_engine.choose_strategy(
-            best_results,
+            top3,
             sum(h.get("hours", 0) for h in hours)
         )
 
-        strategy = strategy_engine.choose_strategy(
-            best_results,
-            sum(h.get("hours", 0) for h in hours)
-        )
-
-        best = best_results[0]["window"]
-        best_object = best_results[0]["name"]
-
+        best = top3[0]["window"]
 
         best_setup = best_setup_for_object(best_object)
 
-        setup_name = best_results[0].get("best_setup", "inconnu")
+        setup_name = top3[0].get("best_setup", "inconnu")
 
         exposure = recommended_exposure(
             CATALOG[best_object],
             bortle=bortle
         )       
 
-        all_results = sorted(
-            all_results,
-            key=lambda x: x["global_score"],
-            reverse=True
-        )
-
-        top3 = all_results[:3]
         top5 = all_results[:5]
         night_score = round(
             sum(r["global_score"] for r in top3) / len(top3)
@@ -4321,8 +4305,8 @@ def forecast_astro(
             "bortle": bortle,
             "object": best_object,
             "best_setup": setup_name,
-            "setup_score": best_results[0].get("setup_score", 0),
-            "global_score": best_results[0].get("global_score", 0),
+            "setup_score": top3[0].get("setup_score", 0),
+            "global_score": top3[0].get("global_score", 0),
             "best_object_score": all_results[0]["global_score"],
             "all_objects": all_results,
             "object_evaluations": {
