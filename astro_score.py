@@ -4134,21 +4134,6 @@ def build_night_schedule_legacy(objects, available_hours, profile=None):
 
     return schedule
 
-def prepare_forecast_weather(lat, lon, weather=None):
-    if weather is None:
-        try:
-            weather = fetch_weather(lat, lon)
-        except Exception as e:
-            print("ERREUR fetch_weather =", repr(e))
-            weather = None
-
-    if weather is None:
-        print("ERREUR : prévisions météo indisponibles.")
-        print("Recommandation météo réelle impossible.")
-        return None
-
-    return parse_hourly_weather(weather)
-
 def evaluate_targets_for_night(
     *,
     sky,
@@ -4211,11 +4196,11 @@ def forecast_astro(
     if equipment is None:
         equipment = equipment or get_active_equipment()
 
-    rows = prepare_forecast_weather(
+    rows = forecast_engine.prepare_weather(
     lat,
     lon,
     weather,
-    )
+)
 
     if rows is None:
         return []
@@ -4602,7 +4587,10 @@ report_runner = ReportRunner(
     tonight_mission_service=tonight_mission_service,    
 )
 
-#forecast_engine = ForecastEngine()
+forecast_engine = ForecastEngine(
+    fetch_weather=fetch_weather,
+    parse_hourly_weather=parse_hourly_weather,
+)
 
 report_runner = ReportRunner(
     portfolio_forecast_engine=portfolio_forecast_engine,
