@@ -1,6 +1,6 @@
 from __future__ import annotations
-
 from collections.abc import Callable
+from decision.weather.weather_forecast import WeatherForecast
 
 class ForecastEngine:
 
@@ -36,6 +36,34 @@ class ForecastEngine:
             return None
 
         return self.parse_hourly_weather(weather)
+
+    def build_weather_forecast(
+        self,
+        rows: list[dict],
+    ) -> WeatherForecast:
+        return WeatherForecast(
+            hourly=rows,
+            hourly_clouds=[
+                hour.get("cloud_cover", 100)
+                for hour in rows
+            ],
+            hourly_humidity=[
+                hour.get("relative_humidity_2m", 100)
+                for hour in rows
+            ],
+            hourly_wind=[
+                hour.get("wind_speed_10m", 0)
+                for hour in rows
+            ],
+            hourly_temperature=[
+                hour.get("temperature_2m", 0)
+                for hour in rows
+            ],
+            hourly_visibility=[
+                hour.get("visibility", 10000)
+                for hour in rows
+            ],
+        )
 
     def evaluate_targets(
         self,

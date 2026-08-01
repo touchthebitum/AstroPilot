@@ -4238,31 +4238,7 @@ def forecast_astro(
     
         all_results = []
 
-        from decision.weather.weather_forecast import WeatherForecast
-
-        caps = WeatherForecast(
-            hourly=rows,
-            hourly_clouds=[
-                h.get("cloud_cover", 100)
-                for h in rows
-            ],
-            hourly_humidity=[
-                h.get("relative_humidity_2m", 100)
-                for h in rows
-            ],
-            hourly_wind=[
-                h.get("wind_speed_10m", 0)
-                for h in rows
-            ],
-            hourly_temperature=[
-                h.get("temperature_2m", 0)
-                for h in rows
-            ],
-            hourly_visibility=[
-                h.get("visibility", 10000)
-                for h in rows
-            ],
-        )
+        caps = forecast_engine.build_weather_forecast(rows)
 
         all_results = forecast_engine.evaluate_targets(
             sky=sky,
