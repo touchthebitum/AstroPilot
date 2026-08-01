@@ -4134,15 +4134,14 @@ def build_night_schedule_legacy(objects, available_hours, profile=None):
 
     return schedule
 
-
 def build_forecast_result(
     *,
     night_date,
     night_score,
     best,
+    best_score,
     best_object,
     top3,
-    top5,
     all_results,
     top_objects_for_night,
     illumination,
@@ -4151,32 +4150,138 @@ def build_forecast_result(
     hours,
     bortle,
     setup_name,
-    best_score,
 ):
     return {
-    
-    "date": str(night_date),
-    "score": night_score,
-    "moon_impact": best["moon_impact"],
-    "moon_penalty": best["moon_penalty"],
-    "verdict": verdict(night_score),
-    "bortle": bortle,
-    "object": best_object,
-    "best_setup": setup_name,
-    "setup_score": top3[0].get("setup_score", 0),
-    "global_score": top3[0].get("global_score", 0),
-    "best_object_score": all_results[0]["global_score"],
-    "all_objects": all_results,
-    "object_evaluations": {
-        r["catalog_key"]: r
-        for r in top_objects_for_night
-    },
-    "best_objects": [
-    r["name"]
-    for r in top3
-    if r["score"] == best_score
-],
+        "date": str(night_date),
+        "score": night_score,
+        "moon_impact": best["moon_impact"],
+        "moon_penalty": best["moon_penalty"],
+        "verdict": verdict(night_score),
+        "bortle": bortle,
+        "object": best_object,
+        "best_setup": setup_name,
+        "setup_score": top3[0].get("setup_score", 0),
+        "global_score": top3[0].get("global_score", 0),
+        "best_object_score": all_results[0]["global_score"],
+        "all_objects": all_results,
+        "object_evaluations": {
+            r["catalog_key"]: r
+            for r in top_objects_for_night
+        },
+        "best_objects": [
+            r["name"]
+            for r in top3
+            if r["score"] == best_score
+        ],
+        "top_objects": [
+            {
+                "name": r["name"],
+                "score": int(r["score"]),
+                "catalog_key": r["catalog_key"],
+                "altitude": round(
+                    float(r["window"]["target_altitude"]),
+                    1,
+                ),
+                "moon_sep": round(
+                    float(r["window"]["moon_sep"]),
+                    1,
+                ),
+                "sqm": round(
+                    float(r["window"]["sqm"]),
+                    2,
+                ),
+                "moon_score": round(
+                    float(r["window"]["details"][0]["moon"]),
+                    1,
+                ),
+                "frame_bonus": round(
+                    float(
+                        r["window"]["details"][0]["frame_bonus"]
+                    ),
+                    1,
+                ),
+                "project_bonus": round(
+                    float(
+                        r["window"]["details"][0].get(
+                            "project_bonus",
+                            0,
+                        )
+                    ),
+                    1,
+                ),
+                "remaining_hours": project_remaining_hours(
+                    r["catalog_key"]
+                ),
+                "priority_bonus": round(
+                    float(
+                        r["window"]["details"][0].get(
+                            "priority_bonus",
+                            0,
+                        )
+                    )
+                ),
+                "best_setup": r.get("best_setup"),
+                "setup_score": r.get("setup_score", 0),
+                "global_score": r.get(
+                    "global_score",
+                    r["score"],
+                ),
+                "decision_summary": r.get("decision_summary"),
+                "decision_context": r.get("decision_context"),
+                "weather_context": r.get("weather_context"),
+            }
+            for r in top_objects_for_night
+        ],
+        "best_window": {
+            "start": best["start"].strftime("%H:%M"),
+            "end": best["end"].strftime("%H:%M"),
+            "score": best["score"],
+        },
+        "top_windows": [
+            {
+                "start": w["start"].strftime("%H:%M"),
+                "end": w["end"].strftime("%H:%M"),
+                "score": w["score"],
+                "sqm": w["sqm"],
+                "moon_elevation": w["moon_elevation"],
+                "moon_sep": w["moon_sep"],
+                "target_altitude": w["target_altitude"],
+            }
+            for w in all_results[0]["window"].get(
+                "top_windows",
+                [best],
+            )
+        ],
+        "moon": {
+            "illumination": illumination,
+            "rise": (
+                moon_rise.strftime("%H:%M")
+                if moon_rise
+                else None
+            ),
+            "set": (
+                moon_set.strftime("%H:%M")
+                if moon_set
+                else None
+            ),
+        },
+        "weather_summary": {
+            "cloud_cover_percent": round(
+                sum(h["cloud_cover"] for h in hours)
+                / len(hours)
+            ),
+            "humidity_percent": round(
+                sum(h["relative_humidity_2m"] for h in hours)
+                / len(hours)
+            ),
+            "wind_kmh": round(
+                sum(h["wind_speed_10m"] for h in hours)
+                / len(hours),
+                1,
+            ),
+        },
     }
+
 
 def forecast_astro(
     lat,
@@ -4316,88 +4421,24 @@ def forecast_astro(
             if r not in top_objects_for_night:
                 top_objects_for_night.append(r)
 
-        results.append({
-            "date": str(night_date),
-            "score": night_score,
-            "moon_impact": best["moon_impact"],
-            "moon_penalty": best["moon_penalty"],
-            "verdict": verdict(night_score),
-            "bortle": bortle,
-            "object": best_object,
-            "best_setup": setup_name,
-            "setup_score": top3[0].get("setup_score", 0),
-            "global_score": top3[0].get("global_score", 0),
-            "best_object_score": all_results[0]["global_score"],
-            "all_objects": all_results,
-            "object_evaluations": {
-                r["catalog_key"]: r
-                for r in top_objects_for_night
-            },
-    
-            "best_objects": [
-                r["name"]
-                for r in top3
-                if r["score"] == best_score
-            ],
-
-            "top_objects": [
-                {
-                    "name": r["name"],
-                    "score": int(r["score"]),
-                    "catalog_key": r["catalog_key"],
-                    "altitude": round(float(r["window"]["target_altitude"]), 1),
-                    "moon_sep": round(float(r["window"]["moon_sep"]), 1),
-                    "sqm": round(float(r["window"]["sqm"]), 2),
-                    "moon_score": round(float(r["window"]["details"][0]["moon"]), 1),
-                    "frame_bonus": round(float(r["window"]["details"][0]["frame_bonus"]), 1),
-                    "project_bonus": round(float(r["window"]["details"][0].get("project_bonus", 0)), 1),
-                    "remaining_hours":project_remaining_hours(r["catalog_key"]),
-                    "priority_bonus": round(float(r["window"]["details"][0].get("priority_bonus", 0)),),
-                    "best_setup": r.get("best_setup"),
-                    "setup_score": r.get("setup_score", 0),
-                    "global_score": r.get("global_score", r["score"]),
-                    "decision_summary": r.get("decision_summary"),
-                    "decision_context": r.get("decision_context"),
-                    "weather_context": r.get("weather_context"),
-                }
-                for r in top_objects_for_night
-
-            ],
-            "best_window": {
-                "start": best["start"].strftime("%H:%M"),
-                "end": best["end"].strftime("%H:%M"),
-                "score": best["score"],
-            },
-            "top_windows": [
-                {
-                    "start": w["start"].strftime("%H:%M"),
-                    "end": w["end"].strftime("%H:%M"),
-                    "score": w["score"],
-                    "sqm": w["sqm"],
-                    "moon_elevation": w["moon_elevation"],
-                    "moon_sep": w["moon_sep"],
-                    "target_altitude": w["target_altitude"],
-                }
-                for w in all_results[0]["window"].get("top_windows", [best])
-            ],
-            "moon": {
-                "illumination": illumination,
-                "rise": moon_rise.strftime("%H:%M") if moon_rise else None,
-                "set": moon_set.strftime("%H:%M") if moon_set else None,
-            },
-            "weather_summary": {
-                "cloud_cover_percent": round(
-                    sum(h["cloud_cover"] for h in hours) / len(hours)
-                ),
-                "humidity_percent": round(
-                    sum(h["relative_humidity_2m"] for h in hours) / len(hours)
-                ),
-                "wind_kmh": round(
-                    sum(h["wind_speed_10m"] for h in hours) / len(hours),
-                    1
-                ),
-            }
-        })
+        results.append(
+            build_forecast_result(
+                night_date=night_date,
+                night_score=night_score,
+                best=best,
+                best_score=best_score,
+                best_object=best_object,
+                top3=top3,
+                all_results=all_results,
+                top_objects_for_night=top_objects_for_night,
+                illumination=illumination,
+                moon_rise=moon_rise,
+                moon_set=moon_set,
+                hours=hours,
+                bortle=bortle,
+                setup_name=setup_name,
+            )
+        )
 
     return results
 
