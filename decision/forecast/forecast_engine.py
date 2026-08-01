@@ -115,15 +115,15 @@ class ForecastEngine:
 
         return all_results
 
-    def forecast_astro(
+    def forecast_one_night(
         self,
+        *,
+        night_date,
+        rows,
         lat,
         lon,
-        city,
         bortle,
-        target="deep_sky",
-        equipment=None,
-        goal="nebulae",
-        weather=None,
+        target,
+        profile,
     ):
         raise NotImplementedError
