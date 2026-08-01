@@ -125,6 +125,18 @@ class MissionAssembler:
                     "hourly_moon_penalty",
                     None,
                 ),
+                display_start_hour=(
+                    (
+                        mission_input.window_start.hour
+                        + mission_input.window_start.minute / 60
+                    )
+                    if mission_input is not None
+                    and mission_input.window_start is not None
+                    else (
+                        context.session.start_time.hour
+                        + context.session.start_time.minute / 60
+                    )
+                ),
                 target=CATALOG[target],
                 latitude=context.site.latitude,
                 longitude=context.site.longitude,
@@ -134,8 +146,9 @@ class MissionAssembler:
                     and mission_input.window_start is not None
                     else context.session.start_time
                 ),
+                ),
             )
-        )
+        
 
         schedule = NightScheduler.build(productivity)
 

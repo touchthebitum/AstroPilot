@@ -4728,6 +4728,11 @@ def main(argv=None) -> int:
 
     top_nights = sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
 
+    tonight_nights = sorted(
+    nights,
+    key=lambda night: night["date"],
+    )
+
     night_capacities = forecast_night_capacities(
         lat,
         lon,
@@ -4751,15 +4756,16 @@ def main(argv=None) -> int:
 
     elif args.mode == "tonight":
         if top_nights:
-
             tonight_runner.run(
-                top_nights=top_nights,
+                top_nights=tonight_nights,
                 night_capacities=night_capacities,
                 use_legacy_report=USE_LEGACY_TONIGHT_REPORT,
             )
 
         if USE_LEGACY_TONIGHT_REPORT and top_nights:
             show_tonight_recommendation(top_nights[0])
+        if USE_LEGACY_TONIGHT_REPORT and tonight_nights:
+            show_tonight_recommendation(tonight_nights[0])
 
     elif args.mode == "full":
         report_runner.run_full(
