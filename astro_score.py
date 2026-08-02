@@ -4138,20 +4138,25 @@ def build_night_schedule_legacy(objects, available_hours, profile=None):
 def build_forecast_result(
     *,
     night_date,
-    night_score,
-    best,
-    best_score,
-    best_object,
-    top3,
-    all_results,
-    top_objects_for_night,
-    illumination,
-    moon_rise,
-    moon_set,
-    hours,
+    night_evaluation,
+    night_context,
     bortle,
-    setup_name,
 ):
+    night_score = night_evaluation.night_score
+    best = night_evaluation.best
+    best_score = night_evaluation.best_score
+    best_object = night_evaluation.best_object
+    top3 = night_evaluation.top3
+    all_results = night_evaluation.all_results
+    top_objects_for_night = (
+        night_evaluation.top_objects_for_night
+    )
+    setup_name = night_evaluation.setup_name
+
+    illumination = night_context["illumination"]
+    moon_rise = night_context["moon_rise"]
+    moon_set = night_context["moon_set"]
+    hours = night_context["hours"]
     return {
         "date": str(night_date),
         "score": night_score,
@@ -4328,43 +4333,16 @@ def forecast_astro(
         if night_context is None:
             continue
 
-        illumination = night_context["illumination"]
-        moon_rise = night_context["moon_rise"]
-        moon_set = night_context["moon_set"]
-        hours = night_context["hours"]
-        night_evaluation = night_context["evaluation"]
         night_evaluation = portfolio_engine.enrich(
-            night_evaluation=night_evaluation,
-        )
-
-        all_results = night_evaluation.all_results
-        best_score = night_evaluation.best_score
-        top3 = night_evaluation.top3
-        best_object = night_evaluation.best_object
-        best = night_evaluation.best
-        setup_name = night_evaluation.setup_name
-        night_score = night_evaluation.night_score
-
-        top_objects_for_night = (
-            night_evaluation.top_objects_for_night
+            night_evaluation=night_context["evaluation"],
         )
 
         results.append(
             build_forecast_result(
                 night_date=night_date,
-                night_score=night_score,
-                best=best,
-                best_score=best_score,
-                best_object=best_object,
-                top3=top3,
-                all_results=all_results,
-                top_objects_for_night=top_objects_for_night,
-                illumination=illumination,
-                moon_rise=moon_rise,
-                moon_set=moon_set,
-                hours=hours,
+                night_evaluation=night_evaluation,
+                night_context=night_context,
                 bortle=bortle,
-                setup_name=setup_name,
             )
         )
 
