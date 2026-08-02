@@ -10,9 +10,11 @@ class PortfolioEngine:
         *,
         project_progress: Callable[[str], float],
         project_remaining_hours: Callable[[str], float | None],
+        project_priority: Callable[[str], float],
     ):
         self.project_progress = project_progress
         self.project_remaining_hours = project_remaining_hours
+        self.project_priority = project_priority
 
     def enrich(
         self,
@@ -56,7 +58,12 @@ class PortfolioEngine:
         *,
         night_evaluation: NightEvaluation,
     ) -> None:
-        pass
+        for result in night_evaluation.top3:
+            object_name = result["name"]
+
+            result["priority"] = self.project_priority(
+                object_name
+            )
 
     def _build_top_objects(
         self,
