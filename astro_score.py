@@ -4347,7 +4347,9 @@ def forecast_astro(
 
         portfolio_keys = set(get_projects().keys())
 
-        top_objects_for_night = all_results[:5]
+        top_objects_for_night = (
+            night_evaluation.top_objects_for_night
+        )
 
         portfolio_objects = [
         r for r in all_results
