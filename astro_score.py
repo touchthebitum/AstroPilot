@@ -4369,14 +4369,7 @@ def forecast_astro(
 
         top3 = all_results[:3]
 
-        from decision.recommendation.alternative_target_engine import AlternativeTargetEngine
-
-        best_object = top3[0]["name"] 
-
-        alternatives = AlternativeTargetEngine.recommend(
-            current_target=best_object,
-            ranked_targets=top3,
-        )
+        best_object = top3[0]["name"]
 
         for r in top3:
             name = r["name"]
@@ -4385,28 +4378,16 @@ def forecast_astro(
             r["remaining_hours"] = project_remaining_hours(name)
             r["roi"] = project_roi(name)
 
-        strategy_engine = NightStrategy(profile)
-
-        strategy = strategy_engine.choose_strategy(
-            top3,
-            sum(h.get("hours", 0) for h in hours)
-        )
-
         best = top3[0]["window"]
-
-        best_setup = best_setup_for_object(best_object)
 
         setup_name = top3[0].get("best_setup", "inconnu")
 
-        exposure = recommended_exposure(
-            CATALOG[best_object],
-            bortle=bortle
-        )       
-
-        top5 = all_results[:5]
         night_score = round(
-            sum(r["global_score"] for r in top3) / len(top3)
-)
+            sum(
+                r["global_score"]
+                for r in top3
+            ) / len(top3)
+        )
 
         portfolio_keys = set(get_projects().keys())
 
