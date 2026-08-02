@@ -5,6 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from astral import LocationInfo
 from astropilot.engines.sky_engine import SkyEngine
+from decision.forecast.night_evaluation import NightEvaluation
 
 class ForecastEngine:
 
@@ -155,15 +156,15 @@ class ForecastEngine:
             ) / len(top3)
         )
 
-        return {
-            "all_results": all_results,
-            "best_score": best_score,
-            "top3": top3,
-            "best_object": best_object,
-            "best": best,
-            "setup_name": setup_name,
-            "night_score": night_score,
-        }
+        return NightEvaluation(
+            all_results=all_results,
+            top3=top3,
+            best_score=best_score,
+            best_object=best_object,
+            best=best,
+            setup_name=setup_name,
+            night_score=night_score,
+        )
 
     def forecast_one_night(
         self,

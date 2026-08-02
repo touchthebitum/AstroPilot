@@ -4363,13 +4363,13 @@ def forecast_astro(
         if night_evaluation is None:
             continue
 
-        all_results = night_evaluation["all_results"]
-        best_score = night_evaluation["best_score"]
-        top3 = night_evaluation["top3"]
-        best_object = night_evaluation["best_object"]
-        best = night_evaluation["best"]
-        setup_name = night_evaluation["setup_name"]
-        night_score = night_evaluation["night_score"]
+        all_results = night_evaluation.all_results
+        best_score = night_evaluation.best_score
+        top3 = night_evaluation.top3
+        best_object = night_evaluation.best_object
+        best = night_evaluation.best
+        setup_name = night_evaluation.setup_name
+        night_score = night_evaluation.night_score
 
         for r in top3:
             name = r["name"]
