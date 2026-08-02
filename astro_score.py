@@ -16,6 +16,7 @@ from decision.renderer.recommendation_renderer import (
 from decision.services.tonight_mission_service import (
     TonightMissionService,
 )
+from decision.portfolio.portfolio_engine import PortfolioEngine
 from decision.forecast.forecast_engine import ForecastEngine
 from decision.runners.tonight_runner import TonightRunner
 from decision.portfolio.portfolio_forecast_engine import PortfolioForecastEngine
@@ -4332,6 +4333,9 @@ def forecast_astro(
         moon_set = night_context["moon_set"]
         hours = night_context["hours"]
         night_evaluation = night_context["evaluation"]
+        night_evaluation = portfolio_engine.enrich(
+        night_evaluation = night_evaluation,
+        )
 
         all_results = night_evaluation.all_results
         best_score = night_evaluation.best_score
@@ -4555,6 +4559,8 @@ tonight_runner = TonightRunner(
     build_mission_input=build_mission_input,
     recommend_project_for_night=recommend_project_for_night,
 )
+
+portfolio_engine = PortfolioEngine()
 
 def main(argv=None) -> int:
     global CURRENT_EQUIPMENT
