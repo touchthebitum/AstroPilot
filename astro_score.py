@@ -4356,15 +4356,20 @@ def forecast_astro(
             decision_engine=decision_engine,
         )
 
-        if not all_results:
+        night_evaluation = forecast_engine.evaluate_night(
+            all_results=all_results,
+        )
+
+        if night_evaluation is None:
             continue
 
-        all_results.sort(key=lambda x: x["global_score"], reverse=True)
-        best_score = all_results[0]["global_score"]
-
-        top3 = all_results[:3]
-
-        best_object = top3[0]["name"]
+        all_results = night_evaluation["all_results"]
+        best_score = night_evaluation["best_score"]
+        top3 = night_evaluation["top3"]
+        best_object = night_evaluation["best_object"]
+        best = night_evaluation["best"]
+        setup_name = night_evaluation["setup_name"]
+        night_score = night_evaluation["night_score"]
 
         for r in top3:
             name = r["name"]
@@ -4372,17 +4377,6 @@ def forecast_astro(
             r["progress"] = project_progress(name)
             r["remaining_hours"] = project_remaining_hours(name)
             r["roi"] = project_roi(name)
-
-        best = top3[0]["window"]
-
-        setup_name = top3[0].get("best_setup", "inconnu")
-
-        night_score = round(
-            sum(
-                r["global_score"]
-                for r in top3
-            ) / len(top3)
-        )
 
         portfolio_keys = set(get_projects().keys())
 

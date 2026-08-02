@@ -125,6 +125,46 @@ class ForecastEngine:
 
         return all_results
 
+    def evaluate_night(
+        self,
+        *,
+        all_results,
+    ):
+        if not all_results:
+            return None
+
+        all_results.sort(
+            key=lambda result: result["global_score"],
+            reverse=True,
+        )
+
+        best_score = all_results[0]["global_score"]
+        top3 = all_results[:3]
+
+        best_object = top3[0]["name"]
+        best = top3[0]["window"]
+        setup_name = top3[0].get(
+            "best_setup",
+            "inconnu",
+        )
+
+        night_score = round(
+            sum(
+                result["global_score"]
+                for result in top3
+            ) / len(top3)
+        )
+
+        return {
+            "all_results": all_results,
+            "best_score": best_score,
+            "top3": top3,
+            "best_object": best_object,
+            "best": best,
+            "setup_name": setup_name,
+            "night_score": night_score,
+        }
+
     def forecast_one_night(
         self,
         *,
