@@ -4348,7 +4348,6 @@ def forecast_astro(
         for r in top3:
             name = r["name"]
             r["priority"] = project_priority(name)
-            r["progress"] = project_progress(name)
             r["remaining_hours"] = project_remaining_hours(name)
             r["roi"] = project_roi(name)
 
@@ -4560,7 +4559,9 @@ tonight_runner = TonightRunner(
     recommend_project_for_night=recommend_project_for_night,
 )
 
-portfolio_engine = PortfolioEngine()
+portfolio_engine = PortfolioEngine(
+    project_progress=project_progress,
+)
 
 def main(argv=None) -> int:
     global CURRENT_EQUIPMENT
