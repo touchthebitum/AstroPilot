@@ -76,4 +76,10 @@ class PortfolioEngine:
         *,
         night_evaluation: NightEvaluation,
     ) -> None:
-        pass
+        top_objects_for_night = (
+            night_evaluation.all_results[:5]
+        )
+
+        night_evaluation.top_objects_for_night = (
+            top_objects_for_night
+        )
