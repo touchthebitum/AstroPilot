@@ -4304,44 +4304,39 @@ def forecast_astro(
 
     if rows is None:
         return []
-    
+
     results = []
 
-    #print("TARGET_OBJECTS = ", TARGET_OBJECTS)
-
     today = datetime.now(ZoneInfo(TIMEZONE)).date()
+    profile = load_user_profile()
 
     for d in range(7):
         night_date = today + timedelta(days=d)
-        current_date = datetime.combine(night_date, datetime.min.time())
 
-        phase = moon_phase(current_date.date())
+        night_context = forecast_engine.forecast_one_night(
+            night_date=night_date,
+            rows=rows,
+            lat=lat,
+            lon=lon,
+            city=city,
+            bortle=bortle,
+            target=target,
+            profile=profile,
+        )
 
-        sky = SkyEngine()
-
-        illumination = round(sky.moon_illumination_from_phase(phase))
-
-
-        city_info = LocationInfo(city, "Switzerland", TIMEZONE, lat, lon)
-
-        target_date = current_date.date()
-
-        sky = SkyEngine()
-
-        moon_rise = sky.safe_moonrise(city_info.observer, target_date, ZoneInfo(TIMEZONE))
-        moon_set  = sky.safe_moonset(city_info.observer, target_date, ZoneInfo(TIMEZONE))
-
-
-        hours = night_hours_rough(rows, current_date, lat, lon, city)
-
-        if not hours:
+        if night_context is None:
             continue
 
-        profile = load_user_profile()
+        current_date = night_context["current_date"]
+        sky = night_context["sky"]
+        illumination = night_context["illumination"]
+        city_info = night_context["city_info"]
+        moon_rise = night_context["moon_rise"]
+        moon_set = night_context["moon_set"]
+        hours = night_context["hours"]
+
         decision_engine = DecisionEngine()
         decision_engine.add_rule(AltitudeRule())
-    
-        all_results = []
 
         caps = forecast_engine.build_weather_forecast(rows)
 
@@ -4359,7 +4354,7 @@ def forecast_astro(
             target=target,
             profile=profile,
             decision_engine=decision_engine,
-            )
+        )
 
         if not all_results:
             continue
