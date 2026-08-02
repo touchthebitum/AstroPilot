@@ -4345,10 +4345,6 @@ def forecast_astro(
         setup_name = night_evaluation.setup_name
         night_score = night_evaluation.night_score
 
-        for r in top3:
-            name = r["name"]
-            r["roi"] = project_roi(name)
-
         portfolio_keys = set(get_projects().keys())
 
         top_objects_for_night = all_results[:5]
@@ -4561,6 +4557,7 @@ portfolio_engine = PortfolioEngine(
     project_progress=project_progress,
     project_remaining_hours=project_remaining_hours,
     project_priority=project_priority,
+    project_roi=project_roi,
 )
 
 def main(argv=None) -> int:
