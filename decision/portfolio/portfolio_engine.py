@@ -12,11 +12,13 @@ class PortfolioEngine:
         project_remaining_hours: Callable[[str], float | None],
         project_priority: Callable[[str], float],
         project_roi: Callable[[str], float],
+        get_projects: Callable[[], dict],
     ):
         self.project_progress = project_progress
         self.project_remaining_hours = project_remaining_hours
         self.project_priority = project_priority
         self.project_roi = project_roi
+        self.get_projects = get_projects
 
     def enrich(
         self,
@@ -76,9 +78,26 @@ class PortfolioEngine:
         *,
         night_evaluation: NightEvaluation,
     ) -> None:
+        portfolio_keys = set(
+            self.get_projects().keys()
+        )
+
         top_objects_for_night = (
             night_evaluation.all_results[:5]
         )
+
+        portfolio_objects = [
+            result
+            for result in night_evaluation.all_results
+            if result.get(
+                "catalog_key",
+                result.get("name"),
+            ) in portfolio_keys
+        ]
+
+        for result in portfolio_objects:
+            if result not in top_objects_for_night:
+                top_objects_for_night.append(result)
 
         night_evaluation.top_objects_for_night = (
             top_objects_for_night

@@ -4345,20 +4345,9 @@ def forecast_astro(
         setup_name = night_evaluation.setup_name
         night_score = night_evaluation.night_score
 
-        portfolio_keys = set(get_projects().keys())
-
         top_objects_for_night = (
             night_evaluation.top_objects_for_night
         )
-
-        portfolio_objects = [
-        r for r in all_results
-        if r.get("catalog_key", r.get("name")) in portfolio_keys
-        ]
-
-        for r in portfolio_objects:
-            if r not in top_objects_for_night:
-                top_objects_for_night.append(r)
 
         results.append(
             build_forecast_result(
@@ -4560,6 +4549,7 @@ portfolio_engine = PortfolioEngine(
     project_remaining_hours=project_remaining_hours,
     project_priority=project_priority,
     project_roi=project_roi,
+    get_projects=get_projects,
 )
 
 def main(argv=None) -> int:
