@@ -4569,6 +4569,9 @@ forecast_engine = ForecastEngine(
     parse_hourly_weather=parse_hourly_weather,
     evaluate_object=evaluate_object,
     target_objects=TARGET_OBJECTS,
+    moon_phase=moon_phase,
+    night_hours_rough=night_hours_rough,
+    timezone=TIMEZONE,
 )
 
 report_runner = ReportRunner(

@@ -1,6 +1,10 @@
 from __future__ import annotations
 from collections.abc import Callable
 from decision.weather.weather_forecast import WeatherForecast
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from astral import LocationInfo
+from astropilot.engines.sky_engine import SkyEngine
 
 class ForecastEngine:
 
@@ -11,11 +15,17 @@ class ForecastEngine:
         parse_hourly_weather: Callable[[dict], list[dict]],
         evaluate_object,
         target_objects,
+        moon_phase,
+        night_hours_rough,
+        timezone,
     ):
         self.fetch_weather = fetch_weather
         self.parse_hourly_weather = parse_hourly_weather
         self.evaluate_object = evaluate_object
         self.target_objects = target_objects
+        self.moon_phase = moon_phase
+        self.night_hours_rough = night_hours_rough
+        self.timezone = timezone
 
     def prepare_weather(
         self,
@@ -122,8 +132,63 @@ class ForecastEngine:
         rows,
         lat,
         lon,
+        city,
         bortle,
         target,
         profile,
     ):
-        raise NotImplementedError
+        current_date = datetime.combine(
+        night_date,
+        datetime.min.time(),
+    )
+
+        phase = self.moon_phase(current_date.date())
+
+        sky = SkyEngine()
+
+        illumination = round(
+            sky.moon_illumination_from_phase(phase)
+        )
+
+        city_info = LocationInfo(
+            city,
+            "Switzerland",
+            self.timezone,
+            lat,
+            lon,
+        )
+
+        target_date = current_date.date()
+
+        moon_rise = sky.safe_moonrise(
+            city_info.observer,
+            target_date,
+            ZoneInfo(self.timezone),
+        )
+
+        moon_set = sky.safe_moonset(
+            city_info.observer,
+            target_date,
+            ZoneInfo(self.timezone),
+        )
+
+        hours = self.night_hours_rough(
+            rows,
+            current_date,
+            lat,
+            lon,
+            city,
+        )
+
+        if not hours:
+            return None
+
+        return {
+            "current_date": current_date,
+            "sky": sky,
+            "illumination": illumination,
+            "city_info": city_info,
+            "moon_rise": moon_rise,
+            "moon_set": moon_set,
+            "hours": hours,
+        }
