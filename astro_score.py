@@ -4327,41 +4327,11 @@ def forecast_astro(
         if night_context is None:
             continue
 
-        current_date = night_context["current_date"]
-        sky = night_context["sky"]
         illumination = night_context["illumination"]
-        city_info = night_context["city_info"]
         moon_rise = night_context["moon_rise"]
         moon_set = night_context["moon_set"]
         hours = night_context["hours"]
-
-        decision_engine = DecisionEngine()
-        decision_engine.add_rule(AltitudeRule())
-
-        caps = forecast_engine.build_weather_forecast(rows)
-
-        all_results = forecast_engine.evaluate_targets(
-            sky=sky,
-            hours=hours,
-            weather=caps,
-            illumination=illumination,
-            moon_rise=moon_rise,
-            moon_set=moon_set,
-            city_info=city_info,
-            lat=lat,
-            lon=lon,
-            bortle=bortle,
-            target=target,
-            profile=profile,
-            decision_engine=decision_engine,
-        )
-
-        night_evaluation = forecast_engine.evaluate_night(
-            all_results=all_results,
-        )
-
-        if night_evaluation is None:
-            continue
+        night_evaluation = night_context["evaluation"]
 
         all_results = night_evaluation.all_results
         best_score = night_evaluation.best_score
@@ -4561,6 +4531,8 @@ forecast_engine = ForecastEngine(
     moon_phase=moon_phase,
     night_hours_rough=night_hours_rough,
     timezone=TIMEZONE,
+    decision_engine_factory=DecisionEngine,
+    altitude_rule_factory=AltitudeRule,
 )
 
 report_runner = ReportRunner(

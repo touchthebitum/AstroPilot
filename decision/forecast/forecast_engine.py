@@ -19,6 +19,8 @@ class ForecastEngine:
         moon_phase,
         night_hours_rough,
         timezone,
+        decision_engine_factory,
+        altitude_rule_factory,
     ):
         self.fetch_weather = fetch_weather
         self.parse_hourly_weather = parse_hourly_weather
@@ -27,6 +29,8 @@ class ForecastEngine:
         self.moon_phase = moon_phase
         self.night_hours_rough = night_hours_rough
         self.timezone = timezone
+        self.decision_engine_factory = decision_engine_factory
+        self.altitude_rule_factory = altitude_rule_factory
 
     def prepare_weather(
         self,
@@ -179,9 +183,9 @@ class ForecastEngine:
         profile,
     ):
         current_date = datetime.combine(
-        night_date,
-        datetime.min.time(),
-    )
+            night_date,
+            datetime.min.time(),
+        )
 
         phase = self.moon_phase(current_date.date())
 
@@ -224,6 +228,36 @@ class ForecastEngine:
         if not hours:
             return None
 
+        decision_engine = self.decision_engine_factory()
+        decision_engine.add_rule(
+            self.altitude_rule_factory()
+        )
+
+        weather_forecast = self.build_weather_forecast(rows)
+
+        all_results = self.evaluate_targets(
+            sky=sky,
+            hours=hours,
+            weather=weather_forecast,
+            illumination=illumination,
+            moon_rise=moon_rise,
+            moon_set=moon_set,
+            city_info=city_info,
+            lat=lat,
+            lon=lon,
+            bortle=bortle,
+            target=target,
+            profile=profile,
+            decision_engine=decision_engine,
+        )
+
+        night_evaluation = self.evaluate_night(
+            all_results=all_results,
+        )
+
+        if night_evaluation is None:
+            return None
+
         return {
             "current_date": current_date,
             "sky": sky,
@@ -232,4 +266,5 @@ class ForecastEngine:
             "moon_rise": moon_rise,
             "moon_set": moon_set,
             "hours": hours,
+            "evaluation": night_evaluation,
         }
