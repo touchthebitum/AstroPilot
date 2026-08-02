@@ -23,6 +23,14 @@ class PortfolioEngine:
             night_evaluation=night_evaluation,
         )
 
+        self._enrich_decision_metrics(
+            night_evaluation=night_evaluation,
+        )
+
+        self._build_top_objects(
+            night_evaluation=night_evaluation,
+        )
+
         return night_evaluation
 
     def _enrich_project_state(
@@ -42,3 +50,17 @@ class PortfolioEngine:
                     object_name
                 )
             )
+
+    def _enrich_decision_metrics(
+        self,
+        *,
+        night_evaluation: NightEvaluation,
+    ) -> None:
+        pass
+
+    def _build_top_objects(
+        self,
+        *,
+        night_evaluation: NightEvaluation,
+    ) -> None:
+        pass
