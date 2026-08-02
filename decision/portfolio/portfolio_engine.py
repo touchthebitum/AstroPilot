@@ -19,6 +19,17 @@ class PortfolioEngine:
         *,
         night_evaluation: NightEvaluation,
     ) -> NightEvaluation:
+        self._enrich_project_state(
+            night_evaluation=night_evaluation,
+        )
+
+        return night_evaluation
+
+    def _enrich_project_state(
+        self,
+        *,
+        night_evaluation: NightEvaluation,
+    ) -> None:
         for result in night_evaluation.top3:
             object_name = result["name"]
 
@@ -31,5 +42,3 @@ class PortfolioEngine:
                     object_name
                 )
             )
-
-        return night_evaluation

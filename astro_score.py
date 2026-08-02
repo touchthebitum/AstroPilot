@@ -4334,7 +4334,7 @@ def forecast_astro(
         hours = night_context["hours"]
         night_evaluation = night_context["evaluation"]
         night_evaluation = portfolio_engine.enrich(
-        night_evaluation = night_evaluation,
+            night_evaluation=night_evaluation,
         )
 
         all_results = night_evaluation.all_results
