@@ -15,7 +15,12 @@ class OpportunityEngine:
         if not candidates:
             return None
 
+        best = max(
+            candidates,
+            key=lambda candidate: candidate.decision_score,
+        )
+
         return Opportunity(
             action=Action.CONTINUE_PROJECT,
-            candidate=candidates[0],
+            candidate=best,
         )
