@@ -2,7 +2,7 @@ from decision.models.candidate import Candidate
 
 from .action import Action
 from .opportunity import Opportunity
-from .opportunity_reason import OpportunityReason
+from .opportunity_reason_builder import OpportunityReasonBuilder
 
 
 class OpportunityEngine:
@@ -24,13 +24,7 @@ class OpportunityEngine:
         return Opportunity(
             action=Action.CONTINUE_PROJECT,
             candidate=best,
-            reasons=[
-                OpportunityReason(
-                    title="Meilleur score décisionnel",
-                    message=(
-                        "Cette opportunité possède le "
-                        "decision_score le plus élevé."
-                    ),
-                )
-            ],
+            reasons=OpportunityReasonBuilder.build(
+                candidate=best,
+            ),
         )

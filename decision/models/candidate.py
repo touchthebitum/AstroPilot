@@ -28,7 +28,7 @@ class Candidate:
     postponement_net_impact: float
     postponement_reason: str
 
-    reasons: dict = field(default_factory=dict)
+    reasons: list[str] = field(default_factory=list)
     strategy_scores: dict = field(default_factory=dict)
 
     def __getitem__(self, key):
