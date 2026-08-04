@@ -8,6 +8,7 @@ class TonightRunner:
         portfolio_forecast_engine,
         build_mission_input,
         recommend_project_for_night,
+        opportunity_recommendation_service,
     ):
         self.report_runner = report_runner
         self.portfolio_forecast_engine = (
@@ -18,6 +19,9 @@ class TonightRunner:
         )
         self.recommend_project_for_night = (
             recommend_project_for_night
+        )
+        self.opportunity_recommendation_service = (
+            opportunity_recommendation_service
         )
 
     def show_completion_forecast(
@@ -57,8 +61,18 @@ class TonightRunner:
         if not recommended_projects:
             return
 
-        recommended_project = recommended_projects[0]
+        recommendation = (
+            self.opportunity_recommendation_service.build(
+                candidates=recommended_projects,
+            )
+        )
 
+        if recommendation is None:
+            return
+
+        recommended_project = (
+            recommendation.opportunity.candidate
+        )
         recommended_key = recommended_project.get(
             "catalog_key",
             recommended_project.get("name"),

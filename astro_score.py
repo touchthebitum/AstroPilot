@@ -16,6 +16,13 @@ from decision.renderer.recommendation_renderer import (
 from decision.services.tonight_mission_service import (
     TonightMissionService,
 )
+from decision.opportunity.opportunity_engine import OpportunityEngine
+from decision.recommendation.recommendation_engine import (
+    RecommendationEngine,
+)
+from decision.services.opportunity_recommendation_service import (
+    OpportunityRecommendationService,
+)
 from decision.portfolio.portfolio_engine import PortfolioEngine
 from decision.forecast.forecast_engine import ForecastEngine
 from decision.runners.tonight_runner import TonightRunner
@@ -4515,11 +4522,25 @@ report_runner = ReportRunner(
     tonight_mission_service=tonight_mission_service,
 )
 
+opportunity_engine = OpportunityEngine()
+
+recommendation_engine = RecommendationEngine()
+
+opportunity_recommendation_service = (
+    OpportunityRecommendationService(
+        opportunity_engine=opportunity_engine,
+        recommendation_engine=recommendation_engine,
+    )
+)
+
 tonight_runner = TonightRunner(
     report_runner=report_runner,
     portfolio_forecast_engine=portfolio_forecast_engine,
     build_mission_input=build_mission_input,
     recommend_project_for_night=recommend_project_for_night,
+    opportunity_recommendation_service=(
+        opportunity_recommendation_service
+    ),
 )
 
 portfolio_engine = PortfolioEngine(
