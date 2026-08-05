@@ -475,54 +475,6 @@ def season_days_remaining(obj):
 
     return max(0, (season_end - today).days)
 
-
-
-def season_bonus(obj):
-    """
-    Bonus saisonnier basé sur le mois courant.
-    Plus fin que l'ancien système best/ok/hors saison.
-    """
-    month = datetime.now(ZoneInfo(TIMEZONE)).month
-
-    name = obj.get("catalog_key") or obj.get("name")
-
-    season = SEASON_WINDOWS.get(name)
-    if not season:
-        return 0
-
-    best_months = season.get("best_months", [])
-    ok_months = season.get("ok_months", [])
-
-    if month in best_months:
-        return 15
-
-    if month in ok_months:
-        return 5
-
-    # Mois adjacent à une fenêtre correcte = faible bonus
-    adjacent_months = set()
-
-    for m in best_months + ok_months:
-        adjacent_months.add(12 if m == 1 else m - 1)
-        adjacent_months.add(1 if m == 12 else m + 1)
-
-    if month in adjacent_months:
-        return 0
-
-    return -10
-
-
-    # Projet terminable cette nuit
-    if remaining <= available_hours:
-        return 20
-
-    # Projet terminable en environ deux nuits
-    if remaining <= available_hours * 2:
-        return 10
-
-    return 0
-
-
 def season_urgency_bonus(obj):
     days = season_days_remaining(obj)
 
@@ -547,47 +499,6 @@ def season_urgency_bonus(obj):
         return 3
 
     return 0
-
-def season_bonus(obj):
-    """
-    Bonus saisonnier selon le mois actuel.
-    """
-    month = datetime.now().month
-
-    name = obj.get("catalog_key", "").upper()
-
-    bonus = 0
-
-    # M31 : août → novembre
-    if name == "M31":
-        if month in [8, 9, 10, 11]:
-            bonus += 25
-        elif month in [6, 7]:
-            bonus += 10
-        elif month in [12, 1]:
-            bonus += 5
-        else:
-            bonus -= 20
-
-    # Rosette : novembre → mars
-    elif "ROSETTE" in name:
-        if month in [11, 12, 1, 2, 3]:
-            bonus += 25
-        elif month in [10, 4]:
-            bonus += 10
-        else:
-            bonus -= 20
-
-    # IC1396 : juin → octobre
-    elif name == "IC1396":
-        if month in [6, 7, 8, 9, 10]:
-            bonus += 25
-        elif month in [5, 11]:
-            bonus += 10
-        else:
-            bonus -= 20
-
-    return bonus
 
 def estimate_portfolio_nights():
     projects = get_projects()
@@ -1297,32 +1208,6 @@ def explain_setup_choice(setup, obj):
         reasons.append("Champ adapté aux nébuleuses")
 
     return reasons
-
-def session_portfolio_gain(project_name, session_hours):
-
-    project = get_projects().get(project_name, {})
-
-    target = project.get("target_hours", 0)
-
-    if target <= 0:
-        return 0
-
-    current_hours = project.get("hours", 0)
-
-    current_progress = (current_hours / target) * 100
-
-    future_hours = min(
-        current_hours + session_hours,
-        target
-    )
-
-    future_progress = (future_hours / target) * 100
-
-    return round(
-        future_progress - current_progress,
-        1
-    )
-
 
 def build_mission_input(evaluation):
     window = evaluation["window"]
