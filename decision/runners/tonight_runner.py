@@ -70,18 +70,10 @@ class TonightRunner:
         if recommendation is None:
             return
 
-        recommended_project = (
-            recommendation.opportunity.candidate
-        )
-        recommended_key = recommended_project.get(
-            "catalog_key",
-            recommended_project.get("name"),
-        )
-
         self.report_runner.run_tonight(
             winner=winner,
             objects=top_objects,
-            recommended_key=recommended_key,
+            recommendation=recommendation,
             build_mission_input=self.build_mission_input,
             top_nights=top_nights,
             use_legacy_report=use_legacy_report,

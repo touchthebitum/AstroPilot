@@ -1,4 +1,5 @@
 from __future__ import annotations
+from decision.recommendation.recommendation import Recommendation
 
 
 class ReportRunner:
@@ -74,10 +75,19 @@ class ReportRunner:
         use_legacy_report,
         winner=None,
         objects=None,
-        recommended_key=None,
+        recommendation: Recommendation | None = None,
         build_mission_input=None,
     ):
         mission = None
+        recommended_key = None
+
+        if recommendation is not None:
+            candidate = recommendation.opportunity.candidate
+
+            recommended_key = candidate.get(
+                "catalog_key",
+                candidate.get("name"),
+            )
 
         if (
             winner is not None
