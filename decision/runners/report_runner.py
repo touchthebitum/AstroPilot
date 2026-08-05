@@ -15,7 +15,6 @@ class ReportRunner:
         show_portfolio_completion_forecast,
         show_tonight_recommendation,
         present_mission,
-        build_mission,
         tonight_mission_service,
     ):
         self.portfolio_forecast_engine = portfolio_forecast_engine
@@ -28,10 +27,7 @@ class ReportRunner:
             show_portfolio_completion_forecast)
         self.show_tonight_recommendation = (
             show_tonight_recommendation)
-        self.show_tonight_recommendation = (
-            show_tonight_recommendation)
         self.present_mission = present_mission
-        self.build_mission = build_mission
         self.tonight_mission_service = tonight_mission_service
 
     def run_portfolio(self):

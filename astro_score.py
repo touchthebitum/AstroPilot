@@ -69,7 +69,6 @@ from decision.night_advisor.night_advisor import NightAdvisor
 from decision.engines.future_opportunity_engine import FutureOpportunityEngine
 from night_scheduler import build_night_schedule
 from night_strategy import NightStrategy
-from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from astral import LocationInfo
 from astral.sun import sun, dusk ,dawn
@@ -4492,7 +4491,6 @@ report_runner = ReportRunner(
     show_portfolio_completion_forecast=show_portfolio_completion_forecast,
     show_tonight_recommendation=show_tonight_recommendation,
     present_mission=MissionPresenter.present,
-    build_mission=NightMissionBuilder.build,
     tonight_mission_service=tonight_mission_service,    
 )
 
@@ -4518,7 +4516,6 @@ report_runner = ReportRunner(
     show_portfolio_completion_forecast=show_portfolio_completion_forecast,
     show_tonight_recommendation=show_tonight_recommendation,
     present_mission=MissionPresenter.present,
-    build_mission=NightMissionBuilder.build,
     tonight_mission_service=tonight_mission_service,
 )
 
