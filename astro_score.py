@@ -3831,28 +3831,6 @@ def evaluate_object(
 
     return result
 
-def build_night_result():
-    return {
-        "date": str(night_date),
-            "score": night_score,
-            "moon_impact": best["moon_impact"],
-            "moon_penalty": best["moon_penalty"],
-            "verdict": verdict(night_score),
-            "bortle": bortle,
-            "object": best_object,
-            "best_setup": setup_name,
-            "setup_score": best_results[0].get("setup_score", 0),
-            "global_score": best_results[0].get("global_score", 0),
-            "best_object_score": all_results[0]["global_score"],
-            "all_objects": all_results,
-            "best_objects": [
-                r["name"]
-                for r in top3
-                if r["score"] == best_score
-            ]
-    }
-    
-
 def build_night_schedule_legacy(objects, available_hours, profile=None):
     schedule = []
     remaining = available_hours
