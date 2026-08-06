@@ -1688,42 +1688,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
     
     return candidates
 
-
-def build_night_schedule_legacy_old(top_objects, available_hours):
-    """
-    Remplit une nuit avec plusieurs projets.
-    """
-
-    schedule = []
-    remaining = available_hours
-
-    for obj in top_objects:
-
-        project = recommend_project_for_object(
-            obj.get("catalog_key", obj.get("name"))
-        )
-
-        if not project:
-            continue
-
-        needed = min(project["remaining"], remaining)
-
-        if needed <= 0:
-            continue
-
-        schedule.append({
-            "object": obj["name"],
-            "project": project["name"],
-            "hours": round(needed, 1),
-        })
-
-        remaining -= needed
-
-        if remaining <= 0:
-            break
-
-    return schedule
-
 def recommend_project_for_object(object_key):
 
     projects = get_projects()
