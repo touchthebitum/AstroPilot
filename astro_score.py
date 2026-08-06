@@ -1688,32 +1688,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
     
     return candidates
 
-def recommend_project_for_object(object_key):
-
-    projects = get_projects()
-
-    candidates = []
-
-    for name, project in projects.items():
-
-        if name != object_key:
-            continue
-
-        remaining = project_remaining_hours(name)
-
-        if remaining <= 0:
-            continue
-
-        candidates.append({
-            "name": name,
-            "remaining": remaining,
-        })
-
-    if not candidates:
-        return None
-
-    return candidates[0]
-
 def forecast_available_hours(nights):
     total = 0
 
