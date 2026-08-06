@@ -3916,19 +3916,6 @@ tonight_mission_service = TonightMissionService(
     build_mission=NightMissionBuilder.build,
 )
 
-report_runner = ReportRunner(
-    portfolio_forecast_engine=portfolio_forecast_engine,
-    show_portfolio_ranking=show_portfolio_ranking,
-    show_completion_forecast=show_completion_forecast,
-    show_astro_calendar=show_astro_calendar,
-    simulate_portfolio_calendar=simulate_portfolio_calendar,
-    show_roadmap=show_roadmap,
-    show_portfolio_completion_forecast=show_portfolio_completion_forecast,
-    show_tonight_recommendation=show_tonight_recommendation,
-    present_mission=MissionPresenter.present,
-    tonight_mission_service=tonight_mission_service,    
-)
-
 forecast_engine = ForecastEngine(
     fetch_weather=fetch_weather,
     parse_hourly_weather=parse_hourly_weather,
