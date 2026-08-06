@@ -624,36 +624,6 @@ def estimate_remaining_nights(hours_remaining, nights=None):
 
     return hours_remaining / max(1, avg_capacity)
 
-def evaluate_project_session(project, session_hours):
-    remaining_before = project_remaining_hours(project["catalog_key"])
-
-    actual_hours = min(session_hours, remaining_before)
-
-    gain = (
-        actual_hours / project["planned_hours"]
-    ) * 100
-
-    remaining_after = max(
-        0,
-        remaining_before - actual_hours
-    )
-
-    completed = remaining_after <= 0
-
-    roi = 0
-    if actual_hours > 0:
-        roi = gain / actual_hours
-
-    return {
-        "project": project["catalog_key"],
-        "hours": actual_hours,
-        "gain": gain,
-        "roi": roi,
-        "remaining_after": remaining_after,
-        "completed": completed,
-    }
-
-
 def portfolio_completion_roadmap():
     projects = get_projects()
 
