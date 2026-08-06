@@ -624,34 +624,6 @@ def estimate_remaining_nights(hours_remaining, nights=None):
 
     return hours_remaining / max(1, avg_capacity)
 
-def portfolio_completion_roadmap():
-    projects = get_projects()
-
-    roadmap = []
-
-    for name, project in projects.items():
-
-        remaining = max(
-            0,
-            project["target_hours"] - project["hours"]
-        )
-
-        if remaining <= 0:
-            continue
-
-        roadmap.append({
-            "name": name,
-            "remaining": remaining,
-            "score": portfolio_score(name)
-        })
-
-    roadmap.sort(
-        key=lambda p: p["score"],
-        reverse=True
-    )
-
-    return roadmap
-
 def simulated_portfolio_score(project):
 
     remaining = (
