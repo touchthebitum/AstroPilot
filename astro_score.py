@@ -3948,27 +3948,6 @@ def forecast_astro(
 
     return results
 
-
-def fake_clear_weather():
-    rows = []
-    now = datetime.now(ZoneInfo(TIMEZONE))
-
-    for i in range(24 * 7):
-        rows.append({
-            "time": now + timedelta(hours=i),
-            "cloud_cover": 0,
-            "cloud_cover_low": 0,
-            "cloud_cover_mid": 0,
-            "cloud_cover_high": 0,
-            "precipitation": 0,
-            "relative_humidity_2m": 50,
-            "visibility": 20000,
-            "wind_speed_10m": 5,
-            "temperature_2m": 10,
-        })
-
-    return rows
-
 def get_location_by_ip():
     try:
         r = requests.get("https://ipapi.co/json/", timeout=10)
