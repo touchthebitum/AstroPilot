@@ -1799,46 +1799,6 @@ def next_project_after(current_project):
 
     return None
 
-def show_project_stats():
-    profile = load_user_profile()
-
-    projects = profile.get("projects", {})
-    sessions = profile.get("sessions", [])
-
-    print("\n===== STATISTIQUES =====\n")
-
-    total_hours = 0
-
-    for name, data in projects.items():
-        hours = data.get("hours", 0)
-        total_hours += hours
-
-        remaining = max(
-            0,
-            data.get("target_hours", 0) - hours
-        )
-        priority = project_priority(name)
-        print(
-            f"{name:15}"
-            f"{hours:5.1f} h   "
-            f"reste {remaining:5.1f} h"
-            f"prio {priority:5.1f}"
-        )
-        print()
-        print(f"Temps total acquis : {total_hours:.1f} h")
-        print(f"Nombre de sessions : {len(sessions)}")
-
-    if projects:
-        best = max(
-        projects.items(),
-        key=lambda x: x[1].get("hours", 0)
-    )
-
-        print(
-            f"Projet principal : "
-            f"{best[0]} ({best[1]['hours']:.1f} h)"
-        )
-
 def show_tonight_recommendation(night):
 
     night_projects = recommend_project_for_night(
