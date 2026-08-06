@@ -2535,62 +2535,6 @@ def show_action_plan(
 
     print("\n=============================")
 
-def show_portfolio_dashboard():
-    
-    projects = get_projects()
-
-    if not projects:
-        print("\nAucun projet enregistré")
-        return
-
-    total_done = 0
-    total_target = 0
-
-    print("\n===== PORTEFEUILLE ASTRO =====\n")
-
-    for name, project in projects.items():
-        hours = project.get("hours", 0)
-        target = project.get("target_hours", 0)
-        remaining = max(0, target - hours)
-
-        progress = 0
-        if target > 0:
-            progress = round(hours / target * 100, 1)
-
-        total_done += hours
-        total_target += target
-
-        print(
-            f"{name:15} "
-            f"{hours:5.1f} / {target:5.1f} h "
-            f"{progress:5.1f}% "
-            f"reste {remaining:5.1f} h"
-        )
-        total_done = 0
-        total_target = 0
-
-    for name, project in projects.items():
-        done = project.get("hours", 0)
-        target = project.get("target_hours", 0)
-
-        total_done += done
-        total_target += target
-        total_remaining = max(0, total_target - total_done)
-
-        global_progress = 0
-    if total_target > 0:
-        global_progress = round(total_done / total_target * 100, 1)
-    print(f"Heures cibles : {total_target:.1f} h")
-
-    print("\n----- TOTAL -----")
-    print(f"Heures réalisées : {total_done:.1f} h")
-    print(f"Heures cibles : {total_target:.1f} h")
-    print(f"Heures restantes : {total_remaining:.1f} h")
-    nights = estimate_portfolio_nights()
-    print(f"Nuits restantes estimées : {nights}")
-    print(f"Progression globale : {global_progress:.1f}%")
-
-
 def session_portfolio_gain(name, session_hours=3.0):
     remaining = project_remaining_hours(name)
 
