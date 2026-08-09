@@ -231,34 +231,6 @@ TARGETS = {
 }
 USE_LEGACY_TONIGHT_REPORT = False
 
-def framing_bonus(target_object):
-    obj = CATALOG[target_object]
-
-    fov = get_fov()
-    frame_width = fov["width_deg"]
-    frame_height = fov["height_deg"]
-
-    object_width = obj.get("width_arcmin", obj.get("size_arcmin", 30)) / 60
-    object_height = obj.get("height_arcmin", obj.get("size_arcmin", 30)) / 60
-
-    ratio_w = object_width / frame_width
-    ratio_h = object_height / frame_height
-    ratio = max(ratio_w, ratio_h)
-
-    
-    if 0.3 <= ratio <= 1.0:
-        return 10
-    elif 0.15 <= ratio < 0.3:
-        return 5
-    elif 1.0 <= ratio < 1.5:
-        return 0
-    elif 1.5 < ratio <= 2.0:
-        return 0
-    elif 2.0 < ratio <= 3.0:
-        return -5
-    else:
-        return -20
-
 def forecast_night_capacities(
     lat,
     lon,
