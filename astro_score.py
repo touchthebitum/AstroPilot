@@ -3794,16 +3794,6 @@ def get_location_by_ip():
             "city": "Buttes",
             "country": "Switzerland",
         }
-def decision_score(astro_score, portfolio_score, profile):
-    prefs = profile.get("preferences", {})
-
-    astro_weight = prefs.get("astro_weight", 0.7)
-    project_weight = prefs.get("project_weight", 0.3)
-
-    return (
-        astro_score * astro_weight +
-        portfolio_score * project_weight
-    )
 
 def get_future_night_capacities(nights, max_nights=10):
     top_nights = sorted(
