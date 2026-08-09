@@ -1013,28 +1013,6 @@ def setup_score(setup, project):
     "reasons": reasons,
 }
 
-def explain_setup_choice(setup, obj):
-    reasons = []
-
-    obj_type = obj.get("type", "")
-
-    if setup.get("f_ratio", 99) <= 2.8:
-        reasons.append("Optique très lumineuse")
-
-    if setup.get("camera", "").lower().endswith("2600"):
-        reasons.append("Capteur haute résolution")
-
-    if setup.get("camera", "").lower().endswith("183"):
-        reasons.append("Très bon échantillonnage")
-
-    if obj_type == "galaxy":
-        reasons.append("Adapté aux objets compacts")
-
-    if obj_type == "nebula":
-        reasons.append("Champ adapté aux nébuleuses")
-
-    return reasons
-
 def build_mission_input(evaluation):
     window = evaluation["window"]
     window_start = window["start"]
