@@ -3630,27 +3630,6 @@ def forecast_astro(
 
     return results
 
-def get_location_by_ip():
-    try:
-        r = requests.get("https://ipapi.co/json/", timeout=10)
-        r.raise_for_status()
-        data = r.json()
-
-        return {
-            "lat": float(data["latitude"]),
-            "lon": float(data["longitude"]),
-            "city": data.get("city", "Lieu détecté"),
-            "country": data.get("country_name", ""),
-        }
-
-    except Exception:
-        return {
-            "lat": 46.7508,
-            "lon": 6.5495,
-            "city": "Buttes",
-            "country": "Switzerland",
-        }
-
 def best_equipment_for_object(object_name):
     obj = CATALOG.get(object_name)
 
