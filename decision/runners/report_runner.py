@@ -100,8 +100,3 @@ class ReportRunner:
 
         if mission is not None:
             self.present_mission(mission)
-
-        if top_nights and use_legacy_report:
-            self.show_tonight_recommendation(
-                top_nights[0]
-            )
