@@ -1534,46 +1534,6 @@ def show_roadmap(
     night_capacities=night_capacities,
     )
 
-def build_dashboard_data(
-    night,
-    night_project,
-    best_setup,
-    best_filters,
-    night_capacities=None
-):
-    if night_capacities is None:
-        night_capacities = []
-
-    total_capacity = forecast_available_hours(night_capacities)
-
-    avg_capacity = (
-        total_capacity / max(1, len(night_capacities))
-        if night_capacities
-        else 3.0
-    )
-
-    project_name = night_project["name"]
-    remaining_hours = project_remaining_hours(project_name)
-
-    remaining_nights = (
-        remaining_hours / max(1, avg_capacity)
-        if remaining_hours is not None
-        else None
-    )
-
-    return {
-        "recommended_project": project_name,
-        "final_score": round(night_project.get("final_score", 0), 1),
-        "astro_score": round(night_project.get("astro_score", 0), 1),
-        "roi": round(night_project.get("roi", 0), 2),
-        "remaining_hours": round(remaining_hours, 1) if remaining_hours is not None else None,
-        "remaining_nights": round(remaining_nights, 1) if remaining_nights is not None else None,
-        "best_setup": best_setup,
-        "best_filters": best_filters,
-        "future_capacity_hours": round(total_capacity, 1),
-        "average_night_capacity": round(avg_capacity, 1),
-    }
-
 def average_night_capacity(nights):
     if not nights:
         return 1
