@@ -55,7 +55,6 @@ from decision.mission.mission_builder import NightMissionBuilder
 from decision.mission.mission_input import MissionInput
 from decision.mission.mission_presenter import MissionPresenter
 from decision.weather.weather_forecast import WeatherForecast
-from decision.night_advisor.night_advisor import NightAdvisor
 from decision.engines.future_opportunity_engine import FutureOpportunityEngine
 from night_scheduler import build_night_schedule
 from night_strategy import NightStrategy
