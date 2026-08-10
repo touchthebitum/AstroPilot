@@ -51,7 +51,6 @@ from decision.decision_engine import DecisionEngine
 from decision.rules.altitude_rule import AltitudeRule
 from decision.rules.visibility_rule import VisibilityRule
 from decision.rules.seeing_rule import SeeingRule
-from decision.rules.base_rule import BaseRule
 from decision.mission.mission_builder import NightMissionBuilder
 from decision.mission.mission_input import MissionInput
 from decision.mission.mission_presenter import MissionPresenter
