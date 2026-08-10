@@ -3922,11 +3922,6 @@ def main(argv=None) -> int:
                 use_legacy_report=USE_LEGACY_TONIGHT_REPORT,
             )
 
-        if USE_LEGACY_TONIGHT_REPORT and top_nights:
-            show_tonight_recommendation(top_nights[0])
-        if USE_LEGACY_TONIGHT_REPORT and tonight_nights:
-            show_tonight_recommendation(tonight_nights[0])
-
     elif args.mode == "full":
         report_runner.run_full(
             nights=nights,
