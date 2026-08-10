@@ -1019,40 +1019,6 @@ def save_user_profile(profile):
     with open("data/user_profile.json", "w", encoding="utf-8") as f:
         json.dump(profile, f, indent=4, ensure_ascii=False)
 
-def log_project_session(object_name, session_hours):
-    profile = load_user_profile()
-
-    projects = profile.get("projects", {})
-
-    if object_name not in projects:
-        print(f"Projet {object_name} introuvable")
-        return
-
-    current_hours = projects[object_name].get("hours", 0)
-
-    projects[object_name]["hours"] = round(
-        current_hours + float(session_hours),
-        1
-    )
-    session = {
-    "date": datetime.now().strftime("%Y-%m-%d"),
-    "object": object_name,
-    "hours": float(session_hours),
-    }
-    profile.setdefault("sessions", []).append(session)
-
-    save_user_profile(profile)
-
-    remaining = project_remaining_hours(object_name)
-
-    print(f"Projet {object_name} mis à jour")
-    print(f"Ancien total : {current_hours} h")
-    print(f"Ajout : {session_hours} h")
-    print(f"Nouveau total : {projects[object_name]['hours']} h")
-
-    if remaining is not None:
-        print(f"Reste : {remaining} h")
-
 def closure_bonus(name, available_hours=3.0):
     remaining = project_remaining_hours(name)
 
