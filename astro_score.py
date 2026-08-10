@@ -3745,37 +3745,6 @@ def get_location_by_ip():
             "country": "Switzerland",
         }
 
-def get_future_night_capacities(nights, max_nights=10):
-    top_nights = sorted(
-        nights,
-        key=lambda x: x["score"],
-        reverse=True
-
-    )[:max_nights]
-
-    capacities = []
-
-    for night in top_nights:
-        window = night.get("best_window")
-
-        if window:
-            start = int(window["start"].split(":")[0])
-            end = int(window["end"].split(":")[0])
-            duration = end - start
-        else:
-            duration = 0
-
-        capacities.append({
-            "date": night.get("date"),
-            "hours": max(0, duration),
-            "score": night.get("score", 0),
-        })
-
-    capacities.sort(
-        key=lambda x: x["date"]
-    )
-    return capacities
-
 def best_equipment_for_object(object_name):
     obj = CATALOG.get(object_name)
 
