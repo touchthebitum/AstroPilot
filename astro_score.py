@@ -56,7 +56,6 @@ from decision.mission.mission_input import MissionInput
 from decision.mission.mission_presenter import MissionPresenter
 from decision.weather.weather_forecast import WeatherForecast
 from decision.engines.future_opportunity_engine import FutureOpportunityEngine
-from night_strategy import NightStrategy
 from zoneinfo import ZoneInfo
 from astral import LocationInfo
 from astral.sun import sun, dusk ,dawn
