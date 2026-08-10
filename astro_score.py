@@ -24,7 +24,6 @@ from decision.engines.night_strategy_engine import NightStrategyEngine
 from decision.engines.project_selection_engine import ProjectSelectionEngine
 from decision.models.candidate import Candidate
 from decision.portfolio.portfolio_presenter import (show_portfolio_completion_forecast,)
-from decision.models.future_opportunity import FutureOpportunity
 from decision.rules.object_fit_rule import ObjectFitRule
 from datetime import datetime, timedelta
 from decision.models.context.decision_context import DecisionContext
