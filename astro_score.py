@@ -1014,11 +1014,6 @@ def build_mission_input(evaluation):
         ),
     )
 
-
-def save_user_profile(profile):
-    with open("data/user_profile.json", "w", encoding="utf-8") as f:
-        json.dump(profile, f, indent=4, ensure_ascii=False)
-
 def closure_bonus(name, available_hours=3.0):
     remaining = project_remaining_hours(name)
 
