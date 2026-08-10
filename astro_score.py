@@ -1481,48 +1481,6 @@ def estimate_portfolio_completion_date(total_remaining, nights):
 
     return None
 
-def next_project_after(current_project):
-    projects = get_projects()
-
-    ranking = []
-
-    for name, project in projects.items():
-
-        if name == current_project:
-            continue
-
-        remaining = max(
-            0,
-            project["target_hours"] - project["hours"]
-        )
-
-        if remaining <= 0:
-            continue
-
-        score = portfolio_score(name)
-        
-        ranking.append(
-            {
-                "name": name,
-                "score": score,
-                "remaining": remaining,
-            }
-        )
-
-    ranking.sort(
-        key=lambda x: x["score"],
-        reverse=True
-)
-
-    for idx, p in enumerate(ranking, start=1):
-        p["rank"] = idx
-
-        if ranking:
-            ranking[0]["total_projects"] = len(ranking)
-            return ranking[0]
-
-    return None
-
 def show_roadmap(
     roadmap,
     forecast_engine,
