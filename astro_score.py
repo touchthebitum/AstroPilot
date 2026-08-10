@@ -83,7 +83,10 @@ from astropilot.catalog import CATALOG
 from astropilot.equipment_profiles import CURRENT_EQUIPMENT
 from astropilot.equipment_profiles import equipment_match_score
 from astropilot.equipment_profiles import capture_score
-from astropilot.user_profile import (get_default_location, load_user_profile, favorite_targets, get_available_equipment, get_preferences, get_projects, get_decision_weights)
+from astropilot.user_profile import (
+    get_projects,
+    get_decision_weights,
+)
 from astropilot.equipment_profiles import (
     get_fov,
     set_current_equipment,
