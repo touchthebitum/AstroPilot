@@ -80,7 +80,7 @@ import astropy.units as u
 from astropilot.engines.sky_engine import SkyEngine
 from astropy.coordinates.baseframe import NonRotationTransformationWarning
 from astropilot.catalog import CATALOG
-from astropilot.equipment_profiles import CURRENT_EQUIPMENT, get_fov
+from astropilot.equipment_profiles import CURRENT_EQUIPMENT
 from astropilot.equipment_profiles import equipment_match_score
 from astropilot.equipment_profiles import capture_score
 from astropilot.user_profile import (get_default_location, load_user_profile, favorite_targets, get_available_equipment, get_preferences, get_projects, get_decision_weights)
