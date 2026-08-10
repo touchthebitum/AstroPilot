@@ -3696,7 +3696,6 @@ report_runner = ReportRunner(
     simulate_portfolio_calendar=simulate_portfolio_calendar,
     show_roadmap=show_roadmap,
     show_portfolio_completion_forecast=show_portfolio_completion_forecast,
-    show_tonight_recommendation=show_tonight_recommendation,
     present_mission=MissionPresenter.present,
     tonight_mission_service=tonight_mission_service,
 )

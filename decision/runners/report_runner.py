@@ -13,7 +13,6 @@ class ReportRunner:
         simulate_portfolio_calendar,
         show_roadmap,
         show_portfolio_completion_forecast,
-        show_tonight_recommendation,
         present_mission,
         tonight_mission_service,
     ):
@@ -25,8 +24,6 @@ class ReportRunner:
         self.show_roadmap = show_roadmap
         self.show_portfolio_completion_forecast = (
             show_portfolio_completion_forecast)
-        self.show_tonight_recommendation = (
-            show_tonight_recommendation)
         self.present_mission = present_mission
         self.tonight_mission_service = tonight_mission_service
 
