@@ -2961,46 +2961,6 @@ def compare_equipment_for_object(object_name):
             f" img={r['imaging_score']}",
             f" cap={r['cap_score']}",
         )
-def best_setup_for_object(object_name):
-    obj = CATALOG.get(object_name)
-
-    if not obj:
-        return []
-
-    results = []
-
-    for eq_name in list_equipment():
-        set_current_equipment(eq_name)
-
-        result = compare_object_to_equipment(
-            obj.get("size_arcmin", 20),
-            obj.get("type", "unknown"),
-            obj.get("scale", "medium"),
-        )
-
-        img_score = imaging_score(obj)
-        cap_score = capture_score(eq_name)
-
-        final_score = (
-            result["combined_score"] * 0.70 +
-            img_score * 0.15 +
-            cap_score * 0.15
-        )
-
-        results.append({
-            "equipment": eq_name,
-            "score": round(final_score),
-            "equipment_score": 
-        result["equipment_score"],
-            "resolution_score":
-        result["resolution_score"],
-            "frame_bonus": result["frame_bonus"],
-            "ratio": result["ratio"],
-        })
-
-    results.sort(key=lambda x: x["score"], reverse=True)
-
-    return results
 
 def imaging_score(obj):
     """
