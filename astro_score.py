@@ -74,7 +74,6 @@ from astral import LocationInfo
 from astral.sun import sun, dusk ,dawn
 from astral.moon import phase as moon_phase, moonrise, moonset
 from astral import moon
-from astral.sun import sun
 from astropy.coordinates import SkyCoord, get_body, EarthLocation, AltAz
 from astropy.time import Time
 import astropy.units as u
