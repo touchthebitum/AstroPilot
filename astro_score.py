@@ -436,21 +436,6 @@ def season_urgency_bonus(obj):
 
     return 0
 
-def estimate_portfolio_nights():
-    projects = get_projects()
-
-    total_remaining = 0
-
-    for project in projects.values():
-        target = project.get("target_hours", 0)
-        done = project.get("hours", 0)
-
-        total_remaining += max(0, target - done)
-
-    HOURS_PER_NIGHT = 4
-
-    return round(total_remaining / HOURS_PER_NIGHT, 1)
-
 def project_remaining_hours(object_name):
     projects = get_projects()
 
