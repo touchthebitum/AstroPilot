@@ -67,7 +67,6 @@ from astropilot.equipment_profiles import CURRENT_EQUIPMENT
 from astropilot.equipment_profiles import capture_score
 from astropilot.user_profile import (
     get_projects,
-    get_decision_weights,
 )
 from astropilot.equipment_profiles import (
     get_fov,
