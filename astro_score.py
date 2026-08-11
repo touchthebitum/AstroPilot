@@ -60,7 +60,6 @@ from zoneinfo import ZoneInfo
 from astral import LocationInfo
 from astral.sun import sun
 from astral.moon import phase as moon_phase
-from astropilot.engines.sky_engine import SkyEngine
 from astropy.coordinates.baseframe import NonRotationTransformationWarning
 from astropilot.catalog import CATALOG
 from astropilot.equipment_profiles import CURRENT_EQUIPMENT
