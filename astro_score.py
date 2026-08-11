@@ -58,7 +58,7 @@ from decision.weather.weather_forecast import WeatherForecast
 from decision.engines.future_opportunity_engine import FutureOpportunityEngine
 from zoneinfo import ZoneInfo
 from astral import LocationInfo
-from astral.sun import sun, dusk ,dawn
+from astral.sun import sun
 from astral.moon import phase as moon_phase, moonrise, moonset
 from astral import moon
 from astropy.coordinates import SkyCoord, get_body, EarthLocation, AltAz
