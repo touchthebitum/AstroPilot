@@ -70,7 +70,6 @@ from astropilot.user_profile import (
 )
 from astropilot.equipment_profiles import (
     set_current_equipment,
-    get_current_equipment,
     list_equipment,
     compare_object_to_equipment
 )
