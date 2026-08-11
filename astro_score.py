@@ -64,7 +64,6 @@ from astropilot.engines.sky_engine import SkyEngine
 from astropy.coordinates.baseframe import NonRotationTransformationWarning
 from astropilot.catalog import CATALOG
 from astropilot.equipment_profiles import CURRENT_EQUIPMENT
-from astropilot.equipment_profiles import equipment_match_score
 from astropilot.equipment_profiles import capture_score
 from astropilot.user_profile import (
     get_projects,
