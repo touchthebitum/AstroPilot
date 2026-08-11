@@ -69,7 +69,6 @@ from astropilot.user_profile import (
     get_projects,
 )
 from astropilot.equipment_profiles import (
-    get_fov,
     set_current_equipment,
     get_current_equipment,
     list_equipment,
