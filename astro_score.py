@@ -79,7 +79,6 @@ from astropilot.user_profile import (
     load_user_profile,
     favorite_targets,
     get_active_equipment,
-    get_preferences,
 )
 
 warnings.filterwarnings(
