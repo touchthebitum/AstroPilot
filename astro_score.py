@@ -2708,7 +2708,6 @@ def main(argv=None) -> int:
     global night_capacities
     global nights
     global rows
-    global top_nights
     global weather
 
     CURRENT_EQUIPMENT = get_active_equipment()
