@@ -2833,7 +2833,6 @@ def main(argv=None) -> int:
     
     if weather is None:
         print ("Prévisions météo indisponibles.")
-        nights=[]
     user_profile = load_user_profile()
     selected_equipment = args.equipment or get_active_equipment()
     
