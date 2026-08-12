@@ -2835,9 +2835,6 @@ def main(argv=None) -> int:
         print ("Prévisions météo indisponibles.")
         nights=[]
     else:
-        rows = parse_hourly_weather(weather)
-    
-    
         bortle = 3
         target = "deep_sky"
     user_profile = load_user_profile()
