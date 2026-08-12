@@ -2711,7 +2711,6 @@ def main(argv=None) -> int:
     global night_capacities
     global nights
     global rows
-    global selected_equipment
     global top_nights
     global weather
 
@@ -2832,7 +2831,6 @@ def main(argv=None) -> int:
     
     if weather is None:
         print ("Prévisions météo indisponibles.")
-    selected_equipment = args.equipment or get_active_equipment()
     
     nights = forecast_astro(
         lat,
