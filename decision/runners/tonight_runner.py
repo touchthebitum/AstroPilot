@@ -44,7 +44,6 @@ class TonightRunner:
         winner,
         top_objects,
         top_nights,
-        use_legacy_report,
     ):
         available_hours = winner.get(
             "duration",
@@ -94,7 +93,6 @@ class TonightRunner:
             winner=winner,
             top_objects=top_objects,
             top_nights=top_nights,
-            use_legacy_report=use_legacy_report,
         )
 
         self.show_completion_forecast(
