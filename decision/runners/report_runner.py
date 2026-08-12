@@ -65,7 +65,6 @@ class ReportRunner:
     def run_tonight(
         self,
         top_nights,
-        use_legacy_report,
         winner=None,
         objects=None,
         recommendation: Recommendation | None = None,

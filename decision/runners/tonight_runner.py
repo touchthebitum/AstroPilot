@@ -76,7 +76,6 @@ class TonightRunner:
             recommendation=recommendation,
             build_mission_input=self.build_mission_input,
             top_nights=top_nights,
-            use_legacy_report=use_legacy_report,
         )
 
     def run(
