@@ -76,7 +76,6 @@ import argparse
 from astropilot.user_profile import (
     get_default_location,
     load_user_profile,
-    favorite_targets,
     get_active_equipment,
 )
 
