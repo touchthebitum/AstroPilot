@@ -2901,11 +2901,6 @@ def main(argv=None) -> int:
             night_capacities=night_capacities,
     )
 
-        report_runner.run_tonight(
-    top_nights=top_nights,
-    use_legacy_report=USE_LEGACY_TONIGHT_REPORT,
-    )
-
     return 0
 
 
