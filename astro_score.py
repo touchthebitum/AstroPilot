@@ -2713,7 +2713,6 @@ def main(argv=None) -> int:
     global rows
     global selected_equipment
     global top_nights
-    global user_profile
     global weather
 
     CURRENT_EQUIPMENT = get_active_equipment()
@@ -2833,7 +2832,6 @@ def main(argv=None) -> int:
     
     if weather is None:
         print ("Prévisions météo indisponibles.")
-    user_profile = load_user_profile()
     selected_equipment = args.equipment or get_active_equipment()
     
     nights = forecast_astro(
