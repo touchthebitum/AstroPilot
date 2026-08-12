@@ -2702,7 +2702,6 @@ portfolio_engine = PortfolioEngine(
 )
 
 def main(argv=None) -> int:
-    global city
     global lat
     global lon
     global night_capacities
