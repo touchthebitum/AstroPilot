@@ -2189,14 +2189,7 @@ def evaluate_object(
         decision_engine.add_rule(ImageQualityRule())
         decision_engine.add_rule(ObjectFitRule())
 
-        ####print(">>> ResolutionRule ajoutée")
-        ###print(decision_engine.rules)
-
         clouds = best.get("clouds", 0)
-
-        ##print(best.keys())
-        #print(best.get("setup_ranking"))
-
 
         camera = Camera(
             manufacturer="ZWO",
