@@ -2702,7 +2702,6 @@ portfolio_engine = PortfolioEngine(
 )
 
 def main(argv=None) -> int:
-    global night_capacities
     global nights
     global rows
     global weather
