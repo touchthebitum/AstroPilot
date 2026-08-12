@@ -1828,49 +1828,6 @@ def simulate_portfolio_calendar(nights):
             completion_dates[name] = night["date"]
             print(f"✓ Projet terminé : {name}")
 
-        
-    ###############################print("\n===== DATES DE FIN SIMULÉES =====")
-
-    ##############################unfinished_projects = []
-
-    #############################for name, project in projects.items():
-        ############################done = project.get("hours_done", project.get("hours", 0))
-        ###########################target = project.get("target_hours", 0)
-        ##########################remaining = max(0, target - done)
-
-        #########################if remaining > 0:
-            #####################unfinished_projects.append(name)
-
-        ########################avg_night_hours = (
-            ####################sum(n.get("duration", 3.0) for n in nights) / len(nights)
-            ###################if nights else 3.0
-        ##################)
-
-        #################unfinished_hours = sum(
-            ################remaining_by_name.get(name, 0)
-            ###############for name in unfinished_projects
-        ##############)
-
-        #############extra_nights = math.ceil(unfinished_hours / avg_night_hours) if avg_night_hours > 0 else 0
-
-        ############if unfinished_projects and completion_dates:
-            ###########last_known_date = max(completion_dates.values())
-            ##########portfolio_end = (
-                #########datetime.strptime(last_known_date, "%Y-%m-%d")
-                ########+ timedelta(days=extra_nights)
-            #######).strftime("%Y-%m-%d")
-        ######elif completion_dates:
-            #####portfolio_end = max(completion_dates.values())
-        ####else:
-            ###portfolio_end = "Indéterminée"
-
-
-    ##for name, date in completion_dates.items():
-            #print(f"{name} -> {date}")
-
-    #print("\n===== FIN PORTEFEUILLE =====")
-    #print(f"Date estimée : {portfolio_end}")
-
     return {
     "completion_dates": completion_dates,
     "portfolio_end": None,
