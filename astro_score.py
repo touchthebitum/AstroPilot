@@ -62,7 +62,6 @@ from astral.sun import sun
 from astral.moon import phase as moon_phase
 from astropy.coordinates.baseframe import NonRotationTransformationWarning
 from astropilot.catalog import CATALOG
-from astropilot.equipment_profiles import CURRENT_EQUIPMENT
 from astropilot.equipment_profiles import capture_score
 from astropilot.user_profile import (
     get_projects,
