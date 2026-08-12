@@ -2703,7 +2703,6 @@ portfolio_engine = PortfolioEngine(
 )
 
 def main(argv=None) -> int:
-    global CURRENT_EQUIPMENT
     global args
     global city
     global lat
