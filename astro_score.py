@@ -2884,7 +2884,7 @@ def main(argv=None) -> int:
         report_runner.run_portfolio()
 
     elif args.mode == "calendar":
-        roadmap = report_runner.run_calendar(nights)
+        report_runner.run_calendar(nights)
 
     elif args.mode == "tonight":
         if top_nights:
