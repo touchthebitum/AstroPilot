@@ -81,7 +81,6 @@ class TonightRunner:
         self,
         top_nights,
         night_capacities,
-        use_legacy_report,
     ):
         if not top_nights:
             return

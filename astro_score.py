@@ -206,7 +206,6 @@ TARGETS = {
     "bortle": 0.4,
 },
 }
-USE_LEGACY_TONIGHT_REPORT = False
 
 def forecast_night_capacities(
     lat,
@@ -2892,7 +2891,6 @@ def main(argv=None) -> int:
             tonight_runner.run(
                 top_nights=tonight_nights,
                 night_capacities=night_capacities,
-                use_legacy_report=USE_LEGACY_TONIGHT_REPORT,
             )
 
     elif args.mode == "full":
