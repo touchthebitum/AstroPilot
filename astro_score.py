@@ -2834,9 +2834,6 @@ def main(argv=None) -> int:
     if weather is None:
         print ("Prévisions météo indisponibles.")
         nights=[]
-    else:
-        bortle = 3
-        target = "deep_sky"
     user_profile = load_user_profile()
     selected_equipment = args.equipment or get_active_equipment()
     
