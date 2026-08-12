@@ -2167,11 +2167,6 @@ def evaluate_object(
     remaining_hours = project_remaining_hours(obj_name)
     roi = project_roi(obj_name)
 
-   
-    progress = project_progress(obj_name)
-    remaining_hours = project_remaining_hours(obj_name)
-    roi = project_roi(obj_name)
-
     altitude = best.get("target_altitude")
 
     if altitude is not None:
