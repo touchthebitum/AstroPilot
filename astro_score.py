@@ -2703,7 +2703,6 @@ portfolio_engine = PortfolioEngine(
 
 def main(argv=None) -> int:
     global nights
-    global weather
 
     CURRENT_EQUIPMENT = get_active_equipment()
     print("\nSetup actif :", CURRENT_EQUIPMENT)
