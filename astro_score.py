@@ -881,13 +881,6 @@ def framing_score(setup, project_name):
 
     fill_ratio = object_size / fov_width_arcmin
 
-    ######print(
-    #####project_name,
-    ####"size=", object_size,
-    ###"fov=", round(fov_width_arcmin, 1),
-    ##"fill=", round(fill_ratio, 2)
-    #)
-
     if 0.4 <= fill_ratio <= 0.8:
         return 25
 
