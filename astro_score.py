@@ -1701,7 +1701,7 @@ def build_astro_calendar(projects, nights):
 
     return calendar
 
-def show_astro_calendar():
+def show_astro_calendar(nights):
     projects = get_projects()
 
     if not projects:

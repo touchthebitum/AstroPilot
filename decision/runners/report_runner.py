@@ -32,7 +32,7 @@ class ReportRunner:
         self.show_completion_forecast()
 
     def run_calendar(self, nights):
-        self.show_astro_calendar()
+        self.show_astro_calendar(nights)
         return self.simulate_portfolio_calendar(nights)
 
     def run_full(
@@ -41,7 +41,7 @@ class ReportRunner:
         night_capacities,
     ):
         self.show_portfolio_ranking()
-        self.show_astro_calendar()
+        self.show_astro_calendar(nights)
 
         roadmap = self.simulate_portfolio_calendar(nights)
 
