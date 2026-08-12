@@ -1591,7 +1591,6 @@ def show_completion_forecast():
         progress = project_progress(name)
         remaining = project_remaining_hours(name)
 
-        progress = project_progress(name)
         nights_needed = math.ceil (remaining / 2.0)
         completion_date = estimate_completion_date(
             remaining,
