@@ -2190,8 +2190,6 @@ def evaluate_object(
 
         summary = DecisionSummaryEngine.build(contributions)
 
-        from decision.recommendation.alternative_target_engine import AlternativeTargetEngine
-
     priority = profile.get("project_priorities", {}).get(obj_name, 0)
     
     result = {
