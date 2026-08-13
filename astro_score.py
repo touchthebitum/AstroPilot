@@ -1090,32 +1090,6 @@ def portfolio_category_load():
 
     return loads
 
-
-def portfolio_roadmap():
-    projects = get_projects()
-
-    roadmap = []
-
-    for name, project in projects.items():
-
-        remaining = project_remaining_hours(name)
-
-        if remaining is None or remaining <= 0:
-            continue
-
-        roi = project_roi(name)
-
-        roadmap.append({
-            "name": name,
-            "remaining": remaining,
-            "roi": roi,
-            "nights": round(remaining / 3, 1)
-        })
-
-    roadmap.sort(key=lambda x: x["roi"], reverse=True)
-
-    return roadmap
-
 project_selection_engine = ProjectSelectionEngine()
 
 night_strategy_engine = NightStrategyEngine(strategy_weights)
