@@ -1582,7 +1582,6 @@ def show_completion_forecast():
     )
 
     for name in projects:
-        score = portfolio_score(name)
         progress = project_progress(name)
         remaining = project_remaining_hours(name)
 
