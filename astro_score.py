@@ -1575,9 +1575,6 @@ def show_completion_forecast():
     if not projects:
         return
 
-    capacity = forecast_available_hours(
-        sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
-    )
     best_nights = sorted(
         nights,
         key=lambda x: x["score"],
