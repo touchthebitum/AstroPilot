@@ -39,7 +39,7 @@ def show_portfolio_completion_forecast(roadmap):
     print(f"Nuits restantes : {len(roadmap)}")
     print(f"Fin estimée du portefeuille : {final_date}")
 
-    print("\n===== PROGRESSION DU PORTEFEUILLE =====")
+    print("\n===== ÉTAT PRÉVU EN FIN DE ROADMAP =====")
 
     displayed = set()
 
@@ -59,17 +59,19 @@ def show_portfolio_completion_forecast(roadmap):
         start_date = project_steps[0].get("date", "?")
         end_date = project_steps[-1].get("date", "?")
 
-        hours = sum(
-            s.get("hours", 0)
-            for s in project_steps
-        )
+        target_hours = project_steps[0]["target_hours"]
 
         nights = len(project_steps)
 
         remaining_after = project_steps[-1].get("remaining_after", 0)
 
-        completed = max(0.0, hours - remaining_after)
-        progress = completed / hours if hours > 0 else 1.0
+        completed = max(0.0, target_hours - remaining_after)
+
+        progress = (
+            completed / target_hours
+            if target_hours > 0 else 1.0
+        )
+
         percent = progress * 100
 
         if remaining_after <= 0:
@@ -78,8 +80,8 @@ def show_portfolio_completion_forecast(roadmap):
         else:
             icon = "◐"
             status = (
-                f"{completed:.1f}/{hours:.1f} h "
+                f"{completed:.1f}/{target_hours:.1f} h "
                 f"({percent:.0f} %) • reste {remaining_after:.1f} h"
-            )
+        )
 
         print(f"{icon} {project:<12} {status}")
