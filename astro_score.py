@@ -1204,8 +1204,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
 
         future = future_engine.estimate (catalog_key)
 
-        days_left = season_days_remaining(obj)
-
         risk_label = future.risk
 
         # Ancien système
