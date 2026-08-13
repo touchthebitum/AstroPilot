@@ -1157,8 +1157,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         progression = progression_bonus(catalog_key)
         diversity_bonus = diversification_bonus(catalog_key)
 
-        category_loads = portfolio_category_load()
-
         astro_part = astro_score * astro_weight
         project_part = priority * project_weight
 
