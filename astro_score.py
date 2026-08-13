@@ -320,34 +320,6 @@ def fetch_weather(lat: float, lon: float) -> dict | None:
     except Exception as e:
         print(f"ERREUR : prévisions météo indisponibles ({type(e).__name__})")
         return None
-    
-def estimated_sqm(bortle, moon_illumination, moon_elevation, moon_target_sep):
-    base = {
-        1: 21.9,
-        2: 21.7,
-        3: 21.3,
-        4: 20.8,
-        5: 20.2,
-        6: 19.5,
-        7: 18.8,
-        8: 18.2,
-        9: 17.5,
-    }.get(bortle, 20.0)
-
-    if moon_elevation <= 0:
-        moon_loss = 0
-    else:
-        sep_factor = max(0.3, 1 - moon_target_sep / 180)
-
-        moon_loss = (
-        (moon_illumination / 100)**1.4
-        * (moon_elevation / 90)
-        * sep_factor
-        * 2.5
-    )
-
-    return round(base - moon_loss, 2)
-
 
 def season_days_remaining(obj):
     today = datetime.now(ZoneInfo(TIMEZONE)).date()
