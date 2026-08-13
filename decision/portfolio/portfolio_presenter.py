@@ -1,43 +1,63 @@
 from __future__ import annotations
 
+from astropilot.user_profile import get_projects
+
+
 def show_portfolio_completion_forecast(roadmap):
 
     if not roadmap:
         print("\nAucune prévision disponible.")
         return
 
-    print("\n===== FIN DU PORTEFEUILLE =====")
-    
-    last_step = roadmap[-1]
+    print("\n===== COUVERTURE DU PORTEFEUILLE =====")
 
-    final_date = last_step.get("date", "?")
+    projects = get_projects()
 
-    total_hours = sum(
+    portfolio_remaining = sum(
+        max(
+            0,
+            project.get("target_hours", 0)
+            - project.get("hours", 0),
+        )
+        for project in projects.values()
+    )
+
+    planned_hours = sum(
         step.get("hours", 0)
         for step in roadmap
     )
 
-    active_projects = len({
+    remaining_after_horizon = max(
+        0,
+        portfolio_remaining - planned_hours,
+    )
+
+    planned_projects = len({
         step["project"]
         for step in roadmap
     })
 
-    planned_capacity = sum(
-        step.get("hours", 0)
+    planned_nights = len({
+        step["night"]
         for step in roadmap
-    )
+    })
 
     coverage = (
-        planned_capacity / total_hours * 100
-        if total_hours > 0 else 0
+        planned_hours / portfolio_remaining * 100
+        if portfolio_remaining > 0
+        else 100.0
     )
 
-    print(f"Projets actifs : {active_projects}")
-    print(f"Temps total restant : {total_hours:.1f} h")
-    print(f"Capacité future connue : {planned_capacity:.1f} h")
-    print(f"Couverture : {coverage:.1f} %")
-    print(f"Nuits restantes : {len(roadmap)}")
-    print(f"Fin estimée du portefeuille : {final_date}")
+    final_date = roadmap[-1].get("date", "?")
+
+    print(f"Projets du portefeuille : {len(projects)}")
+    print(f"Projets planifiés : {planned_projects}")
+    print(f"Temps restant portefeuille : {portfolio_remaining:.1f} h")
+    print(f"Heures planifiées sur l'horizon : {planned_hours:.1f} h")
+    print(f"Reste après l'horizon : {remaining_after_horizon:.1f} h")
+    print(f"Couverture du portefeuille : {coverage:.1f} %")
+    print(f"Nuits planifiées : {planned_nights}")
+    print(f"Dernière nuit connue : {final_date}")
 
     print("\n===== ÉTAT PRÉVU EN FIN DE ROADMAP =====")
 
