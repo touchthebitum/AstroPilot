@@ -2181,25 +2181,6 @@ def evaluate_object(
             preferences=preferences_context,
         )
 
-        context = {
-            "altitude": altitude,
-            "illumination": illumination,
-            "moon_elevation": best.get("moon_elevation"),
-            "moon_sep": best.get("moon_sep"),
-            "cloud_cover": clouds,
-            "cloud_cover_low": clouds,
-            "cloud_cover_mid": clouds,
-            "cloud_cover_high": clouds,
-            "humidity" : best.get("humidity", 0),
-            "wind": best.get("wind", 0),
-            "visibility": best.get("visibility", best.get("visibility_m",0)),
-            "seeing" : best.get("seeing"),
-            "sampling": best.get("arcsec_pixel"),
-            "object_type": CATALOG.get(obj_name, {}).get("type"),
-            "object_size_arcmin": CATALOG.get(obj_name, {}).get("size_arcmin"),
-            "object_name": obj_name,
-        }
-
         contributions, decision_score = decision_engine.evaluate(
             decision_context,
             profile,
