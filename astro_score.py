@@ -1232,7 +1232,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
 
         closure = closure_bonus(catalog_key, available_hours)
 
-        future = future_engine.estimate (catalog_key)
         opportunity_ratio = future.opportunity_ratio
 
         opportunity_bonus = max(
