@@ -1211,12 +1211,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         # Ancien système
         risk_v1 = risk_label_to_score(risk_label)
 
-        # Nouveau système
-        risk_v2 = compute_postponement_risk_score(
-            future,
-            days_left,
-        )
-
         # Pour le moment on conserve V1 comme score utilisé
         postponement_risk = risk_v1
 
