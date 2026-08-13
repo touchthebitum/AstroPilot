@@ -720,32 +720,6 @@ def risk_label_to_score(risk):
 
     return mapping.get(str(risk).upper(), 50)
 
-def compute_postponement_risk_score(future, days_left):
-    """
-    Calcule un risque de report continu (0-100)
-    basé sur les opportunités futures réelles.
-    """
-
-    good_nights = future.good_nights
-    opportunity_ratio = future.opportunity_ratio
-
-    # Peu de bonnes nuits => risque élevé
-    window_risk = max(0, 100 - good_nights * 4)
-
-    # Fin de saison proche => risque élevé
-    season_risk = max(0, 100 - days_left)
-
-    # Ratio d'opportunité élevé => risque élevé
-    ratio_risk = min(100, opportunity_ratio * 10)
-
-    risk = (
-        window_risk * 0.5
-        + season_risk * 0.3
-        + ratio_risk * 0.2
-    )
-
-    return round(max(0, min(risk, 100)), 1)
-
 def compute_postponement_impact(
     postponement_risk,
     confidence="MOYENNE",
