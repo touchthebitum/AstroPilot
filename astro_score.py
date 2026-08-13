@@ -1288,13 +1288,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             + portfolio_rank_bonus
         )
 
-        postponement_impact = compute_postponement_impact(
-            postponement_risk=postponement_risk,
-            confidence=obj.get("confidence", "MOYENNE"),
-            project_priority=priority,
-            astro_score=astro_score,
-        )
-
         final_score = (
             astro_part
             + altitude
