@@ -1235,43 +1235,39 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             final_score += 30
 
         candidates.append(
-            Candidate(
-            name = obj["name"],
-            catalog_key = catalog_key,
-            priority= priority,
-            astro_score= astro_score,
-            final_score= final_score,
-            decision_score= decision_score,
-            season_bonus= season,
-            altitude_bonus= altitude,
-            roi= roi,
-            portfolio_score= portfolio_bonus,
-            global_score= obj.get("global_score", astro_score),
-            setup_score= obj.get("setup_score", 0),
-            best_setup= obj.get("best_setup"),
-            completion_bonus= completion_bonus,
-            closure_bonus= closure,
-            postponement_risk= postponement_risk,
-            postponement_penalty= postponement_impact["postponement_penalty"],
-            urgency_bonus= postponement_impact["urgency_bonus"],
-            postponement_net_impact= postponement_impact["postponement_net_impact"],
-            postponement_reason= postponement_impact["postponement_reason"],
-
-            reasons=explain_recommendation(
-            {
-                "astro_score": astro_score,
-                "roi": roi,
-                "postponement_risk": postponement_risk,
-                "completion_bonus": completion_bonus,
-                "closure_bonus": closure,
-                "season_bonus": season,
-                "progression_bonus": progression,
-                "diversity_bonus": diversity_bonus,
-            }
-        ),
-            strategy_scores= strategy_scores,
+            project_selection_engine.build_candidate(
+                name=obj["name"],
+                catalog_key=catalog_key,
+                priority=priority,
+                astro_score=astro_score,
+                final_score=final_score,
+                decision_score=decision_score,
+                season_bonus=season,
+                altitude_bonus=altitude,
+                roi=roi,
+                portfolio_score=portfolio_bonus,
+                global_score=obj.get("global_score", astro_score),
+                setup_score=obj.get("setup_score", 0),
+                best_setup=obj.get("best_setup"),
+                completion_bonus=completion_bonus,
+                closure_bonus=closure,
+                postponement_risk=postponement_risk,
+                postponement_impact=postponement_impact,
+                reasons=explain_recommendation(
+                    {
+                        "astro_score": astro_score,
+                        "roi": roi,
+                        "postponement_risk": postponement_risk,
+                        "completion_bonus": completion_bonus,
+                        "closure_bonus": closure,
+                        "season_bonus": season,
+                        "progression_bonus": progression,
+                        "diversity_bonus": diversity_bonus,
+                    }
+                ),
+                strategy_scores=strategy_scores,
+            )
         )
-    )
 
     if not candidates:
         return None
