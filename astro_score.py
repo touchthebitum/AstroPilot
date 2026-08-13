@@ -1566,7 +1566,7 @@ def show_portfolio_ranking():
             f"roi={r['roi']:.2f}"
         )
 
-def show_completion_forecast():
+def show_completion_forecast(nights):
 
     projects = get_projects()
 
@@ -2856,7 +2856,7 @@ def main(argv=None) -> int:
     print(f"Total prévisionnel : {total_capacity:.1f} h")
 
     if args.mode == "portfolio":
-        report_runner.run_portfolio()
+        report_runner.run_portfolio(nights)
 
     elif args.mode == "calendar":
         report_runner.run_calendar(nights)

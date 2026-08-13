@@ -27,9 +27,9 @@ class ReportRunner:
         self.present_mission = present_mission
         self.tonight_mission_service = tonight_mission_service
 
-    def run_portfolio(self):
+    def run_portfolio(self, nights):
         self.show_portfolio_ranking()
-        self.show_completion_forecast()
+        self.show_completion_forecast(nights)
 
     def run_calendar(self, nights):
         self.show_astro_calendar(nights)
