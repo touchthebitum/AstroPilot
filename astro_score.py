@@ -2002,6 +2002,71 @@ def compute_best_window_for_object(
     top_windows.sort(key=lambda x: x["score"], reverse=True)
     return top_windows[0]
 
+
+def select_best_setup_for_object(
+    obj_name,
+    profile,
+):
+    best_setup = None
+    best_setup_score = -999
+    setup_ranking = []
+
+    for setup_name in profile.get("available_equipment", []):
+        setup = EQUIPMENT_PROFILES.get(setup_name)
+
+        if not setup:
+            continue
+
+        setup_result = setup_score(
+            setup,
+            {
+                "name": obj_name,
+                "type": CATALOG.get(obj_name, {}).get("type", ""),
+            },
+        )
+
+        pixel_um = (
+            setup.get("pixel_size_um")
+            or setup.get("pixel_size_mm")
+        )
+
+        arcsec_pixel = (
+            round(
+                206.265
+                * pixel_um
+                / setup.get("focal_length_mm"),
+                2,
+            )
+            if setup.get("focal_length_mm") and pixel_um
+            else None
+        )
+
+        score = setup_result["score"]
+
+        setup_ranking.append(
+            {
+                "setup": setup_name,
+                "score": score,
+                "reasons": setup_result["reasons"],
+                "arcsec_pixel": arcsec_pixel,
+            }
+        )
+
+        if score > best_setup_score:
+            best_setup_score = score
+            best_setup = setup_name
+
+    setup_ranking.sort(
+        key=lambda item: item["score"],
+        reverse=True,
+    )
+
+    return (
+        best_setup,
+        best_setup_score,
+        setup_ranking,
+    )
+
 def evaluate_object(
     obj_name,
     sky,
@@ -2034,48 +2099,12 @@ def evaluate_object(
     if best is None:
         return None
 
-    best_setup = None
-    best_setup_score = -999
-    setup_ranking = []
-
-    for setup_name in profile.get("available_equipment", []):
-        setup = EQUIPMENT_PROFILES.get(setup_name)
-
-        if not setup:
-            continue
-
-        setup_result = setup_score(
-            setup,
-            {
-                "name": obj_name,
-                "type": CATALOG.get(obj_name, {}).get("type", ""),
-            },
+    best_setup, best_setup_score, setup_ranking = (
+        select_best_setup_for_object(
+            obj_name=obj_name,
+            profile=profile,
         )
-
-        pixel_um = setup.get("pixel_size_um") or setup.get("pixel_size_mm")
-
-        arcsec_pixel = (
-            round(206.265 * pixel_um / setup.get("focal_length_mm"), 2)
-            if setup.get("focal_length_mm") and pixel_um
-            else None
-        )
-
-        s= setup_result["score"]
-        reasons = setup_result["reasons"]
-
-        setup_ranking.append({
-            "setup": setup_name,
-            "score": s,
-            "reasons": reasons,
-            "arcsec_pixel": arcsec_pixel,
-
-        })
-
-        if s > best_setup_score:
-            best_setup_score = s
-            best_setup = setup_name
-
-    setup_ranking.sort(key=lambda x: x["score"], reverse=True)
+    )
     best["best_setup"] = best_setup
     best["setup_score"] = best_setup_score
     best["global_score"] = best["score"] + best_setup_score
