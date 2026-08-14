@@ -2067,6 +2067,139 @@ def select_best_setup_for_object(
         setup_ranking,
     )
 
+def build_decision_context(
+    *,
+    obj_name,
+    best,
+    selected_setup_profile,
+    profile,
+    illumination,
+    lat,
+    lon,
+):
+    clouds = best.get("clouds", 0)
+
+    camera = Camera(
+        manufacturer=selected_setup_profile["camera_manufacturer"],
+        model=selected_setup_profile["camera_model"],
+        pixel_size_um=selected_setup_profile["pixel_size_um"],
+        sensor_width_px=selected_setup_profile["sensor_width_px"],
+        sensor_height_px=selected_setup_profile["sensor_height_px"],
+        monochrome=selected_setup_profile["monochrome"],
+    )
+
+    optics = ImagingOptics(
+        manufacturer=selected_setup_profile["optics_manufacturer"],
+        model=selected_setup_profile["optics_model"],
+        focal_length_mm=selected_setup_profile["focal_length_mm"],
+        aperture_mm=selected_setup_profile["aperture_mm"],
+        focal_ratio=selected_setup_profile["f_ratio"],
+    )
+
+    mount = Mount(
+        manufacturer="ZWO",
+        model="AM3",
+    )
+
+    imaging_filter = ImagingFilter(
+        manufacturer="Baader",
+        name="H-alpha 6.5nm",
+        filter_type="narrowband",
+        bandwidth_nm=6.5,
+        central_wavelength_nm=656.3,
+    )
+
+    setup = ImagingSetup(
+        mount=mount,
+        optics=optics,
+        camera=camera,
+        filter=imaging_filter,
+    )
+
+    target = CelestialObject(
+        name=obj_name,
+        object_type=CATALOG.get(obj_name, {}).get("type"),
+        angular_size_arcmin=CATALOG.get(obj_name, {}).get("size_arcmin"),
+    )
+
+    session_context = SessionContext(
+        start_time=datetime.now(),
+        end_time=datetime.now() + timedelta(hours=3),
+        available_duration=timedelta(hours=3),
+    )
+
+    site_context = SiteContext(
+        name="Buttes",
+        latitude=lat,
+        longitude=lon,
+        elevation=0,
+        bortle=profile.get("preferences", {}).get("bortle", 4),
+        sqm=best.get("sqm"),
+    )
+
+    weather_context = WeatherContext(
+        cloud_cover=clouds,
+        humidity=best.get("humidity", 0),
+        wind_speed_kmh=best.get("wind", 0),
+        seeing_arcsec=best.get("seeing"),
+        transparency=None,
+        temperature_c=None,
+        forecast_confidence=None,
+        visibility=best.get(
+            "visibility",
+            best.get("visibility_m", 0),
+        ),
+    )
+
+    sky_context = SkyContext(
+        target=target,
+        moon_illumination=illumination,
+        moon_separation_deg=best.get("moon_sep", 180),
+        target_altitude_deg=best.get("target_altitude"),
+        astronomical_darkness=True,
+    )
+
+    equipment_context = EquipmentContext(
+        setup=setup,
+    )
+
+    portfolio_context = PortfolioContext(
+        active_projects=0,
+        total_remaining_hours=0,
+        highest_priority=0,
+        average_progress=0,
+    )
+
+    preferences_context = PreferencesContext(
+        astro_weight=profile.get("preferences", {}).get(
+            "astro_weight",
+            0.7,
+        ),
+        project_weight=profile.get("preferences", {}).get(
+            "project_weight",
+            0.3,
+        ),
+        minimum_altitude_deg=profile.get("preferences", {}).get(
+            "minimum_altitude_deg",
+            30,
+        ),
+        minimum_sqm=profile.get("preferences", {}).get(
+            "min_sqm",
+            20,
+        ),
+    )
+
+    return DecisionContext(
+        session=session_context,
+        site=site_context,
+        equipment=equipment_context,
+        weather=weather_context,
+        sky=sky_context,
+        portfolio=portfolio_context,
+        preferences=preferences_context,
+    )
+
+
 def evaluate_object(
     obj_name,
     sky,
@@ -2143,111 +2276,14 @@ def evaluate_object(
         decision_engine.add_rule(ImageQualityRule())
         decision_engine.add_rule(ObjectFitRule())
 
-        clouds = best.get("clouds", 0)
-
-        camera = Camera(
-            manufacturer=selected_setup_profile["camera_manufacturer"],
-            model=selected_setup_profile["camera_model"],
-            pixel_size_um=selected_setup_profile["pixel_size_um"],
-            sensor_width_px=selected_setup_profile["sensor_width_px"],
-            sensor_height_px=selected_setup_profile["sensor_height_px"],
-            monochrome=selected_setup_profile["monochrome"],
-        )
-
-        optics = ImagingOptics(
-            manufacturer=selected_setup_profile["optics_manufacturer"],
-            model=selected_setup_profile["optics_model"],
-            focal_length_mm=selected_setup_profile["focal_length_mm"],
-            aperture_mm=selected_setup_profile["aperture_mm"],
-            focal_ratio=selected_setup_profile["f_ratio"],
-        )
-
-        mount = Mount(
-            manufacturer="ZWO",
-            model="AM3",
-        )
-
-        imaging_filter = ImagingFilter(
-            manufacturer="Baader",
-            name="H-alpha 6.5nm",
-            filter_type="narrowband",
-            bandwidth_nm=6.5,
-            central_wavelength_nm=656.3,
-        )
-
-        setup = ImagingSetup(
-            mount=mount,
-            optics=optics,
-            camera=camera,
-            filter=imaging_filter,
-        )
-
-        target = CelestialObject(
-            name=obj_name,
-            object_type=CATALOG.get(obj_name, {}).get("type"),
-            angular_size_arcmin=CATALOG.get(obj_name, {}).get("size_arcmin"),
-        )
-
-        session_context = SessionContext(
-            start_time=datetime.now(),
-            end_time=datetime.now() + timedelta(hours=3),
-            available_duration=timedelta(hours=3),
-        )
-
-        site_context = SiteContext(
-            name="Buttes",
-            latitude=lat,
-            longitude=lon,
-            elevation=0,
-            bortle=profile.get("preferences", {}).get("bortle", 4),
-            sqm=best.get("sqm"),
-        )
-
-        weather_context = WeatherContext(
-            cloud_cover=clouds,
-            humidity=best.get("humidity", 0),
-            wind_speed_kmh=best.get("wind", 0),
-            seeing_arcsec=best.get("seeing"),
-            transparency=None,
-            temperature_c=None,
-            forecast_confidence=None,
-            visibility=best.get("visibility", best.get("visibility_m", 0)),
-        )
-
-        sky_context = SkyContext(
-            target=target,
-            moon_illumination=illumination,
-            moon_separation_deg=best.get("moon_sep", 180),
-            target_altitude_deg=altitude,
-            astronomical_darkness=True,
-        )
-
-        equipment_context = EquipmentContext(
-            setup=setup,
-        )
-
-        portfolio_context = PortfolioContext(
-            active_projects=0,
-            total_remaining_hours=0,
-            highest_priority=0,
-            average_progress=0,
-        )
-
-        preferences_context = PreferencesContext(
-            astro_weight=profile.get("preferences", {}).get("astro_weight", 0.7),
-            project_weight=profile.get("preferences", {}).get("project_weight", 0.3),
-            minimum_altitude_deg=profile.get("preferences", {}).get("minimum_altitude_deg", 30),
-            minimum_sqm=profile.get("preferences", {}).get("min_sqm", 20),
-        )
-
-        decision_context = DecisionContext(
-            session=session_context,
-            site=site_context,
-            equipment=equipment_context,
-            weather=weather_context,
-            sky=sky_context,
-            portfolio=portfolio_context,
-            preferences=preferences_context,
+        decision_context = build_decision_context(
+            obj_name=obj_name,
+            best=best,
+            selected_setup_profile=selected_setup_profile,
+            profile=profile,
+            illumination=illumination,
+            lat=lat,
+            lon=lon,
         )
 
         contributions, _ = decision_engine.evaluate(
