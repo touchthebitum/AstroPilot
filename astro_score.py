@@ -2181,7 +2181,7 @@ def evaluate_object(
             preferences=preferences_context,
         )
 
-        contributions, decision_score = decision_engine.evaluate(
+        contributions, _ = decision_engine.evaluate(
             decision_context,
             profile,
         )
