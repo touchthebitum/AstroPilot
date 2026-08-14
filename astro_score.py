@@ -2200,6 +2200,24 @@ def build_decision_context(
     )
 
 
+def build_decision_engine():
+    engine = DecisionEngine()
+
+    engine.add_rule(AltitudeRule())
+    engine.add_rule(MoonRule())
+    engine.add_rule(CloudRule())
+    engine.add_rule(HumidityRule())
+    engine.add_rule(WindRule())
+    engine.add_rule(VisibilityRule())
+    engine.add_rule(SeeingRule())
+    engine.add_rule(SamplingRule())
+    engine.add_rule(ResolutionRule())
+    engine.add_rule(ImageQualityRule())
+    engine.add_rule(ObjectFitRule())
+
+    return engine
+
+
 def evaluate_object(
     obj_name,
     sky,
@@ -2263,18 +2281,7 @@ def evaluate_object(
 
     if altitude is not None:
 
-        decision_engine = DecisionEngine()
-        decision_engine.add_rule(AltitudeRule())
-        decision_engine.add_rule(MoonRule())
-        decision_engine.add_rule(CloudRule())
-        decision_engine.add_rule(HumidityRule())
-        decision_engine.add_rule(WindRule())
-        decision_engine.add_rule(VisibilityRule())
-        decision_engine.add_rule(SeeingRule())
-        decision_engine.add_rule(SamplingRule())
-        decision_engine.add_rule(ResolutionRule())
-        decision_engine.add_rule(ImageQualityRule())
-        decision_engine.add_rule(ObjectFitRule())
+        decision_engine = build_decision_engine()
 
         decision_context = build_decision_context(
             obj_name=obj_name,
