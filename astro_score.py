@@ -2084,6 +2084,15 @@ def evaluate_object(
 
     best["arcsec_pixel"] = setup_ranking[0].get("arcsec_pixel") if setup_ranking else None
 
+    selected_setup_profile = (
+        EQUIPMENT_PROFILES.get(best_setup)
+        if best_setup is not None
+        else None
+    )
+
+    if selected_setup_profile is None:
+        return None
+
     progress = project_progress(obj_name)
     remaining_hours = project_remaining_hours(obj_name)
     roi = project_roi(obj_name)
@@ -2108,20 +2117,20 @@ def evaluate_object(
         clouds = best.get("clouds", 0)
 
         camera = Camera(
-            manufacturer="ZWO",
-            model="ASI183MM",
-            pixel_size_um=2.4,
-            sensor_width_px=5496,
-            sensor_height_px=3672,
-            monochrome=True,
+            manufacturer=selected_setup_profile["camera_manufacturer"],
+            model=selected_setup_profile["camera_model"],
+            pixel_size_um=selected_setup_profile["pixel_size_um"],
+            sensor_width_px=selected_setup_profile["sensor_width_px"],
+            sensor_height_px=selected_setup_profile["sensor_height_px"],
+            monochrome=selected_setup_profile["monochrome"],
         )
 
         optics = ImagingOptics(
-            manufacturer="Samyang",
-            model="135mm",
-            focal_length_mm=135,
-            aperture_mm=48,
-            focal_ratio=2.8,
+            manufacturer=selected_setup_profile["optics_manufacturer"],
+            model=selected_setup_profile["optics_model"],
+            focal_length_mm=selected_setup_profile["focal_length_mm"],
+            aperture_mm=selected_setup_profile["aperture_mm"],
+            focal_ratio=selected_setup_profile["f_ratio"],
         )
 
         mount = Mount(
