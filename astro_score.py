@@ -816,8 +816,15 @@ def framing_score(setup, project_name):
     if not object_size:
         return 0
 
-    focal = setup.get("focal_length", 135)
-    sensor_width = setup.get("sensor_width", 23.5)
+    focal = setup.get(
+        "focal_length_mm",
+        setup.get("focal_length", 135),
+    )
+
+    sensor_width = setup.get(
+        "sensor_width_mm",
+        setup.get("sensor_width", 23.5),
+    )
 
     fov_width_deg = 57.3 * sensor_width / focal
     fov_width_arcmin = fov_width_deg * 60
