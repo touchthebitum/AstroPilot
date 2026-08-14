@@ -2247,6 +2247,7 @@ def evaluate_object(
         "global_score": best["score"] + best_setup_score,
         "setup_ranking": setup_ranking,
         "setup_reasons": best["setup_reasons"],
+        "arcsec_pixel": best.get("arcsec_pixel"),
         "progress": progress,
         "remaining_hours": remaining_hours,
         "roi": roi,
@@ -2396,6 +2397,7 @@ def build_forecast_result(
                 ),
                 "best_setup": r.get("best_setup"),
                 "setup_score": r.get("setup_score", 0),
+                "arcsec_pixel": r.get("arcsec_pixel"),
                 "global_score": r.get(
                     "global_score",
                     r["score"],
