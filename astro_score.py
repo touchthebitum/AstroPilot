@@ -2054,9 +2054,6 @@ def evaluate_object(
 
         pixel_um = setup.get("pixel_size_um") or setup.get("pixel_size_mm")
 
-        if pixel_um is None and setup_name == "samyang_183":
-            pixel_um = 2.4
-
         arcsec_pixel = (
             round(206.265 * pixel_um / setup.get("focal_length_mm"), 2)
             if setup.get("focal_length_mm") and pixel_um
