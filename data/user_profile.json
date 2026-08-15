@@ -60,7 +60,7 @@
     },
     "projects": {
         "M31": {
-            "hours": 0,
+            "hours": 3.0,
             "target_hours": 20,
             "importance": 8
         },
