@@ -76,6 +76,6 @@ class ProjectSelectionEngine:
     ) -> list[Candidate]:
         return sorted(
             candidates,
-            key=lambda candidate: candidate.decision_score,
+            key=lambda candidate: candidate.final_score,
             reverse=True,
         )
