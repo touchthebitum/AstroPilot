@@ -202,6 +202,15 @@ CATALOG = {
         "difficulty": 3,
     },
 
+    "Sh2-129": {
+        "ra": 321.15,
+        "dec": 59.9,
+        "name": "Flying Bat Nebula",
+        "type": "emission_nebula",
+        "size_arcmin": 150,
+        "magnitude": 9.0,
+        "difficulty": 4,
+    },
 
 
     

@@ -73,6 +73,11 @@
             "hours": 0,
             "target_hours": 15,
             "importance": 8
+        },
+        "Sh2-129": {
+            "hours": 0,
+            "target_hours": 18,
+            "importance": 9
         }
     },
     "sessions": [
