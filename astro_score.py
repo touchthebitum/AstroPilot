@@ -2264,6 +2264,57 @@ def build_selected_window_weather(
         ],
     )
 
+
+def build_object_evaluation_result(
+    *,
+    obj_name,
+    best,
+    best_setup,
+    best_setup_score,
+    setup_ranking,
+    progress,
+    remaining_hours,
+    roi,
+    priority,
+    summary,
+    decision_context,
+    weather,
+    hours,
+    sky,
+):
+    return {
+        "name": obj_name,
+        "score": best["score"],
+        "altitude": best.get("target_altitude"),
+        "moon_sep": best.get("moon_sep"),
+        "sqm": best.get("sqm"),
+        "moon_score": best.get("moon_score"),
+        "frame_bonus": best.get("frame_bonus"),
+        "window": best,
+        "catalog_key": obj_name,
+        "best_setup": best_setup,
+        "setup_score": best_setup_score,
+        "global_score": best["score"] + best_setup_score,
+        "setup_ranking": setup_ranking,
+        "setup_reasons": best["setup_reasons"],
+        "arcsec_pixel": best.get("arcsec_pixel"),
+        "progress": progress,
+        "remaining_hours": remaining_hours,
+        "roi": roi,
+        "priority": priority,
+        "season_bonus": best.get("season_bonus", 0),
+        "weather_bonus": best.get("weather_bonus", 0),
+        "decision_summary": summary,
+        "decision_context": decision_context,
+        "weather_context": weather,
+        "selected_window_weather": build_selected_window_weather(
+            hours=hours,
+            best=best,
+            sky=sky,
+        ),
+    }
+
+
 def evaluate_object(
     obj_name,
     sky,
@@ -2346,39 +2397,22 @@ def evaluate_object(
 
     priority = profile.get("project_priorities", {}).get(obj_name, 0)
     
-    result = {
-        "name": obj_name,
-        "score": best["score"],
-        "altitude": best.get("target_altitude"),
-        "moon_sep": best.get("moon_sep"),
-        "sqm": best.get("sqm"),
-        "moon_score": best.get("moon_score"),
-        "frame_bonus": best.get("frame_bonus"),
-        "window": best,
-        "catalog_key": obj_name,
-        "best_setup": best_setup,
-        "setup_score": best_setup_score,
-        "global_score": best["score"] + best_setup_score,
-        "setup_ranking": setup_ranking,
-        "setup_reasons": best["setup_reasons"],
-        "arcsec_pixel": best.get("arcsec_pixel"),
-        "progress": progress,
-        "remaining_hours": remaining_hours,
-        "roi": roi,
-        "priority": priority,
-        "season_bonus": best.get("season_bonus", 0),
-        "weather_bonus": best.get("weather_bonus", 0),
-        "decision_summary": summary,
-        "decision_context": decision_context,
-        "weather_context": weather,
-        "selected_window_weather": build_selected_window_weather(
-            hours=hours,
-            best=best,
-            sky=sky,
-        ),
-    }
-
-    return result
+    return build_object_evaluation_result(
+        obj_name=obj_name,
+        best=best,
+        best_setup=best_setup,
+        best_setup_score=best_setup_score,
+        setup_ranking=setup_ranking,
+        progress=progress,
+        remaining_hours=remaining_hours,
+        roi=roi,
+        priority=priority,
+        summary=summary,
+        decision_context=decision_context,
+        weather=weather,
+        hours=hours,
+        sky=sky,
+    )
 
 def build_forecast_result(
     *,
