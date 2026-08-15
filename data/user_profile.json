@@ -80,7 +80,7 @@
             "importance": 9
         }
     },
-    "sessions": [
+     "sessions": [
         {
             "date": "2026-06-14",
             "object": "M31",
@@ -90,10 +90,9 @@
             "date": "2026-06-14",
             "object": "M31",
             "hours": 2.0
-        },
-    {
-   
-    "decision_weights" : {
+        }
+    ],
+    "decision_weights": {
         "altitude": 0.5,
         "moon": 0.8,
         "cloud": 1.3,
@@ -108,9 +107,5 @@
         "portfolio": 2.0,
         "roi": 1.5,
         "postponement": 1.8
+    }
 }
-        }
-    ]
-}
-
-        
