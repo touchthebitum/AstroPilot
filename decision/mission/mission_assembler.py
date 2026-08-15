@@ -106,6 +106,19 @@ class MissionAssembler:
                 None,
             )
 
+        window_start = (
+            mission_input.window_start
+            if mission_input is not None
+            and mission_input.window_start is not None
+            else getattr(context_session, "start_time", None)
+        )
+
+        display_start_hour = (
+            window_start.hour + window_start.minute / 60
+            if window_start is not None
+            else 22
+        )
+
         productivity = NightProductivityEngine.evaluate(
             NightProductivityContext(
                 astronomical_hours=astronomical_hours,
@@ -125,27 +138,11 @@ class MissionAssembler:
                     "hourly_moon_penalty",
                     None,
                 ),
-                display_start_hour=(
-                    (
-                        mission_input.window_start.hour
-                        + mission_input.window_start.minute / 60
-                    )
-                    if mission_input is not None
-                    and mission_input.window_start is not None
-                    else (
-                        context.session.start_time.hour
-                        + context.session.start_time.minute / 60
-                    )
-                ),
+                display_start_hour=display_start_hour,
                 target=CATALOG[target],
                 latitude=context.site.latitude,
                 longitude=context.site.longitude,
-                observation_time=(
-                    mission_input.window_start
-                    if mission_input is not None
-                    and mission_input.window_start is not None
-                    else context.session.start_time
-                ),
+                observation_time=window_start,
                 ),
             )
         
