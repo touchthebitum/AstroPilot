@@ -43,9 +43,13 @@ class NightStrategyEngine:
                 1,
             )
 
-        decision_score = strategy_scores.get(
-            decision_mode,
-            fallback_score,
-        )
+        if decision_mode == "balanced":
+            strategy_scores["balanced"] = fallback_score
+            decision_score = fallback_score
+        else:
+            decision_score = strategy_scores.get(
+                decision_mode,
+                fallback_score,
+            )
 
         return strategy_scores, decision_score

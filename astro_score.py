@@ -1183,6 +1183,15 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         + postponement_impact["postponement_net_impact"]
         )
 
+        # Limite l’avantage portefeuille si l’objet est surtout choisi grâce au portefeuille
+        if portfolio_bonus > astro_part * 0.5:
+            final_score -= portfolio_bonus * 0.3
+
+        remaining = project_remaining_hours(catalog_key)
+
+        if remaining is not None and remaining <= available_hours:
+            final_score += 30
+
         strategy_scores, decision_score = (
         night_strategy_engine.compute_strategy_scores(
             astro_part=astro_part,
@@ -1196,19 +1205,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             fallback_score=final_score,
         )
     )
-
-        # Limite l’avantage portefeuille si l’objet est surtout choisi grâce au portefeuille
-        if portfolio_bonus > astro_part * 0.5:
-            final_score -= portfolio_bonus * 0.3
-
-        if astro_score <= 0:
-            final_score -= 30
-            decision_score -= 30
-
-        remaining = project_remaining_hours(catalog_key)
-
-        if remaining is not None and remaining <= available_hours:
-            final_score += 30
 
         candidates.append(
             project_selection_engine.build_candidate(
