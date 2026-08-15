@@ -61,15 +61,10 @@ from astral.sun import sun
 from astral.moon import phase as moon_phase
 from astropy.coordinates.baseframe import NonRotationTransformationWarning
 from astropilot.catalog import CATALOG
-from astropilot.equipment_profiles import capture_score
 from astropilot.user_profile import (
     get_projects,
 )
-from astropilot.equipment_profiles import (
-    set_current_equipment,
-    list_equipment,
-    compare_object_to_equipment
-)
+
 import argparse
 from astropilot.user_profile import (
     get_default_location,
@@ -1826,54 +1821,55 @@ def compare_equipment_for_object(object_name):
         print(f"Objet inconnu : {object_name}")
         return
 
+    profile = load_user_profile()
+
+    _, _, ranking = select_best_setup_for_object(
+        obj_name=object_name,
+        profile=profile,
+    )
+
     print(f"\nComparaison matériel pour {object_name}\n")
+    print(f"Objet : {obj['name']}")
+    print(f"Taille : {obj.get('size_arcmin', '?')} arcmin")
 
-    results = []
+    object_size = obj.get("size_arcmin")
 
-    for eq_name in list_equipment():
-        set_current_equipment(eq_name)
+    for item in ranking:
+        setup_name = item["setup"]
+        setup = EQUIPMENT_PROFILES[setup_name]
 
-        result = compare_object_to_equipment(
-            obj.get("size_arcmin", 20),
-            obj.get("type", "unknown"),
-            obj.get("scale", "medium"),
+        focal = setup["focal_length_mm"]
+        sensor_width = setup["sensor_width_mm"]
+
+        fov_width_deg = 57.3 * sensor_width / focal
+
+        fill_ratio = (
+            object_size / (fov_width_deg * 60)
+            if object_size
+            else None
         )
-        img_score = imaging_score(obj)
-        cap_score = capture_score(eq_name)
 
-        final_score = (
-            result["combined_score"] * 0.55 +
-            img_score * 0.20 +
-            cap_score * 0.25
+        reasons = item.get("reasons", [])
+        reason_text = (
+            " • ".join(reasons)
+            if reasons
+            else "Aucune raison particulière"
         )
-        results.append({
-            "equipment": eq_name,
-            "score": round(final_score),
-            "equipment_score": result["equipment_score"],
-            "resolution_score": result["resolution_score"],
-            "ratio": result["ratio"],
-            "frame_bonus": result["frame_bonus"],
-            "arcsec_pixel": result["arcsec_pixel"],
-            "imaging_score": img_score,
-            "cap_score": cap_score,
-        })
-    results.sort(key=lambda x: x["score"], reverse=True)
 
-    print(f"Object : {CATALOG[object_name]['name']}")
-    print(f"Taille : {CATALOG[object_name]['size_arcmin']} arcmin")
+        fill_text = (
+            f"{fill_ratio:.2f}"
+            if fill_ratio is not None
+            else "?"
+        )
 
-    for r in results:
         print(
-            f"{r['equipment']:25} "
-            f"score={r['score']:3} "
-            f"frame={r['frame_bonus']:2} "
-            f"ratio={r['ratio']:.3f} "
-            f"res={r['arcsec_pixel']}"
-            f"eq={r['equipment_score']}"
-            f" resS={r['resolution_score']}"
-            f" img={r['imaging_score']}",
-            f" cap={r['cap_score']}",
+            f"{setup_name:15s} "
+            f"score={item['score']:3} "
+            f"sampling={item['arcsec_pixel']}\"/px "
+            f"FOV={fov_width_deg:.2f}° "
+            f"fill={fill_text}"
         )
+        print(f"  {reason_text}")
 
 def imaging_score(obj):
     """
