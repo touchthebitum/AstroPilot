@@ -562,11 +562,6 @@ class SkyEngine:
 
                 ######elif goal == "clusters" and obj_type == "cluster":
                     #####target_bonus += 12
-                
-                ####from astropilot.equipment_profiles import (
-                    ###CURRENT_EQUIPMENT,
-                    ##get_fov
-                #)
             
                 frame_bonus = 0
 
