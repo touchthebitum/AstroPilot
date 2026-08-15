@@ -21,8 +21,14 @@ class OpportunityEngine:
             key=lambda candidate: candidate.decision_score,
         )
 
+        action = (
+            Action.CONTINUE_PROJECT
+            if best.acquired_hours > 0
+            else Action.START_PROJECT
+        )
+
         return Opportunity(
-            action=Action.CONTINUE_PROJECT,
+            action=action,
             candidate=best,
             reasons=OpportunityReasonBuilder.build(
                 candidate=best,

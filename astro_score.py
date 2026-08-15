@@ -1205,7 +1205,9 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             fallback_score=final_score,
         )
     )
-
+        acquired_hours = float(
+            projects.get(catalog_key, {}).get("hours", 0)
+        )
         candidates.append(
             project_selection_engine.build_candidate(
                 name=obj["name"],
@@ -1238,6 +1240,7 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
                     }
                 ),
                 strategy_scores=strategy_scores,
+                acquired_hours=acquired_hours,
             )
         )
 

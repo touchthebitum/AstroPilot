@@ -36,6 +36,7 @@ class ProjectSelectionEngine:
         postponement_impact: Mapping[str, Any],
         reasons: dict[str, Any],
         strategy_scores: dict[str, float],
+        acquired_hours: float,
     ) -> Candidate:
         return Candidate(
             name=name,
@@ -68,6 +69,7 @@ class ProjectSelectionEngine:
             ),
             reasons=reasons,
             strategy_scores=strategy_scores,
+            acquired_hours=acquired_hours,
         )
 
     @staticmethod
