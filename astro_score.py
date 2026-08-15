@@ -15,6 +15,7 @@ from decision.recommendation.recommendation_engine import (
 from decision.services.opportunity_recommendation_service import (
     OpportunityRecommendationService,
 )
+from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 from decision.portfolio.portfolio_engine import PortfolioEngine
 from decision.forecast.forecast_engine import ForecastEngine
 from decision.runners.tonight_runner import TonightRunner
@@ -123,59 +124,6 @@ OBJECT_SIZES = {
     "Heart": 120,
     "Soul": 150,
     "Veil": 180,
-}
-
-EQUIPMENT_PROFILES = {
-    "samyang_183": {
-        "name": "Samyang 135 + ASI183MM",
-        "optics_manufacturer": "Samyang",
-        "optics_model": "135mm",
-        "focal_length_mm": 135,
-        "aperture_mm": 67,
-        "f_ratio": 2.8,
-        "camera_manufacturer": "ZWO",
-        "camera_model": "ASI183MM",
-        "pixel_size_um": 2.4,
-        "sensor_width_px": 5496,
-        "sensor_height_px": 3672,
-        "sensor_width_mm": 13.2,
-        "sensor_height_mm": 8.8,
-        "monochrome": True,
-    },
-
-    "fra400_2600": {
-        "name": "FRA400 + ASI2600MM",
-        "optics_manufacturer": "Askar",
-        "optics_model": "FRA400",
-        "focal_length_mm": 400,
-        "aperture_mm": 72,
-        "f_ratio": 5.6,
-        "camera_manufacturer": "ZWO",
-        "camera_model": "ASI2600MM",
-        "pixel_size_um": 3.76,
-        "sensor_width_px": 6248,
-        "sensor_height_px": 4176,
-        "sensor_width_mm": 23.5,
-        "sensor_height_mm": 15.7,
-        "monochrome": True,
-    },
-
-    "hyperstar_c8": {
-        "name": "Hyperstar C8 + ASI2600MM",
-        "optics_manufacturer": "Celestron",
-        "optics_model": "C8 HyperStar",
-        "focal_length_mm": 390,
-        "aperture_mm": 203,
-        "f_ratio": 1.9,
-        "camera_manufacturer": "ZWO",
-        "camera_model": "ASI2600MM",
-        "pixel_size_um": 3.76,
-        "sensor_width_px": 6248,
-        "sensor_height_px": 4176,
-        "sensor_width_mm": 23.5,
-        "sensor_height_mm": 15.7,
-        "monochrome": True,
-    },
 }
 
 TARGETS = {
