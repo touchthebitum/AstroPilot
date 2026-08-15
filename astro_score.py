@@ -2628,34 +2628,25 @@ def forecast_astro(
 
     return results
 
-def best_equipment_for_object(object_name):
-    obj = CATALOG.get(object_name)
 
-    if not obj:
+def best_equipment_for_object(object_name):
+    if object_name not in CATALOG:
         return None
 
-    results = []
-
-    for eq_name in list_equipment():
-        set_current_equipment(eq_name)
-
-        result = compare_object_to_equipment(
-            obj.get("size_arcmin", 20),
-            obj.get("type", "unknown"),
-            obj.get("scale", "medium"),
+    best_setup, best_setup_score, _ = (
+        select_best_setup_for_object(
+            obj_name=object_name,
+            profile=load_user_profile(),
         )
-
-        results.append({
-            "equipment": eq_name,
-            "score": result["combined_score"],
-        })
-
-    results.sort(
-        key=lambda x: x["score"],
-        reverse=True
     )
 
-    return results[0]
+    if best_setup is None:
+        return None
+
+    return {
+        "equipment": best_setup,
+        "score": best_setup_score,
+    }
 
 future_engine = FutureOpportunityEngine(
     catalog=CATALOG,
