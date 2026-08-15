@@ -2323,30 +2323,26 @@ def evaluate_object(
     remaining_hours = project_remaining_hours(obj_name)
     roi = project_roi(obj_name)
 
-    altitude = best.get("target_altitude")
+    decision_engine = build_decision_engine()
 
-    if altitude is not None:
+    decision_context = build_decision_context(
+        obj_name=obj_name,
+        best=best,
+        selected_setup_profile=selected_setup_profile,
+        profile=profile,
+        illumination=illumination,
+        lat=lat,
+        lon=lon,
+    )
 
-        decision_engine = build_decision_engine()
+    contributions, _ = decision_engine.evaluate(
+        decision_context,
+        profile,
+    )
 
-        decision_context = build_decision_context(
-            obj_name=obj_name,
-            best=best,
-            selected_setup_profile=selected_setup_profile,
-            profile=profile,
-            illumination=illumination,
-            lat=lat,
-            lon=lon,
-        )
+    from decision.engines.decision_summary_engine import DecisionSummaryEngine
 
-        contributions, _ = decision_engine.evaluate(
-            decision_context,
-            profile,
-        )
-
-        from decision.engines.decision_summary_engine import DecisionSummaryEngine
-
-        summary = DecisionSummaryEngine.build(contributions)
+    summary = DecisionSummaryEngine.build(contributions)
 
     priority = profile.get("project_priorities", {}).get(obj_name, 0)
     
