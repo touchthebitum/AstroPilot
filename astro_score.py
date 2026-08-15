@@ -2218,6 +2218,52 @@ def build_decision_engine():
     return engine
 
 
+def build_selected_window_weather(
+    *,
+    hours,
+    best,
+    sky,
+):
+    selected_hours = [
+        h for h in hours
+        if best["start"] <= h["time"] < best["end"]
+    ]
+
+    return WeatherForecast(
+        hourly=selected_hours,
+        hourly_clouds=[
+            h.get("cloud_cover", 100)
+            for h in selected_hours
+        ],
+        hourly_humidity=[
+            h.get("relative_humidity_2m", 100)
+            for h in selected_hours
+        ],
+        hourly_wind=[
+            h.get("wind_speed_10m", 0)
+            for h in selected_hours
+        ],
+        hourly_seeing=[
+            sky.estimate_seeing(
+                h.get("wind_speed_10m", 0),
+                h.get("relative_humidity_2m", 0),
+            )
+            for h in selected_hours
+        ],
+        hourly_moon_penalty=[
+            detail["moon"]
+            for detail in best.get("details", [])
+        ],
+        hourly_temperature=[
+            h.get("temperature_2m", 0)
+            for h in selected_hours
+        ],
+        hourly_visibility=[
+            h.get("visibility", 10000)
+            for h in selected_hours
+        ],
+    )
+
 def evaluate_object(
     obj_name,
     sky,
@@ -2329,48 +2375,10 @@ def evaluate_object(
         "decision_summary": summary,
         "decision_context": decision_context,
         "weather_context": weather,
-        "selected_window_weather": WeatherForecast(
-            hourly=[
-                h for h in hours
-                if best["start"] <= h["time"] < best["end"]
-            ],
-            hourly_clouds=[
-                h.get("cloud_cover", 100)
-                for h in hours
-                if best["start"] <= h["time"] < best["end"]
-            ],
-            hourly_humidity=[
-                h.get("relative_humidity_2m", 100)
-                for h in hours
-                if best["start"] <= h["time"] < best["end"]
-            ],
-            hourly_wind=[
-                h.get("wind_speed_10m", 0)
-                for h in hours
-                if best["start"] <= h["time"] < best["end"]
-            ],
-            hourly_seeing=[
-                sky.estimate_seeing(
-                    h.get("wind_speed_10m", 0),
-                    h.get("relative_humidity_2m", 0),
-                )
-                for h in hours
-                if best["start"] <= h["time"] < best["end"]
-            ],
-            hourly_moon_penalty=[
-                detail["moon"]
-                for detail in best.get("details", [])
-            ],
-            hourly_temperature=[
-                h.get("temperature_2m", 0)
-                for h in hours
-                if best["start"] <= h["time"] < best["end"]
-            ],
-            hourly_visibility=[
-                h.get("visibility", 10000)
-                for h in hours
-                if best["start"] <= h["time"] < best["end"]
-            ],
+        "selected_window_weather": build_selected_window_weather(
+            hours=hours,
+            best=best,
+            sky=sky,
         ),
     }
 
