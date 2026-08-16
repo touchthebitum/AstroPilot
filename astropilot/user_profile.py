@@ -58,3 +58,65 @@ def favorite_targets():
         .get("preferences", {})
         .get("favorite_targets", ["galaxy", "nebula"])
     )
+
+def save_user_profile(profile):
+    path = DATA_DIR / "user_profile.json"
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(
+            profile,
+            f,
+            indent=4,
+            ensure_ascii=False,
+        )
+
+
+def record_session(
+    project_name,
+    hours,
+    date,
+):
+    if hours <= 0:
+        raise ValueError("hours must be positive")
+
+    profile = load_user_profile()
+    projects = profile.get("projects", {})
+
+    if project_name not in projects:
+        raise ValueError(
+            f"Unknown project: {project_name}"
+        )
+
+    project = projects[project_name]
+
+    current_hours = float(
+        project.get("hours", 0)
+    )
+    target_hours = float(
+        project.get("target_hours", 0)
+    )
+
+    new_hours = current_hours + float(hours)
+
+    if target_hours > 0:
+        new_hours = min(
+            new_hours,
+            target_hours,
+        )
+
+    project["hours"] = new_hours
+
+    sessions = profile.setdefault(
+        "sessions",
+        [],
+    )
+
+    sessions.append(
+        {
+            "date": date,
+            "object": project_name,
+            "hours": float(hours),
+        }
+    )
+
+    save_user_profile(profile)
