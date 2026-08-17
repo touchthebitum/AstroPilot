@@ -949,10 +949,6 @@ def average_night_capacity(nights):
 
 def portfolio_score(name):
     priority = project_priority(name)
-
-    obj = CATALOG.get(name, {})
-
-    urgency = urgency_bonus(obj)
     roi = project_roi(name)
 
     progress = project_progress(name)
@@ -962,7 +958,6 @@ def portfolio_score(name):
 
     return (
         priority * 0.6
-        + urgency
         + roi * 3
         + completion
         + closure
