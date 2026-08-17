@@ -981,22 +981,11 @@ def show_portfolio_ranking():
             continue
 
         priority = project_priority(name)
-
-        obj = CATALOG.get(name, {})
-
-        altitude = urgency_bonus(obj)
         roi = project_roi(name)
-
         progress = project_progress(name)
-        completion = progress / 5
         closure = closure_bonus(name)
-        score = (
-            priority * 0.6
-            + altitude
-            + min(roi * 5, 20)
-            + completion
-            + closure
-        )
+
+        score = portfolio_score(name)
 
         rows.append({
             "name": name,
