@@ -32,6 +32,10 @@ from decision.portfolio.project_gain import (
     portfolio_gain_if_shot,
     session_portfolio_gain,
 )
+from decision.portfolio.diversification import (
+    diversification_bonus,
+    portfolio_category_load,
+)
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 from decision.portfolio.portfolio_engine import PortfolioEngine
 from decision.forecast.forecast_engine import ForecastEngine
@@ -716,43 +720,6 @@ def build_mission_input(evaluation):
     )
 
 
-def diversification_bonus(name):
-    """
-    Bonus stratégique si la catégorie de l'objet est sous-représentée
-    en heures restantes dans le portefeuille.
-    """
-
-    obj = CATALOG.get(name, {})
-    category = obj.get("type", "").lower()
-
-    if not category:
-        return 0
-
-    loads = portfolio_category_load()
-
-    if not loads:
-        return 0
-
-    total_load = sum(loads.values())
-
-    if total_load <= 0:
-        return 0
-
-    category_load = loads.get(category, 0)
-    category_share = category_load / total_load
-
-    # Si la catégorie représente moins de 20 % de la charge restante,
-    # elle est fortement sous-représentée.
-    if category_share < 0.20:
-        return 8
-
-    # Entre 20 % et 35 %, elle est modérément sous-représentée.
-    if category_share < 0.35:
-        return 4
-
-    return 0
-
-
 def strategy_weights(mode="balanced"):
     """
     Pondérations utilisées par les différentes stratégies
@@ -804,41 +771,12 @@ def strategy_weights(mode="balanced"):
 
     return strategies.get(mode, strategies["balanced"])
 
-
-def portfolio_category_load():
-    """
-    Charge restante du portefeuille par catégorie.
-    Retourne par exemple :
-    {
-        "nebula": 37,
-        "galaxy": 8,
-        "cluster": 3,
-    }
-    """
-
-    loads = {}
-
-    for name, project in get_projects().items():
-
-        remaining = project_remaining_hours(name)
-
-        if remaining <= 0:
-            continue
-
-        obj = CATALOG.get(name, {})
-
-        category = obj.get("type", "").lower()
-
-        if not category:
-            continue
-
-        loads[category] = loads.get(category, 0) + remaining
-
-    return loads
-
 project_selection_engine = ProjectSelectionEngine()
 
-night_strategy_engine = NightStrategyEngine(strategy_weights)
+night_strategy_engine = NightStrategyEngine(
+    strategy_weights
+)
+
 
 def recommend_project_for_night(top_objects, available_hours=3.0):
     profile = load_user_profile()
