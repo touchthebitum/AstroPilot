@@ -352,17 +352,56 @@ def season_urgency_bonus(obj):
 
     return 0
 
-def project_remaining_hours(object_name):
+def project_state(object_name):
     projects = get_projects()
 
     if object_name not in projects:
         return None
 
     project = projects[object_name]
-    hours = project.get("hours", 0)
-    target_hours = project.get("target_hours", 0)
 
-    return max(0, round(target_hours - hours, 1))
+    hours = float(
+        project.get("hours", 0)
+    )
+    target_hours = float(
+        project.get("target_hours", 0)
+    )
+
+    if target_hours <= 0:
+        remaining = 0.0
+        progress = 0.0
+    else:
+        remaining = max(
+            0.0,
+            round(target_hours - hours, 1),
+        )
+        progress = round(
+            hours / target_hours * 100,
+            1,
+        )
+
+    return {
+        "hours": hours,
+        "target_hours": target_hours,
+        "remaining": remaining,
+        "progress": progress,
+    }
+
+def project_progress(object_name):
+    state = project_state(object_name)
+
+    if state is None:
+        return 0
+
+    return state["progress"]
+
+def project_remaining_hours(object_name):
+    state = project_state(object_name)
+
+    if state is None:
+        return None
+
+    return state["remaining"]
 
 def regret_score(project_name):
     future = future_engine.estimate (project_name)
@@ -399,22 +438,6 @@ def marginal_gain_factor(progress):
     else:
         return 1.4
 
-
-def project_progress(object_name):
-    projects = get_projects()
-
-    if object_name not in projects:
-        return 0
-
-    project = projects[object_name]
-
-    hours_done = project.get("hours", 0)
-    target_hours = project.get("target_hours", 1)
-
-    if target_hours <= 0:
-        return 0
-
-    return round((hours_done / target_hours) * 100, 1)
 
 def portfolio_gain_if_shot(object_name, session_hours=3.0):
     projects = get_projects()
@@ -634,23 +657,21 @@ def project_details(object_name):
         return None
 
     project = projects[object_name]
+    state = project_state(object_name)
 
-    hours = project.get("hours", 0)
-    target = project.get("target_hours", 0)
+    if state is None:
+        return None
+
     importance = project.get("importance", 5)
-
-    remaining = max(0, target - hours)
-
-    progress = 0
-    if target > 0:
-        progress = round(hours / target * 100, 1)
 
     return {
         "importance": importance,
-        "progress": progress,
-        "remaining": remaining,
-        "remaining_nights": estimate_remaining_nights(object_name)
+        "progress": state["progress"],
+        "remaining": state["remaining"],
+        "remaining_nights": estimate_remaining_nights(object_name),
     }
+
+
 def risk_label_to_score(risk):
     mapping = {
         "FAIBLE": 20,
