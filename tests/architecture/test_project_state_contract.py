@@ -1,9 +1,11 @@
-import astro_score
+import decision.portfolio.project_state as project_state_module
+
+from decision.portfolio.project_state import project_state
 
 
 def test_project_state_returns_canonical_progress(monkeypatch):
     monkeypatch.setattr(
-        astro_score,
+        project_state_module,
         "get_projects",
         lambda: {
             "M31": {
@@ -14,7 +16,7 @@ def test_project_state_returns_canonical_progress(monkeypatch):
         },
     )
 
-    state = astro_score.project_state("M31")
+    state = project_state("M31")
 
     assert state == {
         "hours": 3.0,
@@ -26,17 +28,17 @@ def test_project_state_returns_canonical_progress(monkeypatch):
 
 def test_project_state_returns_none_for_unknown_project(monkeypatch):
     monkeypatch.setattr(
-        astro_score,
+        project_state_module,
         "get_projects",
         lambda: {},
     )
 
-    assert astro_score.project_state("UNKNOWN") is None
+    assert project_state("UNKNOWN") is None
 
 
 def test_project_state_handles_zero_target(monkeypatch):
     monkeypatch.setattr(
-        astro_score,
+        project_state_module,
         "get_projects",
         lambda: {
             "M31": {
@@ -46,7 +48,7 @@ def test_project_state_handles_zero_target(monkeypatch):
         },
     )
 
-    state = astro_score.project_state("M31")
+    state = project_state("M31")
 
     assert state == {
         "hours": 3.0,
