@@ -356,22 +356,6 @@ def show_multi_night_portfolio_roadmap(
             print(f"✓ {step['project']} terminé")
 
 
-def season_bonus(obj):
-    """
-    Bonus saisonnier simple basé sur l'altitude actuelle de l'objet.
-    Version provisoire pour valider le pipeline.
-    """
-    alt = obj.get("altitude", 0)
-
-    if alt >= 70:
-        return 15
-    elif alt >= 50:
-        return 10
-    elif alt >= 30:
-        return 5
-    return 0
-
-
 def risk_label_to_score(risk):
     mapping = {
         "FAIBLE": 20,
