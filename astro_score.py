@@ -20,6 +20,12 @@ from decision.portfolio.project_state import (
     project_progress,
     project_remaining_hours,
 )
+from decision.portfolio.project_scoring import (
+    project_priority,
+    project_roi,
+    closure_bonus,
+    progression_bonus,
+)
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 from decision.portfolio.portfolio_engine import PortfolioEngine
 from decision.forecast.forecast_engine import ForecastEngine
@@ -510,45 +516,6 @@ def show_multi_night_portfolio_roadmap(
             print(f"✓ {step['project']} terminé")
 
 
-def project_priority(object_name):
-    projects = get_projects()
-
-    if object_name not in projects:
-        return 0
-
-    project = projects[object_name]
-    state = project_state(object_name)
-
-    if state is None:
-        return 0
-
-    importance = project.get("importance", 5)
-    target = state["target_hours"]
-
-    if target <= 0:
-        return 0
-
-    completion = state["progress"] / 100
-    remaining = state["remaining"]
-
-    if completion < 0.20:
-        completion_bonus = 0
-    elif completion < 0.50:
-        completion_bonus = 3
-    elif completion < 0.75:
-        completion_bonus = 7
-    elif completion < 0.90:
-        completion_bonus = 12
-    else:
-        completion_bonus = 20
-
-    start_bonus = 0
-    remaining_pressure = min(remaining, 20)
-
-    base_priority = start_bonus + completion_bonus + remaining_pressure
-
-    return round(base_priority * (importance / 5), 1)
-
 def season_bonus(obj):
     """
     Bonus saisonnier simple basé sur l'altitude actuelle de l'objet.
@@ -736,26 +703,6 @@ def explain_recommendation(project):
 
     return reasons
 
-def project_roi(object_name):
-    details = project_details(object_name)
-
-    if not details:
-        return 0
-
-    remaining = details["remaining"]
-
-    if remaining <= 0:
-        return 0
-
-    importance = details["importance"]
-    progress = details["progress"]
-
-    completion_multiplier = 1 + progress / 100
-
-    roi = importance * completion_multiplier / remaining
-
-    return round(roi, 2)
-
 
 def framing_score(setup, project_name):
 
@@ -882,46 +829,6 @@ def build_mission_input(evaluation):
         ),
     )
 
-def closure_bonus(name, available_hours=3.0):
-    remaining = project_remaining_hours(name)
-
-    if remaining is None or remaining <= 0:
-        return 0
-
-    # Vrai bonus de clôture uniquement si le projet peut être fini ce soir
-    if remaining <= available_hours:
-        return 15
-
-    # Petit bonus si le projet est proche de la fin
-    if remaining <= available_hours * 2:
-        return 6
-
-    if remaining <= available_hours * 3:
-        return 3
-
-    return 0
-
-def progression_bonus(name):
-    state = project_state(name)
-
-    if state is None:
-        return 0
-
-    if state["target_hours"] <= 0:
-        return 0
-
-    progress = state["progress"]
-
-    if progress <= 0:
-        return 12
-
-    if progress < 20:
-        return 8
-
-    if progress < 50:
-        return 4
-
-    return 0
 
 def diversification_bonus(name):
     """
