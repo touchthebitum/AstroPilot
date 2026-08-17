@@ -61,14 +61,17 @@ def favorite_targets():
 
 def save_user_profile(profile):
     path = DATA_DIR / "user_profile.json"
+    temp_path = DATA_DIR / "user_profile.json.tmp"
 
-    with open(path, "w", encoding="utf-8") as f:
+    with open(temp_path, "w", encoding="utf-8") as f:
         json.dump(
             profile,
             f,
             indent=4,
             ensure_ascii=False,
         )
+
+    temp_path.replace(path)
 
 
 def record_session(

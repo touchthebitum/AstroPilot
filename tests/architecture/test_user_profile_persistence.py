@@ -122,3 +122,68 @@ def test_record_session_rejects_non_positive_hours(
             0,
             "2026-08-16",
         )
+
+def test_save_user_profile_replaces_file_atomically(
+    tmp_path,
+    monkeypatch,
+):
+    write_profile(
+        tmp_path / "user_profile.json"
+    )
+
+    monkeypatch.setattr(
+        user_profile,
+        "DATA_DIR",
+        tmp_path,
+    )
+
+    profile = user_profile.load_user_profile()
+    profile["projects"]["M31"]["hours"] = 7.5
+
+    user_profile.save_user_profile(profile)
+
+    saved = user_profile.load_user_profile()
+
+    assert saved["projects"]["M31"]["hours"] == 7.5
+    assert not (
+        tmp_path / "user_profile.json.tmp"
+    ).exists()
+
+
+def test_save_user_profile_uses_atomic_replace(
+    tmp_path,
+    monkeypatch,
+):
+    write_profile(
+        tmp_path / "user_profile.json"
+    )
+
+    monkeypatch.setattr(
+        user_profile,
+        "DATA_DIR",
+        tmp_path,
+    )
+
+    replaced = {}
+
+    original_replace = user_profile.Path.replace
+
+
+    def tracking_replace(path, target):
+        replaced["source"] = path
+        replaced["target"] = target
+        return original_replace(path, target)
+
+    monkeypatch.setattr(
+        user_profile.Path,
+        "replace",
+        tracking_replace,
+    )
+
+    profile = user_profile.load_user_profile()
+    profile["projects"]["M31"]["hours"] = 8.0
+
+    user_profile.save_user_profile(profile)
+
+    assert replaced["source"].name == "user_profile.json.tmp"
+    assert replaced["target"].name == "user_profile.json"
