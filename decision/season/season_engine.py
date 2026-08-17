@@ -92,3 +92,27 @@ class SeasonEngine:
             season_end = datetime(year, last_month + 1, 1).date()
 
         return max(0, (season_end - today).days)
+
+    @staticmethod
+    def urgency_bonus(target):
+        days = SeasonEngine.remaining_days(target)
+
+        if days is None:
+            return 0
+
+        if days <= 0:
+            return 0
+
+        if days <= 30:
+            return 25
+
+        if days <= 60:
+            return 15
+
+        if days <= 90:
+            return 8
+
+        if days <= 150:
+            return 3
+
+        return 0
