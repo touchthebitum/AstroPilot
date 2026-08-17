@@ -563,16 +563,19 @@ def project_priority(object_name):
         return 0
 
     project = projects[object_name]
-    importance = project.get("importance", 5)
+    state = project_state(object_name)
 
-    hours = project.get("hours", 0)
-    target = project.get("target_hours", 0)
+    if state is None:
+        return 0
+
+    importance = project.get("importance", 5)
+    target = state["target_hours"]
 
     if target <= 0:
         return 0
 
-    completion = hours / target
-    remaining = max(0, target - hours)
+    completion = state["progress"] / 100
+    remaining = state["remaining"]
 
     if completion < 0.20:
         completion_bonus = 0
@@ -945,16 +948,15 @@ def closure_bonus(name, available_hours=3.0):
     return 0
 
 def progression_bonus(name):
-    remaining = project_remaining_hours(name)
-    project = get_projects().get(name, {})
+    state = project_state(name)
 
-    target = project.get("target_hours", 0)
-    hours = project.get("hours", 0)
-
-    if target <= 0:
+    if state is None:
         return 0
 
-    progress = hours / target * 100
+    if state["target_hours"] <= 0:
+        return 0
+
+    progress = state["progress"]
 
     if progress <= 0:
         return 12
