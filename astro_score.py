@@ -36,6 +36,7 @@ from decision.portfolio.diversification import (
     diversification_bonus,
     portfolio_category_load,
 )
+from decision.season.season_engine import SeasonEngine
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 from decision.portfolio.portfolio_engine import PortfolioEngine
 from decision.forecast.forecast_engine import ForecastEngine
@@ -312,41 +313,7 @@ def fetch_weather(lat: float, lon: float) -> dict | None:
         return None
 
 def season_days_remaining(obj):
-    today = datetime.now(ZoneInfo(TIMEZONE)).date()
-    current_month = today.month
-
-    name = obj.get("catalog_key") or obj.get("name")
-    season = SEASON_WINDOWS.get(name)
-
-    if not season:
-        return None
-
-    months = season.get("best_months", []) + season.get("ok_months", [])
-
-    if not months:
-        return None
-
-    if current_month not in months:
-        return 0
-
-    future_months = [m for m in months if m >= current_month]
-
-    if future_months:
-        last_month = max(future_months)
-    else:
-        last_month = max(months)
-
-    year = today.year
-
-    if last_month < current_month:
-        year += 1
-
-    if last_month == 12:
-        season_end = datetime(year + 1, 1, 1).date()
-    else:
-        season_end = datetime(year, last_month + 1, 1).date()
-
-    return max(0, (season_end - today).days)
+    return SeasonEngine.season_days_remaining(obj)
 
 def season_urgency_bonus(obj):
     days = season_days_remaining(obj)
