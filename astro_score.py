@@ -574,28 +574,6 @@ def season_window_bonus(obj):
     return 0
 
 
-def project_details(object_name):
-    projects = get_projects()
-
-    if object_name not in projects:
-        return None
-
-    project = projects[object_name]
-    state = project_state(object_name)
-
-    if state is None:
-        return None
-
-    importance = project.get("importance", 5)
-
-    return {
-        "importance": importance,
-        "progress": state["progress"],
-        "remaining": state["remaining"],
-        "remaining_nights": estimate_remaining_nights(object_name),
-    }
-
-
 def risk_label_to_score(risk):
     mapping = {
         "FAIBLE": 20,
