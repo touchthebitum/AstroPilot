@@ -699,7 +699,7 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             continue
 
         priority = project_priority(catalog_key)
-        altitude = urgency_bonus(obj)
+        altitude = 0
         season = season_bonus(obj)
         season_urgency = season_urgency_bonus(obj)
         roi = project_roi(catalog_key)
