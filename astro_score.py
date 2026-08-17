@@ -430,20 +430,6 @@ def portfolio_gain_if_shot(object_name, session_hours=3.0):
     return round(gain, 1)
 
 
-def estimate_remaining_nights(hours_remaining, nights=None):
-    if hours_remaining is None:
-        return 0
-
-    if isinstance(hours_remaining, str):
-        hours_remaining = project_remaining_hours(hours_remaining)
-
-    if hours_remaining is None:
-        return 0
-
-    avg_capacity = average_night_capacity(nights) if nights else 3.0
-
-    return hours_remaining / max(1, avg_capacity)
-
 def simulated_portfolio_score(project):
 
     remaining = (
