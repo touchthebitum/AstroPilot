@@ -1604,16 +1604,27 @@ def show_astro_calendar(nights):
 
 def apply_virtual_session(project, hours):
     target = project.get("target_hours", 0)
+    current_hours = project.get("hours", 0)
 
-    project["hours_done"] = min(target, project.get("hours_done",project.get("hours",0)) + hours)
-    
-    project.get("hours", 0)+ hours
+    project["hours"] = min(
+        target,
+        current_hours + hours,
+    )
 
     project["remaining"] = max(
         0,
-        target - project["hours_done"]
+        target - project["hours"],
     )
-    project["progress"] = round(project["hours_done"] / target *100, 1) if target > 0 else 0
+
+    project["progress"] = (
+        round(
+            project["hours"] / target * 100,
+            1,
+        )
+        if target > 0
+        else 0
+    )
+
     project["completed"] = project["remaining"] <= 0
 
     return project
