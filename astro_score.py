@@ -983,7 +983,6 @@ def portfolio_score(name):
     obj = CATALOG.get(name, {})
 
     urgency = urgency_bonus(obj)
-    season = season_window_bonus(obj)
     roi = project_roi(name)
 
     progress = project_progress(name)
@@ -994,7 +993,6 @@ def portfolio_score(name):
     return (
         priority * 0.6
         + urgency
-        + season
         + roi * 3
         + completion
         + closure
@@ -1017,7 +1015,6 @@ def show_portfolio_ranking():
         obj = CATALOG.get(name, {})
 
         altitude = urgency_bonus(obj)
-        season = season_window_bonus(obj)
         roi = project_roi(name)
 
         progress = project_progress(name)
@@ -1026,7 +1023,6 @@ def show_portfolio_ranking():
         score = (
             priority * 0.6
             + altitude
-            + season
             + min(roi * 5, 20)
             + completion
             + closure
