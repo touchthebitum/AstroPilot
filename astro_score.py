@@ -371,18 +371,6 @@ def season_bonus(obj):
         return 5
     return 0
 
-def urgency_bonus(obj):
-
-    altitude = obj.get("altitude", 0)
-
-    if altitude < 25:
-        return 20
-
-    elif altitude < 35:
-        return 10
-
-    return 0
-
 
 def risk_label_to_score(risk):
     mapping = {
