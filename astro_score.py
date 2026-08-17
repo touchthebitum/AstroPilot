@@ -383,36 +383,6 @@ def urgency_bonus(obj):
 
     return 0
 
-def season_remaining_months(obj):
-    ra_deg = obj.get("ra")
-
-    if ra_deg is None:
-        return 6
-
-    ra_hours = ra_deg / 15.0
-    current_month = datetime.now().month
-
-    optimal_month = int((ra_hours / 2) % 12) + 1
-
-    diff = (optimal_month - current_month) % 12
-
-    return max(1, 12 - diff)
-
-
-def season_window_bonus(obj):
-    months = season_remaining_months(obj)
-
-    if months <= 1:
-        return 30
-
-    if months <= 2:
-        return 20
-
-    if months <= 4:
-        return 10
-
-    return 0
-
 
 def risk_label_to_score(risk):
     mapping = {

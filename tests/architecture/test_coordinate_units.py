@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
 import astropy.units as u
@@ -64,19 +62,6 @@ def test_alias_coordinates_match_canonical_ic_region(
 def test_ic1848_matches_reviewed_siril_reference():
     assert CATALOG["IC1848"]["ra"] == pytest.approx(42.825)
     assert CATALOG["IC1848"]["dec"] == pytest.approx(60.408333)
-
-
-def test_season_calculation_converts_catalog_degrees_to_hours(monkeypatch):
-    import astro_score
-
-    class FrozenDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return cls(2026, 7, 26, tzinfo=tz)
-
-    monkeypatch.setattr(astro_score, "datetime", FrozenDateTime)
-
-    assert astro_score.season_remaining_months({"ra": 30.0}) == 5
 
 
 @pytest.mark.parametrize(
