@@ -440,31 +440,30 @@ def marginal_gain_factor(progress):
 
 
 def portfolio_gain_if_shot(object_name, session_hours=3.0):
-    projects = get_projects()
+    state = project_state(object_name)
 
-    if object_name not in projects:
+    if state is None:
         return 0
 
-    before = project_progress(object_name)
+    before = state["progress"]
     marginal_factor = marginal_gain_factor(before)
 
-    project = projects[object_name]
+    target_hours = state["target_hours"]
 
-    current_hours = project.get("hours", 0)
-    target_hours = project.get("target_hours", 1)
+    if target_hours <= 0:
+        return 0
 
     simulated_hours = min(
-        current_hours + session_hours,
-        target_hours
+        state["hours"] + session_hours,
+        target_hours,
     )
 
     after = round(
         simulated_hours / target_hours * 100,
-        1
+        1,
     )
 
     gain = after - before
-
     gain *= marginal_factor
 
     return round(gain, 1)
