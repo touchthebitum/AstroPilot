@@ -55,3 +55,17 @@ def test_progression_bonus_rewards_unstarted_project(monkeypatch):
     )
 
     assert project_scoring.progression_bonus("M31") == 12
+
+
+def test_simulated_portfolio_score_uses_virtual_project_state():
+    project = {
+        "hours": 10,
+        "target_hours": 20,
+        "importance": 8,
+    }
+
+    score = project_scoring.simulated_portfolio_score(
+        project
+    )
+
+    assert score == 117.0

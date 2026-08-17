@@ -25,6 +25,7 @@ from decision.portfolio.project_scoring import (
     project_roi,
     closure_bonus,
     progression_bonus,
+    simulated_portfolio_score,
 )
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 from decision.portfolio.portfolio_engine import PortfolioEngine
@@ -429,38 +430,6 @@ def portfolio_gain_if_shot(object_name, session_hours=3.0):
 
     return round(gain, 1)
 
-
-def simulated_portfolio_score(project):
-
-    remaining = (
-        project["target_hours"]
-        - project["hours"]
-    )
-
-    progress = (
-        project["hours"]
-        / project["target_hours"]
-        * 100
-    )
-
-    importance = project.get(
-        "importance",
-        5
-    )
-
-    closure_bonus = 0
-
-    if remaining > 0:
-        closure_bonus = min(
-        40,
-        round(120 / remaining, 1)
-    )
-
-    return (
-        importance * 10
-        + progress * 0.5
-        + closure_bonus
-    )
 
 def show_multi_night_portfolio_roadmap(
     forecast_engine,

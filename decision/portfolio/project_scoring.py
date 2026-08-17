@@ -123,3 +123,35 @@ def progression_bonus(name):
         return 4
 
     return 0
+
+
+def simulated_portfolio_score(project):
+    remaining = (
+        project["target_hours"]
+        - project["hours"]
+    )
+
+    progress = (
+        project["hours"]
+        / project["target_hours"]
+        * 100
+    )
+
+    importance = project.get(
+        "importance",
+        5,
+    )
+
+    closure_bonus = 0
+
+    if remaining > 0:
+        closure_bonus = min(
+            40,
+            round(120 / remaining, 1),
+        )
+
+    return (
+        importance * 10
+        + progress * 0.5
+        + closure_bonus
+    )
