@@ -434,7 +434,6 @@ def explain_recommendation(project):
     postponement_risk = project.get("postponement_risk", 0)
     completion_bonus = project.get("completion_bonus", 0)
     closure_bonus = project.get("closure_bonus", 0)
-    season_bonus = project.get("season_bonus", 0)
 
     if astro_score >= 90:
         reasons.append("Conditions astronomiques excellentes.")
@@ -454,9 +453,6 @@ def explain_recommendation(project):
 
     if closure_bonus > 0:
         reasons.append("Cette nuit rapproche nettement le projet de sa finalisation.")
-
-    if season_bonus > 0:
-        reasons.append("La cible est actuellement dans une période favorable.")
 
     if not reasons:
         reasons.append("Choix retenu par équilibre global entre conditions, projet et portefeuille.")
@@ -794,7 +790,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
                 astro_score=astro_score,
                 final_score=final_score,
                 decision_score=decision_score,
-                season_bonus=season,
                 altitude_bonus=altitude,
                 roi=roi,
                 portfolio_score=portfolio_bonus,
@@ -812,7 +807,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
                         "postponement_risk": postponement_risk,
                         "completion_bonus": completion_bonus,
                         "closure_bonus": closure,
-                        "season_bonus": season,
                         "progression_bonus": progression,
                         "diversity_bonus": diversity_bonus,
                     }

@@ -18,7 +18,6 @@ def make_candidate(
         astro_score=0,
         final_score=final_score,
         decision_score=decision_score,
-        season_bonus=0,
         altitude_bonus=0,
         roi=0,
         portfolio_score=0,
