@@ -20,12 +20,6 @@ class Candidate:
     completion_bonus: float
     closure_bonus: float
 
-    postponement_risk: float
-    postponement_penalty: float
-    urgency_bonus: float
-    postponement_net_impact: float
-    postponement_reason: str
-
     acquired_hours: float = 0.0
     reasons: list[str] = field(default_factory=list)
     strategy_scores: dict = field(default_factory=dict)

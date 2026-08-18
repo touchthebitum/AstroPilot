@@ -22,11 +22,6 @@ def make_candidate(
         best_setup=None,
         completion_bonus=0,
         closure_bonus=0,
-        postponement_risk=0,
-        postponement_penalty=0,
-        urgency_bonus=0,
-        postponement_net_impact=0,
-        postponement_reason="",
     )
 
 

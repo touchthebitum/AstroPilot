@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
-
 from decision.models.candidate import Candidate
 
 
@@ -30,9 +27,7 @@ class ProjectSelectionEngine:
         best_setup: str | None,
         completion_bonus: float,
         closure_bonus: float,
-        postponement_risk: float,
-        postponement_impact: Mapping[str, Any],
-        reasons: dict[str, Any],
+        reasons: dict[str],
         strategy_scores: dict[str, float],
         acquired_hours: float,
     ) -> Candidate:
@@ -50,19 +45,6 @@ class ProjectSelectionEngine:
             best_setup=best_setup,
             completion_bonus=completion_bonus,
             closure_bonus=closure_bonus,
-            postponement_risk=postponement_risk,
-            postponement_penalty=float(
-                postponement_impact["postponement_penalty"]
-            ),
-            urgency_bonus=float(
-                postponement_impact["urgency_bonus"]
-            ),
-            postponement_net_impact=float(
-                postponement_impact["postponement_net_impact"]
-            ),
-            postponement_reason=str(
-                postponement_impact["postponement_reason"]
-            ),
             reasons=reasons,
             strategy_scores=strategy_scores,
             acquired_hours=acquired_hours,

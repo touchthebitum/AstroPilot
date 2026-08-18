@@ -774,8 +774,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
                 best_setup=obj.get("best_setup"),
                 completion_bonus=completion_bonus,
                 closure_bonus=closure,
-                postponement_risk=postponement_risk,
-                postponement_impact=postponement_impact,
                 reasons=explain_recommendation(
                     {
                         "astro_score": astro_score,
