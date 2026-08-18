@@ -622,9 +622,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             min(8, round(8 / max(opportunity_ratio, 0.1), 1))
         )
 
-        regret = future_engine.regret_score(catalog_key)
-        regret_bonus = min(5, regret * 1.2)
-
         diversity_bonus = diversification_bonus(catalog_key)
 
         astro_part = astro_score * astro_weight
@@ -638,7 +635,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             closure_bonus=closure,
             completion_bonus=completion_bonus,
             opportunity_bonus=opportunity_bonus,
-            regret_bonus=regret_bonus,
             diversity_bonus=diversity_bonus,
         )
 
