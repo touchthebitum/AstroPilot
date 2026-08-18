@@ -302,20 +302,6 @@ def season_urgency_bonus(obj):
     return SeasonEngine.urgency_bonus(obj)
 
 
-def regret_score(project_name):
-    future = future_engine.estimate (project_name)
-
-    good_nights = max(1, future.good_nights)
-    remaining = project_remaining_hours(project_name)
-
-    if remaining is None or remaining <= 0:
-        return 0
-
-    regret = remaining / good_nights
-
-    return round(min(10, regret), 1)
-
-
 def show_multi_night_portfolio_roadmap(
     forecast_engine,
     night_capacities=None,
@@ -699,7 +685,7 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             min(8, round(8 / max(opportunity_ratio, 0.1), 1))
         )
 
-        regret = regret_score(catalog_key)
+        regret = future_engine.regret_score(catalog_key)
         regret_bonus = min(5, regret * 1.2)
 
         progression = progression_bonus(catalog_key)
