@@ -1633,11 +1633,27 @@ def build_decision_context(
         setup=setup,
     )
 
+    project = project_state(obj_name)
+
+    project_remaining = (
+        project["remaining"]
+        if project is not None
+        else 0
+    )
+
+    project_progress_value = (
+        project["progress"]
+        if project is not None
+        else 0
+    )
+
+    project_priority_value = project_priority(obj_name)
+
     portfolio_context = PortfolioContext(
-        active_projects=0,
-        total_remaining_hours=0,
-        highest_priority=0,
-        average_progress=0,
+        active_projects=len(get_projects()),
+        total_remaining_hours=project_remaining,
+        highest_priority=project_priority_value,
+        average_progress=project_progress_value,
     )
 
     preferences_context = PreferencesContext(
