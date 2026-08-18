@@ -102,29 +102,6 @@ def closure_bonus(
     return 0
 
 
-def progression_bonus(name):
-    state = project_state(name)
-
-    if state is None:
-        return 0
-
-    if state["target_hours"] <= 0:
-        return 0
-
-    progress = state["progress"]
-
-    if progress <= 0:
-        return 12
-
-    if progress < 20:
-        return 8
-
-    if progress < 50:
-        return 4
-
-    return 0
-
-
 def simulated_portfolio_score(project):
     remaining = (
         project["target_hours"]

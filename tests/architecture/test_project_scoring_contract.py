@@ -47,16 +47,6 @@ def test_closure_bonus_rewards_finishable_project(monkeypatch):
     ) == 15
 
 
-def test_progression_bonus_rewards_unstarted_project(monkeypatch):
-    install_project(
-        monkeypatch,
-        hours=0,
-        target_hours=20,
-    )
-
-    assert project_scoring.progression_bonus("M31") == 12
-
-
 def test_simulated_portfolio_score_uses_virtual_project_state():
     project = {
         "hours": 10,
