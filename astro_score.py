@@ -298,9 +298,6 @@ def fetch_weather(lat: float, lon: float) -> dict | None:
 def season_days_remaining(obj):
     return SeasonEngine.season_days_remaining(obj)
 
-def season_urgency_bonus(obj):
-    return SeasonEngine.urgency_bonus(obj)
-
 
 def show_multi_night_portfolio_roadmap(
     forecast_engine,
