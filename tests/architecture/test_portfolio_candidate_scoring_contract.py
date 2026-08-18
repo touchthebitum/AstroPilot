@@ -41,9 +41,7 @@ def test_portfolio_candidate_bonus_preserves_formula():
         completion_bonus=14,
         opportunity_bonus=2,
         regret_bonus=1,
-        progression_bonus=12,
         diversity_bonus=4,
-        rank_bonus=6,
     )
 
-    assert score == 51
+    assert score == 33

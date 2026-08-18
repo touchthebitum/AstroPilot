@@ -31,9 +31,7 @@ def portfolio_candidate_bonus(
     completion_bonus: float,
     opportunity_bonus: float,
     regret_bonus: float,
-    progression_bonus: float,
     diversity_bonus: float,
-    rank_bonus: float,
 ) -> float:
     return (
         project_part
@@ -42,7 +40,5 @@ def portfolio_candidate_bonus(
         + completion_bonus
         + opportunity_bonus
         + regret_bonus
-        + progression_bonus
         + diversity_bonus
-        + rank_bonus
     )

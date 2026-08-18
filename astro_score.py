@@ -24,7 +24,6 @@ from decision.portfolio.project_scoring import (
     project_priority,
     project_roi,
     closure_bonus,
-    progression_bonus,
     simulated_portfolio_score,
 )
 from decision.portfolio.project_gain import (
@@ -42,7 +41,6 @@ from decision.risk.postponement_impact import (
 )
 from decision.portfolio.candidate_scoring import (
     portfolio_candidate_bonus,
-    portfolio_rank_bonus,
 )
 from decision.season.season_engine import SeasonEngine
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
@@ -627,35 +625,12 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         regret = future_engine.regret_score(catalog_key)
         regret_bonus = min(5, regret * 1.2)
 
-        progression = progression_bonus(catalog_key)
         diversity_bonus = diversification_bonus(catalog_key)
 
         astro_part = astro_score * astro_weight
         project_part = priority * project_weight
 
         roi_bonus = min(15, roi * 2)
-
-
-        portfolio_ranking = sorted(
-            projects.keys(),
-            key=lambda name: (
-                project_roi(name) * 20
-                + session_portfolio_gain(
-                    name,
-                    available_hours,
-                )
-                + closure_bonus(
-                    name,
-                    available_hours,
-                )
-            ),
-            reverse=True,
-        )
-
-        rank_bonus = portfolio_rank_bonus(
-            catalog_key=catalog_key,
-            portfolio_ranking=portfolio_ranking,
-        )
 
         portfolio_bonus = portfolio_candidate_bonus(
             project_part=project_part,
@@ -664,9 +639,7 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             completion_bonus=completion_bonus,
             opportunity_bonus=opportunity_bonus,
             regret_bonus=regret_bonus,
-            progression_bonus=progression,
             diversity_bonus=diversity_bonus,
-            rank_bonus=rank_bonus,
         )
 
         final_score = (
@@ -722,7 +695,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
                         "postponement_risk": postponement_risk,
                         "completion_bonus": completion_bonus,
                         "closure_bonus": closure,
-                        "progression_bonus": progression,
                         "diversity_bonus": diversity_bonus,
                     }
                 ),
