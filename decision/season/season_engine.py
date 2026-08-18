@@ -34,9 +34,13 @@ class SeasonEngine:
         if days is None:
             return 0
 
-        score = max(0, 100 - days / 2)
+        if days <= 14:
+            return 100
 
-        return round(score, 1)
+        if days <= 45:
+            return 60
+
+        return 0
 
     @staticmethod
     def remaining_good_nights(target):

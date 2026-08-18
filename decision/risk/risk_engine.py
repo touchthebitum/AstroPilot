@@ -14,7 +14,6 @@ class RiskEngine:
         completion = context.completion
         season_remaining_days = context.season_remaining_days
         favorable_nights = context.favorable_nights
-        season_urgency = context.season_urgency or 0
         pressure = context.pressure or 0
 
         if season_remaining_days is None:
@@ -25,13 +24,6 @@ class RiskEngine:
 
         score = 0
         explanation = []
-
-        if season_urgency >= 70:
-            score += 20
-            explanation.append("Urgence saisonnière élevée")
-        elif season_urgency >= 40:
-            score += 10
-            explanation.append("Urgence saisonnière modérée")
 
         if pressure >= 0.50:
             score += 25
