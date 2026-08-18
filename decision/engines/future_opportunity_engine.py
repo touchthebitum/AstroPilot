@@ -131,17 +131,3 @@ class FutureOpportunityEngine:
             return 0.35
 
         return good_hours / total_night_hours
-
-
-    def regret_score(self, project_name):
-        future = self.estimate(project_name)
-
-        good_nights = max(1, future.good_nights)
-        remaining = self.project_provider(project_name)
-
-        if remaining is None or remaining <= 0:
-            return 0
-
-        regret = remaining / good_nights
-
-        return round(min(10, regret), 1)
