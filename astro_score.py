@@ -40,6 +40,10 @@ from decision.risk.postponement_impact import (
     compute_postponement_impact,
     risk_label_to_score,
 )
+from decision.portfolio.candidate_scoring import (
+    portfolio_candidate_bonus,
+    portfolio_rank_bonus,
+)
 from decision.season.season_engine import SeasonEngine
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 from decision.portfolio.portfolio_engine import PortfolioEngine
@@ -632,39 +636,37 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         roi_bonus = min(15, roi * 2)
 
 
-        portfolio_rank_bonus = 0
-
         portfolio_ranking = sorted(
             projects.keys(),
             key=lambda name: (
                 project_roi(name) * 20
-                + session_portfolio_gain(name, available_hours)
-                + closure_bonus(name, available_hours)
+                + session_portfolio_gain(
+                    name,
+                    available_hours,
+                )
+                + closure_bonus(
+                    name,
+                    available_hours,
+                )
             ),
-            reverse=True
+            reverse=True,
         )
 
+        rank_bonus = portfolio_rank_bonus(
+            catalog_key=catalog_key,
+            portfolio_ranking=portfolio_ranking,
+        )
 
-        if catalog_key in portfolio_ranking:
-            rank = portfolio_ranking.index(catalog_key) + 1
-
-            if rank == 1:
-                portfolio_rank_bonus = 12
-            elif rank == 2:
-                portfolio_rank_bonus = 6
-            elif rank == 3:
-                portfolio_rank_bonus = 3
-
-        portfolio_bonus = (
-            project_part
-            + roi_bonus
-            + closure
-            + completion_bonus
-            + opportunity_bonus
-            + regret_bonus
-            + progression
-            + diversity_bonus
-            + portfolio_rank_bonus
+        portfolio_bonus = portfolio_candidate_bonus(
+            project_part=project_part,
+            roi_bonus=roi_bonus,
+            closure_bonus=closure,
+            completion_bonus=completion_bonus,
+            opportunity_bonus=opportunity_bonus,
+            regret_bonus=regret_bonus,
+            progression_bonus=progression,
+            diversity_bonus=diversity_bonus,
+            rank_bonus=rank_bonus,
         )
 
         final_score = (
