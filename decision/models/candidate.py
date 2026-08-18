@@ -10,7 +10,6 @@ class Candidate:
     final_score: float
     decision_score: float
 
-    altitude_bonus: float
     roi: float
     portfolio_score: float
 

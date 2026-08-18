@@ -667,7 +667,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             continue
 
         priority = project_priority(catalog_key)
-        altitude = 0
         season_urgency = season_urgency_bonus(obj)
         roi = project_roi(catalog_key)
 
@@ -749,7 +748,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
 
         final_score = (
             astro_part
-            + altitude
             + season_urgency
             + portfolio_bonus
         + postponement_impact["postponement_net_impact"]
@@ -788,7 +786,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
                 astro_score=astro_score,
                 final_score=final_score,
                 decision_score=decision_score,
-                altitude_bonus=altitude,
                 roi=roi,
                 portfolio_score=portfolio_bonus,
                 global_score=obj.get("global_score", astro_score),
