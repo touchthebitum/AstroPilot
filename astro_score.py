@@ -698,7 +698,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
                 astro_score=astro_score,
                 final_score=final_score,
                 decision_score=decision_score,
-                roi=roi,
                 portfolio_score=portfolio_bonus,
                 global_score=obj.get("global_score", astro_score),
                 setup_score=obj.get("setup_score", 0),
