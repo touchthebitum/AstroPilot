@@ -666,9 +666,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
 
         remaining = project_remaining_hours(catalog_key)
 
-        if remaining is not None and remaining <= available_hours:
-            final_score += 30
-
         strategy_scores, decision_score = (
         night_strategy_engine.compute_strategy_scores(
             astro_part=astro_part,
