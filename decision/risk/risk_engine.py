@@ -58,13 +58,6 @@ class RiskEngine:
             score += 20
             explanation.append("Projet modérément prioritaire")
 
-        if remaining_hours >= 10:
-            score += 30
-            explanation.append("Beaucoup d'heures restantes")
-        elif remaining_hours >= 5:
-            score += 15
-            explanation.append("Quelques heures restantes")
-
         if score >= 60:
             level = "HIGH"
         elif score >= 30:
