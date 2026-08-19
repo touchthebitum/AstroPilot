@@ -24,7 +24,7 @@ class NightStrategyEngine:
         astro_part: float,
         roi_bonus: float,
         postponement_net_impact: float,
-        completion_bonus: float,
+        marginal_progress_bonus: float,
         diversity_bonus: float,
         decision_mode: str,
         fallback_score: float,
@@ -38,7 +38,7 @@ class NightStrategyEngine:
                 astro_part * weights["astro"]
                 + roi_bonus * weights["roi"]
                 + postponement_net_impact * weights["report"]
-                + completion_bonus * weights["completion"]
+                + marginal_progress_bonus * weights["progress"]
                 + diversity_bonus * weights["diversity"],
                 1,
             )

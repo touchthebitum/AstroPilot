@@ -356,7 +356,10 @@ def explain_recommendation(project):
     astro_score = project.get("astro_score", 0)
     roi = project.get("roi", 0)
     postponement_risk = project.get("postponement_risk", 0)
-    completion_bonus = project.get("completion_bonus", 0)
+    marginal_progress_bonus = project.get(
+        "marginal_progress_bonus",
+        0,
+    )
     closure_bonus = project.get("closure_bonus", 0)
 
     if astro_score >= 90:
@@ -372,7 +375,7 @@ def explain_recommendation(project):
     elif postponement_risk >= 40:
         reasons.append("Risque de report modéré à prendre en compte.")
 
-    if completion_bonus >= 10:
+    if marginal_progress_bonus >= 10:
         reasons.append("Cette session apporte une forte progression du projet.")
 
     if closure_bonus > 0:
@@ -522,7 +525,7 @@ def strategy_weights(mode="balanced"):
             "astro": 1.0,
             "roi": 1.0,
             "report": 1.0,
-            "completion": 1.0,
+            "progress": 1.0,
             "diversity": 1.0,
         },
 
@@ -530,7 +533,7 @@ def strategy_weights(mode="balanced"):
             "astro": 0.8,
             "roi": 2.0,
             "report": 0.8,
-            "completion": 0.7,
+            "progress": 0.7,
             "diversity": 0.5,
         },
 
@@ -538,7 +541,7 @@ def strategy_weights(mode="balanced"):
             "astro": 0.8,
             "roi": 0.7,
             "report": 1.0,
-            "completion": 2.0,
+            "progress": 2.0,
             "diversity": 0.5,
         },
 
@@ -546,7 +549,7 @@ def strategy_weights(mode="balanced"):
             "astro": 0.8,
             "roi": 0.7,
             "report": 0.8,
-            "completion": 0.5,
+            "progress": 0.5,
             "diversity": 2.0,
         },
 
@@ -554,7 +557,7 @@ def strategy_weights(mode="balanced"):
             "astro": 0.9,
             "roi": 0.6,
             "report": 2.0,
-            "completion": 1.0,
+            "progress": 1.0,
             "diversity": 0.8,
         },
     }
@@ -610,8 +613,16 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             astro_score=astro_score,
         )
 
-        completion_bonus = marginal_gain_factor(project_progress(catalog_key)) * 10
-        completion_bonus = min(completion_bonus, 30)
+        marginal_progress_bonus = (
+            marginal_gain_factor(
+                project_progress(catalog_key)
+            )
+            * 10
+        )
+        marginal_progress_bonus = min(
+            marginal_progress_bonus,
+            30,
+        )
 
         closure = closure_bonus(catalog_key, available_hours)
 
@@ -633,7 +644,7 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             project_part=project_part,
             roi_bonus=roi_bonus,
             closure_bonus=closure,
-            completion_bonus=completion_bonus,
+            marginal_progress_bonus=marginal_progress_bonus,
             opportunity_bonus=opportunity_bonus,
             diversity_bonus=diversity_bonus,
         )
@@ -660,7 +671,7 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             postponement_net_impact=postponement_impact[
                 "postponement_net_impact"
             ],
-            completion_bonus=completion_bonus,
+            marginal_progress_bonus=marginal_progress_bonus,
             diversity_bonus=diversity_bonus,
             decision_mode=decision_mode,
             fallback_score=final_score,
@@ -688,7 +699,7 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
                         "astro_score": astro_score,
                         "roi": roi,
                         "postponement_risk": postponement_risk,
-                        "completion_bonus": completion_bonus,
+                        "marginal_progress_bonus": marginal_progress_bonus,
                         "closure_bonus": closure,
                         "diversity_bonus": diversity_bonus,
                     }

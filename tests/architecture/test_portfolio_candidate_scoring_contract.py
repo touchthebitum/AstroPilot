@@ -7,7 +7,7 @@ def test_portfolio_candidate_bonus_preserves_formula():
         project_part=8,
         roi_bonus=1,
         closure_bonus=3,
-        completion_bonus=14,
+        marginal_progress_bonus=14,
         opportunity_bonus=2,
         diversity_bonus=4,
     )
