@@ -15,37 +15,13 @@ def project_priority(object_name):
         return 0
 
     project = projects[object_name]
-    state = project_state(object_name)
 
-    if state is None:
-        return 0
-
-    importance = project.get("importance", 5)
-    target = state["target_hours"]
-
-    if target <= 0:
-        return 0
-
-    completion = state["progress"] / 100
-    remaining = state["remaining"]
-
-    if completion < 0.20:
-        completion_bonus = 0
-    elif completion < 0.50:
-        completion_bonus = 3
-    elif completion < 0.75:
-        completion_bonus = 7
-    elif completion < 0.90:
-        completion_bonus = 12
-    else:
-        completion_bonus = 20
-
-    remaining_pressure = min(remaining, 20)
-
-    base_priority = completion_bonus + remaining_pressure
+    importance = float(
+        project.get("importance", 5)
+    )
 
     return round(
-        base_priority * (importance / 5),
+        min(100.0, max(0.0, importance * 10)),
         1,
     )
 

@@ -59,3 +59,16 @@ def test_simulated_portfolio_score_uses_virtual_project_state():
     )
 
     assert score == 117.0
+
+
+def test_project_priority_normalizes_importance_to_100_scale(
+    monkeypatch,
+):
+    install_project(
+        monkeypatch,
+        hours=3,
+        target_hours=20,
+        importance=8,
+    )
+
+    assert project_scoring.project_priority("M31") == 80.0
