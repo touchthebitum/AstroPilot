@@ -526,6 +526,7 @@ def strategy_weights(mode="balanced"):
             "roi": 1.0,
             "report": 1.0,
             "progress": 1.0,
+            "closure": 1.0,
             "diversity": 1.0,
         },
 
@@ -534,6 +535,7 @@ def strategy_weights(mode="balanced"):
             "roi": 2.0,
             "report": 0.8,
             "progress": 0.7,
+            "closure": 0.7,
             "diversity": 0.5,
         },
 
@@ -541,7 +543,8 @@ def strategy_weights(mode="balanced"):
             "astro": 0.8,
             "roi": 0.7,
             "report": 1.0,
-            "progress": 2.0,
+            "progress": 0.5,
+            "closure": 2.0,
             "diversity": 0.5,
         },
 
@@ -550,6 +553,7 @@ def strategy_weights(mode="balanced"):
             "roi": 0.7,
             "report": 0.8,
             "progress": 0.5,
+            "closure": 0.5,
             "diversity": 2.0,
         },
 
@@ -558,6 +562,7 @@ def strategy_weights(mode="balanced"):
             "roi": 0.6,
             "report": 2.0,
             "progress": 1.0,
+            "closure": 1.0,
             "diversity": 0.8,
         },
     }
@@ -672,6 +677,7 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
                 "postponement_net_impact"
             ],
             marginal_progress_bonus=marginal_progress_bonus,
+            closure_bonus=closure,
             diversity_bonus=diversity_bonus,
             decision_mode=decision_mode,
             fallback_score=final_score,

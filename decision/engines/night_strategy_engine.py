@@ -25,6 +25,7 @@ class NightStrategyEngine:
         roi_bonus: float,
         postponement_net_impact: float,
         marginal_progress_bonus: float,
+        closure_bonus: float,
         diversity_bonus: float,
         decision_mode: str,
         fallback_score: float,
@@ -39,6 +40,7 @@ class NightStrategyEngine:
                 + roi_bonus * weights["roi"]
                 + postponement_net_impact * weights["report"]
                 + marginal_progress_bonus * weights["progress"]
+                + closure_bonus * weights["closure"]
                 + diversity_bonus * weights["diversity"],
                 1,
             )
