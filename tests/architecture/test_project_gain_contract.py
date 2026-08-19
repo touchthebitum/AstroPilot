@@ -65,3 +65,19 @@ def test_session_portfolio_gain_uses_remaining_hours(
     )
 
     assert gain == 10.0
+
+def test_session_roi_measures_project_gain_per_hour(
+    monkeypatch,
+):
+    install_project(
+        monkeypatch,
+        hours=0,
+        target_hours=20,
+    )
+
+    roi = project_gain.session_roi(
+        "M31",
+        session_hours=2,
+    )
+
+    assert roi == 5.0

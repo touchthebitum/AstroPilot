@@ -92,3 +92,20 @@ def session_portfolio_gain(
     )
 
     return gain_percent
+
+def session_roi(
+    name,
+    session_hours=3.0,
+):
+    if session_hours <= 0:
+        return 0
+
+    gain = session_portfolio_gain(
+        name,
+        session_hours=session_hours,
+    )
+
+    return round(
+        gain / session_hours,
+        2,
+    )

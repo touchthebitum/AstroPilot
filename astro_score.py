@@ -30,6 +30,7 @@ from decision.portfolio.project_gain import (
     marginal_gain_factor,
     portfolio_gain_if_shot,
     session_portfolio_gain,
+    session_roi,
 )
 from decision.portfolio.diversification import (
     diversification_bonus,
@@ -599,7 +600,10 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             continue
 
         priority = project_priority(catalog_key)
-        roi = project_roi(catalog_key)
+        roi = session_roi(
+            catalog_key,
+            available_hours,
+        )
 
         future = future_engine.estimate (catalog_key)
 
@@ -643,7 +647,10 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         astro_part = astro_score * astro_weight
         project_part = priority * project_weight
 
-        roi_bonus = min(15, roi * 2)
+        roi_bonus = min(
+            15,
+            roi * 0.2,
+        )
 
         portfolio_bonus = portfolio_candidate_bonus(
             project_part=project_part,
