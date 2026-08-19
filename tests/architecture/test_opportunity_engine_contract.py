@@ -23,7 +23,6 @@ def make_candidate(
         global_score=0,
         setup_score=0,
         best_setup=None,
-        completion_bonus=0,
         closure_bonus=0,
         reasons=reasons or [],
         acquired_hours=acquired_hours,

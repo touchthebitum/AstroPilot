@@ -682,7 +682,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
                 global_score=obj.get("global_score", astro_score),
                 setup_score=obj.get("setup_score", 0),
                 best_setup=obj.get("best_setup"),
-                completion_bonus=completion_bonus,
                 closure_bonus=closure,
                 reasons=explain_recommendation(
                     {

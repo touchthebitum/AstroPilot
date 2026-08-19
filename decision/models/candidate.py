@@ -17,7 +17,6 @@ class Candidate:
     setup_score: float
     best_setup: str | None
 
-    completion_bonus: float
     closure_bonus: float
 
     acquired_hours: float = 0.0
