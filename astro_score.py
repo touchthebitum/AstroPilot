@@ -22,7 +22,6 @@ from decision.portfolio.project_state import (
 )
 from decision.portfolio.project_scoring import (
     project_priority,
-    project_roi,
     closure_bonus,
     simulated_portfolio_score,
 )
@@ -307,15 +306,9 @@ def season_days_remaining(obj):
 
 
 def show_multi_night_portfolio_roadmap(
-    forecast_engine,
-    night_capacities=None,
-    avg_night_hours=5,
+    roadmap,
 ):
-
-    simulated = forecast_engine.simulate_dynamic_portfolio_roadmap(
-    night_capacities=night_capacities,
-    avg_night_hours=avg_night_hours,
-    )
+    simulated = roadmap
 
     print("\n===== ROADMAP MULTI-NUITS DYNAMIQUE =====")
 
@@ -745,295 +738,6 @@ def forecast_available_hours(nights):
 
     return round(total, 1)
 
-def estimate_completion_date(hours_needed, nights):
-    remaining = hours_needed
-
-    for night in sorted(nights, key=lambda x: x["date"]):
-
-        window = night.get("best_window")
-
-        if not window:
-            continue
-
-        start = int(window["start"].split(":")[0])
-        end = int(window["end"].split(":")[0])
-
-        available = end - start
-
-        if available <= 0:
-            continue
-
-        remaining -= available
-
-        if remaining <= 0:
-            return night["date"]
-
-    return "Au-delà des prévisions"
-
-def estimate_portfolio_completion_date(total_remaining, nights):
-    remaining = total_remaining
-
-    for night in sorted(nights, key=lambda x: x["date"]):
-
-        window = night.get("best_window")
-
-        if not window:
-            continue
-
-        start = int(window["start"].split(":")[0])
-        end = int(window["end"].split(":")[0])
-        available = end - start
-
-        if available <= 0:
-            continue
-
-        remaining -= available
-
-        if remaining <= 0:
-            return night["date"]
-
-    return None
-
-def show_roadmap(
-    roadmap,
-    forecast_engine,
-    night_capacities=None,
-    ):
-
-    show_multi_night_portfolio_roadmap(
-    forecast_engine=forecast_engine,
-    night_capacities=night_capacities,
-    )
-
-def average_night_capacity(nights):
-    if not nights:
-        return 1
-
-    return (
-        forecast_available_hours(nights)
-        / max(1, len(nights))
-    )
-
-
-def portfolio_score(name):
-    priority = project_priority(name)
-    roi = project_roi(name)
-
-    progress = project_progress(name)
-    completion = progress / 5
-
-    closure = closure_bonus(name)
-
-    return (
-        priority * 0.6
-        + roi * 3
-        + completion
-        + closure
-    )
-
-
-def build_astro_calendar(projects, nights):
-    calendar = []
-
-    sorted_nights = sorted(
-        nights,
-        key=lambda x: x["score"],
-        reverse=True
-    )
-
-    project_order = []
-
-    for name in projects:
-        project_order.append(
-            {
-                "name": name,
-                "score": portfolio_score(name),
-                "remaining": project_remaining_hours(name),
-            }
-        )
-
-    project_order.sort(
-        key=lambda x: x["score"],
-        reverse=True
-    )
-    night_index = 0
-    for project in project_order:
-        remaining = project["remaining"]
-
-        if remaining <= 0:
-            continue
-
-        while remaining > 0 and night_index < len(sorted_nights):
-
-            night = sorted_nights[night_index]
-
-            window = night.get("best_window")
-
-            if not window:
-                night_index += 1
-                continue
-
-            start = int(window["start"].split(":")[0])
-            end = int(window["end"].split(":")[0])
-            available = end - start
-
-            if available <= 0:
-                night_index += 1
-                continue
-
-            used = min(available, remaining)
-
-            calendar.append(
-                {
-                    "date": night["date"],
-                    "project": project["name"],
-                    "hours": used,
-                    "remaining_after": remaining - used,
-                }
-            )
-
-            remaining -= used
-            night_index += 1
-
-    return calendar
-
-def show_astro_calendar(nights):
-    projects = get_projects()
-
-    if not projects:
-        return
-
-    calendar = build_astro_calendar(projects, nights)
-    calendar.sort(key=lambda x: x["date"])
-
-    remaining_by_project = {}
-
-    for name in projects:
-        remaining_by_project[name] = project_remaining_hours(name)
-
-    for item in calendar:
-        name = item["project"]
-        remaining_by_project[name] -= item["hours"]
-        item["remaining_after"] = max(0, remaining_by_project[name])
-
-    if not calendar:
-        return
-
-    print("\n===== CALENDRIER ASTRO =====\n")
-
-    for item in calendar:
-        print(
-            f"{item['date']}  "
-            f"{item['project']:10}  "
-            f"{item['hours']:.1f} h  "
-            f"reste après : {item['remaining_after']:.1f} h"
-        )
-
-def apply_virtual_session(project, hours):
-    target = project.get("target_hours", 0)
-    current_hours = project.get("hours", 0)
-
-    project["hours"] = min(
-        target,
-        current_hours + hours,
-    )
-
-    project["remaining"] = max(
-        0,
-        target - project["hours"],
-    )
-
-    project["progress"] = (
-        round(
-            project["hours"] / target * 100,
-            1,
-        )
-        if target > 0
-        else 0
-    )
-
-    project["completed"] = project["remaining"] <= 0
-
-    return project
-
-def simulate_portfolio_calendar(nights):
-
-    projects = copy.deepcopy(get_projects())
-    completion_dates = {}
-
-    remaining_by_name = {
-    name: project_remaining_hours(name)
-    for name in projects
-    }
-
-    for night in nights:
-        
-        recommendations = recommend_project_for_night(
-        night["top_objects"] + [
-        {"name": name, "catalog_key": name, "score": 0}
-
-                for name in projects.keys()],
-            available_hours=night.get("duration", 3.0))
-        
-        if not recommendations:
-            continue
-
-        best_project = None
-        best_score = -9999
-
-        for p in recommendations[:3]:
-
-            name = p["name"]
-            remaining = remaining_by_name.get(name, 0)
-
-            if remaining <= 0:
-                continue
-
-            score = p["final_score"]
-
-            if score > best_score:
-                best_score = score
-                best_project = p
-
-        if not best_project:
-            continue
-
-        name = best_project["name"]
-        remaining = remaining_by_name[name]
-
-        window = night.get("best_window")
-
-        if window:
-            start = int(window["start"].split(":")[0])
-            end = int(window["end"].split(":")[0])
-            available_hours = max(0, end - start)
-        else:
-            available_hours = 0
-
-        session_hours = min(available_hours,remaining)
-
-        if session_hours <=0:
-            continue
-
-        apply_virtual_session(
-            projects[name],
-            session_hours)
-        
-        remaining_by_name[name] = projects[name]["remaining"]
-        
-        if projects[name].get("completed") and name not in completion_dates:
-            completion_dates[name] = night["date"]
-            print(f"✓ Projet terminé : {name}")
-
-    return {
-    "completion_dates": completion_dates,
-    "portfolio_end": None,
-    "unfinished_projects": [],
-    "remaining_hours": {},
-    "unfinished_hours": 0,
-    "extra_nights": 0,
-    "avg_night_hours": nights,
-}
 
 def verdict(score: int) -> str:
     if score >= 90:
@@ -1970,9 +1674,9 @@ forecast_engine = ForecastEngine(
 
 report_runner = ReportRunner(
     portfolio_forecast_engine=portfolio_forecast_engine,
-    show_astro_calendar=show_astro_calendar,
-    simulate_portfolio_calendar=simulate_portfolio_calendar,
-    show_roadmap=show_roadmap,
+    show_multi_night_portfolio_roadmap=(
+        show_multi_night_portfolio_roadmap
+    ),
     show_portfolio_completion_forecast=show_portfolio_completion_forecast,
     present_mission=MissionPresenter.present,
     tonight_mission_service=tonight_mission_service,
@@ -2169,7 +1873,9 @@ def main(argv=None) -> int:
         )
 
     elif args.mode == "calendar":
-        report_runner.run_calendar(nights)
+        report_runner.run_calendar(
+            night_capacities=night_capacities,
+        )
 
     elif args.mode == "tonight":
         if top_nights:
@@ -2180,9 +1886,8 @@ def main(argv=None) -> int:
 
     elif args.mode == "full":
         report_runner.run_full(
-            nights=nights,
             night_capacities=night_capacities,
-    )
+        )
 
     return 0
 

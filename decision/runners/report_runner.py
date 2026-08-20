@@ -7,17 +7,15 @@ class ReportRunner:
     def __init__(
         self,
         portfolio_forecast_engine,
-        show_astro_calendar,
-        simulate_portfolio_calendar,
-        show_roadmap,
+        show_multi_night_portfolio_roadmap,
         show_portfolio_completion_forecast,
         present_mission,
         tonight_mission_service,
     ):
         self.portfolio_forecast_engine = portfolio_forecast_engine
-        self.show_astro_calendar = show_astro_calendar
-        self.simulate_portfolio_calendar = simulate_portfolio_calendar
-        self.show_roadmap = show_roadmap
+        self.show_multi_night_portfolio_roadmap = (
+            show_multi_night_portfolio_roadmap
+    )
         self.show_portfolio_completion_forecast = (
             show_portfolio_completion_forecast
         )
@@ -39,34 +37,40 @@ class ReportRunner:
             dynamic_roadmap
     )
 
-    def run_calendar(self, nights):
-        self.show_astro_calendar(nights)
-        return self.simulate_portfolio_calendar(nights)
-
-    def run_full(
+    def run_calendar(
         self,
-        nights,
         night_capacities,
     ):
-        self.show_astro_calendar(nights)
-
-        roadmap = self.simulate_portfolio_calendar(nights)
-
-        self.show_roadmap(
-            roadmap,
-            forecast_engine=self.portfolio_forecast_engine,
-            night_capacities=night_capacities,
-        )
-
-        dynamic_roadmap = (
+        roadmap = (
             self.portfolio_forecast_engine
             .simulate_dynamic_portfolio_roadmap(
                 night_capacities=night_capacities,
             )
         )
 
+        self.show_multi_night_portfolio_roadmap(
+            roadmap
+        )
+
+        return roadmap
+
+    def run_full(
+        self,
+        night_capacities,
+    ):
+        roadmap = (
+            self.portfolio_forecast_engine
+            .simulate_dynamic_portfolio_roadmap(
+                night_capacities=night_capacities,
+            )
+        )
+
+        self.show_multi_night_portfolio_roadmap(
+            roadmap
+        )
+
         self.show_portfolio_completion_forecast(
-            dynamic_roadmap
+            roadmap
         )
 
     def run_tonight(
