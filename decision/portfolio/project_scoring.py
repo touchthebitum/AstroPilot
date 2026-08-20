@@ -111,6 +111,6 @@ def simulated_portfolio_score(
     )
 
     return (
-        importance * 10
+        importance * 6
         + closure
     )
