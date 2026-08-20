@@ -84,12 +84,6 @@ def simulated_portfolio_score(project):
         - project["hours"]
     )
 
-    progress = (
-        project["hours"]
-        / project["target_hours"]
-        * 100
-    )
-
     importance = project.get(
         "importance",
         5,
@@ -105,6 +99,5 @@ def simulated_portfolio_score(project):
 
     return (
         importance * 10
-        + progress * 0.5
         + closure_bonus
     )

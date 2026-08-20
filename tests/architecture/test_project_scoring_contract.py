@@ -58,7 +58,7 @@ def test_simulated_portfolio_score_uses_virtual_project_state():
         project
     )
 
-    assert score == 117.0
+    assert score == 92.0
 
 
 def test_project_priority_normalizes_importance_to_100_scale(
