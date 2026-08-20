@@ -1681,7 +1681,6 @@ def build_object_evaluation_result(
     setup_ranking,
     progress,
     remaining_hours,
-    roi,
     priority,
     summary,
     decision_context,
@@ -1707,7 +1706,6 @@ def build_object_evaluation_result(
         "arcsec_pixel": best.get("arcsec_pixel"),
         "progress": progress,
         "remaining_hours": remaining_hours,
-        "roi": roi,
         "priority": priority,
         "season_bonus": best.get("season_bonus", 0),
         "weather_bonus": best.get("weather_bonus", 0),
@@ -1779,7 +1777,6 @@ def evaluate_object(
 
     progress = project_progress(obj_name)
     remaining_hours = project_remaining_hours(obj_name)
-    roi = project_roi(obj_name)
 
     decision_engine = build_decision_engine()
 
@@ -1812,7 +1809,6 @@ def evaluate_object(
         setup_ranking=setup_ranking,
         progress=progress,
         remaining_hours=remaining_hours,
-        roi=roi,
         priority=priority,
         summary=summary,
         decision_context=decision_context,
