@@ -23,17 +23,6 @@ def install_project(monkeypatch, *, hours, target_hours, importance=5):
     )
 
 
-def test_project_roi_uses_current_project_state(monkeypatch):
-    install_project(
-        monkeypatch,
-        hours=10,
-        target_hours=20,
-        importance=8,
-    )
-
-    assert project_scoring.project_roi("M31") == 1.2
-
-
 def test_closure_bonus_rewards_finishable_project(monkeypatch):
     install_project(
         monkeypatch,

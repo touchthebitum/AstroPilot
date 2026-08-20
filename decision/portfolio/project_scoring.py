@@ -26,37 +26,6 @@ def project_priority(object_name):
     )
 
 
-def project_roi(object_name):
-    projects = get_projects()
-
-    if object_name not in projects:
-        return 0
-
-    project = projects[object_name]
-    state = project_state(object_name)
-
-    if state is None:
-        return 0
-
-    remaining = state["remaining"]
-
-    if remaining <= 0:
-        return 0
-
-    importance = project.get("importance", 5)
-    progress = state["progress"]
-
-    completion_multiplier = 1 + progress / 100
-
-    roi = (
-        importance
-        * completion_multiplier
-        / remaining
-    )
-
-    return round(roi, 2)
-
-
 def closure_bonus_for_remaining(
     remaining,
     available_hours=3.0,
