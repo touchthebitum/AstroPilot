@@ -57,13 +57,14 @@ def project_roi(object_name):
     return round(roi, 2)
 
 
-def closure_bonus(
-    name,
+def closure_bonus_for_remaining(
+    remaining,
     available_hours=3.0,
 ):
-    remaining = project_remaining_hours(name)
-
     if remaining is None or remaining <= 0:
+        return 0
+
+    if available_hours <= 0:
         return 0
 
     if remaining <= available_hours:
@@ -78,7 +79,22 @@ def closure_bonus(
     return 0
 
 
-def simulated_portfolio_score(project):
+def closure_bonus(
+    name,
+    available_hours=3.0,
+):
+    remaining = project_remaining_hours(name)
+
+    return closure_bonus_for_remaining(
+        remaining,
+        available_hours,
+    )
+
+
+def simulated_portfolio_score(
+    project,
+    available_hours=3.0,
+):
     remaining = (
         project["target_hours"]
         - project["hours"]
@@ -89,15 +105,12 @@ def simulated_portfolio_score(project):
         5,
     )
 
-    closure_bonus = 0
-
-    if remaining > 0:
-        closure_bonus = min(
-            40,
-            round(120 / remaining, 1),
-        )
+    closure = closure_bonus_for_remaining(
+        remaining,
+        available_hours,
+    )
 
     return (
         importance * 10
-        + closure_bonus
+        + closure
     )

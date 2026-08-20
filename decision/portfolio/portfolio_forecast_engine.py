@@ -71,7 +71,10 @@ class PortfolioForecastEngine:
                         remaining_hours=remaining,
                     )
 
-                    base_score = self.score_project(project)
+                    base_score = self.score_project(
+                        project,
+                        available_hours=hours_remaining_night,
+                    )
 
                     ratio = future.opportunity_ratio
 
