@@ -23,7 +23,11 @@ class FutureOpportunityEngine:
         self.profile_provider = profile_provider
         self.project_provider = project_provider
 
-    def estimate(self, project_name: str) -> FutureOpportunity:
+    def estimate(
+        self,
+        project_name: str,
+        remaining_hours: float | None = None,
+    ) -> FutureOpportunity:
         project = self.catalog.get(project_name)
 
         if not project:
@@ -64,7 +68,10 @@ class FutureOpportunityEngine:
 
         good_nights = max(1, int(season_days * weather_ratio))
 
-        remaining = self.project_provider(project_name)
+        if remaining_hours is None:
+            remaining = self.project_provider(project_name)
+        else:
+            remaining = remaining_hours
 
         if remaining is None:
             remaining = 10

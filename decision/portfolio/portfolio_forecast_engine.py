@@ -59,7 +59,18 @@ class PortfolioForecastEngine:
                 best_score = -9999
 
                 for name, project in active_projects.items():
-                    future = self.future_engine.estimate(name)
+
+                    remaining = max(
+                        0,
+                        project["target_hours"]
+                        - project["hours"],
+                    )
+
+                    future = self.future_engine.estimate(
+                        name,
+                        remaining_hours=remaining,
+                    )
+
                     base_score = self.score_project(project)
 
                     ratio = future.opportunity_ratio
