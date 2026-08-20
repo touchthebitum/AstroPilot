@@ -2119,7 +2119,6 @@ portfolio_engine = PortfolioEngine(
     project_progress=project_progress,
     project_remaining_hours=project_remaining_hours,
     project_priority=project_priority,
-    project_roi=project_roi,
     get_projects=get_projects,
 )
 

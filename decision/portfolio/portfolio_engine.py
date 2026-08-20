@@ -11,13 +11,11 @@ class PortfolioEngine:
         project_progress: Callable[[str], float],
         project_remaining_hours: Callable[[str], float | None],
         project_priority: Callable[[str], float],
-        project_roi: Callable[[str], float],
         get_projects: Callable[[], dict],
     ):
         self.project_progress = project_progress
         self.project_remaining_hours = project_remaining_hours
         self.project_priority = project_priority
-        self.project_roi = project_roi
         self.get_projects = get_projects
 
     def enrich(
@@ -66,10 +64,6 @@ class PortfolioEngine:
             object_name = result["name"]
 
             result["priority"] = self.project_priority(
-                object_name
-            )
-
-            result["roi"] = self.project_roi(
                 object_name
             )
 
