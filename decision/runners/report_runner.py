@@ -7,8 +7,6 @@ class ReportRunner:
     def __init__(
         self,
         portfolio_forecast_engine,
-        show_portfolio_ranking,
-        show_completion_forecast,
         show_astro_calendar,
         simulate_portfolio_calendar,
         show_roadmap,
@@ -17,19 +15,29 @@ class ReportRunner:
         tonight_mission_service,
     ):
         self.portfolio_forecast_engine = portfolio_forecast_engine
-        self.show_portfolio_ranking = show_portfolio_ranking
-        self.show_completion_forecast = show_completion_forecast
         self.show_astro_calendar = show_astro_calendar
         self.simulate_portfolio_calendar = simulate_portfolio_calendar
         self.show_roadmap = show_roadmap
         self.show_portfolio_completion_forecast = (
-            show_portfolio_completion_forecast)
+            show_portfolio_completion_forecast
+        )
         self.present_mission = present_mission
         self.tonight_mission_service = tonight_mission_service
 
-    def run_portfolio(self, nights):
-        self.show_portfolio_ranking()
-        self.show_completion_forecast(nights)
+    def run_portfolio(
+        self,
+        night_capacities,
+    ):
+        dynamic_roadmap = (
+            self.portfolio_forecast_engine
+            .simulate_dynamic_portfolio_roadmap(
+                night_capacities=night_capacities,
+            )
+        )
+
+        self.show_portfolio_completion_forecast(
+            dynamic_roadmap
+    )
 
     def run_calendar(self, nights):
         self.show_astro_calendar(nights)
@@ -40,7 +48,6 @@ class ReportRunner:
         nights,
         night_capacities,
     ):
-        self.show_portfolio_ranking()
         self.show_astro_calendar(nights)
 
         roadmap = self.simulate_portfolio_calendar(nights)

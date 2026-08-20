@@ -831,116 +831,6 @@ def portfolio_score(name):
         + closure
     )
 
-def show_portfolio_ranking():
-
-    projects = get_projects()
-
-    rows = []
-
-    for name in projects:
-        remaining = project_remaining_hours(name)
-
-        if remaining is None or remaining <= 0:
-            continue
-
-        priority = project_priority(name)
-        roi = project_roi(name)
-        progress = project_progress(name)
-        closure = closure_bonus(name)
-
-        score = portfolio_score(name)
-
-        rows.append({
-            "name": name,
-            "score": score,
-            "priority": priority,
-            "progress": progress,
-            "remaining": remaining,
-            "roi": roi,
-            "closure": closure
-        })
-
-    rows.sort(
-        key=lambda x: x["score"],
-        reverse=True
-    )
-
-    print("\n===== CLASSEMENT PORTEFEUILLE =====\n")
-
-    for i, r in enumerate(rows, start=1):
-        print(
-            f"{i}. {r['name']} "
-            f"score={r['score']:.1f} "
-            f"progress={r['progress']:.1f}% "
-            f"reste={r['remaining']:.1f}h "
-            f"roi={r['roi']:.2f}"
-        )
-
-def show_completion_forecast(nights):
-
-    projects = get_projects()
-
-    roadmap = []
-
-    if not projects:
-        return
-
-    best_nights = sorted(
-        nights,
-        key=lambda x: x["score"],
-        reverse=True
-    )
-
-    for name in projects:
-        progress = project_progress(name)
-        remaining = project_remaining_hours(name)
-
-        nights_needed = math.ceil (remaining / 2.0)
-        completion_date = estimate_completion_date(
-            remaining,
-            best_nights
-        )
-
-        roadmap.append({
-            "name": name,
-            "progress": progress,
-            "remaining": remaining,
-            "nights": nights_needed,
-            "completion_date" : completion_date
-        })
-
-        roadmap.sort(
-            key=lambda x: portfolio_score(x["name"]),
-            reverse=True
-    )
-    print("\n===== ROADMAP ASTRO =====\n")
-
-    for i, p in enumerate(roadmap, start=1):
-        print(f"{i}. {p['name']}")
-        print(f"   Progression : {p['progress']:.1f} %")
-        print(f"   Reste : {p['remaining']:.1f} h")
-        print(f"   Fin estimée : {p['completion_date']}")
-        print()
-
-    total_remaining = sum(p["remaining"] for p in roadmap)
-
-    portfolio_completion_date = estimate_portfolio_completion_date(
-    total_remaining,
-    best_nights
-)
-
-    print("\n===== OBJECTIF GLOBAL =====\n")
-    print(f"Heures restantes : {total_remaining:.1f} h")
-
-    if portfolio_completion_date:
-        print(f"Date de fin estimée : {portfolio_completion_date}")
-    else:
-        print("Date de fin estimée : Au-delà des prévisions")
-
-    print(f"Temps restant portefeuille : {total_remaining:.1f} h")
-    avg_capacity = average_night_capacity(best_nights)
-    print(f"Nuits restantes estimées : {total_remaining / max(1, avg_capacity):.1f}")
-
 
 def build_astro_calendar(projects, nights):
     calendar = []
@@ -2080,8 +1970,6 @@ forecast_engine = ForecastEngine(
 
 report_runner = ReportRunner(
     portfolio_forecast_engine=portfolio_forecast_engine,
-    show_portfolio_ranking=show_portfolio_ranking,
-    show_completion_forecast=show_completion_forecast,
     show_astro_calendar=show_astro_calendar,
     simulate_portfolio_calendar=simulate_portfolio_calendar,
     show_roadmap=show_roadmap,
@@ -2276,7 +2164,9 @@ def main(argv=None) -> int:
     print(f"Total prévisionnel : {total_capacity:.1f} h")
 
     if args.mode == "portfolio":
-        report_runner.run_portfolio(nights)
+        report_runner.run_portfolio(
+            night_capacities=night_capacities,
+        )
 
     elif args.mode == "calendar":
         report_runner.run_calendar(nights)
