@@ -718,26 +718,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
     
     return candidates
 
-def forecast_available_hours(nights):
-    total = 0
-
-    for night in nights:
-        if "hours" in night:
-            total += night["hours"]
-            continue
-
-        window = night.get("best_window")
-
-        if not window:
-            continue
-
-        start = int(window["start"].split(":")[0])
-        end = int(window["end"].split(":")[0])
-
-        total += max(0, end - start)
-
-    return round(total, 1)
-
 
 def verdict(score: int) -> str:
     if score >= 90:
