@@ -1255,7 +1255,6 @@ def build_object_evaluation_result(
     setup_ranking,
     progress,
     remaining_hours,
-    priority,
     summary,
     decision_context,
     weather,
@@ -1280,7 +1279,6 @@ def build_object_evaluation_result(
         "arcsec_pixel": best.get("arcsec_pixel"),
         "progress": progress,
         "remaining_hours": remaining_hours,
-        "priority": priority,
         "season_bonus": best.get("season_bonus", 0),
         "weather_bonus": best.get("weather_bonus", 0),
         "decision_summary": summary,
@@ -1373,7 +1371,6 @@ def evaluate_object(
 
     summary = DecisionSummaryEngine.build(contributions)
 
-    priority = profile.get("project_priorities", {}).get(obj_name, 0)
     
     return build_object_evaluation_result(
         obj_name=obj_name,
@@ -1383,7 +1380,6 @@ def evaluate_object(
         setup_ranking=setup_ranking,
         progress=progress,
         remaining_hours=remaining_hours,
-        priority=priority,
         summary=summary,
         decision_context=decision_context,
         weather=weather,
@@ -1684,9 +1680,6 @@ tonight_runner = TonightRunner(
 )
 
 portfolio_engine = PortfolioEngine(
-    project_progress=project_progress,
-    project_remaining_hours=project_remaining_hours,
-    project_priority=project_priority,
     get_projects=get_projects,
 )
 
