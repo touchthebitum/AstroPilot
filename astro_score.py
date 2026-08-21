@@ -1,9 +1,6 @@
-
-import math
 import json
 import requests
 import warnings
-import copy
 from dataclasses import replace
 from decision.services.tonight_mission_service import (
     TonightMissionService,
@@ -27,13 +24,11 @@ from decision.portfolio.project_scoring import (
 )
 from decision.portfolio.project_gain import (
     marginal_gain_factor,
-    portfolio_gain_if_shot,
     session_portfolio_gain,
     session_roi,
 )
 from decision.portfolio.diversification import (
     diversification_bonus,
-    portfolio_category_load,
 )
 from decision.risk.postponement_impact import (
     compute_postponement_impact,
