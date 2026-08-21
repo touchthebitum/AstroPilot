@@ -664,7 +664,6 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         if portfolio_bonus > astro_part * 0.5:
             final_score -= portfolio_bonus * 0.3
 
-        remaining = project_remaining_hours(catalog_key)
 
         strategy_scores, decision_score = (
         night_strategy_engine.compute_strategy_scores(
@@ -1253,7 +1252,6 @@ def build_object_evaluation_result(
     best_setup,
     best_setup_score,
     setup_ranking,
-    progress,
     remaining_hours,
     summary,
     decision_context,
@@ -1277,7 +1275,6 @@ def build_object_evaluation_result(
         "setup_ranking": setup_ranking,
         "setup_reasons": best["setup_reasons"],
         "arcsec_pixel": best.get("arcsec_pixel"),
-        "progress": progress,
         "remaining_hours": remaining_hours,
         "season_bonus": best.get("season_bonus", 0),
         "weather_bonus": best.get("weather_bonus", 0),
@@ -1347,7 +1344,6 @@ def evaluate_object(
     if selected_setup_profile is None:
         return None
 
-    progress = project_progress(obj_name)
     remaining_hours = project_remaining_hours(obj_name)
 
     decision_engine = build_decision_engine()
@@ -1378,7 +1374,6 @@ def evaluate_object(
         best_setup=best_setup,
         best_setup_score=best_setup_score,
         setup_ranking=setup_ranking,
-        progress=progress,
         remaining_hours=remaining_hours,
         summary=summary,
         decision_context=decision_context,
