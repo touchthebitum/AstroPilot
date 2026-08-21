@@ -92,3 +92,25 @@ def test_frozen_buttes_altitudes(
     )
 
     assert altitude == pytest.approx(expected_altitude_deg, abs=1e-6)
+
+def test_astronomical_night_window_uses_18_degree_twilight():
+    from datetime import date
+    from zoneinfo import ZoneInfo
+
+    start, end = SkyEngine.astronomical_night_window(
+        date=date(2026, 8, 21),
+        latitude=46.7508,
+        longitude=6.5495,
+        timezone=ZoneInfo("Europe/Zurich"),
+    )
+
+    duration_hours = (
+        end - start
+    ).total_seconds() / 3600
+
+    assert start.hour == 22
+    assert end.hour == 4
+    assert duration_hours == pytest.approx(
+        6.242,
+        abs=0.02,
+    )

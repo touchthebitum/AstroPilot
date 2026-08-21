@@ -80,8 +80,6 @@ from decision.mission.mission_presenter import MissionPresenter
 from decision.weather.weather_forecast import WeatherForecast
 from decision.engines.future_opportunity_engine import FutureOpportunityEngine
 from zoneinfo import ZoneInfo
-from astral import LocationInfo
-from astral.sun import sun
 from astral.moon import phase as moon_phase
 from astropy.coordinates.baseframe import NonRotationTransformationWarning
 from astropilot.catalog import CATALOG
@@ -750,28 +748,12 @@ def parse_hourly_weather(data: dict) -> list[dict]:
 def night_hours_rough(rows: list[dict], date: datetime, lat: float, lon: float, name: str) -> list[dict]:
     tz = ZoneInfo(TIMEZONE)
 
-    city = LocationInfo(
-        name,
-        "Switzerland",
-        TIMEZONE,
-        lat,
-        lon
-    )
-
-    s = sun(
-        city.observer,
+    start, end = SkyEngine.astronomical_night_window(
         date=date.date(),
-        tzinfo=tz
+        latitude=lat,
+        longitude=lon,
+        timezone=tz,
     )
-
-    s_next = sun(
-        city.observer,
-        date=(date + timedelta(days=1)).date(),
-        tzinfo=tz
-    )
-
-    start = s["dusk"]
-    end = s_next["dawn"]
 
     night_rows = [r for r in rows if start <= r["time"] <= end]
 

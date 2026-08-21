@@ -10,6 +10,7 @@ from astropy.time import Time
 from astropy.utils import iers
 iers.conf.auto_download = False
 iers.conf.auto_max_age = None
+from astral import Depression
 
 import astropy.units as u
 class SkyEngine:
@@ -35,6 +36,42 @@ class SkyEngine:
 
     def __init__(self, context=None):
         self.context = context or {}
+
+    @staticmethod
+    def astronomical_night_window(
+        date,
+        latitude,
+        longitude,
+        timezone,
+    ):
+        from astral import LocationInfo
+
+        city = LocationInfo(
+            "Observer",
+            "Switzerland",
+            timezone,
+            latitude,
+            longitude,
+        )
+
+        current_sun = sun(
+            city.observer,
+            date=date,
+            dawn_dusk_depression=Depression.ASTRONOMICAL,
+            tzinfo=timezone,
+        )
+
+        next_sun = sun(
+            city.observer,
+            date=date + timedelta(days=1),
+            dawn_dusk_depression=Depression.ASTRONOMICAL,
+            tzinfo=timezone,
+        )
+
+        return (
+            current_sun["dusk"],
+            next_sun["dawn"],
+        )
 
     def sky_quality(self):
         """
