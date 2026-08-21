@@ -1596,6 +1596,57 @@ def best_equipment_for_object(object_name):
         "score": best_setup_score,
     }
 
+def show_target_object_analysis(obj_key):
+    obj = CATALOG.get(obj_key)
+
+    if not obj:
+        print(f"Objet inconnu : {obj_key}")
+        return
+
+    print(f"Objet forcé : {obj['name']} ({obj_key})")
+
+    best_setup = best_equipment_for_object(obj_key)
+
+    if best_setup:
+        print(
+            f"Meilleur setup : "
+            f"{best_setup['equipment']} "
+            f"(score {best_setup['score']})"
+        )
+
+    best_filters = recommend_filter(obj)
+
+    if best_filters:
+        print("Filtres conseillés : " + ", ".join(best_filters))
+
+        for filter_name in best_filters:
+            filter_type = None
+
+            if "Ha" in filter_name:
+                filter_type = "Ha"
+            elif "OIII" in filter_name:
+                filter_type = "OIII"
+            elif "SII" in filter_name:
+                filter_type = "SII"
+            elif "LRGB" in filter_name:
+                filter_type = "LRGB"
+
+            exposure = recommended_exposure(
+                obj,
+                filter_type=filter_type,
+            )
+
+            print(
+                f"Temps conseillé {filter_name} : "
+                f"{exposure} h"
+            )
+
+    else:
+        exposure = recommended_exposure(obj)
+        print(f"Temps de pose conseillé : {exposure} h")
+        print("Filtres conseillés : aucun")
+
+
 future_engine = FutureOpportunityEngine(
     catalog=CATALOG,
     weather_provider=fetch_weather,
@@ -1712,53 +1763,9 @@ def main(argv=None) -> int:
         return 0
 
     if args.target_object:
-        obj_key = args.target_object
-        obj = CATALOG.get(obj_key)
-
-        if not obj:
-            print(f"Objet inconnu : {obj_key}")
-            return 0
-
-        print(f"Objet forcé : {obj['name']} ({obj_key})")
-
-        best_setup = best_equipment_for_object(obj_key)
-
-        if best_setup:
-            print(
-                f"Meilleur setup : "
-                f"{best_setup['equipment']} "
-                f"(score {best_setup['score']})"
-            )
-
-        best_filters = recommend_filter(obj)
-
-        if best_filters:
-            print("Filtres conseillés : " + ", ".join(best_filters))
-
-            for filter_name in best_filters:
-                filter_type = None
-
-                if "Ha" in filter_name:
-                    filter_type = "Ha"
-                elif "OIII" in filter_name:
-                    filter_type = "OIII"
-                elif "SII" in filter_name:
-                    filter_type = "SII"
-                elif "LRGB" in filter_name:
-                    filter_type = "LRGB"
-
-                exposure = recommended_exposure(
-                obj,
-                    filter_type=filter_type
-                )
-
-                print(f"Temps conseillé {filter_name} : {exposure} h")
-
-        else:
-            exposure = recommended_exposure(obj)
-            print(f"Temps de pose conseillé : {exposure} h")
-            print("Filtres conseillés : aucun")
-
+        show_target_object_analysis(
+            args.target_object
+        )
         return 0
 
     location = get_default_location()
