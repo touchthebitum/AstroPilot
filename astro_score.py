@@ -1670,11 +1670,6 @@ def main(argv=None) -> int:
             help="Profil matériel à utiliser"
     )
 
-    parser.add_argument(
-        "--compare",
-        action="store_true",
-        help="Comparer tous les profils matériels"
-    )
 
     parser.add_argument(
         "--goal",
