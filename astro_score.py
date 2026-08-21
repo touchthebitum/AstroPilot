@@ -834,21 +834,6 @@ def compare_equipment_for_object(object_name):
         )
         print(f"  {reason_text}")
 
-def imaging_score(obj):
-    """
-    Score 0-100 basé sur la facilité d'imagerie.
-    """
-
-    difficulty = obj.get("imaging_difficulty", 3)
-    surface = obj.get("surface_brightness", 3)
-
-    diff_score = 100 - ((difficulty - 1) * 20)
-    surf_score = surface * 20
-
-    return round(
-        0.6 * diff_score +
-        0.4 * surf_score
-    )
 
 def recommended_exposure(obj, bortle=4, filter_type=None):
     """
