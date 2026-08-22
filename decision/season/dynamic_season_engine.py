@@ -36,7 +36,7 @@ class DynamicSeasonEngine:
             latitude,
             longitude,
         )
-    
+
     @staticmethod
     def target_visibility_window(
         target,
@@ -76,6 +76,7 @@ class DynamicSeasonEngine:
         context,
         horizon_days=180,
         min_altitude=30,
+        min_useful_hours=2.0,
     ):
         if (
             context.latitude is None
@@ -147,6 +148,8 @@ class DynamicSeasonEngine:
 
             current = night_start
             night_peak_altitude = float("-inf")
+            useful_minutes = 0
+            sample_minutes = 10
 
             while current <= night_end:
                 altitude = (
@@ -163,10 +166,13 @@ class DynamicSeasonEngine:
                     night_peak_altitude,
                     altitude,
                 )
+                if altitude >= min_altitude:
+                    useful_minutes += sample_minutes
+                current += timedelta(minutes=sample_minutes)
 
-                current += timedelta(minutes=30)
+            useful_hours = useful_minutes / 60
 
-            if night_peak_altitude < min_altitude:
+            if useful_hours < min_useful_hours:
                 continue
 
             good_dates.append(current_date)
@@ -221,4 +227,4 @@ class DynamicSeasonEngine:
             urgency=urgency,
             confidence=confidence,
         )
-    
+
