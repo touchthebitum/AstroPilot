@@ -239,7 +239,15 @@ def forecast_night_capacities(
             nights[date] = {
                 "date": date,
                 "quality": score,
-                "hours": hours
+                "hours": hours,
+                "latitude": lat,
+                "longitude": lon,
+                "observation_time": h["time"].replace(
+                    hour=23,
+                    minute=0,
+                    second=0,
+                    microsecond=0,
+                ),
             }
         else:
             nights[date]["quality"] = max(
