@@ -209,7 +209,7 @@ def forecast_night_capacities(
         
         hour = h["time"].hour
 
-        if hour < 22 and hour > 4:
+        if 4 < hour < 22:
             continue
 
         date = h["time"].date().isoformat()
