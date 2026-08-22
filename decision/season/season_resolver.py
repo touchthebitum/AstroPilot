@@ -3,7 +3,6 @@ from dataclasses import asdict
 from decision.season.dynamic_season_engine import (
     DynamicSeasonEngine,
 )
-from decision.season.season_engine import SeasonEngine
 
 
 class SeasonResolver:
@@ -16,14 +15,17 @@ class SeasonResolver:
             dynamic.remaining_days is None
             or dynamic.remaining_good_nights is None
         ):
-            legacy = SeasonEngine.summary(
-                context.target
-            )
-
             return {
-                **legacy,
-                "source": "legacy",
-                "confidence": None,
+                "target": context.target,
+                "start_date": None,
+                "end_date": None,
+                "peak_date": None,
+                "remaining_days": None,
+                "remaining_good_nights": None,
+                "urgency": "UNKNOWN",
+                "urgency_score": 0,
+                "source": "unknown",
+                "confidence": 0.0,
             }
 
         result = asdict(dynamic)

@@ -37,14 +37,17 @@ def test_season_resolver_prefers_dynamic_season():
     }
 
 
-def test_season_resolver_falls_back_without_observation_context():
+def test_season_resolver_returns_unknown_without_observation_context():
     context = AnalysisContext(
         target="IC1396",
     )
 
     result = SeasonResolver.resolve(context)
 
-    assert result["source"] == "legacy"
-    assert "remaining_days" in result
-    assert "remaining_good_nights" in result
-    assert "urgency" in result
+    result = SeasonResolver.resolve(context)
+
+    assert result["source"] == "unknown"
+    assert result["remaining_days"] is None
+    assert result["remaining_good_nights"] is None
+    assert result["urgency"] == "UNKNOWN"
+    assert result["confidence"] == 0.0

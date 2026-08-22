@@ -30,7 +30,7 @@ def test_season_analysis_uses_dynamic_season_data():
     assert result.data["peak_date"] is not None
 
 
-def test_season_analysis_falls_back_without_dynamic_context():
+def test_season_analysis_reports_unknown_without_dynamic_context():
     context = AnalysisContext(
         target="IC1396",
     )
@@ -41,3 +41,5 @@ def test_season_analysis_falls_back_without_dynamic_context():
     assert isinstance(result.data, dict)
     assert "urgency" in result.data
     assert "remaining_days" in result.data
+    assert result.data["urgency"] == "UNKNOWN"
+    assert result.data["remaining_days"] is None
