@@ -84,3 +84,75 @@ def test_estimate_accepts_explicit_observation_context():
     )
 
     assert result.needed_nights == 2
+
+def test_estimate_uses_dynamic_season_with_observation_context(
+    monkeypatch,
+):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    captured = {}
+
+    def fake_resolve(context):
+        captured["target"] = context.target
+        captured["latitude"] = context.latitude
+        captured["longitude"] = context.longitude
+        captured["observation_time"] = (
+            context.observation_time
+        )
+
+        return {
+            "remaining_days": 20,
+            "remaining_good_nights": 10,
+            "urgency": "MEDIUM",
+            "source": "dynamic",
+            "confidence": 0.9,
+        }
+
+    monkeypatch.setattr(
+        "decision.engines.future_opportunity_engine."
+        "SeasonResolver.resolve",
+        fake_resolve,
+    )
+
+    engine = FutureOpportunityEngine(
+        catalog={
+            "M31": {
+                "name": "M31",
+                "ra": 10.6847,
+                "dec": 41.2692,
+            }
+        },
+        weather_provider=lambda lat, lon: None,
+        season_engine=lambda project: 999,
+        profile_provider=lambda: {
+            "location": {
+                "latitude": None,
+                "longitude": None,
+            }
+        },
+        project_provider=lambda name: 6,
+    )
+
+    observation_time = datetime(
+        2026,
+        8,
+        27,
+        23,
+        0,
+        tzinfo=ZoneInfo("Europe/Zurich"),
+    )
+
+    engine.estimate(
+        "M31",
+        latitude=46.7508,
+        longitude=6.5495,
+        observation_time=observation_time,
+    )
+
+    assert captured == {
+        "target": "M31",
+        "latitude": 46.7508,
+        "longitude": 6.5495,
+        "observation_time": observation_time,
+    }

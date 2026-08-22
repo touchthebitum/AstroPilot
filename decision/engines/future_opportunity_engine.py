@@ -1,6 +1,8 @@
 from __future__ import annotations
 import math
 from decision.models.future_opportunity import FutureOpportunity
+from decision.intelligence.analysis_context import AnalysisContext
+from decision.season.season_resolver import SeasonResolver
 
 
 class FutureOpportunityEngine:
@@ -45,7 +47,36 @@ class FutureOpportunityEngine:
         project = project.copy()
         project["catalog_key"] = project_name
 
-        season_days = self.season_engine(project)
+        profile = self.profile_provider()
+        location = profile.get("location", {})
+
+        lat = (
+            latitude
+            if latitude is not None
+            else location.get("latitude")
+        )
+        lon = (
+            longitude
+            if longitude is not None
+            else location.get("longitude")
+        )
+
+        if (
+            latitude is not None
+            and longitude is not None
+            and observation_time is not None
+        ):
+            season = SeasonResolver.resolve(
+                AnalysisContext(
+                    target=project_name,
+                    latitude=latitude,
+                    longitude=longitude,
+                    observation_time=observation_time,
+                )
+            )
+            season_days = season["remaining_days"]
+        else:
+            season_days = self.season_engine(project)
 
         if season_days is None:
             return FutureOpportunity(
@@ -55,11 +86,6 @@ class FutureOpportunityEngine:
                 needed_nights=0,
                 opportunity_ratio=0.0,
             )
-
-        profile = self.profile_provider()
-        location = profile.get("location", {})
-        lat = location.get("latitude")
-        lon = location.get("longitude")
 
         weather_ratio = 0.35
 
