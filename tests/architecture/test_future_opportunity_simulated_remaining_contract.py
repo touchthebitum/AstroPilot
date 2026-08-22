@@ -156,3 +156,113 @@ def test_estimate_uses_dynamic_season_with_observation_context(
         "longitude": 6.5495,
         "observation_time": observation_time,
     }
+
+def test_dynamic_future_opportunity_uses_geometric_good_nights(
+    monkeypatch,
+):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(
+        "decision.engines.future_opportunity_engine."
+        "SeasonResolver.resolve",
+        lambda context: {
+            "remaining_days": 100,
+            "remaining_good_nights": 20,
+            "urgency": "LOW",
+            "source": "dynamic",
+            "confidence": 0.9,
+        },
+    )
+
+    engine = FutureOpportunityEngine(
+        catalog={
+            "M31": {
+                "name": "M31",
+                "ra": 10.6847,
+                "dec": 41.2692,
+            }
+        },
+        weather_provider=lambda lat, lon: None,
+        season_engine=lambda project: 999,
+        profile_provider=lambda: {
+            "location": {
+                "latitude": None,
+                "longitude": None,
+            }
+        },
+        project_provider=lambda name: 6,
+    )
+
+    result = engine.estimate(
+        "M31",
+        latitude=46.7508,
+        longitude=6.5495,
+        observation_time=datetime(
+            2026,
+            8,
+            27,
+            23,
+            0,
+            tzinfo=ZoneInfo("Europe/Zurich"),
+        ),
+    )
+
+    # Aucun forecast météo -> fallback weather_ratio = 0.35.
+    # 20 nuits géométriques × 0.35 = 7 nuits attendues.
+    assert result.weather_ratio == 0.35
+    assert result.good_nights == 7
+
+def test_dynamic_future_opportunity_can_have_zero_good_nights(
+    monkeypatch,
+):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(
+        "decision.engines.future_opportunity_engine."
+        "SeasonResolver.resolve",
+        lambda context: {
+            "remaining_days": 10,
+            "remaining_good_nights": 0,
+            "urgency": "HIGH",
+            "source": "dynamic",
+            "confidence": 0.9,
+        },
+    )
+
+    engine = FutureOpportunityEngine(
+        catalog={
+            "M31": {
+                "name": "M31",
+                "ra": 10.6847,
+                "dec": 41.2692,
+            }
+        },
+        weather_provider=lambda lat, lon: None,
+        season_engine=lambda project: 999,
+        profile_provider=lambda: {
+            "location": {
+                "latitude": None,
+                "longitude": None,
+            }
+        },
+        project_provider=lambda name: 6,
+    )
+
+    result = engine.estimate(
+        "M31",
+        latitude=46.7508,
+        longitude=6.5495,
+        observation_time=datetime(
+            2026,
+            8,
+            27,
+            23,
+            0,
+            tzinfo=ZoneInfo("Europe/Zurich"),
+        ),
+    )
+
+    assert result.good_nights == 0
+    assert result.risk == "CRITIQUE"

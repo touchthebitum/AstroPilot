@@ -75,8 +75,10 @@ class FutureOpportunityEngine:
                 )
             )
             season_days = season["remaining_days"]
+            season_good_nights = season["remaining_good_nights"]
         else:
             season_days = self.season_engine(project)
+            season_good_nights = None
 
         if season_days is None:
             return FutureOpportunity(
@@ -95,7 +97,15 @@ class FutureOpportunityEngine:
             if weather:
                 weather_ratio = self._estimate_weather_good_night_ratio(weather)
 
-        good_nights = max(1, int(season_days * weather_ratio))
+        if season_good_nights is not None:
+            good_nights = int(
+                season_good_nights * weather_ratio
+            )
+        else:
+            good_nights = max(
+                1,
+                int(season_days * weather_ratio),
+            )
 
         if remaining_hours is None:
             remaining = self.project_provider(project_name)
