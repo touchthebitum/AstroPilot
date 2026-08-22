@@ -121,7 +121,7 @@ class FutureOpportunityEngine:
         for i, timestamp in enumerate(times):
             hour = int(timestamp[11:13])
 
-            if hour < 22 and hour > 4:
+            if 4 < hour < 22:
                 continue
 
             total_night_hours += 1
