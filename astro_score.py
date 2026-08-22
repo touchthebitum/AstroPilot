@@ -37,7 +37,6 @@ from decision.risk.postponement_impact import (
 from decision.portfolio.candidate_scoring import (
     portfolio_candidate_bonus,
 )
-from decision.season.season_engine import SeasonEngine
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 from decision.portfolio.portfolio_engine import PortfolioEngine
 from decision.forecast.forecast_engine import ForecastEngine
@@ -301,9 +300,6 @@ def fetch_weather(lat: float, lon: float) -> dict | None:
     except Exception as e:
         print(f"ERREUR : prévisions météo indisponibles ({type(e).__name__})")
         return None
-
-def season_days_remaining(obj):
-    return SeasonEngine.season_days_remaining(obj)
 
 
 def show_multi_night_portfolio_roadmap(
