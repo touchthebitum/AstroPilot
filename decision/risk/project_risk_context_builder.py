@@ -1,8 +1,8 @@
 from decision.risk.project_risk_context import ProjectRiskContext
-from decision.season.season_engine import SeasonEngine
 from decision.productivity.productivity_engine import ProductivityEngine
 from decision.intelligence.analysis_context import AnalysisContext
-from decision.season.dynamic_season_engine import DynamicSeasonEngine
+from decision.season.season_resolver import SeasonResolver
+
 
 class ProjectRiskContextBuilder:
 
@@ -21,23 +21,12 @@ class ProjectRiskContextBuilder:
             observation_time=context.session.start_time,
         )
 
-        dynamic = DynamicSeasonEngine.summary(
+        season = SeasonResolver.resolve(
             season_context
         )
 
-        if (
-            dynamic.remaining_days is None
-            or dynamic.remaining_good_nights is None
-        ):
-            season_remaining_days = (
-                SeasonEngine.remaining_days(target)
-            )
-            good_nights = (
-                SeasonEngine.remaining_good_nights(target)
-            )
-        else:
-            season_remaining_days = dynamic.remaining_days
-            good_nights = dynamic.remaining_good_nights
+        season_remaining_days = season["remaining_days"]
+        good_nights = season["remaining_good_nights"]
 
         productivity = ProductivityEngine.evaluate(
             remaining_hours
