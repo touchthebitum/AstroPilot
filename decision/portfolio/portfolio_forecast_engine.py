@@ -69,6 +69,21 @@ class PortfolioForecastEngine:
                     future = self.future_engine.estimate(
                         name,
                         remaining_hours=remaining,
+                        latitude=(
+                            capacity.get("latitude")
+                            if capacity
+                            else None
+                        ),
+                        longitude=(
+                            capacity.get("longitude")
+                            if capacity
+                            else None
+                        ),
+                        observation_time=(
+                            capacity.get("observation_time")
+                            if capacity
+                            else None
+                        ),
                     )
 
                     base_score = self.score_project(
