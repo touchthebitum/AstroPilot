@@ -1,5 +1,3 @@
-from collections.abc import Callable
-
 from decision.models.future_opportunity import FutureOpportunity
 
 def render_opportunity_cost(
@@ -95,38 +93,6 @@ def render_strategic_summary(
     else:
         print("Raison : décision serrée, plusieurs choix valables")
 
-
-def render_postponement_risk(
-    night_projects,
-    catalog,
-    season_days_remaining,
-    estimate_future_opportunities,
-):
-    print("\n===== RISQUE DE REPORT =====")
-
-    for project in night_projects[:3]:
-        catalog_key = project["name"]
-
-        obj = catalog.get(catalog_key, {}).copy()
-        obj["catalog_key"] = catalog_key
-
-        days_left = season_days_remaining(obj)
-
-        future = estimate_future_opportunities(catalog_key)
-
-        risk = future.risk
-
-        if risk == "CRITIQUE":
-            text = f"fin de fenêtre estimée dans {days_left} jours"
-        else:
-            text = (
-                f"fenêtre restante estimée : "
-                f"{future.good_nights} nuits favorables"
-                f"(ratio : {future.opportunity_ratio:.1f})"
-            )
-
-        print(f"{project['name']} : risque {risk}")
-        print(f"   {text}")
 
 def render_after_tonight_roadmap(
     roadmap,
