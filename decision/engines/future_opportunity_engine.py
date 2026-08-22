@@ -27,6 +27,9 @@ class FutureOpportunityEngine:
         self,
         project_name: str,
         remaining_hours: float | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        observation_time=None,
     ) -> FutureOpportunity:
         project = self.catalog.get(project_name)
 

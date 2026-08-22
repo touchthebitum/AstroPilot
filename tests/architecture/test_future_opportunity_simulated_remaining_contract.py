@@ -56,3 +56,31 @@ def test_weather_good_night_ratio_ignores_daytime_hours():
     )
 
     assert ratio == 1.0
+
+def test_estimate_accepts_explicit_observation_context():
+    engine = FutureOpportunityEngine(
+        catalog={
+            "M31": {
+                "name": "M31",
+            }
+        },
+        weather_provider=lambda lat, lon: None,
+        season_engine=lambda project: 30,
+        profile_provider=lambda: {
+            "location": {
+                "latitude": None,
+                "longitude": None,
+            }
+        },
+        project_provider=lambda name: 18,
+    )
+
+    result = engine.estimate(
+        "M31",
+        remaining_hours=6,
+        latitude=46.7508,
+        longitude=6.5495,
+        observation_time=None,
+    )
+
+    assert result.needed_nights == 2
