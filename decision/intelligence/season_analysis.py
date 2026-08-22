@@ -1,6 +1,6 @@
 from decision.intelligence.analysis_result import AnalysisResult
 from decision.season.season_engine import SeasonEngine
-
+from decision.season.dynamic_season_engine import DynamicSeasonEngine
 
 class SeasonAnalysis:
 
@@ -44,16 +44,40 @@ class SeasonAnalysis:
 
     @staticmethod
     def analyze(context) -> AnalysisResult:
+        dynamic = DynamicSeasonEngine.summary(context)
 
-        season = SeasonEngine.summary(context.target)
+        if (
+            dynamic.remaining_days is None
+            or dynamic.remaining_good_nights is None
+        ):
+            season = SeasonEngine.summary(context.target)
+            confidence = SeasonAnalysis._compute_confidence(
+                season["remaining_days"],
+                season["remaining_good_nights"],
+            )
+        else:
+            season = {
+                "target": context.target,
+                "start_date": dynamic.start_date,
+                "end_date": dynamic.end_date,
+                "peak_date": dynamic.peak_date,
+                "remaining_days": dynamic.remaining_days,
+                "remaining_good_nights": (
+                    dynamic.remaining_good_nights
+                ),
+                "urgency": dynamic.urgency,
+                "urgency_score": (
+                    100
+                    if dynamic.urgency == "HIGH"
+                    else 60
+                    if dynamic.urgency == "MEDIUM"
+                    else 0
+                ),
+            }
+            confidence = dynamic.confidence
 
         conclusion = SeasonAnalysis._build_conclusion(
             season["urgency"]
-        )
-
-        confidence = SeasonAnalysis._compute_confidence(
-            season["remaining_days"],
-            season["remaining_good_nights"],
         )
 
         return AnalysisResult(
