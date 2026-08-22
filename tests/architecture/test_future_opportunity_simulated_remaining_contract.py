@@ -3,7 +3,21 @@ from decision.engines.future_opportunity_engine import (
 )
 
 
-def test_estimate_can_use_simulated_remaining_hours():
+def test_estimate_can_use_simulated_remaining_hours(
+    monkeypatch,
+):
+
+    monkeypatch.setattr(
+        "decision.engines.future_opportunity_engine."
+        "SeasonResolver.resolve",
+        lambda context: {
+            "remaining_days": 30,
+            "remaining_good_nights": 10,
+            "urgency": "MEDIUM",
+            "source": "legacy",
+            "confidence": None,
+        },
+    )
     engine = FutureOpportunityEngine(
         catalog={
             "M31": {
@@ -11,7 +25,6 @@ def test_estimate_can_use_simulated_remaining_hours():
             }
         },
         weather_provider=lambda lat, lon: None,
-        season_engine=lambda project: 30,
         profile_provider=lambda: {
             "location": {
                 "latitude": None,
@@ -57,7 +70,20 @@ def test_weather_good_night_ratio_ignores_daytime_hours():
 
     assert ratio == 1.0
 
-def test_estimate_accepts_explicit_observation_context():
+def test_estimate_accepts_explicit_observation_context(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+    "decision.engines.future_opportunity_engine."
+    "SeasonResolver.resolve",
+    lambda context: {
+        "remaining_days": 30,
+        "remaining_good_nights": 10,
+        "urgency": "MEDIUM",
+        "source": "legacy",
+        "confidence": None,
+    },
+    )
     engine = FutureOpportunityEngine(
         catalog={
             "M31": {
@@ -65,7 +91,6 @@ def test_estimate_accepts_explicit_observation_context():
             }
         },
         weather_provider=lambda lat, lon: None,
-        season_engine=lambda project: 30,
         profile_provider=lambda: {
             "location": {
                 "latitude": None,
@@ -124,7 +149,6 @@ def test_estimate_uses_dynamic_season_with_observation_context(
             }
         },
         weather_provider=lambda lat, lon: None,
-        season_engine=lambda project: 999,
         profile_provider=lambda: {
             "location": {
                 "latitude": None,
@@ -184,7 +208,6 @@ def test_dynamic_future_opportunity_uses_geometric_good_nights(
             }
         },
         weather_provider=lambda lat, lon: None,
-        season_engine=lambda project: 999,
         profile_provider=lambda: {
             "location": {
                 "latitude": None,
@@ -240,7 +263,6 @@ def test_dynamic_future_opportunity_can_have_zero_good_nights(
             }
         },
         weather_provider=lambda lat, lon: None,
-        season_engine=lambda project: 999,
         profile_provider=lambda: {
             "location": {
                 "latitude": None,

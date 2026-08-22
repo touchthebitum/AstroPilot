@@ -15,13 +15,11 @@ class FutureOpportunityEngine:
         self,
         catalog,
         weather_provider,
-        season_engine,
         profile_provider,
         project_provider,
     ):
         self.catalog = catalog
         self.weather_provider = weather_provider
-        self.season_engine = season_engine
         self.profile_provider = profile_provider
         self.project_provider = project_provider
 
@@ -61,24 +59,18 @@ class FutureOpportunityEngine:
             else location.get("longitude")
         )
 
-        if (
-            latitude is not None
-            and longitude is not None
-            and observation_time is not None
-        ):
-            season = SeasonResolver.resolve(
-                AnalysisContext(
-                    target=project_name,
-                    latitude=latitude,
-                    longitude=longitude,
-                    observation_time=observation_time,
-                )
+        season = SeasonResolver.resolve(
+            AnalysisContext(
+                target=project_name,
+                latitude=lat,
+                longitude=lon,
+                observation_time=observation_time,
             )
-            season_days = season["remaining_days"]
-            season_good_nights = season["remaining_good_nights"]
-        else:
-            season_days = self.season_engine(project)
-            season_good_nights = None
+        )
+
+        season_days = season["remaining_days"]
+        season_good_nights = season["remaining_good_nights"]
+        season_source = season["source"]
 
         if season_days is None:
             return FutureOpportunity(
@@ -96,8 +88,7 @@ class FutureOpportunityEngine:
 
             if weather:
                 weather_ratio = self._estimate_weather_good_night_ratio(weather)
-
-        if season_good_nights is not None:
+        if season_source == "dynamic":
             good_nights = int(
                 season_good_nights * weather_ratio
             )

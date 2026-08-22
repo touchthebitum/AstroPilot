@@ -1640,7 +1640,6 @@ def show_target_object_analysis(obj_key):
 future_engine = FutureOpportunityEngine(
     catalog=CATALOG,
     weather_provider=fetch_weather,
-    season_engine=season_days_remaining,
     profile_provider=load_user_profile,
     project_provider=project_remaining_hours,
 )
