@@ -37,6 +37,9 @@ from decision.risk.postponement_impact import (
 from decision.portfolio.candidate_scoring import (
     portfolio_candidate_bonus,
 )
+from decision.portfolio.historical_night_capacity_estimator import (
+    HistoricalNightCapacityEstimator,
+)
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 from decision.portfolio.portfolio_engine import PortfolioEngine
 from decision.forecast.forecast_engine import ForecastEngine
@@ -1114,18 +1117,27 @@ def build_decision_context(
 
     project_priority_value = project_priority(obj_name)
 
+    configured_night_capacity = profile.get(
+        "preferences",
+        {},
+    ).get(
+        "productive_hours_per_night",
+        4.0,
+    )
+
+    productive_hours_per_night = (
+        HistoricalNightCapacityEstimator.estimate(
+            sessions=profile.get("sessions", []),
+            fallback=configured_night_capacity,
+        )
+    )
+
     portfolio_context = PortfolioContext(
         active_projects=len(get_projects()),
         total_remaining_hours=project_remaining,
         highest_priority=project_priority_value,
         average_progress=project_progress_value,
-        productive_hours_per_night=profile.get(
-            "preferences",
-            {},
-        ).get(
-            "productive_hours_per_night",
-            4.0,
-        ),
+        productive_hours_per_night=productive_hours_per_night,
     )
 
     preferences_context = PreferencesContext(

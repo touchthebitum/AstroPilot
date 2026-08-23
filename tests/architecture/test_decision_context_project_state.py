@@ -59,7 +59,24 @@ def test_decision_context_uses_selected_project_state(
             "preferences": {
                 "bortle": 3,
                 "productive_hours_per_night": 5.5,
-            }
+            },
+            "sessions": [
+                {
+                    "date": "2026-08-16",
+                    "object": "M31",
+                    "hours": 2.0,
+                },
+                {
+                    "date": "2026-08-16",
+                    "object": "Rosette",
+                    "hours": 1.0,
+                },
+                {
+                    "date": "2026-08-17",
+                    "object": "IC1396",
+                    "hours": 5.0,
+                },
+            ],
         },
         illumination=0.3,
         lat=46.7508,
@@ -70,7 +87,7 @@ def test_decision_context_uses_selected_project_state(
     assert context.portfolio.total_remaining_hours == 17.0
     assert context.portfolio.highest_priority == 27.2
     assert context.portfolio.average_progress == 15.0
-    assert context.portfolio.productive_hours_per_night == 5.5
+    assert context.portfolio.productive_hours_per_night == 4.0
 
 def test_decision_context_session_times_are_timezone_aware():
     context = astro_score.build_decision_context(
