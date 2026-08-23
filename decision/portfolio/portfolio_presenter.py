@@ -57,8 +57,15 @@ def show_portfolio_completion_forecast(roadmap):
     print(f"Reste après l'horizon : {remaining_after_horizon:.1f} h")
     print(f"Couverture du portefeuille : {coverage:.1f} %")
     print(f"Nuits planifiées : {planned_nights}")
-    print(f"Dernière nuit connue : {final_date}")
 
+    if remaining_after_horizon > 0:
+        print(
+            "Date de fin estimée : "
+            "hors horizon prévisionnel"
+        )
+        print(f"Dernière nuit connue : {final_date}")
+    else:
+        print(f"Date de fin estimée : {final_date}")
     print("\n===== ÉTAT PRÉVU EN FIN DE ROADMAP =====")
 
     displayed = set()
