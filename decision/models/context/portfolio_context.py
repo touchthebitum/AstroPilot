@@ -14,3 +14,5 @@ class PortfolioContext:
     highest_priority: int
 
     average_progress: float
+
+    productive_hours_per_night: float = 4.0

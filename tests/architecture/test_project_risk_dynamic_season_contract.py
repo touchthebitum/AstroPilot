@@ -122,6 +122,7 @@ def test_project_risk_pressure_compares_required_to_favorable_nights(
             total_remaining_hours=15,
             highest_priority=80,
             average_progress=0,
+            productive_hours_per_night=5,
         ),
         preferences=PreferencesContext(
             astro_weight=0.7,
@@ -151,6 +152,6 @@ def test_project_risk_pressure_compares_required_to_favorable_nights(
         context=context,
     )
 
-    assert result.required_nights == 4
+    assert result.required_nights == 3
     assert result.favorable_nights == 20
-    assert result.pressure == 0.2
+    assert result.pressure == 0.15

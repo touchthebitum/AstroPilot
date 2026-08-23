@@ -29,7 +29,8 @@ class ProjectRiskContextBuilder:
         good_nights = season["remaining_good_nights"]
 
         required_nights = ProjectCompletionEstimator.required_nights(
-            remaining_hours
+            remaining_hours,
+            context.portfolio.productive_hours_per_night,
         )
 
         pressure = (
