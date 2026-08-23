@@ -76,6 +76,11 @@ def test_decision_context_uses_selected_project_state(
                     "object": "IC1396",
                     "hours": 5.0,
                 },
+                {
+                    "date": "2026-08-18",
+                    "object": "M31",
+                    "hours": 4.0,
+                },
             ],
         },
         illumination=0.3,

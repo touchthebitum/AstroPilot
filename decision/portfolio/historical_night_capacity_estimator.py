@@ -1,5 +1,7 @@
 class HistoricalNightCapacityEstimator:
 
+    MINIMUM_NIGHTS = 3
+
     @staticmethod
     def estimate(
         sessions: list[dict],
@@ -19,7 +21,10 @@ class HistoricalNightCapacityEstimator:
                 + hours
             )
 
-        if not hours_by_night:
+        if (
+            len(hours_by_night)
+            < HistoricalNightCapacityEstimator.MINIMUM_NIGHTS
+        ):
             return fallback
 
         return (
