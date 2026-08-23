@@ -1,5 +1,5 @@
 from decision.risk.project_risk_context import ProjectRiskContext
-from decision.productivity.productivity_engine import ProductivityEngine
+from decision.risk.project_completion_estimator import ProjectCompletionEstimator
 from decision.intelligence.analysis_context import AnalysisContext
 from decision.season.season_resolver import SeasonResolver
 
@@ -28,10 +28,9 @@ class ProjectRiskContextBuilder:
         season_remaining_days = season["remaining_days"]
         good_nights = season["remaining_good_nights"]
 
-        productivity = ProductivityEngine.evaluate(
+        required_nights = ProjectCompletionEstimator.required_nights(
             remaining_hours
         )
-        required_nights = productivity.required_nights
 
         pressure = (
             required_nights
