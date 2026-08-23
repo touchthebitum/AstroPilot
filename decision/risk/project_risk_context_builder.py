@@ -52,4 +52,13 @@ class ProjectRiskContextBuilder:
             favorable_nights=good_nights,
             pressure=pressure,
             required_nights=required_nights,
+            productive_hours_per_night=(
+                context.portfolio.productive_hours_per_night
+            ),
+            night_capacity_source=(
+                context.portfolio.night_capacity_source
+            ),
+            historical_nights=
+                (context.portfolio.historical_nights
+            ),
         )

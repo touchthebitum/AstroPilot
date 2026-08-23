@@ -51,7 +51,24 @@ class MissionPresenter:
 
             print(f"Score : {mission.risk_report.score}")
 
-            print(f"Nuits nécessaires estimées : {mission.risk_report.context.required_nights}")
+            capacity_source = {
+                "profile": "profil",
+                "history": "historique",
+            }.get(
+                mission.risk_report.context.night_capacity_source,
+                mission.risk_report.context.night_capacity_source,
+            )
+
+            print(
+                "Capacité moyenne estimée : "
+                f"{mission.risk_report.context.productive_hours_per_night:.1f} "
+                f"h/nuit ({capacity_source})"
+            )
+
+            print(
+                "Nuits nécessaires estimées : "
+                f"{mission.risk_report.context.required_nights}"
+            )
 
             for line in mission.risk_report.explanation:
                 print(f"• {line}")

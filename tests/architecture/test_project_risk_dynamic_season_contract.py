@@ -155,3 +155,6 @@ def test_project_risk_pressure_compares_required_to_favorable_nights(
     assert result.required_nights == 3
     assert result.favorable_nights == 20
     assert result.pressure == 0.15
+    assert result.productive_hours_per_night == 5
+    assert result.night_capacity_source == "profile"
+    assert result.historical_nights == 0

@@ -1,3 +1,13 @@
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class NightCapacityEstimate:
+    productive_hours_per_night: float
+    source: str
+    historical_nights: int
+
+
 class HistoricalNightCapacityEstimator:
 
     MINIMUM_NIGHTS = 3
@@ -6,7 +16,7 @@ class HistoricalNightCapacityEstimator:
     def estimate(
         sessions: list[dict],
         fallback: float,
-    ) -> float:
+    ) -> NightCapacityEstimate:
         hours_by_night = {}
 
         for session in sessions:
@@ -21,13 +31,23 @@ class HistoricalNightCapacityEstimator:
                 + hours
             )
 
+        historical_nights = len(hours_by_night)
+
         if (
-            len(hours_by_night)
+            historical_nights
             < HistoricalNightCapacityEstimator.MINIMUM_NIGHTS
         ):
-            return fallback
+            return NightCapacityEstimate(
+                productive_hours_per_night=fallback,
+                source="profile",
+                historical_nights=historical_nights,
+            )
 
-        return (
-            sum(hours_by_night.values())
-            / len(hours_by_night)
+        return NightCapacityEstimate(
+            productive_hours_per_night=(
+                sum(hours_by_night.values())
+                / historical_nights
+            ),
+            source="history",
+            historical_nights=historical_nights,
         )

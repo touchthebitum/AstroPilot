@@ -18,7 +18,16 @@ def test_expected_gain_is_printed_once(monkeypatch, capsys):
             confidence=0.75,
             windows=[],
         ),
-        risk_report=None,
+        risk_report=SimpleNamespace(
+            level="MEDIUM",
+            score=40,
+            context=SimpleNamespace(
+                required_nights=4,
+                productive_hours_per_night=4.0,
+                night_capacity_source="profile",
+            ),
+            explanation=[],
+            ),
         window_start=None,
         window_end=None,
         recommended_hours=2.0,
@@ -36,4 +45,8 @@ def test_expected_gain_is_printed_once(monkeypatch, capsys):
 
     MissionPresenter.present(mission)
 
-    assert capsys.readouterr().out.count("Gain attendu") == 1
+    output = capsys.readouterr().out
+
+    assert output.count("Gain attendu") == 1
+    assert "Capacité moyenne estimée : 4.0 h/nuit (profil)" in output
+    assert "Nuits nécessaires estimées : 4" in output

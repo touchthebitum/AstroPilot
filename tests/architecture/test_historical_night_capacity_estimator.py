@@ -27,12 +27,14 @@ def test_capacity_averages_totals_after_three_nights():
         },
     ]
 
-    capacity = HistoricalNightCapacityEstimator.estimate(
+    estimate = HistoricalNightCapacityEstimator.estimate(
         sessions=sessions,
         fallback=6.0,
     )
 
-    assert capacity == 4.0
+    assert estimate.productive_hours_per_night == 4.0
+    assert estimate.source == "history"
+    assert estimate.historical_nights == 3
 
 
 def test_capacity_uses_fallback_with_fewer_than_three_nights():
@@ -49,19 +51,22 @@ def test_capacity_uses_fallback_with_fewer_than_three_nights():
         },
     ]
 
-    capacity = HistoricalNightCapacityEstimator.estimate(
+    estimate = HistoricalNightCapacityEstimator.estimate(
         sessions=sessions,
         fallback=6.0,
     )
 
-    assert capacity == 6.0
+    assert estimate.productive_hours_per_night == 6.0
+    assert estimate.source == "profile"
+    assert estimate.historical_nights == 2
 
 
 def test_capacity_uses_fallback_without_session_history():
-    capacity = HistoricalNightCapacityEstimator.estimate(
+    estimate = HistoricalNightCapacityEstimator.estimate(
         sessions=[],
         fallback=4.5,
     )
 
-    assert capacity == 4.5
-
+    assert estimate.productive_hours_per_night == 4.5
+    assert estimate.source == "profile"
+    assert estimate.historical_nights == 0

@@ -93,6 +93,8 @@ def test_decision_context_uses_selected_project_state(
     assert context.portfolio.highest_priority == 27.2
     assert context.portfolio.average_progress == 15.0
     assert context.portfolio.productive_hours_per_night == 4.0
+    assert context.portfolio.night_capacity_source == "history"
+    assert context.portfolio.historical_nights == 3
 
 def test_decision_context_session_times_are_timezone_aware():
     context = astro_score.build_decision_context(
@@ -141,3 +143,5 @@ def test_decision_context_session_times_are_timezone_aware():
         context.session.end_time.tzinfo.key
         == astro_score.TIMEZONE
     )
+    assert context.portfolio.night_capacity_source == "profile"
+    assert context.portfolio.historical_nights == 0

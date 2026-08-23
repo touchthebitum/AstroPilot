@@ -1125,7 +1125,7 @@ def build_decision_context(
         4.0,
     )
 
-    productive_hours_per_night = (
+    night_capacity_estimate = (
         HistoricalNightCapacityEstimator.estimate(
             sessions=profile.get("sessions", []),
             fallback=configured_night_capacity,
@@ -1137,7 +1137,11 @@ def build_decision_context(
         total_remaining_hours=project_remaining,
         highest_priority=project_priority_value,
         average_progress=project_progress_value,
-        productive_hours_per_night=productive_hours_per_night,
+        productive_hours_per_night=(
+            night_capacity_estimate.productive_hours_per_night
+        ),
+        night_capacity_source=night_capacity_estimate.source,
+        historical_nights=night_capacity_estimate.historical_nights,
     )
 
     preferences_context = PreferencesContext(
