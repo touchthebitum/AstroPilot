@@ -127,6 +127,7 @@ class DynamicSeasonEngine:
         good_dates = []
         peak_date = None
         peak_altitude = float("-inf")
+        peak_useful_minutes = -1
 
         for day_offset in range(horizon_days + 1):
             current_date = (
@@ -177,7 +178,14 @@ class DynamicSeasonEngine:
 
             good_dates.append(current_date)
 
-            if night_peak_altitude > peak_altitude:
+            if (
+                useful_minutes > peak_useful_minutes
+                or (
+                    useful_minutes == peak_useful_minutes
+                    and night_peak_altitude > peak_altitude
+                )
+            ):
+                peak_useful_minutes = useful_minutes
                 peak_altitude = night_peak_altitude
                 peak_date = current_date
 

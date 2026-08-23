@@ -135,3 +135,37 @@ def test_rosette_season_starts_when_useful_window_reaches_two_hours():
 
     assert result.start_date is not None
     assert result.start_date.month == 10
+
+
+def test_peak_date_prefers_longest_useful_night():
+    context = AnalysisContext(
+        target="IC1396",
+        latitude=46.7508,
+        longitude=6.5495,
+        observation_time=datetime(
+            2026,
+            8,
+            22,
+            23,
+            0,
+            tzinfo=ZoneInfo("Europe/Zurich"),
+        ),
+    )
+
+    result = DynamicSeasonEngine.summary(
+        context,
+        horizon_days=120,
+        min_altitude=30,
+        min_useful_hours=2.0,
+    )
+
+    assert result.peak_date is not None
+
+    # Le pic ne doit plus être choisi simplement
+    # par quelques centièmes de degré d'altitude maximale.
+    assert result.peak_date > datetime(
+        2026,
+        8,
+        31,
+        tzinfo=ZoneInfo("Europe/Zurich"),
+    ).date()
