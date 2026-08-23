@@ -147,29 +147,32 @@ class DynamicSeasonEngine:
             except ValueError:
                 continue
 
-            current = night_start
-            night_peak_altitude = float("-inf")
-            useful_minutes = 0
             sample_minutes = 10
 
-            while current <= night_end:
-                altitude = (
-                    DynamicSeasonEngine
-                    .target_altitude_at_time(
-                        target,
-                        context.latitude,
-                        context.longitude,
-                        current,
-                    )
-                )
+            sample_times = []
+            current = night_start
 
-                night_peak_altitude = max(
-                    night_peak_altitude,
-                    altitude,
-                )
-                if altitude >= min_altitude:
-                    useful_minutes += sample_minutes
+            while current <= night_end:
+                sample_times.append(current)
                 current += timedelta(minutes=sample_minutes)
+
+            sky = SkyEngine()
+
+            altitudes = sky.target_altitudes(
+                target["ra"],
+                target["dec"],
+                sample_times,
+                context.latitude,
+                context.longitude,
+            )
+
+            night_peak_altitude = max(altitudes)
+
+            useful_minutes = sum(
+                sample_minutes
+                for altitude in altitudes
+                if altitude >= min_altitude
+            )
 
             useful_hours = useful_minutes / 60
 

@@ -62,8 +62,6 @@ def test_alias_coordinates_match_canonical_ic_region(
 def test_ic1848_matches_reviewed_siril_reference():
     assert CATALOG["IC1848"]["ra"] == pytest.approx(42.825)
     assert CATALOG["IC1848"]["dec"] == pytest.approx(60.408333)
-
-
 @pytest.mark.parametrize(
     ("target_key", "expected_altitude_deg"),
     [
@@ -92,6 +90,54 @@ def test_frozen_buttes_altitudes(
     )
 
     assert altitude == pytest.approx(expected_altitude_deg, abs=1e-6)
+
+def test_vectorized_target_altitudes_match_scalar_altitude():
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    engine = SkyEngine()
+
+    start = datetime(
+        2026,
+        8,
+        22,
+        22,
+        30,
+        tzinfo=ZoneInfo("Europe/Zurich"),
+    )
+
+    times = [
+        start,
+        start + timedelta(minutes=10),
+        start + timedelta(minutes=20),
+    ]
+
+    vectorized = engine.target_altitudes(
+        324.75,
+        57.5,
+        times,
+        46.7508,
+        6.5495,
+    )
+
+    scalar = [
+        engine.target_altitude(
+            324.75,
+            57.5,
+            time,
+            46.7508,
+            6.5495,
+        )
+        for time in times
+    ]
+
+    assert len(vectorized) == len(scalar)
+
+    for actual, expected in zip(vectorized, scalar):
+        assert actual == pytest.approx(
+            expected,
+            abs=1e-9,
+        )
 
 def test_astronomical_night_window_uses_18_degree_twilight():
     from datetime import date

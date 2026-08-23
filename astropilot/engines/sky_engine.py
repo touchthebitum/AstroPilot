@@ -99,7 +99,7 @@ class SkyEngine:
             return "🌔 Gibbeuse"
 
         return "🌕 Pleine lune"
-    
+
     def moon_illumination_from_phase(self, phase: float) -> float:
         """
         Astral renvoie une phase entre 0 et environ 29.5 jours.
@@ -111,7 +111,7 @@ class SkyEngine:
         illum = (1 - math.cos(2 * math.pi * normalized)) / 2
 
         return illum * 100
-    
+
     def moon_visible_during_window(self, window_start, window_end, moonrise_time, moonset_time):
         from datetime import datetime
 
@@ -131,19 +131,19 @@ class SkyEngine:
             return moonrise_time <= window_end
 
         return moonrise_time <= window_end and moonset_time >= window_start
-    
+
     def safe_moonrise(self, observer, date, tz):
         try:
             return moonrise(observer=observer, date=date, tzinfo=tz)
         except ValueError:
             return None
-        
+
     def safe_moonset(self,observer, date, tz):
         try:
             return moonset(observer=observer, date=date, tzinfo=tz)
         except ValueError:
             return None
-        
+
     def moon_target_separation(self, target_ra, target_dec, obs_time, lat, lon):
         location = EarthLocation(
             lat=lat * u.deg,
@@ -162,7 +162,7 @@ class SkyEngine:
         )
 
         return target.separation(moon_pos).deg
-    
+
     def target_altitude(self, target_ra, target_dec, obs_time, lat, lon):
 
         location = EarthLocation(
@@ -181,7 +181,34 @@ class SkyEngine:
         )
 
         return target.transform_to(frame).alt.deg
-    
+
+
+    def target_altitudes(
+        self,
+        target_ra,
+        target_dec,
+        obs_times,
+        lat,
+        lon,
+    ):
+        location = EarthLocation(
+            lat=lat * u.deg,
+            lon=lon * u.deg,
+        )
+
+        target = SkyCoord(
+            ra=target_ra * u.deg,
+            dec=target_dec * u.deg,
+        )
+
+        frame = AltAz(
+            obstime=Time(obs_times),
+            location=location,
+        )
+
+        return target.transform_to(frame).alt.deg
+
+
     def target_altitude_bonus(self, alt):
         if alt >= 75:
             return 25
@@ -193,7 +220,7 @@ class SkyEngine:
             return -15
         else:
             return -35
-        
+
 
     def cloud_penalty(self, total, low, mid, high):
 
@@ -230,7 +257,7 @@ class SkyEngine:
             return 2
 
         return 0
-    
+
     def moon_penalty(self, illumination, moon_elevation, moon_sep):
 
         if moon_elevation <= -6:
@@ -261,14 +288,14 @@ class SkyEngine:
             sep_factor = 1.0
 
         return round(35 * illum_factor * elev_factor * sep_factor, 1)
-    
+
     def humidity_penalty(self, humidity: float) -> float:
         if humidity < 70:
             return 0
         if humidity < 85:
             return 8
         return 18
-    
+
     def precipitation_penalty(self,precipitation: float) -> float:
         if precipitation <= 0:
             return 0
@@ -296,7 +323,7 @@ class SkyEngine:
             return 0
 
         # Open-Meteo donne souvent la visibilité en mètres.
-        
+
         if visibility > 20000:
             return 0
         if visibility > 10000:
@@ -318,9 +345,9 @@ class SkyEngine:
             9: 80,
         }
         return penalties.get(bortle, 40)
-    
-    
-        
+
+
+
     def cloud_score(self):
         pass
 
@@ -368,7 +395,7 @@ class SkyEngine:
         )
 
         return round(base - moon_loss, 2)
-    
+
 
     def hour_geometry(
         self,
@@ -405,7 +432,7 @@ class SkyEngine:
             "moon_target_sep": moon_sep,
         }
 
-    
+
     def score_hour(self, hour,moon_illumination,observer,lat,lon,target_obj,bortle,target,goal,):
 
         geometry = self.hour_geometry(
@@ -419,8 +446,8 @@ class SkyEngine:
         moon_elevation = geometry["moon_elevation"]
         target_altitude = geometry["target_altitude"]
         moon_target_sep = geometry["moon_target_sep"]
-        
-        
+
+
         bp = self.bortle_penalty(bortle)
 
         cp = self.cloud_penalty(
@@ -469,7 +496,7 @@ class SkyEngine:
 
         score = 100 - bp - cp - mp - hp - wp - vp - pp + tb + ab
         score = max(0, min(100, score))
-        
+
         return {
             "score": score,
             "moon_impact": mp,
@@ -505,14 +532,14 @@ class SkyEngine:
             "tb": tb,
             "ab": ab,
             "sqm": sqm,
-                
+
             }
-    
+
     def best_windows(self,hours, moon_illumination, moon_rise, moon_set, observer, lat, lon,bortle=4, target="deep_sky", target_object="M31",target_obj=None, goal="balanced", window_size= 2,min_altitude_deg=30, limit= 3):
 
         if target_obj is None:
             raise ValueError("target_obj is required")
-        
+
         profile = load_user_profile()
 
         if window_size is None:
@@ -573,12 +600,12 @@ class SkyEngine:
                     target,
                     goal,
                 )
-                
+
                 seeing = self.estimate_seeing(
                     h.get("wind_speed_10m", 0),
                     h.get("relative_humidity_2m", 0),
                 )
-                
+
 
                 obj_meta = target_obj or {}
 
@@ -599,7 +626,7 @@ class SkyEngine:
 
                 ######elif goal == "clusters" and obj_type == "cluster":
                     #####target_bonus += 12
-            
+
                 frame_bonus = 0
 
                 object_size = obj_meta.get("size_arcmin", 30) / 60
@@ -648,7 +675,7 @@ class SkyEngine:
                 elif ratio > ideal_max * 1.5:
                     object_bonus -= 35
                 elif ratio > ideal_max:
-                    object_bonus -= 15            
+                    object_bonus -= 15
 
                 # Bonus difficulté : objets faciles favorisés
                 if difficulty == 1:
@@ -673,7 +700,7 @@ class SkyEngine:
                     object_bonus -= 2
                 elif obj_type == "cluster" and moon_illumination > 50:
                     object_bonus += 2
-                    
+
 
                 result["score"] = max(0, min(100, result["score"] + object_bonus + preference_bonus))
 
@@ -765,7 +792,7 @@ class SkyEngine:
                 })
         return sorted(candidates, key=lambda x: x["score"], reverse=True)[:limit]
 
-                
+
     def iter_windows(self, hours, window_size):
         if len(hours) < window_size:
             return []
@@ -776,7 +803,7 @@ class SkyEngine:
             windows.append(hours[i:i + window_size])
 
         return windows
-    
+
     def estimate_seeing(self, wind, humidity):
         """
         Estimation simple du seeing (arcsec).
@@ -798,5 +825,4 @@ class SkyEngine:
             seeing += 0.4
 
         return round(seeing, 1)
-        
-    
+
