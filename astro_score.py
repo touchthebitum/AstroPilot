@@ -1053,9 +1053,13 @@ def build_decision_context(
         angular_size_arcmin=CATALOG.get(obj_name, {}).get("size_arcmin"),
     )
 
+    session_start = datetime.now(
+        ZoneInfo(TIMEZONE)
+    )
+
     session_context = SessionContext(
-        start_time=datetime.now(),
-        end_time=datetime.now() + timedelta(hours=3),
+        start_time=session_start,
+        end_time=session_start + timedelta(hours=3),
         available_duration=timedelta(hours=3),
     )
 
