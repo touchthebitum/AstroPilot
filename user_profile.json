@@ -15,6 +15,7 @@
     "default_goal": "balanced",
     "prefer_existing_projects": true,
     "max_setup_changes_per_night": 1,
+    "productive_hours_per_night": 4.0,
     "favorite_targets":[
         "galaxy",
         "nebula"

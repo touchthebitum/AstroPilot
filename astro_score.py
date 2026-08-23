@@ -1119,6 +1119,13 @@ def build_decision_context(
         total_remaining_hours=project_remaining,
         highest_priority=project_priority_value,
         average_progress=project_progress_value,
+        productive_hours_per_night=profile.get(
+            "preferences",
+            {},
+        ).get(
+            "productive_hours_per_night",
+            4.0,
+        ),
     )
 
     preferences_context = PreferencesContext(

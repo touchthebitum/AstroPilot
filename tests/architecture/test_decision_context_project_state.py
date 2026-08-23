@@ -58,6 +58,7 @@ def test_decision_context_uses_selected_project_state(
         profile={
             "preferences": {
                 "bortle": 3,
+                "productive_hours_per_night": 5.5,
             }
         },
         illumination=0.3,
@@ -69,6 +70,7 @@ def test_decision_context_uses_selected_project_state(
     assert context.portfolio.total_remaining_hours == 17.0
     assert context.portfolio.highest_priority == 27.2
     assert context.portfolio.average_progress == 15.0
+    assert context.portfolio.productive_hours_per_night == 5.5
 
 def test_decision_context_session_times_are_timezone_aware():
     context = astro_score.build_decision_context(
@@ -106,6 +108,7 @@ def test_decision_context_session_times_are_timezone_aware():
         lon=6.5495,
     )
 
+    assert context.portfolio.productive_hours_per_night == 4.0
     assert context.session.start_time.tzinfo is not None
     assert context.session.end_time.tzinfo is not None
     assert (
