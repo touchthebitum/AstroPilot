@@ -75,3 +75,82 @@ def test_project_risk_uses_dynamic_season():
     assert result.favorable_nights is not None
     assert result.favorable_nights > 0
     assert result.pressure > 0
+
+def test_project_risk_pressure_compares_required_to_favorable_nights(
+    monkeypatch,
+):
+    start = datetime(
+        2026,
+        8,
+        21,
+        23,
+        0,
+        tzinfo=ZoneInfo("Europe/Zurich"),
+    )
+
+    context = DecisionContext(
+        session=SessionContext(
+            start_time=start,
+            end_time=start + timedelta(hours=2),
+            available_duration=timedelta(hours=2),
+        ),
+        site=SiteContext(
+            name="Buttes",
+            latitude=46.7508,
+            longitude=6.5495,
+            elevation=700,
+            bortle=3,
+        ),
+        equipment=EquipmentContext(
+            setup=None,
+        ),
+        weather=WeatherContext(
+            cloud_cover=0,
+            humidity=50,
+            wind_speed_kmh=0,
+            seeing_arcsec=1.5,
+        ),
+        sky=SkyContext(
+            target="IC1396",
+            moon_illumination=0,
+            moon_separation_deg=180,
+            target_altitude_deg=60,
+            astronomical_darkness=True,
+        ),
+        portfolio=PortfolioContext(
+            active_projects=1,
+            total_remaining_hours=15,
+            highest_priority=80,
+            average_progress=0,
+        ),
+        preferences=PreferencesContext(
+            astro_weight=0.7,
+            project_weight=0.3,
+            minimum_altitude_deg=30,
+            minimum_sqm=20,
+        ),
+    )
+
+    monkeypatch.setattr(
+        "decision.risk.project_risk_context_builder."
+        "SeasonResolver.resolve",
+        lambda context: {
+            "remaining_days": 100,
+            "remaining_good_nights": 20,
+            "urgency": "LOW",
+            "source": "dynamic",
+            "confidence": 0.9,
+            "start_date": None,
+            "end_date": None,
+            "peak_date": None,
+        },
+    )
+
+    result = ProjectRiskContextBuilder.build(
+        target="IC1396",
+        context=context,
+    )
+
+    assert result.required_nights == 4
+    assert result.favorable_nights == 20
+    assert result.pressure == 0.2

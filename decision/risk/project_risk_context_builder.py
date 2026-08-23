@@ -34,7 +34,7 @@ class ProjectRiskContextBuilder:
         required_nights = productivity.required_nights
 
         pressure = (
-            remaining_hours
+            required_nights
             / max(good_nights or 0, 1)
         )
 
