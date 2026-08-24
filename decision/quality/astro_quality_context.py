@@ -8,3 +8,4 @@ class AstroQualityContext:
     moon_penalty: float
     seeing_arcsec: float | None
     image_quality_score: float | None
+    dew_score: float | None = None

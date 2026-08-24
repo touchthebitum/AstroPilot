@@ -12,6 +12,7 @@ from decision.mission.mission_input import MissionInput
 from decision.engines.image_quality_engine import ImageQualityEngine
 from decision.quality.astro_quality_context import AstroQualityContext
 from decision.quality.astro_quality_engine import AstroQualityEngine
+from decision.quality.dew_risk_engine import DewRiskEngine
 
 
 def _average(values, fallback):
@@ -96,6 +97,10 @@ class MissionAssembler:
             getattr(selected_weather, "hourly_seeing", None),
             getattr(context_weather, "seeing_arcsec", None),
         )
+        temperature = _average(
+            getattr(selected_weather, "hourly_temperature", None),
+            getattr(context_weather, "temperature_c", None),
+        )
         moon_penalty = (
             mission_input.moon_penalty
             if mission_input is not None
@@ -146,6 +151,16 @@ class MissionAssembler:
                 observation_time=window_start,
                 ),
             )
+        dew_risk = None
+
+        if (
+            temperature is not None
+            and humidity is not None
+        ):
+            dew_risk = DewRiskEngine.evaluate(
+                temperature_c=temperature,
+                humidity_percent=humidity,
+            )
         
         image_quality = ImageQualityEngine.evaluate(context)
 
@@ -173,6 +188,11 @@ class MissionAssembler:
                     ),
                     seeing_arcsec=seeing,
                     image_quality_score=image_quality.score,
+                    dew_score=(
+                        dew_risk.score
+                        if dew_risk is not None
+                        else None
+                    ),
                 )
             )
 
@@ -244,4 +264,5 @@ class MissionAssembler:
             tasks=tasks,
             night_slices=productivity.timeline.slices,
             astro_quality=astro_quality,
+            dew_risk=dew_risk,
         )

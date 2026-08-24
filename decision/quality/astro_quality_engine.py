@@ -3,11 +3,12 @@ from decision.quality.astro_quality_result import AstroQualityResult
 
 class AstroQualityEngine:
     WEIGHTS = {
-        "altitude": 0.20,
-        "clouds": 0.30,
-        "moon": 0.15,
-        "seeing": 0.20,
-        "setup": 0.15,
+        "altitude": 0.18,
+        "clouds": 0.27,
+        "moon": 0.13,
+        "seeing": 0.18,
+        "setup": 0.14,
+        "dew": 0.10,
     }
 
     @staticmethod
@@ -126,6 +127,22 @@ class AstroQualityEngine:
                     metrics["setup_score"],
                     AstroQualityEngine.WEIGHTS["setup"],
                     "setup",
+                )
+            )
+        if context.dew_score is not None:
+            metrics["dew_score"] = max(
+                0.0,
+                min(
+                    100.0,
+                    context.dew_score,
+                ),
+            )
+
+            weighted_scores.append(
+                (
+                    metrics["dew_score"],
+                    AstroQualityEngine.WEIGHTS["dew"],
+                    "dew",
                 )
             )
 

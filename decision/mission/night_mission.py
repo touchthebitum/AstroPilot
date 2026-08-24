@@ -4,6 +4,7 @@ from decision.night_productivity.night_productivity_result import NightProductiv
 from decision.mission.night_planner import NightTask
 from decision.intelligence.analysis_result import AnalysisResult
 from decision.quality.astro_quality_result import AstroQualityResult
+from decision.quality.dew_risk_result import DewRiskResult
 
 @dataclass(frozen=True)
 class MissionReason:
@@ -28,3 +29,4 @@ class NightMission:
     astro_quality: AstroQualityResult | None = None
     tasks: list[NightTask] = field(default_factory=list)
     night_slices: list = field(default_factory=list)
+    dew_risk: DewRiskResult | None = None

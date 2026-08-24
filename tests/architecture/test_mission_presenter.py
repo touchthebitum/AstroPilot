@@ -44,6 +44,12 @@ def test_expected_gain_is_printed_once(monkeypatch, capsys):
         season_analysis=None,
         tasks=[],
         equipment=[],
+        dew_risk=SimpleNamespace(
+        dew_point_c=4.0,
+        spread_c=2.0,
+        risk="HIGH",
+        score=45.0,
+        ),
     )
 
     MissionPresenter.present(mission)
@@ -57,3 +63,7 @@ def test_expected_gain_is_printed_once(monkeypatch, capsys):
     assert output.count("Gain attendu") == 1
     assert "Capacité moyenne estimée : 4.0 h/nuit (profil)" in output
     assert "Nuits nécessaires estimées : 4" in output
+    assert "💧 Risque de rosée" in output
+    assert "Niveau : Élevé" in output
+    assert "Point de rosée : 4.0 °C" in output
+    assert "Marge thermique : 2.0 °C" in output

@@ -60,6 +60,31 @@ class MissionPresenter:
             )
             print()
 
+        if mission.dew_risk is not None:
+            risk_labels = {
+                "LOW": "Faible",
+                "MEDIUM": "Modéré",
+                "HIGH": "Élevé",
+                "CRITICAL": "Critique",
+            }
+
+            risk_label = risk_labels.get(
+                mission.dew_risk.risk,
+                mission.dew_risk.risk,
+            )
+
+            print("💧 Risque de rosée")
+            print(f"Niveau : {risk_label}")
+            print(
+                f"Point de rosée : "
+                f"{mission.dew_risk.dew_point_c:.1f} °C"
+            )
+            print(
+                f"Marge thermique : "
+                f"{mission.dew_risk.spread_c:.1f} °C"
+            )
+            print()
+
         if mission.productivity.windows:
             print()
             print("🌙 Fenêtres optimales")

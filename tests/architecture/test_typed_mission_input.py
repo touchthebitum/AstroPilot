@@ -83,7 +83,7 @@ def isolate_assembler(monkeypatch):
     monkeypatch.setattr(
         "decision.mission.mission_assembler.ImageQualityEngine.evaluate",
         lambda context: SimpleNamespace(score=8.0),
-    )
+        )
     monkeypatch.setattr(
         "decision.mission.mission_assembler.AstroQualityEngine.evaluate",
         lambda context: SimpleNamespace(
@@ -91,6 +91,15 @@ def isolate_assembler(monkeypatch):
             confidence=1.0,
             limiting_factor="moon",
             metrics={},
+        ),
+    )
+    monkeypatch.setattr(
+        "decision.mission.mission_assembler.DewRiskEngine.evaluate",
+        lambda **kwargs: SimpleNamespace(
+            dew_point_c=4.0,
+            spread_c=2.0,
+            risk="HIGH",
+            score=45.0,
         ),
     )
     monkeypatch.setattr(

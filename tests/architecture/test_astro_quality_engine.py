@@ -109,3 +109,29 @@ def test_aqi_preserves_expected_quality_bands(
         result = AstroQualityEngine.evaluate(context)
 
         assert minimum <= result.score <= maximum
+
+def test_aqi_dew_risk_can_reduce_quality():
+    safe = AstroQualityContext(
+        target_altitude_deg=70,
+        cloud_cover_percent=10,
+        moon_penalty=0.1,
+        seeing_arcsec=1.5,
+        image_quality_score=8.5,
+        dew_score=100.0,
+    )
+
+    risky = AstroQualityContext(
+        target_altitude_deg=70,
+        cloud_cover_percent=10,
+        moon_penalty=0.1,
+        seeing_arcsec=1.5,
+        image_quality_score=8.5,
+        dew_score=20.0,
+    )
+
+    safe_result = AstroQualityEngine.evaluate(safe)
+    risky_result = AstroQualityEngine.evaluate(risky)
+
+    assert safe_result.score > risky_result.score
+    assert risky_result.metrics["dew_score"] == 20.0
+    assert risky_result.limiting_factor == "dew"
