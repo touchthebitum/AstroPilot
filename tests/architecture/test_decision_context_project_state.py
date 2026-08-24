@@ -125,6 +125,7 @@ def test_decision_context_session_times_are_timezone_aware():
         profile={
             "preferences": {
                 "bortle": 3,
+                "observing_nights_per_week": 2.0,
             }
         },
         illumination=0.3,
@@ -145,3 +146,7 @@ def test_decision_context_session_times_are_timezone_aware():
     )
     assert context.portfolio.night_capacity_source == "profile"
     assert context.portfolio.historical_nights == 0
+    assert (
+        context.portfolio.observing_nights_per_week
+        == 2.0
+)

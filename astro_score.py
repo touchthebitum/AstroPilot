@@ -1132,6 +1132,14 @@ def build_decision_context(
         )
     )
 
+    configured_observing_nights_per_week = profile.get(
+        "preferences",
+        {},
+    ).get(
+        "observing_nights_per_week",
+        0.0,
+    )
+
     portfolio_context = PortfolioContext(
         active_projects=len(get_projects()),
         total_remaining_hours=project_remaining,
@@ -1140,9 +1148,12 @@ def build_decision_context(
         productive_hours_per_night=(
             night_capacity_estimate.productive_hours_per_night
         ),
+        observing_nights_per_week=(
+            configured_observing_nights_per_week
+        ),
         night_capacity_source=night_capacity_estimate.source,
         historical_nights=night_capacity_estimate.historical_nights,
-    )
+        )
 
     preferences_context = PreferencesContext(
         astro_weight=profile.get("preferences", {}).get(
@@ -1726,6 +1737,7 @@ def main(argv=None) -> int:
 
     CURRENT_EQUIPMENT = get_active_equipment()
     print("\nSetup actif :", CURRENT_EQUIPMENT)
+    profile = load_user_profile()
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -1820,6 +1832,31 @@ def main(argv=None) -> int:
         lon,
         weather=weather,
     )
+    preferences = profile.get("preferences", {})
+
+    configured_night_capacity = preferences.get(
+        "productive_hours_per_night",
+        4.0,
+    )
+
+    night_capacity_estimate = (
+        HistoricalNightCapacityEstimator.estimate(
+            sessions=profile.get("sessions", []),
+            fallback=configured_night_capacity,
+        )
+    )
+
+    completion_kwargs = {
+        "productive_hours_per_night": (
+            night_capacity_estimate.productive_hours_per_night
+        ),
+        "observing_nights_per_week": preferences.get(
+            "observing_nights_per_week",
+            0.0,
+        ),
+        "night_capacity_source": night_capacity_estimate.source,
+        "historical_nights": night_capacity_estimate.historical_nights,
+    }
 
     print("\n===== CAPACITÉ À VENIR =====")
 
@@ -1833,6 +1870,7 @@ def main(argv=None) -> int:
     if args.mode == "portfolio":
         report_runner.run_portfolio(
             night_capacities=night_capacities,
+            **completion_kwargs,
         )
 
     elif args.mode == "calendar":
@@ -1850,6 +1888,7 @@ def main(argv=None) -> int:
     elif args.mode == "full":
         report_runner.run_full(
             night_capacities=night_capacities,
+            **completion_kwargs,
         )
 
     return 0

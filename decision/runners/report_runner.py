@@ -25,6 +25,7 @@ class ReportRunner:
     def run_portfolio(
         self,
         night_capacities,
+        **completion_kwargs,
     ):
         dynamic_roadmap = (
             self.portfolio_forecast_engine
@@ -34,8 +35,9 @@ class ReportRunner:
         )
 
         self.show_portfolio_completion_forecast(
-            dynamic_roadmap
-    )
+            dynamic_roadmap,
+            **completion_kwargs,
+        )
 
     def run_calendar(
         self,
@@ -57,6 +59,7 @@ class ReportRunner:
     def run_full(
         self,
         night_capacities,
+        **completion_kwargs,
     ):
         roadmap = (
             self.portfolio_forecast_engine
@@ -70,7 +73,8 @@ class ReportRunner:
         )
 
         self.show_portfolio_completion_forecast(
-            roadmap
+            roadmap,
+            **completion_kwargs,
         )
 
     def run_tonight(

@@ -1,10 +1,16 @@
 from __future__ import annotations
-
 from astropilot.user_profile import get_projects
+import math
+from datetime import datetime, timedelta
 
 
-def show_portfolio_completion_forecast(roadmap):
-
+def show_portfolio_completion_forecast(
+    roadmap,
+    productive_hours_per_night: float = 0.0,
+    observing_nights_per_week: float = 0.0,
+    night_capacity_source: str = "profile",
+    historical_nights: int = 0,
+):
     if not roadmap:
         print("\nAucune prévision disponible.")
         return
@@ -59,13 +65,71 @@ def show_portfolio_completion_forecast(roadmap):
     print(f"Nuits planifiées : {planned_nights}")
 
     if remaining_after_horizon > 0:
-        print(
-            "Date de fin estimée : "
-            "hors horizon prévisionnel"
+        weekly_capacity = (
+            productive_hours_per_night
+            * observing_nights_per_week
         )
-        print(f"Dernière nuit connue : {final_date}")
+
+        if weekly_capacity <= 0:
+            print("Date de fin estimée : indisponible")
+            print(f"Dernière nuit connue : {final_date}")
+        else:
+            weeks_needed = (
+                remaining_after_horizon
+                / weekly_capacity
+            )
+
+            days_needed = math.ceil(
+                weeks_needed * 7
+            )
+
+            horizon_end = datetime.strptime(
+                final_date,
+                "%Y-%m-%d",
+            ).date()
+
+            estimated_date = (
+                horizon_end
+                + timedelta(days=days_needed)
+            )
+
+            print(
+                "Date de fin estimée : "
+                f"vers le {estimated_date}"
+            )
+            print(
+                "Extrapolation au-delà de "
+                "l'horizon météo de 7 nuits."
+            )
+
+            source_label = (
+                "historique"
+                if night_capacity_source == "history"
+                else "profil"
+            )
+
+            print(
+                "Base : "
+                f"{productive_hours_per_night:.1f} h/nuit "
+                f"{source_label} × "
+                f"{observing_nights_per_week:.1f} nuits/semaine"
+            )
+
+            if night_capacity_source == "history":
+                print(
+                    "Confiance : MOYENNE — "
+                    f"basée sur {historical_nights} nuits observées"
+                )
+            else:
+                print(
+                    "Confiance : FAIBLE — "
+                    "paramètres du profil"
+                )
     else:
-        print(f"Date de fin estimée : {final_date}")
+        print(f"Date de fin prévue : {final_date}")
+        print(
+            "Basée sur les prévisions météo disponibles."
+        )
     print("\n===== ÉTAT PRÉVU EN FIN DE ROADMAP =====")
 
     displayed = set()
