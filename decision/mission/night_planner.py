@@ -23,21 +23,6 @@ class NightPlanner:
             NightTask("T-10 min", "T", "Autofocus"),
         ]
 
-        productive_windows = [
-            w for w in night_productivity.windows
-            if w.productive
-        ]
-
-        if productive_windows:
-            tasks.append(
-                NightTask(
-                    start=f"{productive_windows[0].start_hour:.1f} h",
-                    end=f"{productive_windows[-1].end_hour:.1f} h",
-                    title="Acquisition",
-                    productivity=sum(w.productivity for w in productive_windows) / len(productive_windows),
-                )
-            )
-
         tasks.append(
             NightTask(
                 "Fin",
