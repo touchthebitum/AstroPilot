@@ -207,7 +207,6 @@ class MissionAssembler:
             expected_gain=(
                 mission_input.expected_gain if mission_input is not None else 0
             ),
-            alternative_target=None,
             risk_report=risk,
             season_analysis=season_analysis,
             productivity=productivity,

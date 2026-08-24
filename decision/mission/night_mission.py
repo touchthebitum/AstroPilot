@@ -21,7 +21,6 @@ class NightMission:
     window_end: str | None = None
     recommended_hours: float = 0.0
     expected_gain: float = 0.0
-    alternative_target: str | None = None
     risk_report: RiskReport | None = None
     season_analysis: AnalysisResult | None = None 
     productivity: NightProductivityResult | None = None

@@ -32,7 +32,6 @@ def test_expected_gain_is_printed_once(monkeypatch, capsys):
         window_end=None,
         recommended_hours=2.0,
         expected_gain=10.0,
-        alternative_target=None,
         reasons=[
             MissionReason("Bonne altitude", "success"),
             MissionReason("Très bon seeing", "success"),

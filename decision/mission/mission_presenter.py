@@ -82,9 +82,6 @@ class MissionPresenter:
         if mission.expected_gain >0:
             print(f"📈 Gain attendu : +{mission.expected_gain:.1f}%")
 
-        if mission.alternative_target:
-            print(f"🔁 Alternative : {mission.alternative_target}")
-
 
         print("\nPourquoi cette mission ?")
 
@@ -142,6 +139,3 @@ class MissionPresenter:
 
         for advice in advices:
             print(f"[{advice.time}] {advice.message}")
-
-        if mission.alternative_target:
-            print(f"\nMission suivante : {mission.alternative_target}")
