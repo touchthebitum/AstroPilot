@@ -81,6 +81,19 @@ def isolate_assembler(monkeypatch):
         lambda productivity: [],
     )
     monkeypatch.setattr(
+        "decision.mission.mission_assembler.ImageQualityEngine.evaluate",
+        lambda context: SimpleNamespace(score=8.0),
+    )
+    monkeypatch.setattr(
+        "decision.mission.mission_assembler.AstroQualityEngine.evaluate",
+        lambda context: SimpleNamespace(
+            score=82.0,
+            confidence=1.0,
+            limiting_factor="moon",
+            metrics={},
+        ),
+    )
+    monkeypatch.setattr(
         "decision.mission.mission_assembler.SeasonAnalysis.analyze",
         lambda context: None,
     )

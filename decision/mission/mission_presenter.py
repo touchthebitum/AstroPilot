@@ -21,6 +21,45 @@ class MissionPresenter:
         print(f"Confiance productivité : {mission.productivity.confidence:.0%}")
         print()
 
+        if mission.astro_quality is not None:
+            score = mission.astro_quality.score
+
+            if score >= 90:
+                label = "Excellente"
+            elif score >= 75:
+                label = "Très bonne"
+            elif score >= 60:
+                label = "Bonne"
+            elif score >= 40:
+                label = "Moyenne"
+            else:
+                label = "Faible"
+
+            limiting_labels = {
+                "altitude": "Altitude",
+                "clouds": "Nuages",
+                "moon": "Lune",
+                "seeing": "Seeing",
+                "setup": "Setup",
+            }
+
+            limiting_factor = limiting_labels.get(
+                mission.astro_quality.limiting_factor,
+                mission.astro_quality.limiting_factor,
+            )
+
+            print("🌌 Qualité astrophotographique")
+            print(f"AQI : {score:.0f}/100 — {label}")
+
+            if limiting_factor:
+                print(f"Facteur limitant : {limiting_factor}")
+
+            print(
+                "Complétude AQI : "
+                f"{mission.astro_quality.confidence:.0%}"
+            )
+            print()
+
         if mission.productivity.windows:
             print()
             print("🌙 Fenêtres optimales")

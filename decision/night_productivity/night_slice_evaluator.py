@@ -4,12 +4,6 @@ class NightSliceEvaluator:
     @staticmethod
     def evaluate(slice):
 
-        print(
-            f"EVAL altitude={slice.target_altitude:.2f} "
-            f"cloud={slice.cloud_cover:.0f} "
-            f"moon={getattr(slice, 'moon_penalty', 0.0):.2f}"
-        )
-
         productivity = 1.0
 
         productivity -= slice.cloud_cover / 100 * 0.7

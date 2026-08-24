@@ -9,6 +9,9 @@ from decision.intelligence.analysis_context import AnalysisContext
 from decision.season.dynamic_season_engine import DynamicSeasonEngine
 from astropilot.catalog import CATALOG
 from decision.mission.mission_input import MissionInput
+from decision.engines.image_quality_engine import ImageQualityEngine
+from decision.quality.astro_quality_context import AstroQualityContext
+from decision.quality.astro_quality_engine import AstroQualityEngine
 
 
 def _average(values, fallback):
@@ -144,6 +147,34 @@ class MissionAssembler:
                 ),
             )
         
+        image_quality = ImageQualityEngine.evaluate(context)
+
+        target_altitude = getattr(
+            context.sky,
+            "target_altitude_deg",
+            None,
+        )
+
+        astro_quality = None
+
+        if target_altitude is not None:
+            astro_quality = AstroQualityEngine.evaluate(
+                AstroQualityContext(
+                    target_altitude_deg=target_altitude,
+                    cloud_cover_percent=(
+                        20.0
+                        if cloud_cover is None
+                        else cloud_cover
+                    ),
+                    moon_penalty=(
+                        0.2
+                        if moon_penalty is None
+                        else moon_penalty
+                    ),
+                    seeing_arcsec=seeing,
+                    image_quality_score=image_quality.score,
+                )
+            )
 
         risk_context = ProjectRiskContextBuilder.build(
             target=target,
@@ -212,4 +243,5 @@ class MissionAssembler:
             productivity=productivity,
             tasks=tasks,
             night_slices=productivity.timeline.slices,
+            astro_quality=astro_quality,
         )
