@@ -69,10 +69,6 @@ def isolate_assembler(monkeypatch):
         evaluate,
     )
     monkeypatch.setattr(
-        "decision.mission.mission_assembler.NightScheduler.build",
-        lambda productivity: None,
-    )
-    monkeypatch.setattr(
         "decision.mission.mission_assembler.ProjectRiskContextBuilder.build",
         lambda **kwargs: None,
     )

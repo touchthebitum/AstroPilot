@@ -3,7 +3,6 @@ from decision.risk.risk_report import RiskReport
 from decision.night_productivity.night_productivity_result import NightProductivityResult
 from decision.mission.night_planner import NightTask
 from decision.intelligence.analysis_result import AnalysisResult
-from decision.night_scheduler.night_schedule import NightSchedule
 
 @dataclass(frozen=True)
 class MissionReason:
@@ -39,4 +38,3 @@ class NightMission:
     productivity: NightProductivityResult | None = None
     tasks: list[NightTask] = field(default_factory=list)
     night_slices: list = field(default_factory=list)
-    schedule: NightSchedule | None = None
