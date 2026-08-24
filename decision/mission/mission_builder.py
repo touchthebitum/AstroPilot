@@ -35,7 +35,6 @@ class NightMissionBuilder:
             )
 
         equipment = EquipmentBuilder.build(context)
-        timeline = []
         alternatives = []
 
         return MissionAssembler.build(
@@ -43,7 +42,6 @@ class NightMissionBuilder:
             summary=summary,
             context=context,
             equipment=equipment,
-            timeline=timeline,
             alternatives=alternatives,
             weather=weather,
             mission_input=mission_input,

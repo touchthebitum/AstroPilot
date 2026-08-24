@@ -25,7 +25,6 @@ class MissionAssembler:
         summary,
         context,
         equipment,
-        timeline,
         alternatives,
         weather=None,
         mission_input: MissionInput | None = None,
@@ -209,7 +208,6 @@ class MissionAssembler:
                 mission_input.expected_gain if mission_input is not None else 0
             ),
             alternative_target=None,
-            timeline=timeline,
             risk_report=risk,
             season_analysis=season_analysis,
             productivity=productivity,

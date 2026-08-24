@@ -54,7 +54,6 @@ def test_mission_assembler_uses_selected_night_conditions(
             summary=summary,
             context=context,
             equipment=["frozen setup"],
-            timeline=[],
             alternatives=["M42"],
             weather=frozen_weather,
         )

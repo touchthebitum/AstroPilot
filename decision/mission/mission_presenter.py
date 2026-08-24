@@ -143,10 +143,5 @@ class MissionPresenter:
         for advice in advices:
             print(f"[{advice.time}] {advice.message}")
 
-        if mission.timeline:
-            print("\n🕒 Plan")
-            for step in mission.timeline:
-                print(f"{step.time}  {step.title}")
-
         if mission.alternative_target:
             print(f"\nMission suivante : {mission.alternative_target}")

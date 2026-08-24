@@ -40,7 +40,6 @@ def test_expected_gain_is_printed_once(monkeypatch, capsys):
         season_analysis=None,
         tasks=[],
         equipment=[],
-        timeline=[],
     )
 
     MissionPresenter.present(mission)

@@ -247,7 +247,6 @@ def test_fallback_constants_are_used_only_when_data_is_missing(
         summary=summary,
         context=mission_context,
         equipment=[],
-        timeline=[],
         alternatives=[],
         mission_input=_mission_input(
             frozen_time,
