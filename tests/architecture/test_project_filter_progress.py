@@ -276,3 +276,66 @@ def test_project_filter_progress_summary_detects_unexplained_hours():
 
     assert summary.accounted_hours == 3.0
     assert summary.difference == 2.0
+
+def test_single_filter_project_applies_legacy_hours_to_remaining_need():
+    project = {
+        "hours": 3.0,
+        "target_hours": 20.0,
+        "filter_targets": {
+            "LRGB": 20.0,
+        },
+    }
+
+    sessions = [
+        {
+            "date": "2026-06-14",
+            "object": "M31",
+            "hours": 1.0,
+        },
+        {
+            "date": "2026-06-14",
+            "object": "M31",
+            "hours": 2.0,
+        },
+    ]
+
+    remaining = ProjectFilterProgress.effective_remaining_hours(
+        project_name="M31",
+        project=project,
+        sessions=sessions,
+    )
+
+    assert remaining == {
+        "LRGB": 17.0,
+    }
+
+def test_multi_filter_project_does_not_distribute_legacy_hours():
+    project = {
+        "hours": 3.0,
+        "target_hours": 15.0,
+        "filter_targets": {
+            "Ha": 6.0,
+            "OIII": 5.0,
+            "SII": 4.0,
+        },
+    }
+
+    sessions = [
+        {
+            "date": "2026-06-14",
+            "object": "IC1396",
+            "hours": 3.0,
+        },
+    ]
+
+    remaining = ProjectFilterProgress.effective_remaining_hours(
+        project_name="IC1396",
+        project=project,
+        sessions=sessions,
+    )
+
+    assert remaining == {
+        "Ha": 6.0,
+        "OIII": 5.0,
+        "SII": 4.0,
+    }
