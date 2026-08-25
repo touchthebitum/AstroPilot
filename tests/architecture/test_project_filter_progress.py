@@ -1,6 +1,7 @@
 from decision.portfolio.project_filter_progress import (
     ProjectFilterProgress,
 )
+import pytest
 
 
 def test_filter_progress_aggregates_matching_sessions():
@@ -152,3 +153,23 @@ def test_project_filter_progress_returns_empty_without_filter_targets():
     )
 
     assert progress == {}
+
+def test_project_filter_progress_rejects_inconsistent_targets():
+    project = {
+        "target_hours": 15.0,
+        "filter_targets": {
+            "Ha": 6.0,
+            "OIII": 5.0,
+            "SII": 2.0,
+        },
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="must match target_hours",
+    ):
+        ProjectFilterProgress.evaluate_project(
+            project_name="IC1396",
+            project=project,
+            sessions=[],
+        )

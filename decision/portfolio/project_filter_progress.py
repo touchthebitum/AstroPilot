@@ -45,6 +45,7 @@ class ProjectFilterProgress:
         project: dict,
         sessions: list[dict],
     ) -> dict[str, FilterProgress]:
+        ProjectFilterTargets.validate(project)
         targets = ProjectFilterTargets.get(project)
 
         return {
