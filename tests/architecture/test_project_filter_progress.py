@@ -173,3 +173,106 @@ def test_project_filter_progress_rejects_inconsistent_targets():
             project=project,
             sessions=[],
         )
+
+def test_legacy_sessions_are_counted_as_unassigned_hours():
+    sessions = [
+        {
+            "date": "2026-06-14",
+            "object": "M31",
+            "hours": 1.0,
+        },
+        {
+            "date": "2026-06-14",
+            "object": "M31",
+            "hours": 2.0,
+        },
+        {
+            "date": "2026-08-20",
+            "object": "M31",
+            "hours": 1.5,
+            "filter_type": "LRGB",
+        },
+    ]
+
+    unassigned = ProjectFilterProgress.unassigned_hours(
+        project_name="M31",
+        sessions=sessions,
+    )
+
+    assert unassigned == 3.0
+
+def test_other_project_legacy_sessions_are_not_unassigned():
+    sessions = [
+        {
+            "date": "2026-06-14",
+            "object": "M31",
+            "hours": 3.0,
+        },
+        {
+            "date": "2026-06-14",
+            "object": "IC1396",
+            "hours": 5.0,
+        },
+    ]
+
+    unassigned = ProjectFilterProgress.unassigned_hours(
+        project_name="M31",
+        sessions=sessions,
+    )
+
+    assert unassigned == 3.0
+
+def test_project_filter_progress_summary_matches_legacy_history():
+    project = {
+        "hours": 3.0,
+        "target_hours": 20.0,
+    }
+
+    sessions = [
+        {
+            "date": "2026-06-14",
+            "object": "M31",
+            "hours": 1.0,
+        },
+        {
+            "date": "2026-06-14",
+            "object": "M31",
+            "hours": 2.0,
+        },
+    ]
+
+    summary = ProjectFilterProgress.summarize(
+        project_name="M31",
+        project=project,
+        sessions=sessions,
+    )
+
+    assert summary.global_hours == 3.0
+    assert summary.filtered_hours == 0.0
+    assert summary.unassigned_hours == 3.0
+    assert summary.accounted_hours == 3.0
+    assert summary.difference == 0.0
+
+
+def test_project_filter_progress_summary_detects_unexplained_hours():
+    project = {
+        "hours": 5.0,
+        "target_hours": 20.0,
+    }
+
+    sessions = [
+        {
+            "date": "2026-06-14",
+            "object": "M31",
+            "hours": 3.0,
+        },
+    ]
+
+    summary = ProjectFilterProgress.summarize(
+        project_name="M31",
+        project=project,
+        sessions=sessions,
+    )
+
+    assert summary.accounted_hours == 3.0
+    assert summary.difference == 2.0

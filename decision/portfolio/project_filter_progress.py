@@ -98,3 +98,76 @@ class ProjectFilterProgress:
             remaining_hours=round(remaining, 2),
             progress=round(progress, 1),
         )
+
+    @staticmethod
+    def unassigned_hours(
+        *,
+        project_name: str,
+        sessions: list[dict],
+    ) -> float:
+        total = 0.0
+
+        for session in sessions:
+            if session.get("object") != project_name:
+                continue
+
+            if session.get("filter_type") is not None:
+                continue
+
+            total += float(
+                session.get("hours", 0.0)
+            )
+
+        return round(total, 2)
+
+    @staticmethod
+    def summarize(
+        *,
+        project_name: str,
+        project: dict,
+        sessions: list[dict],
+    ) -> ProjectFilterProgressSummary:
+        filter_progress = ProjectFilterProgress.evaluate_project(
+            project_name=project_name,
+            project=project,
+            sessions=sessions,
+        )
+
+        filtered_hours = sum(
+            state.acquired_hours
+            for state in filter_progress.values()
+        )
+
+        unassigned_hours = ProjectFilterProgress.unassigned_hours(
+            project_name=project_name,
+            sessions=sessions,
+        )
+
+        accounted_hours = (
+            filtered_hours
+            + unassigned_hours
+        )
+
+        global_hours = float(
+            project.get("hours", 0.0)
+        )
+
+        return ProjectFilterProgressSummary(
+            global_hours=round(global_hours, 2),
+            filtered_hours=round(filtered_hours, 2),
+            unassigned_hours=round(unassigned_hours, 2),
+            accounted_hours=round(accounted_hours, 2),
+            difference=round(
+                global_hours - accounted_hours,
+                2,
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class ProjectFilterProgressSummary:
+    global_hours: float
+    filtered_hours: float
+    unassigned_hours: float
+    accounted_hours: float
+    difference: float
