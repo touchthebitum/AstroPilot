@@ -50,6 +50,12 @@ def test_expected_gain_is_printed_once(monkeypatch, capsys):
         risk="HIGH",
         score=45.0,
         ),
+        selected_filter=SimpleNamespace(
+            name="LRGB 1.25",
+            filter_type="LRGB",
+            bandwidth_nm=None,
+            source="inventory",
+            ),
     )
 
     MissionPresenter.present(mission)
@@ -67,3 +73,5 @@ def test_expected_gain_is_printed_once(monkeypatch, capsys):
     assert "Niveau : Élevé" in output
     assert "Point de rosée : 4.0 °C" in output
     assert "Marge thermique : 2.0 °C" in output
+    assert "• 🔴 Filtre : LRGB 1.25" in output
+    assert "Baader H-alpha 6.5nm" not in output

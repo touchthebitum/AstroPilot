@@ -196,6 +196,12 @@ class MissionPresenter:
             for item in mission.equipment:
                 print(f"• {item}")
 
+        if mission.selected_filter is not None:
+            print(
+                f"• 🔴 Filtre : "
+                f"{mission.selected_filter.name}"
+            )
+
 
         advices = NightAdvisor.build(mission)
 

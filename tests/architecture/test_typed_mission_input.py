@@ -6,6 +6,7 @@ import pytest
 from decision.mission.mission_assembler import MissionAssembler
 from decision.mission.mission_builder import NightMissionBuilder
 from decision.weather.weather_forecast import WeatherForecast
+from decision.filtering.selected_filter import SelectedFilter
 
 
 def _mission_input(frozen_time, weather, **overrides):
@@ -287,3 +288,24 @@ def test_fallback_constants_are_used_only_when_data_is_missing(
     assert context.wind == 5
     assert context.seeing == 1.5
     assert context.moon_penalty == 0.2
+
+def test_selected_filter_is_preserved_by_mission_input(
+    frozen_time,
+    frozen_weather,
+):
+    selected_filter = SelectedFilter(
+        name="Baader Ha 6.5nm Highspeed",
+        filter_type="Ha",
+        bandwidth_nm=6.5,
+        source="inventory",
+    )
+
+    mission_input = _mission_input(
+        frozen_time,
+        frozen_weather,
+        selected_filter=selected_filter,
+    )
+
+    assert mission_input.selected_filter is selected_filter
+    assert mission_input.selected_filter.filter_type == "Ha"
+    assert mission_input.selected_filter.bandwidth_nm == 6.5

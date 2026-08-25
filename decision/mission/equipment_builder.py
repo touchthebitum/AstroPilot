@@ -31,11 +31,4 @@ class EquipmentBuilder:
                 f"📷 Caméra : {setup.camera.manufacturer} {setup.camera.model}"
             )
 
-        # Filtre
-        if getattr(setup, "filter", None):
-            equipment.append(
-                f"🔴 Filtre : {setup.filter.manufacturer} {setup.filter.name}"
-            )
-
         return equipment
-

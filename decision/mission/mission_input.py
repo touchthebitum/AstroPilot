@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-
+from decision.filtering.selected_filter import SelectedFilter
 from decision.weather.weather_forecast import WeatherForecast
 
 
@@ -13,3 +13,4 @@ class MissionInput:
     moon_penalty: float | None
     recommended_hours: float
     expected_gain: float
+    selected_filter: SelectedFilter | None = None

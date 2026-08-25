@@ -101,6 +101,9 @@ warnings.filterwarnings(
     "ignore",
     category=NonRotationTransformationWarning
 )
+from decision.filtering.filter_inventory_loader import FilterInventoryLoader
+from decision.filtering.filter_selection_context import FilterSelectionContext
+from decision.filtering.filter_selection_engine import FilterSelectionEngine
 
 TIMEZONE = "Europe/Zurich"
 
@@ -494,6 +497,26 @@ def build_mission_input(evaluation):
     if moon_penalty is not None:
         moon_penalty = min(1.0, max(0.0, moon_penalty / 35.0))
 
+    selected_filter = None
+
+    inventory = FilterInventoryLoader.load()
+
+    if inventory:
+        target_data = CATALOG.get(catalog_key, {})
+
+        selected_filter = FilterSelectionEngine.select(
+            FilterSelectionContext(
+                target_name=catalog_key,
+                target_type=target_data.get("type", ""),
+                target_subtype=target_data.get("subtype"),
+                available_filters=inventory,
+                moon_penalty=(
+                    0.0
+                    if moon_penalty is None
+                    else moon_penalty
+                ),
+            )
+        )
     return MissionInput(
         window_start=window_start,
         window_end=window_end,
@@ -505,6 +528,7 @@ def build_mission_input(evaluation):
             catalog_key,
             recommended_hours,
         ),
+        selected_filter=selected_filter,
     )
 
 
