@@ -36,9 +36,38 @@ class FilterSelectionEngine:
                 if filter_type not in moon_safe
             ]
 
-        for filter_type in preferred:
-            for available_filter in available:
-                if available_filter.filter_type == filter_type:
-                    return available_filter
+        candidates = [
+            available_filter
+            for filter_type in preferred
+            for available_filter in available
+            if available_filter.filter_type == filter_type
+        ]
+
+        if candidates:
+            remaining = context.remaining_hours_by_filter
+
+            if remaining:
+                unfinished = [
+                    candidate
+                    for candidate in candidates
+                    if remaining.get(
+                        candidate.filter_type,
+                        0.0,
+                    ) > 0
+                ]
+
+                if unfinished:
+                    if context.moon_penalty >= 0.6:
+                        return unfinished[0]
+
+                    return max(
+                        unfinished,
+                        key=lambda item: remaining.get(
+                            item.filter_type,
+                            0.0,
+                        ),
+                    )
+
+            return candidates[0]
 
         return available[0]

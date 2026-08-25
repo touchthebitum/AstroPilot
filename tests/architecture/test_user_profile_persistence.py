@@ -187,3 +187,34 @@ def test_save_user_profile_uses_atomic_replace(
 
     assert replaced["source"].name == "user_profile.json.tmp"
     assert replaced["target"].name == "user_profile.json"
+
+def test_record_session_persists_filter_type_when_provided(
+    tmp_path,
+    monkeypatch,
+):
+    profile_path = tmp_path / "user_profile.json"
+    write_profile(profile_path)
+
+    monkeypatch.setattr(
+        user_profile,
+        "DATA_DIR",
+        tmp_path,
+    )
+
+    user_profile.record_session(
+        "M31",
+        2.0,
+        "2026-08-16",
+        filter_type="LRGB",
+    )
+
+    profile = user_profile.load_user_profile()
+
+    assert profile["sessions"] == [
+        {
+            "date": "2026-08-16",
+            "object": "M31",
+            "hours": 2.0,
+            "filter_type": "LRGB",
+        }
+    ]

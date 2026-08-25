@@ -78,6 +78,7 @@ def record_session(
     project_name,
     hours,
     date,
+    filter_type=None,
 ):
     if hours <= 0:
         raise ValueError("hours must be positive")
@@ -114,12 +115,15 @@ def record_session(
         [],
     )
 
-    sessions.append(
-        {
-            "date": date,
-            "object": project_name,
-            "hours": float(hours),
-        }
-    )
+    session = {
+        "date": date,
+        "object": project_name,
+        "hours": float(hours),
+    }
+
+    if filter_type is not None:
+        session["filter_type"] = filter_type
+
+    sessions.append(session)
 
     save_user_profile(profile)

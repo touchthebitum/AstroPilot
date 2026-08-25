@@ -85,3 +85,91 @@ def _filter(
         bandwidth_nm=bandwidth_nm,
         source="inventory",
     )
+
+def test_emission_nebula_prefers_filter_with_greatest_remaining_need():
+    context = FilterSelectionContext(
+        target_name="IC1396",
+        target_type="nebula",
+        target_subtype="emission",
+        available_filters=(
+            _filter("Ha", "Baader Ha 6.5nm", 6.5),
+            _filter("OIII", "Baader OIII 6.5nm", 6.5),
+            _filter("SII", "Baader SII 6.5nm", 6.5),
+        ),
+        moon_penalty=0.2,
+        remaining_hours_by_filter={
+            "Ha": 1.0,
+            "OIII": 4.0,
+            "SII": 2.0,
+        },
+    )
+
+    result = FilterSelectionEngine.select(context)
+
+    assert result is not None
+    assert result.filter_type == "OIII"
+
+def test_emission_nebula_keeps_default_priority_without_filter_progress():
+    context = FilterSelectionContext(
+        target_name="IC1396",
+        target_type="nebula",
+        target_subtype="emission",
+        available_filters=(
+            _filter("Ha"),
+            _filter("OIII"),
+            _filter("SII"),
+        ),
+        moon_penalty=0.2,
+    )
+
+    result = FilterSelectionEngine.select(context)
+
+    assert result is not None
+    assert result.filter_type == "Ha"
+
+def test_strong_moon_prefers_ha_when_ha_still_needs_data():
+    context = FilterSelectionContext(
+        target_name="IC1396",
+        target_type="nebula",
+        target_subtype="emission",
+        available_filters=(
+            _filter("Ha"),
+            _filter("OIII"),
+            _filter("SII"),
+        ),
+        moon_penalty=0.8,
+        remaining_hours_by_filter={
+            "Ha": 1.0,
+            "OIII": 4.0,
+            "SII": 3.0,
+        },
+    )
+
+    result = FilterSelectionEngine.select(context)
+
+    assert result is not None
+    assert result.filter_type == "Ha"
+
+
+def test_strong_moon_skips_completed_ha():
+    context = FilterSelectionContext(
+        target_name="IC1396",
+        target_type="nebula",
+        target_subtype="emission",
+        available_filters=(
+            _filter("Ha"),
+            _filter("OIII"),
+            _filter("SII"),
+        ),
+        moon_penalty=0.8,
+        remaining_hours_by_filter={
+            "Ha": 0.0,
+            "OIII": 4.0,
+            "SII": 2.0,
+        },
+    )
+
+    result = FilterSelectionEngine.select(context)
+
+    assert result is not None
+    assert result.filter_type == "SII"

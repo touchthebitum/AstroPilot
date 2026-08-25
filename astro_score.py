@@ -40,6 +40,9 @@ from decision.portfolio.candidate_scoring import (
 from decision.portfolio.historical_night_capacity_estimator import (
     HistoricalNightCapacityEstimator,
 )
+from decision.portfolio.project_filter_progress import (
+    ProjectFilterProgress,
+)
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 from decision.portfolio.portfolio_engine import PortfolioEngine
 from decision.forecast.forecast_engine import ForecastEngine
@@ -514,19 +517,45 @@ def build_mission_input(evaluation):
             )
         )
 
-        selected_filter = FilterSelectionEngine.select(
-            FilterSelectionContext(
-                target_name=catalog_key,
-                target_type=target_type,
-                target_subtype=target_subtype,
-                available_filters=inventory,
-                moon_penalty=(
-                    0.0
-                    if moon_penalty is None
-                    else moon_penalty
-                ),
+        profile = load_user_profile()
+
+        project = (
+            profile
+            .get("projects", {})
+            .get(catalog_key, {})
+        )
+
+        filter_progress = (
+            ProjectFilterProgress.evaluate_project(
+                project_name=catalog_key,
+                project=project,
+                sessions=profile.get("sessions", []),
             )
         )
+
+    remaining_hours_by_filter = {
+        filter_type: progress.remaining_hours
+        for filter_type, progress in filter_progress.items()
+    }
+
+    selected_filter = FilterSelectionEngine.select(
+        FilterSelectionContext(
+            target_name=catalog_key,
+            target_type=target_type,
+            target_subtype=target_subtype,
+            available_filters=inventory,
+            moon_penalty=(
+                0.0
+                if moon_penalty is None
+                else moon_penalty
+            ),
+            remaining_hours_by_filter=(
+                remaining_hours_by_filter
+                if remaining_hours_by_filter
+                else None
+            ),
+        )
+    )
     return MissionInput(
         window_start=window_start,
         window_end=window_end,

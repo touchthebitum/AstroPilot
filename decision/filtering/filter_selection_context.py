@@ -8,3 +8,4 @@ class FilterSelectionContext:
     target_subtype: str | None
     available_filters: tuple[SelectedFilter, ...]
     moon_penalty: float
+    remaining_hours_by_filter: dict[str, float] | None = None
