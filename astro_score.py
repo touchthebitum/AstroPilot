@@ -104,6 +104,9 @@ warnings.filterwarnings(
 from decision.filtering.filter_inventory_loader import FilterInventoryLoader
 from decision.filtering.filter_selection_context import FilterSelectionContext
 from decision.filtering.filter_selection_engine import FilterSelectionEngine
+from decision.filtering.target_semantics_resolver import (
+    TargetSemanticsResolver,
+)
 
 TIMEZONE = "Europe/Zurich"
 
@@ -504,11 +507,18 @@ def build_mission_input(evaluation):
     if inventory:
         target_data = CATALOG.get(catalog_key, {})
 
+        target_type, target_subtype = (
+            TargetSemanticsResolver.resolve(
+                target_name=catalog_key,
+                catalog_data=target_data,
+            )
+        )
+
         selected_filter = FilterSelectionEngine.select(
             FilterSelectionContext(
                 target_name=catalog_key,
-                target_type=target_data.get("type", ""),
-                target_subtype=target_data.get("subtype"),
+                target_type=target_type,
+                target_subtype=target_subtype,
                 available_filters=inventory,
                 moon_penalty=(
                     0.0
