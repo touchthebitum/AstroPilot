@@ -13,43 +13,6 @@ class FilterProgress:
     remaining_hours: float
     progress: float
 
-    @staticmethod
-    def effective_remaining_hours(
-        *,
-        project_name: str,
-        project: dict,
-        sessions: list[dict],
-    ) -> dict[str, float]:
-        progress = ProjectFilterProgress.evaluate_project(
-            project_name=project_name,
-            project=project,
-            sessions=sessions,
-        )
-
-        remaining = {
-            filter_type: state.remaining_hours
-            for filter_type, state in progress.items()
-        }
-
-        if len(remaining) != 1:
-            return remaining
-
-        unassigned = ProjectFilterProgress.unassigned_hours(
-            project_name=project_name,
-            sessions=sessions,
-        )
-
-        filter_type = next(iter(remaining))
-
-        remaining[filter_type] = round(
-            max(
-                0.0,
-                remaining[filter_type] - unassigned,
-            ),
-            2,
-        )
-
-        return remaining
 
 class ProjectFilterProgress:
     @staticmethod
