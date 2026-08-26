@@ -37,3 +37,16 @@ jobs:
 
       - name: Run test suite
         run: uv run --locked --no-sync python -m pytest -q
+
+      - name: Build wheel
+        run: uv build --wheel
+
+      - name: Smoke test installed wheel
+        shell: bash
+        run: |
+          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          wheel="$(pwd)/$wheel"
+          cd "$(mktemp -d)"
+          uv run --isolated --no-project --with "$wheel" python -c \
+            "import astro_score; import astropilot; import decision"
