@@ -180,3 +180,56 @@ def test_configuration_service_clear_is_noop_without_targets():
     )
 
     assert saved["called"] is False
+
+def test_configuration_service_gets_filter_targets():
+    profile = _profile()
+    profile["projects"]["IC1396"]["filter_targets"] = {
+        "Ha": 6.0,
+        "OIII": 5.0,
+        "SII": 4.0,
+    }
+
+    service = FilterTargetConfigurationService(
+        load_profile=lambda: profile,
+        save_profile=lambda value: None,
+    )
+
+    result = service.get(
+        project_name="IC1396",
+    )
+
+    assert result == {
+        "Ha": 6.0,
+        "OIII": 5.0,
+        "SII": 4.0,
+    }
+
+
+def test_configuration_service_get_returns_empty_without_targets():
+    profile = _profile()
+
+    service = FilterTargetConfigurationService(
+        load_profile=lambda: profile,
+        save_profile=lambda value: None,
+    )
+
+    assert service.get(
+        project_name="IC1396",
+    ) == {}
+
+
+def test_configuration_service_get_rejects_unknown_project():
+    profile = _profile()
+
+    service = FilterTargetConfigurationService(
+        load_profile=lambda: profile,
+        save_profile=lambda value: None,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Unknown project",
+    ):
+        service.get(
+            project_name="UNKNOWN",
+        )
