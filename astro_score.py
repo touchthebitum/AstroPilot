@@ -98,6 +98,7 @@ from astropilot.user_profile import (
     get_default_location,
     load_user_profile,
     get_active_equipment,
+    save_user_profile,
 )
 
 warnings.filterwarnings(
@@ -109,6 +110,9 @@ from decision.filtering.filter_selection_context import FilterSelectionContext
 from decision.filtering.filter_selection_engine import FilterSelectionEngine
 from decision.filtering.target_semantics_resolver import (
     TargetSemanticsResolver,
+)
+from decision.services.filter_target_configuration_service import (
+    FilterTargetConfigurationService,
 )
 
 TIMEZONE = "Europe/Zurich"
@@ -1796,6 +1800,40 @@ portfolio_engine = PortfolioEngine(
     get_projects=get_projects,
 )
 
+def parse_filter_target_assignments(
+    values: list[str],
+) -> dict[str, float]:
+    targets = {}
+
+    for value in values:
+        if "=" not in value:
+            raise ValueError(
+                f"Invalid filter target: {value}"
+            )
+
+        filter_type, raw_hours = value.split(
+            "=",
+            1,
+        )
+
+        filter_type = filter_type.strip()
+
+        if not filter_type:
+            raise ValueError(
+                f"Invalid filter target: {value}"
+            )
+
+        try:
+            hours = float(raw_hours)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid filter hours: {raw_hours}"
+            ) from exc
+
+        targets[filter_type] = hours
+
+    return targets
+
 def main(argv=None) -> int:
 
     CURRENT_EQUIPMENT = get_active_equipment()
@@ -1844,7 +1882,93 @@ def main(argv=None) -> int:
         help="Forcer l'analyse complète d'un objet"
     )
 
+    parser.add_argument(
+    "--filter-targets-show",
+    type=str,
+    help="Afficher les objectifs par filtre d'un projet",
+)
+
+    parser.add_argument(
+        "--filter-targets-set",
+        nargs="+",
+        help=(
+            "Configurer les objectifs par filtre : "
+            "PROJECT Ha=6 OIII=5 SII=4"
+        ),
+    )
+
+    parser.add_argument(
+        "--filter-targets-clear",
+        type=str,
+        help="Supprimer les objectifs par filtre d'un projet",
+    )
+
     args = parser.parse_args(argv)
+
+    filter_target_service = FilterTargetConfigurationService(
+        load_profile=load_user_profile,
+        save_profile=save_user_profile,
+        )
+
+    if args.filter_targets_show:
+        config = filter_target_service.describe(
+            project_name=args.filter_targets_show,
+        )
+
+        print(
+            f"\nProjet : {config.project_name}"
+        )
+        print(
+            f"Cible totale : {config.target_hours:.1f} h"
+        )
+
+        if not config.configured:
+            print("Objectifs par filtre : non configurés")
+        else:
+            print("Objectifs par filtre :")
+            for filter_type, hours in config.filter_targets.items():
+                print(
+                    f"• {filter_type}: {hours:.1f} h"
+                )
+
+        return 0
+
+    if args.filter_targets_set:
+        project_name = args.filter_targets_set[0]
+        assignments = args.filter_targets_set[1:]
+
+        targets = parse_filter_target_assignments(
+            assignments
+        )
+
+        configured = filter_target_service.configure(
+            project_name=project_name,
+            filter_targets=targets,
+        )
+
+        print(
+            f"\nObjectifs par filtre configurés pour "
+            f"{project_name}"
+        )
+
+        for filter_type, hours in configured.items():
+            print(
+                f"• {filter_type}: {hours:.1f} h"
+            )
+
+        return 0
+
+    if args.filter_targets_clear:
+        filter_target_service.clear(
+            project_name=args.filter_targets_clear,
+        )
+
+        print(
+            f"\nObjectifs par filtre supprimés pour "
+            f"{args.filter_targets_clear}"
+        )
+
+        return 0
 
     if args.object:
         compare_equipment_for_object(args.object)
