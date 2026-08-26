@@ -43,7 +43,7 @@ Chaque information est calculée une seule fois.
 
 Exemples :
 
-- Productivité → NightSliceEvaluator
+- Productivité → NightTimelineBuilder
 - Météo → NightConditionsProvider
 - Risque → RiskEngine
 - Saison → SeasonAnalysis
