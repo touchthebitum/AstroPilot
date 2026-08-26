@@ -9,7 +9,7 @@ description = "Astrophotography planning and decision engine"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "astral>=3.2,<4.0",
-    "astropy>=7.2,<8.0",
+    "astropy>=7.2,<9.0",
     "requests>=2.32,<3.0",
 ]
 
