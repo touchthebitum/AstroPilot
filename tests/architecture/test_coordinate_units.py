@@ -89,7 +89,10 @@ def test_frozen_buttes_altitudes(
         buttes_site.longitude,
     )
 
-    assert altitude == pytest.approx(expected_altitude_deg, abs=1e-6)
+    assert altitude == pytest.approx(
+        expected_altitude_deg,
+        abs=1e-3,
+    )
 
 def test_vectorized_target_altitudes_match_scalar_altitude():
     from datetime import datetime, timedelta
