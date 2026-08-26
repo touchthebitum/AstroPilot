@@ -1,8 +1,17 @@
+[build-system]
+requires = ["setuptools>=77,<82"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "astropilot"
 version = "0.0.0"
 description = "Astrophotography planning and decision engine"
 requires-python = ">=3.11,<3.14"
+dependencies = [
+    "astral>=3.2,<4.0",
+    "astropy>=7.2,<8.0",
+    "requests>=2.32,<3.0",
+]
 
 [project.optional-dependencies]
 test = [
@@ -24,3 +33,11 @@ pythonpath = [
     ".",
 ]
 
+[tool.setuptools]
+py-modules = ["astro_score"]
+
+[tool.setuptools.packages.find]
+include = [
+    "astropilot*",
+    "decision*",
+]
