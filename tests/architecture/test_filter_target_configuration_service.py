@@ -233,3 +233,64 @@ def test_configuration_service_get_rejects_unknown_project():
         service.get(
             project_name="UNKNOWN",
         )
+
+def test_configuration_service_describes_configured_project():
+    profile = _profile()
+    profile["projects"]["IC1396"]["filter_targets"] = {
+        "Ha": 6.0,
+        "OIII": 5.0,
+        "SII": 4.0,
+    }
+
+    service = FilterTargetConfigurationService(
+        load_profile=lambda: profile,
+        save_profile=lambda value: None,
+    )
+
+    result = service.describe(
+        project_name="IC1396",
+    )
+
+    assert result.project_name == "IC1396"
+    assert result.target_hours == 15.0
+    assert result.filter_targets == {
+        "Ha": 6.0,
+        "OIII": 5.0,
+        "SII": 4.0,
+    }
+    assert result.configured is True
+
+
+def test_configuration_service_describes_unconfigured_project():
+    profile = _profile()
+
+    service = FilterTargetConfigurationService(
+        load_profile=lambda: profile,
+        save_profile=lambda value: None,
+    )
+
+    result = service.describe(
+        project_name="IC1396",
+    )
+
+    assert result.project_name == "IC1396"
+    assert result.target_hours == 15.0
+    assert result.filter_targets == {}
+    assert result.configured is False
+
+
+def test_configuration_service_describe_rejects_unknown_project():
+    profile = _profile()
+
+    service = FilterTargetConfigurationService(
+        load_profile=lambda: profile,
+        save_profile=lambda value: None,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Unknown project",
+    ):
+        service.describe(
+            project_name="UNKNOWN",
+        )
