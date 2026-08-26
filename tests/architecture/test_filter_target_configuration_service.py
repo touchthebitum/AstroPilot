@@ -118,3 +118,65 @@ def test_configuration_service_rejects_inconsistent_total():
 
     assert saved["called"] is False
     assert "filter_targets" not in profile["projects"]["IC1396"]
+
+def test_configuration_service_clears_filter_targets():
+    profile = _profile()
+    profile["projects"]["IC1396"]["filter_targets"] = {
+        "Ha": 6.0,
+        "OIII": 5.0,
+        "SII": 4.0,
+    }
+
+    saved = {}
+
+    service = FilterTargetConfigurationService(
+        load_profile=lambda: profile,
+        save_profile=lambda value: saved.setdefault(
+            "profile",
+            value,
+        ),
+    )
+
+    service.clear(
+        project_name="IC1396",
+    )
+
+    assert "filter_targets" not in (
+        saved["profile"]["projects"]["IC1396"]
+    )
+
+
+def test_configuration_service_clear_rejects_unknown_project():
+    profile = _profile()
+
+    service = FilterTargetConfigurationService(
+        load_profile=lambda: profile,
+        save_profile=lambda value: None,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Unknown project",
+    ):
+        service.clear(
+            project_name="UNKNOWN",
+        )
+
+
+def test_configuration_service_clear_is_noop_without_targets():
+    profile = _profile()
+    saved = {"called": False}
+
+    def save_profile(value):
+        saved["called"] = True
+
+    service = FilterTargetConfigurationService(
+        load_profile=lambda: profile,
+        save_profile=save_profile,
+    )
+
+    service.clear(
+        project_name="IC1396",
+    )
+
+    assert saved["called"] is False

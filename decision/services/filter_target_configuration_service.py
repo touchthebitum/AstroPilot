@@ -56,3 +56,25 @@ class FilterTargetConfigurationService:
         return ProjectFilterTargets.get(
             projects[project_name]
         )
+
+    def clear(
+        self,
+        *,
+        project_name: str,
+    ) -> None:
+        profile = self.load_profile()
+        projects = profile.get("projects", {})
+
+        if project_name not in projects:
+            raise ValueError(
+                f"Unknown project: {project_name}"
+            )
+
+        project = projects[project_name]
+
+        if "filter_targets" not in project:
+            return
+
+        del project["filter_targets"]
+
+        self.save_profile(profile)
