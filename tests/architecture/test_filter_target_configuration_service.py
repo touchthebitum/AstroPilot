@@ -38,7 +38,7 @@ def test_configuration_service_persists_valid_filter_targets():
         },
     )
 
-    assert result == {
+    assert result.filter_targets == {
         "Ha": 6.0,
         "OIII": 5.0,
         "SII": 4.0,
@@ -46,7 +46,18 @@ def test_configuration_service_persists_valid_filter_targets():
 
     assert saved["profile"]["projects"]["IC1396"][
         "filter_targets"
-    ] == result
+    ] == result.filter_targets
+
+    assert result.to_dict() == {
+        "project_name": "IC1396",
+        "target_hours": 15.0,
+        "filter_targets": {
+            "Ha": 6.0,
+            "OIII": 5.0,
+            "SII": 4.0,
+        },
+        "configured": True,
+    }
 
 
 def test_configuration_service_rejects_unknown_project():
@@ -137,13 +148,15 @@ def test_configuration_service_clears_filter_targets():
         ),
     )
 
-    service.clear(
+    result = service.clear(
         project_name="IC1396",
     )
 
     assert "filter_targets" not in (
         saved["profile"]["projects"]["IC1396"]
     )
+    assert result.filter_targets == {}
+    assert result.configured is False
 
 
 def test_configuration_service_clear_rejects_unknown_project():
@@ -175,11 +188,13 @@ def test_configuration_service_clear_is_noop_without_targets():
         save_profile=save_profile,
     )
 
-    service.clear(
+    result = service.clear(
         project_name="IC1396",
     )
 
     assert saved["called"] is False
+    assert result.filter_targets == {}
+    assert result.configured is False
 
 def test_configuration_service_gets_filter_targets():
     profile = _profile()

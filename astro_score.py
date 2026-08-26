@@ -1941,7 +1941,7 @@ def main(argv=None) -> int:
             assignments
         )
 
-        configured = filter_target_service.configure(
+        config = filter_target_service.configure(
             project_name=project_name,
             filter_targets=targets,
         )
@@ -1951,7 +1951,7 @@ def main(argv=None) -> int:
             f"{project_name}"
         )
 
-        for filter_type, hours in configured.items():
+        for filter_type, hours in config.filter_targets.items():
             print(
                 f"• {filter_type}: {hours:.1f} h"
             )

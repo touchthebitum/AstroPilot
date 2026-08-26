@@ -136,7 +136,9 @@ def test_filter_target_cli_set_returns_before_weather(
             captured["project_name"] = project_name
             captured["filter_targets"] = filter_targets
 
-            return filter_targets
+            return SimpleNamespace(
+                filter_targets=filter_targets,
+            )
 
     monkeypatch.setattr(
         astro_score,

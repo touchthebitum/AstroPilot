@@ -5,12 +5,22 @@ from decision.portfolio.project_filter_targets import (
 )
 from dataclasses import dataclass
 
+
 @dataclass(frozen=True)
 class FilterTargetConfiguration:
     project_name: str
     target_hours: float
     filter_targets: dict[str, float]
     configured: bool
+
+    def to_dict(self) -> dict:
+        return {
+            "project_name": self.project_name,
+            "target_hours": self.target_hours,
+            "filter_targets": dict(self.filter_targets),
+            "configured": self.configured,
+        }
+
 
 class FilterTargetConfigurationService:
     def __init__(
@@ -38,7 +48,7 @@ class FilterTargetConfigurationService:
         *,
         project_name: str,
         filter_targets: dict[str, float],
-    ) -> dict[str, float]:
+    ) -> FilterTargetConfiguration:
         profile, project = self._load_project(
             project_name=project_name,
         )
@@ -65,7 +75,10 @@ class FilterTargetConfigurationService:
 
         self.save_profile(profile)
 
-        return ProjectFilterTargets.get(project)
+        return self._describe_project(
+            project_name=project_name,
+            project=project,
+        )
 
     def _load_project(
         self,
@@ -91,6 +104,17 @@ class FilterTargetConfigurationService:
             project_name=project_name,
         )
 
+        return self._describe_project(
+            project_name=project_name,
+            project=project,
+        )
+
+    def _describe_project(
+        self,
+        *,
+        project_name: str,
+        project: dict,
+    ) -> FilterTargetConfiguration:
         filter_targets = ProjectFilterTargets.get(
             project
         )
@@ -108,14 +132,22 @@ class FilterTargetConfigurationService:
         self,
         *,
         project_name: str,
-    ) -> None:
+    ) -> FilterTargetConfiguration:
         profile, project = self._load_project(
             project_name=project_name,
         )
 
         if "filter_targets" not in project:
-            return
+            return self._describe_project(
+                project_name=project_name,
+                project=project,
+            )
 
         del project["filter_targets"]
 
         self.save_profile(profile)
+
+        return self._describe_project(
+            project_name=project_name,
+            project=project,
+        )
