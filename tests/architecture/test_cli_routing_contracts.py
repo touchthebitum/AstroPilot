@@ -5,6 +5,24 @@ import pytest
 import astro_score
 
 
+def test_help_does_not_load_user_profile(monkeypatch):
+    monkeypatch.setattr(
+        astro_score,
+        "get_active_equipment",
+        lambda: pytest.fail("equipment must not be loaded"),
+    )
+    monkeypatch.setattr(
+        astro_score,
+        "load_user_profile",
+        lambda: pytest.fail("profile must not be loaded"),
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(["--help"])
+
+    assert exit_info.value.code == 0
+
+
 @pytest.fixture
 def isolated_cli(monkeypatch):
     monkeypatch.setattr(astro_score, "get_active_equipment", lambda: "setup")

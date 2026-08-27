@@ -1824,11 +1824,6 @@ def parse_filter_target_assignments(
     return targets
 
 def main(argv=None) -> int:
-
-    CURRENT_EQUIPMENT = get_active_equipment()
-    print("\nSetup actif :", CURRENT_EQUIPMENT)
-    profile = load_user_profile()
-
     parser = argparse.ArgumentParser()
     parser.add_argument(
             "--equipment",
@@ -1893,6 +1888,10 @@ def main(argv=None) -> int:
     )
 
     args = parser.parse_args(argv)
+
+    CURRENT_EQUIPMENT = get_active_equipment()
+    print("\nSetup actif :", CURRENT_EQUIPMENT)
+    profile = load_user_profile()
 
     filter_target_service = FilterTargetConfigurationService(
         load_profile=load_user_profile,
