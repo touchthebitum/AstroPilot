@@ -7,6 +7,8 @@ import astropilot.user_profile as user_profile
 
 def write_profile(path, *, project_hours=3.0, target_hours=20.0):
     profile = {
+        "active_equipment": "samyang_183",
+        "available_equipment": ["samyang_183"],
         "projects": {
             "M31": {
                 "hours": project_hours,
