@@ -1,4 +1,5 @@
 import json
+import math
 import os
 from pathlib import Path
 
@@ -26,6 +27,14 @@ def get_user_data_dir() -> Path:
         return Path(configured_dir).expanduser()
 
     return DATA_DIR
+
+
+def is_finite_number(value) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
 
 
 def validate_user_profile(profile, profile_path: Path):
@@ -67,11 +76,53 @@ def validate_user_profile(profile, profile_path: Path):
                 f"{profile_path} : objet JSON attendu."
             )
 
+        for field_name in ("hours", "target_hours"):
+            if field_name not in project:
+                continue
+
+            value = project[field_name]
+
+            if not is_finite_number(value) or value < 0:
+                raise UserProfileError(
+                    f"Champ projects[{project_name!r}].{field_name} "
+                    f"invalide dans {profile_path} : nombre fini "
+                    "positif ou nul attendu."
+                )
+
     for index, session in enumerate(profile.get("sessions", [])):
         if not isinstance(session, dict):
             raise UserProfileError(
                 f"Entrée sessions[{index}] invalide dans "
                 f"{profile_path} : objet JSON attendu."
+            )
+
+        object_name = session.get("object")
+        if (
+            not isinstance(object_name, str)
+            or not object_name.strip()
+        ):
+            raise UserProfileError(
+                f"Champ sessions[{index}].object invalide dans "
+                f"{profile_path} : chaîne non vide attendue."
+            )
+
+        hours = session.get("hours")
+        if not is_finite_number(hours) or hours <= 0:
+            raise UserProfileError(
+                f"Champ sessions[{index}].hours invalide dans "
+                f"{profile_path} : nombre fini strictement "
+                "positif attendu."
+            )
+
+        filter_type = session.get("filter_type")
+        if filter_type is not None and (
+            not isinstance(filter_type, str)
+            or not filter_type.strip()
+        ):
+            raise UserProfileError(
+                f"Champ sessions[{index}].filter_type invalide "
+                f"dans {profile_path} : chaîne non vide ou null "
+                "attendu."
             )
 
     return profile
