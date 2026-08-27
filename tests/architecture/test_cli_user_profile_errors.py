@@ -284,3 +284,108 @@ def test_invalid_session_fields_exit_cleanly(
     assert expected_type in captured.err
     assert "Traceback" not in captured.err
     assert profile_path.read_bytes() == original_content
+
+
+@pytest.mark.parametrize(
+    ("project", "expected_location", "expected_message"),
+    [
+        (
+            {"target_hours": 6, "filter_targets": []},
+            "projects['IC1396'].filter_targets",
+            "objet JSON",
+        ),
+        (
+            {"target_hours": 6, "filter_targets": {"": 6}},
+            "projects['IC1396'].filter_targets",
+            "nom de filtre non vide",
+        ),
+        (
+            {"target_hours": 6, "filter_targets": {"Ha": "six"}},
+            "filter_targets['Ha']",
+            "nombre fini positif ou nul",
+        ),
+        (
+            {"target_hours": 6, "filter_targets": {"Ha": True}},
+            "filter_targets['Ha']",
+            "nombre fini positif ou nul",
+        ),
+        (
+            {"target_hours": 6, "filter_targets": {"Ha": -1}},
+            "filter_targets['Ha']",
+            "nombre fini positif ou nul",
+        ),
+        (
+            {"target_hours": 6, "filter_targets": {"Ha": float("inf")}},
+            "filter_targets['Ha']",
+            "nombre fini positif ou nul",
+        ),
+        (
+            {"filter_targets": {"Ha": 6}},
+            "projects['IC1396'].target_hours",
+            "requis",
+        ),
+        (
+            {"target_hours": 6, "filter_targets": {"Ha": 5}},
+            "projects['IC1396'].filter_targets",
+            "somme 5.00 h",
+        ),
+    ],
+)
+def test_invalid_filter_targets_exit_cleanly(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    project,
+    expected_location,
+    expected_message,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps({"projects": {"IC1396": project}}),
+        encoding="utf-8",
+    )
+    original_content = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(["--filter-targets-show", "IC1396"])
+
+    captured = capsys.readouterr()
+
+    assert exit_info.value.code == 2
+    assert captured.out == ""
+    assert expected_location in captured.err
+    assert expected_message in captured.err
+    assert "Traceback" not in captured.err
+    assert profile_path.read_bytes() == original_content
+
+
+def test_consistent_filter_targets_remain_valid(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "projects": {
+                    "IC1396": {
+                        "target_hours": 6,
+                        "filter_targets": {"Ha": 6},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    original_content = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    result = astro_score.main(["--filter-targets-show", "IC1396"])
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "• Ha: 6.0 h" in captured.out
+    assert captured.err == ""
+    assert profile_path.read_bytes() == original_content

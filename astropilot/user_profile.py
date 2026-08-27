@@ -89,6 +89,57 @@ def validate_user_profile(profile, profile_path: Path):
                     "positif ou nul attendu."
                 )
 
+        if "filter_targets" not in project:
+            continue
+
+        filter_targets = project["filter_targets"]
+        filter_targets_path = (
+            f"projects[{project_name!r}].filter_targets"
+        )
+
+        if not isinstance(filter_targets, dict):
+            raise UserProfileError(
+                f"Champ {filter_targets_path} invalide dans "
+                f"{profile_path} : objet JSON attendu."
+            )
+
+        for filter_name, target_hours in filter_targets.items():
+            if (
+                not isinstance(filter_name, str)
+                or not filter_name.strip()
+            ):
+                raise UserProfileError(
+                    f"Champ {filter_targets_path} invalide dans "
+                    f"{profile_path} : nom de filtre non vide attendu."
+                )
+
+            if not is_finite_number(target_hours) or target_hours < 0:
+                raise UserProfileError(
+                    f"Champ {filter_targets_path}[{filter_name!r}] "
+                    f"invalide dans {profile_path} : nombre fini "
+                    "positif ou nul attendu."
+                )
+
+        if not filter_targets:
+            continue
+
+        if "target_hours" not in project:
+            raise UserProfileError(
+                f"Champ projects[{project_name!r}].target_hours "
+                f"requis dans {profile_path} lorsque des objectifs "
+                "par filtre sont configurés."
+            )
+
+        filter_hours = sum(filter_targets.values())
+        target_hours = project["target_hours"]
+
+        if not math.isclose(filter_hours, target_hours, abs_tol=0.01):
+            raise UserProfileError(
+                f"Champ {filter_targets_path} invalide dans "
+                f"{profile_path} : somme {filter_hours:.2f} h "
+                f"incompatible avec target_hours {target_hours:.2f} h."
+            )
+
     for index, session in enumerate(profile.get("sessions", [])):
         if not isinstance(session, dict):
             raise UserProfileError(
