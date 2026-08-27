@@ -369,6 +369,8 @@ def test_consistent_filter_targets_remain_valid(
     profile_path.write_text(
         json.dumps(
             {
+                "active_equipment": "samyang_183",
+                "available_equipment": ["samyang_183"],
                 "projects": {
                     "IC1396": {
                         "target_hours": 6,
@@ -387,5 +389,93 @@ def test_consistent_filter_targets_remain_valid(
 
     assert result == 0
     assert "• Ha: 6.0 h" in captured.out
+    assert captured.err == ""
+    assert profile_path.read_bytes() == original_content
+
+
+@pytest.mark.parametrize(
+    ("profile", "expected_location", "expected_message"),
+    [
+        (
+            {"available_equipment": ["samyang_183"]},
+            "active_equipment",
+            "chaîne non vide requise",
+        ),
+        (
+            {
+                "active_equipment": [],
+                "available_equipment": ["samyang_183"],
+            },
+            "active_equipment",
+            "chaîne non vide requise",
+        ),
+        (
+            {
+                "active_equipment": "samyang_183",
+                "available_equipment": ["fra400_2600"],
+            },
+            "active_equipment",
+            "doit figurer dans available_equipment",
+        ),
+        (
+            {
+                "active_equipment": "unknown_setup",
+                "available_equipment": ["unknown_setup"],
+            },
+            "available_equipment[0]",
+            "matériel inconnu",
+        ),
+    ],
+)
+def test_invalid_equipment_configuration_exits_cleanly(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    profile,
+    expected_location,
+    expected_message,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(json.dumps(profile), encoding="utf-8")
+    original_content = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(["--object", "M31"])
+
+    captured = capsys.readouterr()
+
+    assert exit_info.value.code == 2
+    assert captured.out == ""
+    assert expected_location in captured.err
+    assert expected_message in captured.err
+    assert "Traceback" not in captured.err
+    assert profile_path.read_bytes() == original_content
+
+
+def test_known_active_equipment_remains_valid(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "active_equipment": "samyang_183",
+                "available_equipment": ["samyang_183"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    original_content = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    result = astro_score.main(["--object", "M31"])
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "Setup actif : samyang_183" in captured.out
+    assert "samyang_183" in captured.out
     assert captured.err == ""
     assert profile_path.read_bytes() == original_content

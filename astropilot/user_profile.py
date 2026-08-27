@@ -3,6 +3,8 @@ import math
 import os
 from pathlib import Path
 
+from astropilot.equipment_catalog import EQUIPMENT_PROFILES
+
 DATA_DIR = Path(__file__).parent.parent / "data"
 
 
@@ -174,6 +176,31 @@ def validate_user_profile(profile, profile_path: Path):
                 f"Champ sessions[{index}].filter_type invalide "
                 f"dans {profile_path} : chaîne non vide ou null "
                 "attendu."
+            )
+
+    active_equipment = profile.get("active_equipment")
+    if (
+        not isinstance(active_equipment, str)
+        or not active_equipment.strip()
+    ):
+        raise UserProfileError(
+            f"Champ active_equipment invalide dans {profile_path} : "
+            "chaîne non vide requise."
+        )
+
+    available_equipment = profile.get("available_equipment", [])
+    if active_equipment not in available_equipment:
+        raise UserProfileError(
+            f"Champ active_equipment invalide dans {profile_path} : "
+            "doit figurer dans available_equipment."
+        )
+
+    for index, equipment_name in enumerate(available_equipment):
+        if equipment_name not in EQUIPMENT_PROFILES:
+            raise UserProfileError(
+                f"Entrée available_equipment[{index}] invalide dans "
+                f"{profile_path} : matériel inconnu "
+                f"({equipment_name!r})."
             )
 
     return profile
