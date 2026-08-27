@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from decision.filtering.selected_filter import SelectedFilter
@@ -6,8 +7,19 @@ from decision.filtering.selected_filter import SelectedFilter
 
 class FilterInventoryLoader:
     @staticmethod
-    def load(path: str | Path = "user_filters.json") -> tuple[SelectedFilter, ...]:
-        path = Path(path)
+    def load(path: str | Path | None = None) -> tuple[SelectedFilter, ...]:
+        if path is None:
+            configured_dir = os.environ.get(
+                "ASTROPILOT_DATA_DIR"
+            )
+            path = (
+                Path(configured_dir).expanduser()
+                / "user_filters.json"
+                if configured_dir
+                else Path("user_filters.json")
+            )
+        else:
+            path = Path(path)
 
         if not path.exists():
             return ()
