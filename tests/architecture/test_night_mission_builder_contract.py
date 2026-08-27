@@ -104,3 +104,35 @@ def test_builder_creates_a_fresh_alternatives_list_each_time(
 
     assert alternatives == [[], []]
     assert alternatives[0] is not alternatives[1]
+
+
+def test_builder_leaves_reason_conversion_to_the_assembler(monkeypatch):
+    class ReasonsOwnedByAssembler:
+        def __iter__(self):
+            raise AssertionError("builder must not iterate mission reasons")
+
+    summary = SimpleNamespace(
+        positives=ReasonsOwnedByAssembler(),
+        negatives=ReasonsOwnedByAssembler(),
+    )
+    captured = {}
+
+    monkeypatch.setattr(
+        module.EquipmentBuilder,
+        "build",
+        lambda context: [],
+    )
+
+    def assemble(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(module.MissionAssembler, "build", assemble)
+
+    NightMissionBuilder.build(
+        target="M31",
+        summary=summary,
+        context=object(),
+    )
+
+    assert captured["summary"] is summary
