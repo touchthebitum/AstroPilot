@@ -23,6 +23,71 @@ def write_profile(path, *, project_hours=3.0, target_hours=20.0):
     )
 
 
+def test_user_data_dir_environment_overrides_legacy_path(
+    tmp_path,
+    monkeypatch,
+):
+    configured_dir = tmp_path / "configured"
+    configured_dir.mkdir()
+    write_profile(configured_dir / "user_profile.json")
+
+    monkeypatch.setenv(
+        "ASTROPILOT_DATA_DIR",
+        str(configured_dir),
+    )
+    monkeypatch.setattr(
+        user_profile,
+        "DATA_DIR",
+        tmp_path / "legacy",
+    )
+
+    assert user_profile.get_user_data_dir() == configured_dir
+    assert user_profile.load_user_profile()["projects"]["M31"][
+        "hours"
+    ] == 3.0
+
+
+def test_user_data_dir_defaults_to_legacy_path(tmp_path, monkeypatch):
+    monkeypatch.delenv("ASTROPILOT_DATA_DIR", raising=False)
+    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+
+    assert user_profile.get_user_data_dir() == tmp_path
+
+
+def test_save_user_profile_uses_configured_data_dir(
+    tmp_path,
+    monkeypatch,
+):
+    configured_dir = tmp_path / "configured"
+    legacy_dir = tmp_path / "legacy"
+    configured_dir.mkdir()
+    legacy_dir.mkdir()
+    write_profile(configured_dir / "user_profile.json")
+    write_profile(
+        legacy_dir / "user_profile.json",
+        project_hours=9.0,
+    )
+
+    monkeypatch.setenv(
+        "ASTROPILOT_DATA_DIR",
+        str(configured_dir),
+    )
+    monkeypatch.setattr(user_profile, "DATA_DIR", legacy_dir)
+
+    profile = user_profile.load_user_profile()
+    profile["projects"]["M31"]["hours"] = 4.5
+    user_profile.save_user_profile(profile)
+
+    assert user_profile.load_user_profile()["projects"]["M31"][
+        "hours"
+    ] == 4.5
+    assert json.loads(
+        (legacy_dir / "user_profile.json").read_text(
+            encoding="utf-8"
+        )
+    )["projects"]["M31"]["hours"] == 9.0
+
+
 def test_record_session_updates_project_and_history(
     tmp_path,
     monkeypatch,
