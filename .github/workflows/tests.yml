@@ -48,5 +48,5 @@ jobs:
           test -n "$wheel"
           wheel="$(pwd)/$wheel"
           cd "$(mktemp -d)"
-          uv run --isolated --no-project --with "$wheel" python -c \
-            "import astro_score; import astropilot; import decision"
+          uv run --isolated --no-project --with "$wheel" \
+            astropilot --help
