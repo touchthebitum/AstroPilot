@@ -5,6 +5,10 @@ from pathlib import Path
 DATA_DIR = Path(__file__).parent.parent / "data"
 
 
+class UserProfileError(Exception):
+    pass
+
+
 def get_user_data_dir() -> Path:
     configured_dir = os.environ.get("ASTROPILOT_DATA_DIR")
 
@@ -15,8 +19,22 @@ def get_user_data_dir() -> Path:
 
 
 def load_user_profile():
-    with open(get_user_data_dir() / "user_profile.json", "r") as f:
-        return json.load(f)
+    profile_path = get_user_data_dir() / "user_profile.json"
+
+    try:
+        with profile_path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except FileNotFoundError as exc:
+        raise UserProfileError(
+            f"Profil utilisateur introuvable : {profile_path}. "
+            "Définissez ASTROPILOT_DATA_DIR vers un dossier "
+            "contenant user_profile.json."
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise UserProfileError(
+            f"Profil utilisateur JSON invalide : {profile_path} "
+            f"(ligne {exc.lineno}, colonne {exc.colno})."
+        ) from exc
     
 def get_decision_weights():
 
