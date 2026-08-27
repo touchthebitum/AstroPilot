@@ -39,6 +39,9 @@ pythonpath = [
 [tool.setuptools]
 py-modules = ["astro_score"]
 
+[tool.setuptools.package-data]
+astropilot = ["knowledge/objects/*.json"]
+
 [tool.setuptools.packages.find]
 include = [
     "astropilot*",
