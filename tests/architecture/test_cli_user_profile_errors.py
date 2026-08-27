@@ -479,3 +479,159 @@ def test_known_active_equipment_remains_valid(
     assert "samyang_183" in captured.out
     assert captured.err == ""
     assert profile_path.read_bytes() == original_content
+
+@pytest.mark.parametrize(
+    ("location", "expected_location"),
+    [
+        (
+            {
+                "latitude": 46.7508,
+                "longitude": 6.5495,
+            },
+            "location.name",
+        ),
+        (
+            {
+                "name": "",
+                "latitude": 46.7508,
+                "longitude": 6.5495,
+            },
+            "location.name",
+        ),
+        (
+            {
+                "name": "Buttes",
+                "longitude": 6.5495,
+            },
+            "location.latitude",
+        ),
+        (
+            {
+                "name": "Buttes",
+                "latitude": 46.7508,
+            },
+            "location.longitude",
+        ),
+        (
+            {
+                "name": "Buttes",
+                "latitude": "46.7508",
+                "longitude": 6.5495,
+            },
+            "location.latitude",
+        ),
+        (
+            {
+                "name": "Buttes",
+                "latitude": 46.7508,
+                "longitude": True,
+            },
+            "location.longitude",
+        ),
+        (
+            {
+                "name": "Buttes",
+                "latitude": float("nan"),
+                "longitude": 6.5495,
+            },
+            "location.latitude",
+        ),
+        (
+            {
+                "name": "Buttes",
+                "latitude": 46.7508,
+                "longitude": float("inf"),
+            },
+            "location.longitude",
+        ),
+        (
+            {
+                "name": "Buttes",
+                "latitude": 91.0,
+                "longitude": 6.5495,
+            },
+            "location.latitude",
+        ),
+        (
+            {
+                "name": "Buttes",
+                "latitude": 46.7508,
+                "longitude": 181.0,
+            },
+            "location.longitude",
+        ),
+    ],
+)
+def test_invalid_location_exits_cleanly(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    location,
+    expected_location,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "active_equipment": "samyang_183",
+                "available_equipment": ["samyang_183"],
+                "location": location,
+            },
+            allow_nan=True,
+        ),
+        encoding="utf-8",
+    )
+    original_content = profile_path.read_bytes()
+
+    monkeypatch.setenv(
+        "ASTROPILOT_DATA_DIR",
+        str(tmp_path),
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(["--object", "M31"])
+
+    captured = capsys.readouterr()
+
+    assert exit_info.value.code == 2
+    assert captured.out == ""
+    assert expected_location in captured.err
+    assert "Erreur profil utilisateur" in captured.err
+    assert "Traceback" not in captured.err
+    assert profile_path.read_bytes() == original_content
+
+
+def test_valid_location_remains_accepted(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "active_equipment": "samyang_183",
+                "available_equipment": ["samyang_183"],
+                "location": {
+                    "name": "Buttes",
+                    "latitude": 46.7508,
+                    "longitude": 6.5495,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    original_content = profile_path.read_bytes()
+
+    monkeypatch.setenv(
+        "ASTROPILOT_DATA_DIR",
+        str(tmp_path),
+    )
+
+    result = astro_score.main(["--object", "M31"])
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "Setup actif : samyang_183" in captured.out
+    assert captured.err == ""
+    assert profile_path.read_bytes() == original_content
