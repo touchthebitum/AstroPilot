@@ -9,6 +9,16 @@ class UserProfileError(Exception):
     pass
 
 
+PROFILE_CONTAINER_TYPES = {
+    "available_equipment": (list, "liste"),
+    "preferences": (dict, "objet JSON"),
+    "projects": (dict, "objet JSON"),
+    "sessions": (list, "liste"),
+    "location": (dict, "objet JSON"),
+    "decision_weights": (dict, "objet JSON"),
+}
+
+
 def get_user_data_dir() -> Path:
     configured_dir = os.environ.get("ASTROPILOT_DATA_DIR")
 
@@ -18,12 +28,35 @@ def get_user_data_dir() -> Path:
     return DATA_DIR
 
 
+def validate_user_profile(profile, profile_path: Path):
+    if not isinstance(profile, dict):
+        raise UserProfileError(
+            f"Structure invalide dans {profile_path} : "
+            "objet JSON attendu à la racine."
+        )
+
+    for field_name, (
+        expected_type,
+        expected_label,
+    ) in PROFILE_CONTAINER_TYPES.items():
+        if field_name not in profile:
+            continue
+
+        if not isinstance(profile[field_name], expected_type):
+            raise UserProfileError(
+                f"Champ '{field_name}' invalide dans "
+                f"{profile_path} : {expected_label} attendu."
+            )
+
+    return profile
+
+
 def load_user_profile():
     profile_path = get_user_data_dir() / "user_profile.json"
 
     try:
         with profile_path.open("r", encoding="utf-8") as handle:
-            return json.load(handle)
+            profile = json.load(handle)
     except FileNotFoundError as exc:
         raise UserProfileError(
             f"Profil utilisateur introuvable : {profile_path}. "
@@ -35,6 +68,8 @@ def load_user_profile():
             f"Profil utilisateur JSON invalide : {profile_path} "
             f"(ligne {exc.lineno}, colonne {exc.colno})."
         ) from exc
+
+    return validate_user_profile(profile, profile_path)
     
 def get_decision_weights():
 
