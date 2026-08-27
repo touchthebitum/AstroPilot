@@ -48,6 +48,32 @@ def validate_user_profile(profile, profile_path: Path):
                 f"{profile_path} : {expected_label} attendu."
             )
 
+    for index, equipment_name in enumerate(
+        profile.get("available_equipment", [])
+    ):
+        if (
+            not isinstance(equipment_name, str)
+            or not equipment_name.strip()
+        ):
+            raise UserProfileError(
+                f"Entrée available_equipment[{index}] invalide "
+                f"dans {profile_path} : chaîne non vide attendue."
+            )
+
+    for project_name, project in profile.get("projects", {}).items():
+        if not isinstance(project, dict):
+            raise UserProfileError(
+                f"Entrée projects[{project_name!r}] invalide dans "
+                f"{profile_path} : objet JSON attendu."
+            )
+
+    for index, session in enumerate(profile.get("sessions", [])):
+        if not isinstance(session, dict):
+            raise UserProfileError(
+                f"Entrée sessions[{index}] invalide dans "
+                f"{profile_path} : objet JSON attendu."
+            )
+
     return profile
 
 
