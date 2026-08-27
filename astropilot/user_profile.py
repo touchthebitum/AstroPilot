@@ -59,6 +59,30 @@ def validate_user_profile(profile, profile_path: Path):
                 f"{profile_path} : {expected_label} attendu."
             )
 
+    if "location" in profile:
+        location = profile["location"]
+
+        name = location.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise UserProfileError(
+                f"Champ location.name invalide dans {profile_path} : "
+                "chaîne non vide requise."
+            )
+
+        latitude = location.get("latitude")
+        if not is_finite_number(latitude) or not -90 <= latitude <= 90:
+            raise UserProfileError(
+                f"Champ location.latitude invalide dans {profile_path} : "
+                "nombre fini compris entre -90 et 90 requis."
+            )
+
+        longitude = location.get("longitude")
+        if not is_finite_number(longitude) or not -180 <= longitude <= 180:
+            raise UserProfileError(
+                f"Champ location.longitude invalide dans {profile_path} : "
+                "nombre fini compris entre -180 et 180 requis."
+            )
+
     for index, equipment_name in enumerate(
         profile.get("available_equipment", [])
     ):
