@@ -99,6 +99,7 @@ from astropilot.user_profile import (
     load_user_profile,
     get_active_equipment,
     save_user_profile,
+    UserProfileError,
 )
 
 warnings.filterwarnings(
@@ -1889,9 +1890,16 @@ def main(argv=None) -> int:
 
     args = parser.parse_args(argv)
 
-    CURRENT_EQUIPMENT = get_active_equipment()
+    try:
+        CURRENT_EQUIPMENT = get_active_equipment()
+        profile = load_user_profile()
+    except UserProfileError as exc:
+        parser.exit(
+            2,
+            f"Erreur profil utilisateur : {exc}\n",
+        )
+
     print("\nSetup actif :", CURRENT_EQUIPMENT)
-    profile = load_user_profile()
 
     filter_target_service = FilterTargetConfigurationService(
         load_profile=load_user_profile,
