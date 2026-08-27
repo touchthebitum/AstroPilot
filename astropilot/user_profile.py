@@ -1,11 +1,21 @@
 import json
+import os
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
 
+def get_user_data_dir() -> Path:
+    configured_dir = os.environ.get("ASTROPILOT_DATA_DIR")
+
+    if configured_dir:
+        return Path(configured_dir).expanduser()
+
+    return DATA_DIR
+
+
 def load_user_profile():
-    with open(DATA_DIR / "user_profile.json", "r") as f:
+    with open(get_user_data_dir() / "user_profile.json", "r") as f:
         return json.load(f)
     
 def get_decision_weights():
@@ -60,8 +70,9 @@ def favorite_targets():
     )
 
 def save_user_profile(profile):
-    path = DATA_DIR / "user_profile.json"
-    temp_path = DATA_DIR / "user_profile.json.tmp"
+    data_dir = get_user_data_dir()
+    path = data_dir / "user_profile.json"
+    temp_path = data_dir / "user_profile.json.tmp"
 
     with open(temp_path, "w", encoding="utf-8") as f:
         json.dump(
