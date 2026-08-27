@@ -933,42 +933,31 @@ def recommended_exposure(obj, bortle=4, filter_type=None):
         hours *=filter_factor.get(filter_type, 1.0)
     return round(hours, 1)
 
-def load_user_filters():
-    try:
-        with open("user_filters.json", "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data.get("filters", [])
-    except Exception as e:
-        print(f"Erreur chargement filtres : {e}")
+def recommend_filter(target_name, obj):
+    inventory = FilterInventoryLoader.load()
+
+    if not inventory:
         return []
-    
-def recommend_filter(obj):
-    filters = load_user_filters()
 
-    obj_type = obj.get("type", "").lower()
+    target_type, target_subtype = TargetSemanticsResolver.resolve(
+        target_name=target_name,
+        catalog_data=obj,
+    )
 
-    if obj_type == "emission_nebula":
-        return [
-            f.get("name")
-            for f in filters
-            if f.get("type") in ["Ha", "OIII", "SII"]
-        ]
+    selected_filter = FilterSelectionEngine.select(
+        FilterSelectionContext(
+            target_name=target_name,
+            target_type=target_type,
+            target_subtype=target_subtype,
+            available_filters=inventory,
+            moon_penalty=0.0,
+        )
+    )
 
-    elif obj_type == "supernova_remnant":
-        return [
-            f.get("name")
-            for f in filters
-            if f.get("type") in ["OIII", "Ha", "SII"]
-        ]
+    if selected_filter is None:
+        return []
 
-    elif obj_type in ["galaxy", "cluster"]:
-        return [
-            f.get("name")
-            for f in filters
-            if f.get("type") == "LRGB"
-        ]
-
-    return []
+    return [selected_filter.name]
 
 def compute_best_window_for_object(
     sky,
@@ -1706,7 +1695,7 @@ def show_target_object_analysis(obj_key):
             f"(score {best_setup['score']})"
         )
 
-    best_filters = recommend_filter(obj)
+    best_filters = recommend_filter(obj_key, obj)
 
     if best_filters:
         print("Filtres conseillés : " + ", ".join(best_filters))
