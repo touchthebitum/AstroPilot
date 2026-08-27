@@ -47,8 +47,11 @@ jobs:
           wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
           test -n "$wheel"
           wheel="$(pwd)/$wheel"
+          smoke_test="$(pwd)/tests/installed_cli_smoke.py"
           cd "$(mktemp -d)"
           uv run --isolated --no-project --with "$wheel" \
             astropilot --help
           uv run --isolated --no-project --with "$wheel" python -c \
             "from decision.filtering.target_semantics_resolver import TargetSemanticsResolver; assert TargetSemanticsResolver.resolve('IC1396', {'type': 'nebula'}) == ('nebula', 'emission')"
+          uv run --isolated --no-project --with "$wheel" \
+            python "$smoke_test"
