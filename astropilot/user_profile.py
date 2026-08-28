@@ -147,6 +147,20 @@ def validate_user_profile(profile, profile_path: Path):
                 "nombre fini compris entre 0 et 30 attendu."
             )
 
+    if "decision_mode" in preferences:
+        decision_mode = preferences["decision_mode"]
+        if decision_mode not in (
+            "balanced",
+            "roi",
+            "completion",
+            "diversification",
+            "risk",
+        ):
+            raise UserProfileError(
+                f"Champ preferences.decision_mode invalide dans "
+                f"{profile_path} : mode reconnu attendu."
+            )
+
     if "location" in profile:
         location = profile["location"]
 
