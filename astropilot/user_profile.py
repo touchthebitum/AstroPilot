@@ -127,6 +127,18 @@ def validate_user_profile(profile, profile_path: Path):
                 "0 et 90 attendu."
             )
 
+    if (
+        "min_altitude_deg" in preferences
+        and "minimum_altitude_deg" in preferences
+        and preferences["min_altitude_deg"]
+        != preferences["minimum_altitude_deg"]
+    ):
+        raise UserProfileError(
+            "Champs preferences.min_altitude_deg et "
+            "preferences.minimum_altitude_deg invalides dans "
+            f"{profile_path} : valeurs identiques attendues."
+        )
+
     if "bortle" in preferences:
         bortle = preferences["bortle"]
         if (
