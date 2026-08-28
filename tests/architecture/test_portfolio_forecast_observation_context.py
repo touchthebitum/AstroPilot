@@ -32,8 +32,9 @@ def test_portfolio_forecast_passes_night_context_to_future_engine():
             project_name,
             remaining_hours=None,
             latitude=None,
-            longitude=None,
-            observation_time=None,
+                longitude=None,
+                observation_time=None,
+                profile=None,
         ):
             captured["project_name"] = project_name
             captured["remaining_hours"] = remaining_hours

@@ -89,15 +89,9 @@ from astral.moon import phase as moon_phase
 from astropy.coordinates.baseframe import NonRotationTransformationWarning
 from astropilot.catalog import CATALOG
 from astropilot.engines.sky_engine import SkyEngine
-from astropilot.user_profile import (
-    get_projects,
-)
-
 import argparse
 from astropilot.user_profile import (
-    get_default_location,
     load_user_profile,
-    get_active_equipment,
     save_user_profile,
     resolve_minimum_altitude_deg,
     UserProfileError,
@@ -478,8 +472,8 @@ def setup_score(setup, project):
     "reasons": reasons,
 }
 
-def build_mission_input(evaluation):
-    profile = load_user_profile()
+def build_mission_input(evaluation, *, profile=None):
+    profile = profile or {}
     projects = profile.get("projects", {})
     window = evaluation["window"]
     window_start = window["start"]
@@ -641,8 +635,12 @@ night_strategy_engine = NightStrategyEngine(
 )
 
 
-def recommend_project_for_night(top_objects, available_hours=3.0):
-    profile = load_user_profile()
+def recommend_project_for_night(
+    top_objects,
+    available_hours=3.0,
+    *,
+    profile,
+):
     prefs = profile.get("preferences", {})
 
     astro_weight = prefs.get("astro_weight", 0.7)
@@ -670,7 +668,14 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             projects=projects,
         )
 
-        future = future_engine.estimate (catalog_key)
+        future = future_engine.estimate(
+            catalog_key,
+            remaining_hours=project_remaining_hours(
+                catalog_key,
+                projects,
+            ),
+            profile=profile,
+        )
 
         risk_label = future.risk
 
@@ -842,14 +847,13 @@ def night_hours_rough(rows: list[dict], date: datetime, lat: float, lon: float, 
 
     return night_rows
 
-def compare_equipment_for_object(object_name):
+def compare_equipment_for_object(object_name, profile=None):
+    profile = profile or {}
     obj = CATALOG.get(object_name)
 
     if not obj:
         print(f"Objet inconnu : {object_name}")
         return
-
-    profile = load_user_profile()
 
     _, _, ranking = select_best_setup_for_object(
         obj_name=object_name,
@@ -1613,9 +1617,13 @@ def forecast_astro(
     equipment=None,
     goal="nebulae",
     weather=None,
+    profile=None,
 ):
+    if profile is None:
+        profile = load_user_profile()
+
     if equipment is None:
-        equipment = equipment or get_active_equipment()
+        equipment = profile.get("active_equipment")
 
     rows = forecast_engine.prepare_weather(
     lat,
@@ -1629,8 +1637,6 @@ def forecast_astro(
     results = []
 
     today = datetime.now(ZoneInfo(TIMEZONE)).date()
-    profile = load_user_profile()
-
     for d in range(7):
         night_date = today + timedelta(days=d)
 
@@ -1650,6 +1656,7 @@ def forecast_astro(
 
         night_evaluation = portfolio_engine.enrich(
             night_evaluation=night_context["evaluation"],
+            projects=profile.get("projects", {}),
         )
 
         results.append(
@@ -1664,14 +1671,15 @@ def forecast_astro(
     return results
 
 
-def best_equipment_for_object(object_name):
+def best_equipment_for_object(object_name, profile=None):
+    profile = profile or {}
     if object_name not in CATALOG:
         return None
 
     best_setup, best_setup_score, _ = (
         select_best_setup_for_object(
             obj_name=object_name,
-            profile=load_user_profile(),
+            profile=profile,
         )
     )
 
@@ -1683,7 +1691,8 @@ def best_equipment_for_object(object_name):
         "score": best_setup_score,
     }
 
-def show_target_object_analysis(obj_key):
+def show_target_object_analysis(obj_key, profile=None):
+    profile = profile or {}
     obj = CATALOG.get(obj_key)
 
     if not obj:
@@ -1692,7 +1701,7 @@ def show_target_object_analysis(obj_key):
 
     print(f"Objet forcé : {obj['name']} ({obj_key})")
 
-    best_setup = best_equipment_for_object(obj_key)
+    best_setup = best_equipment_for_object(obj_key, profile)
 
     if best_setup:
         print(
@@ -1734,30 +1743,13 @@ def show_target_object_analysis(obj_key):
         print("Filtres conseillés : aucun")
 
 
-def current_project_remaining_hours(project_name):
-    projects = load_user_profile().get("projects", {})
-    return project_remaining_hours(project_name, projects)
-
-
-def present_portfolio_completion_forecast(roadmap, **kwargs):
-    projects = load_user_profile().get("projects", {})
-    return show_portfolio_completion_forecast(
-        roadmap,
-        projects=projects,
-        **kwargs,
-    )
-
-
 future_engine = FutureOpportunityEngine(
     catalog=CATALOG,
     weather_provider=fetch_weather,
-    profile_provider=load_user_profile,
-    project_provider=current_project_remaining_hours,
 )
 portfolio_forecast_engine = PortfolioForecastEngine(
     future_engine=future_engine,
     score_project=simulated_portfolio_score,
-    project_provider=get_projects,
 )
 tonight_mission_service = TonightMissionService(
     build_mission=NightMissionBuilder.build,
@@ -1780,9 +1772,7 @@ report_runner = ReportRunner(
     show_multi_night_portfolio_roadmap=(
         show_multi_night_portfolio_roadmap
     ),
-    show_portfolio_completion_forecast=(
-        present_portfolio_completion_forecast
-    ),
+    show_portfolio_completion_forecast=show_portfolio_completion_forecast,
     present_mission=MissionPresenter.present,
     tonight_mission_service=tonight_mission_service,
 )
@@ -1808,9 +1798,7 @@ tonight_runner = TonightRunner(
     ),
 )
 
-portfolio_engine = PortfolioEngine(
-    get_projects=get_projects,
-)
+portfolio_engine = PortfolioEngine()
 
 def parse_filter_target_assignments(
     values: list[str],
@@ -1913,8 +1901,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        CURRENT_EQUIPMENT = get_active_equipment()
         profile = load_user_profile()
+        CURRENT_EQUIPMENT = profile.get("active_equipment")
     except UserProfileError as exc:
         parser.exit(
             2,
@@ -1989,16 +1977,21 @@ def main(argv=None) -> int:
         return 0
 
     if args.object:
-        compare_equipment_for_object(args.object)
+        compare_equipment_for_object(args.object, profile)
         return 0
 
     if args.target_object:
         show_target_object_analysis(
-            args.target_object
+            args.target_object,
+            profile,
         )
         return 0
 
-    location = get_default_location()
+    location = profile.get("location", {
+        "name": "Buttes",
+        "latitude": 46.7508,
+        "longitude": 6.5495,
+    })
     lat = location["latitude"]
     lon = location["longitude"]
     city = location["name"]
@@ -2019,6 +2012,7 @@ def main(argv=None) -> int:
         equipment=args.equipment,
         goal=args.goal,
         weather=weather,
+        profile=profile,
     )
 
     if nights is None:
@@ -2075,12 +2069,14 @@ def main(argv=None) -> int:
     if args.mode == "portfolio":
         report_runner.run_portfolio(
             night_capacities=night_capacities,
+            profile=profile,
             **completion_kwargs,
         )
 
     elif args.mode == "calendar":
         report_runner.run_calendar(
             night_capacities=night_capacities,
+            profile=profile,
         )
 
     elif args.mode == "tonight":
@@ -2088,11 +2084,13 @@ def main(argv=None) -> int:
             tonight_runner.run(
                 top_nights=tonight_nights,
                 night_capacities=night_capacities,
+                profile=profile,
             )
 
     elif args.mode == "full":
         report_runner.run_full(
             night_capacities=night_capacities,
+            profile=profile,
             **completion_kwargs,
         )
 

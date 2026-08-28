@@ -1,24 +1,17 @@
-from collections.abc import Callable
-
 from decision.forecast.night_evaluation import NightEvaluation
 
 
 class PortfolioEngine:
 
-    def __init__(
-        self,
-        *,
-        get_projects: Callable[[], dict],
-    ):
-        self.get_projects = get_projects
-
     def enrich(
         self,
         *,
         night_evaluation: NightEvaluation,
+        projects: dict,
     ) -> NightEvaluation:
         self._build_top_objects(
             night_evaluation=night_evaluation,
+            projects=projects,
         )
 
         return night_evaluation
@@ -28,9 +21,10 @@ class PortfolioEngine:
         self,
         *,
         night_evaluation: NightEvaluation,
+        projects: dict,
     ) -> None:
         portfolio_keys = set(
-            self.get_projects().keys()
+            projects.keys()
         )
 
         top_objects_for_night = (
