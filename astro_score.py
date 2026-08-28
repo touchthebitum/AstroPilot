@@ -479,6 +479,8 @@ def setup_score(setup, project):
 }
 
 def build_mission_input(evaluation):
+    profile = load_user_profile()
+    projects = profile.get("projects", {})
     window = evaluation["window"]
     window_start = window["start"]
     window_end = window["end"]
@@ -522,8 +524,6 @@ def build_mission_input(evaluation):
                 catalog_data=target_data,
             )
         )
-
-        profile = load_user_profile()
 
         project = (
             profile
@@ -572,6 +572,7 @@ def build_mission_input(evaluation):
         expected_gain=session_portfolio_gain(
             catalog_key,
             recommended_hours,
+            projects=projects,
         ),
         selected_filter=selected_filter,
     )
@@ -648,7 +649,7 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
     project_weight = prefs.get("project_weight", 0.3)
     decision_mode = prefs.get("decision_mode", "balanced")
 
-    projects = get_projects()
+    projects = profile.get("projects", {})
     candidates = []
 
     for obj in top_objects:
@@ -662,10 +663,11 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
         if astro_score <= 0:
             continue
 
-        priority = project_priority(catalog_key)
+        priority = project_priority(catalog_key, projects)
         roi = session_roi(
             catalog_key,
             available_hours,
+            projects=projects,
         )
 
         future = future_engine.estimate (catalog_key)
@@ -687,7 +689,7 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
 
         marginal_progress_bonus = (
             marginal_gain_factor(
-                project_progress(catalog_key)
+                project_progress(catalog_key, projects)
             )
             * 10
         )
@@ -696,7 +698,11 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             30,
         )
 
-        closure = closure_bonus(catalog_key, available_hours)
+        closure = closure_bonus(
+            catalog_key,
+            available_hours,
+            projects=projects,
+        )
 
         opportunity_ratio = future.opportunity_ratio
 
@@ -705,7 +711,7 @@ def recommend_project_for_night(top_objects, available_hours=3.0):
             min(8, round(8 / max(opportunity_ratio, 0.1), 1))
         )
 
-        diversity_bonus = diversification_bonus(catalog_key)
+        diversity_bonus = diversification_bonus(catalog_key, projects)
 
         astro_part = astro_score * astro_weight
         project_part = priority * project_weight
@@ -965,27 +971,27 @@ def compute_best_window_for_object(
     sky,
     hours,
     illumination,
-    moon_rise,
-    moon_set,
     city_info,
     lat,
     lon,
     bortle,
     target,
     obj_name,
+    profile,
 ):
+    preferences = profile.get("preferences", {})
+
     top_windows = sky.best_windows(
         hours=hours,
         moon_illumination=illumination,
-        moon_rise=moon_rise,
-        moon_set=moon_set,
         observer=city_info.observer,
         lat=lat,
         lon=lon,
         bortle=bortle,
         target=target,
-        target_object=obj_name,
         target_obj=TARGET_OBJECTS[obj_name],
+        window_size=preferences.get("window_size", 2),
+        min_altitude_deg=resolve_minimum_altitude_deg(preferences),
     )
 
     if not top_windows:
@@ -1159,7 +1165,8 @@ def build_decision_context(
         setup=setup,
     )
 
-    project = project_state(obj_name)
+    projects = profile.get("projects", {})
+    project = project_state(obj_name, projects)
 
     project_remaining = (
         project["remaining"]
@@ -1173,7 +1180,7 @@ def build_decision_context(
         else 0
     )
 
-    project_priority_value = project_priority(obj_name)
+    project_priority_value = project_priority(obj_name, projects)
 
     configured_night_capacity = profile.get(
         "preferences",
@@ -1199,7 +1206,7 @@ def build_decision_context(
     )
 
     portfolio_context = PortfolioContext(
-        active_projects=len(get_projects()),
+        active_projects=len(projects),
         total_remaining_hours=project_remaining,
         highest_priority=project_priority_value,
         average_progress=project_progress_value,
@@ -1356,8 +1363,6 @@ def evaluate_object(
     sky,
     hours,
     illumination,
-    moon_rise,
-    moon_set,
     city_info,
     lat,
     lon,
@@ -1370,14 +1375,13 @@ def evaluate_object(
         sky,
         hours,
         illumination,
-        moon_rise,
-        moon_set,
         city_info,
         lat,
         lon,
         bortle,
         target,
         obj_name,
+        profile,
     )
 
     if best is None:
@@ -1406,7 +1410,10 @@ def evaluate_object(
     if selected_setup_profile is None:
         return None
 
-    remaining_hours = project_remaining_hours(obj_name)
+    remaining_hours = project_remaining_hours(
+        obj_name,
+        profile.get("projects", {}),
+    )
 
     decision_engine = build_decision_engine()
 
@@ -1524,9 +1531,7 @@ def build_forecast_result(
                     ),
                     1,
                 ),
-                "remaining_hours": project_remaining_hours(
-                    r["catalog_key"]
-                ),
+                "remaining_hours": r.get("remaining_hours"),
                 "priority_bonus": round(
                     float(
                         r["window"]["details"][0].get(
@@ -1729,15 +1734,30 @@ def show_target_object_analysis(obj_key):
         print("Filtres conseillés : aucun")
 
 
+def current_project_remaining_hours(project_name):
+    projects = load_user_profile().get("projects", {})
+    return project_remaining_hours(project_name, projects)
+
+
+def present_portfolio_completion_forecast(roadmap, **kwargs):
+    projects = load_user_profile().get("projects", {})
+    return show_portfolio_completion_forecast(
+        roadmap,
+        projects=projects,
+        **kwargs,
+    )
+
+
 future_engine = FutureOpportunityEngine(
     catalog=CATALOG,
     weather_provider=fetch_weather,
     profile_provider=load_user_profile,
-    project_provider=project_remaining_hours,
+    project_provider=current_project_remaining_hours,
 )
 portfolio_forecast_engine = PortfolioForecastEngine(
     future_engine=future_engine,
     score_project=simulated_portfolio_score,
+    project_provider=get_projects,
 )
 tonight_mission_service = TonightMissionService(
     build_mission=NightMissionBuilder.build,
@@ -1760,7 +1780,9 @@ report_runner = ReportRunner(
     show_multi_night_portfolio_roadmap=(
         show_multi_night_portfolio_roadmap
     ),
-    show_portfolio_completion_forecast=show_portfolio_completion_forecast,
+    show_portfolio_completion_forecast=(
+        present_portfolio_completion_forecast
+    ),
     present_mission=MissionPresenter.present,
     tonight_mission_service=tonight_mission_service,
 )

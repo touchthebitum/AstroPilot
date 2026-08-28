@@ -7,7 +7,7 @@ def test_decision_context_uses_selected_project_state(
     monkeypatch.setattr(
         astro_score,
         "project_state",
-        lambda name: {
+        lambda name, projects: {
             "hours": 3.0,
             "target_hours": 20.0,
             "remaining": 17.0,
@@ -18,16 +18,7 @@ def test_decision_context_uses_selected_project_state(
     monkeypatch.setattr(
         astro_score,
         "project_priority",
-        lambda name: 27.2,
-    )
-
-    monkeypatch.setattr(
-        astro_score,
-        "get_projects",
-        lambda: {
-            "M31": {},
-            "IC1396": {},
-        },
+        lambda name, projects: 27.2,
     )
 
     context = astro_score.build_decision_context(
@@ -56,6 +47,10 @@ def test_decision_context_uses_selected_project_state(
             "f_ratio": 2.8,
         },
         profile={
+            "projects": {
+                "M31": {},
+                "IC1396": {},
+            },
             "preferences": {
                 "bortle": 3,
                 "min_altitude_deg": 42,

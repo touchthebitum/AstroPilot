@@ -4,10 +4,6 @@ from astral import moon
 from astral.moon import moonrise, moonset
 from astral.sun import sun
 from astral import moon
-from astropilot.user_profile import (
-    load_user_profile,
-    resolve_minimum_altitude_deg,
-)
 from astropy.coordinates import SkyCoord, get_body, EarthLocation, AltAz
 from astropy.time import Time
 from astropy.utils import iers
@@ -114,26 +110,6 @@ class SkyEngine:
         illum = (1 - math.cos(2 * math.pi * normalized)) / 2
 
         return illum * 100
-
-    def moon_visible_during_window(self, window_start, window_end, moonrise_time, moonset_time):
-        from datetime import datetime
-
-        if not isinstance(moonrise_time, datetime):
-            moonrise_time = None
-
-        if not isinstance(moonset_time, datetime):
-            moonset_time = None
-
-        if moonrise_time is None and moonset_time is None:
-            return False
-
-        if moonrise_time is None:
-            return moonset_time >= window_start
-
-        if moonset_time is None:
-            return moonrise_time <= window_end
-
-        return moonrise_time <= window_end and moonset_time >= window_start
 
     def safe_moonrise(self, observer, date, tz):
         try:
@@ -538,37 +514,19 @@ class SkyEngine:
 
             }
 
-    def best_windows(self,hours, moon_illumination, moon_rise, moon_set, observer, lat, lon,bortle=4, target="deep_sky", target_object="M31",target_obj=None, goal="balanced", window_size= 2,min_altitude_deg=30, limit= 3):
+    def best_windows(self,hours, moon_illumination, observer, lat, lon,bortle=4, target="deep_sky",target_obj=None, goal="balanced", window_size=2,min_altitude_deg=30, limit= 3):
 
         if target_obj is None:
             raise ValueError("target_obj is required")
-
-        profile = load_user_profile()
-
-        if window_size is None:
-            window_size = profile.get("preferences", {}).get("window_size", 2)
-
-        sky = self
 
         windows = self.iter_windows(hours, window_size)
 
         if not windows:
             return []
 
-        min_alt = resolve_minimum_altitude_deg(
-            profile.get("preferences", {})
-        )
-
         candidates = []
 
         for window in windows:
-
-            visible = sky.moon_visible_during_window(
-                window[0]["time"],
-                window[-1]["time"] + timedelta(hours=1),
-                moon_rise,
-                moon_set
-            )
 
             scores = []
             hour_details = []
@@ -576,8 +534,6 @@ class SkyEngine:
             moon_penalties = []
 
             for h in window:
-                #target_obj = TARGET_OBJECTS[target_object]
-
                 geometry = self.hour_geometry(
                     h,
                     observer,
@@ -586,10 +542,8 @@ class SkyEngine:
                     lon
                 )
 
-                moon_elevation = geometry["moon_elevation"]
                 target_alt = geometry["target_altitude"]
-                moon_sep = geometry["moon_target_sep"]
-                if target_alt < min_alt:
+                if target_alt < min_altitude_deg:
                     continue
 
                 result = self.score_hour(
@@ -604,12 +558,6 @@ class SkyEngine:
                     goal,
                 )
 
-                seeing = self.estimate_seeing(
-                    h.get("wind_speed_10m", 0),
-                    h.get("relative_humidity_2m", 0),
-                )
-
-
                 obj_meta = target_obj or {}
 
                 difficulty = obj_meta.get("difficulty", 2)
@@ -618,19 +566,6 @@ class SkyEngine:
 
                 object_bonus = 0
 
-
-                target_bonus = 0
-
-                if goal == "nebulae" and obj_type == "nebula":
-                    target_bonus += 12
-
-                elif goal == "galaxies" and obj_type == "galaxy":
-                    target_bonus += 12
-
-                ######elif goal == "clusters" and obj_type == "cluster":
-                    #####target_bonus += 12
-
-                frame_bonus = 0
 
                 object_size = obj_meta.get("size_arcmin", 30) / 60
                 ratio = 1
@@ -828,4 +763,3 @@ class SkyEngine:
             seeing += 0.4
 
         return round(seeing, 1)
-

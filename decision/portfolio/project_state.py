@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-from astropilot.user_profile import get_projects
+def project_state(object_name, projects):
+    return project_state_from_project(projects.get(object_name))
 
 
-def project_state(object_name):
-    projects = get_projects()
-
-    if object_name not in projects:
+def project_state_from_project(project):
+    if project is None:
         return None
-
-    project = projects[object_name]
 
     hours = float(
         project.get("hours", 0)
@@ -39,8 +36,8 @@ def project_state(object_name):
     }
 
 
-def project_progress(object_name):
-    state = project_state(object_name)
+def project_progress(object_name, projects):
+    state = project_state(object_name, projects)
 
     if state is None:
         return 0
@@ -48,8 +45,8 @@ def project_progress(object_name):
     return state["progress"]
 
 
-def project_remaining_hours(object_name):
-    state = project_state(object_name)
+def project_remaining_hours(object_name, projects):
+    state = project_state(object_name, projects)
 
     if state is None:
         return None

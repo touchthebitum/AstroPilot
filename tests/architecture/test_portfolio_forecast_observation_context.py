@@ -1,16 +1,13 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import decision.portfolio.portfolio_forecast_engine as module
 from decision.models.future_opportunity import FutureOpportunity
 from decision.portfolio.portfolio_forecast_engine import (
     PortfolioForecastEngine,
 )
 
 
-def test_portfolio_forecast_passes_night_context_to_future_engine(
-    monkeypatch,
-):
+def test_portfolio_forecast_passes_night_context_to_future_engine():
     observation_time = datetime(
         2026,
         8,
@@ -20,16 +17,12 @@ def test_portfolio_forecast_passes_night_context_to_future_engine(
         tzinfo=ZoneInfo("Europe/Zurich"),
     )
 
-    monkeypatch.setattr(
-        module,
-        "get_projects",
-        lambda: {
-            "M31": {
-                "hours": 0,
-                "target_hours": 2,
-            }
-        },
-    )
+    projects = {
+        "M31": {
+            "hours": 0,
+            "target_hours": 2,
+        }
+    }
 
     captured = {}
 
@@ -59,6 +52,7 @@ def test_portfolio_forecast_passes_night_context_to_future_engine(
     engine = PortfolioForecastEngine(
         future_engine=FakeFutureEngine(),
         score_project=lambda project, available_hours: 50,
+        project_provider=lambda: projects,
     )
 
     engine.simulate_dynamic_portfolio_roadmap(

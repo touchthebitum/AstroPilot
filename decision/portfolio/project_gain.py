@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from astropilot.user_profile import get_projects
-
 from decision.portfolio.project_state import (
-    project_remaining_hours,
-    project_state,
+    project_state_from_project,
 )
 
 
@@ -27,8 +24,10 @@ def marginal_gain_factor(progress):
 def portfolio_gain_if_shot(
     object_name,
     session_hours=3.0,
+    *,
+    projects,
 ):
-    state = project_state(object_name)
+    state = project_state_from_project(projects.get(object_name))
 
     if state is None:
         return 0
@@ -62,8 +61,11 @@ def portfolio_gain_if_shot(
 def session_portfolio_gain(
     name,
     session_hours=3.0,
+    *,
+    projects,
 ):
-    remaining = project_remaining_hours(name)
+    state = project_state_from_project(projects.get(name))
+    remaining = state["remaining"] if state is not None else None
 
     if remaining is None or remaining <= 0:
         return 0
@@ -73,7 +75,7 @@ def session_portfolio_gain(
         remaining,
     )
 
-    project = get_projects().get(
+    project = projects.get(
         name,
         {},
     )
@@ -96,6 +98,8 @@ def session_portfolio_gain(
 def session_roi(
     name,
     session_hours=3.0,
+    *,
+    projects,
 ):
     if session_hours <= 0:
         return 0
@@ -103,6 +107,7 @@ def session_roi(
     gain = session_portfolio_gain(
         name,
         session_hours=session_hours,
+        projects=projects,
     )
 
     return round(

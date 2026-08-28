@@ -106,8 +106,6 @@ class ForecastEngine:
                 hours=hours,
                 weather=weather,
                 illumination=illumination,
-                moon_rise=moon_rise,
-                moon_set=moon_set,
                 city_info=city_info,
                 lat=lat,
                 lon=lon,

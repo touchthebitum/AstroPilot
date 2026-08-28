@@ -1,31 +1,29 @@
 import decision.portfolio.portfolio_presenter as module
 
 
+def projects_with_target(target_hours):
+    return {
+        "M31": {
+            "hours": 0,
+            "target_hours": target_hours,
+        },
+    }
+
+
 def test_incomplete_portfolio_reports_completion_beyond_horizon(
-    monkeypatch,
     capsys,
 ):
-    monkeypatch.setattr(
-        module,
-        "get_projects",
-        lambda: {
-            "M31": {
-                "hours": 0,
-                "target_hours": 10,
-            },
-        },
-    )
-
-    module.show_portfolio_completion_forecast([
-        {
+    module.show_portfolio_completion_forecast(
+        [{
             "night": 1,
             "date": "2026-08-23",
             "project": "M31",
             "hours": 4,
             "target_hours": 10,
             "remaining_after": 6,
-        },
-    ])
+        }],
+        projects=projects_with_target(10),
+    )
 
     output = capsys.readouterr().out
 
@@ -34,30 +32,19 @@ def test_incomplete_portfolio_reports_completion_beyond_horizon(
 
 
 def test_completed_portfolio_reports_completion_date(
-    monkeypatch,
     capsys,
 ):
-    monkeypatch.setattr(
-        module,
-        "get_projects",
-        lambda: {
-            "M31": {
-                "hours": 0,
-                "target_hours": 4,
-            },
-        },
-    )
-
-    module.show_portfolio_completion_forecast([
-        {
+    module.show_portfolio_completion_forecast(
+        [{
             "night": 1,
             "date": "2026-08-23",
             "project": "M31",
             "hours": 4,
             "target_hours": 4,
             "remaining_after": 0,
-        },
-    ])
+        }],
+        projects=projects_with_target(4),
+    )
 
     output = capsys.readouterr().out
 
@@ -69,20 +56,8 @@ def test_completed_portfolio_reports_completion_date(
     assert "Date de fin estimée" not in output
 
 def test_incomplete_portfolio_extrapolates_completion_from_profile(
-    monkeypatch,
     capsys,
 ):
-    monkeypatch.setattr(
-        module,
-        "get_projects",
-        lambda: {
-            "M31": {
-                "hours": 0,
-                "target_hours": 39,
-            },
-        },
-    )
-
     module.show_portfolio_completion_forecast(
         [
             {
@@ -94,6 +69,7 @@ def test_incomplete_portfolio_extrapolates_completion_from_profile(
                 "remaining_after": 35,
             },
         ],
+        projects=projects_with_target(39),
         productive_hours_per_night=4.0,
         observing_nights_per_week=2.0,
         night_capacity_source="profile",
@@ -120,20 +96,8 @@ def test_incomplete_portfolio_extrapolates_completion_from_profile(
     )
 
 def test_incomplete_portfolio_extrapolates_completion_from_history(
-    monkeypatch,
     capsys,
 ):
-    monkeypatch.setattr(
-        module,
-        "get_projects",
-        lambda: {
-            "M31": {
-                "hours": 0,
-                "target_hours": 39,
-            },
-        },
-    )
-
     module.show_portfolio_completion_forecast(
         [
             {
@@ -145,6 +109,7 @@ def test_incomplete_portfolio_extrapolates_completion_from_history(
                 "remaining_after": 35,
             },
         ],
+        projects=projects_with_target(39),
         productive_hours_per_night=3.2,
         observing_nights_per_week=2.0,
         night_capacity_source="history",

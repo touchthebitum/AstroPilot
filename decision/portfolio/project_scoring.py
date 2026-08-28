@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-from astropilot.user_profile import get_projects
-
 from decision.portfolio.project_state import (
-    project_remaining_hours,
-    project_state,
+    project_state_from_project,
 )
 
 
-def project_priority(object_name):
-    projects = get_projects()
-
+def project_priority(object_name, projects):
     if object_name not in projects:
         return 0
 
@@ -51,8 +46,11 @@ def closure_bonus_for_remaining(
 def closure_bonus(
     name,
     available_hours=3.0,
+    *,
+    projects,
 ):
-    remaining = project_remaining_hours(name)
+    state = project_state_from_project(projects.get(name))
+    remaining = state["remaining"] if state is not None else None
 
     return closure_bonus_for_remaining(
         remaining,

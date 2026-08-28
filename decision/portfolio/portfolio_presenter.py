@@ -1,11 +1,12 @@
 from __future__ import annotations
-from astropilot.user_profile import get_projects
 import math
 from datetime import datetime, timedelta
 
 
 def show_portfolio_completion_forecast(
     roadmap,
+    *,
+    projects,
     productive_hours_per_night: float = 0.0,
     observing_nights_per_week: float = 0.0,
     night_capacity_source: str = "profile",
@@ -16,8 +17,6 @@ def show_portfolio_completion_forecast(
         return
 
     print("\n===== COUVERTURE DU PORTEFEUILLE =====")
-
-    projects = get_projects()
 
     portfolio_remaining = sum(
         max(

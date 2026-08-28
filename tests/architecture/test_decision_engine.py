@@ -12,13 +12,9 @@ class StubRule:
         return self.contribution
 
 
-def test_rules_are_evaluated_in_order_and_receive_the_same_inputs(monkeypatch):
-    monkeypatch.setattr(
-        "decision.decision_engine.get_rule_weights",
-        lambda: {},
-    )
+def test_rules_are_evaluated_in_order_and_receive_the_same_inputs():
     context = object()
-    profile = object()
+    profile = {}
     first_contribution = RuleContribution(rule="First", score=10, weight=2)
     third_contribution = RuleContribution(rule="Third", score=5, weight=3)
     first_rule = StubRule(first_contribution)
@@ -40,11 +36,7 @@ def test_rules_are_evaluated_in_order_and_receive_the_same_inputs(monkeypatch):
     assert total_score == 35
 
 
-def test_contribution_weight_is_used_when_profile_has_no_override(monkeypatch):
-    monkeypatch.setattr(
-        "decision.decision_engine.get_rule_weights",
-        lambda: {},
-    )
+def test_contribution_weight_is_used_when_profile_has_no_override():
     contribution = RuleContribution(
         rule="Cloud",
         score=8,
@@ -53,7 +45,7 @@ def test_contribution_weight_is_used_when_profile_has_no_override(monkeypatch):
     engine = DecisionEngine()
     engine.add_rule(StubRule(contribution))
 
-    contributions, total_score = engine.evaluate(object(), object())
+    contributions, total_score = engine.evaluate(object(), {})
 
     assert contributions == [contribution]
     assert contribution.weight == 1.5
@@ -61,12 +53,7 @@ def test_contribution_weight_is_used_when_profile_has_no_override(monkeypatch):
 
 
 def test_profile_weight_overrides_contribution_weight_by_normalized_rule_name(
-    monkeypatch,
 ):
-    monkeypatch.setattr(
-        "decision.decision_engine.get_rule_weights",
-        lambda: {"image_quality": 0.25},
-    )
     contribution = RuleContribution(
         rule="Image Quality",
         score=80,
@@ -75,20 +62,18 @@ def test_profile_weight_overrides_contribution_weight_by_normalized_rule_name(
     engine = DecisionEngine()
     engine.add_rule(StubRule(contribution))
 
-    contributions, total_score = engine.evaluate(object(), object())
+    contributions, total_score = engine.evaluate(
+        object(),
+        {"decision_weights": {"image_quality": 0.25}},
+    )
 
     assert contributions == [contribution]
     assert contribution.weight == 0.25
     assert total_score == 20
 
 
-def test_engine_without_rules_returns_an_empty_result(monkeypatch):
-    monkeypatch.setattr(
-        "decision.decision_engine.get_rule_weights",
-        lambda: {},
-    )
-
-    contributions, total_score = DecisionEngine().evaluate(object(), object())
+def test_engine_without_rules_returns_an_empty_result():
+    contributions, total_score = DecisionEngine().evaluate(object(), {})
 
     assert contributions == []
     assert total_score == 0
