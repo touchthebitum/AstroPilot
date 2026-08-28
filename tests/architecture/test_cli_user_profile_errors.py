@@ -547,6 +547,50 @@ def test_invalid_session_fields_exit_cleanly(
 
 
 @pytest.mark.parametrize(
+    ("date_present", "date_value"),
+    [
+        pytest.param(False, None, id="missing"),
+        pytest.param(True, None, id="null"),
+        pytest.param(True, 20260816, id="number"),
+        pytest.param(True, "", id="empty"),
+        pytest.param(True, "16-08-2026", id="wrong-format"),
+        pytest.param(True, "2026-08-16T22:00:00", id="datetime"),
+        pytest.param(True, "2026-02-30", id="invalid-calendar-date"),
+    ],
+)
+def test_invalid_session_date_exits_cleanly(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    date_present,
+    date_value,
+):
+    session = {"object": "IC1396", "hours": 1}
+    if date_present:
+        session["date"] = date_value
+
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps({"sessions": [session]}),
+        encoding="utf-8",
+    )
+    original_content = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(["--object", "M31"])
+
+    captured = capsys.readouterr()
+
+    assert exit_info.value.code == 2
+    assert captured.out == ""
+    assert "sessions[0].date" in captured.err
+    assert "date ISO valide au format YYYY-MM-DD" in captured.err
+    assert "Traceback" not in captured.err
+    assert profile_path.read_bytes() == original_content
+
+
+@pytest.mark.parametrize(
     ("project", "expected_location", "expected_message"),
     [
         (
