@@ -439,6 +439,47 @@ def test_project_hours_above_target_exit_cleanly(
 
 
 @pytest.mark.parametrize(
+    "invalid_value",
+    ["high", None, True, -1, 11, float("inf"), float("nan")],
+)
+def test_invalid_project_importance_exits_cleanly(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    invalid_value,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "projects": {
+                    "IC1396": {
+                        "hours": 0,
+                        "target_hours": 6,
+                        "importance": invalid_value,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    original_content = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(["--object", "M31"])
+
+    captured = capsys.readouterr()
+
+    assert exit_info.value.code == 2
+    assert captured.out == ""
+    assert "projects['IC1396'].importance" in captured.err
+    assert "compris entre 0 et 10" in captured.err
+    assert "Traceback" not in captured.err
+    assert profile_path.read_bytes() == original_content
+
+
+@pytest.mark.parametrize(
     ("session", "field_name", "expected_type"),
     [
         ({"hours": 1}, "object", "chaîne non vide"),

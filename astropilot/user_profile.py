@@ -168,6 +168,18 @@ def validate_user_profile(profile, profile_path: Path):
                 "target_hours."
             )
 
+        if "importance" in project:
+            importance = project["importance"]
+            if (
+                not is_finite_number(importance)
+                or not 0 <= importance <= 10
+            ):
+                raise UserProfileError(
+                    f"Champ projects[{project_name!r}].importance "
+                    f"invalide dans {profile_path} : nombre fini "
+                    "compris entre 0 et 10 attendu."
+                )
+
         if "filter_targets" not in project:
             continue
 
