@@ -196,6 +196,8 @@ def test_invalid_project_hours_exit_cleanly(
             {
                 "projects": {
                     "IC1396": {
+                        "hours": 0,
+                        "target_hours": 0,
                         field_name: invalid_value,
                     }
                 }
@@ -215,6 +217,40 @@ def test_invalid_project_hours_exit_cleanly(
     assert captured.out == ""
     assert f"projects['IC1396'].{field_name}" in captured.err
     assert "nombre fini positif ou nul" in captured.err
+    assert "Traceback" not in captured.err
+    assert profile_path.read_bytes() == original_content
+
+
+@pytest.mark.parametrize(
+    ("project", "missing_field"),
+    [
+        ({"target_hours": 6}, "hours"),
+        ({"hours": 1}, "target_hours"),
+    ],
+)
+def test_missing_project_hours_exit_cleanly(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    project,
+    missing_field,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps({"projects": {"IC1396": project}}),
+        encoding="utf-8",
+    )
+    original_content = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(["--object", "M31"])
+
+    captured = capsys.readouterr()
+
+    assert exit_info.value.code == 2
+    assert captured.out == ""
+    assert f"projects['IC1396'].{missing_field}" in captured.err
     assert "Traceback" not in captured.err
     assert profile_path.read_bytes() == original_content
 
@@ -290,42 +326,66 @@ def test_invalid_session_fields_exit_cleanly(
     ("project", "expected_location", "expected_message"),
     [
         (
-            {"target_hours": 6, "filter_targets": []},
+            {"hours": 0, "target_hours": 6, "filter_targets": []},
             "projects['IC1396'].filter_targets",
             "objet JSON",
         ),
         (
-            {"target_hours": 6, "filter_targets": {"": 6}},
+            {
+                "hours": 0,
+                "target_hours": 6,
+                "filter_targets": {"": 6},
+            },
             "projects['IC1396'].filter_targets",
             "nom de filtre non vide",
         ),
         (
-            {"target_hours": 6, "filter_targets": {"Ha": "six"}},
+            {
+                "hours": 0,
+                "target_hours": 6,
+                "filter_targets": {"Ha": "six"},
+            },
             "filter_targets['Ha']",
             "nombre fini positif ou nul",
         ),
         (
-            {"target_hours": 6, "filter_targets": {"Ha": True}},
+            {
+                "hours": 0,
+                "target_hours": 6,
+                "filter_targets": {"Ha": True},
+            },
             "filter_targets['Ha']",
             "nombre fini positif ou nul",
         ),
         (
-            {"target_hours": 6, "filter_targets": {"Ha": -1}},
+            {
+                "hours": 0,
+                "target_hours": 6,
+                "filter_targets": {"Ha": -1},
+            },
             "filter_targets['Ha']",
             "nombre fini positif ou nul",
         ),
         (
-            {"target_hours": 6, "filter_targets": {"Ha": float("inf")}},
+            {
+                "hours": 0,
+                "target_hours": 6,
+                "filter_targets": {"Ha": float("inf")},
+            },
             "filter_targets['Ha']",
             "nombre fini positif ou nul",
         ),
         (
-            {"filter_targets": {"Ha": 6}},
+            {"hours": 0, "filter_targets": {"Ha": 6}},
             "projects['IC1396'].target_hours",
             "requis",
         ),
         (
-            {"target_hours": 6, "filter_targets": {"Ha": 5}},
+            {
+                "hours": 0,
+                "target_hours": 6,
+                "filter_targets": {"Ha": 5},
+            },
             "projects['IC1396'].filter_targets",
             "somme 5.00 h",
         ),
@@ -373,6 +433,7 @@ def test_consistent_filter_targets_remain_valid(
                 "available_equipment": ["samyang_183"],
                 "projects": {
                     "IC1396": {
+                        "hours": 0,
                         "target_hours": 6,
                         "filter_targets": {"Ha": 6},
                     }

@@ -104,7 +104,10 @@ def validate_user_profile(profile, profile_path: Path):
 
         for field_name in ("hours", "target_hours"):
             if field_name not in project:
-                continue
+                raise UserProfileError(
+                    f"Champ projects[{project_name!r}].{field_name} "
+                    f"requis dans {profile_path}."
+                )
 
             value = project[field_name]
 
