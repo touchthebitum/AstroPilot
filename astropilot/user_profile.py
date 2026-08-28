@@ -139,6 +139,14 @@ def validate_user_profile(profile, profile_path: Path):
                 "entier compris entre 1 et 9 attendu."
             )
 
+    if "min_sqm" in preferences:
+        min_sqm = preferences["min_sqm"]
+        if not is_finite_number(min_sqm) or not 0 <= min_sqm <= 30:
+            raise UserProfileError(
+                f"Champ preferences.min_sqm invalide dans {profile_path} : "
+                "nombre fini compris entre 0 et 30 attendu."
+            )
+
     if "location" in profile:
         location = profile["location"]
 
