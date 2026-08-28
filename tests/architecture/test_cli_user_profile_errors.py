@@ -394,6 +394,51 @@ def test_missing_project_hours_exit_cleanly(
 
 
 @pytest.mark.parametrize(
+    ("hours", "target_hours"),
+    [
+        (6, 5),
+        (1, 0),
+    ],
+)
+def test_project_hours_above_target_exit_cleanly(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    hours,
+    target_hours,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "projects": {
+                    "IC1396": {
+                        "hours": hours,
+                        "target_hours": target_hours,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    original_content = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(["--object", "M31"])
+
+    captured = capsys.readouterr()
+
+    assert exit_info.value.code == 2
+    assert captured.out == ""
+    assert "projects['IC1396'].hours" in captured.err
+    assert "target_hours" in captured.err
+    assert "inférieur ou égal" in captured.err
+    assert "Traceback" not in captured.err
+    assert profile_path.read_bytes() == original_content
+
+
+@pytest.mark.parametrize(
     ("session", "field_name", "expected_type"),
     [
         ({"hours": 1}, "object", "chaîne non vide"),

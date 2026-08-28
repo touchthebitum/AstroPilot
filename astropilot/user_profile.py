@@ -161,6 +161,13 @@ def validate_user_profile(profile, profile_path: Path):
                     "positif ou nul attendu."
                 )
 
+        if project["hours"] > project["target_hours"]:
+            raise UserProfileError(
+                f"Champ projects[{project_name!r}].hours invalide dans "
+                f"{profile_path} : doit être inférieur ou égal à "
+                "target_hours."
+            )
+
         if "filter_targets" not in project:
             continue
 
