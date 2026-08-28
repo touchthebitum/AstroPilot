@@ -86,11 +86,11 @@ class ImageQualityEngine:
                 "seeing_match" : seeing_match,
                 "detail_level": (
                     "Excellent"
-                    if adequacy >= 0.9 else
+                    if adequacy >= 90 else
                     "Bon"
-                    if adequacy >= 0.7 else
+                    if adequacy >= 70 else
                     "Moyen"
-                    if adequacy >= 0.5 else
+                    if adequacy >= 50 else
                     "Faible"
                 ),
             },

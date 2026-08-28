@@ -1,6 +1,5 @@
 from decision.rule_contribution import RuleContribution
 from decision.models.sampling_model import SamplingModel
-from decision.models.resolution_model import ResolutionModel
 from decision.calculators.setup_calculator import SetupCalculator
 
 class SamplingRule:
@@ -20,12 +19,6 @@ class SamplingRule:
                 details="",
             )
 
-        resolution = ResolutionModel.evaluate(
-            object_type = context.sky.target.object_type,
-            object_size_arcmin=context.sky.target.angular_size_arcmin,
-            pixel_size=sampling,
-        )
-
         evaluation = SamplingModel.evaluate(
             object_type = context.sky.target.object_type,
             object_size_arcmin=context.sky.target.angular_size_arcmin,
@@ -44,4 +37,3 @@ class SamplingRule:
             reason=reason,
             details=details,
         )
-

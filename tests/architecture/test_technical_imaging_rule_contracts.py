@@ -113,11 +113,6 @@ def test_sampling_rule_returns_low_confidence_when_sampling_is_missing(
         lambda setup: SimpleNamespace(sampling_arcsec_per_pixel=None),
     )
     monkeypatch.setattr(
-        sampling_module.ResolutionModel,
-        "evaluate",
-        lambda **kwargs: pytest.fail("resolution must not run"),
-    )
-    monkeypatch.setattr(
         sampling_module.SamplingModel,
         "evaluate",
         lambda **kwargs: pytest.fail("sampling model must not run"),
@@ -147,19 +142,10 @@ def test_sampling_rule_delegates_setup_target_and_weather_values(monkeypatch):
         lambda setup: capabilities,
     )
 
-    def evaluate_resolution(**kwargs):
-        calls["resolution"] = kwargs
-        return SimpleNamespace()
-
     def evaluate_sampling(**kwargs):
         calls["sampling"] = kwargs
         return evaluation
 
-    monkeypatch.setattr(
-        sampling_module.ResolutionModel,
-        "evaluate",
-        evaluate_resolution,
-    )
     monkeypatch.setattr(
         sampling_module.SamplingModel,
         "evaluate",
@@ -168,11 +154,7 @@ def test_sampling_rule_delegates_setup_target_and_weather_values(monkeypatch):
 
     contribution = SamplingRule().evaluate(context, profile=object())
 
-    assert calls["resolution"] == {
-        "object_type": "galaxy",
-        "object_size_arcmin": 190.0,
-        "pixel_size": 1.234,
-    }
+    assert not hasattr(sampling_module, "ResolutionModel")
     assert calls["sampling"] == {
         "object_type": "galaxy",
         "object_size_arcmin": 190.0,
