@@ -68,7 +68,6 @@ from decision.models.equipment.mount import Mount
 from decision.models.equipment.imaging_optics import ImagingOptics
 from decision.models.equipment.imaging_filter import ImagingFilter
 from decision.models.equipment.imaging_setup import ImagingSetup
-from decision.rules.image_quality_rule import ImageQualityRule
 from decision.rules.resolution_rule import ResolutionRule
 from decision.rules.sampling_rule import SamplingRule
 from decision.rules.wind_rule import WindRule
@@ -1265,7 +1264,6 @@ def build_decision_engine():
     engine.add_rule(SeeingRule())
     engine.add_rule(SamplingRule())
     engine.add_rule(ResolutionRule())
-    engine.add_rule(ImageQualityRule())
     engine.add_rule(ObjectFitRule())
 
     return engine
