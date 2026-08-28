@@ -3,6 +3,7 @@ import json
 import pytest
 
 import astro_score
+from astropilot.user_profile import validate_user_profile
 
 
 def test_missing_user_profile_exits_cleanly(
@@ -331,6 +332,56 @@ def test_invalid_altitude_preference_exits_cleanly(
     assert captured.out == ""
     assert f"preferences.{field_name}" in captured.err
     assert "compris entre 0 et 90" in captured.err
+    assert "Traceback" not in captured.err
+    assert profile_path.read_bytes() == original_content
+
+
+def test_matching_altitude_preferences_are_valid(tmp_path):
+    profile_path = tmp_path / "user_profile.json"
+    profile = {
+        "active_equipment": "samyang_183",
+        "available_equipment": ["samyang_183"],
+        "preferences": {
+            "min_altitude_deg": 30,
+            "minimum_altitude_deg": 30,
+        },
+    }
+
+    assert validate_user_profile(profile, profile_path) is profile
+
+
+def test_conflicting_altitude_preferences_exit_cleanly(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "active_equipment": "samyang_183",
+                "available_equipment": ["samyang_183"],
+                "preferences": {
+                    "min_altitude_deg": 25,
+                    "minimum_altitude_deg": 30,
+                },
+            },
+        ),
+        encoding="utf-8",
+    )
+    original_content = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(["--object", "M31"])
+
+    captured = capsys.readouterr()
+
+    assert exit_info.value.code == 2
+    assert captured.out == ""
+    assert "preferences.min_altitude_deg" in captured.err
+    assert "preferences.minimum_altitude_deg" in captured.err
+    assert "valeurs identiques" in captured.err
     assert "Traceback" not in captured.err
     assert profile_path.read_bytes() == original_content
 
