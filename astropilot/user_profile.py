@@ -1,6 +1,7 @@
 import json
 import math
 import os
+from datetime import date
 from pathlib import Path
 
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
@@ -265,6 +266,24 @@ def validate_user_profile(profile, profile_path: Path):
                 f"Champ sessions[{index}].filter_type invalide "
                 f"dans {profile_path} : chaîne non vide ou null "
                 "attendu."
+            )
+
+        session_date = session.get("date")
+        valid_date = False
+        if isinstance(session_date, str):
+            try:
+                valid_date = (
+                    date.fromisoformat(session_date).isoformat()
+                    == session_date
+                )
+            except ValueError:
+                pass
+
+        if not valid_date:
+            raise UserProfileError(
+                f"Champ sessions[{index}].date invalide dans "
+                f"{profile_path} : date ISO valide au format "
+                "YYYY-MM-DD attendue."
             )
 
     active_equipment = profile.get("active_equipment")
