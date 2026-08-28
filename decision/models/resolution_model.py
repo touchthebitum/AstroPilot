@@ -33,8 +33,6 @@ class ResolutionModel:
 
         pixels = object_size_arcmin * 60 / pixel_size
 
-        pixels = object_size_arcmin * 60 / pixel_size
-
         if pixels < 500:
             size_factor = "small"
         elif pixels < 2000:
