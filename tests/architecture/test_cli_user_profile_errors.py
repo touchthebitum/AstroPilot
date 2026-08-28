@@ -151,6 +151,49 @@ def test_invalid_decision_weight_exits_cleanly(
 
 
 @pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("astro_weight", "heavy"),
+        ("astro_weight", True),
+        ("astro_weight", -1),
+        ("astro_weight", float("inf")),
+        ("astro_weight", float("nan")),
+        ("project_weight", "heavy"),
+        ("project_weight", True),
+        ("project_weight", -1),
+        ("project_weight", float("inf")),
+        ("project_weight", float("nan")),
+    ],
+)
+def test_invalid_preference_weight_exits_cleanly(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    field_name,
+    invalid_value,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps({"preferences": {field_name: invalid_value}}),
+        encoding="utf-8",
+    )
+    original_content = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(["--object", "M31"])
+
+    captured = capsys.readouterr()
+
+    assert exit_info.value.code == 2
+    assert captured.out == ""
+    assert f"preferences.{field_name}" in captured.err
+    assert "nombre fini positif ou nul" in captured.err
+    assert "Traceback" not in captured.err
+    assert profile_path.read_bytes() == original_content
+
+
+@pytest.mark.parametrize(
     ("profile", "expected_location", "expected_type"),
     [
         (
