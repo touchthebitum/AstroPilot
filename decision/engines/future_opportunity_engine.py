@@ -15,8 +15,8 @@ class FutureOpportunityEngine:
         self,
         catalog,
         weather_provider,
-        profile_provider,
-        project_provider,
+        profile_provider=None,
+        project_provider=None,
     ):
         self.catalog = catalog
         self.weather_provider = weather_provider
@@ -30,6 +30,7 @@ class FutureOpportunityEngine:
         latitude: float | None = None,
         longitude: float | None = None,
         observation_time=None,
+        profile=None,
     ) -> FutureOpportunity:
         project = self.catalog.get(project_name)
 
@@ -45,7 +46,8 @@ class FutureOpportunityEngine:
         project = project.copy()
         project["catalog_key"] = project_name
 
-        profile = self.profile_provider()
+        if profile is None:
+            profile = self.profile_provider() if self.profile_provider else {}
         location = profile.get("location", {})
 
         lat = (
@@ -99,7 +101,11 @@ class FutureOpportunityEngine:
             )
 
         if remaining_hours is None:
-            remaining = self.project_provider(project_name)
+            remaining = (
+                self.project_provider(project_name)
+                if self.project_provider
+                else None
+            )
         else:
             remaining = remaining_hours
 

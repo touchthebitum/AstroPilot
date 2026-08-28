@@ -24,7 +24,7 @@ def test_ic1396_target_analysis_uses_semantic_filter_selection(
     monkeypatch.setattr(
         astro_score,
         "best_equipment_for_object",
-        lambda _target_name: None,
+        lambda _target_name, _profile: None,
     )
     monkeypatch.setattr(
         astro_score.FilterInventoryLoader,

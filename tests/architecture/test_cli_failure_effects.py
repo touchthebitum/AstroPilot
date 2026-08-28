@@ -7,11 +7,19 @@ import astro_score
 
 @pytest.fixture
 def isolated_cli_failures(monkeypatch):
-    monkeypatch.setattr(astro_score, "get_active_equipment", lambda: "setup")
     monkeypatch.setattr(
         astro_score,
         "load_user_profile",
-        lambda: {"preferences": {}, "sessions": []},
+        lambda: {
+            "active_equipment": "setup",
+            "location": {
+                "latitude": 46.5,
+                "longitude": 6.6,
+                "name": "Buttes",
+            },
+            "preferences": {},
+            "sessions": [],
+        },
     )
     monkeypatch.setattr(
         astro_score,
@@ -22,11 +30,6 @@ def isolated_cli_failures(monkeypatch):
         astro_score,
         "FilterTargetConfigurationService",
         lambda **kwargs: object(),
-    )
-    monkeypatch.setattr(
-        astro_score,
-        "get_default_location",
-        lambda: {"latitude": 46.5, "longitude": 6.6, "name": "Buttes"},
     )
 
 

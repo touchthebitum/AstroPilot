@@ -5,12 +5,31 @@ import pytest
 import astro_score
 
 
-def test_help_does_not_load_user_profile(monkeypatch):
+def test_direct_command_loads_profile_once(monkeypatch):
+    calls = []
+    profile = {"active_equipment": "setup"}
+
+    def load_profile():
+        calls.append(None)
+        return profile
+
+    monkeypatch.setattr(astro_score, "load_user_profile", load_profile)
     monkeypatch.setattr(
         astro_score,
-        "get_active_equipment",
-        lambda: pytest.fail("equipment must not be loaded"),
+        "FilterTargetConfigurationService",
+        lambda **kwargs: object(),
     )
+    monkeypatch.setattr(
+        astro_score,
+        "compare_equipment_for_object",
+        lambda object_name, supplied_profile: None,
+    )
+
+    assert astro_score.main(["--object", "M31"]) == 0
+    assert len(calls) == 1
+
+
+def test_help_does_not_load_user_profile(monkeypatch):
     monkeypatch.setattr(
         astro_score,
         "load_user_profile",
@@ -25,11 +44,16 @@ def test_help_does_not_load_user_profile(monkeypatch):
 
 @pytest.fixture
 def isolated_cli(monkeypatch):
-    monkeypatch.setattr(astro_score, "get_active_equipment", lambda: "setup")
     monkeypatch.setattr(
         astro_score,
         "load_user_profile",
         lambda: {
+            "active_equipment": "setup",
+            "location": {
+                "latitude": 46.5,
+                "longitude": 6.6,
+                "name": "Buttes",
+            },
             "preferences": {
                 "productive_hours_per_night": 3.5,
                 "observing_nights_per_week": 2.0,
@@ -62,12 +86,7 @@ def test_direct_object_commands_return_before_location_and_weather(
     monkeypatch.setattr(
         astro_score,
         function_name,
-        lambda value: calls.append(value),
-    )
-    monkeypatch.setattr(
-        astro_score,
-        "get_default_location",
-        lambda: pytest.fail("location must not be resolved"),
+        lambda value, profile: calls.append(value),
     )
     monkeypatch.setattr(
         astro_score,
@@ -92,11 +111,6 @@ def forecast_cli(monkeypatch, isolated_cli):
         {"date": "2026-08-27", "score": 90.0},
     ]
 
-    monkeypatch.setattr(
-        astro_score,
-        "get_default_location",
-        lambda: {"latitude": 46.5, "longitude": 6.6, "name": "Buttes"},
-    )
     monkeypatch.setattr(
         astro_score,
         "fetch_weather",
@@ -150,6 +164,7 @@ def test_report_modes_route_to_exactly_one_runner(mode, forecast_cli):
     called_mode, kwargs = forecast_cli.calls[0]
     assert called_mode == mode
     assert kwargs["night_capacities"] is forecast_cli.capacities
+    assert kwargs.pop("profile")["active_equipment"] == "setup"
 
     if mode in {"portfolio", "full"}:
         assert kwargs == {

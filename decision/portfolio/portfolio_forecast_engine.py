@@ -6,17 +6,34 @@ import copy
 class PortfolioForecastEngine:
 
 
-    def __init__(self, future_engine, score_project, project_provider):
+    def __init__(
+        self,
+        future_engine,
+        score_project,
+        profile_provider=None,
+        project_provider=None,
+    ):
             self.future_engine = future_engine
             self.score_project = score_project
+            self.profile_provider = profile_provider
             self.project_provider = project_provider
 
     def simulate_dynamic_portfolio_roadmap(
         self,
         night_capacities=None,
         avg_night_hours=5,
+        *,
+        profile=None,
     ):
-        projects = copy.deepcopy(self.project_provider())
+        if profile is None:
+            if self.profile_provider is not None:
+                profile = self.profile_provider()
+            elif self.project_provider is not None:
+                profile = {"projects": self.project_provider()}
+            else:
+                profile = {}
+
+        projects = copy.deepcopy(profile.get("projects", {}))
 
         simulated = []
         current_night = 1
@@ -68,6 +85,7 @@ class PortfolioForecastEngine:
                     future = self.future_engine.estimate(
                         name,
                         remaining_hours=remaining,
+                        profile=profile,
                         latitude=(
                             capacity.get("latitude")
                             if capacity

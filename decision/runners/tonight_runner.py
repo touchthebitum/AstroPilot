@@ -27,16 +27,19 @@ class TonightRunner:
     def show_completion_forecast(
         self,
         night_capacities,
+        profile=None,
     ):
-        dynamic_roadmap = (
-            self.portfolio_forecast_engine
-            .simulate_dynamic_portfolio_roadmap(
-                night_capacities=night_capacities,
-            )
-        )
+        simulation_kwargs = {"night_capacities": night_capacities}
+        if profile is not None:
+            simulation_kwargs["profile"] = profile
+        dynamic_roadmap = self.portfolio_forecast_engine.simulate_dynamic_portfolio_roadmap(**simulation_kwargs)
 
+        presentation_kwargs = {}
+        if profile is not None:
+            presentation_kwargs["projects"] = profile.get("projects", {})
         self.report_runner.show_portfolio_completion_forecast(
-            dynamic_roadmap
+            dynamic_roadmap,
+            **presentation_kwargs,
         )
 
     def present_recommended_mission(
@@ -44,17 +47,19 @@ class TonightRunner:
         winner,
         top_objects,
         top_nights,
+        profile=None,
     ):
         available_hours = winner.get(
             "duration",
             3.0,
         )
 
-        recommended_projects = (
-            self.recommend_project_for_night(
-                top_objects,
-                available_hours=available_hours,
-            )
+        recommendation_kwargs = {"available_hours": available_hours}
+        if profile is not None:
+            recommendation_kwargs["profile"] = profile
+        recommended_projects = self.recommend_project_for_night(
+            top_objects,
+            **recommendation_kwargs,
         )
 
         if not recommended_projects:
@@ -73,7 +78,14 @@ class TonightRunner:
             winner=winner,
             objects=top_objects,
             recommendation=recommendation,
-            build_mission_input=self.build_mission_input,
+            build_mission_input=(
+                self.build_mission_input
+                if profile is None
+                else lambda evaluation: self.build_mission_input(
+                    evaluation,
+                    profile=profile,
+                )
+            ),
             top_nights=top_nights,
         )
 
@@ -81,6 +93,7 @@ class TonightRunner:
         self,
         top_nights,
         night_capacities,
+        profile=None,
     ):
         if not top_nights:
             return
@@ -92,8 +105,10 @@ class TonightRunner:
             winner=winner,
             top_objects=top_objects,
             top_nights=top_nights,
+            profile=profile,
         )
 
         self.show_completion_forecast(
-            night_capacities
+            night_capacities,
+            profile,
         )

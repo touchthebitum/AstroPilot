@@ -84,14 +84,8 @@ def test_filter_target_cli_show_returns_before_weather(
 
     monkeypatch.setattr(
         astro_score,
-        "get_active_equipment",
-        lambda: "samyang_183",
-    )
-
-    monkeypatch.setattr(
-        astro_score,
         "load_user_profile",
-        lambda: {},
+        lambda: {"active_equipment": "samyang_183"},
     )
 
     monkeypatch.setattr(
@@ -148,14 +142,8 @@ def test_filter_target_cli_set_returns_before_weather(
 
     monkeypatch.setattr(
         astro_score,
-        "get_active_equipment",
-        lambda: "samyang_183",
-    )
-
-    monkeypatch.setattr(
-        astro_score,
         "load_user_profile",
-        lambda: {},
+        lambda: {"active_equipment": "samyang_183"},
     )
 
     monkeypatch.setattr(
@@ -218,14 +206,8 @@ def test_filter_target_cli_clear_returns_before_weather(
 
     monkeypatch.setattr(
         astro_score,
-        "get_active_equipment",
-        lambda: "samyang_183",
-    )
-
-    monkeypatch.setattr(
-        astro_score,
         "load_user_profile",
-        lambda: {},
+        lambda: {"active_equipment": "samyang_183"},
     )
 
     monkeypatch.setattr(
