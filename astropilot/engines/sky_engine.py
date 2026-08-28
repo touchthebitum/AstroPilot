@@ -566,16 +566,7 @@ class SkyEngine:
 
                 object_bonus = 0
 
-
                 object_size = obj_meta.get("size_arcmin", 30) / 60
-                ratio = 1
-
-                ####object_size = obj_meta.get("size_arcmin", 30) / 60
-                ###frame_width = fov["width_deg"]
-
-                ##frame_diag = (fov["width_deg"]**2 + fov["height_deg"]**2) ** 0.5
-                #ratio = object_size / frame_diag
-
 
                 preference_bonus = 0
 
@@ -590,30 +581,6 @@ class SkyEngine:
 
                 elif goal == "small_targets" and object_size <= 0.5:
                     preference_bonus = 8
-
-                if obj_type in ["planetary_nebula"]:
-                    ideal_min = 0.02
-                    ideal_max = 0.20
-                elif obj_type in ["galaxy"]:
-                    ideal_min = 0.05
-                    ideal_max = 0.40
-                elif obj_type in ["cluster"]:
-                    ideal_min = 0.10
-                    ideal_max = 0.60
-                else:  # nebula
-                    ideal_min = 0.25
-                    ideal_max = 0.45
-
-                if ideal_min <= ratio <= ideal_max:
-                    object_bonus += 20
-                elif ratio < ideal_min / 2:
-                    object_bonus -= 25
-                elif ratio < ideal_min:
-                    object_bonus -= 10
-                elif ratio > ideal_max * 1.5:
-                    object_bonus -= 35
-                elif ratio > ideal_max:
-                    object_bonus -= 15
 
                 # Bonus difficulté : objets faciles favorisés
                 if difficulty == 1:

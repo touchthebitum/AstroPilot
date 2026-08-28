@@ -116,11 +116,11 @@ TARGET = "deep_sky"
 
 TARGET_OBJECTS = {
     key: {
-        "ra": value["ra"],
-        "dec": value["dec"],
-        "size_arcmin":
-value.get("size_arcmin",
-value.get("width_arcmin", 30)),
+        **value,
+        "size_arcmin": value.get(
+            "size_arcmin",
+            value.get("width_arcmin", 30),
+        ),
     }
     for key, value in CATALOG.items()
     if "ra" in value and "dec" in value
