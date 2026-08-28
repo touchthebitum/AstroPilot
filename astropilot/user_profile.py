@@ -391,22 +391,8 @@ def load_user_profile():
         ) from exc
 
     return validate_user_profile(profile, profile_path)
-    
-def get_decision_weights():
 
-    profile = load_user_profile()
-    prefs = profile.get("preferences", {})
 
-    mode = prefs.get("decision_mode", "balanced")
-
-    if mode == "science":
-        return 0.8, 0.2
-
-    elif mode == "finisher":
-        return 0.5, 0.5
-
-    return 0.7, 0.30
-    
 def get_active_equipment():
     return load_user_profile().get("active_equipment")
 
