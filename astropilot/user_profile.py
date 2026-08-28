@@ -66,6 +66,18 @@ def validate_user_profile(profile, profile_path: Path):
                 f"{profile_path} : nombre fini positif ou nul attendu."
             )
 
+    preferences = profile.get("preferences", {})
+    for field_name in ("astro_weight", "project_weight"):
+        if field_name not in preferences:
+            continue
+
+        weight = preferences[field_name]
+        if not is_finite_number(weight) or weight < 0:
+            raise UserProfileError(
+                f"Champ preferences.{field_name} invalide dans "
+                f"{profile_path} : nombre fini positif ou nul attendu."
+            )
+
     if "location" in profile:
         location = profile["location"]
 
