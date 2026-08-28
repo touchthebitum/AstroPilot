@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 from astropilot.catalog import CATALOG
-from astropilot.user_profile import get_projects
-
 from decision.portfolio.project_state import (
-    project_remaining_hours,
+    project_state_from_project,
 )
 
 
-def portfolio_category_load():
+def portfolio_category_load(projects):
     loads = {}
 
-    for name, project in get_projects().items():
-        remaining = project_remaining_hours(name)
+    for name, project in projects.items():
+        state = project_state_from_project(project)
+        remaining = state["remaining"]
 
         if remaining is None or remaining <= 0:
             continue
@@ -31,14 +30,14 @@ def portfolio_category_load():
     return loads
 
 
-def diversification_bonus(name):
+def diversification_bonus(name, projects):
     obj = CATALOG.get(name, {})
     category = obj.get("type", "").lower()
 
     if not category:
         return 0
 
-    loads = portfolio_category_load()
+    loads = portfolio_category_load(projects)
 
     if not loads:
         return 0

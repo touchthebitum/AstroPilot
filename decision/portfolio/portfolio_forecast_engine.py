@@ -2,22 +2,21 @@ from __future__ import annotations
 
 import copy
 
-from astropilot.user_profile import get_projects
-
 
 class PortfolioForecastEngine:
 
 
-    def __init__(self, future_engine, score_project):
+    def __init__(self, future_engine, score_project, project_provider):
             self.future_engine = future_engine
             self.score_project = score_project
+            self.project_provider = project_provider
 
     def simulate_dynamic_portfolio_roadmap(
         self,
         night_capacities=None,
         avg_night_hours=5,
     ):
-        projects = copy.deepcopy(get_projects())
+        projects = copy.deepcopy(self.project_provider())
 
         simulated = []
         current_night = 1

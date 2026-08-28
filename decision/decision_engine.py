@@ -1,7 +1,6 @@
 from decision.rule_contribution import RuleContribution
 from decision.rules.sampling_rule import SamplingRule
 from decision.rules.seeing_rule import SeeingRule
-from astropilot.user_profile import get_rule_weights
 
 
 class DecisionEngine:
@@ -16,7 +15,7 @@ class DecisionEngine:
         total_score = 0
         contributions = []
 
-        weights = get_rule_weights()
+        weights = profile.get("decision_weights", {})
 
         for rule in self.rules:
 

@@ -2,7 +2,6 @@ import copy
 
 import pytest
 
-import decision.portfolio.portfolio_forecast_engine as module
 from decision.models.future_opportunity import FutureOpportunity
 from decision.portfolio.portfolio_forecast_engine import (
     PortfolioForecastEngine,
@@ -21,14 +20,13 @@ class StableFutureEngine:
 
 
 def simulate(monkeypatch, projects, night_capacities):
-    monkeypatch.setattr(module, "get_projects", lambda: projects)
-
     engine = PortfolioForecastEngine(
         future_engine=StableFutureEngine(),
         score_project=lambda project, available_hours: project.get(
             "priority",
             0,
         ),
+        project_provider=lambda: projects,
     )
 
     return engine.simulate_dynamic_portfolio_roadmap(

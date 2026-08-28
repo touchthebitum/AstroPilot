@@ -1,9 +1,8 @@
 import decision.portfolio.project_scoring as project_scoring
-import decision.portfolio.project_state as project_state_module
 
 
-def install_project(monkeypatch, *, hours, target_hours, importance=5):
-    projects = {
+def project_snapshot(*, hours, target_hours, importance=5):
+    return {
         "M31": {
             "hours": hours,
             "target_hours": target_hours,
@@ -11,21 +10,8 @@ def install_project(monkeypatch, *, hours, target_hours, importance=5):
         }
     }
 
-    monkeypatch.setattr(
-        project_scoring,
-        "get_projects",
-        lambda: projects,
-    )
-    monkeypatch.setattr(
-        project_state_module,
-        "get_projects",
-        lambda: projects,
-    )
-
-
-def test_closure_bonus_rewards_finishable_project(monkeypatch):
-    install_project(
-        monkeypatch,
+def test_closure_bonus_rewards_finishable_project():
+    projects = project_snapshot(
         hours=18,
         target_hours=20,
     )
@@ -33,6 +19,7 @@ def test_closure_bonus_rewards_finishable_project(monkeypatch):
     assert project_scoring.closure_bonus(
         "M31",
         available_hours=2,
+        projects=projects,
     ) == 15
 
 
@@ -50,17 +37,14 @@ def test_simulated_portfolio_score_uses_virtual_project_state():
     assert score == 48.0
 
 
-def test_project_priority_normalizes_importance_to_100_scale(
-    monkeypatch,
-):
-    install_project(
-        monkeypatch,
+def test_project_priority_normalizes_importance_to_100_scale():
+    projects = project_snapshot(
         hours=3,
         target_hours=20,
         importance=8,
     )
 
-    assert project_scoring.project_priority("M31") == 80.0
+    assert project_scoring.project_priority("M31", projects) == 80.0
 
 def test_closure_bonus_for_remaining_uses_session_capacity():
     assert (

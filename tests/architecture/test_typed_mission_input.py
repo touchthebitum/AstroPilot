@@ -239,7 +239,9 @@ def test_expected_gain_uses_existing_session_portfolio_gain(
     monkeypatch.setattr(
         astro_score,
         "session_portfolio_gain",
-        lambda target, hours: 7.5 if (target, hours) == ("M31", 1.5) else -1,
+        lambda target, hours, projects: (
+            7.5 if (target, hours) == ("M31", 1.5) else -1
+        ),
     )
 
     mission_input = astro_score.build_mission_input(evaluation)
