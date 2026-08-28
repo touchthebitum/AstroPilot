@@ -120,6 +120,37 @@ def test_invalid_profile_container_exits_cleanly(
 
 
 @pytest.mark.parametrize(
+    "invalid_value",
+    ["heavy", True, -1, float("inf"), float("nan")],
+)
+def test_invalid_decision_weight_exits_cleanly(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    invalid_value,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps({"decision_weights": {"cloud": invalid_value}}),
+        encoding="utf-8",
+    )
+    original_content = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(["--object", "M31"])
+
+    captured = capsys.readouterr()
+
+    assert exit_info.value.code == 2
+    assert captured.out == ""
+    assert "decision_weights['cloud']" in captured.err
+    assert "nombre fini positif ou nul" in captured.err
+    assert "Traceback" not in captured.err
+    assert profile_path.read_bytes() == original_content
+
+
+@pytest.mark.parametrize(
     ("profile", "expected_location", "expected_type"),
     [
         (

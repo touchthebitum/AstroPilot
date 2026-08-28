@@ -59,6 +59,13 @@ def validate_user_profile(profile, profile_path: Path):
                 f"{profile_path} : {expected_label} attendu."
             )
 
+    for rule_key, weight in profile.get("decision_weights", {}).items():
+        if not is_finite_number(weight) or weight < 0:
+            raise UserProfileError(
+                f"Champ decision_weights[{rule_key!r}] invalide dans "
+                f"{profile_path} : nombre fini positif ou nul attendu."
+            )
+
     if "location" in profile:
         location = profile["location"]
 
