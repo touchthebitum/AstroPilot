@@ -194,6 +194,70 @@ def test_invalid_preference_weight_exits_cleanly(
 
 
 @pytest.mark.parametrize(
+    ("field_name", "invalid_value", "expected_message"),
+    [
+        ("productive_hours_per_night", "four", "strictement positif"),
+        ("productive_hours_per_night", None, "strictement positif"),
+        ("productive_hours_per_night", True, "strictement positif"),
+        ("productive_hours_per_night", 0, "strictement positif"),
+        ("productive_hours_per_night", -1, "strictement positif"),
+        (
+            "productive_hours_per_night",
+            float("inf"),
+            "strictement positif",
+        ),
+        (
+            "productive_hours_per_night",
+            float("nan"),
+            "strictement positif",
+        ),
+        ("observing_nights_per_week", "two", "compris entre 0 et 7"),
+        ("observing_nights_per_week", None, "compris entre 0 et 7"),
+        ("observing_nights_per_week", True, "compris entre 0 et 7"),
+        ("observing_nights_per_week", -1, "compris entre 0 et 7"),
+        ("observing_nights_per_week", 8, "compris entre 0 et 7"),
+        (
+            "observing_nights_per_week",
+            float("inf"),
+            "compris entre 0 et 7",
+        ),
+        (
+            "observing_nights_per_week",
+            float("nan"),
+            "compris entre 0 et 7",
+        ),
+    ],
+)
+def test_invalid_capacity_preference_exits_cleanly(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    field_name,
+    invalid_value,
+    expected_message,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps({"preferences": {field_name: invalid_value}}),
+        encoding="utf-8",
+    )
+    original_content = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(["--object", "M31"])
+
+    captured = capsys.readouterr()
+
+    assert exit_info.value.code == 2
+    assert captured.out == ""
+    assert f"preferences.{field_name}" in captured.err
+    assert expected_message in captured.err
+    assert "Traceback" not in captured.err
+    assert profile_path.read_bytes() == original_content
+
+
+@pytest.mark.parametrize(
     ("profile", "expected_location", "expected_type"),
     [
         (

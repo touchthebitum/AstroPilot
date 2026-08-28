@@ -78,6 +78,30 @@ def validate_user_profile(profile, profile_path: Path):
                 f"{profile_path} : nombre fini positif ou nul attendu."
             )
 
+    if "productive_hours_per_night" in preferences:
+        productive_hours = preferences["productive_hours_per_night"]
+        if (
+            not is_finite_number(productive_hours)
+            or productive_hours <= 0
+        ):
+            raise UserProfileError(
+                "Champ preferences.productive_hours_per_night invalide "
+                f"dans {profile_path} : nombre fini strictement "
+                "positif attendu."
+            )
+
+    if "observing_nights_per_week" in preferences:
+        observing_nights = preferences["observing_nights_per_week"]
+        if (
+            not is_finite_number(observing_nights)
+            or not 0 <= observing_nights <= 7
+        ):
+            raise UserProfileError(
+                "Champ preferences.observing_nights_per_week invalide "
+                f"dans {profile_path} : nombre fini compris entre "
+                "0 et 7 attendu."
+            )
+
     if "location" in profile:
         location = profile["location"]
 
