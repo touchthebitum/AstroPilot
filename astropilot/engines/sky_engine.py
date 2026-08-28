@@ -4,7 +4,10 @@ from astral import moon
 from astral.moon import moonrise, moonset
 from astral.sun import sun
 from astral import moon
-from astropilot.user_profile import load_user_profile
+from astropilot.user_profile import (
+    load_user_profile,
+    resolve_minimum_altitude_deg,
+)
 from astropy.coordinates import SkyCoord, get_body, EarthLocation, AltAz
 from astropy.time import Time
 from astropy.utils import iers
@@ -552,6 +555,10 @@ class SkyEngine:
         if not windows:
             return []
 
+        min_alt = resolve_minimum_altitude_deg(
+            profile.get("preferences", {})
+        )
+
         candidates = []
 
         for window in windows:
@@ -567,10 +574,6 @@ class SkyEngine:
             hour_details = []
             moon_impacts = []
             moon_penalties = []
-
-            profile = load_user_profile()
-
-            min_alt = profile.get("preferences",{}).get("min_altitude_deg",30)
 
             for h in window:
                 #target_obj = TARGET_OBJECTS[target_object]

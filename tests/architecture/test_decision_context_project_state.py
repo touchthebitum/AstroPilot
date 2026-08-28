@@ -58,6 +58,7 @@ def test_decision_context_uses_selected_project_state(
         profile={
             "preferences": {
                 "bortle": 3,
+                "min_altitude_deg": 42,
                 "productive_hours_per_night": 5.5,
             },
             "sessions": [
@@ -95,6 +96,7 @@ def test_decision_context_uses_selected_project_state(
     assert context.portfolio.productive_hours_per_night == 4.0
     assert context.portfolio.night_capacity_source == "history"
     assert context.portfolio.historical_nights == 3
+    assert context.preferences.minimum_altitude_deg == 42
 
 def test_decision_context_session_times_are_timezone_aware():
     context = astro_score.build_decision_context(
