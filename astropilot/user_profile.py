@@ -103,6 +103,18 @@ def validate_user_profile(profile, profile_path: Path):
                 "0 et 7 attendu."
             )
 
+    if "window_size" in preferences:
+        window_size = preferences["window_size"]
+        if (
+            not isinstance(window_size, int)
+            or isinstance(window_size, bool)
+            or window_size <= 0
+        ):
+            raise UserProfileError(
+                f"Champ preferences.window_size invalide dans "
+                f"{profile_path} : entier strictement positif attendu."
+            )
+
     if "location" in profile:
         location = profile["location"]
 
