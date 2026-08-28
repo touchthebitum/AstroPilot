@@ -127,6 +127,18 @@ def validate_user_profile(profile, profile_path: Path):
                 "0 et 90 attendu."
             )
 
+    if "bortle" in preferences:
+        bortle = preferences["bortle"]
+        if (
+            not isinstance(bortle, int)
+            or isinstance(bortle, bool)
+            or not 1 <= bortle <= 9
+        ):
+            raise UserProfileError(
+                f"Champ preferences.bortle invalide dans {profile_path} : "
+                "entier compris entre 1 et 9 attendu."
+            )
+
     if "location" in profile:
         location = profile["location"]
 
