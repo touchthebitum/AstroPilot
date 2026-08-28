@@ -99,6 +99,7 @@ from astropilot.user_profile import (
     load_user_profile,
     get_active_equipment,
     save_user_profile,
+    resolve_minimum_altitude_deg,
     UserProfileError,
 )
 
@@ -1221,9 +1222,8 @@ def build_decision_context(
             "project_weight",
             0.3,
         ),
-        minimum_altitude_deg=profile.get("preferences", {}).get(
-            "minimum_altitude_deg",
-            30,
+        minimum_altitude_deg=resolve_minimum_altitude_deg(
+            profile.get("preferences", {}),
         ),
         minimum_sqm=profile.get("preferences", {}).get(
             "min_sqm",

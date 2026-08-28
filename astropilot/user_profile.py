@@ -40,6 +40,13 @@ def is_finite_number(value) -> bool:
     )
 
 
+def resolve_minimum_altitude_deg(preferences) -> float:
+    return preferences.get(
+        "min_altitude_deg",
+        preferences.get("minimum_altitude_deg", 30),
+    )
+
+
 def validate_user_profile(profile, profile_path: Path):
     if not isinstance(profile, dict):
         raise UserProfileError(

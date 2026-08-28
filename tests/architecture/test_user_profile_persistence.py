@@ -56,6 +56,31 @@ def test_user_data_dir_defaults_to_legacy_path(tmp_path, monkeypatch):
     assert user_profile.get_user_data_dir() == tmp_path
 
 
+@pytest.mark.parametrize(
+    ("preferences", "expected_altitude"),
+    [
+        ({}, 30),
+        ({"min_altitude_deg": 25}, 25),
+        ({"minimum_altitude_deg": 35}, 35),
+        (
+            {
+                "min_altitude_deg": 40,
+                "minimum_altitude_deg": 40,
+            },
+            40,
+        ),
+    ],
+)
+def test_minimum_altitude_preference_aliases(
+    preferences,
+    expected_altitude,
+):
+    assert (
+        user_profile.resolve_minimum_altitude_deg(preferences)
+        == expected_altitude
+    )
+
+
 def test_save_user_profile_uses_configured_data_dir(
     tmp_path,
     monkeypatch,
