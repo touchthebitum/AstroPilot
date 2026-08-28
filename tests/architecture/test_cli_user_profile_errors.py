@@ -289,6 +289,53 @@ def test_invalid_window_size_exits_cleanly(
 
 
 @pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("min_altitude_deg", "thirty"),
+        ("min_altitude_deg", None),
+        ("min_altitude_deg", True),
+        ("min_altitude_deg", -1),
+        ("min_altitude_deg", 91),
+        ("min_altitude_deg", float("inf")),
+        ("min_altitude_deg", float("nan")),
+        ("minimum_altitude_deg", "thirty"),
+        ("minimum_altitude_deg", None),
+        ("minimum_altitude_deg", True),
+        ("minimum_altitude_deg", -1),
+        ("minimum_altitude_deg", 91),
+        ("minimum_altitude_deg", float("inf")),
+        ("minimum_altitude_deg", float("nan")),
+    ],
+)
+def test_invalid_altitude_preference_exits_cleanly(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    field_name,
+    invalid_value,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps({"preferences": {field_name: invalid_value}}),
+        encoding="utf-8",
+    )
+    original_content = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(["--object", "M31"])
+
+    captured = capsys.readouterr()
+
+    assert exit_info.value.code == 2
+    assert captured.out == ""
+    assert f"preferences.{field_name}" in captured.err
+    assert "compris entre 0 et 90" in captured.err
+    assert "Traceback" not in captured.err
+    assert profile_path.read_bytes() == original_content
+
+
+@pytest.mark.parametrize(
     ("profile", "expected_location", "expected_type"),
     [
         (

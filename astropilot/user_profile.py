@@ -115,6 +115,18 @@ def validate_user_profile(profile, profile_path: Path):
                 f"{profile_path} : entier strictement positif attendu."
             )
 
+    for field_name in ("min_altitude_deg", "minimum_altitude_deg"):
+        if field_name not in preferences:
+            continue
+
+        altitude = preferences[field_name]
+        if not is_finite_number(altitude) or not 0 <= altitude <= 90:
+            raise UserProfileError(
+                f"Champ preferences.{field_name} invalide dans "
+                f"{profile_path} : nombre fini compris entre "
+                "0 et 90 attendu."
+            )
+
     if "location" in profile:
         location = profile["location"]
 
