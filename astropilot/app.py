@@ -58,6 +58,32 @@ class TonightAstroQualityModel(BaseModel):
     metrics: dict[str, float] = Field(default_factory=dict)
 
 
+class TonightProductivityWindowModel(BaseModel):
+    start_offset_hours: float
+    end_offset_hours: float
+    start_time: str
+    end_time: str
+    productivity: float
+    productive: bool
+    reason: str
+    altitude: float
+    cloud_cover: float
+    moon_penalty: float
+    seeing: float
+
+
+class TonightProductivityModel(BaseModel):
+    astronomical_hours: float
+    productive_hours: float
+    confidence: float
+    cloud_loss: float
+    moon_loss: float
+    altitude_loss: float
+    weather_loss: float
+    display_start_hour: int
+    windows: list[TonightProductivityWindowModel] = Field(default_factory=list)
+
+
 class TonightResponseModel(BaseModel):
     status: str
     night_date: str | None = None
@@ -74,6 +100,7 @@ class TonightResponseModel(BaseModel):
     equipment: list[str] = Field(default_factory=list)
     selected_filter: TonightFilterModel | None = None
     astro_quality: TonightAstroQualityModel | None = None
+    productivity: TonightProductivityModel | None = None
     reasons: list[TonightReasonModel] = Field(default_factory=list)
 
 

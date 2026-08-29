@@ -5,6 +5,10 @@ import pytest
 from decision.filtering.selected_filter import SelectedFilter
 from decision.mission.night_mission import MissionReason, NightMission
 from decision.models.candidate import Candidate
+from decision.night_productivity.night_productivity_result import (
+    NightProductivityResult,
+)
+from decision.night_productivity.night_window import NightWindow
 from decision.opportunity.action import Action
 from decision.opportunity.opportunity import Opportunity
 from decision.quality.astro_quality_result import AstroQualityResult
@@ -62,6 +66,7 @@ def test_partial_results_produce_stable_transport_status(status):
         "equipment": [],
         "selected_filter": None,
         "astro_quality": None,
+        "productivity": None,
         "reasons": [],
     }
 
@@ -90,6 +95,29 @@ def test_complete_result_maps_only_json_compatible_values():
             confidence=0.84,
             limiting_factor="clouds",
             metrics={"altitude": 91.0, "clouds": 64.0},
+        ),
+        productivity=NightProductivityResult(
+            astronomical_hours=6.0,
+            productive_hours=3.5,
+            confidence=0.82,
+            cloud_loss=1.0,
+            moon_loss=0.5,
+            altitude_loss=0.25,
+            weather_loss=0.75,
+            display_start_hour=22,
+            windows=[
+                NightWindow(
+                    start_hour=1.5,
+                    end_hour=4.25,
+                    productivity=0.88,
+                    altitude=67.0,
+                    cloud_cover=12.0,
+                    moon_penalty=0.1,
+                    seeing=1.4,
+                    productive=True,
+                    reason="stable_conditions",
+                )
+            ],
         ),
     )
 
@@ -127,6 +155,31 @@ def test_complete_result_maps_only_json_compatible_values():
         "label": "very_good",
         "limiting_factor": "clouds",
         "metrics": {"altitude": 91.0, "clouds": 64.0},
+    }
+    assert response["productivity"] == {
+        "astronomical_hours": 6.0,
+        "productive_hours": 3.5,
+        "confidence": 0.82,
+        "cloud_loss": 1.0,
+        "moon_loss": 0.5,
+        "altitude_loss": 0.25,
+        "weather_loss": 0.75,
+        "display_start_hour": 22,
+        "windows": [
+            {
+                "start_offset_hours": 1.5,
+                "end_offset_hours": 4.25,
+                "start_time": "23:30",
+                "end_time": "02:15",
+                "productivity": 0.88,
+                "productive": True,
+                "reason": "stable_conditions",
+                "altitude": 67.0,
+                "cloud_cover": 12.0,
+                "moon_penalty": 0.1,
+                "seeing": 1.4,
+            }
+        ],
     }
     assert response["reasons"] == [
         {

@@ -49,6 +49,41 @@ def _quality_label(score: float) -> str:
     return "low"
 
 
+def _clock_text(hour: float) -> str:
+    total_minutes = round(hour * 60) % (24 * 60)
+    return f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
+
+
+@dataclass(frozen=True)
+class TonightProductivityWindowResponse:
+    start_offset_hours: float
+    end_offset_hours: float
+    start_time: str
+    end_time: str
+    productivity: float
+    productive: bool
+    reason: str
+    altitude: float
+    cloud_cover: float
+    moon_penalty: float
+    seeing: float
+
+
+@dataclass(frozen=True)
+class TonightProductivityResponse:
+    astronomical_hours: float
+    productive_hours: float
+    confidence: float
+    cloud_loss: float
+    moon_loss: float
+    altitude_loss: float
+    weather_loss: float
+    display_start_hour: int
+    windows: list[TonightProductivityWindowResponse] = field(
+        default_factory=list
+    )
+
+
 @dataclass(frozen=True)
 class TonightResponse:
     status: str
@@ -66,6 +101,7 @@ class TonightResponse:
     equipment: list[str] = field(default_factory=list)
     selected_filter: TonightFilterResponse | None = None
     astro_quality: TonightAstroQualityResponse | None = None
+    productivity: TonightProductivityResponse | None = None
     reasons: list[TonightReasonResponse] = field(default_factory=list)
 
     @classmethod
@@ -114,6 +150,37 @@ class TonightResponse:
                 },
             )
 
+        productivity = None
+        if mission is not None and mission.productivity is not None:
+            source = mission.productivity
+            base = source.display_start_hour
+            productivity = TonightProductivityResponse(
+                astronomical_hours=float(source.astronomical_hours),
+                productive_hours=float(source.productive_hours),
+                confidence=float(source.confidence),
+                cloud_loss=float(source.cloud_loss),
+                moon_loss=float(source.moon_loss),
+                altitude_loss=float(source.altitude_loss),
+                weather_loss=float(source.weather_loss),
+                display_start_hour=int(base),
+                windows=[
+                    TonightProductivityWindowResponse(
+                        start_offset_hours=float(window.start_hour),
+                        end_offset_hours=float(window.end_hour),
+                        start_time=_clock_text(base + window.start_hour),
+                        end_time=_clock_text(base + window.end_hour),
+                        productivity=float(window.productivity),
+                        productive=bool(window.productive),
+                        reason=window.reason,
+                        altitude=float(window.altitude),
+                        cloud_cover=float(window.cloud_cover),
+                        moon_penalty=float(window.moon_penalty),
+                        seeing=float(window.seeing),
+                    )
+                    for window in source.windows
+                ],
+            )
+
         return cls(
             status=result.status.value,
             night_date=_text(
@@ -156,6 +223,7 @@ class TonightResponse:
             equipment=list(mission.equipment) if mission is not None else [],
             selected_filter=selected_filter,
             astro_quality=astro_quality,
+            productivity=productivity,
             reasons=(
                 [
                     TonightReasonResponse(
