@@ -32,12 +32,13 @@ Branche de référence actuelle :
 État Git au dernier contrôle :
 
 - `main == origin/main`
-- merge commit : `3bac899`
+- merge commit courant : `aaf472a`
 - PR #82 mergée via `4985b8d`, commit fonctionnel `22e314f`
 - PR #83 mergée via `3bac899`, commit fonctionnel `ad1df86`
-- working tree propre au contrôle de reprise
+- PR #84 mergée via `aaf472a`, tête fonctionnelle `c0ea82f`
+- working tree propre au contrôle post-merge
 - stash de sécurité existant conservé sans modification
-- suite complète post-merge : 600 tests passés
+- suite complète post-merge : 613 tests passés
 
 Le refactoring majeur de l’ancien moteur monolithique est désormais très avancé.
 
@@ -512,10 +513,9 @@ Le mode `calendar` et le mode `portfolio` n’utilisent plus l’ancien moteur c
 
 601 tests passants en suite complète.
 
-État validé sur la branche `introduce-tonight-api` après la première tranche
-API Tonight :
+État validé sur `main` après merge de la PR #84 :
 
-613 tests passants en suite complète.
+613 tests passants en suite complète post-merge.
 
 Principaux contrats architecturaux testés :
 
@@ -615,6 +615,14 @@ La priorité n’est désormais plus de réduire artificiellement la taille du f
 - suite complète : 601 tests passants
 
 ### Première tranche verticale API Tonight
+
+La PR #84 a intégré cette tranche sur `main` :
+
+- merge commit : `aaf472a`
+- tête fonctionnelle : `c0ea82f`
+- 5 commits isolés
+- 13 fichiers modifiés
+- baseline post-merge : 613 tests passants
 
 Le module `astropilot/app.py` expose désormais :
 
