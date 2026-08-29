@@ -32,13 +32,15 @@ Branche de référence actuelle :
 État Git au dernier contrôle :
 
 - `main == origin/main`
-- merge commit courant : `aaf472a`
+- merge commit courant : `6a206e7`
 - PR #82 mergée via `4985b8d`, commit fonctionnel `22e314f`
 - PR #83 mergée via `3bac899`, commit fonctionnel `ad1df86`
 - PR #84 mergée via `aaf472a`, tête fonctionnelle `c0ea82f`
+- PR #85 mergée via `67af9a9`, clôture documentaire de la PR #84
+- PR #86 mergée via `6a206e7`, tête fonctionnelle `b645692`
 - working tree propre au contrôle post-merge
 - stash de sécurité existant conservé sans modification
-- suite complète post-merge : 613 tests passés
+- suite complète post-merge : 619 tests passés
 
 Le refactoring majeur de l’ancien moteur monolithique est désormais très avancé.
 
@@ -517,8 +519,7 @@ Le mode `calendar` et le mode `portfolio` n’utilisent plus l’ancien moteur c
 
 613 tests passants en suite complète post-merge.
 
-État validé sur la branche
-`enrich-tonight-decision-intelligence-api` :
+État validé sur `main` après merge de la PR #86 :
 
 619 tests passants en suite complète.
 
@@ -685,8 +686,12 @@ Le test de bout en bout garantit :
 
 ### Enrichissement Decision Intelligence de l'API Tonight
 
-La branche `enrich-tonight-decision-intelligence-api` étend le contrat
-existant sans modifier les moteurs de calcul.
+La PR #86 a intégré cet enrichissement sur `main` sans modifier les moteurs de
+calcul :
+
+- merge commit : `6a206e7`
+- tête fonctionnelle : `b645692`
+- baseline post-merge : 619 tests passants
 
 Le bloc AQI expose :
 
@@ -722,7 +727,9 @@ Le scénario HTTP de bout en bout traverse le composition root de production
 et vérifie le JSON riche. Le schéma OpenAPI contient les modèles imbriqués
 destinés aux futurs clients mobiles.
 
-Baseline de la branche : 619 tests passants.
+Cette tranche complète la première API Tonight avec une intelligence
+décisionnelle directement exploitable par les futurs clients mobiles, tout en
+conservant les moteurs métier comme sources canoniques.
 
 
 ## 20. Sprint feature-opportunity-engine — bilan historique
