@@ -104,6 +104,20 @@ class TonightPostponementRiskModel(BaseModel):
     season_remaining_days: int | None = None
 
 
+class TonightSeasonModel(BaseModel):
+    analysis_name: str
+    conclusion: str
+    confidence: float
+    data: dict = Field(default_factory=dict)
+
+
+class TonightExplanationModel(BaseModel):
+    positives: list[TonightReasonModel] = Field(default_factory=list)
+    warnings: list[TonightReasonModel] = Field(default_factory=list)
+    information: list[TonightReasonModel] = Field(default_factory=list)
+    limiting_factors: list[str] = Field(default_factory=list)
+
+
 class TonightResponseModel(BaseModel):
     status: str
     night_date: str | None = None
@@ -123,6 +137,8 @@ class TonightResponseModel(BaseModel):
     productivity: TonightProductivityModel | None = None
     dew_risk: TonightDewRiskModel | None = None
     postponement_risk: TonightPostponementRiskModel | None = None
+    season: TonightSeasonModel | None = None
+    explanation: TonightExplanationModel | None = None
     reasons: list[TonightReasonModel] = Field(default_factory=list)
 
 

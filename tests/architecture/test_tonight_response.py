@@ -3,6 +3,7 @@ from datetime import date, datetime, timezone
 import pytest
 
 from decision.filtering.selected_filter import SelectedFilter
+from decision.intelligence.analysis_result import AnalysisResult
 from decision.mission.night_mission import MissionReason, NightMission
 from decision.models.candidate import Candidate
 from decision.night_productivity.night_productivity_result import (
@@ -72,6 +73,8 @@ def test_partial_results_produce_stable_transport_status(status):
         "productivity": None,
         "dew_risk": None,
         "postponement_risk": None,
+        "season": None,
+        "explanation": None,
         "reasons": [],
     }
 
@@ -88,7 +91,11 @@ def test_complete_result_maps_only_json_compatible_values():
     mission = NightMission(
         target="Andromeda",
         confidence=0.87,
-        reasons=[MissionReason("Excellent altitude", "success", "72°")],
+        reasons=[
+            MissionReason("Excellent altitude", "success", "72°"),
+            MissionReason("Thin cloud risk", "warning"),
+            MissionReason("Broadband session", "info"),
+        ],
         equipment=["Widefield", "ASI2600MC"],
         window_start=datetime(2026, 9, 1, 22, 30, tzinfo=timezone.utc),
         window_end=datetime(2026, 9, 2, 2, 0, tzinfo=timezone.utc),
@@ -145,6 +152,15 @@ def test_complete_result_maps_only_json_compatible_values():
                 night_capacity_source="history",
                 historical_nights=6,
             ),
+        ),
+        season_analysis=AnalysisResult(
+            analysis_name="season",
+            conclusion="Prime autumn window",
+            confidence=0.89,
+            data={
+                "peak_date": date(2026, 10, 12),
+                "months": ("September", "October"),
+            },
         ),
     )
 
@@ -226,12 +242,55 @@ def test_complete_result_maps_only_json_compatible_values():
         "favorable_nights": 2,
         "season_remaining_days": 21,
     }
+    assert response["season"] == {
+        "analysis_name": "season",
+        "conclusion": "Prime autumn window",
+        "confidence": 0.89,
+        "data": {
+            "peak_date": "2026-10-12",
+            "months": ["September", "October"],
+        },
+    }
+    assert response["explanation"] == {
+        "positives": [
+            {
+                "title": "Excellent altitude",
+                "severity": "success",
+                "value": "72°",
+            }
+        ],
+        "warnings": [
+            {
+                "title": "Thin cloud risk",
+                "severity": "warning",
+                "value": None,
+            }
+        ],
+        "information": [
+            {
+                "title": "Broadband session",
+                "severity": "info",
+                "value": None,
+            }
+        ],
+        "limiting_factors": ["clouds"],
+    }
     assert response["reasons"] == [
         {
             "title": "Excellent altitude",
             "severity": "success",
             "value": "72°",
-        }
+        },
+        {
+            "title": "Thin cloud risk",
+            "severity": "warning",
+            "value": None,
+        },
+        {
+            "title": "Broadband session",
+            "severity": "info",
+            "value": None,
+        },
     ]
 
 

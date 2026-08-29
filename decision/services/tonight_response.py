@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import date, datetime
+from enum import Enum
 
 from decision.services.tonight_application_service import TonightResult
 
@@ -11,6 +12,22 @@ def _text(value) -> str | None:
         return None
     if isinstance(value, (date, datetime)):
         return value.isoformat()
+    return str(value)
+
+
+def _json_value(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return _json_value(value.value)
+    if is_dataclass(value):
+        return _json_value(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_value(item) for item in value]
     return str(value)
 
 
@@ -107,6 +124,22 @@ class TonightPostponementRiskResponse:
 
 
 @dataclass(frozen=True)
+class TonightSeasonResponse:
+    analysis_name: str
+    conclusion: str
+    confidence: float
+    data: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TonightExplanationResponse:
+    positives: list[TonightReasonResponse] = field(default_factory=list)
+    warnings: list[TonightReasonResponse] = field(default_factory=list)
+    information: list[TonightReasonResponse] = field(default_factory=list)
+    limiting_factors: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class TonightResponse:
     status: str
     night_date: str | None = None
@@ -126,6 +159,8 @@ class TonightResponse:
     productivity: TonightProductivityResponse | None = None
     dew_risk: TonightDewRiskResponse | None = None
     postponement_risk: TonightPostponementRiskResponse | None = None
+    season: TonightSeasonResponse | None = None
+    explanation: TonightExplanationResponse | None = None
     reasons: list[TonightReasonResponse] = field(default_factory=list)
 
     @classmethod
@@ -248,6 +283,53 @@ class TonightResponse:
                 ),
             )
 
+        season = None
+        if mission is not None and mission.season_analysis is not None:
+            source = mission.season_analysis
+            season = TonightSeasonResponse(
+                analysis_name=source.analysis_name,
+                conclusion=source.conclusion,
+                confidence=float(source.confidence),
+                data=_json_value(source.data),
+            )
+
+        reasons = (
+            [
+                TonightReasonResponse(
+                    title=reason.title,
+                    severity=reason.severity,
+                    value=reason.value,
+                )
+                for reason in mission.reasons
+            ]
+            if mission is not None
+            else []
+        )
+        explanation = None
+        if mission is not None:
+            limiting_factors = []
+            if (
+                mission.astro_quality is not None
+                and mission.astro_quality.limiting_factor is not None
+            ):
+                limiting_factors.append(
+                    mission.astro_quality.limiting_factor
+                )
+            explanation = TonightExplanationResponse(
+                positives=[
+                    reason for reason in reasons if reason.severity == "success"
+                ],
+                warnings=[
+                    reason for reason in reasons if reason.severity == "warning"
+                ],
+                information=[
+                    reason
+                    for reason in reasons
+                    if reason.severity not in {"success", "warning"}
+                ],
+                limiting_factors=limiting_factors,
+            )
+
         return cls(
             status=result.status.value,
             night_date=_text(
@@ -293,18 +375,9 @@ class TonightResponse:
             productivity=productivity,
             dew_risk=dew_risk,
             postponement_risk=postponement_risk,
-            reasons=(
-                [
-                    TonightReasonResponse(
-                        title=reason.title,
-                        severity=reason.severity,
-                        value=reason.value,
-                    )
-                    for reason in mission.reasons
-                ]
-                if mission is not None
-                else []
-            ),
+            season=season,
+            explanation=explanation,
+            reasons=reasons,
         )
 
     def to_dict(self) -> dict:
