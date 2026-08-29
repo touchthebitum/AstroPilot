@@ -241,15 +241,15 @@ def validate_weather_payload(
             break
 
     if len(parsed_times) == hour_count:
+        utc_times = [value.astimezone(timezone.utc) for value in parsed_times]
         if any(
             current <= previous
-            for previous, current in zip(parsed_times, parsed_times[1:])
+            for previous, current in zip(utc_times, utc_times[1:])
         ):
             issues.append("non_monotonic_hourly_time")
         elif any(
-            current.astimezone(timezone.utc) - previous.astimezone(timezone.utc)
-            != timedelta(hours=1)
-            for previous, current in zip(parsed_times, parsed_times[1:])
+            current - previous != timedelta(hours=1)
+            for previous, current in zip(utc_times, utc_times[1:])
         ):
             issues.append("non_hourly_time_cadence")
 
