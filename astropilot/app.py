@@ -140,6 +140,21 @@ class TonightExplanationModel(BaseModel):
     limiting_factors: list[str] = Field(default_factory=list)
 
 
+class TonightTaskModel(BaseModel):
+    start: str
+    end: str
+    title: str
+    description: str = ""
+    priority: int = 0
+
+
+class TonightAdviceModel(BaseModel):
+    time: str
+    priority: str
+    category: str
+    message: str
+
+
 class TonightResponseModel(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -238,6 +253,23 @@ class TonightResponseModel(BaseModel):
                             "value": "high",
                         }
                     ],
+                    "tasks": [
+                        {
+                            "start": "T-30 min",
+                            "end": "T-20 min",
+                            "title": "Installer le matériel",
+                            "description": "",
+                            "priority": 0,
+                        }
+                    ],
+                    "advices": [
+                        {
+                            "time": "Avant installation",
+                            "priority": "MEDIUM",
+                            "category": "weather",
+                            "message": "Check the latest weather forecast.",
+                        }
+                    ],
                 }
             ]
         }
@@ -264,6 +296,8 @@ class TonightResponseModel(BaseModel):
     season: TonightSeasonModel | None = None
     explanation: TonightExplanationModel | None = None
     reasons: list[TonightReasonModel] = Field(default_factory=list)
+    tasks: list[TonightTaskModel] = Field(default_factory=list)
+    advices: list[TonightAdviceModel] = Field(default_factory=list)
 
 
 def _production_service_factory():

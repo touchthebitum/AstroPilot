@@ -149,13 +149,77 @@
 
         <footer class="decision-footer">
           <p id="decision-footnote">Décision calculée pour votre configuration actuelle.</p>
-          <button class="mission-button" type="button" disabled aria-describedby="mission-soon">
+          <button class="mission-button" id="open-mission" type="button">
             Voir ma mission
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
           </button>
-          <span id="mission-soon" class="soon-badge">Bientôt</span>
         </footer>
       </article>
+
+      <dialog class="mission-dialog" id="mission-dialog" aria-labelledby="mission-title">
+        <div class="mission-surface">
+          <header class="mission-header">
+            <div>
+              <p class="eyebrow">Ma mission</p>
+              <h2 id="mission-title">—</h2>
+              <p id="mission-summary">—</p>
+            </div>
+            <button class="dialog-close" id="close-mission" type="button" aria-label="Fermer la mission">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+            </button>
+          </header>
+
+          <div class="mission-overview">
+            <div>
+              <span>Fenêtre</span>
+              <strong id="mission-window">—</strong>
+            </div>
+            <div>
+              <span>Temps conseillé</span>
+              <strong id="mission-duration">—</strong>
+            </div>
+            <div>
+              <span>Gain attendu</span>
+              <strong id="mission-gain">—</strong>
+            </div>
+          </div>
+
+          <div class="mission-columns">
+            <section class="mission-section" aria-labelledby="setup-title">
+              <div class="mission-section-heading">
+                <span aria-hidden="true">01</span>
+                <h3 id="setup-title">Préparer la configuration</h3>
+              </div>
+              <ul class="setup-list" id="mission-equipment"></ul>
+              <div class="filter-callout" id="mission-filter-wrap">
+                <span>Filtre</span>
+                <strong id="mission-filter">—</strong>
+              </div>
+            </section>
+
+            <section class="mission-section" aria-labelledby="plan-title">
+              <div class="mission-section-heading">
+                <span aria-hidden="true">02</span>
+                <h3 id="plan-title">Suivre le plan de nuit</h3>
+              </div>
+              <ol class="mission-timeline" id="mission-tasks"></ol>
+            </section>
+          </div>
+
+          <section class="mission-section advice-section" aria-labelledby="advice-title">
+            <div class="mission-section-heading">
+              <span aria-hidden="true">03</span>
+              <h3 id="advice-title">Conseils pour cette nuit</h3>
+            </div>
+            <ul class="advice-list" id="mission-advices"></ul>
+          </section>
+
+          <footer class="mission-footer">
+            <p>Cette mission reprend la décision Classic déjà calculée.</p>
+            <button class="secondary-button" id="mission-back" type="button">Retour à Classic</button>
+          </footer>
+        </div>
+      </dialog>
     </main>
 
     <footer class="page-footer">

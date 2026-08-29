@@ -6,6 +6,10 @@ const ui = Object.freeze({
   decision: document.querySelector("#decision"),
   refresh: document.querySelector("#refresh"),
   retry: document.querySelector("#message-retry"),
+  mission: document.querySelector("#mission-dialog"),
+  openMission: document.querySelector("#open-mission"),
+  closeMission: document.querySelector("#close-mission"),
+  missionBack: document.querySelector("#mission-back"),
 });
 
 const state = { currentDecision: null };
@@ -104,6 +108,76 @@ function setList(selector, items, fallback) {
   }
 }
 
+function renderMission(decision) {
+  const start = clock(decision.window_start);
+  const end = clock(decision.window_end);
+  text("#mission-title", decision.target || "Mission de cette nuit");
+  text("#mission-summary", labels.actions[decision.action] || "Session recommandée");
+  text("#mission-window", start && end ? `${start} — ${end}` : "À confirmer");
+  text("#mission-duration", duration(decision.recommended_hours));
+  text("#mission-gain", Number(decision.expected_gain) > 0 ? `+${Math.round(Number(decision.expected_gain))} %` : "Non estimé");
+
+  const equipment = document.querySelector("#mission-equipment");
+  equipment.replaceChildren();
+  const equipmentItems = (decision.equipment || []).filter(Boolean);
+  for (const value of equipmentItems.length ? equipmentItems : ["Configuration non précisée"]) {
+    const item = document.createElement("li");
+    item.textContent = value;
+    if (!equipmentItems.length) item.className = "mission-empty";
+    equipment.append(item);
+  }
+
+  const filter = decision.selected_filter;
+  document.querySelector("#mission-filter-wrap").hidden = !filter;
+  text("#mission-filter", filter?.name || "—");
+
+  const tasks = document.querySelector("#mission-tasks");
+  tasks.replaceChildren();
+  const taskItems = (decision.tasks || []).filter((task) => task?.title);
+  for (const task of taskItems) {
+    const item = document.createElement("li");
+    const time = document.createElement("span");
+    const copy = document.createElement("div");
+    const title = document.createElement("strong");
+    time.className = "task-time";
+    copy.className = "task-copy";
+    time.textContent = `${task.start} → ${task.end}`;
+    title.textContent = task.title;
+    copy.append(title);
+    if (task.description) {
+      const description = document.createElement("small");
+      description.textContent = task.description;
+      copy.append(description);
+    }
+    item.append(time, copy);
+    tasks.append(item);
+  }
+  if (!taskItems.length) {
+    const item = document.createElement("li");
+    item.className = "mission-empty";
+    item.textContent = "Plan opérationnel non disponible.";
+    tasks.append(item);
+  }
+
+  const advices = document.querySelector("#mission-advices");
+  advices.replaceChildren();
+  const adviceItems = (decision.advices || []).filter((advice) => advice?.message);
+  for (const advice of adviceItems) {
+    const item = document.createElement("li");
+    const time = document.createElement("span");
+    time.className = "advice-time";
+    time.textContent = advice.time || "Cette nuit";
+    item.append(time, document.createTextNode(advice.message));
+    advices.append(item);
+  }
+  if (!adviceItems.length) {
+    const item = document.createElement("li");
+    item.className = "mission-empty";
+    item.textContent = "Aucun conseil particulier pour cette nuit.";
+    advices.append(item);
+  }
+}
+
 function renderDecision(decision) {
   state.currentDecision = decision;
 
@@ -155,6 +229,7 @@ function renderDecision(decision) {
 
   setList("#insights-list", [...positives, ...information], "Aucune explication supplémentaire disponible.");
   setList("#risks-list", risks, "Aucun risque essentiel signalé.");
+  renderMission(decision);
   show("decision");
 }
 
@@ -225,4 +300,12 @@ async function loadTonight() {
 
 ui.refresh.addEventListener("click", loadTonight);
 ui.retry.addEventListener("click", loadTonight);
+ui.openMission.addEventListener("click", () => {
+  if (state.currentDecision) ui.mission.showModal();
+});
+ui.closeMission.addEventListener("click", () => ui.mission.close());
+ui.missionBack.addEventListener("click", () => ui.mission.close());
+ui.mission.addEventListener("click", (event) => {
+  if (event.target === ui.mission) ui.mission.close();
+});
 loadTonight();

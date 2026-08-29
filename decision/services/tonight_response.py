@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import date, datetime
 from enum import Enum
 
+from decision.advisor.night_advisor import NightAdvisor
 from decision.services.tonight_application_service import TonightResult
 
 
@@ -140,6 +141,23 @@ class TonightExplanationResponse:
 
 
 @dataclass(frozen=True)
+class TonightTaskResponse:
+    start: str
+    end: str
+    title: str
+    description: str = ""
+    priority: int = 0
+
+
+@dataclass(frozen=True)
+class TonightAdviceResponse:
+    time: str
+    priority: str
+    category: str
+    message: str
+
+
+@dataclass(frozen=True)
 class TonightResponse:
     status: str
     night_date: str | None = None
@@ -162,6 +180,8 @@ class TonightResponse:
     season: TonightSeasonResponse | None = None
     explanation: TonightExplanationResponse | None = None
     reasons: list[TonightReasonResponse] = field(default_factory=list)
+    tasks: list[TonightTaskResponse] = field(default_factory=list)
+    advices: list[TonightAdviceResponse] = field(default_factory=list)
 
     @classmethod
     def from_result(cls, result: TonightResult) -> TonightResponse:
@@ -330,6 +350,34 @@ class TonightResponse:
                 limiting_factors=limiting_factors,
             )
 
+        tasks = (
+            [
+                TonightTaskResponse(
+                    start=task.start,
+                    end=task.end,
+                    title=task.title,
+                    description=task.description,
+                    priority=int(task.priority),
+                )
+                for task in mission.tasks
+            ]
+            if mission is not None
+            else []
+        )
+        advices = (
+            [
+                TonightAdviceResponse(
+                    time=advice.time,
+                    priority=advice.priority,
+                    category=advice.category,
+                    message=advice.message,
+                )
+                for advice in NightAdvisor.build(mission)
+            ]
+            if mission is not None and mission.productivity is not None
+            else []
+        )
+
         return cls(
             status=result.status.value,
             night_date=_text(
@@ -378,6 +426,8 @@ class TonightResponse:
             season=season,
             explanation=explanation,
             reasons=reasons,
+            tasks=tasks,
+            advices=advices,
         )
 
     def to_dict(self) -> dict:

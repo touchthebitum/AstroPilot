@@ -5,6 +5,7 @@ import pytest
 from decision.filtering.selected_filter import SelectedFilter
 from decision.intelligence.analysis_result import AnalysisResult
 from decision.mission.night_mission import MissionReason, NightMission
+from decision.mission.night_planner import NightTask
 from decision.models.candidate import Candidate
 from decision.night_productivity.night_productivity_result import (
     NightProductivityResult,
@@ -76,6 +77,8 @@ def test_partial_results_produce_stable_transport_status(status):
         "season": None,
         "explanation": None,
         "reasons": [],
+        "tasks": [],
+        "advices": [],
     }
 
 
@@ -162,6 +165,14 @@ def test_complete_result_maps_only_json_compatible_values():
                 "months": ("September", "October"),
             },
         ),
+        tasks=[
+            NightTask(
+                "T-30 min",
+                "T-20 min",
+                "Installer le matériel",
+                priority=2,
+            )
+        ],
     )
 
     response = TonightResponse.from_result(
@@ -291,6 +302,23 @@ def test_complete_result_maps_only_json_compatible_values():
             "severity": "info",
             "value": None,
         },
+    ]
+    assert response["tasks"] == [
+        {
+            "start": "T-30 min",
+            "end": "T-20 min",
+            "title": "Installer le matériel",
+            "description": "",
+            "priority": 2,
+        }
+    ]
+    assert response["advices"] == [
+        {
+            "time": "Début",
+            "priority": "INFO",
+            "category": "general",
+            "message": "Aucun conseil particulier pour cette nuit.",
+        }
     ]
 
 

@@ -221,6 +221,8 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
         "TonightPostponementRiskModel",
         "TonightSeasonModel",
         "TonightExplanationModel",
+        "TonightTaskModel",
+        "TonightAdviceModel",
     }.issubset(schemas)
 
     tonight_response = schemas["TonightResponseModel"]["properties"]
@@ -233,6 +235,12 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
     assert tonight_response["postponement_risk"]["anyOf"][0][
         "$ref"
     ].endswith("TonightPostponementRiskModel")
+    assert tonight_response["tasks"]["items"]["$ref"].endswith(
+        "TonightTaskModel"
+    )
+    assert tonight_response["advices"]["items"]["$ref"].endswith(
+        "TonightAdviceModel"
+    )
 
 
 def test_openapi_documents_tonight_request_and_available_response_examples():
@@ -256,6 +264,8 @@ def test_openapi_documents_tonight_request_and_available_response_examples():
     assert response_example["productivity"]["windows"][0]["productive"] is True
     assert response_example["postponement_risk"]["level"] == "medium"
     assert response_example["season"]["analysis_name"] == "season_window"
+    assert response_example["tasks"][0]["title"] == "Installer le matériel"
+    assert response_example["advices"][0]["category"] == "weather"
 
 
 def test_openapi_documents_tonight_operation_and_error_examples():
