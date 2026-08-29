@@ -27,6 +27,8 @@ def test_root_serves_tonight_classic_ui():
     assert response.headers["content-type"].startswith("text/html")
     assert "Ce soir — AstroPilot" in response.text
     assert "Voir ma mission" in response.text
+    assert "Données météo par Open-Meteo.com" in response.text
+    assert 'id="weather-trust"' in response.text
     assert 'id="mission-dialog"' in response.text
     assert "confidence-value" not in response.text
     assert 'src="/ui/app.js"' in response.text
@@ -45,6 +47,9 @@ def test_tonight_ui_assets_are_served():
     assert script.text.count("fetch(") == 1
     assert "currentDecision" in script.text
     assert "target_common_name" in script.text
+    assert "weather_trust" in script.text
+    assert 'detail?.code === "weather_invalid"' in script.text
+    assert 'detail?.code === "weather_insufficient"' in script.text
     assert "productive_hours ?? decision.recommended_hours" in script.text
     assert "showModal()" in script.text
 

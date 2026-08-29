@@ -194,6 +194,8 @@ button { color: inherit; }
 .mission-button { cursor: pointer; }
 .mission-button:hover { color: var(--ink); border-color: rgba(103,228,209,.35); background: var(--cyan-soft); }
 .page-footer { display: flex; gap: 9px; justify-content: center; padding: 36px 20px 45px; color: #4e5d72; font-size: 11px; letter-spacing: .05em; }
+.page-footer a { color: inherit; }
+.weather-trust { margin: 7px 0 0; color: #718197; font-size: 11px; letter-spacing: .02em; }
 
 .mission-dialog {
   width: min(880px, calc(100% - 32px));

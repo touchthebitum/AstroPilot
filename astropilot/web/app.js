@@ -187,6 +187,7 @@ function renderDecision(decision) {
   const qualityScore = quality ? Math.round(Number(quality.score)) : null;
   const qualityCopy = labels.quality[quality?.label] || ["Non évaluée", "L’indice de qualité n’est pas disponible pour cette décision."];
   const limiting = quality?.limiting_factor;
+  const weatherTrust = decision.weather_trust;
 
   text("#night-date", dateLabel(decision.night_date));
   text("#recommendation", labels.actions[decision.action] || "Session recommandée");
@@ -202,6 +203,13 @@ function renderDecision(decision) {
   text("#quality-title", qualityCopy[0]);
   text("#quality-summary", qualityCopy[1]);
   text("#limiting-factor", limiting ? (labels.factors[limiting] || limiting.replaceAll("_", " ")) : "Aucun identifié");
+  if (weatherTrust?.validation_status === "validated") {
+    const retrieved = clock(weatherTrust.retrieved_at_utc);
+    const retrieval = retrieved ? ` · récupérées à ${retrieved}` : "";
+    text("#weather-trust", `${weatherTrust.provider} · réponse validée · ${weatherTrust.hour_count} h couvertes${retrieval}`);
+  } else {
+    text("#weather-trust", "Provenance météo non disponible.");
+  }
 
   const circumference = 2 * Math.PI * 48;
   const progress = document.querySelector("#quality-progress");
@@ -245,6 +253,12 @@ function normalizeError(response, payload) {
   if (response.status === 503) {
     if (detail?.code === "weather_unavailable") {
       return ["Météo temporairement indisponible", "AstroPilot ne peut pas encore lire les conditions de votre site. Réessayez dans un instant."];
+    }
+    if (detail?.code === "weather_invalid") {
+      return ["Données météo rejetées", "AstroPilot a reçu une réponse météo, mais ses contrôles de cohérence ont échoué. Aucune décision n’est calculée."];
+    }
+    if (detail?.code === "weather_insufficient") {
+      return ["Prévisions météo insuffisantes", "La couverture reçue ne permet pas de préparer la nuit avec assez de données. Aucune décision n’est calculée."];
     }
     return ["Prévisions temporairement indisponibles", "La prévision de cette nuit n’est pas accessible pour le moment. Réessayez dans un instant."];
   }

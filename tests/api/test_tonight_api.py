@@ -12,6 +12,10 @@ from decision.services.tonight_application_service import (
     TonightResult,
     TonightStatus,
 )
+from decision.weather.weather_ingress import (
+    WeatherIngressError,
+    WeatherInsufficientError,
+)
 
 
 def make_result():
@@ -145,6 +149,49 @@ def test_weather_unavailable_is_a_service_error_before_evaluation():
     assert response.json()["detail"]["code"] == "weather_unavailable"
 
 
+def test_invalid_weather_is_rejected_before_evaluation():
+    class Service:
+        def evaluate(self, **kwargs):
+            raise AssertionError("service must not run with invalid weather")
+
+    def invalid_weather(lat, lon):
+        raise WeatherIngressError(["invalid_unit_wind_speed_10m"])
+
+    client = TestClient(
+        create_app(
+            service_factory=lambda: Service(),
+            weather_provider=invalid_weather,
+            profile_provider=lambda: {},
+        )
+    )
+
+    response = client.post("/v1/tonight", json={})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "weather_invalid",
+        "message": "Weather data failed validation.",
+    }
+
+
+def test_insufficient_weather_has_a_distinct_service_error():
+    def insufficient_weather(lat, lon):
+        raise WeatherInsufficientError(["hourly_coverage_below_24"])
+
+    client = TestClient(
+        create_app(
+            service_factory=lambda: None,
+            weather_provider=insufficient_weather,
+            profile_provider=lambda: {},
+        )
+    )
+
+    response = client.post("/v1/tonight", json={})
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "weather_insufficient"
+
+
 def test_forecast_unavailable_is_a_service_error():
     client = make_client(
         result=TonightResult(
@@ -224,6 +271,7 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
         "TonightExplanationModel",
         "TonightTaskModel",
         "TonightAdviceModel",
+        "TonightWeatherTrustModel",
     }.issubset(schemas)
 
     tonight_response = schemas["TonightResponseModel"]["properties"]
@@ -241,6 +289,9 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
     )
     assert tonight_response["advices"]["items"]["$ref"].endswith(
         "TonightAdviceModel"
+    )
+    assert tonight_response["weather_trust"]["anyOf"][0]["$ref"].endswith(
+        "TonightWeatherTrustModel"
     )
 
 
@@ -286,3 +337,12 @@ def test_openapi_documents_tonight_operation_and_error_examples():
     ]["weather_unavailable"]["value"]["detail"]["code"] == (
         "weather_unavailable"
     )
+    error_examples = operation["responses"]["503"]["content"][
+        "application/json"
+    ]["examples"]
+    assert error_examples["weather_invalid"]["value"]["detail"]["code"] == (
+        "weather_invalid"
+    )
+    assert error_examples["weather_insufficient"]["value"]["detail"][
+        "code"
+    ] == "weather_insufficient"

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from decision.services.tonight_application_service import TonightStatus
 from decision.services.tonight_response import TonightResponse
+from decision.weather.weather_ingress import WeatherIngressError, WeatherSnapshot
 
 
 class LocationRequest(BaseModel):
@@ -163,6 +164,24 @@ class TonightAdviceModel(BaseModel):
     message: str
 
 
+class TonightWeatherTrustModel(BaseModel):
+    provider: str
+    retrieved_at_utc: str
+    requested_latitude: float
+    requested_longitude: float
+    grid_latitude: float
+    grid_longitude: float
+    grid_distance_km: float
+    elevation_m: float | None = None
+    timezone: str
+    utc_offset_seconds: int
+    valid_from: str
+    valid_until: str
+    hour_count: int = Field(ge=24)
+    completeness: float = Field(ge=0.0, le=1.0)
+    validation_status: Literal["validated"]
+
+
 class TonightResponseModel(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -309,6 +328,7 @@ class TonightResponseModel(BaseModel):
     reasons: list[TonightReasonModel] = Field(default_factory=list)
     tasks: list[TonightTaskModel] = Field(default_factory=list)
     advices: list[TonightAdviceModel] = Field(default_factory=list)
+    weather_trust: TonightWeatherTrustModel | None = None
 
 
 def _production_service_factory():
@@ -390,7 +410,10 @@ def create_app(
                 },
             },
             503: {
-                "description": "Weather or forecast data is unavailable.",
+                "description": (
+                    "Weather is unavailable, invalid or insufficient, or the "
+                    "tonight forecast is unavailable."
+                ),
                 "content": {
                     "application/json": {
                         "examples": {
@@ -402,6 +425,24 @@ def create_app(
                                         "message": (
                                             "Weather data is temporarily unavailable."
                                         ),
+                                    }
+                                },
+                            },
+                            "weather_invalid": {
+                                "summary": "Weather response rejected",
+                                "value": {
+                                    "detail": {
+                                        "code": "weather_invalid",
+                                        "message": "Weather data failed validation.",
+                                    }
+                                },
+                            },
+                            "weather_insufficient": {
+                                "summary": "Weather coverage is insufficient",
+                                "value": {
+                                    "detail": {
+                                        "code": "weather_insufficient",
+                                        "message": "Weather coverage is insufficient.",
                                     }
                                 },
                             },
@@ -448,10 +489,21 @@ def create_app(
             ) from exc
         profile["location"] = location
 
-        weather = weather_provider(
-            location["latitude"],
-            location["longitude"],
-        )
+        try:
+            weather = weather_provider(
+                location["latitude"],
+                location["longitude"],
+            )
+        except WeatherIngressError as exc:
+            message = (
+                "Weather coverage is insufficient."
+                if exc.code == "weather_insufficient"
+                else "Weather data failed validation."
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={"code": exc.code, "message": message},
+            ) from exc
         if weather is None:
             raise HTTPException(
                 status_code=503,
@@ -478,7 +530,10 @@ def create_app(
                 },
             )
 
-        return TonightResponse.from_result(result).to_dict()
+        payload = TonightResponse.from_result(result).to_dict()
+        if isinstance(weather, WeatherSnapshot):
+            payload["weather_trust"] = weather.trust_transport()
+        return payload
 
     return application
 

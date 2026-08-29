@@ -1,0 +1,233 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from math import asin, cos, isfinite, radians, sin, sqrt
+from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+PROVIDER = "Open-Meteo"
+REQUIRED_HOURLY_UNITS = {
+    "cloud_cover": "%",
+    "cloud_cover_low": "%",
+    "cloud_cover_mid": "%",
+    "cloud_cover_high": "%",
+    "precipitation": "mm",
+    "relative_humidity_2m": "%",
+    "visibility": "m",
+    "wind_speed_10m": "km/h",
+    "temperature_2m": "°C",
+}
+VALUE_RANGES = {
+    "cloud_cover": (0.0, 100.0),
+    "cloud_cover_low": (0.0, 100.0),
+    "cloud_cover_mid": (0.0, 100.0),
+    "cloud_cover_high": (0.0, 100.0),
+    "precipitation": (0.0, None),
+    "relative_humidity_2m": (0.0, 100.0),
+    "visibility": (0.0, None),
+    "wind_speed_10m": (0.0, None),
+    "temperature_2m": (-100.0, 60.0),
+}
+MINIMUM_HOURLY_COVERAGE = 24
+MAXIMUM_GRID_DISTANCE_KM = 50.0
+
+
+class WeatherIngressError(ValueError):
+    code = "weather_invalid"
+
+    def __init__(self, issues: list[str]):
+        super().__init__("; ".join(issues))
+        self.issues = tuple(issues)
+
+
+class WeatherInsufficientError(WeatherIngressError):
+    code = "weather_insufficient"
+
+
+@dataclass(frozen=True)
+class WeatherSnapshot:
+    payload: dict[str, Any]
+    provider: str
+    retrieved_at_utc: datetime
+    requested_latitude: float
+    requested_longitude: float
+    grid_latitude: float
+    grid_longitude: float
+    grid_distance_km: float
+    elevation_m: float | None
+    timezone: str
+    utc_offset_seconds: int
+    valid_from: datetime
+    valid_until: datetime
+    hour_count: int
+    completeness: float
+
+    def trust_transport(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "retrieved_at_utc": self.retrieved_at_utc.isoformat(),
+            "requested_latitude": self.requested_latitude,
+            "requested_longitude": self.requested_longitude,
+            "grid_latitude": self.grid_latitude,
+            "grid_longitude": self.grid_longitude,
+            "grid_distance_km": self.grid_distance_km,
+            "elevation_m": self.elevation_m,
+            "timezone": self.timezone,
+            "utc_offset_seconds": self.utc_offset_seconds,
+            "valid_from": self.valid_from.isoformat(),
+            "valid_until": self.valid_until.isoformat(),
+            "hour_count": self.hour_count,
+            "completeness": self.completeness,
+            "validation_status": "validated",
+        }
+
+
+def _number(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and isfinite(float(value))
+    )
+
+
+def _grid_distance_km(lat1: float, lon1: float, lat2: float, lon2: float):
+    earth_radius_km = 6371.0
+    delta_lat = radians(lat2 - lat1)
+    delta_lon = radians(lon2 - lon1)
+    start_lat = radians(lat1)
+    end_lat = radians(lat2)
+    value = (
+        sin(delta_lat / 2) ** 2
+        + cos(start_lat) * cos(end_lat) * sin(delta_lon / 2) ** 2
+    )
+    return 2 * earth_radius_km * asin(sqrt(value))
+
+
+def validate_weather_payload(
+    payload: dict[str, Any],
+    *,
+    requested_latitude: float,
+    requested_longitude: float,
+    requested_timezone: str,
+    retrieved_at_utc: datetime | None = None,
+) -> WeatherSnapshot:
+    if not isinstance(payload, dict):
+        raise WeatherIngressError(["response_not_object"])
+    if payload.get("error") is True:
+        raise WeatherIngressError(["provider_error_response"])
+
+    issues = []
+    for name in ("latitude", "longitude", "utc_offset_seconds"):
+        if not _number(payload.get(name)):
+            issues.append(f"invalid_{name}")
+
+    response_timezone = payload.get("timezone")
+    if response_timezone != requested_timezone:
+        issues.append("unexpected_timezone")
+    try:
+        zone = ZoneInfo(response_timezone) if isinstance(response_timezone, str) else None
+    except ZoneInfoNotFoundError:
+        zone = None
+        issues.append("unknown_timezone")
+
+    units = payload.get("hourly_units")
+    if not isinstance(units, dict):
+        issues.append("missing_hourly_units")
+        units = {}
+    for name, expected in REQUIRED_HOURLY_UNITS.items():
+        if units.get(name) != expected:
+            issues.append(f"invalid_unit_{name}")
+
+    hourly = payload.get("hourly")
+    if not isinstance(hourly, dict):
+        raise WeatherIngressError([*issues, "missing_hourly"])
+    times = hourly.get("time")
+    if not isinstance(times, list):
+        raise WeatherIngressError([*issues, "missing_hourly_time"])
+    hour_count = len(times)
+
+    for name in REQUIRED_HOURLY_UNITS:
+        values = hourly.get(name)
+        if not isinstance(values, list):
+            issues.append(f"missing_series_{name}")
+            continue
+        if len(values) != hour_count:
+            issues.append(f"misaligned_series_{name}")
+            continue
+        lower, upper = VALUE_RANGES[name]
+        for value in values:
+            if not _number(value):
+                issues.append(f"invalid_value_{name}")
+                break
+            numeric = float(value)
+            if numeric < lower or (upper is not None and numeric > upper):
+                issues.append(f"out_of_range_{name}")
+                break
+
+    parsed_times = []
+    for value in times:
+        try:
+            parsed = datetime.fromisoformat(value)
+        except (TypeError, ValueError):
+            issues.append("invalid_hourly_time")
+            break
+        if parsed.tzinfo is not None or zone is None:
+            issues.append("unexpected_hourly_timezone_format")
+            break
+        parsed_times.append(parsed.replace(tzinfo=zone))
+
+    if len(parsed_times) == hour_count:
+        if any(
+            current <= previous
+            for previous, current in zip(parsed_times, parsed_times[1:])
+        ):
+            issues.append("non_monotonic_hourly_time")
+        elif any(
+            current - previous != timedelta(hours=1)
+            for previous, current in zip(parsed_times, parsed_times[1:])
+        ):
+            issues.append("non_hourly_time_cadence")
+
+    if issues:
+        raise WeatherIngressError(issues)
+    if hour_count < MINIMUM_HOURLY_COVERAGE:
+        raise WeatherInsufficientError(["hourly_coverage_below_24"])
+
+    grid_latitude = float(payload["latitude"])
+    grid_longitude = float(payload["longitude"])
+    distance = _grid_distance_km(
+        requested_latitude,
+        requested_longitude,
+        grid_latitude,
+        grid_longitude,
+    )
+    if distance > MAXIMUM_GRID_DISTANCE_KM:
+        raise WeatherIngressError(["weather_grid_too_far"])
+
+    retrieved = retrieved_at_utc or datetime.now(timezone.utc)
+    if retrieved.tzinfo is None:
+        raise WeatherIngressError(["retrieval_time_without_timezone"])
+
+    elevation = payload.get("elevation")
+    if elevation is not None and not _number(elevation):
+        raise WeatherIngressError(["invalid_elevation"])
+
+    return WeatherSnapshot(
+        payload=payload,
+        provider=PROVIDER,
+        retrieved_at_utc=retrieved.astimezone(timezone.utc),
+        requested_latitude=float(requested_latitude),
+        requested_longitude=float(requested_longitude),
+        grid_latitude=grid_latitude,
+        grid_longitude=grid_longitude,
+        grid_distance_km=round(distance, 2),
+        elevation_m=float(elevation) if elevation is not None else None,
+        timezone=response_timezone,
+        utc_offset_seconds=int(payload["utc_offset_seconds"]),
+        valid_from=parsed_times[0],
+        valid_until=parsed_times[-1],
+        hour_count=hour_count,
+        completeness=1.0,
+    )
