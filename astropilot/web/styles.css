@@ -194,9 +194,80 @@ button { color: inherit; }
 .decision-footer p { flex: 1; margin: 0; color: var(--subtle); font-size: 11px; }
 .mission-button { display: inline-flex; gap: 8px; align-items: center; padding: 10px 14px; color: #95a3b5; background: rgba(255,255,255,.025); border: 1px solid var(--line); border-radius: 10px; }
 .mission-button svg { width: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; }
-.mission-button:disabled { cursor: not-allowed; }
-.soon-badge { margin-left: 8px; color: var(--cyan); font-size: 9px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+.mission-button { cursor: pointer; }
+.mission-button:hover { color: var(--ink); border-color: rgba(103,228,209,.35); background: var(--cyan-soft); }
 .page-footer { display: flex; gap: 9px; justify-content: center; padding: 36px 20px 45px; color: #4e5d72; font-size: 11px; letter-spacing: .05em; }
+
+.mission-dialog {
+  width: min(880px, calc(100% - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+}
+
+.mission-dialog::backdrop {
+  background: rgba(1, 6, 12, .82);
+  backdrop-filter: blur(9px);
+}
+
+.mission-surface {
+  overflow: hidden;
+  background: linear-gradient(145deg, #122136, #091321);
+  border: 1px solid var(--line-bright);
+  border-radius: var(--radius);
+  box-shadow: 0 32px 100px rgba(0,0,0,.55);
+}
+
+.mission-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 35px 39px 29px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mission-header h2 { margin: 0; font-family: Georgia, serif; font-size: 38px; font-weight: 400; letter-spacing: -.025em; }
+.mission-header > div > p:last-child { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+.dialog-close { display: grid; width: 38px; height: 38px; place-items: center; background: rgba(255,255,255,.025); border: 1px solid var(--line); border-radius: 50%; cursor: pointer; }
+.dialog-close:hover { background: rgba(255,255,255,.07); border-color: var(--line-bright); }
+.dialog-close svg { width: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+
+.mission-overview { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--line); background: rgba(5,14,25,.34); }
+.mission-overview > div { padding: 20px 39px; }
+.mission-overview > div + div { border-left: 1px solid var(--line); }
+.mission-overview span, .filter-callout span { display: block; margin-bottom: 3px; color: var(--subtle); font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.mission-overview strong { font-family: Georgia, serif; font-size: 19px; font-weight: 400; }
+
+.mission-columns { display: grid; grid-template-columns: .9fr 1.1fr; }
+.mission-columns > section + section { border-left: 1px solid var(--line); }
+.mission-section { padding: 29px 39px 33px; }
+.mission-section-heading { display: flex; gap: 11px; align-items: center; }
+.mission-section-heading > span { display: grid; width: 27px; height: 27px; place-items: center; color: var(--cyan); background: var(--cyan-soft); border-radius: 50%; font-size: 9px; font-weight: 750; }
+.mission-section-heading h3 { margin: 0; font-size: 15px; font-weight: 620; }
+.setup-list, .advice-list { display: grid; gap: 10px; margin: 20px 0; padding: 0; list-style: none; }
+.setup-list li { color: #b5c1d0; font-size: 13px; }
+.filter-callout { padding: 13px 15px; background: var(--cyan-soft); border: 1px solid rgba(103,228,209,.16); border-radius: 11px; }
+.filter-callout strong { color: var(--cyan); font-size: 13px; font-weight: 600; }
+
+.mission-timeline { position: relative; display: grid; gap: 0; margin: 20px 0 0; padding: 0; list-style: none; }
+.mission-timeline::before { position: absolute; top: 10px; bottom: 10px; left: 5px; width: 1px; content: ""; background: var(--line-bright); }
+.mission-timeline li { position: relative; display: grid; grid-template-columns: 100px 1fr; gap: 15px; padding: 0 0 18px 22px; }
+.mission-timeline li:last-child { padding-bottom: 0; }
+.mission-timeline li::before { position: absolute; top: 6px; left: 2px; width: 7px; height: 7px; content: ""; background: var(--cyan); border: 2px solid var(--panel-strong); border-radius: 50%; box-shadow: 0 0 9px rgba(103,228,209,.35); }
+.task-time { color: var(--subtle); font-size: 10px; line-height: 1.8; text-transform: uppercase; }
+.task-copy strong { display: block; font-size: 13px; font-weight: 580; }
+.task-copy small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+
+.advice-section { border-top: 1px solid var(--line); }
+.advice-list { grid-template-columns: repeat(2, 1fr); margin-bottom: 0; }
+.advice-list li { padding: 14px 15px; color: #b5c1d0; background: rgba(255,255,255,.025); border: 1px solid var(--line); border-radius: 11px; font-size: 12px; }
+.advice-time { display: block; margin-bottom: 4px; color: var(--gold); font-size: 9px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.mission-empty { color: var(--subtle) !important; font-style: italic; }
+.mission-footer { display: flex; align-items: center; padding: 20px 39px; border-top: 1px solid var(--line); background: rgba(3,10,18,.4); }
+.mission-footer p { flex: 1; margin: 0; color: var(--subtle); font-size: 11px; }
 
 @media (max-width: 720px) {
   .topbar { grid-template-columns: 1fr auto; width: min(100% - 30px, 1180px); }
@@ -220,6 +291,18 @@ button { color: inherit; }
   .risks { border-top: 1px solid var(--line); border-left: 0; }
   .decision-footer { flex-wrap: wrap; gap: 15px; padding: 21px 25px; }
   .decision-footer p { flex-basis: 100%; }
+  .mission-dialog { width: calc(100% - 20px); max-height: calc(100vh - 20px); }
+  .mission-header { padding: 27px 24px 23px; }
+  .mission-header h2 { font-size: 31px; }
+  .mission-overview { grid-template-columns: 1fr; }
+  .mission-overview > div { padding: 15px 24px; }
+  .mission-overview > div + div { border-top: 1px solid var(--line); border-left: 0; }
+  .mission-columns { grid-template-columns: 1fr; }
+  .mission-columns > section + section { border-top: 1px solid var(--line); border-left: 0; }
+  .mission-section { padding: 25px 24px; }
+  .advice-list { grid-template-columns: 1fr; }
+  .mission-footer { flex-wrap: wrap; gap: 14px; padding: 19px 24px; }
+  .mission-footer p { flex-basis: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

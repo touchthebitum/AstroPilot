@@ -27,6 +27,7 @@ def test_root_serves_tonight_classic_ui():
     assert response.headers["content-type"].startswith("text/html")
     assert "Ce soir — AstroPilot" in response.text
     assert "Voir ma mission" in response.text
+    assert 'id="mission-dialog"' in response.text
     assert 'src="/ui/app.js"' in response.text
 
 
@@ -40,7 +41,9 @@ def test_tonight_ui_assets_are_served():
     assert stylesheet.headers["content-type"].startswith("text/css")
     assert script.status_code == 200
     assert "fetch(\"/v1/tonight\"" in script.text
+    assert script.text.count("fetch(") == 1
     assert "currentDecision" in script.text
+    assert "showModal()" in script.text
 
 
 def test_web_assets_are_declared_as_package_data():
