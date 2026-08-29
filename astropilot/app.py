@@ -164,6 +164,7 @@ class TonightResponseModel(BaseModel):
                     "night_date": "2026-08-29",
                     "target": "NGC 7000",
                     "catalog_key": "ngc7000",
+                    "target_common_name": "North America Nebula",
                     "action": "continue_project",
                     "recommendation_confidence": 0.91,
                     "mission_confidence": 0.88,
@@ -279,6 +280,7 @@ class TonightResponseModel(BaseModel):
     night_date: str | None = None
     target: str | None = None
     catalog_key: str | None = None
+    target_common_name: str | None = None
     action: str | None = None
     recommendation_confidence: float | None = None
     mission_confidence: float | str | None = None

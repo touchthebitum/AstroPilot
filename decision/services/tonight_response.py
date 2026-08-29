@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import date, datetime
 from enum import Enum
 
+from astropilot.catalog import CATALOG
 from decision.advisor.night_advisor import NightAdvisor
 from decision.services.tonight_application_service import TonightResult
 
@@ -163,6 +164,7 @@ class TonightResponse:
     night_date: str | None = None
     target: str | None = None
     catalog_key: str | None = None
+    target_common_name: str | None = None
     action: str | None = None
     recommendation_confidence: float | None = None
     mission_confidence: float | str | None = None
@@ -192,6 +194,21 @@ class TonightResponse:
             if recommendation is not None
             else None
         )
+        target = (
+            mission.target
+            if mission is not None
+            else candidate.get("name") if candidate is not None else None
+        )
+        catalog_key = (
+            candidate.get("catalog_key") if candidate is not None else target
+        )
+        target_common_name = (
+            CATALOG.get(catalog_key, {}).get("name")
+            if catalog_key is not None
+            else None
+        )
+        if target_common_name == target:
+            target_common_name = None
 
         scores = {}
         if candidate is not None:
@@ -383,14 +400,9 @@ class TonightResponse:
             night_date=_text(
                 result.night.get("date") if result.night is not None else None
             ),
-            target=(
-                mission.target
-                if mission is not None
-                else candidate.get("name") if candidate is not None else None
-            ),
-            catalog_key=(
-                candidate.get("catalog_key") if candidate is not None else None
-            ),
+            target=target,
+            catalog_key=catalog_key,
+            target_common_name=target_common_name,
             action=(
                 recommendation.opportunity.action.value
                 if recommendation is not None

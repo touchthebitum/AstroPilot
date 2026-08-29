@@ -43,6 +43,7 @@ def test_tonight_ui_assets_are_served():
     assert "fetch(\"/v1/tonight\"" in script.text
     assert script.text.count("fetch(") == 1
     assert "currentDecision" in script.text
+    assert "target_common_name" in script.text
     assert "showModal()" in script.text
 
 

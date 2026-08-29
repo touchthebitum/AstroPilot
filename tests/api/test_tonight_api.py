@@ -105,6 +105,7 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
     assert payload["night_date"] == "2026-09-01"
     assert payload["target"] == "Andromeda"
     assert payload["catalog_key"] == "M31"
+    assert payload["target_common_name"] == "Galaxie d’Andromède"
     assert payload["recommended_hours"] == 3.5
 
 

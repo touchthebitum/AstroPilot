@@ -112,7 +112,8 @@ function renderMission(decision) {
   const start = clock(decision.window_start);
   const end = clock(decision.window_end);
   text("#mission-title", decision.target || "Mission de cette nuit");
-  text("#mission-summary", labels.actions[decision.action] || "Session recommandée");
+  const missionAction = labels.actions[decision.action] || "Session recommandée";
+  text("#mission-summary", decision.target_common_name ? `${decision.target_common_name} · ${missionAction}` : missionAction);
   text("#mission-window", start && end ? `${start} — ${end}` : "À confirmer");
   text("#mission-duration", duration(decision.recommended_hours));
   text("#mission-gain", Number(decision.expected_gain) > 0 ? `+${Math.round(Number(decision.expected_gain))} %` : "Non estimé");
@@ -197,7 +198,7 @@ function renderDecision(decision) {
   text("#night-date", dateLabel(decision.night_date));
   text("#recommendation", labels.actions[decision.action] || "Session recommandée");
   text("#target-name", decision.target || "Cible à confirmer");
-  text("#catalog-key", decision.catalog_key && decision.catalog_key !== decision.target ? decision.catalog_key : "");
+  text("#catalog-key", decision.target_common_name || (decision.catalog_key && decision.catalog_key !== decision.target ? decision.catalog_key : ""));
   text("#confidence-value", confidence === null ? "—" : `${confidence}%`);
   document.querySelector("#confidence-wrap").hidden = confidence === null;
   text("#window-value", start && end ? `${start} — ${end}` : "À confirmer");
