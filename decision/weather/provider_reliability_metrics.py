@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from math import isfinite, sqrt
+from math import ceil, isfinite, sqrt
 
 from decision.weather.provider_reliability import (
     ComparisonStatus,
@@ -155,6 +155,23 @@ class ProviderVariableMetrics:
     mean_signed_error: float
     mean_absolute_error: float
     root_mean_squared_error: float
+    median_absolute_error: float
+    percentile_90_absolute_error: float
+    maximum_absolute_error: float
+
+
+def _median(values: list[float]) -> float:
+    ordered = sorted(values)
+    midpoint = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[midpoint]
+    return (ordered[midpoint - 1] + ordered[midpoint]) / 2
+
+
+def _nearest_rank_percentile(values: list[float], percentile: float) -> float:
+    ordered = sorted(values)
+    rank = ceil(percentile * len(ordered))
+    return ordered[rank - 1]
 
 
 @dataclass(frozen=True)
@@ -245,6 +262,7 @@ def build_provider_reliability_report(
         ),
     ):
         sample_count = len(errors)
+        absolute_errors = [error.absolute_error for error in errors]
         metric_results.append(
             ProviderVariableMetrics(
                 provider_id=provider_id,
@@ -267,6 +285,11 @@ def build_provider_reliability_report(
                 root_mean_squared_error=sqrt(
                     sum(error.signed_error**2 for error in errors) / sample_count
                 ),
+                median_absolute_error=_median(absolute_errors),
+                percentile_90_absolute_error=_nearest_rank_percentile(
+                    absolute_errors, 0.90
+                ),
+                maximum_absolute_error=max(absolute_errors),
             )
         )
 
