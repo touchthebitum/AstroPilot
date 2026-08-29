@@ -11,6 +11,7 @@ class TonightResult:
     night: dict | None
     recommendation: Recommendation | None
     mission: NightMission | None
+    forecast_available: bool = True
 
 
 class TonightApplicationService:
@@ -60,6 +61,14 @@ class TonightApplicationService:
             weather=weather,
             profile=profile,
         )
+
+        if nights is None:
+            return TonightResult(
+                None,
+                None,
+                None,
+                forecast_available=False,
+            )
 
         if not nights:
             return TonightResult(None, None, None)

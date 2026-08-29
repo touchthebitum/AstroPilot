@@ -2017,28 +2017,37 @@ def main(argv=None) -> int:
     if weather is None:
         print ("Prévisions météo indisponibles.")
     
-    nights = forecast_astro(
-        lat,
-        lon,
-        city,
-        bortle=3,
-        target=TARGET,
-        equipment=args.equipment,
-        goal=args.goal,
-        weather=weather,
-        profile=profile,
-    )
+    tonight_result = None
 
-    if nights is None:
-        print("ERREUR: forecast_astro a retourné None")
-        return 0
+    if args.mode == "tonight":
+        tonight_result = build_tonight_application_service().evaluate(
+            profile=profile,
+            weather=weather,
+            equipment=args.equipment,
+            goal=args.goal,
+            target=TARGET,
+            bortle=3,
+        )
 
-    top_nights = sorted(nights, key=lambda x: x["score"], reverse=True)[:3]
+        if not tonight_result.forecast_available:
+            print("ERREUR: forecast_astro a retourné None")
+            return 0
+    else:
+        nights = forecast_astro(
+            lat,
+            lon,
+            city,
+            bortle=3,
+            target=TARGET,
+            equipment=args.equipment,
+            goal=args.goal,
+            weather=weather,
+            profile=profile,
+        )
 
-    tonight_nights = sorted(
-    nights,
-    key=lambda night: night["date"],
-    )
+        if nights is None:
+            print("ERREUR: forecast_astro a retourné None")
+            return 0
 
     night_capacities = forecast_night_capacities(
         lat,
@@ -2094,11 +2103,13 @@ def main(argv=None) -> int:
         )
 
     elif args.mode == "tonight":
-        if top_nights:
-            tonight_runner.run(
-                top_nights=tonight_nights,
-                night_capacities=night_capacities,
-                profile=profile,
+        if tonight_result.night is not None:
+            if tonight_result.mission is not None:
+                report_runner.present_mission(tonight_result.mission)
+
+            tonight_runner.show_completion_forecast(
+                night_capacities,
+                profile,
             )
 
     elif args.mode == "full":

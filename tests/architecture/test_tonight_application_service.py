@@ -229,6 +229,24 @@ def test_no_forecast_nights_stops_all_downstream_work():
     assert mission_service.calls == []
 
 
+def test_unavailable_forecast_is_distinct_from_empty_forecast():
+    service, recommendation_service, mission_service = make_service(
+        forecast_nights=lambda *args, **kwargs: None,
+        build_candidates=lambda *args, **kwargs: None,
+    )
+
+    result = service.evaluate(profile={}, weather=object())
+
+    assert result == TonightResult(
+        None,
+        None,
+        None,
+        forecast_available=False,
+    )
+    assert recommendation_service.calls == []
+    assert mission_service.calls == []
+
+
 def test_no_candidates_preserves_night_and_skips_downstream_services():
     night = {"date": "2026-09-01", "top_objects": []}
     service, recommendation_service, mission_service = make_service(
