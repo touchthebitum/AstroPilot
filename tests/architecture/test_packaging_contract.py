@@ -24,11 +24,11 @@ def test_wheel_excludes_internal_decision_tests():
     assert "decision.tests*" in package_finder["exclude"]
 
 
-def test_wheel_includes_only_immutable_object_knowledge_data():
+def test_wheel_includes_only_immutable_product_assets():
     package_data = _pyproject()["tool"]["setuptools"]["package-data"]
 
     assert package_data == {
-        "astropilot": ["knowledge/objects/*.json"],
+        "astropilot": ["knowledge/objects/*.json", "web/*"],
     }
     declared_patterns = package_data["astropilot"]
     assert "data/user_profile.json" not in declared_patterns

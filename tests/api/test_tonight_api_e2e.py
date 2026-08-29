@@ -160,11 +160,16 @@ def test_http_request_runs_real_application_composition_once(monkeypatch):
         "tonight_mission_service",
         MissionService(),
     )
-    monkeypatch.setattr(
-        astro_score,
-        "load_user_profile",
-        lambda: pytest.fail("API must not load the CLI profile"),
-    )
+    profile_loads = []
+
+    def load_profile():
+        profile_loads.append(True)
+        return {
+            "available_equipment": ["widefield"],
+            "projects": {"M42": {"hours": 4}},
+        }
+
+    monkeypatch.setattr(astro_score, "load_user_profile", load_profile)
     monkeypatch.setattr(
         astro_score,
         "save_user_profile",
@@ -192,6 +197,7 @@ def test_http_request_runs_real_application_composition_once(monkeypatch):
     )
 
     assert response.status_code == 200
+    assert profile_loads == [True]
     assert calls["weather"] == [(47.1, 6.8)]
     assert len(calls["forecast"]) == 1
     assert calls["candidates"] == [
@@ -199,6 +205,7 @@ def test_http_request_runs_real_application_composition_once(monkeypatch):
             selected_objects,
             3.5,
             {
+                "available_equipment": ["widefield"],
                 "projects": {"M31": {"hours": 2}},
                 "location": {
                     "name": "La Chaux-de-Fonds",

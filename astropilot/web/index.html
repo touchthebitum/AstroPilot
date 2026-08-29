@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#08111f">
+    <meta
+      name="description"
+      content="La recommandation AstroPilot pour votre prochaine nuit d'astrophotographie."
+    >
+    <title>Ce soir — AstroPilot</title>
+    <link rel="stylesheet" href="/ui/styles.css">
+    <script src="/ui/app.js" defer></script>
+  </head>
+  <body>
+    <div class="sky-glow" aria-hidden="true"></div>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="AstroPilot — Ce soir">
+        <span class="brand-mark" aria-hidden="true">
+          <span></span>
+        </span>
+        <span>AstroPilot</span>
+      </a>
+      <div class="night-context">
+        <span class="context-label">Ce soir</span>
+        <time id="night-date">—</time>
+      </div>
+      <button class="refresh-button" id="refresh" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20 6v5h-5M4 18v-5h5M6.1 9A7 7 0 0 1 18 6l2 5M3.9 13 6 18a7 7 0 0 0 11.9-3"/>
+        </svg>
+        <span>Actualiser</span>
+      </button>
+    </header>
+
+    <main class="shell">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">Votre décision, sans détour</p>
+        <h1 id="page-title">La meilleure utilisation de votre nuit.</h1>
+        <p>Une recommandation unique, calculée à partir du ciel, de votre matériel et de vos projets.</p>
+      </section>
+
+      <section id="loading-state" class="state-panel loading-panel" aria-live="polite">
+        <div class="orbit" aria-hidden="true"><span></span></div>
+        <div>
+          <p class="state-kicker">Analyse en cours</p>
+          <h2>AstroPilot observe votre nuit…</h2>
+          <p>Météo, cible, fenêtre et qualité du ciel.</p>
+        </div>
+      </section>
+
+      <section id="message-state" class="state-panel message-panel" hidden aria-live="polite">
+        <span class="message-icon" id="message-icon" aria-hidden="true">!</span>
+        <div>
+          <p class="state-kicker" id="message-kicker">Décision indisponible</p>
+          <h2 id="message-title">Impossible de préparer la nuit.</h2>
+          <p id="message-body"></p>
+        </div>
+        <button class="secondary-button" id="message-retry" type="button">Réessayer</button>
+      </section>
+
+      <article id="decision" class="decision" hidden aria-live="polite">
+        <div class="decision-head">
+          <div>
+            <div class="recommendation-line">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span id="recommendation">Session recommandée</span>
+            </div>
+            <p class="target-label">Cible prioritaire</p>
+            <h2 id="target-name">—</h2>
+            <p class="catalog-key" id="catalog-key"></p>
+          </div>
+          <div class="confidence" id="confidence-wrap">
+            <span id="confidence-value">—</span>
+            <small>confiance</small>
+          </div>
+        </div>
+
+        <div class="decision-grid">
+          <section class="metric-card window-card" aria-labelledby="window-title">
+            <div class="metric-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
+            </div>
+            <div>
+              <p class="metric-label" id="window-title">Meilleure fenêtre</p>
+              <p class="metric-value" id="window-value">—</p>
+              <p class="metric-note" id="window-note">Heure locale</p>
+            </div>
+          </section>
+
+          <section class="metric-card" aria-labelledby="duration-title">
+            <div class="metric-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 7v5l3 2M9 2h6M12 4a9 9 0 1 1-9 9"/></svg>
+            </div>
+            <div>
+              <p class="metric-label" id="duration-title">Durée productive</p>
+              <p class="metric-value" id="duration-value">—</p>
+              <p class="metric-note" id="duration-note">Temps réellement exploitable</p>
+            </div>
+          </section>
+
+          <section class="metric-card" aria-labelledby="filter-title">
+            <div class="metric-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>
+            </div>
+            <div>
+              <p class="metric-label" id="filter-title">Filtre conseillé</p>
+              <p class="metric-value compact" id="filter-value">—</p>
+              <p class="metric-note" id="filter-note">Selon la cible et le ciel</p>
+            </div>
+          </section>
+        </div>
+
+        <section class="quality-panel" aria-labelledby="quality-title">
+          <div class="quality-score">
+            <svg viewBox="0 0 120 120" aria-hidden="true">
+              <circle class="quality-track" cx="60" cy="60" r="48"/>
+              <circle class="quality-progress" id="quality-progress" cx="60" cy="60" r="48"/>
+            </svg>
+            <div><strong id="quality-score">—</strong><span>/100</span></div>
+          </div>
+          <div class="quality-copy">
+            <p class="metric-label">Indice de qualité astronomique</p>
+            <h3 id="quality-title">Qualité du ciel</h3>
+            <p id="quality-summary">—</p>
+          </div>
+          <div class="limiting-factor">
+            <span>Facteur limitant</span>
+            <strong id="limiting-factor">—</strong>
+          </div>
+        </section>
+
+        <div class="insight-grid">
+          <section class="insights" aria-labelledby="insights-title">
+            <div class="section-heading">
+              <span class="heading-icon good" aria-hidden="true">✓</span>
+              <h3 id="insights-title">Pourquoi cette décision</h3>
+            </div>
+            <ul id="insights-list"></ul>
+          </section>
+          <section class="risks" aria-labelledby="risks-title">
+            <div class="section-heading">
+              <span class="heading-icon caution" aria-hidden="true">!</span>
+              <h3 id="risks-title">À garder en tête</h3>
+            </div>
+            <ul id="risks-list"></ul>
+          </section>
+        </div>
+
+        <footer class="decision-footer">
+          <p id="decision-footnote">Décision calculée pour votre configuration actuelle.</p>
+          <button class="mission-button" type="button" disabled aria-describedby="mission-soon">
+            Voir ma mission
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+          <span id="mission-soon" class="soon-badge">Bientôt</span>
+        </footer>
+      </article>
+    </main>
+
+    <footer class="page-footer">
+      <span>AstroPilot</span>
+      <span aria-hidden="true">·</span>
+      <span>Une décision. Une nuit.</span>
+    </footer>
+  </body>
+</html>
