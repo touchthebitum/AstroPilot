@@ -230,3 +230,45 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
     assert tonight_response["postponement_risk"]["anyOf"][0][
         "$ref"
     ].endswith("TonightPostponementRiskModel")
+
+
+def test_openapi_documents_tonight_request_and_available_response_examples():
+    client = make_client(result=make_result())
+
+    schema = client.get("/openapi.json").json()
+    schemas = schema["components"]["schemas"]
+
+    request_example = schemas["TonightRequest"]["examples"][0]
+    assert request_example["location"] == {
+        "name": "Buttes",
+        "latitude": 46.7508,
+        "longitude": 6.5495,
+    }
+    assert request_example["goal"] == "balanced"
+    assert request_example["target"] == "deep_sky"
+
+    response_example = schemas["TonightResponseModel"]["examples"][0]
+    assert response_example["status"] == "available"
+    assert response_example["astro_quality"]["label"] == "very_good"
+    assert response_example["productivity"]["windows"][0]["productive"] is True
+    assert response_example["postponement_risk"]["level"] == "medium"
+    assert response_example["season"]["analysis_name"] == "season_window"
+
+
+def test_openapi_documents_tonight_operation_and_error_examples():
+    client = make_client(result=make_result())
+
+    operation = client.get("/openapi.json").json()["paths"]["/v1/tonight"][
+        "post"
+    ]
+
+    assert operation["summary"] == "Recommend tonight's astrophotography mission"
+    assert "Decision Intelligence" in operation["description"]
+    assert operation["responses"]["422"]["content"]["application/json"][
+        "examples"
+    ]["invalid_request"]["value"]["detail"][0]["type"] == "less_than_equal"
+    assert operation["responses"]["503"]["content"]["application/json"][
+        "examples"
+    ]["weather_unavailable"]["value"]["detail"]["code"] == (
+        "weather_unavailable"
+    )
