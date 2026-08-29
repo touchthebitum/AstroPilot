@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Callable, Literal
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from decision.services.tonight_application_service import TonightStatus
 from decision.services.tonight_response import TonightResponse
@@ -16,6 +16,25 @@ class LocationRequest(BaseModel):
 
 
 class TonightRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "location": {
+                        "name": "Buttes",
+                        "latitude": 46.7508,
+                        "longitude": 6.5495,
+                    },
+                    "profile": {},
+                    "equipment": "widefield",
+                    "goal": "balanced",
+                    "target": "deep_sky",
+                    "bortle": 3,
+                }
+            ]
+        }
+    )
+
     location: LocationRequest | None = None
     profile: dict = Field(default_factory=dict)
     equipment: str | None = None
@@ -119,6 +138,108 @@ class TonightExplanationModel(BaseModel):
 
 
 class TonightResponseModel(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "status": "available",
+                    "night_date": "2026-08-29",
+                    "target": "NGC 7000",
+                    "catalog_key": "ngc7000",
+                    "action": "continue_project",
+                    "recommendation_confidence": 0.91,
+                    "mission_confidence": 0.88,
+                    "scores": {"astronomy": 84.0, "mission": 89.0},
+                    "window_start": "22:30",
+                    "window_end": "02:30",
+                    "recommended_hours": 4.0,
+                    "expected_gain": 3.4,
+                    "equipment": ["widefield", "dual_narrowband"],
+                    "selected_filter": {
+                        "name": "L-eXtreme",
+                        "filter_type": "dual_narrowband",
+                        "bandwidth_nm": 7.0,
+                    },
+                    "astro_quality": {
+                        "score": 86.0,
+                        "confidence": 0.9,
+                        "label": "very_good",
+                        "limiting_factor": "moon",
+                        "metrics": {"altitude": 92.0, "moon": 71.0},
+                    },
+                    "productivity": {
+                        "astronomical_hours": 6.2,
+                        "productive_hours": 4.0,
+                        "confidence": 0.86,
+                        "cloud_loss": 0.8,
+                        "moon_loss": 0.7,
+                        "altitude_loss": 0.4,
+                        "weather_loss": 0.3,
+                        "display_start_hour": 20,
+                        "windows": [
+                            {
+                                "start_offset_hours": 2.5,
+                                "end_offset_hours": 6.5,
+                                "start_time": "22:30",
+                                "end_time": "02:30",
+                                "productivity": 0.85,
+                                "productive": True,
+                                "reason": "Strong altitude and clear sky",
+                                "altitude": 62.0,
+                                "cloud_cover": 12.0,
+                                "moon_penalty": 0.18,
+                                "seeing": 1.7,
+                            }
+                        ],
+                    },
+                    "dew_risk": {
+                        "level": "low",
+                        "score": 18.0,
+                        "dew_point_c": 7.0,
+                        "spread_c": 5.0,
+                    },
+                    "postponement_risk": {
+                        "level": "medium",
+                        "score": 44,
+                        "explanations": ["Five favorable nights remain."],
+                        "required_nights": 2,
+                        "productive_hours_per_night": 3.5,
+                        "capacity_source": "forecast",
+                        "historical_nights": 8,
+                        "remaining_hours": 6.0,
+                        "favorable_nights": 5,
+                        "season_remaining_days": 24,
+                    },
+                    "season": {
+                        "analysis_name": "season_window",
+                        "conclusion": "The target remains well placed.",
+                        "confidence": 0.82,
+                        "data": {"remaining_days": 24},
+                    },
+                    "explanation": {
+                        "positives": [
+                            {
+                                "title": "High altitude",
+                                "severity": "positive",
+                                "value": "62 deg",
+                            }
+                        ],
+                        "warnings": [],
+                        "information": [],
+                        "limiting_factors": ["moon"],
+                    },
+                    "reasons": [
+                        {
+                            "title": "Portfolio priority",
+                            "severity": "positive",
+                            "value": "high",
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
     status: str
     night_date: str | None = None
     target: str | None = None
@@ -164,6 +285,77 @@ def create_app(
     @application.post(
         "/v1/tonight",
         response_model=TonightResponseModel,
+        summary="Recommend tonight's astrophotography mission",
+        description=(
+            "Evaluates the next available night and returns a transport-safe "
+            "mission enriched with Decision Intelligence: astronomical "
+            "quality, productivity, operational risks and season context."
+        ),
+        responses={
+            422: {
+                "description": "The request or profile location is invalid.",
+                "content": {
+                    "application/json": {
+                        "examples": {
+                            "invalid_request": {
+                                "summary": "Bortle value outside the range 1-9",
+                                "value": {
+                                    "detail": [
+                                        {
+                                            "type": "less_than_equal",
+                                            "loc": ["body", "bortle"],
+                                            "msg": "Input should be less than or equal to 9",
+                                            "input": 12,
+                                            "ctx": {"le": 9},
+                                        }
+                                    ]
+                                },
+                            },
+                            "invalid_profile_location": {
+                                "summary": "Invalid location stored in profile",
+                                "value": {
+                                    "detail": {
+                                        "code": "invalid_profile_location",
+                                        "message": "Profile location is invalid.",
+                                    }
+                                },
+                            },
+                        }
+                    }
+                },
+            },
+            503: {
+                "description": "Weather or forecast data is unavailable.",
+                "content": {
+                    "application/json": {
+                        "examples": {
+                            "weather_unavailable": {
+                                "summary": "Weather provider unavailable",
+                                "value": {
+                                    "detail": {
+                                        "code": "weather_unavailable",
+                                        "message": (
+                                            "Weather data is temporarily unavailable."
+                                        ),
+                                    }
+                                },
+                            },
+                            "forecast_unavailable": {
+                                "summary": "Tonight forecast unavailable",
+                                "value": {
+                                    "detail": {
+                                        "code": "forecast_unavailable",
+                                        "message": (
+                                            "Tonight forecast is temporarily unavailable."
+                                        ),
+                                    }
+                                },
+                            },
+                        }
+                    }
+                },
+            },
+        },
     )
     def tonight(request: TonightRequest):
         profile = dict(request.profile)
