@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable, Literal
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from decision.services.tonight_application_service import TonightStatus
@@ -275,12 +278,29 @@ def _production_weather_provider(latitude: float, longitude: float):
     return fetch_weather(latitude, longitude)
 
 
+def _production_profile_provider():
+    from astro_score import load_user_profile
+
+    return load_user_profile()
+
+
 def create_app(
     *,
     service_factory: Callable = _production_service_factory,
     weather_provider: Callable = _production_weather_provider,
+    profile_provider: Callable = _production_profile_provider,
 ) -> FastAPI:
     application = FastAPI(title="AstroPilot API", version="1.0.0")
+    web_root = Path(__file__).with_name("web")
+    application.mount(
+        "/ui",
+        StaticFiles(directory=web_root),
+        name="tonight-ui",
+    )
+
+    @application.get("/", include_in_schema=False)
+    def tonight_ui():
+        return FileResponse(web_root / "index.html")
 
     @application.post(
         "/v1/tonight",
@@ -358,7 +378,8 @@ def create_app(
         },
     )
     def tonight(request: TonightRequest):
-        profile = dict(request.profile)
+        profile = dict(profile_provider())
+        profile.update(request.profile)
         if request.location is not None:
             profile["location"] = request.location.model_dump()
 

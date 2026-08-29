@@ -62,6 +62,7 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
         weather_provider=lambda lat, lon: (
             weather_calls.append((lat, lon)) or weather
         ),
+        profile_provider=lambda: {},
     )
 
     response = TestClient(app).post(
@@ -119,6 +120,7 @@ def make_client(*, result, weather=DEFAULT_WEATHER):
         create_app(
             service_factory=lambda: Service(),
             weather_provider=lambda lat, lon: weather,
+            profile_provider=lambda: {},
         )
     )
 
@@ -132,6 +134,7 @@ def test_weather_unavailable_is_a_service_error_before_evaluation():
         create_app(
             service_factory=lambda: Service(),
             weather_provider=lambda lat, lon: None,
+            profile_provider=lambda: {},
         )
     )
 
