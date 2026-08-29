@@ -18,7 +18,7 @@ class MissionPresenter:
         print("🌙 Productivité prévue")
         print(f"Heures astronomiques : {mission.productivity.astronomical_hours:.1f} h")
         print(f"Heures productives : {mission.productivity.productive_hours:.1f} h")
-        print(f"Confiance productivité : {mission.productivity.confidence:.0%}")
+        print(f"Part productive : {mission.productivity.confidence:.0%}")
         print()
 
         if mission.astro_quality is not None:

@@ -97,7 +97,15 @@ class TonightProductivityWindowModel(BaseModel):
 class TonightProductivityModel(BaseModel):
     astronomical_hours: float
     productive_hours: float
-    confidence: float
+    productive_fraction: float = Field(ge=0.0, le=1.0)
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Deprecated compatibility alias for productive_fraction; "
+            "this is not forecast confidence."
+        ),
+    )
     cloud_loss: float
     moon_loss: float
     altitude_loss: float
@@ -189,7 +197,8 @@ class TonightResponseModel(BaseModel):
                     "productivity": {
                         "astronomical_hours": 6.2,
                         "productive_hours": 4.0,
-                        "confidence": 0.86,
+                        "productive_fraction": 0.65,
+                        "confidence": 0.65,
                         "cloud_loss": 0.8,
                         "moon_loss": 0.7,
                         "altitude_loss": 0.4,

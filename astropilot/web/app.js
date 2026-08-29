@@ -50,12 +50,6 @@ function show(view) {
   ui.decision.hidden = view !== "decision";
 }
 
-function percentage(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return null;
-  const normalized = Number(value) <= 1 ? Number(value) * 100 : Number(value);
-  return Math.round(Math.max(0, Math.min(100, normalized)));
-}
-
 function duration(hours) {
   const value = Number(hours);
   if (!Number.isFinite(value) || value <= 0) return "Non précisée";
@@ -182,9 +176,8 @@ function renderMission(decision) {
 function renderDecision(decision) {
   state.currentDecision = decision;
 
-  const confidence = percentage(decision.recommendation_confidence);
   const productivity = decision.productivity;
-  const productiveHours = productivity?.productive_hours || decision.recommended_hours;
+  const productiveHours = productivity?.productive_hours ?? decision.recommended_hours;
   const firstWindow = productivity?.windows?.find((window) => window.productive)
     || productivity?.windows?.[0];
   const start = clock(decision.window_start) || firstWindow?.start_time || null;
@@ -199,8 +192,6 @@ function renderDecision(decision) {
   text("#recommendation", labels.actions[decision.action] || "Session recommandée");
   text("#target-name", decision.target || "Cible à confirmer");
   text("#catalog-key", decision.target_common_name || (decision.catalog_key && decision.catalog_key !== decision.target ? decision.catalog_key : ""));
-  text("#confidence-value", confidence === null ? "—" : `${confidence}%`);
-  document.querySelector("#confidence-wrap").hidden = confidence === null;
   text("#window-value", start && end ? `${start} — ${end}` : "À confirmer");
   text("#window-note", firstWindow?.reason ? "Fenêtre productive principale" : "Heure locale");
   text("#duration-value", duration(productiveHours));
