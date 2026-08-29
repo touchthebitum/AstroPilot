@@ -224,6 +224,7 @@ def test_http_request_runs_real_application_composition_once(monkeypatch):
     assert payload["status"] == "available"
     assert payload["target"] == "Andromeda"
     assert payload["catalog_key"] == "M31"
+    assert payload["target_common_name"] == "Galaxie d’Andromède"
     assert payload["astro_quality"] == {
         "score": 84.0,
         "confidence": 0.9,

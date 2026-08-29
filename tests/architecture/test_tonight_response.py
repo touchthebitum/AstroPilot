@@ -60,6 +60,7 @@ def test_partial_results_produce_stable_transport_status(status):
         "night_date": None,
         "target": None,
         "catalog_key": None,
+        "target_common_name": None,
         "action": None,
         "recommendation_confidence": None,
         "mission_confidence": None,
@@ -187,6 +188,7 @@ def test_complete_result_maps_only_json_compatible_values():
     assert response["night_date"] == "2026-09-01"
     assert response["target"] == "Andromeda"
     assert response["catalog_key"] == "M31"
+    assert response["target_common_name"] == "Galaxie d’Andromède"
     assert response["action"] == "start_project"
     assert response["recommendation_confidence"] == 0.91
     assert response["scores"] == {
