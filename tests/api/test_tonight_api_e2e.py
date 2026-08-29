@@ -5,11 +5,20 @@ from fastapi.testclient import TestClient
 
 import astro_score
 from astropilot.app import create_app
+from decision.intelligence.analysis_result import AnalysisResult
 from decision.mission.night_mission import NightMission
 from decision.models.candidate import Candidate
+from decision.night_productivity.night_productivity_result import (
+    NightProductivityResult,
+)
+from decision.night_productivity.night_window import NightWindow
 from decision.opportunity.action import Action
 from decision.opportunity.opportunity import Opportunity
+from decision.quality.astro_quality_result import AstroQualityResult
+from decision.quality.dew_risk_result import DewRiskResult
 from decision.recommendation.recommendation import Recommendation
+from decision.risk.project_risk_context import ProjectRiskContext
+from decision.risk.risk_report import RiskReport
 
 
 def test_http_request_runs_real_application_composition_once(monkeypatch):
@@ -52,6 +61,61 @@ def test_http_request_runs_real_application_composition_once(monkeypatch):
         confidence=0.87,
         equipment=["Widefield"],
         recommended_hours=3.5,
+        astro_quality=AstroQualityResult(
+            score=84.0,
+            confidence=0.9,
+            limiting_factor="clouds",
+            metrics={"altitude": 92.0, "clouds": 70.0},
+        ),
+        productivity=NightProductivityResult(
+            astronomical_hours=6.0,
+            productive_hours=3.5,
+            confidence=0.82,
+            cloud_loss=1.0,
+            moon_loss=0.5,
+            altitude_loss=0.25,
+            weather_loss=0.75,
+            display_start_hour=22,
+            windows=[
+                NightWindow(
+                    start_hour=1.0,
+                    end_hour=4.0,
+                    productivity=0.88,
+                    altitude=67.0,
+                    cloud_cover=12.0,
+                    moon_penalty=0.1,
+                    seeing=1.4,
+                    productive=True,
+                    reason="stable_conditions",
+                )
+            ],
+        ),
+        dew_risk=DewRiskResult(
+            dew_point_c=7.2,
+            spread_c=1.8,
+            risk="HIGH",
+            score=82.0,
+        ),
+        risk_report=RiskReport(
+            level="MEDIUM",
+            score=63,
+            explanation=["Only two favorable nights remain"],
+            context=ProjectRiskContext(
+                priority=8.0,
+                remaining_hours=5.5,
+                completion=0.45,
+                season_remaining_days=21,
+                favorable_nights=2,
+                required_nights=2,
+                productive_hours_per_night=3.5,
+            ),
+        ),
+        season_analysis=AnalysisResult(
+            analysis_name="season",
+            conclusion="Prime autumn window",
+            confidence=0.89,
+            data={"peak_month": "October"},
+        ),
     )
 
     def fetch_weather(latitude, longitude):
@@ -149,6 +213,25 @@ def test_http_request_runs_real_application_composition_once(monkeypatch):
     assert calls["mission"][0]["winner"] is selected_night
     assert calls["mission"][0]["objects"] is selected_objects
     assert calls["mission"][0]["recommended_key"] == "M31"
-    assert response.json()["status"] == "available"
-    assert response.json()["target"] == "Andromeda"
-    assert response.json()["catalog_key"] == "M31"
+    payload = response.json()
+    assert payload["status"] == "available"
+    assert payload["target"] == "Andromeda"
+    assert payload["catalog_key"] == "M31"
+    assert payload["astro_quality"] == {
+        "score": 84.0,
+        "confidence": 0.9,
+        "label": "very_good",
+        "limiting_factor": "clouds",
+        "metrics": {"altitude": 92.0, "clouds": 70.0},
+    }
+    assert payload["productivity"]["productive_hours"] == 3.5
+    assert payload["productivity"]["windows"][0]["start_time"] == "23:00"
+    assert payload["productivity"]["windows"][0]["end_time"] == "02:00"
+    assert payload["dew_risk"]["level"] == "HIGH"
+    assert payload["postponement_risk"]["required_nights"] == 2
+    assert payload["season"] == {
+        "analysis_name": "season",
+        "conclusion": "Prime autumn window",
+        "confidence": 0.89,
+        "data": {"peak_month": "October"},
+    }

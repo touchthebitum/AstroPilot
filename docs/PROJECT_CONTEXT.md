@@ -517,6 +517,11 @@ Le mode `calendar` et le mode `portfolio` n’utilisent plus l’ancien moteur c
 
 613 tests passants en suite complète post-merge.
 
+État validé sur la branche
+`enrich-tonight-decision-intelligence-api` :
+
+619 tests passants en suite complète.
+
 Principaux contrats architecturaux testés :
 
 - Candidate score
@@ -544,6 +549,11 @@ Principaux contrats architecturaux testés :
 - validation des coordonnées, du Bortle, de l'objectif et du type de cible
 - contrats HTTP pour météo et forecast indisponibles
 - scénario API de bout en bout utilisant le composition root de production
+- contrat API AQI avec libellé stable, métriques et facteur limitant
+- productivité et fenêtres horaires transportables
+- risques de rosée et de report structurés
+- analyse saisonnière et explications regroupées par sévérité
+- schéma OpenAPI de l'intelligence décisionnelle Tonight
 
 Les quatre runtimes ont également été validés :
 
@@ -672,6 +682,47 @@ Le test de bout en bout garantit :
 - l'absence de chargement ou persistance du profil CLI
 - l'absence de présentation terminal
 - suite complète : 613 tests passants
+
+### Enrichissement Decision Intelligence de l'API Tonight
+
+La branche `enrich-tonight-decision-intelligence-api` étend le contrat
+existant sans modifier les moteurs de calcul.
+
+Le bloc AQI expose :
+
+- score et confiance
+- libellé stable : `excellent`, `very_good`, `good`, `average` ou `low`
+- facteur limitant
+- métriques par dimension
+
+Le bloc productivité expose :
+
+- heures astronomiques et productives
+- confiance et pertes par cause
+- fenêtres exploitables
+- heures d'affichage avant et après minuit
+- productivité, altitude, nuages, Lune, seeing et raison par fenêtre
+
+Le bloc risques expose :
+
+- niveau, score, point de rosée et marge thermique
+- niveau et score de report
+- nuits requises, capacité moyenne et source
+- heures restantes, nuits favorables et jours de saison restants
+- explications de risque
+
+Le bloc saison et explication expose :
+
+- nom, conclusion, confiance et données sérialisables de l'analyse
+- raisons positives, avertissements et informations
+- facteurs limitants
+
+Les structures absentes restent `null`. Aucun fallback artificiel n'est ajouté.
+Le scénario HTTP de bout en bout traverse le composition root de production
+et vérifie le JSON riche. Le schéma OpenAPI contient les modèles imbriqués
+destinés aux futurs clients mobiles.
+
+Baseline de la branche : 619 tests passants.
 
 
 ## 20. Sprint feature-opportunity-engine — bilan historique
