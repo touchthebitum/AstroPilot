@@ -8,6 +8,7 @@ from decision.recommendation.recommendation import Recommendation
 from decision.services.tonight_application_service import (
     TonightApplicationService,
     TonightResult,
+    TonightStatus,
 )
 
 
@@ -209,7 +210,12 @@ def test_location_defaults_match_current_cli_policy():
             },
         )
     ]
-    assert result == TonightResult(None, None, None)
+    assert result == TonightResult(
+        None,
+        None,
+        None,
+        status=TonightStatus.NO_NIGHT,
+    )
 
 
 def test_no_forecast_nights_stops_all_downstream_work():
@@ -223,8 +229,31 @@ def test_no_forecast_nights_stops_all_downstream_work():
 
     result = service.evaluate(profile={}, weather=object())
 
-    assert result == TonightResult(None, None, None)
+    assert result == TonightResult(
+        None,
+        None,
+        None,
+        status=TonightStatus.NO_NIGHT,
+    )
     assert candidate_calls == []
+    assert recommendation_service.calls == []
+    assert mission_service.calls == []
+
+
+def test_unavailable_forecast_is_distinct_from_empty_forecast():
+    service, recommendation_service, mission_service = make_service(
+        forecast_nights=lambda *args, **kwargs: None,
+        build_candidates=lambda *args, **kwargs: None,
+    )
+
+    result = service.evaluate(profile={}, weather=object())
+
+    assert result == TonightResult(
+        None,
+        None,
+        None,
+        status=TonightStatus.FORECAST_UNAVAILABLE,
+    )
     assert recommendation_service.calls == []
     assert mission_service.calls == []
 
@@ -238,7 +267,12 @@ def test_no_candidates_preserves_night_and_skips_downstream_services():
 
     result = service.evaluate(profile={}, weather=object())
 
-    assert result == TonightResult(night, None, None)
+    assert result == TonightResult(
+        night,
+        None,
+        None,
+        status=TonightStatus.NO_CANDIDATE,
+    )
     assert result.night is night
     assert recommendation_service.calls == []
     assert mission_service.calls == []
@@ -254,7 +288,12 @@ def test_no_recommendation_preserves_night_and_skips_mission():
 
     result = service.evaluate(profile={}, weather=object())
 
-    assert result == TonightResult(night, None, None)
+    assert result == TonightResult(
+        night,
+        None,
+        None,
+        status=TonightStatus.NO_RECOMMENDATION,
+    )
     assert recommendation_service.calls == [candidates]
     assert mission_service.calls == []
 
@@ -276,4 +315,5 @@ def test_missing_mission_preserves_exact_night_and_recommendation():
     assert result.night is night
     assert result.recommendation is recommendation
     assert result.mission is None
+    assert result.status is TonightStatus.NO_MISSION
     assert len(mission_service.calls) == 1

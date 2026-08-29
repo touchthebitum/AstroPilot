@@ -142,13 +142,21 @@ def forecast_cli(monkeypatch, isolated_cli):
             run_portfolio=lambda **kwargs: calls.append(("portfolio", kwargs)),
             run_calendar=lambda **kwargs: calls.append(("calendar", kwargs)),
             run_full=lambda **kwargs: calls.append(("full", kwargs)),
+            present_mission=lambda mission: calls.append(
+                ("mission", mission)
+            ),
         ),
     )
     monkeypatch.setattr(
         astro_score,
         "tonight_runner",
         SimpleNamespace(
-            run=lambda **kwargs: calls.append(("tonight", kwargs)),
+            show_completion_forecast=lambda capacities, profile: calls.append(
+                (
+                    "tonight_completion",
+                    {"night_capacities": capacities, "profile": profile},
+                )
+            ),
         ),
     )
 
@@ -178,15 +186,62 @@ def test_report_modes_route_to_exactly_one_runner(mode, forecast_cli):
         assert kwargs == {"night_capacities": forecast_cli.capacities}
 
 
-def test_tonight_mode_sorts_nights_by_date_before_routing(forecast_cli):
+def test_tonight_mode_routes_application_result_without_second_forecast(
+    monkeypatch,
+    forecast_cli,
+):
+    evaluation_calls = []
+    mission = object()
+
+    class ApplicationService:
+        def evaluate(self, **kwargs):
+            evaluation_calls.append(kwargs)
+            return SimpleNamespace(
+                forecast_available=True,
+                night=forecast_cli.nights[1],
+                mission=mission,
+            )
+
+    monkeypatch.setattr(
+        astro_score,
+        "build_tonight_application_service",
+        lambda: ApplicationService(),
+    )
+    monkeypatch.setattr(
+        astro_score,
+        "forecast_astro",
+        lambda *args, **kwargs: pytest.fail(
+            "CLI must delegate tonight forecast to the application service"
+        ),
+    )
+
     result = astro_score.main(["--mode", "tonight"])
 
     assert result == 0
-    assert len(forecast_cli.calls) == 1
-    called_mode, kwargs = forecast_cli.calls[0]
-    assert called_mode == "tonight"
-    assert kwargs["night_capacities"] is forecast_cli.capacities
-    assert [night["date"] for night in kwargs["top_nights"]] == [
-        "2026-08-27",
-        "2026-08-28",
+    assert evaluation_calls == [
+        {
+            "profile": {
+                "active_equipment": "setup",
+                "location": {
+                    "latitude": 46.5,
+                    "longitude": 6.6,
+                    "name": "Buttes",
+                },
+                "preferences": {
+                    "productive_hours_per_night": 3.5,
+                    "observing_nights_per_week": 2.0,
+                },
+                "sessions": [],
+            },
+            "weather": {"weather": True},
+            "equipment": None,
+            "goal": "balanced",
+            "target": astro_score.TARGET,
+            "bortle": 3,
+        }
     ]
+    assert forecast_cli.calls[0] == ("mission", mission)
+    called_mode, kwargs = forecast_cli.calls[1]
+    assert called_mode == "tonight_completion"
+    assert kwargs["night_capacities"] is forecast_cli.capacities
+    assert kwargs["profile"]["active_equipment"] == "setup"

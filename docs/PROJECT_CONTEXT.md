@@ -23,23 +23,21 @@ Dépôt GitHub :
 https://github.com/touchthebitum/astropilot
 
 
-## 2. État du projet au 21 août 2026
+## 2. État du projet au 29 août 2026
 
-Branche de développement actuelle :
+Branche de référence actuelle :
 
-`feature-opportunity-engine`
+`main`
 
 État Git au dernier contrôle :
 
-- branche en avance de 174 commits sur `origin/feature-opportunity-engine`
-- working tree propre
-- `astro_score.py` : 1846 lignes
-- 82 tests collectés et passants
-- modes CLI validés :
-  - `tonight`
-  - `portfolio`
-  - `calendar`
-  - `full`
+- `main == origin/main`
+- merge commit : `3bac899`
+- PR #82 mergée via `4985b8d`, commit fonctionnel `22e314f`
+- PR #83 mergée via `3bac899`, commit fonctionnel `ad1df86`
+- working tree propre au contrôle de reprise
+- stash de sécurité existant conservé sans modification
+- suite complète post-merge : 600 tests passés
 
 Le refactoring majeur de l’ancien moteur monolithique est désormais très avancé.
 
@@ -55,6 +53,7 @@ Forecast
 → OpportunityEngine
 → RecommendationEngine
 → OpportunityRecommendationService
+→ TonightApplicationService
 → TonightRunner
 → TonightMissionService
 → NightMission
@@ -374,6 +373,7 @@ Composants principaux :
 - `decision/mission/equipment_builder.py`
 - `decision/mission/mission_presenter.py`
 - `decision/services/tonight_mission_service.py`
+- `decision/services/tonight_application_service.py`
 
 La mission finale contient notamment :
 
@@ -390,6 +390,44 @@ La mission finale contient notamment :
 - productivité
 - risque de report
 - explications de recommandation
+
+### Orchestration applicative Tonight
+
+La PR #82 a introduit `TonightApplicationService` comme frontière applicative
+du parcours produit `tonight`.
+
+Le service orchestre, sans réimplémenter les règles de domaine :
+
+1. le forecast des nuits
+2. la sélection de la première nuit chronologique
+3. la construction des candidats
+4. `OpportunityRecommendationService`
+5. `TonightMissionService`
+
+Il retourne un `TonightResult` immuable contenant la nuit sélectionnée, la
+recommandation si elle existe, et la mission si elle peut être construite.
+Les sorties partielles sont explicites. Le service préserve les objets produits
+par les couches amont et ne provoque ni affichage, ni persistance, ni chargement
+de profil par lui-même.
+
+La PR #83 a ajouté le composition root de production
+`build_tonight_application_service()` dans `astro_score.py`. Cette factory
+injecte les implémentations canoniques existantes :
+
+- `forecast_astro`
+- `recommend_project_for_night`
+- `opportunity_recommendation_service`
+- `tonight_mission_service`
+- `build_mission_input`
+
+La construction est sans effet de bord et conserve les instances réelles de
+`OpportunityEngine`, `RecommendationEngine` et `NightMissionBuilder`.
+
+Décision architecturale : le service applicatif est désormais le point
+d'orchestration du cas d'usage Tonight. Le mode CLI `tonight` est maintenant
+basculé sur ce service. Le routage conserve l'affichage de capacité, la
+présentation de la mission et la projection de complétion, sans second appel au
+forecast.
 
 
 ## 15. Matériel
@@ -466,9 +504,18 @@ Le mode `calendar` et le mode `portfolio` n’utilisent plus l’ancien moteur c
 
 ## 17. Tests
 
-État validé au 21 août 2026 :
+État validé après merge de la PR #83 :
 
-82 tests passants.
+600 tests passants en suite complète post-merge.
+
+État validé après migration du routage CLI Tonight :
+
+601 tests passants en suite complète.
+
+État validé sur la branche `introduce-tonight-api` après la première tranche
+API Tonight :
+
+613 tests passants en suite complète.
 
 Principaux contrats architecturaux testés :
 
@@ -490,6 +537,13 @@ Principaux contrats architecturaux testés :
 - scoring projet
 - Season bridge
 - persistance du profil utilisateur
+- orchestration de `TonightApplicationService`, y compris les sorties partielles
+- composition de production et absence d'effets de bord à la construction
+- contrat de réponse Tonight composé uniquement de valeurs sérialisables
+- route FastAPI `POST /v1/tonight`
+- validation des coordonnées, du Bortle, de l'objectif et du type de cible
+- contrats HTTP pour météo et forecast indisponibles
+- scénario API de bout en bout utilisant le composition root de production
 
 Les quatre runtimes ont également été validés :
 
@@ -503,11 +557,10 @@ Les quatre runtimes ont également été validés :
 
 `astro_score.py` reste encore le principal point d’intégration du système.
 
-Taille actuelle :
-
-1846 lignes
-
-Le fichier contenait auparavant plus de 4700 lignes.
+Le fichier contenait auparavant plus de 4700 lignes et reste le point d'entrée
+et de composition du CLI. La PR #83 y a ajouté la factory de production du
+nouveau service applicatif Tonight. Le mode `tonight` utilise maintenant cette
+factory ; les autres modes conservent leur routage existant.
 
 Le refactoring a supprimé ou extrait une grande quantité de logique legacy.
 
@@ -517,10 +570,103 @@ Les fonctions restantes ont été auditées :
 - aucune fonction réellement orpheline détectée
 - plusieurs fonctions sont conservées comme callbacks injectés dans les nouveaux moteurs
 
-La priorité n’est désormais plus de réduire artificiellement la taille du fichier, mais de déplacer uniquement les responsabilités dont les frontières architecturales sont claires.
+La priorité n’est désormais plus de réduire artificiellement la taille du fichier, mais de déplacer uniquement les responsabilités dont les frontières architecturales sont claires. Aucun nouveau nettoyage général du core ne doit être lancé.
 
 
-## 19. Sprint feature-opportunity-engine — bilan
+## 19. Incréments applicatifs Tonight — bilan
+
+### PR #82 - TonightApplicationService
+
+- merge commit : `4985b8d`
+- commit fonctionnel : `22e314f`
+- ajout d'une frontière applicative testable pour le parcours Tonight
+- orchestration explicite forecast → candidats → recommandation → mission
+- gestion contractuelle des résultats partiels
+- aucune responsabilité de présentation ou de persistance
+
+### PR #83 - production composition root
+
+- merge commit : `3bac899`
+- commit fonctionnel : `ad1df86`
+- ajout de `build_tonight_application_service()`
+- câblage des dépendances canoniques existantes
+- construction sans effet de bord
+- suite complète validée à 600 tests
+
+### Décisions associées
+
+- conserver le domaine et les moteurs existants comme sources canoniques
+- faire porter l'orchestration du cas d'usage par la couche applicative
+- maintenir la composition de production dans un point explicite
+- migrer le routage CLI dans un incrément séparé, sans refactoring diffus
+- préserver les contrats d'effets de bord, d'identité et de sortie partielle
+
+### Migration du routage CLI Tonight
+
+- `--mode tonight` appelle `TonightApplicationService.evaluate()`
+- le forecast Tonight n'est calculé qu'une fois
+- une mission retournée est présentée par le presenter canonique
+- la projection de complétion reste exécutée lorsqu'une nuit existe
+- une liste de nuits vide conserve le rapport de capacité sans lancer les
+  traitements aval
+- un forecast indisponible reste distingué d'une liste vide et arrête les
+  calculs de capacité, conformément au contrat CLI existant
+- les modes `portfolio`, `calendar` et `full` ne sont pas modifiés
+- suite complète : 601 tests passants
+
+### Première tranche verticale API Tonight
+
+Le module `astropilot/app.py` expose désormais :
+
+`POST /v1/tonight`
+
+Le pipeline HTTP est :
+
+requête validée
+→ profil et position
+→ météo
+→ composition de production
+→ `TonightApplicationService`
+→ `TonightResponse`
+→ JSON
+
+Le contrat transportable expose notamment :
+
+- statut métier explicite
+- date de nuit
+- cible et identifiant catalogue
+- action recommandée et confiance
+- principaux scores
+- fenêtre et durée recommandées
+- gain attendu
+- matériel et filtre
+- raisons de mission
+
+Statuts métier disponibles :
+
+- `available`
+- `no_night`
+- `no_candidate`
+- `no_recommendation`
+- `no_mission`
+- `forecast_unavailable`
+
+Les résultats métier partiels restent des réponses HTTP 200. Les entrées
+invalides produisent une réponse 422. Une météo ou un forecast techniquement
+indisponible produit une réponse 503 structurée.
+
+Le test de bout en bout garantit :
+
+- un seul appel au forecast
+- la sélection chronologique de la nuit
+- le passage par recommandation et mission
+- la sérialisation JSON
+- l'absence de chargement ou persistance du profil CLI
+- l'absence de présentation terminal
+- suite complète : 613 tests passants
+
+
+## 20. Sprint feature-opportunity-engine — bilan historique
 
 Le sprint a notamment réalisé :
 
@@ -565,7 +711,7 @@ Commits récents représentatifs :
 - `57599d0` fix: use simulated remaining hours in portfolio forecast
 
 
-## 20. Principes de développement
+## 21. Principes de développement
 
 Pour chaque changement architectural sensible :
 
@@ -600,7 +746,7 @@ Après chaque sprint majeur ou décision architecturale importante :
 - mettre à jour la version PDF de PROJECT_CONTEXT si elle est maintenue
 
 
-## 21. Roadmap produit
+## 22. Roadmap produit
 
 ### Astro Quality Index — AQI
 
@@ -690,9 +836,14 @@ Prévoir un affichage dédié à l’utilisation nocturne :
 
 ### Mobile / API
 
+État actuel :
+
+- première application FastAPI créée
+- route `POST /v1/tonight` disponible
+- composition applicative et réponse JSON testées de bout en bout
+
 Étapes futures :
 
-- FastAPI
 - authentification
 - gestion utilisateurs
 - GPS
@@ -703,7 +854,7 @@ Prévoir un affichage dédié à l’utilisation nocturne :
 - notifications
 
 
-## 22. Dette technique restante
+## 23. Dette technique restante
 
 Principaux points à surveiller :
 
@@ -715,14 +866,14 @@ Principaux points à surveiller :
 - saison dynamique à finaliser
 - catalogue à enrichir
 - persistance utilisateur à consolider
-- API non encore implémentée
+- API limitée pour l'instant à la tranche verticale Tonight
 
 Le nettoyage ne doit plus être poursuivi uniquement pour réduire le nombre de lignes.
 
 Chaque extraction future doit résoudre une responsabilité architecturale réelle.
 
 
-## 23. Règle de reprise du projet
+## 24. Règle de reprise du projet
 
 Lors d’une nouvelle session de développement :
 
@@ -730,8 +881,8 @@ Lors d’une nouvelle session de développement :
 2. vérifier la branche active
 3. exécuter `git status --short`
 4. vérifier les derniers commits
-5. lancer `pytest -q`
-6. vérifier la taille de `astro_score.py`
+5. vérifier le stash de sécurité sans l'appliquer ni le supprimer
+6. lancer `pytest -q`
 7. ne pas supposer que les anciens chemins legacy existent encore
 8. poursuivre à partir des moteurs actuels
-
+9. ne pas lancer de nettoyage général du core sans objectif produit explicite
