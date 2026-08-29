@@ -195,7 +195,16 @@ button { color: inherit; }
 .mission-button:hover { color: var(--ink); border-color: rgba(103,228,209,.35); background: var(--cyan-soft); }
 .page-footer { display: flex; gap: 9px; justify-content: center; padding: 36px 20px 45px; color: #4e5d72; font-size: 11px; letter-spacing: .05em; }
 .page-footer a { color: inherit; }
-.weather-trust { margin: 7px 0 0; color: #718197; font-size: 11px; letter-spacing: .02em; }
+.weather-trust-panel { padding: 25px 42px 27px; border-top: 1px solid var(--line); background: rgba(5, 14, 25, .28); }
+.weather-trust-heading { display: flex; gap: 20px; justify-content: space-between; align-items: center; }
+.weather-trust-heading h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.trust-badge { padding: 6px 10px; color: var(--cyan); background: var(--cyan-soft); border: 1px solid rgba(103,228,209,.18); border-radius: 999px; font-size: 10px; font-weight: 700; }
+.weather-trust-grid { display: grid; grid-template-columns: .75fr .85fr 1.2fr 2fr; gap: 14px; margin: 19px 0 0; }
+.weather-trust-grid > div { min-width: 0; }
+.weather-trust-grid dt { color: var(--subtle); font-size: 9px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.weather-trust-grid dd { margin: 5px 0 0; color: #b5c1d0; font-size: 11px; line-height: 1.45; }
+.weather-trust-note { margin: 13px 0 0; color: var(--subtle); font-size: 10px; }
+.mission-weather-trust { border-top: 1px solid var(--line); }
 
 .mission-dialog {
   width: min(880px, calc(100% - 32px));
@@ -299,6 +308,11 @@ button { color: inherit; }
   .mission-columns > section + section { border-top: 1px solid var(--line); border-left: 0; }
   .mission-section { padding: 25px 24px; }
   .advice-list { grid-template-columns: 1fr; }
+  .weather-trust-panel { padding: 23px 25px; }
+  .weather-trust-heading { align-items: flex-start; }
+  .trust-badge { max-width: 150px; text-align: center; }
+  .weather-trust-grid { grid-template-columns: 1fr 1fr; }
+  .weather-trust-grid > div:nth-child(n+3) { padding-top: 9px; border-top: 1px solid var(--line); }
   .mission-footer { flex-wrap: wrap; gap: 14px; padding: 19px 24px; }
   .mission-footer p { flex-basis: 100%; }
 }

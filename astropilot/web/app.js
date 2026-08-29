@@ -83,6 +83,63 @@ function dateLabel(value) {
   }).format(parsed);
 }
 
+function siteDateTime(value, timeZone) {
+  if (!value) return "Non précisée";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  try {
+    return new Intl.DateTimeFormat("fr-CH", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone,
+      timeZoneName: "short",
+    }).format(parsed);
+  } catch (_error) {
+    return String(value);
+  }
+}
+
+function renderWeatherTrust(weatherTrust, prefix) {
+  const validated = weatherTrust?.validation_status === "validated"
+    && weatherTrust?.freshness_status === "fresh";
+  if (!validated) {
+    text(`#${prefix}-weather-status`, "Non disponible");
+    text(`#${prefix}-weather-provider`, "Provenance non disponible");
+    text(`#${prefix}-weather-age`, "Non évalué");
+    text(`#${prefix}-weather-retrieved`, "Non précisée");
+    text(`#${prefix}-weather-coverage`, "Non précisée");
+    if (prefix === "classic") text("#classic-weather-timezone", "Fuseau du site non disponible.");
+    return;
+  }
+
+  const zone = weatherTrust.timezone;
+  const age = Number(weatherTrust.snapshot_age_minutes);
+  const maximumAge = Number(weatherTrust.maximum_age_minutes);
+  text(`#${prefix}-weather-status`, "Données fraîches et validées");
+  text(`#${prefix}-weather-provider`, weatherTrust.provider);
+  text(
+    `#${prefix}-weather-age`,
+    Number.isFinite(age)
+      ? `Récupérées il y a ${age.toLocaleString("fr-CH")} min${Number.isFinite(maximumAge) ? ` · limite ${maximumAge.toLocaleString("fr-CH")} min` : ""}`
+      : "Non évalué",
+  );
+  text(
+    `#${prefix}-weather-retrieved`,
+    siteDateTime(weatherTrust.retrieved_at_utc, zone),
+  );
+  text(
+    `#${prefix}-weather-coverage`,
+    `${siteDateTime(weatherTrust.valid_from, zone)} → ${siteDateTime(weatherTrust.valid_until, zone)}`,
+  );
+  if (prefix === "classic") {
+    text("#classic-weather-timezone", `Horaires affichés dans le fuseau du site : ${zone}.`);
+  }
+}
+
 function reasonText(reason) {
   if (!reason) return null;
   const title = reason.title || "Information";
@@ -203,16 +260,8 @@ function renderDecision(decision) {
   text("#quality-title", qualityCopy[0]);
   text("#quality-summary", qualityCopy[1]);
   text("#limiting-factor", limiting ? (labels.factors[limiting] || limiting.replaceAll("_", " ")) : "Aucun identifié");
-  if (weatherTrust?.validation_status === "validated") {
-    const retrieved = clock(weatherTrust.retrieved_at_utc);
-    const retrieval = retrieved ? ` · récupérées à ${retrieved}` : "";
-    const age = Number.isFinite(Number(weatherTrust.snapshot_age_minutes))
-      ? ` · âge ${Number(weatherTrust.snapshot_age_minutes).toLocaleString("fr-CH")} min`
-      : "";
-    text("#weather-trust", `${weatherTrust.provider} · ${weatherTrust.timezone} · réponse fraîche · ${weatherTrust.hour_count} h couvertes${age}${retrieval}`);
-  } else {
-    text("#weather-trust", "Provenance météo non disponible.");
-  }
+  renderWeatherTrust(weatherTrust, "classic");
+  renderWeatherTrust(weatherTrust, "mission");
 
   const circumference = 2 * Math.PI * 48;
   const progress = document.querySelector("#quality-progress");
