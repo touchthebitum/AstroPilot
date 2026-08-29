@@ -215,6 +215,7 @@ def test_complete_result_maps_only_json_compatible_values():
     assert response["productivity"] == {
         "astronomical_hours": 6.0,
         "productive_hours": 3.5,
+        "productive_fraction": 0.82,
         "confidence": 0.82,
         "cloud_loss": 1.0,
         "moon_loss": 0.5,

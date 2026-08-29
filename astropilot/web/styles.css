@@ -147,9 +147,6 @@ button { color: inherit; }
 .target-label, .metric-label { margin: 0 0 5px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
 .decision-head h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp(37px, 5vw, 54px); font-weight: 400; line-height: 1; letter-spacing: -.025em; }
 .catalog-key { margin: 9px 0 0; color: var(--subtle); font-size: 13px; }
-.confidence { display: flex; flex-direction: column; align-items: center; min-width: 76px; padding: 13px; background: var(--cyan-soft); border: 1px solid rgba(103,228,209,.2); border-radius: 15px; }
-.confidence span { color: var(--cyan); font-family: Georgia, serif; font-size: 25px; }
-.confidence small { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
 
 .decision-grid { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--line); }
 .metric-card { display: flex; gap: 16px; align-items: center; min-width: 0; padding: 27px 30px; }
@@ -280,7 +277,6 @@ button { color: inherit; }
   .state-panel > div { min-width: calc(100% - 100px); }
   .decision-head { padding: 30px 25px 26px; }
   .decision-head h2 { font-size: 38px; }
-  .confidence { min-width: 67px; margin-left: 15px; }
   .decision-grid { grid-template-columns: 1fr; }
   .metric-card { padding: 21px 25px; }
   .metric-card + .metric-card { border-top: 1px solid var(--line); border-left: 0; }

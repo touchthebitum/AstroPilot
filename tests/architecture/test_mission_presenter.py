@@ -66,6 +66,8 @@ def test_expected_gain_is_printed_once(monkeypatch, capsys):
     assert "AQI : 84/100 — Très bonne" in output
     assert "Facteur limitant : Lune" in output
     assert "Complétude AQI : 100%" in output
+    assert "Part productive : 75%" in output
+    assert "Confiance productivité" not in output
     assert output.count("Gain attendu") == 1
     assert "Capacité moyenne estimée : 4.0 h/nuit (profil)" in output
     assert "Nuits nécessaires estimées : 4" in output

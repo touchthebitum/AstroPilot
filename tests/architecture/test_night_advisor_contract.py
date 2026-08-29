@@ -46,20 +46,10 @@ def test_short_productive_window_threshold(
     assert [advice.category for advice in advices] == expected_categories
 
 
-@pytest.mark.parametrize(
-    ("confidence", "expected_categories"),
-    [
-        (0.39, ["weather"]),
-        (0.40, ["general"]),
-    ],
-)
-def test_weather_confidence_threshold(
-    confidence,
-    expected_categories,
-):
-    advices = NightAdvisor.build(mission(confidence=confidence))
+def test_productive_fraction_is_not_treated_as_weather_confidence():
+    advices = NightAdvisor.build(mission(confidence=0.1))
 
-    assert [advice.category for advice in advices] == expected_categories
+    assert [advice.category for advice in advices] == ["general"]
 
 
 def test_only_high_season_urgency_adds_season_advice():
@@ -80,6 +70,14 @@ def test_high_and_critical_risks_add_risk_advice(risk_report):
     assert advices[0].priority == "HIGH"
 
 
+def test_risk_report_level_adds_risk_advice():
+    report = SimpleNamespace(level="HIGH")
+
+    advices = NightAdvisor.build(mission(risk_report=report))
+
+    assert [advice.category for advice in advices] == ["risk"]
+
+
 def test_all_applicable_advices_keep_decision_order():
     advices = NightAdvisor.build(
         mission(
@@ -92,7 +90,6 @@ def test_all_applicable_advices_keep_decision_order():
 
     assert [advice.category for advice in advices] == [
         "strategy",
-        "weather",
         "season",
         "risk",
     ]

@@ -26,15 +26,6 @@ class NightAdvisor:
                 )
             )
 
-        if mission.productivity.confidence < 0.40:
-            advices.append(
-                Advice(
-                    time="Avant installation",
-                    priority="MEDIUM",
-                    category="weather",
-                    message="Prévisions peu fiables : vérifier les dernières données météo.",
-                )
-            )
         if (
             mission.season_analysis is not None
             and mission.season_analysis.data.get("urgency") == "HIGH"
@@ -48,7 +39,12 @@ class NightAdvisor:
                 )
             )
 
-        if mission.risk_report in ("HIGH", "CRITICAL"):
+        risk_level = getattr(
+            mission.risk_report,
+            "level",
+            mission.risk_report,
+        )
+        if risk_level in ("HIGH", "CRITICAL"):
             advices.append(
                 Advice(
                     time="Début",

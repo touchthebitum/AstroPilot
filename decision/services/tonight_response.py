@@ -92,6 +92,7 @@ class TonightProductivityWindowResponse:
 class TonightProductivityResponse:
     astronomical_hours: float
     productive_hours: float
+    productive_fraction: float
     confidence: float
     cloud_loss: float
     moon_loss: float
@@ -253,6 +254,7 @@ class TonightResponse:
             productivity = TonightProductivityResponse(
                 astronomical_hours=float(source.astronomical_hours),
                 productive_hours=float(source.productive_hours),
+                productive_fraction=float(source.confidence),
                 confidence=float(source.confidence),
                 cloud_loss=float(source.cloud_loss),
                 moon_loss=float(source.moon_loss),
