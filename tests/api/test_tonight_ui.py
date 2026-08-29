@@ -29,6 +29,12 @@ def test_root_serves_tonight_classic_ui():
     assert "Voir ma mission" in response.text
     assert "Données météo par Open-Meteo.com" in response.text
     assert 'id="weather-trust"' in response.text
+    assert 'id="classic-weather-coverage"' in response.text
+    assert 'id="mission-weather-coverage"' in response.text
+    assert 'id="classic-weather-status"' in response.text
+    assert 'id="mission-weather-status"' in response.text
+    assert "Fraîcheur météo" in response.text
+    assert "Âge du snapshot" not in response.text
     assert 'id="mission-dialog"' in response.text
     assert "confidence-value" not in response.text
     assert 'src="/ui/app.js"' in response.text
@@ -53,6 +59,14 @@ def test_tonight_ui_assets_are_served():
     assert 'detail?.code === "weather_stale"' in script.text
     assert 'detail?.code === "weather_window_uncovered"' in script.text
     assert "weatherTrust.snapshot_age_minutes" in script.text
+    assert "weatherTrust.valid_from" in script.text
+    assert "weatherTrust.valid_until" in script.text
+    assert "weatherTrust.retrieved_at_utc" in script.text
+    assert 'renderWeatherTrust(weatherTrust, "classic")' in script.text
+    assert 'renderWeatherTrust(weatherTrust, "mission")' in script.text
+    assert "timeZone," in script.text
+    assert "Date.now(" not in script.text
+    assert "Récupérées il y a" in script.text
     assert "no_productive_window" in script.text
     assert 'detail?.code === "decision_invalid"' in script.text
     assert 'detail?.code === "location_timezone_unresolved"' in script.text
