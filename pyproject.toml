@@ -12,6 +12,7 @@ dependencies = [
     "astropy>=7.2,<8.0",
     "fastapi>=0.116,<1.0",
     "requests>=2.32,<3.0",
+    "timezonefinder>=8,<9",
 ]
 
 [project.scripts]

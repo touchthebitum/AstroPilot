@@ -1,6 +1,9 @@
 from types import SimpleNamespace
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from decision.forecast.forecast_engine import ForecastEngine
+import decision.forecast.forecast_engine as forecast_module
 
 
 def _engine(**overrides):
@@ -81,6 +84,44 @@ def test_build_weather_forecast_preserves_rows_and_applies_defaults():
     assert forecast.hourly_wind == [8, 0]
     assert forecast.hourly_temperature == [4, 0]
     assert forecast.hourly_visibility == [15000, 10000]
+
+
+def test_forecast_uses_the_weather_rows_timezone_for_lunar_calculations(
+    monkeypatch,
+):
+    captured = []
+
+    class Sky:
+        @staticmethod
+        def moon_illumination_from_phase(value):
+            return 0
+
+        @staticmethod
+        def safe_moonrise(observer, date, timezone):
+            captured.append(("rise", timezone.key))
+
+        @staticmethod
+        def safe_moonset(observer, date, timezone):
+            captured.append(("set", timezone.key))
+
+    monkeypatch.setattr(forecast_module, "SkyEngine", Sky)
+    engine = _engine(
+        night_hours_rough=lambda *args: [],
+    )
+
+    result = engine.forecast_one_night(
+        night_date=datetime(2026, 9, 1).date(),
+        rows=[{"time": datetime(2026, 9, 1, 22, tzinfo=ZoneInfo("Asia/Tokyo"))}],
+        lat=35.6762,
+        lon=139.6503,
+        city="Tokyo",
+        bortle=8,
+        target="deep_sky",
+        profile={},
+    )
+
+    assert result is None
+    assert captured == [("rise", "Asia/Tokyo"), ("set", "Asia/Tokyo")]
 
 
 def test_evaluate_targets_preserves_catalog_order_and_skips_none():

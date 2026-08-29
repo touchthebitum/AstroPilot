@@ -206,7 +206,7 @@ function renderDecision(decision) {
   if (weatherTrust?.validation_status === "validated") {
     const retrieved = clock(weatherTrust.retrieved_at_utc);
     const retrieval = retrieved ? ` · récupérées à ${retrieved}` : "";
-    text("#weather-trust", `${weatherTrust.provider} · réponse validée · ${weatherTrust.hour_count} h couvertes${retrieval}`);
+    text("#weather-trust", `${weatherTrust.provider} · ${weatherTrust.timezone} · réponse validée · ${weatherTrust.hour_count} h couvertes${retrieval}`);
   } else {
     text("#weather-trust", "Provenance météo non disponible.");
   }
@@ -263,6 +263,9 @@ function normalizeError(response, payload) {
     }
     if (detail?.code === "decision_invalid") {
       return ["Décision rejetée par sécurité", "AstroPilot a détecté une contradiction interne et refuse d’afficher une recommandation potentiellement trompeuse."];
+    }
+    if (detail?.code === "location_timezone_unresolved") {
+      return ["Fuseau horaire introuvable", "AstroPilot ne peut pas relier ce site à un fuseau horaire fiable et refuse de calculer une nuit locale."];
     }
     return ["Prévisions temporairement indisponibles", "La prévision de cette nuit n’est pas accessible pour le moment. Réessayez dans un instant."];
   }

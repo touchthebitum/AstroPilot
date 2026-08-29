@@ -180,6 +180,14 @@ class ForecastEngine:
         target,
         profile,
     ):
+        row_zone = (
+            rows[0].get("time").tzinfo
+            if rows
+            and isinstance(rows[0], dict)
+            and getattr(rows[0].get("time"), "tzinfo", None) is not None
+            else None
+        )
+        timezone_name = getattr(row_zone, "key", self.timezone)
         current_date = datetime.combine(
             night_date,
             datetime.min.time(),
@@ -195,8 +203,8 @@ class ForecastEngine:
 
         city_info = LocationInfo(
             city,
-            "Switzerland",
-            self.timezone,
+            "",
+            timezone_name,
             lat,
             lon,
         )
@@ -206,13 +214,13 @@ class ForecastEngine:
         moon_rise = sky.safe_moonrise(
             city_info.observer,
             target_date,
-            ZoneInfo(self.timezone),
+            ZoneInfo(timezone_name),
         )
 
         moon_set = sky.safe_moonset(
             city_info.observer,
             target_date,
-            ZoneInfo(self.timezone),
+            ZoneInfo(timezone_name),
         )
 
         hours = self.night_hours_rough(

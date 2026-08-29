@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -12,17 +13,17 @@ from decision.weather.weather_ingress import (
 
 
 def valid_payload(hours=48):
-    start = datetime(2026, 8, 29)
+    start = datetime(2026, 8, 29, tzinfo=ZoneInfo("Europe/Zurich"))
     return {
         "latitude": 46.75,
         "longitude": 6.55,
         "elevation": 837.0,
         "timezone": "Europe/Zurich",
         "utc_offset_seconds": 7200,
-        "hourly_units": {"time": "iso8601", **REQUIRED_HOURLY_UNITS},
+        "hourly_units": {"time": "unixtime", **REQUIRED_HOURLY_UNITS},
         "hourly": {
             "time": [
-                (start + timedelta(hours=index)).isoformat(timespec="minutes")
+                int((start + timedelta(hours=index)).timestamp())
                 for index in range(hours)
             ],
             "cloud_cover": [20.0] * hours,
@@ -54,6 +55,7 @@ def test_valid_payload_becomes_an_immutable_snapshot_with_auditable_metadata():
     assert snapshot.provider == "Open-Meteo"
     assert snapshot.hour_count == 48
     assert snapshot.completeness == 1.0
+    assert snapshot.timezone_source == "coordinates_local"
     assert snapshot.valid_from.isoformat() == "2026-08-29T00:00:00+02:00"
     assert snapshot.valid_until.isoformat() == "2026-08-30T23:00:00+02:00"
     assert snapshot.trust_transport()["validation_status"] == "validated"
@@ -64,6 +66,10 @@ def test_valid_payload_becomes_an_immutable_snapshot_with_auditable_metadata():
     [
         (lambda data: data.update(error=True), "provider_error_response"),
         (lambda data: data.pop("hourly_units"), "missing_hourly_units"),
+        (
+            lambda data: data["hourly_units"].update(time="iso8601"),
+            "invalid_unit_time",
+        ),
         (
             lambda data: data["hourly_units"].update(wind_speed_10m="m/s"),
             "invalid_unit_wind_speed_10m",
@@ -81,7 +87,7 @@ def test_valid_payload_becomes_an_immutable_snapshot_with_auditable_metadata():
             "invalid_value_temperature_2m",
         ),
         (
-            lambda data: data["hourly"]["time"].__setitem__(1, "2026-08-29T00:30"),
+            lambda data: data["hourly"]["time"].__setitem__(1, data["hourly"]["time"][0] + 1800),
             "non_hourly_time_cadence",
         ),
         (lambda data: data.update(timezone="UTC"), "unexpected_timezone"),
@@ -127,3 +133,21 @@ def test_retrieval_timestamp_must_be_timezone_aware():
         )
 
     assert caught.value.issues == ("retrieval_time_without_timezone",)
+
+
+def test_unix_weather_hours_cross_spring_dst_as_distinct_utc_instants():
+    payload = valid_payload()
+    start_utc = datetime(2026, 3, 29, tzinfo=timezone.utc)
+    payload["hourly"]["time"] = [
+        int((start_utc + timedelta(hours=index)).timestamp())
+        for index in range(48)
+    ]
+
+    snapshot = validate(payload)
+
+    assert snapshot.valid_from.isoformat() == "2026-03-29T01:00:00+01:00"
+    assert snapshot.payload["hourly"]["time"][1] - snapshot.payload["hourly"]["time"][0] == 3600
+    second = datetime.fromtimestamp(
+        snapshot.payload["hourly"]["time"][1], timezone.utc
+    ).astimezone(ZoneInfo(snapshot.timezone))
+    assert second.isoformat() == "2026-03-29T03:00:00+02:00"

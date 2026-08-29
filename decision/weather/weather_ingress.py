@@ -58,6 +58,7 @@ class WeatherSnapshot:
     grid_distance_km: float
     elevation_m: float | None
     timezone: str
+    timezone_source: str
     utc_offset_seconds: int
     valid_from: datetime
     valid_until: datetime
@@ -75,6 +76,7 @@ class WeatherSnapshot:
             "grid_distance_km": self.grid_distance_km,
             "elevation_m": self.elevation_m,
             "timezone": self.timezone,
+            "timezone_source": self.timezone_source,
             "utc_offset_seconds": self.utc_offset_seconds,
             "valid_from": self.valid_from.isoformat(),
             "valid_until": self.valid_until.isoformat(),
@@ -136,6 +138,8 @@ def validate_weather_payload(
     if not isinstance(units, dict):
         issues.append("missing_hourly_units")
         units = {}
+    if units.get("time") != "unixtime":
+        issues.append("invalid_unit_time")
     for name, expected in REQUIRED_HOURLY_UNITS.items():
         if units.get(name) != expected:
             issues.append(f"invalid_unit_{name}")
@@ -168,15 +172,18 @@ def validate_weather_payload(
 
     parsed_times = []
     for value in times:
-        try:
-            parsed = datetime.fromisoformat(value)
-        except (TypeError, ValueError):
+        if not _number(value):
             issues.append("invalid_hourly_time")
             break
-        if parsed.tzinfo is not None or zone is None:
-            issues.append("unexpected_hourly_timezone_format")
+        if zone is None:
             break
-        parsed_times.append(parsed.replace(tzinfo=zone))
+        try:
+            parsed_times.append(
+                datetime.fromtimestamp(float(value), timezone.utc).astimezone(zone)
+            )
+        except (OverflowError, OSError, ValueError):
+            issues.append("invalid_hourly_time")
+            break
 
     if len(parsed_times) == hour_count:
         if any(
@@ -185,7 +192,8 @@ def validate_weather_payload(
         ):
             issues.append("non_monotonic_hourly_time")
         elif any(
-            current - previous != timedelta(hours=1)
+            current.astimezone(timezone.utc) - previous.astimezone(timezone.utc)
+            != timedelta(hours=1)
             for previous, current in zip(parsed_times, parsed_times[1:])
         ):
             issues.append("non_hourly_time_cadence")
@@ -225,6 +233,7 @@ def validate_weather_payload(
         grid_distance_km=round(distance, 2),
         elevation_m=float(elevation) if elevation is not None else None,
         timezone=response_timezone,
+        timezone_source="coordinates_local",
         utc_offset_seconds=int(payload["utc_offset_seconds"]),
         valid_from=parsed_times[0],
         valid_until=parsed_times[-1],

@@ -52,6 +52,8 @@ def test_tonight_ui_assets_are_served():
     assert 'detail?.code === "weather_insufficient"' in script.text
     assert "no_productive_window" in script.text
     assert 'detail?.code === "decision_invalid"' in script.text
+    assert 'detail?.code === "location_timezone_unresolved"' in script.text
+    assert "weatherTrust.timezone" in script.text
     assert "productive_hours ?? decision.recommended_hours" in script.text
     assert "showModal()" in script.text
 
