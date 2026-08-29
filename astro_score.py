@@ -90,6 +90,7 @@ from decision.weather.weather_ingress import (
     WeatherSnapshot,
     validate_weather_payload,
 )
+from decision.location.location_time import LocationTimeResolver
 from decision.engines.future_opportunity_engine import FutureOpportunityEngine
 from zoneinfo import ZoneInfo
 from astral.moon import phase as moon_phase
@@ -286,15 +287,17 @@ def fetch_weather(lat: float, lon: float) -> WeatherSnapshot | None:
     url = "https://api.open-meteo.com/v1/forecast"
     #url = "https://api.open-meteo.com_BUG/v1/forecast"
 
+    location_time = LocationTimeResolver.resolve(lat, lon)
+    timezone_name = location_time.timezone_name
     params = {
         "latitude": lat,
         "longitude": lon,
-        "timezone": TIMEZONE,
+        "timezone": timezone_name,
         "forecast_days": 7,
         "temperature_unit": "celsius",
         "wind_speed_unit": "kmh",
         "precipitation_unit": "mm",
-        "timeformat": "iso8601",
+        "timeformat": "unixtime",
         "hourly": ",".join([
                 "cloud_cover",
                 "cloud_cover_low",
@@ -332,7 +335,7 @@ def fetch_weather(lat: float, lon: float) -> WeatherSnapshot | None:
         payload,
         requested_latitude=lat,
         requested_longitude=lon,
-        requested_timezone=TIMEZONE,
+        requested_timezone=timezone_name,
         retrieved_at_utc=datetime.now(timezone.utc),
     )
 
@@ -836,14 +839,20 @@ def verdict(score: int) -> str:
 def parse_hourly_weather(data: dict | WeatherSnapshot) -> list[dict]:
     if data is None:
         return []
-    if isinstance(data, WeatherSnapshot):
+    snapshot = data if isinstance(data, WeatherSnapshot) else None
+    if snapshot is not None:
         data = data.payload
+    zone = ZoneInfo(snapshot.timezone if snapshot is not None else TIMEZONE)
     hourly = data["hourly"]
     rows = []
     
     for i, t in enumerate(hourly["time"]):
         rows.append({
-            "time": datetime.fromisoformat(t).replace(tzinfo=ZoneInfo(TIMEZONE)),
+            "time": (
+                datetime.fromtimestamp(float(t), timezone.utc).astimezone(zone)
+                if snapshot is not None
+                else datetime.fromisoformat(t).replace(tzinfo=zone)
+            ),
             "cloud_cover": hourly["cloud_cover"][i],
             "cloud_cover_low": hourly["cloud_cover_low"][i],
             "cloud_cover_mid": hourly["cloud_cover_mid"][i],
@@ -857,8 +866,22 @@ def parse_hourly_weather(data: dict | WeatherSnapshot) -> list[dict]:
 
     return rows
 
-def night_hours_rough(rows: list[dict], date: datetime, lat: float, lon: float, name: str) -> list[dict]:
-    tz = ZoneInfo(TIMEZONE)
+def night_hours_rough(
+    rows: list[dict],
+    date: datetime,
+    lat: float,
+    lon: float,
+    name: str,
+    timezone_name: str | None = None,
+) -> list[dict]:
+    row_zone = (
+        rows[0].get("time").tzinfo
+        if rows
+        and isinstance(rows[0], dict)
+        and getattr(rows[0].get("time"), "tzinfo", None) is not None
+        else None
+    )
+    tz = row_zone or ZoneInfo(timezone_name or TIMEZONE)
 
     start, end = SkyEngine.astronomical_night_window(
         date=date.date(),
@@ -1148,9 +1171,11 @@ def build_decision_context(
         angular_size_arcmin=CATALOG.get(obj_name, {}).get("size_arcmin"),
     )
 
-    session_start = datetime.now(
-        ZoneInfo(TIMEZONE)
-    )
+    selected_start = best.get("start")
+    session_zone = getattr(selected_start, "tzinfo", None)
+    if session_zone is None:
+        session_zone = LocationTimeResolver.resolve(lat, lon).zone
+    session_start = datetime.now(session_zone)
 
     session_context = SessionContext(
         start_time=session_start,
@@ -1164,6 +1189,7 @@ def build_decision_context(
         longitude=lon,
         elevation=0,
         bortle=profile.get("preferences", {}).get("bortle", 4),
+        timezone=getattr(session_zone, "key", str(session_zone)),
         sqm=best.get("sqm"),
     )
 
@@ -1659,7 +1685,16 @@ def forecast_astro(
 
     results = []
 
-    today = datetime.now(ZoneInfo(TIMEZONE)).date()
+    row_zone = getattr(rows[0].get("time"), "tzinfo", None) if rows else None
+    resolved_zone = (
+        row_zone
+        or (
+            ZoneInfo(weather.timezone)
+            if isinstance(weather, WeatherSnapshot)
+            else LocationTimeResolver.resolve(lat, lon).zone
+        )
+    )
+    today = datetime.now(resolved_zone).date()
     for d in range(7):
         night_date = today + timedelta(days=d)
 

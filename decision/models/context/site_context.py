@@ -13,7 +13,8 @@ class SiteContext:
 
     bortle: int
 
+    timezone: str = "Europe/Zurich"
+
     sqm: float | None = None
 
     has_horizon_profile: bool = False
-

@@ -17,6 +17,7 @@ from decision.weather.weather_ingress import (
     WeatherInsufficientError,
 )
 from decision.validation.decision_consistency import DecisionConsistencyError
+from decision.location.location_time import LocationTimeError
 
 
 def make_result():
@@ -215,6 +216,24 @@ def test_internally_inconsistent_decision_is_rejected_before_transport():
     }
 
 
+def test_unresolved_location_timezone_stops_before_evaluation():
+    def unresolved_timezone(lat, lon):
+        raise LocationTimeError("timezone_not_found")
+
+    client = TestClient(
+        create_app(
+            service_factory=lambda: None,
+            weather_provider=unresolved_timezone,
+            profile_provider=lambda: {},
+        )
+    )
+
+    response = client.post("/v1/tonight", json={})
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "location_timezone_unresolved"
+
+
 def test_forecast_unavailable_is_a_service_error():
     client = make_client(
         result=TonightResult(
@@ -372,3 +391,6 @@ def test_openapi_documents_tonight_operation_and_error_examples():
     assert error_examples["decision_invalid"]["value"]["detail"]["code"] == (
         "decision_invalid"
     )
+    assert error_examples["location_timezone_unresolved"]["value"]["detail"][
+        "code"
+    ] == "location_timezone_unresolved"

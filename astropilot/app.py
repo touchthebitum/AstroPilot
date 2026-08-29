@@ -12,6 +12,7 @@ from decision.services.tonight_application_service import TonightStatus
 from decision.services.tonight_response import TonightResponse
 from decision.weather.weather_ingress import WeatherIngressError, WeatherSnapshot
 from decision.validation.decision_consistency import DecisionConsistencyError
+from decision.location.location_time import LocationTimeError
 
 
 class LocationRequest(BaseModel):
@@ -181,6 +182,7 @@ class TonightWeatherTrustModel(BaseModel):
     grid_distance_km: float
     elevation_m: float | None = None
     timezone: str
+    timezone_source: Literal["coordinates_local"]
     utc_offset_seconds: int
     valid_from: str
     valid_until: str
@@ -464,6 +466,17 @@ def create_app(
                                     }
                                 },
                             },
+                            "location_timezone_unresolved": {
+                                "summary": "Location timezone unresolved",
+                                "value": {
+                                    "detail": {
+                                        "code": "location_timezone_unresolved",
+                                        "message": (
+                                            "The location timezone could not be resolved."
+                                        ),
+                                    }
+                                },
+                            },
                             "forecast_unavailable": {
                                 "summary": "Tonight forecast unavailable",
                                 "value": {
@@ -521,6 +534,14 @@ def create_app(
             raise HTTPException(
                 status_code=503,
                 detail={"code": exc.code, "message": message},
+            ) from exc
+        except LocationTimeError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": exc.code,
+                    "message": "The location timezone could not be resolved.",
+                },
             ) from exc
         if weather is None:
             raise HTTPException(

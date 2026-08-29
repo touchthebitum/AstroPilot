@@ -1,8 +1,11 @@
 from __future__ import annotations
 import math
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from decision.models.future_opportunity import FutureOpportunity
 from decision.intelligence.analysis_context import AnalysisContext
 from decision.season.season_resolver import SeasonResolver
+from decision.weather.weather_ingress import WeatherSnapshot
 
 
 class FutureOpportunityEngine:
@@ -141,10 +144,12 @@ class FutureOpportunityEngine:
 
     @staticmethod
     def _estimate_weather_good_night_ratio(weather) -> float:
-        if not weather or "hourly" not in weather:
+        snapshot = weather if isinstance(weather, WeatherSnapshot) else None
+        payload = snapshot.payload if snapshot is not None else weather
+        if not payload or "hourly" not in payload:
             return 0.35
 
-        hourly = weather["hourly"]
+        hourly = payload["hourly"]
         times = hourly.get("time", [])
         clouds = hourly.get("cloud_cover", [])
         humidity = hourly.get("relative_humidity_2m", [])
@@ -155,7 +160,13 @@ class FutureOpportunityEngine:
         total_night_hours = 0
 
         for i, timestamp in enumerate(times):
-            hour = int(timestamp[11:13])
+            if snapshot is not None:
+                hour = datetime.fromtimestamp(
+                    float(timestamp),
+                    timezone.utc,
+                ).astimezone(ZoneInfo(snapshot.timezone)).hour
+            else:
+                hour = int(timestamp[11:13])
 
             if 4 < hour < 22:
                 continue
