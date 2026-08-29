@@ -50,6 +50,8 @@ def test_tonight_ui_assets_are_served():
     assert "weather_trust" in script.text
     assert 'detail?.code === "weather_invalid"' in script.text
     assert 'detail?.code === "weather_insufficient"' in script.text
+    assert 'detail?.code === "weather_stale"' in script.text
+    assert "weatherTrust.snapshot_age_minutes" in script.text
     assert "no_productive_window" in script.text
     assert 'detail?.code === "decision_invalid"' in script.text
     assert 'detail?.code === "location_timezone_unresolved"' in script.text

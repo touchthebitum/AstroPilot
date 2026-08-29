@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from math import asin, cos, isfinite, radians, sin, sqrt
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
@@ -32,6 +32,8 @@ VALUE_RANGES = {
 }
 MINIMUM_HOURLY_COVERAGE = 24
 MAXIMUM_GRID_DISTANCE_KM = 50.0
+MAXIMUM_SNAPSHOT_AGE = timedelta(minutes=90)
+FUTURE_RETRIEVAL_TOLERANCE = timedelta(minutes=5)
 
 
 class WeatherIngressError(ValueError):
@@ -44,6 +46,17 @@ class WeatherIngressError(ValueError):
 
 class WeatherInsufficientError(WeatherIngressError):
     code = "weather_insufficient"
+
+
+class WeatherStaleError(WeatherIngressError):
+    code = "weather_stale"
+
+
+@dataclass(frozen=True)
+class WeatherFreshness:
+    snapshot_age_minutes: float
+    freshness_status: Literal["fresh"]
+    maximum_age_minutes: int
 
 
 @dataclass(frozen=True)
@@ -65,8 +78,11 @@ class WeatherSnapshot:
     hour_count: int
     completeness: float
 
-    def trust_transport(self) -> dict[str, Any]:
-        return {
+    def trust_transport(
+        self,
+        freshness: WeatherFreshness | None = None,
+    ) -> dict[str, Any]:
+        transport = {
             "provider": self.provider,
             "retrieved_at_utc": self.retrieved_at_utc.isoformat(),
             "requested_latitude": self.requested_latitude,
@@ -84,6 +100,45 @@ class WeatherSnapshot:
             "completeness": self.completeness,
             "validation_status": "validated",
         }
+        if freshness is not None:
+            transport.update(
+                snapshot_age_minutes=freshness.snapshot_age_minutes,
+                freshness_status=freshness.freshness_status,
+                maximum_age_minutes=freshness.maximum_age_minutes,
+            )
+        return transport
+
+
+def validate_weather_freshness(
+    snapshot: WeatherSnapshot,
+    *,
+    reference_time_utc: datetime,
+    maximum_age: timedelta = MAXIMUM_SNAPSHOT_AGE,
+    future_tolerance: timedelta = FUTURE_RETRIEVAL_TOLERANCE,
+) -> WeatherFreshness:
+    if reference_time_utc.tzinfo is None:
+        raise WeatherIngressError(["reference_time_without_timezone"])
+    if snapshot.retrieved_at_utc.tzinfo is None:
+        raise WeatherIngressError(["retrieval_time_without_timezone"])
+    if maximum_age < timedelta(0):
+        raise ValueError("maximum_age must not be negative")
+    if future_tolerance < timedelta(0):
+        raise ValueError("future_tolerance must not be negative")
+
+    age = (
+        reference_time_utc.astimezone(timezone.utc)
+        - snapshot.retrieved_at_utc.astimezone(timezone.utc)
+    )
+    if age < -future_tolerance:
+        raise WeatherIngressError(["retrieval_time_in_future"])
+    if age > maximum_age:
+        raise WeatherStaleError(["retrieval_time_too_old"])
+
+    return WeatherFreshness(
+        snapshot_age_minutes=round(max(0.0, age.total_seconds() / 60.0), 2),
+        freshness_status="fresh",
+        maximum_age_minutes=int(maximum_age.total_seconds() / 60),
+    )
 
 
 def _number(value: Any) -> bool:

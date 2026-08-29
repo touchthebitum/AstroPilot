@@ -5,10 +5,14 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from decision.weather.weather_ingress import (
+    FUTURE_RETRIEVAL_TOLERANCE,
+    MAXIMUM_SNAPSHOT_AGE,
     REQUIRED_HOURLY_UNITS,
     WeatherIngressError,
     WeatherInsufficientError,
+    WeatherStaleError,
     validate_weather_payload,
+    validate_weather_freshness,
 )
 
 
@@ -133,6 +137,84 @@ def test_retrieval_timestamp_must_be_timezone_aware():
         )
 
     assert caught.value.issues == ("retrieval_time_without_timezone",)
+
+
+@pytest.mark.parametrize(
+    ("age", "expected_minutes"),
+    [
+        (timedelta(minutes=12, seconds=30), 12.5),
+        (MAXIMUM_SNAPSHOT_AGE, 90.0),
+    ],
+)
+def test_fresh_snapshot_and_exact_age_limit_are_accepted(age, expected_minutes):
+    snapshot = validate(valid_payload())
+
+    freshness = validate_weather_freshness(
+        snapshot,
+        reference_time_utc=snapshot.retrieved_at_utc + age,
+    )
+
+    assert freshness.snapshot_age_minutes == expected_minutes
+    assert freshness.freshness_status == "fresh"
+    assert freshness.maximum_age_minutes == 90
+
+
+def test_snapshot_beyond_age_limit_is_distinctly_stale():
+    snapshot = validate(valid_payload())
+
+    with pytest.raises(WeatherStaleError) as caught:
+        validate_weather_freshness(
+            snapshot,
+            reference_time_utc=(
+                snapshot.retrieved_at_utc
+                + MAXIMUM_SNAPSHOT_AGE
+                + timedelta(microseconds=1)
+            ),
+        )
+
+    assert caught.value.code == "weather_stale"
+    assert caught.value.issues == ("retrieval_time_too_old",)
+
+
+def test_future_timestamp_at_tolerance_is_accepted_with_zero_display_age():
+    snapshot = validate(valid_payload())
+
+    freshness = validate_weather_freshness(
+        snapshot,
+        reference_time_utc=(
+            snapshot.retrieved_at_utc - FUTURE_RETRIEVAL_TOLERANCE
+        ),
+    )
+
+    assert freshness.snapshot_age_minutes == 0.0
+
+
+def test_excessively_future_timestamp_is_invalid():
+    snapshot = validate(valid_payload())
+
+    with pytest.raises(WeatherIngressError) as caught:
+        validate_weather_freshness(
+            snapshot,
+            reference_time_utc=(
+                snapshot.retrieved_at_utc
+                - FUTURE_RETRIEVAL_TOLERANCE
+                - timedelta(microseconds=1)
+            ),
+        )
+
+    assert not isinstance(caught.value, WeatherStaleError)
+    assert caught.value.code == "weather_invalid"
+    assert caught.value.issues == ("retrieval_time_in_future",)
+
+
+def test_injected_reference_time_makes_freshness_deterministic():
+    snapshot = validate(valid_payload())
+    reference = snapshot.retrieved_at_utc + timedelta(minutes=37)
+
+    first = validate_weather_freshness(snapshot, reference_time_utc=reference)
+    second = validate_weather_freshness(snapshot, reference_time_utc=reference)
+
+    assert first == second
 
 
 def test_unix_weather_hours_cross_spring_dst_as_distinct_utc_instants():
