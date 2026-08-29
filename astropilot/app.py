@@ -50,6 +50,74 @@ class TonightFilterModel(BaseModel):
     bandwidth_nm: float | None = None
 
 
+class TonightAstroQualityModel(BaseModel):
+    score: float
+    confidence: float
+    label: str
+    limiting_factor: str | None = None
+    metrics: dict[str, float] = Field(default_factory=dict)
+
+
+class TonightProductivityWindowModel(BaseModel):
+    start_offset_hours: float
+    end_offset_hours: float
+    start_time: str
+    end_time: str
+    productivity: float
+    productive: bool
+    reason: str
+    altitude: float
+    cloud_cover: float
+    moon_penalty: float
+    seeing: float
+
+
+class TonightProductivityModel(BaseModel):
+    astronomical_hours: float
+    productive_hours: float
+    confidence: float
+    cloud_loss: float
+    moon_loss: float
+    altitude_loss: float
+    weather_loss: float
+    display_start_hour: int
+    windows: list[TonightProductivityWindowModel] = Field(default_factory=list)
+
+
+class TonightDewRiskModel(BaseModel):
+    level: str
+    score: float
+    dew_point_c: float
+    spread_c: float
+
+
+class TonightPostponementRiskModel(BaseModel):
+    level: str
+    score: int
+    explanations: list[str] = Field(default_factory=list)
+    required_nights: int | None = None
+    productive_hours_per_night: float | None = None
+    capacity_source: str | None = None
+    historical_nights: int | None = None
+    remaining_hours: float | None = None
+    favorable_nights: int | None = None
+    season_remaining_days: int | None = None
+
+
+class TonightSeasonModel(BaseModel):
+    analysis_name: str
+    conclusion: str
+    confidence: float
+    data: dict = Field(default_factory=dict)
+
+
+class TonightExplanationModel(BaseModel):
+    positives: list[TonightReasonModel] = Field(default_factory=list)
+    warnings: list[TonightReasonModel] = Field(default_factory=list)
+    information: list[TonightReasonModel] = Field(default_factory=list)
+    limiting_factors: list[str] = Field(default_factory=list)
+
+
 class TonightResponseModel(BaseModel):
     status: str
     night_date: str | None = None
@@ -65,6 +133,12 @@ class TonightResponseModel(BaseModel):
     expected_gain: float = 0.0
     equipment: list[str] = Field(default_factory=list)
     selected_filter: TonightFilterModel | None = None
+    astro_quality: TonightAstroQualityModel | None = None
+    productivity: TonightProductivityModel | None = None
+    dew_risk: TonightDewRiskModel | None = None
+    postponement_risk: TonightPostponementRiskModel | None = None
+    season: TonightSeasonModel | None = None
+    explanation: TonightExplanationModel | None = None
     reasons: list[TonightReasonModel] = Field(default_factory=list)
 
 

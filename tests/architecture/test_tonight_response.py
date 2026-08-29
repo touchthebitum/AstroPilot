@@ -3,11 +3,20 @@ from datetime import date, datetime, timezone
 import pytest
 
 from decision.filtering.selected_filter import SelectedFilter
+from decision.intelligence.analysis_result import AnalysisResult
 from decision.mission.night_mission import MissionReason, NightMission
 from decision.models.candidate import Candidate
+from decision.night_productivity.night_productivity_result import (
+    NightProductivityResult,
+)
+from decision.night_productivity.night_window import NightWindow
 from decision.opportunity.action import Action
 from decision.opportunity.opportunity import Opportunity
+from decision.quality.astro_quality_result import AstroQualityResult
 from decision.recommendation.recommendation import Recommendation
+from decision.quality.dew_risk_result import DewRiskResult
+from decision.risk.project_risk_context import ProjectRiskContext
+from decision.risk.risk_report import RiskReport
 from decision.services.tonight_application_service import (
     TonightResult,
     TonightStatus,
@@ -60,6 +69,12 @@ def test_partial_results_produce_stable_transport_status(status):
         "expected_gain": 0.0,
         "equipment": [],
         "selected_filter": None,
+        "astro_quality": None,
+        "productivity": None,
+        "dew_risk": None,
+        "postponement_risk": None,
+        "season": None,
+        "explanation": None,
         "reasons": [],
     }
 
@@ -76,13 +91,77 @@ def test_complete_result_maps_only_json_compatible_values():
     mission = NightMission(
         target="Andromeda",
         confidence=0.87,
-        reasons=[MissionReason("Excellent altitude", "success", "72°")],
+        reasons=[
+            MissionReason("Excellent altitude", "success", "72°"),
+            MissionReason("Thin cloud risk", "warning"),
+            MissionReason("Broadband session", "info"),
+        ],
         equipment=["Widefield", "ASI2600MC"],
         window_start=datetime(2026, 9, 1, 22, 30, tzinfo=timezone.utc),
         window_end=datetime(2026, 9, 2, 2, 0, tzinfo=timezone.utc),
         recommended_hours=3.5,
         expected_gain=12.0,
         selected_filter=SelectedFilter("L-Pro", "broadband", 50.0),
+        astro_quality=AstroQualityResult(
+            score=78.0,
+            confidence=0.84,
+            limiting_factor="clouds",
+            metrics={"altitude": 91.0, "clouds": 64.0},
+        ),
+        productivity=NightProductivityResult(
+            astronomical_hours=6.0,
+            productive_hours=3.5,
+            confidence=0.82,
+            cloud_loss=1.0,
+            moon_loss=0.5,
+            altitude_loss=0.25,
+            weather_loss=0.75,
+            display_start_hour=22,
+            windows=[
+                NightWindow(
+                    start_hour=1.5,
+                    end_hour=4.25,
+                    productivity=0.88,
+                    altitude=67.0,
+                    cloud_cover=12.0,
+                    moon_penalty=0.1,
+                    seeing=1.4,
+                    productive=True,
+                    reason="stable_conditions",
+                )
+            ],
+        ),
+        dew_risk=DewRiskResult(
+            dew_point_c=7.2,
+            spread_c=1.8,
+            risk="HIGH",
+            score=82.0,
+        ),
+        risk_report=RiskReport(
+            level="MEDIUM",
+            score=63,
+            explanation=["Only two favorable nights remain"],
+            context=ProjectRiskContext(
+                priority=8.0,
+                remaining_hours=5.5,
+                completion=0.45,
+                season_remaining_days=21,
+                favorable_nights=2,
+                required_nights=2,
+                productive_hours_per_night=3.5,
+                night_capacity_source="history",
+                historical_nights=6,
+            ),
+        ),
+        season_analysis=AnalysisResult(
+            analysis_name="season",
+            conclusion="Prime autumn window",
+            confidence=0.89,
+            data={
+                "peak_date": date(2026, 10, 12),
+                "months": ("September", "October"),
+            },
+        ),
     )
 
     response = TonightResponse.from_result(
@@ -113,10 +192,131 @@ def test_complete_result_maps_only_json_compatible_values():
         "filter_type": "broadband",
         "bandwidth_nm": 50.0,
     }
+    assert response["astro_quality"] == {
+        "score": 78.0,
+        "confidence": 0.84,
+        "label": "very_good",
+        "limiting_factor": "clouds",
+        "metrics": {"altitude": 91.0, "clouds": 64.0},
+    }
+    assert response["productivity"] == {
+        "astronomical_hours": 6.0,
+        "productive_hours": 3.5,
+        "confidence": 0.82,
+        "cloud_loss": 1.0,
+        "moon_loss": 0.5,
+        "altitude_loss": 0.25,
+        "weather_loss": 0.75,
+        "display_start_hour": 22,
+        "windows": [
+            {
+                "start_offset_hours": 1.5,
+                "end_offset_hours": 4.25,
+                "start_time": "23:30",
+                "end_time": "02:15",
+                "productivity": 0.88,
+                "productive": True,
+                "reason": "stable_conditions",
+                "altitude": 67.0,
+                "cloud_cover": 12.0,
+                "moon_penalty": 0.1,
+                "seeing": 1.4,
+            }
+        ],
+    }
+    assert response["dew_risk"] == {
+        "level": "HIGH",
+        "score": 82.0,
+        "dew_point_c": 7.2,
+        "spread_c": 1.8,
+    }
+    assert response["postponement_risk"] == {
+        "level": "MEDIUM",
+        "score": 63,
+        "explanations": ["Only two favorable nights remain"],
+        "required_nights": 2,
+        "productive_hours_per_night": 3.5,
+        "capacity_source": "history",
+        "historical_nights": 6,
+        "remaining_hours": 5.5,
+        "favorable_nights": 2,
+        "season_remaining_days": 21,
+    }
+    assert response["season"] == {
+        "analysis_name": "season",
+        "conclusion": "Prime autumn window",
+        "confidence": 0.89,
+        "data": {
+            "peak_date": "2026-10-12",
+            "months": ["September", "October"],
+        },
+    }
+    assert response["explanation"] == {
+        "positives": [
+            {
+                "title": "Excellent altitude",
+                "severity": "success",
+                "value": "72°",
+            }
+        ],
+        "warnings": [
+            {
+                "title": "Thin cloud risk",
+                "severity": "warning",
+                "value": None,
+            }
+        ],
+        "information": [
+            {
+                "title": "Broadband session",
+                "severity": "info",
+                "value": None,
+            }
+        ],
+        "limiting_factors": ["clouds"],
+    }
     assert response["reasons"] == [
         {
             "title": "Excellent altitude",
             "severity": "success",
             "value": "72°",
-        }
+        },
+        {
+            "title": "Thin cloud risk",
+            "severity": "warning",
+            "value": None,
+        },
+        {
+            "title": "Broadband session",
+            "severity": "info",
+            "value": None,
+        },
     ]
+
+
+@pytest.mark.parametrize(
+    ("score", "label"),
+    [
+        (90.0, "excellent"),
+        (75.0, "very_good"),
+        (60.0, "good"),
+        (40.0, "average"),
+        (39.9, "low"),
+    ],
+)
+def test_astro_quality_labels_are_stable(score, label):
+    mission = NightMission(
+        target="Andromeda",
+        confidence=0.8,
+        astro_quality=AstroQualityResult(score=score, confidence=0.9),
+    )
+
+    response = TonightResponse.from_result(
+        TonightResult(
+            night={"date": date(2026, 9, 1)},
+            recommendation=None,
+            mission=mission,
+        )
+    )
+
+    assert response.astro_quality.label == label

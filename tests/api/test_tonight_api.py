@@ -201,3 +201,32 @@ def test_invalid_location_embedded_in_profile_is_rejected():
 
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "invalid_profile_location"
+
+
+def test_openapi_schema_exposes_decision_intelligence_contracts():
+    client = make_client(result=make_result())
+
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    schemas = response.json()["components"]["schemas"]
+    assert {
+        "TonightAstroQualityModel",
+        "TonightProductivityModel",
+        "TonightProductivityWindowModel",
+        "TonightDewRiskModel",
+        "TonightPostponementRiskModel",
+        "TonightSeasonModel",
+        "TonightExplanationModel",
+    }.issubset(schemas)
+
+    tonight_response = schemas["TonightResponseModel"]["properties"]
+    assert tonight_response["astro_quality"]["anyOf"][0]["$ref"].endswith(
+        "TonightAstroQualityModel"
+    )
+    assert tonight_response["productivity"]["anyOf"][0]["$ref"].endswith(
+        "TonightProductivityModel"
+    )
+    assert tonight_response["postponement_risk"]["anyOf"][0][
+        "$ref"
+    ].endswith("TonightPostponementRiskModel")
