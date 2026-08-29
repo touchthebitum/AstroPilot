@@ -49,6 +49,8 @@ def make_result():
             target="Andromeda",
             confidence=0.87,
             equipment=["Widefield"],
+            window_start=datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+            window_end=datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
             recommended_hours=3.5,
         ),
     )
@@ -119,7 +121,7 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
 DEFAULT_WEATHER = {"weather": True}
 
 
-def make_weather_snapshot(retrieved_at_utc):
+def make_weather_snapshot(retrieved_at_utc, *, valid_until=None):
     valid_from = datetime(2026, 9, 1, tzinfo=timezone.utc)
     return WeatherSnapshot(
         payload={"hourly": {}},
@@ -135,7 +137,7 @@ def make_weather_snapshot(retrieved_at_utc):
         timezone_source="coordinates_local",
         utc_offset_seconds=7200,
         valid_from=valid_from,
-        valid_until=valid_from + timedelta(hours=47),
+        valid_until=valid_until or valid_from + timedelta(hours=47),
         hour_count=48,
         completeness=1.0,
     )
@@ -264,6 +266,40 @@ def test_fresh_weather_transport_exposes_server_calculated_age():
     assert trust["snapshot_age_minutes"] == 42.5
     assert trust["freshness_status"] == "fresh"
     assert trust["maximum_age_minutes"] == 90
+
+
+def test_uncovered_mission_window_cannot_be_returned_as_available():
+    reference = datetime(2026, 8, 29, 20, 0, tzinfo=timezone.utc)
+    weather = make_weather_snapshot(
+        reference - timedelta(minutes=5),
+        valid_until=datetime(2026, 9, 1, 23, tzinfo=timezone.utc),
+    )
+    evaluation_calls = []
+
+    class Service:
+        def evaluate(self, **kwargs):
+            evaluation_calls.append(kwargs)
+            return make_result()
+
+    client = TestClient(
+        create_app(
+            service_factory=lambda: Service(),
+            weather_provider=lambda lat, lon: weather,
+            profile_provider=lambda: {},
+            clock=lambda: reference,
+        )
+    )
+
+    response = client.post("/v1/tonight", json={})
+
+    assert len(evaluation_calls) == 1
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "weather_window_uncovered",
+        "message": (
+            "Weather data does not fully cover the selected mission window."
+        ),
+    }
 
 
 def test_internally_inconsistent_decision_is_rejected_before_transport():
@@ -467,6 +503,9 @@ def test_openapi_documents_tonight_operation_and_error_examples():
     assert error_examples["weather_stale"]["value"]["detail"]["code"] == (
         "weather_stale"
     )
+    assert error_examples["weather_window_uncovered"]["value"]["detail"][
+        "code"
+    ] == "weather_window_uncovered"
     assert error_examples["decision_invalid"]["value"]["detail"]["code"] == (
         "decision_invalid"
     )

@@ -267,6 +267,9 @@ function normalizeError(response, payload) {
     if (detail?.code === "weather_stale") {
       return ["Données météo trop anciennes", "Les données météo reçues dépassent la limite de fraîcheur de 90 minutes. AstroPilot refuse de calculer une décision potentiellement trompeuse."];
     }
+    if (detail?.code === "weather_window_uncovered") {
+      return ["Fenêtre météo non couverte", "Les prévisions validées ne couvrent pas entièrement le créneau proposé. AstroPilot refuse d’afficher cette mission."];
+    }
     if (detail?.code === "decision_invalid") {
       return ["Décision rejetée par sécurité", "AstroPilot a détecté une contradiction interne et refuse d’afficher une recommandation potentiellement trompeuse."];
     }
