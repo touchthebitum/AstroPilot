@@ -18,6 +18,10 @@ from decision.weather.weather_ingress import (
     validate_weather_freshness,
 )
 from decision.validation.decision_consistency import DecisionConsistencyError
+from decision.validation.weather_window_coverage import (
+    WeatherWindowCoverageError,
+    validate_selected_window_weather_coverage,
+)
 from decision.location.location_time import LocationTimeError
 
 
@@ -456,7 +460,8 @@ def create_app(
             503: {
                 "description": (
                     "Weather is unavailable, invalid or insufficient, or the "
-                    "snapshot is stale, or the tonight forecast is unavailable."
+                    "snapshot is stale, the selected window is not covered, "
+                    "or the tonight forecast is unavailable."
                 ),
                 "content": {
                     "application/json": {
@@ -497,6 +502,18 @@ def create_app(
                                         "code": "weather_stale",
                                         "message": (
                                             "Weather data is too old for a reliable decision."
+                                        ),
+                                    }
+                                },
+                            },
+                            "weather_window_uncovered": {
+                                "summary": "Mission window is not covered by weather",
+                                "value": {
+                                    "detail": {
+                                        "code": "weather_window_uncovered",
+                                        "message": (
+                                            "Weather data does not fully cover the "
+                                            "selected mission window."
                                         ),
                                     }
                                 },
@@ -631,6 +648,27 @@ def create_app(
                     "message": "Tonight forecast is temporarily unavailable.",
                 },
             )
+
+        if (
+            result.status is TonightStatus.AVAILABLE
+            and isinstance(weather, WeatherSnapshot)
+        ):
+            try:
+                validate_selected_window_weather_coverage(
+                    result.mission,
+                    weather,
+                )
+            except WeatherWindowCoverageError as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "code": exc.code,
+                        "message": (
+                            "Weather data does not fully cover the selected "
+                            "mission window."
+                        ),
+                    },
+                ) from exc
 
         payload = TonightResponse.from_result(result).to_dict()
         if isinstance(weather, WeatherSnapshot):

@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 from decision.risk.risk_report import RiskReport
 from decision.night_productivity.night_productivity_result import NightProductivityResult
 from decision.mission.night_planner import NightTask
@@ -20,8 +21,8 @@ class NightMission:
     confidence: str
     reasons: list[MissionReason] = field(default_factory=list)
     equipment: list[str] = field(default_factory=list)
-    window_start: str | None = None
-    window_end: str | None = None
+    window_start: datetime | None = None
+    window_end: datetime | None = None
     recommended_hours: float = 0.0
     expected_gain: float = 0.0
     risk_report: RiskReport | None = None
