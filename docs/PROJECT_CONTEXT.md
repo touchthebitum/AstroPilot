@@ -512,6 +512,11 @@ Le mode `calendar` et le mode `portfolio` n’utilisent plus l’ancien moteur c
 
 601 tests passants en suite complète.
 
+État validé sur la branche `introduce-tonight-api` après la première tranche
+API Tonight :
+
+613 tests passants en suite complète.
+
 Principaux contrats architecturaux testés :
 
 - Candidate score
@@ -534,6 +539,11 @@ Principaux contrats architecturaux testés :
 - persistance du profil utilisateur
 - orchestration de `TonightApplicationService`, y compris les sorties partielles
 - composition de production et absence d'effets de bord à la construction
+- contrat de réponse Tonight composé uniquement de valeurs sérialisables
+- route FastAPI `POST /v1/tonight`
+- validation des coordonnées, du Bortle, de l'objectif et du type de cible
+- contrats HTTP pour météo et forecast indisponibles
+- scénario API de bout en bout utilisant le composition root de production
 
 Les quatre runtimes ont également été validés :
 
@@ -603,6 +613,57 @@ La priorité n’est désormais plus de réduire artificiellement la taille du f
   calculs de capacité, conformément au contrat CLI existant
 - les modes `portfolio`, `calendar` et `full` ne sont pas modifiés
 - suite complète : 601 tests passants
+
+### Première tranche verticale API Tonight
+
+Le module `astropilot/app.py` expose désormais :
+
+`POST /v1/tonight`
+
+Le pipeline HTTP est :
+
+requête validée
+→ profil et position
+→ météo
+→ composition de production
+→ `TonightApplicationService`
+→ `TonightResponse`
+→ JSON
+
+Le contrat transportable expose notamment :
+
+- statut métier explicite
+- date de nuit
+- cible et identifiant catalogue
+- action recommandée et confiance
+- principaux scores
+- fenêtre et durée recommandées
+- gain attendu
+- matériel et filtre
+- raisons de mission
+
+Statuts métier disponibles :
+
+- `available`
+- `no_night`
+- `no_candidate`
+- `no_recommendation`
+- `no_mission`
+- `forecast_unavailable`
+
+Les résultats métier partiels restent des réponses HTTP 200. Les entrées
+invalides produisent une réponse 422. Une météo ou un forecast techniquement
+indisponible produit une réponse 503 structurée.
+
+Le test de bout en bout garantit :
+
+- un seul appel au forecast
+- la sélection chronologique de la nuit
+- le passage par recommandation et mission
+- la sérialisation JSON
+- l'absence de chargement ou persistance du profil CLI
+- l'absence de présentation terminal
+- suite complète : 613 tests passants
 
 
 ## 20. Sprint feature-opportunity-engine — bilan historique
@@ -775,9 +836,14 @@ Prévoir un affichage dédié à l’utilisation nocturne :
 
 ### Mobile / API
 
+État actuel :
+
+- première application FastAPI créée
+- route `POST /v1/tonight` disponible
+- composition applicative et réponse JSON testées de bout en bout
+
 Étapes futures :
 
-- FastAPI
 - authentification
 - gestion utilisateurs
 - GPS
@@ -800,7 +866,7 @@ Principaux points à surveiller :
 - saison dynamique à finaliser
 - catalogue à enrichir
 - persistance utilisateur à consolider
-- API non encore implémentée
+- API limitée pour l'instant à la tranche verticale Tonight
 
 Le nettoyage ne doit plus être poursuivi uniquement pour réduire le nombre de lignes.
 
