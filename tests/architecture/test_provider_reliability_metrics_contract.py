@@ -161,6 +161,9 @@ def test_metrics_are_factual_and_keep_signed_error():
     assert metrics.mean_signed_error == pytest.approx(4 / 3)
     assert metrics.mean_absolute_error == pytest.approx(8 / 3)
     assert metrics.root_mean_squared_error == pytest.approx((24 / 3) ** 0.5)
+    assert metrics.median_absolute_error == 2
+    assert metrics.percentile_90_absolute_error == 4
+    assert metrics.maximum_absolute_error == 4
     assert metrics.unit == "°C"
 
 
@@ -173,6 +176,57 @@ def test_too_few_samples_are_explicitly_insufficient():
 
     assert report.variable_metrics[0].sample_count == 2
     assert report.variable_metrics[0].evidence_status is EvidenceStatus.INSUFFICIENT
+    assert report.variable_metrics[0].median_absolute_error == 2
+
+
+def test_rare_large_error_is_never_hidden_or_removed():
+    samples = tuple(
+        verification(
+            forecast_values=(weather_value(WeatherVariable.TEMPERATURE_C, value),),
+        )
+        for value in (10, 11, 12, 13, 50)
+    )
+
+    report = build_provider_reliability_report(
+        samples, policy=policy(minimum_sample_size=1), scope=report_scope()
+    )
+    metrics = report.variable_metrics[0]
+
+    assert metrics.sample_count == 5
+    assert metrics.median_absolute_error == 2
+    assert metrics.percentile_90_absolute_error == 40
+    assert metrics.maximum_absolute_error == 40
+    assert metrics.mean_absolute_error == pytest.approx(9.2)
+
+
+def test_even_sample_median_uses_the_two_central_values():
+    samples = tuple(
+        verification(
+            forecast_values=(weather_value(WeatherVariable.TEMPERATURE_C, value),),
+        )
+        for value in (10, 12, 14, 18)
+    )
+
+    report = build_provider_reliability_report(
+        samples, policy=policy(minimum_sample_size=1), scope=report_scope()
+    )
+
+    assert report.variable_metrics[0].median_absolute_error == 3
+
+
+def test_p90_uses_the_explicit_nearest_rank_method():
+    samples = tuple(
+        verification(
+            forecast_values=(weather_value(WeatherVariable.TEMPERATURE_C, 10 + error),),
+        )
+        for error in range(1, 11)
+    )
+
+    report = build_provider_reliability_report(
+        samples, policy=policy(minimum_sample_size=1), scope=report_scope()
+    )
+
+    assert report.variable_metrics[0].percentile_90_absolute_error == 9
 
 
 def test_provider_model_variable_and_horizon_are_never_mixed():
