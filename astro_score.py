@@ -5,6 +5,9 @@ from dataclasses import replace
 from decision.services.tonight_mission_service import (
     TonightMissionService,
 )
+from decision.services.tonight_application_service import (
+    TonightApplicationService,
+)
 from decision.opportunity.opportunity_engine import OpportunityEngine
 from decision.recommendation.recommendation_engine import (
     RecommendationEngine,
@@ -1797,6 +1800,19 @@ tonight_runner = TonightRunner(
 )
 
 portfolio_engine = PortfolioEngine()
+
+
+def build_tonight_application_service() -> TonightApplicationService:
+    return TonightApplicationService(
+        forecast_nights=forecast_astro,
+        build_candidates=recommend_project_for_night,
+        opportunity_recommendation_service=(
+            opportunity_recommendation_service
+        ),
+        tonight_mission_service=tonight_mission_service,
+        build_mission_input=build_mission_input,
+    )
+
 
 def parse_filter_target_assignments(
     values: list[str],
