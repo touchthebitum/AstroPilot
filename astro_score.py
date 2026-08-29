@@ -56,7 +56,7 @@ from decision.engines.night_strategy_engine import NightStrategyEngine
 from decision.engines.project_selection_engine import ProjectSelectionEngine
 from decision.portfolio.portfolio_presenter import (show_portfolio_completion_forecast,)
 from decision.rules.object_fit_rule import ObjectFitRule
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decision.models.context.decision_context import DecisionContext
 from decision.models.context.session_context import SessionContext
 from decision.models.context.site_context import SiteContext
@@ -85,6 +85,11 @@ from decision.mission.mission_builder import NightMissionBuilder
 from decision.mission.mission_input import MissionInput
 from decision.mission.mission_presenter import MissionPresenter
 from decision.weather.weather_forecast import WeatherForecast
+from decision.weather.weather_ingress import (
+    WeatherIngressError,
+    WeatherSnapshot,
+    validate_weather_payload,
+)
 from decision.engines.future_opportunity_engine import FutureOpportunityEngine
 from zoneinfo import ZoneInfo
 from astral.moon import phase as moon_phase
@@ -277,7 +282,7 @@ def forecast_night_capacities(
     return list(nights.values())[:days]
 
 
-def fetch_weather(lat: float, lon: float) -> dict | None:
+def fetch_weather(lat: float, lon: float) -> WeatherSnapshot | None:
     url = "https://api.open-meteo.com/v1/forecast"
     #url = "https://api.open-meteo.com_BUG/v1/forecast"
 
@@ -286,6 +291,10 @@ def fetch_weather(lat: float, lon: float) -> dict | None:
         "longitude": lon,
         "timezone": TIMEZONE,
         "forecast_days": 7,
+        "temperature_unit": "celsius",
+        "wind_speed_unit": "kmh",
+        "precipitation_unit": "mm",
+        "timeformat": "iso8601",
         "hourly": ",".join([
                 "cloud_cover",
                 "cloud_cover_low",
@@ -302,8 +311,6 @@ def fetch_weather(lat: float, lon: float) -> dict | None:
     try:
         response = requests.get(url, params=params, timeout=15)
         response.raise_for_status()
-        return response.json()
-
     except requests.exceptions.ReadTimeout:
         print("Erreur météo : timeout Open-Meteo")
         return None
@@ -315,6 +322,19 @@ def fetch_weather(lat: float, lon: float) -> dict | None:
     except Exception as e:
         print(f"ERREUR : prévisions météo indisponibles ({type(e).__name__})")
         return None
+
+    try:
+        payload = response.json()
+    except (TypeError, ValueError) as exc:
+        raise WeatherIngressError(["response_not_json"]) from exc
+
+    return validate_weather_payload(
+        payload,
+        requested_latitude=lat,
+        requested_longitude=lon,
+        requested_timezone=TIMEZONE,
+        retrieved_at_utc=datetime.now(timezone.utc),
+    )
 
 
 def show_multi_night_portfolio_roadmap(
@@ -813,9 +833,11 @@ def verdict(score: int) -> str:
     return "Mauvais"
 
 
-def parse_hourly_weather(data: dict) -> list[dict]:
+def parse_hourly_weather(data: dict | WeatherSnapshot) -> list[dict]:
     if data is None:
         return []
+    if isinstance(data, WeatherSnapshot):
+        data = data.payload
     hourly = data["hourly"]
     rows = []
     
