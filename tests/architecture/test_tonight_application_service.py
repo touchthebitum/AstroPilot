@@ -1,6 +1,8 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
 from decision.mission.night_mission import NightMission
+from decision.night_productivity.night_productivity_result import NightProductivityResult
+from decision.night_productivity.night_window import NightWindow
 from decision.models.candidate import Candidate
 from decision.opportunity.action import Action
 from decision.opportunity.opportunity import Opportunity
@@ -121,7 +123,35 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
     candidate_calls = []
     candidates = [make_candidate()]
     recommendation = make_recommendation(candidates[0])
-    mission = NightMission(target="Andromeda", confidence="HIGH")
+    mission = NightMission(
+        target="Andromeda",
+        confidence="HIGH",
+        window_start=datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+        window_end=datetime(2026, 9, 2, 2, tzinfo=timezone.utc),
+        recommended_hours=3.0,
+        productivity=NightProductivityResult(
+            astronomical_hours=4.0,
+            productive_hours=3.0,
+            confidence=0.75,
+            cloud_loss=0.5,
+            moon_loss=0.25,
+            altitude_loss=0.0,
+            weather_loss=0.25,
+            windows=[
+                NightWindow(
+                    start_hour=0.0,
+                    end_hour=3.0,
+                    productivity=0.8,
+                    altitude=60.0,
+                    cloud_cover=10.0,
+                    moon_penalty=0.1,
+                    seeing=1.5,
+                    productive=True,
+                    reason="stable",
+                )
+            ],
+        ),
+    )
 
     def forecast(*args, **kwargs):
         forecast_calls.append((args, kwargs))
@@ -317,3 +347,37 @@ def test_missing_mission_preserves_exact_night_and_recommendation():
     assert result.mission is None
     assert result.status is TonightStatus.NO_MISSION
     assert len(mission_service.calls) == 1
+
+
+def test_night_without_a_productive_window_is_not_available():
+    night = {"date": "2026-09-01", "top_objects": []}
+    candidate = make_candidate()
+    recommendation = make_recommendation(candidate)
+    mission = NightMission(
+        target="Andromeda",
+        confidence=0.9,
+        window_start=datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+        window_end=datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
+        recommended_hours=0.0,
+        productivity=NightProductivityResult(
+            astronomical_hours=3.0,
+            productive_hours=0.9,
+            confidence=0.3,
+            cloud_loss=1.5,
+            moon_loss=0.4,
+            altitude_loss=0.0,
+            weather_loss=0.2,
+            windows=[],
+        ),
+    )
+    service, _, _ = make_service(
+        forecast_nights=lambda *args, **kwargs: [night],
+        build_candidates=lambda *args, **kwargs: [candidate],
+        recommendation=recommendation,
+        mission=mission,
+    )
+
+    result = service.evaluate(profile={}, weather=object())
+
+    assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW
+    assert result.mission is mission

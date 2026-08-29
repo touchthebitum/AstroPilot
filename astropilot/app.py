@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from decision.services.tonight_application_service import TonightStatus
 from decision.services.tonight_response import TonightResponse
 from decision.weather.weather_ingress import WeatherIngressError, WeatherSnapshot
+from decision.validation.decision_consistency import DecisionConsistencyError
 
 
 class LocationRequest(BaseModel):
@@ -75,7 +76,13 @@ class TonightFilterModel(BaseModel):
 
 class TonightAstroQualityModel(BaseModel):
     score: float
-    confidence: float
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Completeness of AQI inputs; not weather forecast reliability."
+        ),
+    )
     label: str
     limiting_factor: str | None = None
     metrics: dict[str, float] = Field(default_factory=dict)
@@ -446,6 +453,17 @@ def create_app(
                                     }
                                 },
                             },
+                            "decision_invalid": {
+                                "summary": "Decision consistency check failed",
+                                "value": {
+                                    "detail": {
+                                        "code": "decision_invalid",
+                                        "message": (
+                                            "The decision failed consistency validation."
+                                        ),
+                                    }
+                                },
+                            },
                             "forecast_unavailable": {
                                 "summary": "Tonight forecast unavailable",
                                 "value": {
@@ -513,14 +531,23 @@ def create_app(
                 },
             )
 
-        result = service_factory().evaluate(
-            profile=profile,
-            weather=weather,
-            equipment=request.equipment,
-            goal=request.goal,
-            target=request.target,
-            bortle=request.bortle,
-        )
+        try:
+            result = service_factory().evaluate(
+                profile=profile,
+                weather=weather,
+                equipment=request.equipment,
+                goal=request.goal,
+                target=request.target,
+                bortle=request.bortle,
+            )
+        except DecisionConsistencyError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": exc.code,
+                    "message": "The decision failed consistency validation.",
+                },
+            ) from exc
         if result.status is TonightStatus.FORECAST_UNAVAILABLE:
             raise HTTPException(
                 status_code=503,
