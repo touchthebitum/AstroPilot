@@ -29,6 +29,27 @@ class TonightFilterResponse:
 
 
 @dataclass(frozen=True)
+class TonightAstroQualityResponse:
+    score: float
+    confidence: float
+    label: str
+    limiting_factor: str | None = None
+    metrics: dict[str, float] = field(default_factory=dict)
+
+
+def _quality_label(score: float) -> str:
+    if score >= 90:
+        return "excellent"
+    if score >= 75:
+        return "very_good"
+    if score >= 60:
+        return "good"
+    if score >= 40:
+        return "average"
+    return "low"
+
+
+@dataclass(frozen=True)
 class TonightResponse:
     status: str
     night_date: str | None = None
@@ -44,6 +65,7 @@ class TonightResponse:
     expected_gain: float = 0.0
     equipment: list[str] = field(default_factory=list)
     selected_filter: TonightFilterResponse | None = None
+    astro_quality: TonightAstroQualityResponse | None = None
     reasons: list[TonightReasonResponse] = field(default_factory=list)
 
     @classmethod
@@ -76,6 +98,20 @@ class TonightResponse:
                 name=mission.selected_filter.name,
                 filter_type=mission.selected_filter.filter_type,
                 bandwidth_nm=mission.selected_filter.bandwidth_nm,
+            )
+
+        astro_quality = None
+        if mission is not None and mission.astro_quality is not None:
+            quality = mission.astro_quality
+            astro_quality = TonightAstroQualityResponse(
+                score=float(quality.score),
+                confidence=float(quality.confidence),
+                label=_quality_label(quality.score),
+                limiting_factor=quality.limiting_factor,
+                metrics={
+                    name: float(value)
+                    for name, value in quality.metrics.items()
+                },
             )
 
         return cls(
@@ -119,6 +155,7 @@ class TonightResponse:
             ),
             equipment=list(mission.equipment) if mission is not None else [],
             selected_filter=selected_filter,
+            astro_quality=astro_quality,
             reasons=(
                 [
                     TonightReasonResponse(

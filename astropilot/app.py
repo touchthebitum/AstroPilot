@@ -50,6 +50,14 @@ class TonightFilterModel(BaseModel):
     bandwidth_nm: float | None = None
 
 
+class TonightAstroQualityModel(BaseModel):
+    score: float
+    confidence: float
+    label: str
+    limiting_factor: str | None = None
+    metrics: dict[str, float] = Field(default_factory=dict)
+
+
 class TonightResponseModel(BaseModel):
     status: str
     night_date: str | None = None
@@ -65,6 +73,7 @@ class TonightResponseModel(BaseModel):
     expected_gain: float = 0.0
     equipment: list[str] = Field(default_factory=list)
     selected_filter: TonightFilterModel | None = None
+    astro_quality: TonightAstroQualityModel | None = None
     reasons: list[TonightReasonModel] = Field(default_factory=list)
 
 

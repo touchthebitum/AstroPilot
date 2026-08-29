@@ -7,6 +7,7 @@ from decision.mission.night_mission import MissionReason, NightMission
 from decision.models.candidate import Candidate
 from decision.opportunity.action import Action
 from decision.opportunity.opportunity import Opportunity
+from decision.quality.astro_quality_result import AstroQualityResult
 from decision.recommendation.recommendation import Recommendation
 from decision.services.tonight_application_service import (
     TonightResult,
@@ -60,6 +61,7 @@ def test_partial_results_produce_stable_transport_status(status):
         "expected_gain": 0.0,
         "equipment": [],
         "selected_filter": None,
+        "astro_quality": None,
         "reasons": [],
     }
 
@@ -83,6 +85,12 @@ def test_complete_result_maps_only_json_compatible_values():
         recommended_hours=3.5,
         expected_gain=12.0,
         selected_filter=SelectedFilter("L-Pro", "broadband", 50.0),
+        astro_quality=AstroQualityResult(
+            score=78.0,
+            confidence=0.84,
+            limiting_factor="clouds",
+            metrics={"altitude": 91.0, "clouds": 64.0},
+        ),
     )
 
     response = TonightResponse.from_result(
@@ -113,6 +121,13 @@ def test_complete_result_maps_only_json_compatible_values():
         "filter_type": "broadband",
         "bandwidth_nm": 50.0,
     }
+    assert response["astro_quality"] == {
+        "score": 78.0,
+        "confidence": 0.84,
+        "label": "very_good",
+        "limiting_factor": "clouds",
+        "metrics": {"altitude": 91.0, "clouds": 64.0},
+    }
     assert response["reasons"] == [
         {
             "title": "Excellent altitude",
@@ -120,3 +135,31 @@ def test_complete_result_maps_only_json_compatible_values():
             "value": "72°",
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ("score", "label"),
+    [
+        (90.0, "excellent"),
+        (75.0, "very_good"),
+        (60.0, "good"),
+        (40.0, "average"),
+        (39.9, "low"),
+    ],
+)
+def test_astro_quality_labels_are_stable(score, label):
+    mission = NightMission(
+        target="Andromeda",
+        confidence=0.8,
+        astro_quality=AstroQualityResult(score=score, confidence=0.9),
+    )
+
+    response = TonightResponse.from_result(
+        TonightResult(
+            night={"date": date(2026, 9, 1)},
+            recommendation=None,
+            mission=mission,
+        )
+    )
+
+    assert response.astro_quality.label == label
