@@ -206,7 +206,10 @@ function renderDecision(decision) {
   if (weatherTrust?.validation_status === "validated") {
     const retrieved = clock(weatherTrust.retrieved_at_utc);
     const retrieval = retrieved ? ` · récupérées à ${retrieved}` : "";
-    text("#weather-trust", `${weatherTrust.provider} · ${weatherTrust.timezone} · réponse validée · ${weatherTrust.hour_count} h couvertes${retrieval}`);
+    const age = Number.isFinite(Number(weatherTrust.snapshot_age_minutes))
+      ? ` · âge ${Number(weatherTrust.snapshot_age_minutes).toLocaleString("fr-CH")} min`
+      : "";
+    text("#weather-trust", `${weatherTrust.provider} · ${weatherTrust.timezone} · réponse fraîche · ${weatherTrust.hour_count} h couvertes${age}${retrieval}`);
   } else {
     text("#weather-trust", "Provenance météo non disponible.");
   }
@@ -260,6 +263,9 @@ function normalizeError(response, payload) {
     }
     if (detail?.code === "weather_insufficient") {
       return ["Prévisions météo insuffisantes", "La couverture reçue ne permet pas de préparer la nuit avec assez de données. Aucune décision n’est calculée."];
+    }
+    if (detail?.code === "weather_stale") {
+      return ["Données météo trop anciennes", "Les données météo reçues dépassent la limite de fraîcheur de 90 minutes. AstroPilot refuse de calculer une décision potentiellement trompeuse."];
     }
     if (detail?.code === "decision_invalid") {
       return ["Décision rejetée par sécurité", "AstroPilot a détecté une contradiction interne et refuse d’afficher une recommandation potentiellement trompeuse."];

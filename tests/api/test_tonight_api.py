@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
@@ -15,6 +15,7 @@ from decision.services.tonight_application_service import (
 from decision.weather.weather_ingress import (
     WeatherIngressError,
     WeatherInsufficientError,
+    WeatherSnapshot,
 )
 from decision.validation.decision_consistency import DecisionConsistencyError
 from decision.location.location_time import LocationTimeError
@@ -118,6 +119,28 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
 DEFAULT_WEATHER = {"weather": True}
 
 
+def make_weather_snapshot(retrieved_at_utc):
+    valid_from = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    return WeatherSnapshot(
+        payload={"hourly": {}},
+        provider="Open-Meteo",
+        retrieved_at_utc=retrieved_at_utc,
+        requested_latitude=46.7508,
+        requested_longitude=6.5495,
+        grid_latitude=46.75,
+        grid_longitude=6.55,
+        grid_distance_km=0.1,
+        elevation_m=837.0,
+        timezone="Europe/Zurich",
+        timezone_source="coordinates_local",
+        utc_offset_seconds=7200,
+        valid_from=valid_from,
+        valid_until=valid_from + timedelta(hours=47),
+        hour_count=48,
+        completeness=1.0,
+    )
+
+
 def make_client(*, result, weather=DEFAULT_WEATHER):
     class Service:
         def evaluate(self, **kwargs):
@@ -192,6 +215,55 @@ def test_insufficient_weather_has_a_distinct_service_error():
 
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "weather_insufficient"
+
+
+def test_stale_weather_is_rejected_before_evaluation_with_injected_clock():
+    reference = datetime(2026, 8, 29, 20, 0, tzinfo=timezone.utc)
+    weather = make_weather_snapshot(reference - timedelta(minutes=91))
+
+    class Service:
+        def evaluate(self, **kwargs):
+            raise AssertionError("service must not run with stale weather")
+
+    client = TestClient(
+        create_app(
+            service_factory=lambda: Service(),
+            weather_provider=lambda lat, lon: weather,
+            profile_provider=lambda: {},
+            clock=lambda: reference,
+        )
+    )
+
+    response = client.post("/v1/tonight", json={})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "weather_stale",
+        "message": "Weather data is too old for a reliable decision.",
+    }
+
+
+def test_fresh_weather_transport_exposes_server_calculated_age():
+    reference = datetime(2026, 8, 29, 20, 0, tzinfo=timezone.utc)
+    weather = make_weather_snapshot(reference - timedelta(minutes=42, seconds=30))
+    client = TestClient(
+        create_app(
+            service_factory=lambda: type(
+                "Service", (), {"evaluate": lambda self, **kwargs: make_result()}
+            )(),
+            weather_provider=lambda lat, lon: weather,
+            profile_provider=lambda: {},
+            clock=lambda: reference,
+        )
+    )
+
+    response = client.post("/v1/tonight", json={})
+
+    assert response.status_code == 200
+    trust = response.json()["weather_trust"]
+    assert trust["snapshot_age_minutes"] == 42.5
+    assert trust["freshness_status"] == "fresh"
+    assert trust["maximum_age_minutes"] == 90
 
 
 def test_internally_inconsistent_decision_is_rejected_before_transport():
@@ -335,6 +407,10 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
     assert tonight_response["weather_trust"]["anyOf"][0]["$ref"].endswith(
         "TonightWeatherTrustModel"
     )
+    weather_trust = schemas["TonightWeatherTrustModel"]["properties"]
+    assert weather_trust["snapshot_age_minutes"]["minimum"] == 0.0
+    assert weather_trust["freshness_status"]["const"] == "fresh"
+    assert weather_trust["maximum_age_minutes"]["exclusiveMinimum"] == 0
 
 
 def test_openapi_documents_tonight_request_and_available_response_examples():
@@ -388,6 +464,9 @@ def test_openapi_documents_tonight_operation_and_error_examples():
     assert error_examples["weather_insufficient"]["value"]["detail"][
         "code"
     ] == "weather_insufficient"
+    assert error_examples["weather_stale"]["value"]["detail"]["code"] == (
+        "weather_stale"
+    )
     assert error_examples["decision_invalid"]["value"]["detail"]["code"] == (
         "decision_invalid"
     )

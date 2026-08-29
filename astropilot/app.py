@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Literal
 
@@ -10,7 +11,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from decision.services.tonight_application_service import TonightStatus
 from decision.services.tonight_response import TonightResponse
-from decision.weather.weather_ingress import WeatherIngressError, WeatherSnapshot
+from decision.weather.weather_ingress import (
+    WeatherFreshness,
+    WeatherIngressError,
+    WeatherSnapshot,
+    validate_weather_freshness,
+)
 from decision.validation.decision_consistency import DecisionConsistencyError
 from decision.location.location_time import LocationTimeError
 
@@ -189,6 +195,9 @@ class TonightWeatherTrustModel(BaseModel):
     hour_count: int = Field(ge=24)
     completeness: float = Field(ge=0.0, le=1.0)
     validation_status: Literal["validated"]
+    snapshot_age_minutes: float = Field(ge=0.0)
+    freshness_status: Literal["fresh"]
+    maximum_age_minutes: int = Field(gt=0)
 
 
 class TonightResponseModel(BaseModel):
@@ -308,6 +317,27 @@ class TonightResponseModel(BaseModel):
                             "message": "Check the latest weather forecast.",
                         }
                     ],
+                    "weather_trust": {
+                        "provider": "Open-Meteo",
+                        "retrieved_at_utc": "2026-08-29T18:00:00+00:00",
+                        "requested_latitude": 46.7508,
+                        "requested_longitude": 6.5495,
+                        "grid_latitude": 46.75,
+                        "grid_longitude": 6.55,
+                        "grid_distance_km": 0.1,
+                        "elevation_m": 837.0,
+                        "timezone": "Europe/Zurich",
+                        "timezone_source": "coordinates_local",
+                        "utc_offset_seconds": 7200,
+                        "valid_from": "2026-08-29T00:00:00+02:00",
+                        "valid_until": "2026-09-04T23:00:00+02:00",
+                        "hour_count": 168,
+                        "completeness": 1.0,
+                        "validation_status": "validated",
+                        "snapshot_age_minutes": 4.5,
+                        "freshness_status": "fresh",
+                        "maximum_age_minutes": 90,
+                    },
                 }
             ]
         }
@@ -358,11 +388,16 @@ def _production_profile_provider():
     return load_user_profile()
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def create_app(
     *,
     service_factory: Callable = _production_service_factory,
     weather_provider: Callable = _production_weather_provider,
     profile_provider: Callable = _production_profile_provider,
+    clock: Callable[[], datetime] = _utc_now,
 ) -> FastAPI:
     application = FastAPI(title="AstroPilot API", version="1.0.0")
     web_root = Path(__file__).with_name("web")
@@ -421,7 +456,7 @@ def create_app(
             503: {
                 "description": (
                     "Weather is unavailable, invalid or insufficient, or the "
-                    "tonight forecast is unavailable."
+                    "snapshot is stale, or the tonight forecast is unavailable."
                 ),
                 "content": {
                     "application/json": {
@@ -452,6 +487,17 @@ def create_app(
                                     "detail": {
                                         "code": "weather_insufficient",
                                         "message": "Weather coverage is insufficient.",
+                                    }
+                                },
+                            },
+                            "weather_stale": {
+                                "summary": "Weather snapshot is too old",
+                                "value": {
+                                    "detail": {
+                                        "code": "weather_stale",
+                                        "message": (
+                                            "Weather data is too old for a reliable decision."
+                                        ),
                                     }
                                 },
                             },
@@ -520,17 +566,25 @@ def create_app(
             ) from exc
         profile["location"] = location
 
+        weather_freshness: WeatherFreshness | None = None
         try:
             weather = weather_provider(
                 location["latitude"],
                 location["longitude"],
             )
+            if isinstance(weather, WeatherSnapshot):
+                weather_freshness = validate_weather_freshness(
+                    weather,
+                    reference_time_utc=clock(),
+                )
         except WeatherIngressError as exc:
-            message = (
-                "Weather coverage is insufficient."
-                if exc.code == "weather_insufficient"
-                else "Weather data failed validation."
-            )
+            messages = {
+                "weather_insufficient": "Weather coverage is insufficient.",
+                "weather_stale": (
+                    "Weather data is too old for a reliable decision."
+                ),
+            }
+            message = messages.get(exc.code, "Weather data failed validation.")
             raise HTTPException(
                 status_code=503,
                 detail={"code": exc.code, "message": message},
@@ -580,7 +634,7 @@ def create_app(
 
         payload = TonightResponse.from_result(result).to_dict()
         if isinstance(weather, WeatherSnapshot):
-            payload["weather_trust"] = weather.trust_transport()
+            payload["weather_trust"] = weather.trust_transport(weather_freshness)
         return payload
 
     return application
