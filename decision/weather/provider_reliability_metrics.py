@@ -2,15 +2,74 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
-from math import sqrt
+from math import isfinite, sqrt
 
 from decision.weather.provider_reliability import (
     ComparisonStatus,
     WeatherForecastVerification,
+    WeatherLocation,
     WeatherVariable,
 )
+
+
+def _utc(value: datetime, name: str) -> datetime:
+    if not isinstance(value, datetime) or value.tzinfo is None:
+        raise ValueError(f"{name}_must_be_timezone_aware")
+    return value.astimezone(timezone.utc)
+
+
+def _distance_km(first: WeatherLocation, second: WeatherLocation) -> float:
+    from math import asin, cos, radians, sin
+
+    delta_lat = radians(second.latitude - first.latitude)
+    delta_lon = radians(second.longitude - first.longitude)
+    first_latitude = radians(first.latitude)
+    second_latitude = radians(second.latitude)
+    haversine = (
+        sin(delta_lat / 2) ** 2
+        + cos(first_latitude)
+        * cos(second_latitude)
+        * sin(delta_lon / 2) ** 2
+    )
+    return 2 * 6371.0 * asin(sqrt(haversine))
+
+
+@dataclass(frozen=True)
+class ReliabilityReportScope:
+    center: WeatherLocation
+    radius_km: float
+    starts_at_utc: datetime
+    ends_at_utc: datetime
+
+    def __post_init__(self):
+        if not isinstance(self.center, WeatherLocation):
+            raise ValueError("invalid_reliability_scope_center")
+        if (
+            isinstance(self.radius_km, bool)
+            or not isinstance(self.radius_km, (int, float))
+            or not isfinite(float(self.radius_km))
+            or self.radius_km < 0
+        ):
+            raise ValueError("invalid_reliability_scope_radius")
+        starts_at = _utc(self.starts_at_utc, "scope_starts_at")
+        ends_at = _utc(self.ends_at_utc, "scope_ends_at")
+        if ends_at < starts_at:
+            raise ValueError("invalid_reliability_scope_interval")
+        object.__setattr__(self, "radius_km", float(self.radius_km))
+        object.__setattr__(self, "starts_at_utc", starts_at)
+        object.__setattr__(self, "ends_at_utc", ends_at)
+
+    def exclusion_reasons(
+        self, verification: WeatherForecastVerification
+    ) -> tuple[str, ...]:
+        reasons = []
+        if not self.starts_at_utc <= verification.forecast_for_utc <= self.ends_at_utc:
+            reasons.append("forecast_time_outside_report_scope")
+        if _distance_km(self.center, verification.requested_location) > self.radius_km:
+            reasons.append("requested_location_outside_report_scope")
+        return tuple(reasons)
 
 
 @dataclass(frozen=True)
@@ -100,24 +159,44 @@ class ProviderVariableMetrics:
 
 @dataclass(frozen=True)
 class ProviderReliabilityReport:
+    scope: ReliabilityReportScope
     coverage: tuple[ProviderComparisonCoverage, ...]
     variable_metrics: tuple[ProviderVariableMetrics, ...]
+    context_exclusions: tuple["ProviderContextExclusions", ...] = ()
+
+
+@dataclass(frozen=True)
+class ProviderContextExclusions:
+    provider_id: str
+    model_id: str | None
+    excluded_count: int
+    reasons: tuple[tuple[str, int], ...]
 
 
 def build_provider_reliability_report(
     verifications: tuple[WeatherForecastVerification, ...],
     *,
     policy: ReliabilityMetricsPolicy,
+    scope: ReliabilityReportScope,
 ) -> ProviderReliabilityReport:
     if not isinstance(policy, ReliabilityMetricsPolicy):
         raise ValueError("reliability_metrics_policy_required")
+    if not isinstance(scope, ReliabilityReportScope):
+        raise ValueError("reliability_report_scope_required")
 
     coverage = defaultdict(lambda: {"total": 0, "comparable": 0, "reasons": Counter()})
     samples = defaultdict(list)
+    exclusions = defaultdict(lambda: {"count": 0, "reasons": Counter()})
 
     for verification in tuple(verifications):
         if not isinstance(verification, WeatherForecastVerification):
             raise ValueError("invalid_forecast_verification")
+        context_reasons = scope.exclusion_reasons(verification)
+        if context_reasons:
+            exclusion = exclusions[(verification.provider_id, verification.model_id)]
+            exclusion["count"] += 1
+            exclusion["reasons"].update(context_reasons)
+            continue
         bucket = policy.bucket_for(verification.horizon)
         coverage_key = (verification.provider_id, verification.model_id, bucket.name)
         group = coverage[coverage_key]
@@ -191,7 +270,21 @@ def build_provider_reliability_report(
             )
         )
 
+    exclusion_results = tuple(
+        ProviderContextExclusions(
+            provider_id=provider_id,
+            model_id=model_id,
+            excluded_count=values["count"],
+            reasons=tuple(sorted(values["reasons"].items())),
+        )
+        for (provider_id, model_id), values in sorted(
+            exclusions.items(), key=lambda item: (item[0][0], item[0][1] or "")
+        )
+    )
+
     return ProviderReliabilityReport(
+        scope=scope,
         coverage=tuple(coverage_results),
         variable_metrics=tuple(metric_results),
+        context_exclusions=exclusion_results,
     )

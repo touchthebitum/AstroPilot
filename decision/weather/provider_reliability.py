@@ -193,6 +193,9 @@ class WeatherForecastVerification:
     horizon: timedelta
     time_difference: timedelta
     distance_km: float
+    forecast_for_utc: datetime
+    requested_location: WeatherLocation
+    grid_location: WeatherLocation
     model_id: str | None = None
     errors: tuple[WeatherVariableError, ...] = ()
     reasons: tuple[str, ...] = ()
@@ -265,6 +268,9 @@ def compare_forecast_to_observation(
             horizon=forecast.horizon,
             time_difference=time_difference,
             distance_km=distance,
+            forecast_for_utc=forecast.forecast_for_utc,
+            requested_location=forecast.requested_location,
+            grid_location=forecast.grid_location,
             reasons=tuple(reasons),
             unmatched_variables=unmatched,
         )
@@ -291,6 +297,9 @@ def compare_forecast_to_observation(
         horizon=forecast.horizon,
         time_difference=time_difference,
         distance_km=distance,
+        forecast_for_utc=forecast.forecast_for_utc,
+        requested_location=forecast.requested_location,
+        grid_location=forecast.grid_location,
         errors=tuple(errors),
         unmatched_variables=unmatched,
     )

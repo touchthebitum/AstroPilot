@@ -14,6 +14,7 @@ from decision.weather.provider_reliability import (
 from decision.weather.provider_reliability_metrics import (
     EvidenceStatus,
     HorizonBucket,
+    ReliabilityReportScope,
     ReliabilityMetricsPolicy,
     build_provider_reliability_report,
 )
@@ -83,6 +84,17 @@ def policy(minimum_sample_size=3):
     )
 
 
+def report_scope(**overrides):
+    return ReliabilityReportScope(
+        center=overrides.get("center", SITE),
+        radius_km=overrides.get("radius_km", 5),
+        starts_at_utc=overrides.get(
+            "starts_at_utc", VALID_AT - timedelta(days=1)
+        ),
+        ends_at_utc=overrides.get("ends_at_utc", VALID_AT + timedelta(days=1)),
+    )
+
+
 def test_policy_requires_explicit_contiguous_full_horizon_coverage():
     with pytest.raises(ValueError, match="horizon_buckets_must_start_at_zero"):
         ReliabilityMetricsPolicy(
@@ -119,6 +131,7 @@ def test_horizon_boundary_belongs_to_the_later_bucket():
     report = build_provider_reliability_report(
         (verification(horizon=timedelta(hours=6)),),
         policy=policy(minimum_sample_size=1),
+        scope=report_scope(),
     )
 
     assert report.coverage[0].horizon_bucket == "6-24h"
@@ -138,7 +151,9 @@ def test_metrics_are_factual_and_keep_signed_error():
         ),
     )
 
-    report = build_provider_reliability_report(samples, policy=policy())
+    report = build_provider_reliability_report(
+        samples, policy=policy(), scope=report_scope()
+    )
     metrics = report.variable_metrics[0]
 
     assert metrics.sample_count == 3
@@ -153,6 +168,7 @@ def test_too_few_samples_are_explicitly_insufficient():
     report = build_provider_reliability_report(
         (verification(), verification()),
         policy=policy(minimum_sample_size=3),
+        scope=report_scope(),
     )
 
     assert report.variable_metrics[0].sample_count == 2
@@ -176,6 +192,7 @@ def test_provider_model_variable_and_horizon_are_never_mixed():
     report = build_provider_reliability_report(
         samples,
         policy=policy(minimum_sample_size=1),
+        scope=report_scope(),
     )
 
     keys = {
@@ -192,6 +209,7 @@ def test_not_comparable_samples_are_counted_but_never_used_as_zero_error():
     report = build_provider_reliability_report(
         (rejected, valid),
         policy=policy(minimum_sample_size=2),
+        scope=report_scope(),
     )
 
     coverage = report.coverage[0]
@@ -216,6 +234,7 @@ def test_missing_variable_does_not_create_a_sample():
     report = build_provider_reliability_report(
         (sample,),
         policy=policy(minimum_sample_size=1),
+        scope=report_scope(),
     )
 
     assert [item.variable for item in report.variable_metrics] == [
@@ -224,7 +243,9 @@ def test_missing_variable_does_not_create_a_sample():
 
 
 def test_empty_input_produces_an_empty_report_without_claims():
-    report = build_provider_reliability_report((), policy=policy())
+    report = build_provider_reliability_report(
+        (), policy=policy(), scope=report_scope()
+    )
 
     assert report.coverage == ()
     assert report.variable_metrics == ()
@@ -234,6 +255,7 @@ def test_metrics_results_are_immutable():
     report = build_provider_reliability_report(
         (verification(),),
         policy=policy(minimum_sample_size=1),
+        scope=report_scope(),
     )
 
     with pytest.raises(FrozenInstanceError):
@@ -242,10 +264,12 @@ def test_metrics_results_are_immutable():
 
 def test_policy_and_verifications_are_mandatory_and_typed():
     with pytest.raises(ValueError, match="reliability_metrics_policy_required"):
-        build_provider_reliability_report((), policy=None)
+        build_provider_reliability_report((), policy=None, scope=report_scope())
 
     with pytest.raises(ValueError, match="invalid_forecast_verification"):
-        build_provider_reliability_report((object(),), policy=policy())
+        build_provider_reliability_report(
+            (object(),), policy=policy(), scope=report_scope()
+        )
 
 
 def test_verification_preserves_provider_and_model_provenance():
@@ -253,3 +277,116 @@ def test_verification_preserves_provider_and_model_provenance():
 
     assert sample.provider_id == "provider_a"
     assert sample.model_id == "model_1"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"radius_km": -1}, "invalid_reliability_scope_radius"),
+        (
+            {"starts_at_utc": datetime(2026, 8, 29, 20)},
+            "scope_starts_at_must_be_timezone_aware",
+        ),
+        (
+            {
+                "starts_at_utc": VALID_AT + timedelta(hours=1),
+                "ends_at_utc": VALID_AT,
+            },
+            "invalid_reliability_scope_interval",
+        ),
+    ],
+)
+def test_report_scope_is_explicit_and_strictly_validated(overrides, message):
+    with pytest.raises(ValueError, match=message):
+        report_scope(**overrides)
+
+
+def test_report_scope_is_mandatory():
+    with pytest.raises(ValueError, match="reliability_report_scope_required"):
+        build_provider_reliability_report(
+            (verification(),), policy=policy(), scope=None
+        )
+
+
+def test_time_scope_boundaries_are_inclusive():
+    samples = (verification(), verification(horizon=timedelta(hours=1)))
+    scope = report_scope(starts_at_utc=VALID_AT, ends_at_utc=VALID_AT)
+
+    report = build_provider_reliability_report(
+        samples, policy=policy(minimum_sample_size=1), scope=scope
+    )
+
+    assert report.coverage[0].total_count == 2
+    assert report.context_exclusions == ()
+
+
+def test_out_of_period_verification_is_excluded_and_explained():
+    scope = report_scope(
+        starts_at_utc=VALID_AT + timedelta(seconds=1),
+        ends_at_utc=VALID_AT + timedelta(days=1),
+    )
+
+    report = build_provider_reliability_report(
+        (verification(),), policy=policy(), scope=scope
+    )
+
+    assert report.coverage == ()
+    assert report.variable_metrics == ()
+    assert report.context_exclusions[0].excluded_count == 1
+    assert report.context_exclusions[0].reasons == (
+        ("forecast_time_outside_report_scope", 1),
+    )
+
+
+def test_out_of_area_verification_is_excluded_and_explained():
+    report = build_provider_reliability_report(
+        (verification(),),
+        policy=policy(),
+        scope=report_scope(center=WeatherLocation(47.5, 8.5), radius_km=1),
+    )
+
+    assert report.coverage == ()
+    assert report.context_exclusions[0].reasons == (
+        ("requested_location_outside_report_scope", 1),
+    )
+
+
+def test_each_context_exclusion_reason_remains_visible():
+    report = build_provider_reliability_report(
+        (verification(),),
+        policy=policy(),
+        scope=report_scope(
+            center=WeatherLocation(47.5, 8.5),
+            radius_km=1,
+            starts_at_utc=VALID_AT + timedelta(hours=1),
+            ends_at_utc=VALID_AT + timedelta(hours=2),
+        ),
+    )
+
+    assert report.context_exclusions[0].excluded_count == 1
+    assert report.context_exclusions[0].reasons == (
+        ("forecast_time_outside_report_scope", 1),
+        ("requested_location_outside_report_scope", 1),
+    )
+
+
+def test_context_exclusions_are_separated_by_provider_and_model():
+    samples = (
+        verification(provider="provider_a", model="one"),
+        verification(provider="provider_a", model="two"),
+        verification(provider="provider_b", model="one"),
+    )
+    scope = report_scope(
+        starts_at_utc=VALID_AT + timedelta(hours=1),
+        ends_at_utc=VALID_AT + timedelta(hours=2),
+    )
+
+    report = build_provider_reliability_report(samples, policy=policy(), scope=scope)
+
+    assert [
+        (item.provider_id, item.model_id) for item in report.context_exclusions
+    ] == [
+        ("provider_a", "one"),
+        ("provider_a", "two"),
+        ("provider_b", "one"),
+    ]
