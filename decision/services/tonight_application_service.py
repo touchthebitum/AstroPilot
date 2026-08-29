@@ -1,9 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 from decision.mission.night_mission import NightMission
 from decision.recommendation.recommendation import Recommendation
+
+
+class TonightStatus(str, Enum):
+    AVAILABLE = "available"
+    FORECAST_UNAVAILABLE = "forecast_unavailable"
+    NO_NIGHT = "no_night"
+    NO_CANDIDATE = "no_candidate"
+    NO_RECOMMENDATION = "no_recommendation"
+    NO_MISSION = "no_mission"
 
 
 @dataclass(frozen=True)
@@ -11,7 +21,11 @@ class TonightResult:
     night: dict | None
     recommendation: Recommendation | None
     mission: NightMission | None
-    forecast_available: bool = True
+    status: TonightStatus = TonightStatus.AVAILABLE
+
+    @property
+    def forecast_available(self) -> bool:
+        return self.status is not TonightStatus.FORECAST_UNAVAILABLE
 
 
 class TonightApplicationService:
@@ -67,11 +81,16 @@ class TonightApplicationService:
                 None,
                 None,
                 None,
-                forecast_available=False,
+                status=TonightStatus.FORECAST_UNAVAILABLE,
             )
 
         if not nights:
-            return TonightResult(None, None, None)
+            return TonightResult(
+                None,
+                None,
+                None,
+                status=TonightStatus.NO_NIGHT,
+            )
 
         night = sorted(nights, key=lambda item: item["date"])[0]
         top_objects = night.get("top_objects") or []
@@ -82,13 +101,23 @@ class TonightApplicationService:
         )
 
         if not candidates:
-            return TonightResult(night, None, None)
+            return TonightResult(
+                night,
+                None,
+                None,
+                status=TonightStatus.NO_CANDIDATE,
+            )
 
         recommendation = self.opportunity_recommendation_service.build(
             candidates=candidates,
         )
         if recommendation is None:
-            return TonightResult(night, None, None)
+            return TonightResult(
+                night,
+                None,
+                None,
+                status=TonightStatus.NO_RECOMMENDATION,
+            )
 
         candidate = recommendation.opportunity.candidate
         recommended_key = candidate.get(
@@ -105,4 +134,13 @@ class TonightApplicationService:
             ),
         )
 
-        return TonightResult(night, recommendation, mission)
+        return TonightResult(
+            night,
+            recommendation,
+            mission,
+            status=(
+                TonightStatus.AVAILABLE
+                if mission is not None
+                else TonightStatus.NO_MISSION
+            ),
+        )
