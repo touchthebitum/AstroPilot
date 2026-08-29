@@ -13,6 +13,9 @@ from decision.opportunity.action import Action
 from decision.opportunity.opportunity import Opportunity
 from decision.quality.astro_quality_result import AstroQualityResult
 from decision.recommendation.recommendation import Recommendation
+from decision.quality.dew_risk_result import DewRiskResult
+from decision.risk.project_risk_context import ProjectRiskContext
+from decision.risk.risk_report import RiskReport
 from decision.services.tonight_application_service import (
     TonightResult,
     TonightStatus,
@@ -67,6 +70,8 @@ def test_partial_results_produce_stable_transport_status(status):
         "selected_filter": None,
         "astro_quality": None,
         "productivity": None,
+        "dew_risk": None,
+        "postponement_risk": None,
         "reasons": [],
     }
 
@@ -118,6 +123,28 @@ def test_complete_result_maps_only_json_compatible_values():
                     reason="stable_conditions",
                 )
             ],
+        ),
+        dew_risk=DewRiskResult(
+            dew_point_c=7.2,
+            spread_c=1.8,
+            risk="HIGH",
+            score=82.0,
+        ),
+        risk_report=RiskReport(
+            level="MEDIUM",
+            score=63,
+            explanation=["Only two favorable nights remain"],
+            context=ProjectRiskContext(
+                priority=8.0,
+                remaining_hours=5.5,
+                completion=0.45,
+                season_remaining_days=21,
+                favorable_nights=2,
+                required_nights=2,
+                productive_hours_per_night=3.5,
+                night_capacity_source="history",
+                historical_nights=6,
+            ),
         ),
     )
 
@@ -180,6 +207,24 @@ def test_complete_result_maps_only_json_compatible_values():
                 "seeing": 1.4,
             }
         ],
+    }
+    assert response["dew_risk"] == {
+        "level": "HIGH",
+        "score": 82.0,
+        "dew_point_c": 7.2,
+        "spread_c": 1.8,
+    }
+    assert response["postponement_risk"] == {
+        "level": "MEDIUM",
+        "score": 63,
+        "explanations": ["Only two favorable nights remain"],
+        "required_nights": 2,
+        "productive_hours_per_night": 3.5,
+        "capacity_source": "history",
+        "historical_nights": 6,
+        "remaining_hours": 5.5,
+        "favorable_nights": 2,
+        "season_remaining_days": 21,
     }
     assert response["reasons"] == [
         {

@@ -84,6 +84,26 @@ class TonightProductivityModel(BaseModel):
     windows: list[TonightProductivityWindowModel] = Field(default_factory=list)
 
 
+class TonightDewRiskModel(BaseModel):
+    level: str
+    score: float
+    dew_point_c: float
+    spread_c: float
+
+
+class TonightPostponementRiskModel(BaseModel):
+    level: str
+    score: int
+    explanations: list[str] = Field(default_factory=list)
+    required_nights: int | None = None
+    productive_hours_per_night: float | None = None
+    capacity_source: str | None = None
+    historical_nights: int | None = None
+    remaining_hours: float | None = None
+    favorable_nights: int | None = None
+    season_remaining_days: int | None = None
+
+
 class TonightResponseModel(BaseModel):
     status: str
     night_date: str | None = None
@@ -101,6 +121,8 @@ class TonightResponseModel(BaseModel):
     selected_filter: TonightFilterModel | None = None
     astro_quality: TonightAstroQualityModel | None = None
     productivity: TonightProductivityModel | None = None
+    dew_risk: TonightDewRiskModel | None = None
+    postponement_risk: TonightPostponementRiskModel | None = None
     reasons: list[TonightReasonModel] = Field(default_factory=list)
 
 

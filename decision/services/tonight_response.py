@@ -85,6 +85,28 @@ class TonightProductivityResponse:
 
 
 @dataclass(frozen=True)
+class TonightDewRiskResponse:
+    level: str
+    score: float
+    dew_point_c: float
+    spread_c: float
+
+
+@dataclass(frozen=True)
+class TonightPostponementRiskResponse:
+    level: str
+    score: int
+    explanations: list[str] = field(default_factory=list)
+    required_nights: int | None = None
+    productive_hours_per_night: float | None = None
+    capacity_source: str | None = None
+    historical_nights: int | None = None
+    remaining_hours: float | None = None
+    favorable_nights: int | None = None
+    season_remaining_days: int | None = None
+
+
+@dataclass(frozen=True)
 class TonightResponse:
     status: str
     night_date: str | None = None
@@ -102,6 +124,8 @@ class TonightResponse:
     selected_filter: TonightFilterResponse | None = None
     astro_quality: TonightAstroQualityResponse | None = None
     productivity: TonightProductivityResponse | None = None
+    dew_risk: TonightDewRiskResponse | None = None
+    postponement_risk: TonightPostponementRiskResponse | None = None
     reasons: list[TonightReasonResponse] = field(default_factory=list)
 
     @classmethod
@@ -181,6 +205,49 @@ class TonightResponse:
                 ],
             )
 
+        dew_risk = None
+        if mission is not None and mission.dew_risk is not None:
+            source = mission.dew_risk
+            dew_risk = TonightDewRiskResponse(
+                level=source.risk,
+                score=float(source.score),
+                dew_point_c=float(source.dew_point_c),
+                spread_c=float(source.spread_c),
+            )
+
+        postponement_risk = None
+        if mission is not None and mission.risk_report is not None:
+            source = mission.risk_report
+            context = source.context
+            postponement_risk = TonightPostponementRiskResponse(
+                level=source.level,
+                score=int(source.score),
+                explanations=list(source.explanation),
+                required_nights=getattr(context, "required_nights", None),
+                productive_hours_per_night=getattr(
+                    context,
+                    "productive_hours_per_night",
+                    None,
+                ),
+                capacity_source=getattr(
+                    context,
+                    "night_capacity_source",
+                    None,
+                ),
+                historical_nights=getattr(
+                    context,
+                    "historical_nights",
+                    None,
+                ),
+                remaining_hours=getattr(context, "remaining_hours", None),
+                favorable_nights=getattr(context, "favorable_nights", None),
+                season_remaining_days=getattr(
+                    context,
+                    "season_remaining_days",
+                    None,
+                ),
+            )
+
         return cls(
             status=result.status.value,
             night_date=_text(
@@ -224,6 +291,8 @@ class TonightResponse:
             selected_filter=selected_filter,
             astro_quality=astro_quality,
             productivity=productivity,
+            dew_risk=dew_risk,
+            postponement_risk=postponement_risk,
             reasons=(
                 [
                     TonightReasonResponse(
