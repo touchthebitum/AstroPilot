@@ -5,6 +5,7 @@ from enum import Enum
 
 from decision.mission.night_mission import NightMission
 from decision.recommendation.recommendation import Recommendation
+from decision.validation.decision_consistency import DecisionConsistencyGate
 
 
 class TonightStatus(str, Enum):
@@ -14,6 +15,7 @@ class TonightStatus(str, Enum):
     NO_CANDIDATE = "no_candidate"
     NO_RECOMMENDATION = "no_recommendation"
     NO_MISSION = "no_mission"
+    NO_PRODUCTIVE_WINDOW = "no_productive_window"
 
 
 @dataclass(frozen=True)
@@ -134,13 +136,23 @@ class TonightApplicationService:
             ),
         )
 
+        if mission is None:
+            return TonightResult(
+                night,
+                recommendation,
+                None,
+                status=TonightStatus.NO_MISSION,
+            )
+
+        DecisionConsistencyGate.validate_mission(mission)
+
         return TonightResult(
             night,
             recommendation,
             mission,
             status=(
                 TonightStatus.AVAILABLE
-                if mission is not None
-                else TonightStatus.NO_MISSION
+                if DecisionConsistencyGate.has_productive_window(mission)
+                else TonightStatus.NO_PRODUCTIVE_WINDOW
             ),
         )

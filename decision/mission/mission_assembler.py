@@ -204,6 +204,29 @@ class MissionAssembler:
         risk = RiskEngine.evaluate(risk_context)
         tasks = NightPlanner.build(productivity)
 
+        requested_hours = (
+            mission_input.recommended_hours if mission_input is not None else 0
+        )
+        productive_hours = getattr(productivity, "productive_hours", None)
+        productive_windows = getattr(productivity, "windows", None)
+        if productive_windows == []:
+            operational_hours = 0.0
+        elif productive_hours is not None:
+            operational_hours = min(
+                requested_hours,
+                max(0.0, productive_hours),
+            )
+        else:
+            operational_hours = requested_hours
+        requested_gain = (
+            mission_input.expected_gain if mission_input is not None else 0
+        )
+        operational_gain = (
+            requested_gain * operational_hours / requested_hours
+            if requested_hours > 0
+            else 0
+        )
+
 
         analysis_context = AnalysisContext(
             target=target,
@@ -253,10 +276,10 @@ class MissionAssembler:
                 mission_input.window_end if mission_input is not None else None
             ),
             recommended_hours=(
-                mission_input.recommended_hours if mission_input is not None else 0
+                round(operational_hours, 2)
             ),
             expected_gain=(
-                mission_input.expected_gain if mission_input is not None else 0
+                round(operational_gain, 2)
             ),
             selected_filter=(
                 mission_input.selected_filter

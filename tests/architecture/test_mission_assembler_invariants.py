@@ -310,3 +310,58 @@ def test_build_does_not_mutate_context(
         "temperature_c": context.weather.temperature_c,
         "target_altitude_deg": context.sky.target_altitude_deg,
     } == original
+
+
+def test_operational_duration_and_gain_are_limited_by_productive_capacity(
+    frozen_time,
+    summary,
+    context,
+    isolated_dependencies,
+):
+    isolated_dependencies.productivity.productive_hours = 0.75
+    isolated_dependencies.productivity.windows = [object()]
+    input_data = mission_input(
+        frozen_time,
+        WeatherForecast(),
+        recommended_hours=1.5,
+        expected_gain=6.0,
+    )
+
+    result = MissionAssembler.build(
+        target="M31",
+        summary=summary,
+        context=context,
+        equipment=[],
+        alternatives=[],
+        mission_input=input_data,
+    )
+
+    assert result.recommended_hours == 0.75
+    assert result.expected_gain == 3.0
+
+
+def test_no_productive_window_exposes_no_recommended_duration_or_gain(
+    frozen_time,
+    summary,
+    context,
+    isolated_dependencies,
+):
+    isolated_dependencies.productivity.productive_hours = 0.75
+    isolated_dependencies.productivity.windows = []
+
+    result = MissionAssembler.build(
+        target="M31",
+        summary=summary,
+        context=context,
+        equipment=[],
+        alternatives=[],
+        mission_input=mission_input(
+            frozen_time,
+            WeatherForecast(),
+            recommended_hours=1.5,
+            expected_gain=6.0,
+        ),
+    )
+
+    assert result.recommended_hours == 0.0
+    assert result.expected_gain == 0.0

@@ -16,6 +16,7 @@ from decision.weather.weather_ingress import (
     WeatherIngressError,
     WeatherInsufficientError,
 )
+from decision.validation.decision_consistency import DecisionConsistencyError
 
 
 def make_result():
@@ -192,6 +193,28 @@ def test_insufficient_weather_has_a_distinct_service_error():
     assert response.json()["detail"]["code"] == "weather_insufficient"
 
 
+def test_internally_inconsistent_decision_is_rejected_before_transport():
+    class Service:
+        def evaluate(self, **kwargs):
+            raise DecisionConsistencyError(["recommended_hours_exceed_productive_hours"])
+
+    client = TestClient(
+        create_app(
+            service_factory=lambda: Service(),
+            weather_provider=lambda lat, lon: object(),
+            profile_provider=lambda: {},
+        )
+    )
+
+    response = client.post("/v1/tonight", json={})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "decision_invalid",
+        "message": "The decision failed consistency validation.",
+    }
+
+
 def test_forecast_unavailable_is_a_service_error():
     client = make_client(
         result=TonightResult(
@@ -346,3 +369,6 @@ def test_openapi_documents_tonight_operation_and_error_examples():
     assert error_examples["weather_insufficient"]["value"]["detail"][
         "code"
     ] == "weather_insufficient"
+    assert error_examples["decision_invalid"]["value"]["detail"]["code"] == (
+        "decision_invalid"
+    )

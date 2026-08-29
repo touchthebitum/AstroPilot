@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -61,6 +61,8 @@ def test_http_request_runs_real_application_composition_once(monkeypatch):
         confidence=0.87,
         equipment=["Widefield"],
         recommended_hours=3.5,
+        window_start=datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+        window_end=datetime(2026, 9, 2, 4, tzinfo=timezone.utc),
         astro_quality=AstroQualityResult(
             score=84.0,
             confidence=0.9,
@@ -70,7 +72,7 @@ def test_http_request_runs_real_application_composition_once(monkeypatch):
         productivity=NightProductivityResult(
             astronomical_hours=6.0,
             productive_hours=3.5,
-            confidence=0.82,
+            confidence=0.58,
             cloud_loss=1.0,
             moon_loss=0.5,
             altitude_loss=0.25,
