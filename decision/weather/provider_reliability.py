@@ -188,10 +188,12 @@ class WeatherVariableError:
 
 @dataclass(frozen=True)
 class WeatherForecastVerification:
+    provider_id: str
     status: ComparisonStatus
     horizon: timedelta
     time_difference: timedelta
     distance_km: float
+    model_id: str | None = None
     errors: tuple[WeatherVariableError, ...] = ()
     reasons: tuple[str, ...] = ()
     unmatched_variables: tuple[WeatherVariable, ...] = ()
@@ -257,6 +259,8 @@ def compare_forecast_to_observation(
 
     if reasons:
         return WeatherForecastVerification(
+            provider_id=forecast.provider_id,
+            model_id=forecast.model_id,
             status=ComparisonStatus.NOT_COMPARABLE,
             horizon=forecast.horizon,
             time_difference=time_difference,
@@ -281,6 +285,8 @@ def compare_forecast_to_observation(
             )
         )
     return WeatherForecastVerification(
+        provider_id=forecast.provider_id,
+        model_id=forecast.model_id,
         status=ComparisonStatus.COMPARABLE,
         horizon=forecast.horizon,
         time_difference=time_difference,
