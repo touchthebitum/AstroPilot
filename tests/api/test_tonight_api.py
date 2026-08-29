@@ -8,7 +8,10 @@ from decision.models.candidate import Candidate
 from decision.opportunity.action import Action
 from decision.opportunity.opportunity import Opportunity
 from decision.recommendation.recommendation import Recommendation
-from decision.services.tonight_application_service import TonightResult
+from decision.services.tonight_application_service import (
+    TonightResult,
+    TonightStatus,
+)
 
 
 def make_result():
@@ -102,3 +105,99 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
     assert payload["target"] == "Andromeda"
     assert payload["catalog_key"] == "M31"
     assert payload["recommended_hours"] == 3.5
+
+
+DEFAULT_WEATHER = {"weather": True}
+
+
+def make_client(*, result, weather=DEFAULT_WEATHER):
+    class Service:
+        def evaluate(self, **kwargs):
+            return result
+
+    return TestClient(
+        create_app(
+            service_factory=lambda: Service(),
+            weather_provider=lambda lat, lon: weather,
+        )
+    )
+
+
+def test_weather_unavailable_is_a_service_error_before_evaluation():
+    class Service:
+        def evaluate(self, **kwargs):
+            raise AssertionError("service must not run without weather")
+
+    client = TestClient(
+        create_app(
+            service_factory=lambda: Service(),
+            weather_provider=lambda lat, lon: None,
+        )
+    )
+
+    response = client.post("/v1/tonight", json={})
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "weather_unavailable"
+
+
+def test_forecast_unavailable_is_a_service_error():
+    client = make_client(
+        result=TonightResult(
+            None,
+            None,
+            None,
+            status=TonightStatus.FORECAST_UNAVAILABLE,
+        )
+    )
+
+    response = client.post("/v1/tonight", json={})
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "forecast_unavailable"
+
+
+def test_empty_product_results_remain_successful_business_responses():
+    client = make_client(
+        result=TonightResult(
+            None,
+            None,
+            None,
+            status=TonightStatus.NO_NIGHT,
+        )
+    )
+
+    response = client.post("/v1/tonight", json={})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "no_night"
+
+
+def test_request_coordinates_and_bortle_are_validated():
+    client = make_client(result=make_result())
+
+    response = client.post(
+        "/v1/tonight",
+        json={
+            "location": {
+                "name": "Invalid",
+                "latitude": 120,
+                "longitude": 6.8,
+            },
+            "bortle": 12,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_invalid_location_embedded_in_profile_is_rejected():
+    client = make_client(result=make_result())
+
+    response = client.post(
+        "/v1/tonight",
+        json={"profile": {"location": {"name": "Incomplete"}}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "invalid_profile_location"

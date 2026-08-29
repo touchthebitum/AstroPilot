@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Callable, Literal
 
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field, ValidationError
 
+from decision.services.tonight_application_service import TonightStatus
 from decision.services.tonight_response import TonightResponse
 
 
@@ -27,7 +28,13 @@ class TonightRequest(BaseModel):
         "highest_score",
         "best_setup",
     ] = "balanced"
-    target: str = "deep_sky"
+    target: Literal[
+        "milky_way",
+        "deep_sky",
+        "planetary",
+        "moon",
+        "nightscape",
+    ] = "deep_sky"
     bortle: int = Field(default=3, ge=1, le=9)
 
 
@@ -89,7 +96,7 @@ def create_app(
         if request.location is not None:
             profile["location"] = request.location.model_dump()
 
-        location = profile.get(
+        raw_location = profile.get(
             "location",
             {
                 "name": "Buttes",
@@ -97,10 +104,31 @@ def create_app(
                 "longitude": 6.5495,
             },
         )
+        try:
+            location = LocationRequest.model_validate(raw_location).model_dump()
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "invalid_profile_location",
+                    "message": "Profile location is invalid.",
+                },
+            ) from exc
+        profile["location"] = location
+
         weather = weather_provider(
             location["latitude"],
             location["longitude"],
         )
+        if weather is None:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "weather_unavailable",
+                    "message": "Weather data is temporarily unavailable.",
+                },
+            )
+
         result = service_factory().evaluate(
             profile=profile,
             weather=weather,
@@ -109,6 +137,15 @@ def create_app(
             target=request.target,
             bortle=request.bortle,
         )
+        if result.status is TonightStatus.FORECAST_UNAVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "forecast_unavailable",
+                    "message": "Tonight forecast is temporarily unavailable.",
+                },
+            )
+
         return TonightResponse.from_result(result).to_dict()
 
     return application
