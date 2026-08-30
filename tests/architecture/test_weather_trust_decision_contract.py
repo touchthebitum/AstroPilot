@@ -78,6 +78,7 @@ def verification(*, maximum_error=2.0, reference="station_a"):
     return WeatherForecastVerification(
         provider_id="provider_a",
         reference_source_id=reference,
+        station_id="station_a",
         model_id="model_1",
         status=ComparisonStatus.COMPARABLE,
         horizon=timedelta(hours=6),
@@ -88,6 +89,7 @@ def verification(*, maximum_error=2.0, reference="station_a"):
         grid_location=SITE,
         observed_at_utc=NOW,
         observation_location=SITE,
+        altitude_difference_m=None,
         errors=(error,),
     )
 

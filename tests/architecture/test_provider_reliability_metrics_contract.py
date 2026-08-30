@@ -61,6 +61,7 @@ def verification(
     )
     observation = WeatherObservationPoint(
         source_id=reference_source,
+        station_id="station_123",
         observed_at_utc=observed_at,
         location=SITE,
         values=observation_values,

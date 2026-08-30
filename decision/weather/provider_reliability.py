@@ -13,7 +13,9 @@ class WeatherVariable(str, Enum):
     RELATIVE_HUMIDITY_PERCENT = "relative_humidity_percent"
     VISIBILITY_M = "visibility_m"
     WIND_SPEED_KMH = "wind_speed_kmh"
+    WIND_GUST_KMH = "wind_gust_kmh"
     TEMPERATURE_C = "temperature_c"
+    DEW_POINT_C = "dew_point_c"
 
 
 CANONICAL_UNITS = {
@@ -22,7 +24,9 @@ CANONICAL_UNITS = {
     WeatherVariable.RELATIVE_HUMIDITY_PERCENT: "%",
     WeatherVariable.VISIBILITY_M: "m",
     WeatherVariable.WIND_SPEED_KMH: "km/h",
+    WeatherVariable.WIND_GUST_KMH: "km/h",
     WeatherVariable.TEMPERATURE_C: "°C",
+    WeatherVariable.DEW_POINT_C: "°C",
 }
 
 VALUE_RANGES = {
@@ -31,7 +35,9 @@ VALUE_RANGES = {
     WeatherVariable.RELATIVE_HUMIDITY_PERCENT: (0.0, 100.0),
     WeatherVariable.VISIBILITY_M: (0.0, None),
     WeatherVariable.WIND_SPEED_KMH: (0.0, None),
+    WeatherVariable.WIND_GUST_KMH: (0.0, None),
     WeatherVariable.TEMPERATURE_C: (-100.0, 60.0),
+    WeatherVariable.DEW_POINT_C: (-100.0, 60.0),
 }
 
 
@@ -59,14 +65,19 @@ def _identity(value: str, name: str) -> str:
 class WeatherLocation:
     latitude: float
     longitude: float
+    altitude_m: float | None = None
 
     def __post_init__(self):
         if not _finite_number(self.latitude) or not -90 <= self.latitude <= 90:
             raise ValueError("invalid_latitude")
         if not _finite_number(self.longitude) or not -180 <= self.longitude <= 180:
             raise ValueError("invalid_longitude")
+        if self.altitude_m is not None and not _finite_number(self.altitude_m):
+            raise ValueError("invalid_altitude")
         object.__setattr__(self, "latitude", float(self.latitude))
         object.__setattr__(self, "longitude", float(self.longitude))
+        if self.altitude_m is not None:
+            object.__setattr__(self, "altitude_m", float(self.altitude_m))
 
 
 @dataclass(frozen=True)
@@ -148,6 +159,7 @@ class WeatherForecastPoint:
 @dataclass(frozen=True)
 class WeatherObservationPoint:
     source_id: str
+    station_id: str
     observed_at_utc: datetime
     location: WeatherLocation
     values: tuple[WeatherValue, ...]
@@ -159,6 +171,11 @@ class WeatherObservationPoint:
         if self.quality_status not in ("validated", "rejected"):
             raise ValueError("invalid_observation_quality_status")
         object.__setattr__(self, "source_id", _identity(self.source_id, "source_id"))
+        object.__setattr__(
+            self,
+            "station_id",
+            _identity(self.station_id, "station_id"),
+        )
         object.__setattr__(
             self,
             "observed_at_utc",
@@ -190,6 +207,7 @@ class WeatherVariableError:
 class WeatherForecastVerification:
     provider_id: str
     reference_source_id: str
+    station_id: str
     status: ComparisonStatus
     horizon: timedelta
     time_difference: timedelta
@@ -199,6 +217,7 @@ class WeatherForecastVerification:
     grid_location: WeatherLocation
     observed_at_utc: datetime
     observation_location: WeatherLocation
+    altitude_difference_m: float | None
     model_id: str | None = None
     errors: tuple[WeatherVariableError, ...] = ()
     reasons: tuple[str, ...] = ()
@@ -234,6 +253,12 @@ def compare_forecast_to_observation(
 
     time_difference = abs(observation.observed_at_utc - forecast.forecast_for_utc)
     distance = _distance_km(forecast.grid_location, observation.location)
+    altitude_difference = (
+        forecast.grid_location.altitude_m - observation.location.altitude_m
+        if forecast.grid_location.altitude_m is not None
+        and observation.location.altitude_m is not None
+        else None
+    )
     reasons = []
     if observation.quality_status != "validated":
         reasons.append("observation_rejected")
@@ -267,6 +292,7 @@ def compare_forecast_to_observation(
         return WeatherForecastVerification(
             provider_id=forecast.provider_id,
             reference_source_id=observation.source_id,
+            station_id=observation.station_id,
             model_id=forecast.model_id,
             status=ComparisonStatus.NOT_COMPARABLE,
             horizon=forecast.horizon,
@@ -277,6 +303,7 @@ def compare_forecast_to_observation(
             grid_location=forecast.grid_location,
             observed_at_utc=observation.observed_at_utc,
             observation_location=observation.location,
+            altitude_difference_m=altitude_difference,
             reasons=tuple(reasons),
             unmatched_variables=unmatched,
         )
@@ -299,6 +326,7 @@ def compare_forecast_to_observation(
     return WeatherForecastVerification(
         provider_id=forecast.provider_id,
         reference_source_id=observation.source_id,
+        station_id=observation.station_id,
         model_id=forecast.model_id,
         status=ComparisonStatus.COMPARABLE,
         horizon=forecast.horizon,
@@ -309,6 +337,7 @@ def compare_forecast_to_observation(
         grid_location=forecast.grid_location,
         observed_at_utc=observation.observed_at_utc,
         observation_location=observation.location,
+        altitude_difference_m=altitude_difference,
         errors=tuple(errors),
         unmatched_variables=unmatched,
     )
