@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from decision.forecast.forecast_run import ForecastRun
 from decision.mission.night_mission import NightMission
 from decision.recommendation.recommendation import Recommendation
 from decision.validation.decision_consistency import DecisionConsistencyGate
+from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 
 
 class TonightStatus(str, Enum):
@@ -24,6 +26,7 @@ class TonightResult:
     recommendation: Recommendation | None
     mission: NightMission | None
     status: TonightStatus = TonightStatus.AVAILABLE
+    forecast_evidence: DecisionForecastEvidence | None = None
 
     @property
     def forecast_available(self) -> bool:
@@ -66,7 +69,7 @@ class TonightApplicationService:
                 "longitude": 6.5495,
             },
         )
-        nights = self.forecast_nights(
+        forecast_run: ForecastRun | None = self.forecast_nights(
             location["latitude"],
             location["longitude"],
             location["name"],
@@ -78,7 +81,7 @@ class TonightApplicationService:
             profile=profile,
         )
 
-        if nights is None:
+        if forecast_run is None:
             return TonightResult(
                 None,
                 None,
@@ -86,12 +89,15 @@ class TonightApplicationService:
                 status=TonightStatus.FORECAST_UNAVAILABLE,
             )
 
+        nights = forecast_run.nights
+        forecast_evidence = forecast_run.evidence
         if not nights:
             return TonightResult(
                 None,
                 None,
                 None,
                 status=TonightStatus.NO_NIGHT,
+                forecast_evidence=forecast_evidence,
             )
 
         night = sorted(nights, key=lambda item: item["date"])[0]
@@ -108,6 +114,7 @@ class TonightApplicationService:
                 None,
                 None,
                 status=TonightStatus.NO_CANDIDATE,
+                forecast_evidence=forecast_evidence,
             )
 
         recommendation = self.opportunity_recommendation_service.build(
@@ -119,6 +126,7 @@ class TonightApplicationService:
                 None,
                 None,
                 status=TonightStatus.NO_RECOMMENDATION,
+                forecast_evidence=forecast_evidence,
             )
 
         candidate = recommendation.opportunity.candidate
@@ -142,6 +150,7 @@ class TonightApplicationService:
                 recommendation,
                 None,
                 status=TonightStatus.NO_MISSION,
+                forecast_evidence=forecast_evidence,
             )
 
         DecisionConsistencyGate.validate_mission(mission)
@@ -155,4 +164,5 @@ class TonightApplicationService:
                 if DecisionConsistencyGate.has_productive_window(mission)
                 else TonightStatus.NO_PRODUCTIVE_WINDOW
             ),
+            forecast_evidence=forecast_evidence,
         )
