@@ -156,6 +156,9 @@ def test_comparable_values_preserve_signed_and_absolute_errors():
     assert verification.forecast_for_utc == FORECAST_FOR
     assert verification.requested_location == SITE
     assert verification.grid_location == SITE
+    assert verification.reference_source_id == "station_reference"
+    assert verification.observed_at_utc == FORECAST_FOR
+    assert verification.observation_location == SITE
     errors = {error.variable: error for error in verification.errors}
     assert errors[WeatherVariable.CLOUD_COVER_PERCENT].signed_error == 10.0
     assert errors[WeatherVariable.CLOUD_COVER_PERCENT].absolute_error == 10.0
