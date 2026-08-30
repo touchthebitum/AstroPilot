@@ -22,6 +22,7 @@ from decision.weather.weather_trust_decision import (
     WeatherDecisionAdmissibility,
     WeatherDecisionContext,
     WeatherEvidenceQuality,
+    WeatherReliabilityContext,
     WeatherTrustDecisionEvaluator,
     WeatherTrustEvidence,
 )
@@ -102,15 +103,23 @@ def report(*verifications, minimum_sample_size=1):
     )
 
 
-def context(**overrides):
+def reliability_context(**overrides):
     values = {
-        "provider_id": "provider_a",
         "model_id": "model_1",
         "reference_source_id": "station_a",
         "horizon_bucket": "all",
         "required_variables": (WeatherVariable.CLOUD_COVER_PERCENT,),
         "reliability_scope": reliability_scope(),
+    }
+    values.update(overrides)
+    return WeatherReliabilityContext(**values)
+
+
+def context(**overrides):
+    values = {
+        "provider_id": "provider_a",
         "decision_location": SITE,
+        "reliability_context": reliability_context(),
     }
     values.update(overrides)
     return WeatherDecisionContext(**values)
@@ -141,7 +150,7 @@ def test_complete_eligible_evidence_is_admissible_without_a_trust_score():
 def test_unknown_provider_reliability_requires_caution_not_trust():
     decision = WeatherTrustDecisionEvaluator.evaluate(
         evidence(provider_reliability=None),
-        context=context(),
+        context=context(reliability_context=None),
     )
 
     assert decision.evidence_quality is WeatherEvidenceQuality.INSUFFICIENT
@@ -149,10 +158,46 @@ def test_unknown_provider_reliability_requires_caution_not_trust():
     assert "provider_reliability_unavailable" in decision.reasons
 
 
+def test_provider_report_without_historical_context_is_invalid_and_refused():
+    decision = WeatherTrustDecisionEvaluator.evaluate(
+        evidence(),
+        context=context(reliability_context=None),
+    )
+
+    assert decision.evidence_quality is WeatherEvidenceQuality.INVALID
+    assert decision.admissibility is WeatherDecisionAdmissibility.REFUSED
+    assert decision.reasons == ("provider_reliability_context_missing",)
+
+
+def test_historical_context_without_provider_report_requires_caution():
+    decision = WeatherTrustDecisionEvaluator.evaluate(
+        evidence(provider_reliability=None),
+        context=context(),
+    )
+
+    assert decision.evidence_quality is WeatherEvidenceQuality.INSUFFICIENT
+    assert decision.admissibility is WeatherDecisionAdmissibility.CAUTION
+    assert decision.reasons == ("provider_reliability_unavailable",)
+
+
+def test_historical_context_is_atomic_and_immutable():
+    with pytest.raises(TypeError):
+        WeatherReliabilityContext(
+            model_id="model_1",
+            reference_source_id="station_a",
+            horizon_bucket="all",
+            reliability_scope=reliability_scope(),
+        )
+
+    historical = reliability_context()
+    with pytest.raises(FrozenInstanceError):
+        historical.reference_source_id = "station_b"
+
+
 def test_incoherent_freshness_cannot_produce_admissible():
     decision = WeatherTrustDecisionEvaluator.evaluate(
         evidence(freshness=WeatherFreshness(5.0, "stale", 90)),
-        context=context(),
+        context=context(reliability_context=None),
     )
 
     assert decision.evidence_quality is WeatherEvidenceQuality.INSUFFICIENT
@@ -168,7 +213,7 @@ def test_snapshot_location_must_match_the_decision_location():
                 requested_longitude=8.5417,
             )
         ),
-        context=context(),
+        context=context(reliability_context=None),
     )
 
     assert decision.evidence_quality is WeatherEvidenceQuality.INVALID
@@ -179,7 +224,7 @@ def test_snapshot_location_must_match_the_decision_location():
 def test_snapshot_provider_mismatch_is_invalid_and_refused():
     decision = WeatherTrustDecisionEvaluator.evaluate(
         evidence(snapshot=snapshot(provider="provider_b")),
-        context=context(),
+        context=context(reliability_context=None),
     )
 
     assert decision.evidence_quality is WeatherEvidenceQuality.INVALID
@@ -215,7 +260,7 @@ def test_too_few_observations_cannot_be_promoted_to_sufficient():
 def test_missing_required_current_evidence_refuses_the_decision(overrides, reason):
     decision = WeatherTrustDecisionEvaluator.evaluate(
         evidence(**overrides),
-        context=context(),
+        context=context(reliability_context=None),
     )
 
     assert decision.evidence_quality is WeatherEvidenceQuality.INSUFFICIENT
@@ -226,10 +271,9 @@ def test_missing_required_current_evidence_refuses_the_decision(overrides, reaso
 def test_explicit_invalid_evidence_has_fail_closed_priority():
     decision = WeatherTrustDecisionEvaluator.evaluate(
         evidence(
-            provider_reliability=None,
             integrity_issues=("invalid_weather_units",),
         ),
-        context=context(),
+        context=context(reliability_context=None),
     )
 
     assert decision.evidence_quality is WeatherEvidenceQuality.INVALID
@@ -268,7 +312,11 @@ def test_unknown_selected_window_coverage_is_explicitly_refused():
 def test_context_mismatch_is_explicit_and_never_uses_another_source():
     decision = WeatherTrustDecisionEvaluator.evaluate(
         evidence(),
-        context=context(reference_source_id="station_b"),
+        context=context(
+            reliability_context=reliability_context(
+                reference_source_id="station_b"
+            )
+        ),
     )
 
     assert decision.evidence_quality is WeatherEvidenceQuality.INSUFFICIENT
@@ -284,7 +332,11 @@ def test_location_or_period_scope_mismatch_is_never_silently_mixed():
 
     decision = WeatherTrustDecisionEvaluator.evaluate(
         evidence(),
-        context=context(reliability_scope=other_period),
+        context=context(
+            reliability_context=reliability_context(
+                reliability_scope=other_period
+            )
+        ),
     )
 
     assert decision.evidence_quality is WeatherEvidenceQuality.INSUFFICIENT
@@ -295,7 +347,11 @@ def test_location_or_period_scope_mismatch_is_never_silently_mixed():
 def test_required_variable_must_have_eligible_evidence():
     decision = WeatherTrustDecisionEvaluator.evaluate(
         evidence(),
-        context=context(required_variables=(WeatherVariable.WIND_SPEED_KMH,)),
+        context=context(
+            reliability_context=reliability_context(
+                required_variables=(WeatherVariable.WIND_SPEED_KMH,)
+            )
+        ),
     )
 
     assert decision.evidence_quality is WeatherEvidenceQuality.INSUFFICIENT
@@ -372,11 +428,19 @@ def test_required_variable_order_does_not_change_the_decision():
 
     first = WeatherTrustDecisionEvaluator.evaluate(
         evidence(provider_reliability=reliability),
-        context=context(required_variables=variables),
+        context=context(
+            reliability_context=reliability_context(
+                required_variables=variables
+            )
+        ),
     )
     second = WeatherTrustDecisionEvaluator.evaluate(
         evidence(provider_reliability=reliability),
-        context=context(required_variables=tuple(reversed(variables))),
+        context=context(
+            reliability_context=reliability_context(
+                required_variables=tuple(reversed(variables))
+            )
+        ),
     )
 
     assert first == second

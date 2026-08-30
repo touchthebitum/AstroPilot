@@ -31,14 +31,12 @@ def _identity(value: str, name: str) -> str:
 
 
 @dataclass(frozen=True)
-class WeatherDecisionContext:
-    provider_id: str
+class WeatherReliabilityContext:
     model_id: str | None
     reference_source_id: str
     horizon_bucket: str
     required_variables: tuple[WeatherVariable, ...]
     reliability_scope: ReliabilityReportScope
-    decision_location: WeatherLocation
 
     def __post_init__(self):
         variables = tuple(self.required_variables)
@@ -50,14 +48,6 @@ class WeatherDecisionContext:
             raise ValueError("duplicate_required_weather_variable")
         if not isinstance(self.reliability_scope, ReliabilityReportScope):
             raise ValueError("reliability_report_scope_required")
-        if not isinstance(self.decision_location, WeatherLocation):
-            raise ValueError("weather_decision_location_required")
-
-        object.__setattr__(
-            self,
-            "provider_id",
-            _identity(self.provider_id, "provider_id"),
-        )
         object.__setattr__(
             self,
             "reference_source_id",
@@ -74,6 +64,28 @@ class WeatherDecisionContext:
             self,
             "required_variables",
             tuple(sorted(variables, key=lambda variable: variable.value)),
+        )
+
+
+@dataclass(frozen=True)
+class WeatherDecisionContext:
+    provider_id: str
+    decision_location: WeatherLocation
+    reliability_context: WeatherReliabilityContext | None = None
+
+    def __post_init__(self):
+        if not isinstance(self.decision_location, WeatherLocation):
+            raise ValueError("weather_decision_location_required")
+        if self.reliability_context is not None and not isinstance(
+            self.reliability_context,
+            WeatherReliabilityContext,
+        ):
+            raise ValueError("invalid_weather_reliability_context")
+
+        object.__setattr__(
+            self,
+            "provider_id",
+            _identity(self.provider_id, "provider_id"),
         )
 
 
@@ -170,13 +182,20 @@ class WeatherTrustDecisionEvaluator:
             )
 
         report = evidence.provider_reliability
+        reliability_context = context.reliability_context
+        if report is not None and reliability_context is None:
+            return WeatherTrustDecision(
+                evidence_quality=WeatherEvidenceQuality.INVALID,
+                admissibility=WeatherDecisionAdmissibility.REFUSED,
+                reasons=("provider_reliability_context_missing",),
+            )
         if report is None:
             return WeatherTrustDecision(
                 evidence_quality=WeatherEvidenceQuality.INSUFFICIENT,
                 admissibility=WeatherDecisionAdmissibility.CAUTION,
                 reasons=("provider_reliability_unavailable",),
             )
-        if report.scope != context.reliability_scope:
+        if report.scope != reliability_context.reliability_scope:
             return WeatherTrustDecision(
                 evidence_quality=WeatherEvidenceQuality.INSUFFICIENT,
                 admissibility=WeatherDecisionAdmissibility.CAUTION,
@@ -187,9 +206,10 @@ class WeatherTrustDecisionEvaluator:
             metric.variable: metric
             for metric in report.variable_metrics
             if metric.provider_id == context.provider_id
-            and metric.model_id == context.model_id
-            and metric.reference_source_id == context.reference_source_id
-            and metric.horizon_bucket == context.horizon_bucket
+            and metric.model_id == reliability_context.model_id
+            and metric.reference_source_id
+            == reliability_context.reference_source_id
+            and metric.horizon_bucket == reliability_context.horizon_bucket
         }
         reasons = []
 
@@ -197,8 +217,9 @@ class WeatherTrustDecisionEvaluator:
             exclusion
             for exclusion in report.context_exclusions
             if exclusion.provider_id == context.provider_id
-            and exclusion.model_id == context.model_id
-            and exclusion.reference_source_id == context.reference_source_id
+            and exclusion.model_id == reliability_context.model_id
+            and exclusion.reference_source_id
+            == reliability_context.reference_source_id
         ]
         for exclusion in matching_exclusions:
             reasons.extend(
@@ -210,9 +231,10 @@ class WeatherTrustDecisionEvaluator:
             coverage
             for coverage in report.coverage
             if coverage.provider_id == context.provider_id
-            and coverage.model_id == context.model_id
-            and coverage.reference_source_id == context.reference_source_id
-            and coverage.horizon_bucket == context.horizon_bucket
+            and coverage.model_id == reliability_context.model_id
+            and coverage.reference_source_id
+            == reliability_context.reference_source_id
+            and coverage.horizon_bucket == reliability_context.horizon_bucket
         ]
         for coverage in matching_coverage:
             reasons.extend(
@@ -224,7 +246,7 @@ class WeatherTrustDecisionEvaluator:
             reasons.append("provider_context_not_evaluated")
 
         insufficient = False
-        for variable in context.required_variables:
+        for variable in reliability_context.required_variables:
             metric = matching_metrics.get(variable)
             if metric is None:
                 reasons.append(f"provider_evidence_missing:{variable.value}")
