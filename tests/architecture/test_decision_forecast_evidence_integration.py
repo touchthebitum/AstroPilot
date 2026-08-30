@@ -66,6 +66,7 @@ def test_forecast_astro_builds_evidence_once_from_same_snapshot_and_rows(monkeyp
         3,
         weather=weather,
         profile={},
+        reference_time_utc=NOW,
     )
 
     assert isinstance(run, ForecastRun)
@@ -104,6 +105,7 @@ def test_forecast_astro_preserves_legacy_non_snapshot_without_false_evidence(
         3,
         weather={"legacy": True},
         profile={},
+        reference_time_utc=NOW,
     )
 
     assert run == ForecastRun(nights=(), evidence=None)
@@ -138,6 +140,7 @@ def test_forecast_astro_preserves_empty_evidence_for_valid_snapshot(monkeypatch)
         3,
         weather=weather,
         profile={},
+        reference_time_utc=NOW,
     )
 
     assert evidence_calls == [(weather, rows)]

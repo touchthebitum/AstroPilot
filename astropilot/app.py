@@ -595,6 +595,7 @@ def create_app(
         },
     )
     def tonight(request: TonightRequest):
+        reference_time_utc = clock()
         profile = dict(profile_provider())
         profile.update(request.profile)
         if request.location is not None:
@@ -629,7 +630,7 @@ def create_app(
             if isinstance(weather, WeatherSnapshot):
                 weather_freshness = validate_weather_freshness(
                     weather,
-                    reference_time_utc=clock(),
+                    reference_time_utc=reference_time_utc,
                 )
         except WeatherIngressError as exc:
             messages = {
@@ -664,6 +665,7 @@ def create_app(
             result = service_factory().evaluate(
                 profile=profile,
                 weather=weather,
+                reference_time_utc=reference_time_utc,
                 equipment=request.equipment,
                 goal=request.goal,
                 target=request.target,

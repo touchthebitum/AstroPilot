@@ -24,6 +24,7 @@ from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 
 
 def test_http_request_runs_real_application_composition_once(monkeypatch):
+    reference_time = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
     calls = {
         "weather": [],
         "forecast": [],
@@ -188,7 +189,7 @@ def test_http_request_runs_real_application_composition_once(monkeypatch):
         lambda mission: pytest.fail("API must not print the mission"),
     )
 
-    response = TestClient(create_app()).post(
+    response = TestClient(create_app(clock=lambda: reference_time)).post(
         "/v1/tonight",
         json={
             "location": {
@@ -207,6 +208,7 @@ def test_http_request_runs_real_application_composition_once(monkeypatch):
     assert profile_loads == [True]
     assert calls["weather"] == [(47.1, 6.8)]
     assert len(calls["forecast"]) == 1
+    assert calls["forecast"][0][1]["reference_time_utc"] is reference_time
     assert calls["candidates"] == [
         (
             selected_objects,

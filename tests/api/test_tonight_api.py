@@ -61,6 +61,7 @@ def make_result():
 
 def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
     weather = object()
+    reference_time = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
     weather_calls = []
     evaluation_calls = []
 
@@ -75,6 +76,7 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
             weather_calls.append((lat, lon)) or weather
         ),
         profile_provider=lambda: {},
+        clock=lambda: reference_time,
     )
 
     response = TestClient(app).post(
@@ -106,6 +108,7 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
                 },
             },
             "weather": weather,
+            "reference_time_utc": reference_time,
             "equipment": "portable",
             "goal": "galaxies",
             "target": "deep_sky",
@@ -253,6 +256,8 @@ def test_fresh_weather_transport_exposes_server_calculated_age(monkeypatch):
     weather = make_weather_snapshot(reference - timedelta(minutes=42, seconds=30))
     result = make_result()
     evaluations = []
+    service_calls = []
+    clock_calls = []
     evaluate = app_module.WeatherTrustDecisionEvaluator.evaluate
 
     def record_evaluation(evidence, *, context):
@@ -264,14 +269,22 @@ def test_fresh_weather_transport_exposes_server_calculated_age(monkeypatch):
         "evaluate",
         record_evaluation,
     )
+
+    class Service:
+        def evaluate(self, **kwargs):
+            service_calls.append(kwargs)
+            return result
+
+    def clock():
+        clock_calls.append(None)
+        return reference
+
     client = TestClient(
         create_app(
-            service_factory=lambda: type(
-                "Service", (), {"evaluate": lambda self, **kwargs: result}
-            )(),
+            service_factory=lambda: Service(),
             weather_provider=lambda lat, lon: weather,
             profile_provider=lambda: {},
-            clock=lambda: reference,
+            clock=clock,
         )
     )
 
@@ -308,6 +321,8 @@ def test_fresh_weather_transport_exposes_server_calculated_age(monkeypatch):
     assert context.decision_location.latitude == 46.7508
     assert context.decision_location.longitude == 6.5495
     assert context.reliability_context is None
+    assert clock_calls == [None]
+    assert service_calls[0]["reference_time_utc"] is reference
 
 
 def test_uncovered_mission_window_returns_refused_without_active_mission():
