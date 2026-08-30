@@ -65,12 +65,16 @@ def test_tonight_ui_assets_are_served():
     assert "weatherTrust.retrieved_at_utc" in script.text
     assert 'renderWeatherTrust(weatherTrust, weatherDecision, "classic")' in script.text
     assert 'renderWeatherTrust(weatherTrust, weatherDecision, "mission")' in script.text
-    assert 'weatherDecision?.admissibility === "caution"' in script.text
+    assert "weatherDecision?.presentation?.label" in script.text
+    assert "weatherDecision?.presentation?.summary" in script.text
     assert 'payload.status === "weather_refused"' in script.text
-    assert "Validation météo partielle" in script.text
-    assert "Météo validée pour cette décision" in script.text
-    assert "ne peut pas confirmer une mission fiable" in script.text
+    assert "Validation météo partielle" not in script.text
+    assert "Météo validée pour cette décision" not in script.text
+    assert "Mission météo non confirmée" not in script.text
+    assert "ne peut pas confirmer une mission fiable" not in script.text
     assert "weatherDecision.reasons" not in script.text
+    assert "provider_reliability_unavailable" not in script.text
+    assert "selected_window_uncovered" not in script.text
     assert "timeZone," in script.text
     assert "Date.now(" not in script.text
     assert "Récupérées il y a" in script.text

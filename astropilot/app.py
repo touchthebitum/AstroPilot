@@ -212,10 +212,16 @@ class TonightWeatherTrustModel(BaseModel):
     maximum_age_minutes: int = Field(gt=0)
 
 
+class TonightWeatherDecisionPresentationModel(BaseModel):
+    label: str
+    summary: str
+
+
 class TonightWeatherDecisionModel(BaseModel):
     evidence_quality: WeatherEvidenceQuality
     admissibility: WeatherDecisionAdmissibility
     reasons: list[str]
+    presentation: TonightWeatherDecisionPresentationModel
 
 
 class TonightResponseModel(BaseModel):
@@ -360,6 +366,14 @@ class TonightResponseModel(BaseModel):
                         "evidence_quality": "insufficient",
                         "admissibility": "caution",
                         "reasons": ["provider_reliability_unavailable"],
+                        "presentation": {
+                            "label": "Validation météo partielle",
+                            "summary": (
+                                "Certaines preuves historiques de fiabilité ne sont "
+                                "pas encore disponibles ; cela ne signifie pas que "
+                                "la météo est mauvaise."
+                            ),
+                        },
                     },
                 },
                 {
@@ -369,6 +383,13 @@ class TonightResponseModel(BaseModel):
                         "evidence_quality": "insufficient",
                         "admissibility": "refused",
                         "reasons": ["selected_window_uncovered"],
+                        "presentation": {
+                            "label": "Mission non confirmée",
+                            "summary": (
+                                "La fenêtre calculée dépasse la période couverte par "
+                                "les données météo disponibles."
+                            ),
+                        },
                     },
                 },
             ]

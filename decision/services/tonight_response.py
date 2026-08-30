@@ -9,6 +9,7 @@ from decision.advisor.night_advisor import NightAdvisor
 from decision.services.tonight_application_service import TonightResult
 from decision.weather.weather_trust_decision import (
     WeatherDecisionAdmissibility,
+    WeatherEvidenceQuality,
     WeatherTrustDecision,
 )
 
@@ -164,6 +165,74 @@ class TonightAdviceResponse:
 
 
 @dataclass(frozen=True)
+class TonightWeatherDecisionPresentationResponse:
+    label: str
+    summary: str
+
+
+@dataclass(frozen=True)
+class TonightWeatherDecisionResponse:
+    evidence_quality: WeatherEvidenceQuality
+    admissibility: WeatherDecisionAdmissibility
+    reasons: tuple[str, ...]
+    presentation: TonightWeatherDecisionPresentationResponse
+
+
+_WEATHER_PRESENTATION_FALLBACKS = {
+    WeatherDecisionAdmissibility.ADMISSIBLE: (
+        "Météo validée pour cette décision",
+        "Les preuves météo disponibles permettent de confirmer cette décision.",
+    ),
+    WeatherDecisionAdmissibility.CAUTION: (
+        "Validation météo partielle",
+        "La mission reste recommandée, mais certaines preuves météo sont "
+        "incomplètes ou indisponibles.",
+    ),
+    WeatherDecisionAdmissibility.REFUSED: (
+        "Mission non confirmée",
+        "Les preuves météo disponibles ne permettent pas de confirmer cette mission.",
+    ),
+}
+
+_WEATHER_PRESENTATIONS = {
+    (
+        WeatherDecisionAdmissibility.CAUTION,
+        ("provider_reliability_unavailable",),
+    ): (
+        "Validation météo partielle",
+        "Certaines preuves historiques de fiabilité ne sont pas encore disponibles ; "
+        "cela ne signifie pas que la météo est mauvaise.",
+    ),
+    (
+        WeatherDecisionAdmissibility.REFUSED,
+        ("selected_window_uncovered",),
+    ): (
+        "Mission non confirmée",
+        "La fenêtre calculée dépasse la période couverte par les données météo "
+        "disponibles.",
+    ),
+}
+
+
+def _weather_decision_response(
+    decision: WeatherTrustDecision,
+) -> TonightWeatherDecisionResponse:
+    label, summary = _WEATHER_PRESENTATIONS.get(
+        (decision.admissibility, decision.reasons),
+        _WEATHER_PRESENTATION_FALLBACKS[decision.admissibility],
+    )
+    return TonightWeatherDecisionResponse(
+        evidence_quality=decision.evidence_quality,
+        admissibility=decision.admissibility,
+        reasons=decision.reasons,
+        presentation=TonightWeatherDecisionPresentationResponse(
+            label=label,
+            summary=summary,
+        ),
+    )
+
+
+@dataclass(frozen=True)
 class TonightResponse:
     status: str
     night_date: str | None = None
@@ -189,7 +258,7 @@ class TonightResponse:
     reasons: list[TonightReasonResponse] = field(default_factory=list)
     tasks: list[TonightTaskResponse] = field(default_factory=list)
     advices: list[TonightAdviceResponse] = field(default_factory=list)
-    weather_decision: WeatherTrustDecision | None = None
+    weather_decision: TonightWeatherDecisionResponse | None = None
 
     def __post_init__(self):
         refused = (
@@ -466,7 +535,11 @@ class TonightResponse:
             reasons=reasons,
             tasks=tasks,
             advices=advices,
-            weather_decision=weather_decision,
+            weather_decision=(
+                _weather_decision_response(weather_decision)
+                if weather_decision is not None
+                else None
+            ),
         )
 
     def to_dict(self) -> dict:
