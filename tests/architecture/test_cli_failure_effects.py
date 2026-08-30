@@ -1,3 +1,4 @@
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -82,6 +83,8 @@ def test_missing_forecast_stops_before_capacity_and_runners(
     assert result == 0
     assert len(forecast_calls) == 1
     assert forecast_calls[0]["weather"] is weather
+    assert isinstance(forecast_calls[0]["reference_time_utc"], datetime)
+    assert forecast_calls[0]["reference_time_utc"].utcoffset() is not None
     assert "ERREUR: forecast_astro a retourné None" in output
     if weather is None:
         assert "Prévisions météo indisponibles." in output

@@ -1671,7 +1671,15 @@ def forecast_astro(
     goal="nebulae",
     weather=None,
     profile=None,
-):
+    *,
+    reference_time_utc: datetime,
+) -> ForecastRun:
+    if not isinstance(reference_time_utc, datetime):
+        raise ValueError("invalid_reference_time")
+    if reference_time_utc.utcoffset() is None:
+        raise ValueError("reference_time_without_timezone")
+    normalized_reference_time = reference_time_utc.astimezone(timezone.utc)
+
     if profile is None:
         profile = load_user_profile()
 
@@ -1704,7 +1712,7 @@ def forecast_astro(
             else LocationTimeResolver.resolve(lat, lon).zone
         )
     )
-    today = datetime.now(resolved_zone).date()
+    today = normalized_reference_time.astimezone(resolved_zone).date()
     for d in range(7):
         night_date = today + timedelta(days=d)
 
@@ -2080,6 +2088,7 @@ def main(argv=None) -> int:
     print(f"\nLieu détecté : {city} ({lat}, {lon})\n")
 
     weather = fetch_weather(lat, lon)
+    reference_time_utc = datetime.now(timezone.utc)
     
     if weather is None:
         print ("Prévisions météo indisponibles.")
@@ -2090,6 +2099,7 @@ def main(argv=None) -> int:
         tonight_result = build_tonight_application_service().evaluate(
             profile=profile,
             weather=weather,
+            reference_time_utc=reference_time_utc,
             equipment=args.equipment,
             goal=args.goal,
             target=TARGET,
@@ -2110,6 +2120,7 @@ def main(argv=None) -> int:
             goal=args.goal,
             weather=weather,
             profile=profile,
+            reference_time_utc=reference_time_utc,
         )
 
         if forecast_run is None:

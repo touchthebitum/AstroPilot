@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 
 from decision.forecast.forecast_run import ForecastRun
@@ -56,6 +57,7 @@ class TonightApplicationService:
         *,
         profile,
         weather,
+        reference_time_utc: datetime,
         equipment=None,
         goal="balanced",
         target="deep_sky",
@@ -79,6 +81,7 @@ class TonightApplicationService:
             goal=goal,
             weather=weather,
             profile=profile,
+            reference_time_utc=reference_time_utc,
         )
 
         if forecast_run is None:

@@ -17,6 +17,7 @@ from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 
 
 FORECAST_EVIDENCE = DecisionForecastEvidence(())
+REFERENCE_TIME = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
 
 
 def forecast_run(nights):
@@ -180,6 +181,7 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
     result = service.evaluate(
         profile=profile,
         weather=weather,
+        reference_time_utc=REFERENCE_TIME,
         equipment="portable",
         goal="galaxies",
         target="deep_sky",
@@ -195,6 +197,7 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
                 "goal": "galaxies",
                 "weather": weather,
                 "profile": profile,
+                "reference_time_utc": REFERENCE_TIME,
             },
         )
     ]
@@ -236,7 +239,11 @@ def test_location_defaults_match_current_cli_policy():
     profile = {}
     weather = object()
 
-    result = service.evaluate(profile=profile, weather=weather)
+    result = service.evaluate(
+        profile=profile,
+        weather=weather,
+        reference_time_utc=REFERENCE_TIME,
+    )
 
     assert calls == [
         (
@@ -247,6 +254,7 @@ def test_location_defaults_match_current_cli_policy():
                 "goal": "balanced",
                 "weather": weather,
                 "profile": profile,
+                "reference_time_utc": REFERENCE_TIME,
             },
         )
     ]
@@ -268,7 +276,9 @@ def test_no_forecast_nights_stops_all_downstream_work():
         ),
     )
 
-    result = service.evaluate(profile={}, weather=object())
+    result = service.evaluate(
+        profile={}, weather=object(), reference_time_utc=REFERENCE_TIME
+    )
 
     assert result == TonightResult(
         None,
@@ -288,7 +298,9 @@ def test_unavailable_forecast_is_distinct_from_empty_forecast():
         build_candidates=lambda *args, **kwargs: None,
     )
 
-    result = service.evaluate(profile={}, weather=object())
+    result = service.evaluate(
+        profile={}, weather=object(), reference_time_utc=REFERENCE_TIME
+    )
 
     assert result == TonightResult(
         None,
@@ -307,7 +319,9 @@ def test_no_candidates_preserves_night_and_skips_downstream_services():
         build_candidates=lambda *args, **kwargs: [],
     )
 
-    result = service.evaluate(profile={}, weather=object())
+    result = service.evaluate(
+        profile={}, weather=object(), reference_time_utc=REFERENCE_TIME
+    )
 
     assert result == TonightResult(
         night,
@@ -329,7 +343,9 @@ def test_no_recommendation_preserves_night_and_skips_mission():
         build_candidates=lambda *args, **kwargs: candidates,
     )
 
-    result = service.evaluate(profile={}, weather=object())
+    result = service.evaluate(
+        profile={}, weather=object(), reference_time_utc=REFERENCE_TIME
+    )
 
     assert result == TonightResult(
         night,
@@ -354,7 +370,9 @@ def test_missing_mission_preserves_exact_night_and_recommendation():
         mission=None,
     )
 
-    result = service.evaluate(profile={}, weather=object())
+    result = service.evaluate(
+        profile={}, weather=object(), reference_time_utc=REFERENCE_TIME
+    )
 
     assert result.night is night
     assert result.recommendation is recommendation
@@ -392,7 +410,9 @@ def test_night_without_a_productive_window_is_not_available():
         mission=mission,
     )
 
-    result = service.evaluate(profile={}, weather=object())
+    result = service.evaluate(
+        profile={}, weather=object(), reference_time_utc=REFERENCE_TIME
+    )
 
     assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW
     assert result.mission is mission

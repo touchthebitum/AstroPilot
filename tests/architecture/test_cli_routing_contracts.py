@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -105,6 +106,16 @@ def test_direct_object_commands_return_before_location_and_weather(
 @pytest.fixture
 def forecast_cli(monkeypatch, isolated_cli):
     calls = []
+    forecast_calls = []
+    clock_calls = []
+    reference_time = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            clock_calls.append(tz)
+            return reference_time
+
     capacities = [
         {"date": "2026-08-27", "hours": 2.0, "quality": 80.0},
     ]
@@ -118,14 +129,15 @@ def forecast_cli(monkeypatch, isolated_cli):
         "fetch_weather",
         lambda lat, lon: {"weather": True},
     )
-    monkeypatch.setattr(
-        astro_score,
-        "forecast_astro",
-        lambda *args, **kwargs: ForecastRun(
+    monkeypatch.setattr(astro_score, "datetime", FixedDateTime)
+    def forecast(*args, **kwargs):
+        forecast_calls.append((args, kwargs))
+        return ForecastRun(
             nights=nights,
             evidence=DecisionForecastEvidence(()),
-        ),
-    )
+        )
+
+    monkeypatch.setattr(astro_score, "forecast_astro", forecast)
     monkeypatch.setattr(
         astro_score,
         "forecast_night_capacities",
@@ -165,7 +177,14 @@ def forecast_cli(monkeypatch, isolated_cli):
         ),
     )
 
-    return SimpleNamespace(calls=calls, capacities=capacities, nights=nights)
+    return SimpleNamespace(
+        calls=calls,
+        capacities=capacities,
+        nights=nights,
+        forecast_calls=forecast_calls,
+        clock_calls=clock_calls,
+        reference_time=reference_time,
+    )
 
 
 @pytest.mark.parametrize("mode", ["portfolio", "calendar", "full"])
@@ -173,6 +192,10 @@ def test_report_modes_route_to_exactly_one_runner(mode, forecast_cli):
     result = astro_score.main(["--mode", mode])
 
     assert result == 0
+    assert len(forecast_cli.forecast_calls) == 1
+    reference_time = forecast_cli.forecast_calls[0][1]["reference_time_utc"]
+    assert reference_time is forecast_cli.reference_time
+    assert forecast_cli.clock_calls == [timezone.utc]
     assert len(forecast_cli.calls) == 1
     called_mode, kwargs = forecast_cli.calls[0]
     assert called_mode == mode
@@ -197,6 +220,14 @@ def test_tonight_mode_routes_application_result_without_second_forecast(
 ):
     evaluation_calls = []
     mission = object()
+    reference_time = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
+    clock_calls = []
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            clock_calls.append(tz)
+            return reference_time
 
     class ApplicationService:
         def evaluate(self, **kwargs):
@@ -212,6 +243,7 @@ def test_tonight_mode_routes_application_result_without_second_forecast(
         "build_tonight_application_service",
         lambda: ApplicationService(),
     )
+    monkeypatch.setattr(astro_score, "datetime", FixedDateTime)
     monkeypatch.setattr(
         astro_score,
         "forecast_astro",
@@ -223,6 +255,7 @@ def test_tonight_mode_routes_application_result_without_second_forecast(
     result = astro_score.main(["--mode", "tonight"])
 
     assert result == 0
+    assert clock_calls == [timezone.utc]
     assert evaluation_calls == [
         {
             "profile": {
@@ -239,6 +272,7 @@ def test_tonight_mode_routes_application_result_without_second_forecast(
                 "sessions": [],
             },
             "weather": {"weather": True},
+            "reference_time_utc": reference_time,
             "equipment": None,
             "goal": "balanced",
             "target": astro_score.TARGET,
