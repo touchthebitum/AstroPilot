@@ -103,10 +103,10 @@ function siteDateTime(value, timeZone) {
   }
 }
 
-function renderWeatherTrust(weatherTrust, prefix) {
-  const validated = weatherTrust?.validation_status === "validated"
+function renderWeatherTrust(weatherTrust, weatherDecision, prefix) {
+  const ingressValidated = weatherTrust?.validation_status === "validated"
     && weatherTrust?.freshness_status === "fresh";
-  if (!validated) {
+  if (!ingressValidated) {
     text(`#${prefix}-weather-status`, "Non disponible");
     text(`#${prefix}-weather-provider`, "Provenance non disponible");
     text(`#${prefix}-weather-age`, "Non évalué");
@@ -119,7 +119,12 @@ function renderWeatherTrust(weatherTrust, prefix) {
   const zone = weatherTrust.timezone;
   const age = Number(weatherTrust.snapshot_age_minutes);
   const maximumAge = Number(weatherTrust.maximum_age_minutes);
-  text(`#${prefix}-weather-status`, "Données fraîches et validées");
+  const status = weatherDecision?.admissibility === "caution"
+    ? "Validation météo partielle"
+    : weatherDecision?.admissibility === "admissible"
+      ? "Météo validée pour cette décision"
+      : "Décision météo non disponible";
+  text(`#${prefix}-weather-status`, status);
   text(`#${prefix}-weather-provider`, weatherTrust.provider);
   text(
     `#${prefix}-weather-age`,
@@ -245,6 +250,7 @@ function renderDecision(decision) {
   const qualityCopy = labels.quality[quality?.label] || ["Non évaluée", "L’indice de qualité n’est pas disponible pour cette décision."];
   const limiting = quality?.limiting_factor;
   const weatherTrust = decision.weather_trust;
+  const weatherDecision = decision.weather_decision;
 
   text("#night-date", dateLabel(decision.night_date));
   text("#recommendation", labels.actions[decision.action] || "Session recommandée");
@@ -260,8 +266,8 @@ function renderDecision(decision) {
   text("#quality-title", qualityCopy[0]);
   text("#quality-summary", qualityCopy[1]);
   text("#limiting-factor", limiting ? (labels.factors[limiting] || limiting.replaceAll("_", " ")) : "Aucun identifié");
-  renderWeatherTrust(weatherTrust, "classic");
-  renderWeatherTrust(weatherTrust, "mission");
+  renderWeatherTrust(weatherTrust, weatherDecision, "classic");
+  renderWeatherTrust(weatherTrust, weatherDecision, "mission");
 
   const circumference = 2 * Math.PI * 48;
   const progress = document.querySelector("#quality-progress");
@@ -316,9 +322,6 @@ function normalizeError(response, payload) {
     if (detail?.code === "weather_stale") {
       return ["Données météo trop anciennes", "Les données météo reçues dépassent la limite de fraîcheur de 90 minutes. AstroPilot refuse de calculer une décision potentiellement trompeuse."];
     }
-    if (detail?.code === "weather_window_uncovered") {
-      return ["Fenêtre météo non couverte", "Les prévisions validées ne couvrent pas entièrement le créneau proposé. AstroPilot refuse d’afficher cette mission."];
-    }
     if (detail?.code === "decision_invalid") {
       return ["Décision rejetée par sécurité", "AstroPilot a détecté une contradiction interne et refuse d’afficher une recommandation potentiellement trompeuse."];
     }
@@ -352,6 +355,15 @@ async function loadTonight() {
     if (!response.ok) {
       const [title, body] = normalizeError(response, payload);
       showMessage(title, body, { kicker: response.status === 422 ? "Entrée invalide" : "Service indisponible" });
+      return;
+    }
+
+    if (payload.status === "weather_refused") {
+      showMessage(
+        "Mission météo non confirmée",
+        "AstroPilot ne peut pas confirmer une mission fiable avec les preuves météo disponibles.",
+        { kicker: "Analyse terminée" },
+      );
       return;
     }
 
