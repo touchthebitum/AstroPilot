@@ -27,7 +27,9 @@ def value(variable, number, *, aggregation_period=None):
         WeatherVariable.RELATIVE_HUMIDITY_PERCENT: "%",
         WeatherVariable.VISIBILITY_M: "m",
         WeatherVariable.WIND_SPEED_KMH: "km/h",
+        WeatherVariable.WIND_GUST_KMH: "km/h",
         WeatherVariable.TEMPERATURE_C: "°C",
+        WeatherVariable.DEW_POINT_C: "°C",
     }
     return WeatherValue(
         variable,
@@ -56,6 +58,7 @@ def forecast(*values, forecast_for=FORECAST_FOR):
 def observation(*values, observed_at=FORECAST_FOR, location=SITE, quality="validated"):
     return WeatherObservationPoint(
         source_id="station_reference",
+        station_id="station_123",
         observed_at_utc=observed_at,
         location=location,
         values=values
@@ -95,6 +98,37 @@ def test_forecast_identity_horizon_and_instants_are_immutable_and_utc():
         point.provider_id = "changed"
 
 
+def test_location_preserves_optional_finite_altitude_without_defaulting_to_zero():
+    assert WeatherLocation(46.7508, 6.5495).altitude_m is None
+    assert WeatherLocation(46.7508, 6.5495, altitude_m=1_245).altitude_m == 1245.0
+
+    for invalid in (float("nan"), float("inf"), True):
+        with pytest.raises(ValueError, match="invalid_altitude"):
+            WeatherLocation(46.7508, 6.5495, altitude_m=invalid)
+
+
+def test_observation_preserves_distinct_source_and_station_identities():
+    point = WeatherObservationPoint(
+        source_id=" meteoswiss ",
+        station_id=" chaumont ",
+        observed_at_utc=FORECAST_FOR,
+        location=SITE,
+        values=(value(WeatherVariable.TEMPERATURE_C, 8),),
+    )
+
+    assert point.source_id == "meteoswiss"
+    assert point.station_id == "chaumont"
+
+    with pytest.raises(ValueError, match="invalid_station_id"):
+        WeatherObservationPoint(
+            source_id="meteoswiss",
+            station_id=" ",
+            observed_at_utc=FORECAST_FOR,
+            location=SITE,
+            values=(value(WeatherVariable.TEMPERATURE_C, 8),),
+        )
+
+
 def test_forecast_captured_after_its_valid_time_is_rejected():
     with pytest.raises(ValueError, match="forecast_captured_after_valid_time"):
         forecast(forecast_for=RETRIEVED - timedelta(seconds=1))
@@ -107,7 +141,9 @@ def test_forecast_captured_after_its_valid_time_is_rejected():
         (WeatherVariable.RELATIVE_HUMIDITY_PERCENT, 80),
         (WeatherVariable.VISIBILITY_M, 15_000),
         (WeatherVariable.WIND_SPEED_KMH, 12),
+        (WeatherVariable.WIND_GUST_KMH, 20),
         (WeatherVariable.TEMPERATURE_C, 5),
+        (WeatherVariable.DEW_POINT_C, 2),
     ],
 )
 def test_initial_instantaneous_variables_use_canonical_units(variable, valid_value):
@@ -157,6 +193,8 @@ def test_comparable_values_preserve_signed_and_absolute_errors():
     assert verification.requested_location == SITE
     assert verification.grid_location == SITE
     assert verification.reference_source_id == "station_reference"
+    assert verification.station_id == "station_123"
+    assert verification.altitude_difference_m is None
     assert verification.observed_at_utc == FORECAST_FOR
     assert verification.observation_location == SITE
     errors = {error.variable: error for error in verification.errors}
@@ -164,6 +202,48 @@ def test_comparable_values_preserve_signed_and_absolute_errors():
     assert errors[WeatherVariable.CLOUD_COVER_PERCENT].absolute_error == 10.0
     assert errors[WeatherVariable.TEMPERATURE_C].signed_error == -2.0
     assert errors[WeatherVariable.TEMPERATURE_C].absolute_error == 2.0
+
+
+def test_altitude_difference_is_forecast_grid_minus_observation_and_not_a_gate():
+    forecast_location = WeatherLocation(46.7508, 6.5495, altitude_m=1_250)
+    observation_location = WeatherLocation(46.7508, 6.5495, altitude_m=500)
+    candidate_forecast = WeatherForecastPoint(
+        provider_id="open_meteo",
+        retrieved_at_utc=RETRIEVED,
+        forecast_for_utc=FORECAST_FOR,
+        requested_location=forecast_location,
+        grid_location=forecast_location,
+        values=(value(WeatherVariable.TEMPERATURE_C, 8),),
+    )
+
+    verification = compare(
+        candidate_forecast=candidate_forecast,
+        candidate_observation=observation(
+            value(WeatherVariable.TEMPERATURE_C, 10),
+            location=observation_location,
+        ),
+    )
+
+    assert verification.status is ComparisonStatus.COMPARABLE
+    assert verification.altitude_difference_m == 750.0
+    assert verification.reasons == ()
+
+
+def test_altitude_difference_is_none_when_either_altitude_is_missing():
+    forecast_location = WeatherLocation(46.7508, 6.5495, altitude_m=1_250)
+    candidate_forecast = WeatherForecastPoint(
+        provider_id="open_meteo",
+        retrieved_at_utc=RETRIEVED,
+        forecast_for_utc=FORECAST_FOR,
+        requested_location=forecast_location,
+        grid_location=forecast_location,
+        values=(value(WeatherVariable.TEMPERATURE_C, 8),),
+    )
+
+    verification = compare(candidate_forecast=candidate_forecast)
+
+    assert verification.status is ComparisonStatus.COMPARABLE
+    assert verification.altitude_difference_m is None
 
 
 def test_missing_variable_is_reported_without_becoming_zero():
