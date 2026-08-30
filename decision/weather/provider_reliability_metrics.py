@@ -135,6 +135,7 @@ class EvidenceStatus(str, Enum):
 @dataclass(frozen=True)
 class ProviderComparisonCoverage:
     provider_id: str
+    reference_source_id: str
     model_id: str | None
     horizon_bucket: str
     total_count: int
@@ -146,6 +147,7 @@ class ProviderComparisonCoverage:
 @dataclass(frozen=True)
 class ProviderVariableMetrics:
     provider_id: str
+    reference_source_id: str
     model_id: str | None
     variable: WeatherVariable
     unit: str
@@ -185,6 +187,7 @@ class ProviderReliabilityReport:
 @dataclass(frozen=True)
 class ProviderContextExclusions:
     provider_id: str
+    reference_source_id: str
     model_id: str | None
     excluded_count: int
     reasons: tuple[tuple[str, int], ...]
@@ -210,12 +213,23 @@ def build_provider_reliability_report(
             raise ValueError("invalid_forecast_verification")
         context_reasons = scope.exclusion_reasons(verification)
         if context_reasons:
-            exclusion = exclusions[(verification.provider_id, verification.model_id)]
+            exclusion = exclusions[
+                (
+                    verification.provider_id,
+                    verification.model_id,
+                    verification.reference_source_id,
+                )
+            ]
             exclusion["count"] += 1
             exclusion["reasons"].update(context_reasons)
             continue
         bucket = policy.bucket_for(verification.horizon)
-        coverage_key = (verification.provider_id, verification.model_id, bucket.name)
+        coverage_key = (
+            verification.provider_id,
+            verification.model_id,
+            verification.reference_source_id,
+            bucket.name,
+        )
         group = coverage[coverage_key]
         group["total"] += 1
 
@@ -228,6 +242,7 @@ def build_provider_reliability_report(
             sample_key = (
                 verification.provider_id,
                 verification.model_id,
+                verification.reference_source_id,
                 error.variable,
                 error.unit,
                 bucket.name,
@@ -235,13 +250,15 @@ def build_provider_reliability_report(
             samples[sample_key].append(error)
 
     coverage_results = []
-    for (provider_id, model_id, bucket_name), group in sorted(
-        coverage.items(), key=lambda item: (item[0][0], item[0][1] or "", item[0][2])
+    for (provider_id, model_id, reference_source_id, bucket_name), group in sorted(
+        coverage.items(),
+        key=lambda item: (item[0][0], item[0][1] or "", item[0][2], item[0][3]),
     ):
         comparable_count = group["comparable"]
         coverage_results.append(
             ProviderComparisonCoverage(
                 provider_id=provider_id,
+                reference_source_id=reference_source_id,
                 model_id=model_id,
                 horizon_bucket=bucket_name,
                 total_count=group["total"],
@@ -252,13 +269,21 @@ def build_provider_reliability_report(
         )
 
     metric_results = []
-    for (provider_id, model_id, variable, unit, bucket_name), errors in sorted(
+    for (
+        provider_id,
+        model_id,
+        reference_source_id,
+        variable,
+        unit,
+        bucket_name,
+    ), errors in sorted(
         samples.items(),
         key=lambda item: (
             item[0][0],
             item[0][1] or "",
-            item[0][2].value,
-            item[0][4],
+            item[0][2],
+            item[0][3].value,
+            item[0][5],
         ),
     ):
         sample_count = len(errors)
@@ -266,6 +291,7 @@ def build_provider_reliability_report(
         metric_results.append(
             ProviderVariableMetrics(
                 provider_id=provider_id,
+                reference_source_id=reference_source_id,
                 model_id=model_id,
                 variable=variable,
                 unit=unit,
@@ -296,12 +322,14 @@ def build_provider_reliability_report(
     exclusion_results = tuple(
         ProviderContextExclusions(
             provider_id=provider_id,
+            reference_source_id=reference_source_id,
             model_id=model_id,
             excluded_count=values["count"],
             reasons=tuple(sorted(values["reasons"].items())),
         )
-        for (provider_id, model_id), values in sorted(
-            exclusions.items(), key=lambda item: (item[0][0], item[0][1] or "")
+        for (provider_id, model_id, reference_source_id), values in sorted(
+            exclusions.items(),
+            key=lambda item: (item[0][0], item[0][1] or "", item[0][2]),
         )
     )
 

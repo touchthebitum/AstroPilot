@@ -189,6 +189,7 @@ class WeatherVariableError:
 @dataclass(frozen=True)
 class WeatherForecastVerification:
     provider_id: str
+    reference_source_id: str
     status: ComparisonStatus
     horizon: timedelta
     time_difference: timedelta
@@ -196,6 +197,8 @@ class WeatherForecastVerification:
     forecast_for_utc: datetime
     requested_location: WeatherLocation
     grid_location: WeatherLocation
+    observed_at_utc: datetime
+    observation_location: WeatherLocation
     model_id: str | None = None
     errors: tuple[WeatherVariableError, ...] = ()
     reasons: tuple[str, ...] = ()
@@ -263,6 +266,7 @@ def compare_forecast_to_observation(
     if reasons:
         return WeatherForecastVerification(
             provider_id=forecast.provider_id,
+            reference_source_id=observation.source_id,
             model_id=forecast.model_id,
             status=ComparisonStatus.NOT_COMPARABLE,
             horizon=forecast.horizon,
@@ -271,6 +275,8 @@ def compare_forecast_to_observation(
             forecast_for_utc=forecast.forecast_for_utc,
             requested_location=forecast.requested_location,
             grid_location=forecast.grid_location,
+            observed_at_utc=observation.observed_at_utc,
+            observation_location=observation.location,
             reasons=tuple(reasons),
             unmatched_variables=unmatched,
         )
@@ -292,6 +298,7 @@ def compare_forecast_to_observation(
         )
     return WeatherForecastVerification(
         provider_id=forecast.provider_id,
+        reference_source_id=observation.source_id,
         model_id=forecast.model_id,
         status=ComparisonStatus.COMPARABLE,
         horizon=forecast.horizon,
@@ -300,6 +307,8 @@ def compare_forecast_to_observation(
         forecast_for_utc=forecast.forecast_for_utc,
         requested_location=forecast.requested_location,
         grid_location=forecast.grid_location,
+        observed_at_utc=observation.observed_at_utc,
+        observation_location=observation.location,
         errors=tuple(errors),
         unmatched_variables=unmatched,
     )

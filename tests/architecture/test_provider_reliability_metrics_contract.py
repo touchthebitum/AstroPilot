@@ -42,6 +42,7 @@ def verification(
     observation_values=None,
     observed_at=VALID_AT,
     observation_quality="validated",
+    reference_source="reference_station",
 ):
     forecast_values = forecast_values or (
         weather_value(WeatherVariable.TEMPERATURE_C, 12),
@@ -59,7 +60,7 @@ def verification(
         values=forecast_values,
     )
     observation = WeatherObservationPoint(
-        source_id="reference_station",
+        source_id=reference_source,
         observed_at_utc=observed_at,
         location=SITE,
         values=observation_values,
@@ -254,6 +255,38 @@ def test_provider_model_variable_and_horizon_are_never_mixed():
         for item in report.variable_metrics
     }
     assert len(keys) == 5
+
+
+def test_reference_observation_sources_are_never_mixed():
+    samples = (
+        verification(reference_source="station_a"),
+        verification(reference_source="station_b"),
+    )
+
+    report = build_provider_reliability_report(
+        samples, policy=policy(minimum_sample_size=1), scope=report_scope()
+    )
+
+    assert [item.reference_source_id for item in report.coverage] == [
+        "station_a",
+        "station_b",
+    ]
+    assert [item.reference_source_id for item in report.variable_metrics] == [
+        "station_a",
+        "station_b",
+    ]
+    assert all(item.sample_count == 1 for item in report.variable_metrics)
+
+
+def test_reference_provenance_is_preserved_in_metrics():
+    report = build_provider_reliability_report(
+        (verification(reference_source="validated_station"),),
+        policy=policy(minimum_sample_size=1),
+        scope=report_scope(),
+    )
+
+    assert report.coverage[0].reference_source_id == "validated_station"
+    assert report.variable_metrics[0].reference_source_id == "validated_station"
 
 
 def test_not_comparable_samples_are_counted_but_never_used_as_zero_error():
