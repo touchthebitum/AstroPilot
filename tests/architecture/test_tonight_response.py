@@ -392,6 +392,13 @@ def test_caution_preserves_active_transport_and_internal_result_identities():
         "evidence_quality": "insufficient",
         "admissibility": "caution",
         "reasons": ["provider_reliability_unavailable"],
+        "presentation": {
+            "label": "Validation météo partielle",
+            "summary": (
+                "Certaines preuves historiques de fiabilité ne sont pas encore "
+                "disponibles ; cela ne signifie pas que la météo est mauvaise."
+            ),
+        },
     }
     assert result.recommendation is recommendation
     assert result.mission is mission
@@ -462,6 +469,13 @@ def test_refused_weather_decision_redacts_active_transport_only():
             "evidence_quality": "insufficient",
             "admissibility": "refused",
             "reasons": ["selected_window_uncovered"],
+            "presentation": {
+                "label": "Mission non confirmée",
+                "summary": (
+                    "La fenêtre calculée dépasse la période couverte par les "
+                    "données météo disponibles."
+                ),
+            },
         },
     }
     assert result.recommendation is recommendation
@@ -484,3 +498,88 @@ def test_weather_refusal_and_transport_status_cannot_diverge():
         TonightResponse(status="available", weather_decision=refused)
     with pytest.raises(ValueError, match="weather_refusal_transport_status_mismatch"):
         TonightResponse(status="weather_refused", weather_decision=caution)
+
+
+@pytest.mark.parametrize(
+    ("admissibility", "label", "summary"),
+    [
+        (
+            WeatherDecisionAdmissibility.ADMISSIBLE,
+            "Météo validée pour cette décision",
+            "Les preuves météo disponibles permettent de confirmer cette décision.",
+        ),
+        (
+            WeatherDecisionAdmissibility.CAUTION,
+            "Validation météo partielle",
+            (
+                "La mission reste recommandée, mais certaines preuves météo sont "
+                "incomplètes ou indisponibles."
+            ),
+        ),
+        (
+            WeatherDecisionAdmissibility.REFUSED,
+            "Mission non confirmée",
+            (
+                "Les preuves météo disponibles ne permettent pas de confirmer "
+                "cette mission."
+            ),
+        ),
+    ],
+)
+def test_unknown_weather_reason_uses_only_admissibility_fallback(
+    admissibility,
+    label,
+    summary,
+):
+    decision = WeatherTrustDecision(
+        evidence_quality=WeatherEvidenceQuality.SUFFICIENT,
+        admissibility=admissibility,
+        reasons=("future_weather_reason",),
+    )
+    result = TonightResult(
+        night={"date": date(2026, 9, 1)},
+        recommendation=None,
+        mission=None,
+    )
+
+    response = TonightResponse.from_result(
+        result,
+        weather_decision=decision,
+    ).to_dict()
+
+    assert response["weather_decision"] == {
+        "evidence_quality": "sufficient",
+        "admissibility": admissibility.value,
+        "reasons": ["future_weather_reason"],
+        "presentation": {"label": label, "summary": summary},
+    }
+
+
+def test_multiple_weather_reasons_use_admissibility_fallback_without_combining():
+    decision = WeatherTrustDecision(
+        evidence_quality=WeatherEvidenceQuality.INSUFFICIENT,
+        admissibility=WeatherDecisionAdmissibility.CAUTION,
+        reasons=("provider_reliability_unavailable", "future_weather_reason"),
+    )
+    result = TonightResult(
+        night={"date": date(2026, 9, 1)},
+        recommendation=None,
+        mission=None,
+    )
+
+    response = TonightResponse.from_result(
+        result,
+        weather_decision=decision,
+    ).to_dict()
+
+    assert response["weather_decision"]["reasons"] == [
+        "provider_reliability_unavailable",
+        "future_weather_reason",
+    ]
+    assert response["weather_decision"]["presentation"] == {
+        "label": "Validation météo partielle",
+        "summary": (
+            "La mission reste recommandée, mais certaines preuves météo sont "
+            "incomplètes ou indisponibles."
+        ),
+    }

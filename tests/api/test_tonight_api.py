@@ -286,6 +286,13 @@ def test_fresh_weather_transport_exposes_server_calculated_age(monkeypatch):
         "evidence_quality": "insufficient",
         "admissibility": "caution",
         "reasons": ["provider_reliability_unavailable"],
+        "presentation": {
+            "label": "Validation météo partielle",
+            "summary": (
+                "Certaines preuves historiques de fiabilité ne sont pas encore "
+                "disponibles ; cela ne signifie pas que la météo est mauvaise."
+            ),
+        },
     }
     assert response.json()["status"] == "available"
     assert response.json()["target"] == "Andromeda"
@@ -335,6 +342,13 @@ def test_uncovered_mission_window_returns_refused_without_active_mission():
         "evidence_quality": "insufficient",
         "admissibility": "refused",
         "reasons": ["selected_window_uncovered"],
+        "presentation": {
+            "label": "Mission non confirmée",
+            "summary": (
+                "La fenêtre calculée dépasse la période couverte par les données "
+                "météo disponibles."
+            ),
+        },
     }
     assert payload["target"] is None
     assert payload["catalog_key"] is None
@@ -560,6 +574,9 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
         "WeatherDecisionAdmissibility"
     )
     assert weather_decision["reasons"]["items"]["type"] == "string"
+    assert weather_decision["presentation"]["$ref"].endswith(
+        "TonightWeatherDecisionPresentationModel"
+    )
     weather_trust = schemas["TonightWeatherTrustModel"]["properties"]
     assert weather_trust["snapshot_age_minutes"]["minimum"] == 0.0
     assert weather_trust["freshness_status"]["const"] == "fresh"
@@ -593,6 +610,13 @@ def test_openapi_documents_tonight_request_and_available_response_examples():
         "evidence_quality": "insufficient",
         "admissibility": "caution",
         "reasons": ["provider_reliability_unavailable"],
+        "presentation": {
+            "label": "Validation météo partielle",
+            "summary": (
+                "Certaines preuves historiques de fiabilité ne sont pas encore "
+                "disponibles ; cela ne signifie pas que la météo est mauvaise."
+            ),
+        },
     }
 
 

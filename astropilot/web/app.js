@@ -119,12 +119,8 @@ function renderWeatherTrust(weatherTrust, weatherDecision, prefix) {
   const zone = weatherTrust.timezone;
   const age = Number(weatherTrust.snapshot_age_minutes);
   const maximumAge = Number(weatherTrust.maximum_age_minutes);
-  const status = weatherDecision?.admissibility === "caution"
-    ? "Validation météo partielle"
-    : weatherDecision?.admissibility === "admissible"
-      ? "Météo validée pour cette décision"
-      : "Décision météo non disponible";
-  text(`#${prefix}-weather-status`, status);
+  text(`#${prefix}-weather-status`, weatherDecision?.presentation?.label);
+  text(`#${prefix}-weather-title`, weatherDecision?.presentation?.summary);
   text(`#${prefix}-weather-provider`, weatherTrust.provider);
   text(
     `#${prefix}-weather-age`,
@@ -360,8 +356,8 @@ async function loadTonight() {
 
     if (payload.status === "weather_refused") {
       showMessage(
-        "Mission météo non confirmée",
-        "AstroPilot ne peut pas confirmer une mission fiable avec les preuves météo disponibles.",
+        payload.weather_decision.presentation.label,
+        payload.weather_decision.presentation.summary,
         { kicker: "Analyse terminée" },
       );
       return;
