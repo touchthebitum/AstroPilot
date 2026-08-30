@@ -3,6 +3,8 @@ from types import SimpleNamespace
 import pytest
 
 import astro_score
+from decision.forecast.forecast_run import ForecastRun
+from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 
 
 @pytest.fixture
@@ -104,7 +106,10 @@ def test_empty_night_list_keeps_capacity_report_but_skips_tonight_runner(
     monkeypatch.setattr(
         astro_score,
         "forecast_astro",
-        lambda *args, **kwargs: [],
+        lambda *args, **kwargs: ForecastRun(
+            nights=(),
+            evidence=DecisionForecastEvidence(()),
+        ),
     )
 
     def forecast_capacities(lat, lon, *, weather):

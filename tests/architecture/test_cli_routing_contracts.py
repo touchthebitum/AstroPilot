@@ -3,6 +3,8 @@ from types import SimpleNamespace
 import pytest
 
 import astro_score
+from decision.forecast.forecast_run import ForecastRun
+from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 
 
 def test_direct_command_loads_profile_once(monkeypatch):
@@ -119,7 +121,10 @@ def forecast_cli(monkeypatch, isolated_cli):
     monkeypatch.setattr(
         astro_score,
         "forecast_astro",
-        lambda *args, **kwargs: nights,
+        lambda *args, **kwargs: ForecastRun(
+            nights=nights,
+            evidence=DecisionForecastEvidence(()),
+        ),
     )
     monkeypatch.setattr(
         astro_score,

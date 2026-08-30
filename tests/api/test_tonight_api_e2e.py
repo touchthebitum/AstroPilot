@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import astro_score
 from astropilot.app import create_app
+from decision.forecast.forecast_run import ForecastRun
 from decision.intelligence.analysis_result import AnalysisResult
 from decision.mission.night_mission import NightMission
 from decision.models.candidate import Candidate
@@ -19,6 +20,7 @@ from decision.quality.dew_risk_result import DewRiskResult
 from decision.recommendation.recommendation import Recommendation
 from decision.risk.project_risk_context import ProjectRiskContext
 from decision.risk.risk_report import RiskReport
+from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 
 
 def test_http_request_runs_real_application_composition_once(monkeypatch):
@@ -126,10 +128,13 @@ def test_http_request_runs_real_application_composition_once(monkeypatch):
 
     def forecast(*args, **kwargs):
         calls["forecast"].append((args, kwargs))
-        return [
-            {"date": date(2026, 9, 2), "top_objects": []},
-            selected_night,
-        ]
+        return ForecastRun(
+            nights=(
+                {"date": date(2026, 9, 2), "top_objects": []},
+                selected_night,
+            ),
+            evidence=DecisionForecastEvidence(()),
+        )
 
     def build_candidates(objects, available_hours, *, profile):
         calls["candidates"].append((objects, available_hours, profile))

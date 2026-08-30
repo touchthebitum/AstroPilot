@@ -8,6 +8,10 @@ from decision.services.tonight_mission_service import (
 from decision.services.tonight_application_service import (
     TonightApplicationService,
 )
+from decision.forecast.forecast_run import ForecastRun
+from decision.weather.decision_forecast_evidence import (
+    build_decision_forecast_evidence,
+)
 from decision.opportunity.opportunity_engine import OpportunityEngine
 from decision.recommendation.recommendation_engine import (
     RecommendationEngine,
@@ -1681,7 +1685,13 @@ def forecast_astro(
 )
 
     if rows is None:
-        return []
+        return ForecastRun(nights=(), evidence=None)
+
+    forecast_evidence = (
+        build_decision_forecast_evidence(weather, rows)
+        if isinstance(weather, WeatherSnapshot)
+        else None
+    )
 
     results = []
 
@@ -1726,7 +1736,7 @@ def forecast_astro(
             )
         )
 
-    return results
+    return ForecastRun(nights=tuple(results), evidence=forecast_evidence)
 
 
 def best_equipment_for_object(object_name, profile=None):
@@ -2090,7 +2100,7 @@ def main(argv=None) -> int:
             print("ERREUR: forecast_astro a retourné None")
             return 0
     else:
-        nights = forecast_astro(
+        forecast_run = forecast_astro(
             lat,
             lon,
             city,
@@ -2102,9 +2112,10 @@ def main(argv=None) -> int:
             profile=profile,
         )
 
-        if nights is None:
+        if forecast_run is None:
             print("ERREUR: forecast_astro a retourné None")
             return 0
+        nights = forecast_run.nights
 
     night_capacities = forecast_night_capacities(
         lat,

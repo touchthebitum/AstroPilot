@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone
 
+from decision.forecast.forecast_run import ForecastRun
 from decision.mission.night_mission import NightMission
 from decision.night_productivity.night_productivity_result import NightProductivityResult
 from decision.night_productivity.night_window import NightWindow
@@ -12,6 +13,14 @@ from decision.services.tonight_application_service import (
     TonightResult,
     TonightStatus,
 )
+from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
+
+
+FORECAST_EVIDENCE = DecisionForecastEvidence(())
+
+
+def forecast_run(nights):
+    return ForecastRun(nights=nights, evidence=FORECAST_EVIDENCE)
 
 
 class RecordingRecommendationService:
@@ -155,7 +164,7 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
 
     def forecast(*args, **kwargs):
         forecast_calls.append((args, kwargs))
-        return [later, selected]
+        return forecast_run([later, selected])
 
     def build_candidates(objects, available_hours=3.0, *, profile):
         candidate_calls.append((objects, available_hours, profile))
@@ -202,6 +211,7 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
     assert result.night is selected
     assert result.recommendation is recommendation
     assert result.mission is mission
+    assert result.forecast_evidence is FORECAST_EVIDENCE
     assert selected["top_objects"] is selected_objects
     assert selected_objects[0]["global_score"] == 91.0
     assert selected_objects[0]["decision_score"] == 87.0
@@ -217,7 +227,7 @@ def test_location_defaults_match_current_cli_policy():
 
     def forecast(*args, **kwargs):
         calls.append((args, kwargs))
-        return []
+        return forecast_run([])
 
     service, _, _ = make_service(
         forecast_nights=forecast,
@@ -245,13 +255,14 @@ def test_location_defaults_match_current_cli_policy():
         None,
         None,
         status=TonightStatus.NO_NIGHT,
+        forecast_evidence=FORECAST_EVIDENCE,
     )
 
 
 def test_no_forecast_nights_stops_all_downstream_work():
     candidate_calls = []
     service, recommendation_service, mission_service = make_service(
-        forecast_nights=lambda *args, **kwargs: [],
+        forecast_nights=lambda *args, **kwargs: forecast_run([]),
         build_candidates=lambda *args, **kwargs: candidate_calls.append(
             (args, kwargs)
         ),
@@ -264,6 +275,7 @@ def test_no_forecast_nights_stops_all_downstream_work():
         None,
         None,
         status=TonightStatus.NO_NIGHT,
+        forecast_evidence=FORECAST_EVIDENCE,
     )
     assert candidate_calls == []
     assert recommendation_service.calls == []
@@ -291,7 +303,7 @@ def test_unavailable_forecast_is_distinct_from_empty_forecast():
 def test_no_candidates_preserves_night_and_skips_downstream_services():
     night = {"date": "2026-09-01", "top_objects": []}
     service, recommendation_service, mission_service = make_service(
-        forecast_nights=lambda *args, **kwargs: [night],
+        forecast_nights=lambda *args, **kwargs: forecast_run([night]),
         build_candidates=lambda *args, **kwargs: [],
     )
 
@@ -302,6 +314,7 @@ def test_no_candidates_preserves_night_and_skips_downstream_services():
         None,
         None,
         status=TonightStatus.NO_CANDIDATE,
+        forecast_evidence=FORECAST_EVIDENCE,
     )
     assert result.night is night
     assert recommendation_service.calls == []
@@ -312,7 +325,7 @@ def test_no_recommendation_preserves_night_and_skips_mission():
     night = {"date": "2026-09-01", "top_objects": []}
     candidates = [make_candidate()]
     service, recommendation_service, mission_service = make_service(
-        forecast_nights=lambda *args, **kwargs: [night],
+        forecast_nights=lambda *args, **kwargs: forecast_run([night]),
         build_candidates=lambda *args, **kwargs: candidates,
     )
 
@@ -323,6 +336,7 @@ def test_no_recommendation_preserves_night_and_skips_mission():
         None,
         None,
         status=TonightStatus.NO_RECOMMENDATION,
+        forecast_evidence=FORECAST_EVIDENCE,
     )
     assert recommendation_service.calls == [candidates]
     assert mission_service.calls == []
@@ -334,7 +348,7 @@ def test_missing_mission_preserves_exact_night_and_recommendation():
     candidates = [candidate]
     recommendation = make_recommendation(candidate)
     service, _, mission_service = make_service(
-        forecast_nights=lambda *args, **kwargs: [night],
+        forecast_nights=lambda *args, **kwargs: forecast_run([night]),
         build_candidates=lambda *args, **kwargs: candidates,
         recommendation=recommendation,
         mission=None,
@@ -346,6 +360,7 @@ def test_missing_mission_preserves_exact_night_and_recommendation():
     assert result.recommendation is recommendation
     assert result.mission is None
     assert result.status is TonightStatus.NO_MISSION
+    assert result.forecast_evidence is FORECAST_EVIDENCE
     assert len(mission_service.calls) == 1
 
 
@@ -371,7 +386,7 @@ def test_night_without_a_productive_window_is_not_available():
         ),
     )
     service, _, _ = make_service(
-        forecast_nights=lambda *args, **kwargs: [night],
+        forecast_nights=lambda *args, **kwargs: forecast_run([night]),
         build_candidates=lambda *args, **kwargs: [candidate],
         recommendation=recommendation,
         mission=mission,
@@ -381,3 +396,4 @@ def test_night_without_a_productive_window_is_not_available():
 
     assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW
     assert result.mission is mission
+    assert result.forecast_evidence is FORECAST_EVIDENCE
