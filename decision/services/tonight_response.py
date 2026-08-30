@@ -7,6 +7,10 @@ from enum import Enum
 from astropilot.catalog import CATALOG
 from decision.advisor.night_advisor import NightAdvisor
 from decision.services.tonight_application_service import TonightResult
+from decision.weather.weather_trust_decision import (
+    WeatherDecisionAdmissibility,
+    WeatherTrustDecision,
+)
 
 
 def _text(value) -> str | None:
@@ -185,11 +189,31 @@ class TonightResponse:
     reasons: list[TonightReasonResponse] = field(default_factory=list)
     tasks: list[TonightTaskResponse] = field(default_factory=list)
     advices: list[TonightAdviceResponse] = field(default_factory=list)
+    weather_decision: WeatherTrustDecision | None = None
+
+    def __post_init__(self):
+        refused = (
+            self.weather_decision is not None
+            and self.weather_decision.admissibility
+            is WeatherDecisionAdmissibility.REFUSED
+        )
+        if refused != (self.status == "weather_refused"):
+            raise ValueError("weather_refusal_transport_status_mismatch")
 
     @classmethod
-    def from_result(cls, result: TonightResult) -> TonightResponse:
-        recommendation = result.recommendation
-        mission = result.mission
+    def from_result(
+        cls,
+        result: TonightResult,
+        *,
+        weather_decision: WeatherTrustDecision | None = None,
+    ) -> TonightResponse:
+        refused = (
+            weather_decision is not None
+            and weather_decision.admissibility
+            is WeatherDecisionAdmissibility.REFUSED
+        )
+        recommendation = None if refused else result.recommendation
+        mission = None if refused else result.mission
         candidate = (
             recommendation.opportunity.candidate
             if recommendation is not None
@@ -398,7 +422,7 @@ class TonightResponse:
         )
 
         return cls(
-            status=result.status.value,
+            status="weather_refused" if refused else result.status.value,
             night_date=_text(
                 result.night.get("date") if result.night is not None else None
             ),
@@ -442,7 +466,8 @@ class TonightResponse:
             reasons=reasons,
             tasks=tasks,
             advices=advices,
+            weather_decision=weather_decision,
         )
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        return _json_value(asdict(self))

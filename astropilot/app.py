@@ -11,6 +11,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from decision.services.tonight_application_service import TonightStatus
 from decision.services.tonight_response import TonightResponse
+from decision.weather.provider_reliability import WeatherLocation
+from decision.weather.weather_trust_decision import (
+    WeatherDecisionAdmissibility,
+    WeatherDecisionContext,
+    WeatherEvidenceQuality,
+    WeatherTrustDecisionEvaluator,
+    WeatherTrustEvidence,
+)
 from decision.weather.weather_ingress import (
     WeatherFreshness,
     WeatherIngressError,
@@ -204,6 +212,12 @@ class TonightWeatherTrustModel(BaseModel):
     maximum_age_minutes: int = Field(gt=0)
 
 
+class TonightWeatherDecisionModel(BaseModel):
+    evidence_quality: WeatherEvidenceQuality
+    admissibility: WeatherDecisionAdmissibility
+    reasons: list[str]
+
+
 class TonightResponseModel(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -342,7 +356,21 @@ class TonightResponseModel(BaseModel):
                         "freshness_status": "fresh",
                         "maximum_age_minutes": 90,
                     },
-                }
+                    "weather_decision": {
+                        "evidence_quality": "insufficient",
+                        "admissibility": "caution",
+                        "reasons": ["provider_reliability_unavailable"],
+                    },
+                },
+                {
+                    "status": "weather_refused",
+                    "night_date": "2026-08-29",
+                    "weather_decision": {
+                        "evidence_quality": "insufficient",
+                        "admissibility": "refused",
+                        "reasons": ["selected_window_uncovered"],
+                    },
+                },
             ]
         }
     )
@@ -372,6 +400,7 @@ class TonightResponseModel(BaseModel):
     tasks: list[TonightTaskModel] = Field(default_factory=list)
     advices: list[TonightAdviceModel] = Field(default_factory=list)
     weather_trust: TonightWeatherTrustModel | None = None
+    weather_decision: TonightWeatherDecisionModel | None = None
 
 
 def _production_service_factory():
@@ -460,8 +489,7 @@ def create_app(
             503: {
                 "description": (
                     "Weather is unavailable, invalid or insufficient, or the "
-                    "snapshot is stale, the selected window is not covered, "
-                    "or the tonight forecast is unavailable."
+                    "snapshot is stale, or the tonight forecast is unavailable."
                 ),
                 "content": {
                     "application/json": {
@@ -502,18 +530,6 @@ def create_app(
                                         "code": "weather_stale",
                                         "message": (
                                             "Weather data is too old for a reliable decision."
-                                        ),
-                                    }
-                                },
-                            },
-                            "weather_window_uncovered": {
-                                "summary": "Mission window is not covered by weather",
-                                "value": {
-                                    "detail": {
-                                        "code": "weather_window_uncovered",
-                                        "message": (
-                                            "Weather data does not fully cover the "
-                                            "selected mission window."
                                         ),
                                     }
                                 },
@@ -649,28 +665,64 @@ def create_app(
                 },
             )
 
+        weather_decision = None
         if (
             result.status is TonightStatus.AVAILABLE
             and isinstance(weather, WeatherSnapshot)
         ):
+            selected_window_covered = True
             try:
                 validate_selected_window_weather_coverage(
                     result.mission,
                     weather,
                 )
             except WeatherWindowCoverageError as exc:
-                raise HTTPException(
-                    status_code=503,
-                    detail={
-                        "code": exc.code,
-                        "message": (
-                            "Weather data does not fully cover the selected "
-                            "mission window."
-                        ),
-                    },
-                ) from exc
+                issues = set(exc.issues)
+                decisional_issues = {
+                    "window_starts_before_weather",
+                    "window_ends_after_weather",
+                }
+                if issues and issues <= decisional_issues:
+                    selected_window_covered = False
+                else:
+                    weather_invalid = "invalid_weather_coverage" in issues
+                    raise HTTPException(
+                        status_code=503,
+                        detail={
+                            "code": (
+                                "weather_invalid"
+                                if weather_invalid
+                                else "decision_invalid"
+                            ),
+                            "message": (
+                                "Weather data failed validation."
+                                if weather_invalid
+                                else "The decision failed consistency validation."
+                            ),
+                        },
+                    ) from exc
 
-        payload = TonightResponse.from_result(result).to_dict()
+            weather_decision = WeatherTrustDecisionEvaluator.evaluate(
+                WeatherTrustEvidence(
+                    snapshot=weather,
+                    freshness=weather_freshness,
+                    selected_window_covered=selected_window_covered,
+                    provider_reliability=None,
+                ),
+                context=WeatherDecisionContext(
+                    provider_id=weather.provider,
+                    decision_location=WeatherLocation(
+                        latitude=location["latitude"],
+                        longitude=location["longitude"],
+                    ),
+                    reliability_context=None,
+                ),
+            )
+
+        payload = TonightResponse.from_result(
+            result,
+            weather_decision=weather_decision,
+        ).to_dict()
         if isinstance(weather, WeatherSnapshot):
             payload["weather_trust"] = weather.trust_transport(weather_freshness)
         return payload

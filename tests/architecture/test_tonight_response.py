@@ -23,6 +23,11 @@ from decision.services.tonight_application_service import (
     TonightStatus,
 )
 from decision.services.tonight_response import TonightResponse
+from decision.weather.weather_trust_decision import (
+    WeatherDecisionAdmissibility,
+    WeatherEvidenceQuality,
+    WeatherTrustDecision,
+)
 
 
 def make_candidate():
@@ -80,6 +85,7 @@ def test_partial_results_produce_stable_transport_status(status):
         "reasons": [],
         "tasks": [],
         "advices": [],
+        "weather_decision": None,
     }
 
 
@@ -351,3 +357,130 @@ def test_astro_quality_labels_are_stable(score, label):
     )
 
     assert response.astro_quality.label == label
+
+
+def test_caution_preserves_active_transport_and_internal_result_identities():
+    candidate = make_candidate()
+    recommendation = Recommendation(
+        opportunity=Opportunity(
+            action=Action.START_PROJECT,
+            candidate=candidate,
+        ),
+        confidence=0.91,
+    )
+    mission = NightMission(target="Andromeda", confidence=0.87)
+    result = TonightResult(
+        night={"date": date(2026, 9, 1)},
+        recommendation=recommendation,
+        mission=mission,
+    )
+    decision = WeatherTrustDecision(
+        evidence_quality=WeatherEvidenceQuality.INSUFFICIENT,
+        admissibility=WeatherDecisionAdmissibility.CAUTION,
+        reasons=("provider_reliability_unavailable",),
+    )
+
+    response = TonightResponse.from_result(
+        result,
+        weather_decision=decision,
+    ).to_dict()
+
+    assert response["status"] == "available"
+    assert response["target"] == "Andromeda"
+    assert response["action"] == "start_project"
+    assert response["weather_decision"] == {
+        "evidence_quality": "insufficient",
+        "admissibility": "caution",
+        "reasons": ["provider_reliability_unavailable"],
+    }
+    assert result.recommendation is recommendation
+    assert result.mission is mission
+
+
+def test_refused_weather_decision_redacts_active_transport_only():
+    candidate = make_candidate()
+    recommendation = Recommendation(
+        opportunity=Opportunity(
+            action=Action.START_PROJECT,
+            candidate=candidate,
+        ),
+        confidence=0.91,
+    )
+    mission = NightMission(
+        target="Andromeda",
+        confidence=0.87,
+        equipment=["Widefield"],
+        window_start=datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+        window_end=datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
+        recommended_hours=3.0,
+        expected_gain=8.0,
+        selected_filter=SelectedFilter("L-Pro", "broadband", 50.0),
+        tasks=[NightTask("T-30 min", "T-20 min", "Installer")],
+    )
+    result = TonightResult(
+        night={"date": date(2026, 9, 1)},
+        recommendation=recommendation,
+        mission=mission,
+    )
+    decision = WeatherTrustDecision(
+        evidence_quality=WeatherEvidenceQuality.INSUFFICIENT,
+        admissibility=WeatherDecisionAdmissibility.REFUSED,
+        reasons=("selected_window_uncovered",),
+    )
+
+    response = TonightResponse.from_result(
+        result,
+        weather_decision=decision,
+    ).to_dict()
+
+    assert response == {
+        "status": "weather_refused",
+        "night_date": "2026-09-01",
+        "target": None,
+        "catalog_key": None,
+        "target_common_name": None,
+        "action": None,
+        "recommendation_confidence": None,
+        "mission_confidence": None,
+        "scores": {},
+        "window_start": None,
+        "window_end": None,
+        "recommended_hours": 0.0,
+        "expected_gain": 0.0,
+        "equipment": [],
+        "selected_filter": None,
+        "astro_quality": None,
+        "productivity": None,
+        "dew_risk": None,
+        "postponement_risk": None,
+        "season": None,
+        "explanation": None,
+        "reasons": [],
+        "tasks": [],
+        "advices": [],
+        "weather_decision": {
+            "evidence_quality": "insufficient",
+            "admissibility": "refused",
+            "reasons": ["selected_window_uncovered"],
+        },
+    }
+    assert result.recommendation is recommendation
+    assert result.mission is mission
+
+
+def test_weather_refusal_and_transport_status_cannot_diverge():
+    refused = WeatherTrustDecision(
+        evidence_quality=WeatherEvidenceQuality.INSUFFICIENT,
+        admissibility=WeatherDecisionAdmissibility.REFUSED,
+        reasons=("selected_window_uncovered",),
+    )
+    caution = WeatherTrustDecision(
+        evidence_quality=WeatherEvidenceQuality.INSUFFICIENT,
+        admissibility=WeatherDecisionAdmissibility.CAUTION,
+        reasons=("provider_reliability_unavailable",),
+    )
+
+    with pytest.raises(ValueError, match="weather_refusal_transport_status_mismatch"):
+        TonightResponse(status="available", weather_decision=refused)
+    with pytest.raises(ValueError, match="weather_refusal_transport_status_mismatch"):
+        TonightResponse(status="weather_refused", weather_decision=caution)

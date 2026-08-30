@@ -1,7 +1,9 @@
 from datetime import date, datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
+import astropilot.app as app_module
 from astropilot.app import create_app
 from decision.mission.night_mission import NightMission
 from decision.models.candidate import Candidate
@@ -17,6 +19,7 @@ from decision.weather.weather_ingress import (
     WeatherInsufficientError,
     WeatherSnapshot,
 )
+from decision.validation.weather_window_coverage import WeatherWindowCoverageError
 from decision.validation.decision_consistency import DecisionConsistencyError
 from decision.location.location_time import LocationTimeError
 
@@ -245,13 +248,26 @@ def test_stale_weather_is_rejected_before_evaluation_with_injected_clock():
     }
 
 
-def test_fresh_weather_transport_exposes_server_calculated_age():
+def test_fresh_weather_transport_exposes_server_calculated_age(monkeypatch):
     reference = datetime(2026, 8, 29, 20, 0, tzinfo=timezone.utc)
     weather = make_weather_snapshot(reference - timedelta(minutes=42, seconds=30))
+    result = make_result()
+    evaluations = []
+    evaluate = app_module.WeatherTrustDecisionEvaluator.evaluate
+
+    def record_evaluation(evidence, *, context):
+        evaluations.append((evidence, context))
+        return evaluate(evidence, context=context)
+
+    monkeypatch.setattr(
+        app_module.WeatherTrustDecisionEvaluator,
+        "evaluate",
+        record_evaluation,
+    )
     client = TestClient(
         create_app(
             service_factory=lambda: type(
-                "Service", (), {"evaluate": lambda self, **kwargs: make_result()}
+                "Service", (), {"evaluate": lambda self, **kwargs: result}
             )(),
             weather_provider=lambda lat, lon: weather,
             profile_provider=lambda: {},
@@ -266,9 +282,28 @@ def test_fresh_weather_transport_exposes_server_calculated_age():
     assert trust["snapshot_age_minutes"] == 42.5
     assert trust["freshness_status"] == "fresh"
     assert trust["maximum_age_minutes"] == 90
+    assert response.json()["weather_decision"] == {
+        "evidence_quality": "insufficient",
+        "admissibility": "caution",
+        "reasons": ["provider_reliability_unavailable"],
+    }
+    assert response.json()["status"] == "available"
+    assert response.json()["target"] == "Andromeda"
+    assert result.recommendation is not None
+    assert result.mission is not None
+    assert len(evaluations) == 1
+    evidence, context = evaluations[0]
+    assert evidence.snapshot is weather
+    assert evidence.freshness.snapshot_age_minutes == 42.5
+    assert evidence.selected_window_covered is True
+    assert evidence.provider_reliability is None
+    assert context.provider_id == weather.provider
+    assert context.decision_location.latitude == 46.7508
+    assert context.decision_location.longitude == 6.5495
+    assert context.reliability_context is None
 
 
-def test_uncovered_mission_window_cannot_be_returned_as_available():
+def test_uncovered_mission_window_returns_refused_without_active_mission():
     reference = datetime(2026, 8, 29, 20, 0, tzinfo=timezone.utc)
     weather = make_weather_snapshot(
         reference - timedelta(minutes=5),
@@ -293,13 +328,70 @@ def test_uncovered_mission_window_cannot_be_returned_as_available():
     response = client.post("/v1/tonight", json={})
 
     assert len(evaluation_calls) == 1
-    assert response.status_code == 503
-    assert response.json()["detail"] == {
-        "code": "weather_window_uncovered",
-        "message": (
-            "Weather data does not fully cover the selected mission window."
-        ),
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "weather_refused"
+    assert payload["weather_decision"] == {
+        "evidence_quality": "insufficient",
+        "admissibility": "refused",
+        "reasons": ["selected_window_uncovered"],
     }
+    assert payload["target"] is None
+    assert payload["catalog_key"] is None
+    assert payload["action"] is None
+    assert payload["recommendation_confidence"] is None
+    assert payload["mission_confidence"] is None
+    assert payload["scores"] == {}
+    assert payload["window_start"] is None
+    assert payload["window_end"] is None
+    assert payload["recommended_hours"] == 0.0
+    assert payload["expected_gain"] == 0.0
+    assert payload["equipment"] == []
+    assert payload["selected_filter"] is None
+    assert payload["productivity"] is None
+    assert payload["tasks"] == []
+    assert payload["advices"] == []
+
+
+@pytest.mark.parametrize(
+    ("issue", "code"),
+    [
+        ("invalid_mission_window", "decision_invalid"),
+        ("invalid_weather_coverage", "weather_invalid"),
+        ("unexpected_window_issue", "decision_invalid"),
+    ],
+)
+def test_structural_or_unknown_window_issue_remains_technical(
+    monkeypatch,
+    issue,
+    code,
+):
+    reference = datetime(2026, 8, 29, 20, 0, tzinfo=timezone.utc)
+    weather = make_weather_snapshot(reference - timedelta(minutes=5))
+
+    def fail_coverage(mission, snapshot):
+        raise WeatherWindowCoverageError([issue])
+
+    monkeypatch.setattr(
+        app_module,
+        "validate_selected_window_weather_coverage",
+        fail_coverage,
+    )
+    client = TestClient(
+        create_app(
+            service_factory=lambda: type(
+                "Service", (), {"evaluate": lambda self, **kwargs: make_result()}
+            )(),
+            weather_provider=lambda lat, lon: weather,
+            profile_provider=lambda: {},
+            clock=lambda: reference,
+        )
+    )
+
+    response = client.post("/v1/tonight", json={})
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == code
 
 
 def test_internally_inconsistent_decision_is_rejected_before_transport():
@@ -358,20 +450,31 @@ def test_forecast_unavailable_is_a_service_error():
     assert response.json()["detail"]["code"] == "forecast_unavailable"
 
 
-def test_empty_product_results_remain_successful_business_responses():
+@pytest.mark.parametrize(
+    "status",
+    [
+        TonightStatus.NO_NIGHT,
+        TonightStatus.NO_CANDIDATE,
+        TonightStatus.NO_RECOMMENDATION,
+        TonightStatus.NO_MISSION,
+        TonightStatus.NO_PRODUCTIVE_WINDOW,
+    ],
+)
+def test_empty_product_results_remain_successful_business_responses(status):
     client = make_client(
         result=TonightResult(
             None,
             None,
             None,
-            status=TonightStatus.NO_NIGHT,
+            status=status,
         )
     )
 
     response = client.post("/v1/tonight", json={})
 
     assert response.status_code == 200
-    assert response.json()["status"] == "no_night"
+    assert response.json()["status"] == status.value
+    assert response.json()["weather_decision"] is None
 
 
 def test_request_coordinates_and_bortle_are_validated():
@@ -422,6 +525,9 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
         "TonightTaskModel",
         "TonightAdviceModel",
         "TonightWeatherTrustModel",
+        "TonightWeatherDecisionModel",
+        "WeatherEvidenceQuality",
+        "WeatherDecisionAdmissibility",
     }.issubset(schemas)
 
     tonight_response = schemas["TonightResponseModel"]["properties"]
@@ -443,6 +549,17 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
     assert tonight_response["weather_trust"]["anyOf"][0]["$ref"].endswith(
         "TonightWeatherTrustModel"
     )
+    assert tonight_response["weather_decision"]["anyOf"][0]["$ref"].endswith(
+        "TonightWeatherDecisionModel"
+    )
+    weather_decision = schemas["TonightWeatherDecisionModel"]["properties"]
+    assert weather_decision["evidence_quality"]["$ref"].endswith(
+        "WeatherEvidenceQuality"
+    )
+    assert weather_decision["admissibility"]["$ref"].endswith(
+        "WeatherDecisionAdmissibility"
+    )
+    assert weather_decision["reasons"]["items"]["type"] == "string"
     weather_trust = schemas["TonightWeatherTrustModel"]["properties"]
     assert weather_trust["snapshot_age_minutes"]["minimum"] == 0.0
     assert weather_trust["freshness_status"]["const"] == "fresh"
@@ -472,6 +589,11 @@ def test_openapi_documents_tonight_request_and_available_response_examples():
     assert response_example["season"]["analysis_name"] == "season_window"
     assert response_example["tasks"][0]["title"] == "Installer le matériel"
     assert response_example["advices"][0]["category"] == "weather"
+    assert response_example["weather_decision"] == {
+        "evidence_quality": "insufficient",
+        "admissibility": "caution",
+        "reasons": ["provider_reliability_unavailable"],
+    }
 
 
 def test_openapi_documents_tonight_operation_and_error_examples():
@@ -503,9 +625,7 @@ def test_openapi_documents_tonight_operation_and_error_examples():
     assert error_examples["weather_stale"]["value"]["detail"]["code"] == (
         "weather_stale"
     )
-    assert error_examples["weather_window_uncovered"]["value"]["detail"][
-        "code"
-    ] == "weather_window_uncovered"
+    assert "weather_window_uncovered" not in error_examples
     assert error_examples["decision_invalid"]["value"]["detail"]["code"] == (
         "decision_invalid"
     )
