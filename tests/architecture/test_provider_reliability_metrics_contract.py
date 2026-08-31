@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from decision.weather.provider_reliability import (
+    ComparisonStatus,
+    ObservationQualityStatus,
     WeatherForecastPoint,
     WeatherLocation,
     WeatherObservationPoint,
@@ -41,7 +43,7 @@ def verification(
     forecast_values=None,
     observation_values=None,
     observed_at=VALID_AT,
-    observation_quality="validated",
+    observation_quality=ObservationQualityStatus.VALIDATED,
     reference_source="reference_station",
 ):
     forecast_values = forecast_values or (
@@ -291,7 +293,7 @@ def test_reference_provenance_is_preserved_in_metrics():
 
 
 def test_not_comparable_samples_are_counted_but_never_used_as_zero_error():
-    rejected = verification(observation_quality="rejected")
+    rejected = verification(observation_quality=ObservationQualityStatus.REJECTED)
     valid = verification()
 
     report = build_provider_reliability_report(
@@ -308,6 +310,28 @@ def test_not_comparable_samples_are_counted_but_never_used_as_zero_error():
     assert report.variable_metrics[0].sample_count == 1
     assert report.variable_metrics[0].mean_absolute_error == 2
     assert report.variable_metrics[0].evidence_status is EvidenceStatus.INSUFFICIENT
+
+
+def test_unverified_observation_is_coverage_only_and_never_a_metric_sample():
+    unverified = verification(
+        observation_quality=ObservationQualityStatus.UNVERIFIED
+    )
+
+    report = build_provider_reliability_report(
+        (unverified,),
+        policy=policy(minimum_sample_size=1),
+        scope=report_scope(),
+    )
+
+    assert unverified.status is ComparisonStatus.NOT_COMPARABLE
+    assert unverified.errors == ()
+    assert report.coverage[0].total_count == 1
+    assert report.coverage[0].comparable_count == 0
+    assert report.coverage[0].not_comparable_count == 1
+    assert report.coverage[0].not_comparable_reasons == (
+        ("observation_quality_unverified", 1),
+    )
+    assert report.variable_metrics == ()
 
 
 def test_missing_variable_does_not_create_a_sample():

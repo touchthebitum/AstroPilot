@@ -10,6 +10,7 @@ from decision.weather.field_validation_comparison import (
 )
 from decision.weather.provider_reliability import (
     ComparisonStatus,
+    ObservationQualityStatus,
     WeatherForecastPoint,
     WeatherForecastVerification,
     WeatherLocation,
@@ -55,7 +56,7 @@ def observation(
     *values,
     observed_at=VALID_AT,
     location=SITE,
-    quality="validated",
+    quality=ObservationQualityStatus.VALIDATED,
 ):
     return WeatherObservationPoint(
         source_id="meteoswiss",
@@ -166,7 +167,7 @@ def test_candidates_keep_order_and_exact_policy_arguments(monkeypatch):
         (
             observation(
                 value(WeatherVariable.TEMPERATURE_C, 8),
-                quality="rejected",
+                quality=ObservationQualityStatus.REJECTED,
             ),
             timedelta(minutes=30),
             5.0,
