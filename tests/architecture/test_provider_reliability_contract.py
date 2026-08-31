@@ -6,6 +6,7 @@ import pytest
 
 from decision.weather.provider_reliability import (
     ComparisonStatus,
+    ObservationQualityStatus,
     WeatherForecastPoint,
     WeatherLocation,
     WeatherObservationPoint,
@@ -55,7 +56,12 @@ def forecast(*values, forecast_for=FORECAST_FOR):
     )
 
 
-def observation(*values, observed_at=FORECAST_FOR, location=SITE, quality="validated"):
+def observation(
+    *values,
+    observed_at=FORECAST_FOR,
+    location=SITE,
+    quality=ObservationQualityStatus.VALIDATED,
+):
     return WeatherObservationPoint(
         source_id="station_reference",
         station_id="station_123",
@@ -114,6 +120,7 @@ def test_observation_preserves_distinct_source_and_station_identities():
         observed_at_utc=FORECAST_FOR,
         location=SITE,
         values=(value(WeatherVariable.TEMPERATURE_C, 8),),
+        quality_status=ObservationQualityStatus.VALIDATED,
     )
 
     assert point.source_id == "meteoswiss"
@@ -126,6 +133,37 @@ def test_observation_preserves_distinct_source_and_station_identities():
             observed_at_utc=FORECAST_FOR,
             location=SITE,
             values=(value(WeatherVariable.TEMPERATURE_C, 8),),
+            quality_status=ObservationQualityStatus.VALIDATED,
+        )
+
+
+@pytest.mark.parametrize("quality_status", tuple(ObservationQualityStatus))
+def test_observation_quality_states_are_explicitly_representable(quality_status):
+    point = observation(
+        value(WeatherVariable.TEMPERATURE_C, 8),
+        quality=quality_status,
+    )
+
+    assert point.quality_status is quality_status
+
+
+def test_observation_quality_status_is_required():
+    with pytest.raises(TypeError):
+        WeatherObservationPoint(
+            source_id="meteoswiss",
+            station_id="chaumont",
+            observed_at_utc=FORECAST_FOR,
+            location=SITE,
+            values=(value(WeatherVariable.TEMPERATURE_C, 8),),
+        )
+
+
+@pytest.mark.parametrize("quality_status", ["validated", "unverified", "rejected"])
+def test_observation_quality_status_rejects_raw_strings(quality_status):
+    with pytest.raises(ValueError, match="invalid_observation_quality_status"):
+        observation(
+            value(WeatherVariable.TEMPERATURE_C, 8),
+            quality=quality_status,
         )
 
 
@@ -300,11 +338,42 @@ def test_observation_outside_explicit_spatial_tolerance_is_not_comparable():
 
 
 def test_rejected_observation_is_never_used_for_error_measurement():
-    verification = compare(candidate_observation=observation(quality="rejected"))
+    verification = compare(
+        candidate_observation=observation(
+            quality=ObservationQualityStatus.REJECTED
+        )
+    )
 
     assert verification.status is ComparisonStatus.NOT_COMPARABLE
     assert verification.errors == ()
     assert "observation_rejected" in verification.reasons
+
+
+def test_unverified_observation_is_not_comparable_without_numeric_error():
+    verification = compare(
+        candidate_observation=observation(
+            quality=ObservationQualityStatus.UNVERIFIED
+        )
+    )
+
+    assert verification.status is ComparisonStatus.NOT_COMPARABLE
+    assert verification.reasons == ("observation_quality_unverified",)
+    assert verification.errors == ()
+
+
+def test_quality_reason_coexists_with_other_non_comparability_reasons():
+    verification = compare(
+        candidate_observation=observation(
+            observed_at=FORECAST_FOR + timedelta(minutes=31),
+            quality=ObservationQualityStatus.UNVERIFIED,
+        ),
+        time_tolerance=timedelta(minutes=30),
+    )
+
+    assert verification.status is ComparisonStatus.NOT_COMPARABLE
+    assert "observation_quality_unverified" in verification.reasons
+    assert "observation_time_outside_tolerance" in verification.reasons
+    assert verification.errors == ()
 
 
 def test_precipitation_periods_must_match():

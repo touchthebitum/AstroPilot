@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from math import asin, cos, isfinite, radians, sin, sqrt
-from typing import Literal
 
 
 class WeatherVariable(str, Enum):
@@ -16,6 +15,12 @@ class WeatherVariable(str, Enum):
     WIND_GUST_KMH = "wind_gust_kmh"
     TEMPERATURE_C = "temperature_c"
     DEW_POINT_C = "dew_point_c"
+
+
+class ObservationQualityStatus(str, Enum):
+    VALIDATED = "validated"
+    UNVERIFIED = "unverified"
+    REJECTED = "rejected"
 
 
 CANONICAL_UNITS = {
@@ -163,12 +168,12 @@ class WeatherObservationPoint:
     observed_at_utc: datetime
     location: WeatherLocation
     values: tuple[WeatherValue, ...]
-    quality_status: Literal["validated", "rejected"] = "validated"
+    quality_status: ObservationQualityStatus
 
     def __post_init__(self):
         if not isinstance(self.location, WeatherLocation):
             raise ValueError("invalid_observation_location")
-        if self.quality_status not in ("validated", "rejected"):
+        if not isinstance(self.quality_status, ObservationQualityStatus):
             raise ValueError("invalid_observation_quality_status")
         object.__setattr__(self, "source_id", _identity(self.source_id, "source_id"))
         object.__setattr__(
@@ -260,7 +265,9 @@ def compare_forecast_to_observation(
         else None
     )
     reasons = []
-    if observation.quality_status != "validated":
+    if observation.quality_status is ObservationQualityStatus.UNVERIFIED:
+        reasons.append("observation_quality_unverified")
+    elif observation.quality_status is ObservationQualityStatus.REJECTED:
         reasons.append("observation_rejected")
     if time_difference > time_tolerance:
         reasons.append("observation_time_outside_tolerance")
