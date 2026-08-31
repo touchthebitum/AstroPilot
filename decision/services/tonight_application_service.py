@@ -28,6 +28,7 @@ class TonightResult:
     mission: NightMission | None
     status: TonightStatus = TonightStatus.AVAILABLE
     forecast_evidence: DecisionForecastEvidence | None = None
+    decision_id: str | None = None
 
     @property
     def forecast_available(self) -> bool:
