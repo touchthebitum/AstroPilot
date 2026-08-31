@@ -4,12 +4,16 @@ from types import SimpleNamespace
 import pytest
 
 import astro_score
+from decision.weather.decision_forecast_evidence_persistence import (
+    DecisionForecastEvidencePersistenceError,
+)
 from decision.forecast.forecast_run import ForecastRun
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 
 
 @pytest.fixture
-def isolated_cli_failures(monkeypatch):
+def isolated_cli_failures(monkeypatch, tmp_path):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(
         astro_score,
         "load_user_profile",
@@ -90,6 +94,38 @@ def test_missing_forecast_stops_before_capacity_and_runners(
         assert "Prévisions météo indisponibles." in output
     else:
         assert "Prévisions météo indisponibles." not in output
+
+
+def test_tonight_persistence_failure_exits_without_presenting_mission(
+    monkeypatch,
+    capsys,
+    isolated_cli_failures,
+):
+    class FailingService:
+        def evaluate(self, **kwargs):
+            raise DecisionForecastEvidencePersistenceError("storage_failed")
+
+    monkeypatch.setattr(
+        astro_score,
+        "build_durable_tonight_application_service",
+        lambda: FailingService(),
+    )
+    monkeypatch.setattr(
+        astro_score,
+        "fetch_weather",
+        lambda lat, lon: {"weather": True},
+    )
+    monkeypatch.setattr(
+        astro_score,
+        "forecast_night_capacities",
+        lambda *args, **kwargs: pytest.fail("capacity must not be computed"),
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(["--mode", "tonight"])
+
+    assert exit_info.value.code == 1
+    assert "persistance durable indisponible" in capsys.readouterr().err
 
 
 def test_empty_night_list_keeps_capacity_report_but_skips_tonight_runner(

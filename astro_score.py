@@ -8,6 +8,16 @@ from decision.services.tonight_mission_service import (
 from decision.services.tonight_application_service import (
     TonightApplicationService,
 )
+from decision.services.durable_tonight_application_service import (
+    DurableTonightApplicationService,
+    generate_decision_id,
+)
+from decision.weather.decision_forecast_evidence_persistence import (
+    DecisionForecastEvidencePersistenceError,
+)
+from astropilot.decision_forecast_evidence_store import (
+    FileDecisionForecastEvidenceStore,
+)
 from decision.forecast.forecast_run import ForecastRun
 from decision.weather.decision_forecast_evidence import (
     build_decision_forecast_evidence,
@@ -103,6 +113,7 @@ from astropilot.catalog import CATALOG
 from astropilot.engines.sky_engine import SkyEngine
 import argparse
 from astropilot.user_profile import (
+    get_user_data_dir,
     load_user_profile,
     save_user_profile,
     resolve_minimum_altitude_deg,
@@ -1889,6 +1900,17 @@ def build_tonight_application_service() -> TonightApplicationService:
     )
 
 
+def build_durable_tonight_application_service(
+) -> DurableTonightApplicationService:
+    return DurableTonightApplicationService(
+        application_service=build_tonight_application_service(),
+        evidence_store=FileDecisionForecastEvidenceStore(
+            get_user_data_dir() / "decision_forecast_evidence"
+        ),
+        decision_id_factory=generate_decision_id,
+    )
+
+
 def parse_filter_target_assignments(
     values: list[str],
 ) -> dict[str, float]:
@@ -2096,15 +2118,21 @@ def main(argv=None) -> int:
     tonight_result = None
 
     if args.mode == "tonight":
-        tonight_result = build_tonight_application_service().evaluate(
-            profile=profile,
-            weather=weather,
-            reference_time_utc=reference_time_utc,
-            equipment=args.equipment,
-            goal=args.goal,
-            target=TARGET,
-            bortle=3,
-        )
+        try:
+            tonight_result = build_durable_tonight_application_service().evaluate(
+                profile=profile,
+                weather=weather,
+                reference_time_utc=reference_time_utc,
+                equipment=args.equipment,
+                goal=args.goal,
+                target=TARGET,
+                bortle=3,
+            )
+        except (DecisionForecastEvidencePersistenceError, OSError):
+            parser.exit(
+                1,
+                "Erreur : persistance durable indisponible.\n",
+            )
 
         if not tonight_result.forecast_available:
             print("ERREUR: forecast_astro a retourné None")

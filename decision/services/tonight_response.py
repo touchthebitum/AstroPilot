@@ -235,6 +235,7 @@ def _weather_decision_response(
 @dataclass(frozen=True)
 class TonightResponse:
     status: str
+    decision_id: str | None = None
     night_date: str | None = None
     target: str | None = None
     catalog_key: str | None = None
@@ -492,6 +493,7 @@ class TonightResponse:
 
         return cls(
             status="weather_refused" if refused else result.status.value,
+            decision_id=result.decision_id,
             night_date=_text(
                 result.night.get("date") if result.night is not None else None
             ),
