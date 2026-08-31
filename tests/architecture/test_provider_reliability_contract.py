@@ -184,8 +184,57 @@ def test_forecast_captured_after_its_valid_time_is_rejected():
         (WeatherVariable.DEW_POINT_C, 2),
     ],
 )
-def test_initial_instantaneous_variables_use_canonical_units(variable, valid_value):
-    assert value(variable, valid_value).value == float(valid_value)
+def test_non_precipitation_variables_allow_no_aggregation_period(
+    variable,
+    valid_value,
+):
+    measured = value(variable, valid_value)
+
+    assert measured.value == float(valid_value)
+    assert measured.aggregation_period is None
+
+
+@pytest.mark.parametrize(
+    "variable",
+    [WeatherVariable.WIND_SPEED_KMH, WeatherVariable.WIND_GUST_KMH],
+)
+def test_wind_accepts_an_explicit_positive_aggregation_period(variable):
+    measured = value(
+        variable,
+        12,
+        aggregation_period=timedelta(minutes=10),
+    )
+
+    assert measured.aggregation_period == timedelta(minutes=10)
+
+
+@pytest.mark.parametrize(
+    "aggregation_period",
+    [timedelta(0), timedelta(microseconds=-1), 600, "10 minutes"],
+)
+@pytest.mark.parametrize(
+    "variable",
+    [WeatherVariable.WIND_SPEED_KMH, WeatherVariable.WIND_GUST_KMH],
+)
+def test_wind_rejects_invalid_explicit_aggregation_periods(
+    variable,
+    aggregation_period,
+):
+    with pytest.raises(ValueError, match="invalid_aggregation_period"):
+        value(variable, 12, aggregation_period=aggregation_period)
+
+
+@pytest.mark.parametrize(
+    "variable",
+    [
+        WeatherVariable.TEMPERATURE_C,
+        WeatherVariable.RELATIVE_HUMIDITY_PERCENT,
+        WeatherVariable.DEW_POINT_C,
+    ],
+)
+def test_non_aggregated_variables_still_reject_aggregation_period(variable):
+    with pytest.raises(ValueError, match="aggregation_period_not_supported"):
+        value(variable, 10, aggregation_period=timedelta(minutes=10))
 
 
 def test_precipitation_requires_an_explicit_aggregation_period():
@@ -397,6 +446,49 @@ def test_precipitation_periods_must_match():
     assert verification.reasons == (
         "aggregation_period_mismatch:precipitation_mm",
     )
+
+
+def test_unknown_and_explicit_wind_periods_do_not_match():
+    predicted = value(WeatherVariable.WIND_SPEED_KMH, 12)
+    observed = value(
+        WeatherVariable.WIND_SPEED_KMH,
+        10,
+        aggregation_period=timedelta(minutes=10),
+    )
+
+    verification = compare(
+        candidate_forecast=forecast(predicted),
+        candidate_observation=observation(observed),
+    )
+
+    assert verification.status is ComparisonStatus.NOT_COMPARABLE
+    assert verification.reasons == (
+        "aggregation_period_mismatch:wind_speed_kmh",
+    )
+    assert verification.errors == ()
+
+
+def test_identical_wind_periods_do_not_block_comparison():
+    period = timedelta(minutes=10)
+    predicted = value(
+        WeatherVariable.WIND_SPEED_KMH,
+        12,
+        aggregation_period=period,
+    )
+    observed = value(
+        WeatherVariable.WIND_SPEED_KMH,
+        10,
+        aggregation_period=period,
+    )
+
+    verification = compare(
+        candidate_forecast=forecast(predicted),
+        candidate_observation=observation(observed),
+    )
+
+    assert verification.status is ComparisonStatus.COMPARABLE
+    assert verification.reasons == ()
+    assert verification.errors[0].signed_error == 2
 
 
 @pytest.mark.parametrize(
