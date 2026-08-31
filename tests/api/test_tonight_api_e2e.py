@@ -23,7 +23,11 @@ from decision.risk.risk_report import RiskReport
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 
 
-def test_http_request_runs_real_application_composition_once(monkeypatch):
+def test_http_request_runs_real_application_composition_once(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
     reference_time = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
     calls = {
         "weather": [],

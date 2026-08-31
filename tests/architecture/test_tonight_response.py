@@ -62,6 +62,7 @@ def test_partial_results_produce_stable_transport_status(status):
 
     assert response.to_dict() == {
         "status": status.value,
+        "decision_id": None,
         "night_date": None,
         "target": None,
         "catalog_key": None,
@@ -442,6 +443,7 @@ def test_refused_weather_decision_redacts_active_transport_only():
 
     assert response == {
         "status": "weather_refused",
+        "decision_id": None,
         "night_date": "2026-09-01",
         "target": None,
         "catalog_key": None,

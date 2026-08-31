@@ -26,6 +26,9 @@ from decision.weather.weather_ingress import (
     validate_weather_freshness,
 )
 from decision.validation.decision_consistency import DecisionConsistencyError
+from decision.weather.decision_forecast_evidence_persistence import (
+    DecisionForecastEvidencePersistenceError,
+)
 from decision.validation.weather_window_coverage import (
     WeatherWindowCoverageError,
     validate_selected_window_weather_coverage,
@@ -407,6 +410,7 @@ class TonightResponseModel(BaseModel):
     scores: dict[str, float] = Field(default_factory=dict)
     window_start: str | None = None
     window_end: str | None = None
+    decision_id: str | None = None
     recommended_hours: float = 0.0
     expected_gain: float = 0.0
     equipment: list[str] = Field(default_factory=list)
@@ -425,9 +429,9 @@ class TonightResponseModel(BaseModel):
 
 
 def _production_service_factory():
-    from astro_score import build_tonight_application_service
+    from astro_score import build_durable_tonight_application_service
 
-    return build_tonight_application_service()
+    return build_durable_tonight_application_service()
 
 
 def _production_weather_provider(latitude: float, longitude: float):
@@ -677,6 +681,16 @@ def create_app(
                 detail={
                     "code": exc.code,
                     "message": "The decision failed consistency validation.",
+                },
+            ) from exc
+        except (DecisionForecastEvidencePersistenceError, OSError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "decision_persistence_unavailable",
+                    "message": (
+                        "Durable decision persistence is temporarily unavailable."
+                    ),
                 },
             ) from exc
         if result.status is TonightStatus.FORECAST_UNAVAILABLE:

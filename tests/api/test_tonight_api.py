@@ -21,10 +21,13 @@ from decision.weather.weather_ingress import (
 )
 from decision.validation.weather_window_coverage import WeatherWindowCoverageError
 from decision.validation.decision_consistency import DecisionConsistencyError
+from decision.weather.decision_forecast_evidence_persistence import (
+    DecisionForecastEvidencePersistenceError,
+)
 from decision.location.location_time import LocationTimeError
 
 
-def make_result():
+def make_result(*, decision_id=None):
     candidate = Candidate(
         name="Andromeda",
         catalog_key="M31",
@@ -56,6 +59,7 @@ def make_result():
             window_end=datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
             recommended_hours=3.5,
         ),
+        decision_id=decision_id,
     )
 
 
@@ -122,6 +126,61 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
     assert payload["catalog_key"] == "M31"
     assert payload["target_common_name"] == "Galaxie d’Andromède"
     assert payload["recommended_hours"] == 3.5
+
+
+def test_tonight_endpoint_preserves_durable_decision_id():
+    client = make_client(result=make_result(decision_id="decision-123"))
+
+    response = client.post("/v1/tonight", json={})
+
+    assert response.status_code == 200
+    assert response.json()["decision_id"] == "decision-123"
+
+
+def test_partial_tonight_result_preserves_durable_decision_id():
+    client = make_client(
+        result=TonightResult(
+            None,
+            None,
+            None,
+            status=TonightStatus.NO_MISSION,
+            decision_id="partial-123",
+        )
+    )
+
+    response = client.post("/v1/tonight", json={})
+
+    assert response.status_code == 200
+    assert response.json()["decision_id"] == "partial-123"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        DecisionForecastEvidencePersistenceError("storage_failed"),
+        OSError("filesystem unavailable"),
+    ],
+)
+def test_persistence_failure_is_a_controlled_service_error(error):
+    class Service:
+        def evaluate(self, **kwargs):
+            raise error
+
+    client = TestClient(
+        create_app(
+            service_factory=lambda: Service(),
+            weather_provider=lambda lat, lon: object(),
+            profile_provider=lambda: {},
+        )
+    )
+
+    response = client.post("/v1/tonight", json={})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "decision_persistence_unavailable",
+        "message": "Durable decision persistence is temporarily unavailable.",
+    }
 
 
 DEFAULT_WEATHER = {"weather": True}

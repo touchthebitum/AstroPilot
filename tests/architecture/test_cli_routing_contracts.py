@@ -46,7 +46,8 @@ def test_help_does_not_load_user_profile(monkeypatch):
 
 
 @pytest.fixture
-def isolated_cli(monkeypatch):
+def isolated_cli(monkeypatch, tmp_path):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(
         astro_score,
         "load_user_profile",
@@ -240,7 +241,7 @@ def test_tonight_mode_routes_application_result_without_second_forecast(
 
     monkeypatch.setattr(
         astro_score,
-        "build_tonight_application_service",
+        "build_durable_tonight_application_service",
         lambda: ApplicationService(),
     )
     monkeypatch.setattr(astro_score, "datetime", FixedDateTime)
