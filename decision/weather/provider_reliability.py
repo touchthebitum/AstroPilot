@@ -109,6 +109,15 @@ class WeatherValue:
                 or self.aggregation_period <= timedelta(0)
             ):
                 raise ValueError("precipitation_aggregation_period_required")
+        elif self.variable in (
+            WeatherVariable.WIND_SPEED_KMH,
+            WeatherVariable.WIND_GUST_KMH,
+        ):
+            if self.aggregation_period is not None and (
+                not isinstance(self.aggregation_period, timedelta)
+                or self.aggregation_period <= timedelta(0)
+            ):
+                raise ValueError("invalid_aggregation_period")
         elif self.aggregation_period is not None:
             raise ValueError("aggregation_period_not_supported")
         object.__setattr__(self, "value", numeric)
