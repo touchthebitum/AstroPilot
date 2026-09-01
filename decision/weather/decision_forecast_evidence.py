@@ -17,6 +17,7 @@ _ROW_VARIABLES = (
     ("temperature_2m", WeatherVariable.TEMPERATURE_C),
     ("relative_humidity_2m", WeatherVariable.RELATIVE_HUMIDITY_PERCENT),
     ("wind_speed_10m", WeatherVariable.WIND_SPEED_KMH),
+    ("cloud_cover", WeatherVariable.CLOUD_COVER_PERCENT),
 )
 
 

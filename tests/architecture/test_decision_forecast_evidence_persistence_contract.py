@@ -26,6 +26,7 @@ RETRIEVED_AT = datetime(2026, 8, 31, 18, tzinfo=timezone.utc)
 
 def value(variable, number, *, aggregation_period=None):
     units = {
+        WeatherVariable.CLOUD_COVER_PERCENT: "%",
         WeatherVariable.PRECIPITATION_MM: "mm",
         WeatherVariable.RELATIVE_HUMIDITY_PERCENT: "%",
         WeatherVariable.TEMPERATURE_C: "°C",
@@ -123,6 +124,38 @@ def test_root_document_is_explicit_and_versioned():
     assert payload["schema_version"] == 1
     assert payload["decision_id"] == "decision-123"
     assert isinstance(payload["forecast_evidence"]["forecast_points"], list)
+
+
+def test_cloud_cover_evidence_round_trip_is_lossless_and_schema_v1():
+    cloud_point = point(
+        value(WeatherVariable.CLOUD_COVER_PERCENT, 37.25),
+        hour=23,
+        provider="Open-Meteo",
+        model_id="best_match",
+        requested_altitude=1_200.0,
+        grid_altitude=1_245.0,
+    )
+    source = DecisionForecastEvidence((cloud_point,))
+    document = document_for(source)
+
+    restored = deserialize_decision_forecast_evidence(
+        document,
+        decision_id="decision-123",
+    )
+    payload = json.loads(document)
+
+    assert payload["schema_version"] == 1
+    assert restored == source
+    restored_point = restored.forecast_points[0]
+    assert restored_point.provider_id == "Open-Meteo"
+    assert restored_point.model_id == "best_match"
+    assert restored_point.retrieved_at_utc == RETRIEVED_AT
+    assert restored_point.forecast_for_utc == RETRIEVED_AT.replace(hour=23)
+    assert restored_point.requested_location == cloud_point.requested_location
+    assert restored_point.grid_location == cloud_point.grid_location
+    assert restored_point.values == (
+        value(WeatherVariable.CLOUD_COVER_PERCENT, 37.25),
+    )
 
 
 def test_empty_evidence_round_trip_is_supported():
