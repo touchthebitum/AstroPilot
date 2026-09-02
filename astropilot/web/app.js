@@ -305,6 +305,9 @@ function showMessage(title, body, { kicker = "Décision indisponible", retry = t
 
 function normalizeError(response, payload) {
   const detail = payload?.detail;
+  if (payload?.error === "user_profile_unavailable") {
+    return ["Configuration requise", "AstroPilot n’est pas encore configuré. Un profil utilisateur valide est requis. Vérifiez ASTROPILOT_DATA_DIR et user_profile.json."];
+  }
   if (response.status === 503) {
     if (detail?.code === "weather_unavailable") {
       return ["Météo temporairement indisponible", "AstroPilot ne peut pas encore lire les conditions de votre site. Réessayez dans un instant."];

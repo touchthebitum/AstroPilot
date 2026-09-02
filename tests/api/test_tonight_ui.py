@@ -81,6 +81,9 @@ def test_tonight_ui_assets_are_served():
     assert "no_productive_window" in script.text
     assert 'detail?.code === "decision_invalid"' in script.text
     assert 'detail?.code === "location_timezone_unresolved"' in script.text
+    assert 'payload?.error === "user_profile_unavailable"' in script.text
+    assert "Un profil utilisateur valide est requis" in script.text
+    assert "ASTROPILOT_DATA_DIR et user_profile.json" in script.text
     assert "weatherTrust.timezone" in script.text
     assert "productive_hours ?? decision.recommended_hours" in script.text
     assert "showModal()" in script.text

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import astropilot.app as app_module
 from astropilot.app import create_app
+from astropilot.user_profile import UserProfileError
 from decision.mission.night_mission import NightMission
 from decision.models.candidate import Candidate
 from decision.opportunity.action import Action
@@ -61,6 +62,36 @@ def make_result(*, decision_id=None):
         ),
         decision_id=decision_id,
     )
+
+
+@pytest.mark.parametrize(
+    "profile_error",
+    [
+        UserProfileError("Profil utilisateur introuvable"),
+        UserProfileError("Profil utilisateur JSON invalide"),
+        UserProfileError("Structure de profil invalide"),
+    ],
+)
+def test_user_profile_error_is_a_controlled_service_error(profile_error):
+    def unavailable_profile():
+        raise profile_error
+
+    app = create_app(
+        service_factory=lambda: None,
+        weather_provider=lambda lat, lon: object(),
+        profile_provider=unavailable_profile,
+    )
+
+    response = TestClient(app).post("/v1/tonight", json={})
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": "user_profile_unavailable",
+        "message": (
+            "AstroPilot requires a valid user_profile.json. "
+            "Check ASTROPILOT_DATA_DIR and the profile contents."
+        ),
+    }
 
 
 def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():

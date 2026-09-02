@@ -5,10 +5,11 @@ from pathlib import Path
 from typing import Callable, Literal
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from astropilot.user_profile import UserProfileError
 from decision.services.tonight_application_service import TonightStatus
 from decision.services.tonight_response import TonightResponse
 from decision.weather.provider_reliability import WeatherLocation
@@ -600,7 +601,19 @@ def create_app(
     )
     def tonight(request: TonightRequest):
         reference_time_utc = clock()
-        profile = dict(profile_provider())
+        try:
+            profile = dict(profile_provider())
+        except UserProfileError:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "user_profile_unavailable",
+                    "message": (
+                        "AstroPilot requires a valid user_profile.json. "
+                        "Check ASTROPILOT_DATA_DIR and the profile contents."
+                    ),
+                },
+            )
         profile.update(request.profile)
         if request.location is not None:
             profile["location"] = request.location.model_dump()
