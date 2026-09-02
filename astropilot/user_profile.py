@@ -1,9 +1,14 @@
+import copy
 import json
 import math
 import os
+import sys
+import tempfile
+from collections.abc import Mapping
 from datetime import date
 from pathlib import Path
 
+from astropilot.catalog import CATALOG
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -389,6 +394,144 @@ def validate_user_profile(profile, profile_path: Path):
             )
 
     return profile
+
+
+def create_or_replace_user_configuration(
+    candidate: Mapping[str, object],
+) -> dict:
+    if not isinstance(candidate, Mapping):
+        raise UserProfileError(
+            "Configuration utilisateur V1 invalide : mapping attendu."
+        )
+
+    try:
+        normalized = copy.deepcopy(dict(candidate))
+    except Exception as error:
+        raise UserProfileError(
+            "Configuration utilisateur V1 invalide : "
+            "le candidat ne peut pas être copié et normalisé."
+        ) from error
+
+    if "setups" in normalized:
+        raise UserProfileError(
+            "Configuration utilisateur V1 invalide : "
+            "le champ legacy 'setups' n'est pas accepté."
+        )
+
+    if "location" not in normalized:
+        raise UserProfileError(
+            "Configuration utilisateur V1 invalide : location requise."
+        )
+
+    preferences = normalized.get("preferences")
+    if not isinstance(preferences, Mapping):
+        raise UserProfileError(
+            "Configuration utilisateur V1 invalide : preferences requis."
+        )
+    if "bortle" not in preferences:
+        raise UserProfileError(
+            "Configuration utilisateur V1 invalide : "
+            "preferences.bortle requis."
+        )
+
+    available_equipment = normalized.get("available_equipment")
+    if not isinstance(available_equipment, list) or not available_equipment:
+        raise UserProfileError(
+            "Configuration utilisateur V1 invalide : "
+            "available_equipment doit contenir au moins un équipement."
+        )
+
+    if "active_equipment" not in normalized:
+        raise UserProfileError(
+            "Configuration utilisateur V1 invalide : "
+            "active_equipment requis."
+        )
+
+    projects = normalized.get("projects")
+    if not isinstance(projects, Mapping) or not projects:
+        raise UserProfileError(
+            "Configuration utilisateur V1 invalide : "
+            "projects doit contenir au moins un projet."
+        )
+
+    normalized_projects = {}
+    for project_id, project in projects.items():
+        catalog_entry = CATALOG.get(project_id)
+        if (
+            catalog_entry is None
+            or "ra" not in catalog_entry
+            or "dec" not in catalog_entry
+        ):
+            raise UserProfileError(
+                "Configuration utilisateur V1 invalide : "
+                f"projet inconnu ou inutilisable ({project_id!r})."
+            )
+        if not isinstance(project, Mapping):
+            raise UserProfileError(
+                "Configuration utilisateur V1 invalide : "
+                f"projet {project_id!r} doit être un mapping."
+            )
+        if "target_hours" not in project:
+            raise UserProfileError(
+                "Configuration utilisateur V1 invalide : "
+                f"projects[{project_id!r}].target_hours requis."
+            )
+
+        normalized_project = copy.deepcopy(dict(project))
+        normalized_project.setdefault("hours", 0)
+        normalized_projects[project_id] = normalized_project
+
+    normalized["projects"] = normalized_projects
+    normalized.setdefault("sessions", [])
+
+    validate_user_profile(normalized, Path("user_profile.json"))
+
+    try:
+        document = json.dumps(
+            normalized,
+            indent=4,
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        if json.loads(document) != normalized:
+            raise TypeError("configuration changes during JSON serialization")
+    except (TypeError, ValueError) as error:
+        raise UserProfileError(
+            "Configuration utilisateur V1 invalide : "
+            "document JSON non sérialisable."
+        ) from error
+
+    data_dir = get_user_data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    profile_path = data_dir / "user_profile.json"
+    temporary_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=data_dir,
+            prefix=".user_profile.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(document)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+
+        os.replace(temporary_path, profile_path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            primary_error = sys.exception()
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                if primary_error is None:
+                    raise
+
+    return normalized
 
 
 def load_user_profile():
