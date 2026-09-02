@@ -80,8 +80,10 @@ def test_decision_context_uses_selected_project_state(
             ],
         },
         illumination=0.3,
+        site_name="Mont Sujet",
         lat=46.7508,
         lon=6.5495,
+        bortle=6,
     )
 
     assert context.portfolio.active_projects == 2
@@ -92,6 +94,10 @@ def test_decision_context_uses_selected_project_state(
     assert context.portfolio.night_capacity_source == "history"
     assert context.portfolio.historical_nights == 3
     assert context.preferences.minimum_altitude_deg == 42
+    assert context.site.name == "Mont Sujet"
+    assert context.site.latitude == 46.7508
+    assert context.site.longitude == 6.5495
+    assert context.site.bortle == 6
 
 def test_decision_context_session_times_are_timezone_aware():
     context = astro_score.build_decision_context(
@@ -126,8 +132,10 @@ def test_decision_context_session_times_are_timezone_aware():
             }
         },
         illumination=0.3,
+        site_name="La Chaux-de-Fonds",
         lat=46.7508,
         lon=6.5495,
+        bortle=3,
     )
 
     assert context.portfolio.productive_hours_per_night == 4.0

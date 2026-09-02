@@ -1138,8 +1138,10 @@ def build_decision_context(
     selected_setup_profile,
     profile,
     illumination,
+    site_name,
     lat,
     lon,
+    bortle,
 ):
     clouds = best.get("clouds", 0)
 
@@ -1199,11 +1201,11 @@ def build_decision_context(
     )
 
     site_context = SiteContext(
-        name="Buttes",
+        name=site_name,
         latitude=lat,
         longitude=lon,
         elevation=0,
-        bortle=profile.get("preferences", {}).get("bortle", 4),
+        bortle=bortle,
         timezone=getattr(session_zone, "key", str(session_zone)),
         sqm=best.get("sqm"),
     )
@@ -1491,8 +1493,10 @@ def evaluate_object(
         selected_setup_profile=selected_setup_profile,
         profile=profile,
         illumination=illumination,
+        site_name=city_info.name,
         lat=lat,
         lon=lon,
+        bortle=bortle,
     )
 
     contributions, _ = decision_engine.evaluate(
@@ -2098,11 +2102,7 @@ def main(argv=None) -> int:
         )
         return 0
 
-    location = profile.get("location", {
-        "name": "Buttes",
-        "latitude": 46.7508,
-        "longitude": 6.5495,
-    })
+    location = profile["location"]
     lat = location["latitude"]
     lon = location["longitude"]
     city = location["name"]
@@ -2126,7 +2126,7 @@ def main(argv=None) -> int:
                 equipment=args.equipment,
                 goal=args.goal,
                 target=TARGET,
-                bortle=3,
+                bortle=profile["preferences"]["bortle"],
             )
         except (DecisionForecastEvidencePersistenceError, OSError):
             parser.exit(
@@ -2142,7 +2142,7 @@ def main(argv=None) -> int:
             lat,
             lon,
             city,
-            bortle=3,
+            bortle=profile["preferences"]["bortle"],
             target=TARGET,
             equipment=args.equipment,
             goal=args.goal,

@@ -38,7 +38,7 @@ from decision.location.location_time import LocationTimeError
 
 
 class LocationRequest(BaseModel):
-    name: str = "Buttes"
+    name: str
     latitude: float = Field(ge=-90.0, le=90.0)
     longitude: float = Field(ge=-180.0, le=180.0)
 
@@ -82,7 +82,7 @@ class TonightRequest(BaseModel):
         "moon",
         "nightscape",
     ] = "deep_sky"
-    bortle: int = Field(default=3, ge=1, le=9)
+    bortle: int | None = Field(default=None, ge=1, le=9)
 
 
 class TonightReasonModel(BaseModel):
@@ -637,6 +637,11 @@ def create_app(
                 },
             ) from exc
         profile["location"] = location
+        effective_bortle = (
+            request.bortle
+            if request.bortle is not None
+            else profile.get("preferences", {}).get("bortle", 3)
+        )
 
         weather_freshness: WeatherFreshness | None = None
         try:
@@ -686,7 +691,7 @@ def create_app(
                 equipment=request.equipment,
                 goal=request.goal,
                 target=request.target,
-                bortle=request.bortle,
+                bortle=effective_bortle,
             )
         except DecisionConsistencyError as exc:
             raise HTTPException(

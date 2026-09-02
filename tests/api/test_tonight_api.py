@@ -110,7 +110,14 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
         weather_provider=lambda lat, lon: (
             weather_calls.append((lat, lon)) or weather
         ),
-        profile_provider=lambda: {},
+        profile_provider=lambda: {
+            "location": {
+                "name": "Profile site",
+                "latitude": 46.2,
+                "longitude": 7.1,
+            },
+            "preferences": {"bortle": 6},
+        },
         clock=lambda: reference_time,
     )
 
@@ -135,6 +142,7 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
     assert evaluation_calls == [
         {
             "profile": {
+                "preferences": {"bortle": 6},
                 "projects": {"M31": {"hours": 2}},
                 "location": {
                     "name": "La Chaux-de-Fonds",
@@ -157,6 +165,33 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
     assert payload["catalog_key"] == "M31"
     assert payload["target_common_name"] == "Galaxie d’Andromède"
     assert payload["recommended_hours"] == 3.5
+
+
+def test_tonight_uses_profile_bortle_without_request_override():
+    evaluation_calls = []
+
+    class Service:
+        def evaluate(self, **kwargs):
+            evaluation_calls.append(kwargs)
+            return make_result()
+
+    app = create_app(
+        service_factory=lambda: Service(),
+        weather_provider=lambda lat, lon: object(),
+        profile_provider=lambda: {
+            "location": {
+                "name": "Mont Sujet",
+                "latitude": 47.12,
+                "longitude": 7.04,
+            },
+            "preferences": {"bortle": 6},
+        },
+    )
+
+    response = TestClient(app).post("/v1/tonight", json={})
+
+    assert response.status_code == 200
+    assert evaluation_calls[0]["bortle"] == 6
 
 
 def test_tonight_endpoint_preserves_durable_decision_id():
@@ -609,6 +644,17 @@ def test_request_coordinates_and_bortle_are_validated():
             },
             "bortle": 12,
         },
+    )
+
+    assert response.status_code == 422
+
+
+def test_explicit_location_requires_an_explicit_name():
+    client = make_client(result=make_result())
+
+    response = client.post(
+        "/v1/tonight",
+        json={"location": {"latitude": 47.1, "longitude": 6.8}},
     )
 
     assert response.status_code == 422

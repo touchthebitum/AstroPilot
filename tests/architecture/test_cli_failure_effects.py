@@ -24,7 +24,7 @@ def isolated_cli_failures(monkeypatch, tmp_path):
                 "longitude": 6.6,
                 "name": "Buttes",
             },
-            "preferences": {},
+            "preferences": {"bortle": 6},
             "sessions": [],
         },
     )

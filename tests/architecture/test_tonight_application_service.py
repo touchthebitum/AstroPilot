@@ -1,5 +1,7 @@
 from datetime import date, datetime, timezone
 
+import pytest
+
 from decision.forecast.forecast_run import ForecastRun
 from decision.mission.night_mission import NightMission
 from decision.night_productivity.night_productivity_result import NightProductivityResult
@@ -95,6 +97,20 @@ def make_service(
         build_mission_input=build_mission_input,
     )
     return service, recommendation_service, mission_service
+
+
+def test_evaluate_requires_explicit_bortle_keyword():
+    service, _, _ = make_service(
+        forecast_nights=lambda *args, **kwargs: forecast_run([]),
+        build_candidates=lambda *args, **kwargs: [],
+    )
+
+    with pytest.raises(TypeError, match="bortle"):
+        service.evaluate(
+            profile={},
+            weather=object(),
+            reference_time_utc=REFERENCE_TIME,
+        )
 
 
 def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
@@ -243,6 +259,7 @@ def test_location_defaults_match_current_cli_policy():
         profile=profile,
         weather=weather,
         reference_time_utc=REFERENCE_TIME,
+        bortle=3,
     )
 
     assert calls == [
@@ -277,7 +294,10 @@ def test_no_forecast_nights_stops_all_downstream_work():
     )
 
     result = service.evaluate(
-        profile={}, weather=object(), reference_time_utc=REFERENCE_TIME
+        profile={},
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=3,
     )
 
     assert result == TonightResult(
@@ -299,7 +319,10 @@ def test_unavailable_forecast_is_distinct_from_empty_forecast():
     )
 
     result = service.evaluate(
-        profile={}, weather=object(), reference_time_utc=REFERENCE_TIME
+        profile={},
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=3,
     )
 
     assert result == TonightResult(
@@ -320,7 +343,10 @@ def test_no_candidates_preserves_night_and_skips_downstream_services():
     )
 
     result = service.evaluate(
-        profile={}, weather=object(), reference_time_utc=REFERENCE_TIME
+        profile={},
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=3,
     )
 
     assert result == TonightResult(
@@ -344,7 +370,10 @@ def test_no_recommendation_preserves_night_and_skips_mission():
     )
 
     result = service.evaluate(
-        profile={}, weather=object(), reference_time_utc=REFERENCE_TIME
+        profile={},
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=3,
     )
 
     assert result == TonightResult(
@@ -371,7 +400,10 @@ def test_missing_mission_preserves_exact_night_and_recommendation():
     )
 
     result = service.evaluate(
-        profile={}, weather=object(), reference_time_utc=REFERENCE_TIME
+        profile={},
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=3,
     )
 
     assert result.night is night
@@ -411,7 +443,10 @@ def test_night_without_a_productive_window_is_not_available():
     )
 
     result = service.evaluate(
-        profile={}, weather=object(), reference_time_utc=REFERENCE_TIME
+        profile={},
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=3,
     )
 
     assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW

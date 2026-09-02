@@ -59,6 +59,7 @@ def isolated_cli(monkeypatch, tmp_path):
                 "name": "Buttes",
             },
             "preferences": {
+                "bortle": 6,
                 "productive_hours_per_night": 3.5,
                 "observing_nights_per_week": 2.0,
             },
@@ -267,6 +268,7 @@ def test_tonight_mode_routes_application_result_without_second_forecast(
                     "name": "Buttes",
                 },
                 "preferences": {
+                    "bortle": 6,
                     "productive_hours_per_night": 3.5,
                     "observing_nights_per_week": 2.0,
                 },
@@ -277,7 +279,7 @@ def test_tonight_mode_routes_application_result_without_second_forecast(
             "equipment": None,
             "goal": "balanced",
             "target": astro_score.TARGET,
-            "bortle": 3,
+            "bortle": 6,
         }
     ]
     assert forecast_cli.calls[0] == ("mission", mission)
