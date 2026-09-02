@@ -15,6 +15,7 @@ from decision.services.tonight_application_service import (
     TonightResult,
     TonightStatus,
 )
+import decision.services.tonight_application_service as tonight_service_module
 from decision.weather.weather_ingress import (
     WeatherIngressError,
     WeatherInsufficientError,
@@ -133,7 +134,7 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
                 "latitude": 47.1,
                 "longitude": 6.8,
             },
-            "equipment": "portable",
+            "equipment": "samyang_183",
             "goal": "galaxies",
             "target": "deep_sky",
             "bortle": 4,
@@ -157,7 +158,7 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
             },
             "weather": weather,
             "reference_time_utc": reference_time,
-            "equipment": "portable",
+            "equipment": "samyang_183",
             "goal": "galaxies",
             "target": "deep_sky",
             "bortle": 4,
@@ -654,6 +655,42 @@ def test_request_coordinates_and_bortle_are_validated():
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize("equipment", ["fra400_2600", "not_a_setup"])
+def test_invalid_tonight_equipment_is_a_stable_unprocessable_request(equipment):
+    class Service:
+        def evaluate(self, **kwargs):
+            raise tonight_service_module.TonightEquipmentSelectionError(
+                "invalid_tonight_equipment"
+            )
+
+    client = TestClient(
+        create_app(
+            service_factory=lambda: Service(),
+            weather_provider=lambda lat, lon: object(),
+            profile_provider=lambda: {
+                "location": {
+                    "name": "Buttes",
+                    "latitude": 46.7508,
+                    "longitude": 6.5495,
+                },
+                "preferences": {"bortle": 3},
+                "active_equipment": "samyang_183",
+                "available_equipment": ["samyang_183"],
+            },
+        )
+    )
+
+    response = client.post("/v1/tonight", json={"equipment": equipment})
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": {
+            "code": "invalid_tonight_equipment",
+            "message": "The requested equipment is unknown or unavailable.",
+        }
+    }
+
+
 def test_explicit_location_requires_an_explicit_name():
     client = make_client(result=make_result())
 
@@ -755,6 +792,7 @@ def test_openapi_documents_tonight_request_and_available_response_examples():
     }
     assert request_example["goal"] == "balanced"
     assert request_example["target"] == "deep_sky"
+    assert request_example["equipment"] == "samyang_183"
 
     response_example = schemas["TonightResponseModel"]["examples"][0]
     assert response_example["status"] == "available"

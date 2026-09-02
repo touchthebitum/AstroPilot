@@ -177,7 +177,8 @@ def test_http_request_runs_real_application_composition_once(
     def load_profile():
         profile_loads.append(True)
         return {
-            "available_equipment": ["widefield"],
+            "active_equipment": "samyang_183",
+            "available_equipment": ["samyang_183", "fra400_2600"],
             "projects": {"M31": {"hours": 2}},
         }
 
@@ -201,7 +202,7 @@ def test_http_request_runs_real_application_composition_once(
                 "latitude": 47.1,
                 "longitude": 6.8,
             },
-            "equipment": "portable",
+            "equipment": "fra400_2600",
             "goal": "galaxies",
             "bortle": 4,
         },
@@ -211,13 +212,20 @@ def test_http_request_runs_real_application_composition_once(
     assert profile_loads == [True]
     assert calls["weather"] == [(47.1, 6.8)]
     assert len(calls["forecast"]) == 1
-    assert calls["forecast"][0][1]["reference_time_utc"] is reference_time
+    forecast_kwargs = calls["forecast"][0][1]
+    assert forecast_kwargs["reference_time_utc"] is reference_time
+    assert forecast_kwargs["profile"]["active_equipment"] == "fra400_2600"
+    assert forecast_kwargs["profile"]["available_equipment"] == [
+        "fra400_2600"
+    ]
+    assert "equipment" not in forecast_kwargs
     assert calls["candidates"] == [
         (
             selected_objects,
             3.5,
             {
-                "available_equipment": ["widefield"],
+                "active_equipment": "fra400_2600",
+                "available_equipment": ["fra400_2600"],
                 "projects": {"M31": {"hours": 2}},
                 "location": {
                     "name": "La Chaux-de-Fonds",

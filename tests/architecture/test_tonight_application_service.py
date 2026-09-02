@@ -2,6 +2,8 @@ from datetime import date, datetime, timezone
 
 import pytest
 
+import decision.services.tonight_application_service as tonight_service_module
+
 from decision.forecast.forecast_run import ForecastRun
 from decision.mission.night_mission import NightMission
 from decision.night_productivity.night_productivity_result import NightProductivityResult
@@ -20,6 +22,13 @@ from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 
 FORECAST_EVIDENCE = DecisionForecastEvidence(())
 REFERENCE_TIME = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
+
+
+def make_profile(*, available_equipment=None, active_equipment="samyang_183"):
+    return {
+        "active_equipment": active_equipment,
+        "available_equipment": available_equipment or [active_equipment],
+    }
 
 
 def forecast_run(nights):
@@ -115,12 +124,15 @@ def test_evaluate_requires_explicit_bortle_keyword():
 
 def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
     profile = {
+        "active_equipment": "samyang_183",
+        "available_equipment": ["samyang_183", "fra400_2600"],
         "location": {
             "name": "La Chaux-de-Fonds",
             "latitude": 47.1,
             "longitude": 6.8,
         }
     }
+    original_available = profile["available_equipment"]
     weather = object()
     later_objects = [{"catalog_key": "M42"}]
     selected_objects = [
@@ -198,7 +210,7 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
         profile=profile,
         weather=weather,
         reference_time_utc=REFERENCE_TIME,
-        equipment="portable",
+        equipment="fra400_2600",
         goal="galaxies",
         target="deep_sky",
         bortle=4,
@@ -209,15 +221,26 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
             (47.1, 6.8, "La Chaux-de-Fonds", 4),
             {
                 "target": "deep_sky",
-                "equipment": "portable",
                 "goal": "galaxies",
                 "weather": weather,
-                "profile": profile,
+                "profile": {
+                    **profile,
+                    "active_equipment": "fra400_2600",
+                    "available_equipment": ["fra400_2600"],
+                },
                 "reference_time_utc": REFERENCE_TIME,
             },
         )
     ]
-    assert candidate_calls == [(selected_objects, 4.25, profile)]
+    effective_profile = {
+        **profile,
+        "active_equipment": "fra400_2600",
+        "available_equipment": ["fra400_2600"],
+    }
+    assert candidate_calls == [(selected_objects, 4.25, effective_profile)]
+    forecast_profile = forecast_calls[0][1]["profile"]
+    assert forecast_profile is not profile
+    assert forecast_profile["location"] is profile["location"]
     assert recommendation_service.calls == [candidates]
     assert mission_service.calls[0]["winner"] is selected
     assert mission_service.calls[0]["objects"] is selected_objects
@@ -225,8 +248,11 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
     evaluation = object()
     assert mission_service.calls[0]["build_mission_input"](evaluation) == (
         evaluation,
-        profile,
+        effective_profile,
     )
+    assert profile["active_equipment"] == "samyang_183"
+    assert profile["available_equipment"] is original_available
+    assert profile["available_equipment"] == ["samyang_183", "fra400_2600"]
     assert result.night is selected
     assert result.recommendation is recommendation
     assert result.mission is mission
@@ -252,7 +278,7 @@ def test_location_defaults_match_current_cli_policy():
         forecast_nights=forecast,
         build_candidates=lambda *args, **kwargs: None,
     )
-    profile = {}
+    profile = make_profile()
     weather = object()
 
     result = service.evaluate(
@@ -267,10 +293,12 @@ def test_location_defaults_match_current_cli_policy():
             (46.7508, 6.5495, "Buttes", 3),
             {
                 "target": "deep_sky",
-                "equipment": None,
                 "goal": "balanced",
                 "weather": weather,
-                "profile": profile,
+                "profile": {
+                    **profile,
+                    "available_equipment": ["samyang_183"],
+                },
                 "reference_time_utc": REFERENCE_TIME,
             },
         )
@@ -294,7 +322,7 @@ def test_no_forecast_nights_stops_all_downstream_work():
     )
 
     result = service.evaluate(
-        profile={},
+        profile=make_profile(),
         weather=object(),
         reference_time_utc=REFERENCE_TIME,
         bortle=3,
@@ -319,7 +347,7 @@ def test_unavailable_forecast_is_distinct_from_empty_forecast():
     )
 
     result = service.evaluate(
-        profile={},
+        profile=make_profile(),
         weather=object(),
         reference_time_utc=REFERENCE_TIME,
         bortle=3,
@@ -343,7 +371,7 @@ def test_no_candidates_preserves_night_and_skips_downstream_services():
     )
 
     result = service.evaluate(
-        profile={},
+        profile=make_profile(),
         weather=object(),
         reference_time_utc=REFERENCE_TIME,
         bortle=3,
@@ -370,7 +398,7 @@ def test_no_recommendation_preserves_night_and_skips_mission():
     )
 
     result = service.evaluate(
-        profile={},
+        profile=make_profile(),
         weather=object(),
         reference_time_utc=REFERENCE_TIME,
         bortle=3,
@@ -400,7 +428,7 @@ def test_missing_mission_preserves_exact_night_and_recommendation():
     )
 
     result = service.evaluate(
-        profile={},
+        profile=make_profile(),
         weather=object(),
         reference_time_utc=REFERENCE_TIME,
         bortle=3,
@@ -443,7 +471,7 @@ def test_night_without_a_productive_window_is_not_available():
     )
 
     result = service.evaluate(
-        profile={},
+        profile=make_profile(),
         weather=object(),
         reference_time_utc=REFERENCE_TIME,
         bortle=3,
@@ -452,3 +480,62 @@ def test_night_without_a_productive_window_is_not_available():
     assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW
     assert result.mission is mission
     assert result.forecast_evidence is FORECAST_EVIDENCE
+
+
+@pytest.mark.parametrize(
+    "available_equipment",
+    [
+        ["samyang_183"],
+        ["samyang_183", "fra400_2600"],
+    ],
+)
+def test_active_equipment_is_the_only_setup_exposed_to_tonight_forecast(
+    available_equipment,
+):
+    calls = []
+    profile = make_profile(available_equipment=available_equipment)
+    original_available = profile["available_equipment"]
+    service, _, _ = make_service(
+        forecast_nights=lambda *args, **kwargs: (
+            calls.append(kwargs) or forecast_run([])
+        ),
+        build_candidates=lambda *args, **kwargs: [],
+    )
+
+    service.evaluate(
+        profile=profile,
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        equipment=None,
+        bortle=3,
+    )
+
+    assert calls[0]["profile"]["active_equipment"] == "samyang_183"
+    assert calls[0]["profile"]["available_equipment"] == ["samyang_183"]
+    assert "equipment" not in calls[0]
+    assert profile["available_equipment"] is original_available
+    assert profile["available_equipment"] == available_equipment
+
+
+@pytest.mark.parametrize("requested_equipment", ["fra400_2600", "not_a_setup"])
+def test_unavailable_or_unknown_override_is_rejected_before_forecast(
+    requested_equipment,
+):
+    service, _, _ = make_service(
+        forecast_nights=lambda *args, **kwargs: pytest.fail(
+            "forecast must not run for invalid equipment"
+        ),
+        build_candidates=lambda *args, **kwargs: [],
+    )
+
+    with pytest.raises(
+        tonight_service_module.TonightEquipmentSelectionError,
+        match="invalid_tonight_equipment",
+    ):
+        service.evaluate(
+            profile=make_profile(),
+            weather=object(),
+            reference_time_utc=REFERENCE_TIME,
+            equipment=requested_equipment,
+            bortle=3,
+        )

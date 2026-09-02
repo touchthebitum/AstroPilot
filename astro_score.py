@@ -6,6 +6,7 @@ from decision.services.tonight_mission_service import (
     TonightMissionService,
 )
 from decision.services.tonight_application_service import (
+    TonightEquipmentSelectionError,
     TonightApplicationService,
 )
 from decision.services.durable_tonight_application_service import (
@@ -2127,6 +2128,12 @@ def main(argv=None) -> int:
                 goal=args.goal,
                 target=TARGET,
                 bortle=profile["preferences"]["bortle"],
+            )
+        except TonightEquipmentSelectionError:
+            parser.exit(
+                2,
+                "Erreur matériel : le setup demandé est inconnu ou "
+                "indisponible.\n",
             )
         except (DecisionForecastEvidencePersistenceError, OSError):
             parser.exit(
