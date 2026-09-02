@@ -62,7 +62,7 @@ class TonightApplicationService:
         equipment=None,
         goal="balanced",
         target="deep_sky",
-        bortle=3,
+        bortle,
     ) -> TonightResult:
         location = profile.get(
             "location",

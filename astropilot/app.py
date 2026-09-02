@@ -5,10 +5,11 @@ from pathlib import Path
 from typing import Callable, Literal
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from astropilot.user_profile import UserProfileError
 from decision.services.tonight_application_service import TonightStatus
 from decision.services.tonight_response import TonightResponse
 from decision.weather.provider_reliability import WeatherLocation
@@ -37,13 +38,14 @@ from decision.location.location_time import LocationTimeError
 
 
 class LocationRequest(BaseModel):
-    name: str = "Buttes"
+    name: str
     latitude: float = Field(ge=-90.0, le=90.0)
     longitude: float = Field(ge=-180.0, le=180.0)
 
 
 class TonightRequest(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "examples": [
                 {
@@ -52,7 +54,6 @@ class TonightRequest(BaseModel):
                         "latitude": 46.7508,
                         "longitude": 6.5495,
                     },
-                    "profile": {},
                     "equipment": "widefield",
                     "goal": "balanced",
                     "target": "deep_sky",
@@ -63,7 +64,6 @@ class TonightRequest(BaseModel):
     )
 
     location: LocationRequest | None = None
-    profile: dict = Field(default_factory=dict)
     equipment: str | None = None
     goal: Literal[
         "balanced",
@@ -81,7 +81,7 @@ class TonightRequest(BaseModel):
         "moon",
         "nightscape",
     ] = "deep_sky"
-    bortle: int = Field(default=3, ge=1, le=9)
+    bortle: int | None = Field(default=None, ge=1, le=9)
 
 
 class TonightReasonModel(BaseModel):
@@ -600,8 +600,19 @@ def create_app(
     )
     def tonight(request: TonightRequest):
         reference_time_utc = clock()
-        profile = dict(profile_provider())
-        profile.update(request.profile)
+        try:
+            profile = dict(profile_provider())
+        except UserProfileError:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "user_profile_unavailable",
+                    "message": (
+                        "AstroPilot requires a valid user_profile.json. "
+                        "Check ASTROPILOT_DATA_DIR and the profile contents."
+                    ),
+                },
+            )
         if request.location is not None:
             profile["location"] = request.location.model_dump()
 
@@ -624,6 +635,11 @@ def create_app(
                 },
             ) from exc
         profile["location"] = location
+        effective_bortle = (
+            request.bortle
+            if request.bortle is not None
+            else profile.get("preferences", {}).get("bortle", 3)
+        )
 
         weather_freshness: WeatherFreshness | None = None
         try:
@@ -673,7 +689,7 @@ def create_app(
                 equipment=request.equipment,
                 goal=request.goal,
                 target=request.target,
-                bortle=request.bortle,
+                bortle=effective_bortle,
             )
         except DecisionConsistencyError as exc:
             raise HTTPException(

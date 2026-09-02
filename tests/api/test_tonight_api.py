@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import astropilot.app as app_module
 from astropilot.app import create_app
+from astropilot.user_profile import UserProfileError
 from decision.mission.night_mission import NightMission
 from decision.models.candidate import Candidate
 from decision.opportunity.action import Action
@@ -63,11 +64,52 @@ def make_result(*, decision_id=None):
     )
 
 
+@pytest.mark.parametrize(
+    "profile_error",
+    [
+        UserProfileError("Profil utilisateur introuvable"),
+        UserProfileError("Profil utilisateur JSON invalide"),
+        UserProfileError("Structure de profil invalide"),
+    ],
+)
+def test_user_profile_error_is_a_controlled_service_error(profile_error):
+    def unavailable_profile():
+        raise profile_error
+
+    app = create_app(
+        service_factory=lambda: None,
+        weather_provider=lambda lat, lon: object(),
+        profile_provider=unavailable_profile,
+    )
+
+    response = TestClient(app).post("/v1/tonight", json={})
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": "user_profile_unavailable",
+        "message": (
+            "AstroPilot requires a valid user_profile.json. "
+            "Check ASTROPILOT_DATA_DIR and the profile contents."
+        ),
+    }
+
+
 def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
     weather = object()
     reference_time = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
     weather_calls = []
     evaluation_calls = []
+    persisted_profile = {
+        "location": {
+            "name": "Profile site",
+            "latitude": 46.2,
+            "longitude": 7.1,
+        },
+        "preferences": {"bortle": 6},
+        "available_equipment": ["samyang_183"],
+        "active_equipment": "samyang_183",
+        "projects": {"M31": {"target_hours": 2}},
+    }
 
     class Service:
         def evaluate(self, **kwargs):
@@ -79,7 +121,7 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
         weather_provider=lambda lat, lon: (
             weather_calls.append((lat, lon)) or weather
         ),
-        profile_provider=lambda: {},
+        profile_provider=lambda: persisted_profile,
         clock=lambda: reference_time,
     )
 
@@ -91,7 +133,6 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
                 "latitude": 47.1,
                 "longitude": 6.8,
             },
-            "profile": {"projects": {"M31": {"hours": 2}}},
             "equipment": "portable",
             "goal": "galaxies",
             "target": "deep_sky",
@@ -104,7 +145,10 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
     assert evaluation_calls == [
         {
             "profile": {
-                "projects": {"M31": {"hours": 2}},
+                "preferences": {"bortle": 6},
+                "available_equipment": ["samyang_183"],
+                "active_equipment": "samyang_183",
+                "projects": {"M31": {"target_hours": 2}},
                 "location": {
                     "name": "La Chaux-de-Fonds",
                     "latitude": 47.1,
@@ -126,6 +170,33 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
     assert payload["catalog_key"] == "M31"
     assert payload["target_common_name"] == "Galaxie d’Andromède"
     assert payload["recommended_hours"] == 3.5
+
+
+def test_tonight_uses_profile_bortle_without_request_override():
+    evaluation_calls = []
+
+    class Service:
+        def evaluate(self, **kwargs):
+            evaluation_calls.append(kwargs)
+            return make_result()
+
+    app = create_app(
+        service_factory=lambda: Service(),
+        weather_provider=lambda lat, lon: object(),
+        profile_provider=lambda: {
+            "location": {
+                "name": "Mont Sujet",
+                "latitude": 47.12,
+                "longitude": 7.04,
+            },
+            "preferences": {"bortle": 6},
+        },
+    )
+
+    response = TestClient(app).post("/v1/tonight", json={})
+
+    assert response.status_code == 200
+    assert evaluation_calls[0]["bortle"] == 6
 
 
 def test_tonight_endpoint_preserves_durable_decision_id():
@@ -583,16 +654,26 @@ def test_request_coordinates_and_bortle_are_validated():
     assert response.status_code == 422
 
 
-def test_invalid_location_embedded_in_profile_is_rejected():
+def test_explicit_location_requires_an_explicit_name():
     client = make_client(result=make_result())
 
     response = client.post(
         "/v1/tonight",
-        json={"profile": {"location": {"name": "Incomplete"}}},
+        json={"location": {"latitude": 47.1, "longitude": 6.8}},
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"]["code"] == "invalid_profile_location"
+
+
+def test_unknown_profile_field_is_rejected():
+    client = make_client(result=make_result())
+
+    response = client.post(
+        "/v1/tonight",
+        json={"profile": {"projects": {}}},
+    )
+
+    assert response.status_code == 422
 
 
 def test_openapi_schema_exposes_decision_intelligence_contracts():
@@ -664,6 +745,9 @@ def test_openapi_documents_tonight_request_and_available_response_examples():
     schemas = schema["components"]["schemas"]
 
     request_example = schemas["TonightRequest"]["examples"][0]
+    request_properties = schemas["TonightRequest"]["properties"]
+    assert "profile" not in request_properties
+    assert "profile" not in request_example
     assert request_example["location"] == {
         "name": "Buttes",
         "latitude": 46.7508,

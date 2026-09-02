@@ -18,6 +18,12 @@ def test_installed_package_exposes_astropilot_command():
     }
 
 
+def test_installed_runtime_declares_uvicorn_for_api_and_ui_serving():
+    dependencies = _pyproject()["project"]["dependencies"]
+
+    assert "uvicorn>=0.52,<1.0" in dependencies
+
+
 def test_wheel_excludes_internal_decision_tests():
     package_finder = _pyproject()["tool"]["setuptools"]["packages"]["find"]
 
