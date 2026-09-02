@@ -99,6 +99,17 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
     reference_time = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
     weather_calls = []
     evaluation_calls = []
+    persisted_profile = {
+        "location": {
+            "name": "Profile site",
+            "latitude": 46.2,
+            "longitude": 7.1,
+        },
+        "preferences": {"bortle": 6},
+        "available_equipment": ["samyang_183"],
+        "active_equipment": "samyang_183",
+        "projects": {"M31": {"target_hours": 2}},
+    }
 
     class Service:
         def evaluate(self, **kwargs):
@@ -110,14 +121,7 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
         weather_provider=lambda lat, lon: (
             weather_calls.append((lat, lon)) or weather
         ),
-        profile_provider=lambda: {
-            "location": {
-                "name": "Profile site",
-                "latitude": 46.2,
-                "longitude": 7.1,
-            },
-            "preferences": {"bortle": 6},
-        },
+        profile_provider=lambda: persisted_profile,
         clock=lambda: reference_time,
     )
 
@@ -129,7 +133,6 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
                 "latitude": 47.1,
                 "longitude": 6.8,
             },
-            "profile": {"projects": {"M31": {"hours": 2}}},
             "equipment": "portable",
             "goal": "galaxies",
             "target": "deep_sky",
@@ -143,7 +146,9 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
         {
             "profile": {
                 "preferences": {"bortle": 6},
-                "projects": {"M31": {"hours": 2}},
+                "available_equipment": ["samyang_183"],
+                "active_equipment": "samyang_183",
+                "projects": {"M31": {"target_hours": 2}},
                 "location": {
                     "name": "La Chaux-de-Fonds",
                     "latitude": 47.1,
@@ -660,16 +665,15 @@ def test_explicit_location_requires_an_explicit_name():
     assert response.status_code == 422
 
 
-def test_invalid_location_embedded_in_profile_is_rejected():
+def test_unknown_profile_field_is_rejected():
     client = make_client(result=make_result())
 
     response = client.post(
         "/v1/tonight",
-        json={"profile": {"location": {"name": "Incomplete"}}},
+        json={"profile": {"projects": {}}},
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"]["code"] == "invalid_profile_location"
 
 
 def test_openapi_schema_exposes_decision_intelligence_contracts():
@@ -741,6 +745,9 @@ def test_openapi_documents_tonight_request_and_available_response_examples():
     schemas = schema["components"]["schemas"]
 
     request_example = schemas["TonightRequest"]["examples"][0]
+    request_properties = schemas["TonightRequest"]["properties"]
+    assert "profile" not in request_properties
+    assert "profile" not in request_example
     assert request_example["location"] == {
         "name": "Buttes",
         "latitude": 46.7508,

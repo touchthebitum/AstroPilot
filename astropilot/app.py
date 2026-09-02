@@ -45,6 +45,7 @@ class LocationRequest(BaseModel):
 
 class TonightRequest(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "examples": [
                 {
@@ -53,7 +54,6 @@ class TonightRequest(BaseModel):
                         "latitude": 46.7508,
                         "longitude": 6.5495,
                     },
-                    "profile": {},
                     "equipment": "widefield",
                     "goal": "balanced",
                     "target": "deep_sky",
@@ -64,7 +64,6 @@ class TonightRequest(BaseModel):
     )
 
     location: LocationRequest | None = None
-    profile: dict = Field(default_factory=dict)
     equipment: str | None = None
     goal: Literal[
         "balanced",
@@ -614,7 +613,6 @@ def create_app(
                     ),
                 },
             )
-        profile.update(request.profile)
         if request.location is not None:
             profile["location"] = request.location.model_dump()
 

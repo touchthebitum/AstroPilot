@@ -178,7 +178,7 @@ def test_http_request_runs_real_application_composition_once(
         profile_loads.append(True)
         return {
             "available_equipment": ["widefield"],
-            "projects": {"M42": {"hours": 4}},
+            "projects": {"M31": {"hours": 2}},
         }
 
     monkeypatch.setattr(astro_score, "load_user_profile", load_profile)
@@ -201,7 +201,6 @@ def test_http_request_runs_real_application_composition_once(
                 "latitude": 47.1,
                 "longitude": 6.8,
             },
-            "profile": {"projects": {"M31": {"hours": 2}}},
             "equipment": "portable",
             "goal": "galaxies",
             "bortle": 4,
