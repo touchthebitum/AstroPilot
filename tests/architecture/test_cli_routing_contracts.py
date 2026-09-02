@@ -52,7 +52,8 @@ def isolated_cli(monkeypatch, tmp_path):
         astro_score,
         "load_user_profile",
         lambda: {
-            "active_equipment": "setup",
+            "active_equipment": "samyang_183",
+            "available_equipment": ["samyang_183", "fra400_2600"],
             "location": {
                 "latitude": 46.5,
                 "longitude": 6.6,
@@ -202,7 +203,7 @@ def test_report_modes_route_to_exactly_one_runner(mode, forecast_cli):
     called_mode, kwargs = forecast_cli.calls[0]
     assert called_mode == mode
     assert kwargs["night_capacities"] is forecast_cli.capacities
-    assert kwargs.pop("profile")["active_equipment"] == "setup"
+    assert kwargs.pop("profile")["active_equipment"] == "samyang_183"
 
     if mode in {"portfolio", "full"}:
         assert kwargs == {
@@ -216,9 +217,15 @@ def test_report_modes_route_to_exactly_one_runner(mode, forecast_cli):
         assert kwargs == {"night_capacities": forecast_cli.capacities}
 
 
+@pytest.mark.parametrize(
+    ("extra_args", "expected_equipment"),
+    [([], None), (["--equipment", "fra400_2600"], "fra400_2600")],
+)
 def test_tonight_mode_routes_application_result_without_second_forecast(
     monkeypatch,
     forecast_cli,
+    extra_args,
+    expected_equipment,
 ):
     evaluation_calls = []
     mission = object()
@@ -254,14 +261,15 @@ def test_tonight_mode_routes_application_result_without_second_forecast(
         ),
     )
 
-    result = astro_score.main(["--mode", "tonight"])
+    result = astro_score.main(["--mode", "tonight", *extra_args])
 
     assert result == 0
     assert clock_calls == [timezone.utc]
     assert evaluation_calls == [
         {
             "profile": {
-                "active_equipment": "setup",
+                "active_equipment": "samyang_183",
+                "available_equipment": ["samyang_183", "fra400_2600"],
                 "location": {
                     "latitude": 46.5,
                     "longitude": 6.6,
@@ -276,7 +284,7 @@ def test_tonight_mode_routes_application_result_without_second_forecast(
             },
             "weather": {"weather": True},
             "reference_time_utc": reference_time,
-            "equipment": None,
+            "equipment": expected_equipment,
             "goal": "balanced",
             "target": astro_score.TARGET,
             "bortle": 6,
@@ -286,4 +294,4 @@ def test_tonight_mode_routes_application_result_without_second_forecast(
     called_mode, kwargs = forecast_cli.calls[1]
     assert called_mode == "tonight_completion"
     assert kwargs["night_capacities"] is forecast_cli.capacities
-    assert kwargs["profile"]["active_equipment"] == "setup"
+    assert kwargs["profile"]["active_equipment"] == "samyang_183"

@@ -10,7 +10,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from astropilot.user_profile import UserProfileError
-from decision.services.tonight_application_service import TonightStatus
+from decision.services.tonight_application_service import (
+    TonightEquipmentSelectionError,
+    TonightStatus,
+)
 from decision.services.tonight_response import TonightResponse
 from decision.weather.provider_reliability import WeatherLocation
 from decision.weather.weather_trust_decision import (
@@ -54,7 +57,7 @@ class TonightRequest(BaseModel):
                         "latitude": 46.7508,
                         "longitude": 6.5495,
                     },
-                    "equipment": "widefield",
+                    "equipment": "samyang_183",
                     "goal": "balanced",
                     "target": "deep_sky",
                     "bortle": 3,
@@ -691,6 +694,16 @@ def create_app(
                 target=request.target,
                 bortle=effective_bortle,
             )
+        except TonightEquipmentSelectionError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": exc.code,
+                    "message": (
+                        "The requested equipment is unknown or unavailable."
+                    ),
+                },
+            ) from exc
         except DecisionConsistencyError as exc:
             raise HTTPException(
                 status_code=503,

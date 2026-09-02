@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 import astro_score
+import decision.services.tonight_application_service as tonight_service_module
 from decision.weather.decision_forecast_evidence_persistence import (
     DecisionForecastEvidencePersistenceError,
 )
@@ -18,7 +19,8 @@ def isolated_cli_failures(monkeypatch, tmp_path):
         astro_score,
         "load_user_profile",
         lambda: {
-            "active_equipment": "setup",
+            "active_equipment": "samyang_183",
+            "available_equipment": ["samyang_183"],
             "location": {
                 "latitude": 46.5,
                 "longitude": 6.6,
@@ -126,6 +128,41 @@ def test_tonight_persistence_failure_exits_without_presenting_mission(
 
     assert exit_info.value.code == 1
     assert "persistance durable indisponible" in capsys.readouterr().err
+
+
+def test_invalid_tonight_equipment_exits_with_stable_user_error(
+    monkeypatch,
+    capsys,
+    isolated_cli_failures,
+):
+    class FailingService:
+        def evaluate(self, **kwargs):
+            raise tonight_service_module.TonightEquipmentSelectionError(
+                "invalid_tonight_equipment"
+            )
+
+    monkeypatch.setattr(
+        astro_score,
+        "build_durable_tonight_application_service",
+        lambda: FailingService(),
+    )
+    monkeypatch.setattr(
+        astro_score,
+        "fetch_weather",
+        lambda lat, lon: {"weather": True},
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(
+            ["--mode", "tonight", "--equipment", "not_a_setup"]
+        )
+
+    assert exit_info.value.code == 2
+    error = capsys.readouterr().err
+    assert error == (
+        "Erreur matériel : le setup demandé est inconnu ou indisponible.\n"
+    )
+    assert "Traceback" not in error
 
 
 def test_empty_night_list_keeps_capacity_report_but_skips_tonight_runner(

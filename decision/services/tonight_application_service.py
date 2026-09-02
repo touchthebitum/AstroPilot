@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
+from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 from decision.forecast.forecast_run import ForecastRun
 from decision.mission.night_mission import NightMission
 from decision.recommendation.recommendation import Recommendation
@@ -19,6 +20,29 @@ class TonightStatus(str, Enum):
     NO_RECOMMENDATION = "no_recommendation"
     NO_MISSION = "no_mission"
     NO_PRODUCTIVE_WINDOW = "no_productive_window"
+
+
+class TonightEquipmentSelectionError(ValueError):
+    code = "invalid_tonight_equipment"
+
+
+def resolve_tonight_equipment(profile, requested_equipment) -> str:
+    selected_equipment = (
+        requested_equipment
+        if requested_equipment is not None
+        else profile.get("active_equipment")
+    )
+    available_equipment = profile.get("available_equipment")
+
+    if (
+        not isinstance(selected_equipment, str)
+        or selected_equipment not in EQUIPMENT_PROFILES
+        or not isinstance(available_equipment, list)
+        or selected_equipment not in available_equipment
+    ):
+        raise TonightEquipmentSelectionError("invalid_tonight_equipment")
+
+    return selected_equipment
 
 
 @dataclass(frozen=True)
@@ -64,7 +88,13 @@ class TonightApplicationService:
         target="deep_sky",
         bortle,
     ) -> TonightResult:
-        location = profile.get(
+        selected_equipment = resolve_tonight_equipment(profile, equipment)
+        effective_profile = {
+            **profile,
+            "active_equipment": selected_equipment,
+            "available_equipment": [selected_equipment],
+        }
+        location = effective_profile.get(
             "location",
             {
                 "name": "Buttes",
@@ -78,10 +108,9 @@ class TonightApplicationService:
             location["name"],
             bortle,
             target=target,
-            equipment=equipment,
             goal=goal,
             weather=weather,
-            profile=profile,
+            profile=effective_profile,
             reference_time_utc=reference_time_utc,
         )
 
@@ -109,7 +138,7 @@ class TonightApplicationService:
         candidates = self.build_candidates(
             top_objects,
             available_hours=night.get("duration", 3.0),
-            profile=profile,
+            profile=effective_profile,
         )
 
         if not candidates:
@@ -144,7 +173,7 @@ class TonightApplicationService:
             recommended_key=recommended_key,
             build_mission_input=lambda evaluation: self.build_mission_input(
                 evaluation,
-                profile=profile,
+                profile=effective_profile,
             ),
         )
 
