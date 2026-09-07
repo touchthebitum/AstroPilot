@@ -5,6 +5,7 @@ from datetime import datetime
 from enum import Enum
 
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
+from astropilot.user_profile import UserProfileError, is_finite_number
 from decision.forecast.forecast_run import ForecastRun
 from decision.mission.night_mission import NightMission
 from decision.recommendation.recommendation import Recommendation
@@ -43,6 +44,49 @@ def resolve_tonight_equipment(profile, requested_equipment) -> str:
         raise TonightEquipmentSelectionError("invalid_tonight_equipment")
 
     return selected_equipment
+
+
+@dataclass(frozen=True)
+class TonightInputs:
+    location: dict
+    bortle: int
+    equipment: str
+
+
+def resolve_tonight_inputs(
+    profile,
+    *,
+    location=None,
+    bortle=None,
+    equipment=None,
+) -> TonightInputs:
+    """Resolve only Tonight's critical local inputs, without I/O or mutation."""
+    selected_equipment = resolve_tonight_equipment(profile, equipment)
+    selected_location = location if location is not None else profile.get("location")
+    if not isinstance(selected_location, dict):
+        raise UserProfileError("Configuration Tonight : location requise et valide.")
+    name = selected_location.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise UserProfileError("Configuration Tonight : location.name invalide.")
+    for field, limit in (("latitude", 90), ("longitude", 180)):
+        value = selected_location.get(field)
+        if not is_finite_number(value) or not -limit <= value <= limit:
+            raise UserProfileError(f"Configuration Tonight : location.{field} invalide.")
+
+    preferences = profile.get("preferences", {})
+    selected_bortle = (
+        bortle
+        if bortle is not None
+        else preferences.get("bortle") if isinstance(preferences, dict) else None
+    )
+    if (
+        not isinstance(selected_bortle, int)
+        or isinstance(selected_bortle, bool)
+        or not 1 <= selected_bortle <= 9
+    ):
+        raise UserProfileError("Configuration Tonight : Bortle requis, entier de 1 à 9.")
+
+    return TonightInputs(dict(selected_location), selected_bortle, selected_equipment)
 
 
 @dataclass(frozen=True)
@@ -88,25 +132,20 @@ class TonightApplicationService:
         target="deep_sky",
         bortle,
     ) -> TonightResult:
-        selected_equipment = resolve_tonight_equipment(profile, equipment)
+        inputs = resolve_tonight_inputs(profile, equipment=equipment, bortle=bortle)
+        selected_equipment = inputs.equipment
         effective_profile = {
             **profile,
+            "location": inputs.location,
             "active_equipment": selected_equipment,
             "available_equipment": [selected_equipment],
         }
-        location = effective_profile.get(
-            "location",
-            {
-                "name": "Buttes",
-                "latitude": 46.7508,
-                "longitude": 6.5495,
-            },
-        )
+        location = inputs.location
         forecast_run: ForecastRun | None = self.forecast_nights(
             location["latitude"],
             location["longitude"],
             location["name"],
-            bortle,
+            inputs.bortle,
             target=target,
             goal=goal,
             weather=weather,

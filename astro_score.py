@@ -8,6 +8,7 @@ from decision.services.tonight_mission_service import (
 from decision.services.tonight_application_service import (
     TonightEquipmentSelectionError,
     TonightApplicationService,
+    resolve_tonight_inputs,
 )
 from decision.services.durable_tonight_application_service import (
     DurableTonightApplicationService,
@@ -2103,7 +2104,18 @@ def main(argv=None) -> int:
         )
         return 0
 
-    location = profile["location"]
+    if args.mode == "tonight":
+        try:
+            tonight_inputs = resolve_tonight_inputs(profile, equipment=args.equipment)
+        except TonightEquipmentSelectionError:
+            parser.exit(
+                2,
+                "Erreur matériel : le setup demandé est inconnu ou indisponible.\n",
+            )
+        except UserProfileError as exc:
+            parser.exit(2, f"Erreur profil utilisateur : {exc}\n")
+
+    location = tonight_inputs.location if args.mode == "tonight" else profile["location"]
     lat = location["latitude"]
     lon = location["longitude"]
     city = location["name"]
@@ -2124,10 +2136,10 @@ def main(argv=None) -> int:
                 profile=profile,
                 weather=weather,
                 reference_time_utc=reference_time_utc,
-                equipment=args.equipment,
+                equipment=tonight_inputs.equipment,
                 goal=args.goal,
                 target=TARGET,
-                bortle=profile["preferences"]["bortle"],
+                bortle=tonight_inputs.bortle,
             )
         except TonightEquipmentSelectionError:
             parser.exit(
