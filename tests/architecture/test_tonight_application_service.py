@@ -4,6 +4,7 @@ import pytest
 
 import decision.services.tonight_application_service as tonight_service_module
 
+from astropilot.user_profile import UserProfileError
 from decision.forecast.forecast_run import ForecastRun
 from decision.mission.night_mission import NightMission
 from decision.night_productivity.night_productivity_result import NightProductivityResult
@@ -26,6 +27,7 @@ REFERENCE_TIME = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
 
 def make_profile(*, available_equipment=None, active_equipment="samyang_183"):
     return {
+        "location": {"name": "Mont Sujet", "latitude": 47.12, "longitude": 7.04},
         "active_equipment": active_equipment,
         "available_equipment": available_equipment or [active_equipment],
     }
@@ -240,7 +242,8 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
     assert candidate_calls == [(selected_objects, 4.25, effective_profile)]
     forecast_profile = forecast_calls[0][1]["profile"]
     assert forecast_profile is not profile
-    assert forecast_profile["location"] is profile["location"]
+    assert forecast_profile["location"] == profile["location"]
+    assert forecast_profile["location"] is not profile["location"]
     assert recommendation_service.calls == [candidates]
     assert mission_service.calls[0]["winner"] is selected
     assert mission_service.calls[0]["objects"] is selected_objects
@@ -267,49 +270,24 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
     assert selected_objects[0]["window_score"] == 89.0
 
 
-def test_location_defaults_match_current_cli_policy():
-    calls = []
-
-    def forecast(*args, **kwargs):
-        calls.append((args, kwargs))
-        return forecast_run([])
-
+def test_missing_location_is_rejected_before_forecast():
+    forecast_calls = []
     service, _, _ = make_service(
-        forecast_nights=forecast,
+        forecast_nights=lambda *args, **kwargs: forecast_calls.append(args),
         build_candidates=lambda *args, **kwargs: None,
     )
     profile = make_profile()
-    weather = object()
+    profile.pop("location")
 
-    result = service.evaluate(
-        profile=profile,
-        weather=weather,
-        reference_time_utc=REFERENCE_TIME,
-        bortle=3,
-    )
-
-    assert calls == [
-        (
-            (46.7508, 6.5495, "Buttes", 3),
-            {
-                "target": "deep_sky",
-                "goal": "balanced",
-                "weather": weather,
-                "profile": {
-                    **profile,
-                    "available_equipment": ["samyang_183"],
-                },
-                "reference_time_utc": REFERENCE_TIME,
-            },
+    with pytest.raises(UserProfileError, match="location"):
+        service.evaluate(
+            profile=profile,
+            weather=None,
+            reference_time_utc=REFERENCE_TIME,
+            bortle=3,
         )
-    ]
-    assert result == TonightResult(
-        None,
-        None,
-        None,
-        status=TonightStatus.NO_NIGHT,
-        forecast_evidence=FORECAST_EVIDENCE,
-    )
+
+    assert forecast_calls == []
 
 
 def test_no_forecast_nights_stops_all_downstream_work():

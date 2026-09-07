@@ -7,12 +7,13 @@ from typing import Callable, Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 
 from astropilot.user_profile import UserProfileError
 from decision.services.tonight_application_service import (
     TonightEquipmentSelectionError,
     TonightStatus,
+    resolve_tonight_inputs,
 )
 from decision.services.tonight_response import TonightResponse
 from decision.weather.provider_reliability import WeatherLocation
@@ -605,6 +606,16 @@ def create_app(
         reference_time_utc = clock()
         try:
             profile = dict(profile_provider())
+            inputs = resolve_tonight_inputs(
+                profile,
+                location=(
+                    request.location.model_dump()
+                    if request.location is not None
+                    else None
+                ),
+                bortle=request.bortle,
+                equipment=request.equipment,
+            )
         except UserProfileError:
             return JSONResponse(
                 status_code=503,
@@ -616,33 +627,19 @@ def create_app(
                     ),
                 },
             )
-        if request.location is not None:
-            profile["location"] = request.location.model_dump()
-
-        raw_location = profile.get(
-            "location",
-            {
-                "name": "Buttes",
-                "latitude": 46.7508,
-                "longitude": 6.5495,
-            },
-        )
-        try:
-            location = LocationRequest.model_validate(raw_location).model_dump()
-        except ValidationError as exc:
+        except TonightEquipmentSelectionError as exc:
             raise HTTPException(
                 status_code=422,
                 detail={
-                    "code": "invalid_profile_location",
-                    "message": "Profile location is invalid.",
+                    "code": exc.code,
+                    "message": (
+                        "The requested equipment is unknown or unavailable."
+                    ),
                 },
             ) from exc
+        location = inputs.location
         profile["location"] = location
-        effective_bortle = (
-            request.bortle
-            if request.bortle is not None
-            else profile.get("preferences", {}).get("bortle", 3)
-        )
+        effective_bortle = inputs.bortle
 
         weather_freshness: WeatherFreshness | None = None
         try:
@@ -689,21 +686,11 @@ def create_app(
                 profile=profile,
                 weather=weather,
                 reference_time_utc=reference_time_utc,
-                equipment=request.equipment,
+                equipment=inputs.equipment,
                 goal=request.goal,
                 target=request.target,
                 bortle=effective_bortle,
             )
-        except TonightEquipmentSelectionError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "code": exc.code,
-                    "message": (
-                        "The requested equipment is unknown or unavailable."
-                    ),
-                },
-            ) from exc
         except DecisionConsistencyError as exc:
             raise HTTPException(
                 status_code=503,

@@ -29,6 +29,15 @@ from decision.weather.decision_forecast_evidence_persistence import (
 from decision.location.location_time import LocationTimeError
 
 
+def valid_profile():
+    return {
+        "location": {"name": "Buttes", "latitude": 46.7508, "longitude": 6.5495},
+        "preferences": {"bortle": 3},
+        "active_equipment": "samyang_183",
+        "available_equipment": ["samyang_183"],
+    }
+
+
 def make_result(*, decision_id=None):
     candidate = Candidate(
         name="Andromeda",
@@ -185,6 +194,7 @@ def test_tonight_uses_profile_bortle_without_request_override():
         service_factory=lambda: Service(),
         weather_provider=lambda lat, lon: object(),
         profile_provider=lambda: {
+            **valid_profile(),
             "location": {
                 "name": "Mont Sujet",
                 "latitude": 47.12,
@@ -242,7 +252,7 @@ def test_persistence_failure_is_a_controlled_service_error(error):
         create_app(
             service_factory=lambda: Service(),
             weather_provider=lambda lat, lon: object(),
-            profile_provider=lambda: {},
+            profile_provider=valid_profile,
         )
     )
 
@@ -289,7 +299,7 @@ def make_client(*, result, weather=DEFAULT_WEATHER):
         create_app(
             service_factory=lambda: Service(),
             weather_provider=lambda lat, lon: weather,
-            profile_provider=lambda: {},
+            profile_provider=valid_profile,
         )
     )
 
@@ -303,7 +313,7 @@ def test_weather_unavailable_is_a_service_error_before_evaluation():
         create_app(
             service_factory=lambda: Service(),
             weather_provider=lambda lat, lon: None,
-            profile_provider=lambda: {},
+            profile_provider=valid_profile,
         )
     )
 
@@ -325,7 +335,7 @@ def test_invalid_weather_is_rejected_before_evaluation():
         create_app(
             service_factory=lambda: Service(),
             weather_provider=invalid_weather,
-            profile_provider=lambda: {},
+            profile_provider=valid_profile,
         )
     )
 
@@ -346,7 +356,7 @@ def test_insufficient_weather_has_a_distinct_service_error():
         create_app(
             service_factory=lambda: None,
             weather_provider=insufficient_weather,
-            profile_provider=lambda: {},
+            profile_provider=valid_profile,
         )
     )
 
@@ -368,7 +378,7 @@ def test_stale_weather_is_rejected_before_evaluation_with_injected_clock():
         create_app(
             service_factory=lambda: Service(),
             weather_provider=lambda lat, lon: weather,
-            profile_provider=lambda: {},
+            profile_provider=valid_profile,
             clock=lambda: reference,
         )
     )
@@ -414,7 +424,7 @@ def test_fresh_weather_transport_exposes_server_calculated_age(monkeypatch):
         create_app(
             service_factory=lambda: Service(),
             weather_provider=lambda lat, lon: weather,
-            profile_provider=lambda: {},
+            profile_provider=valid_profile,
             clock=clock,
         )
     )
@@ -473,7 +483,7 @@ def test_uncovered_mission_window_returns_refused_without_active_mission():
         create_app(
             service_factory=lambda: Service(),
             weather_provider=lambda lat, lon: weather,
-            profile_provider=lambda: {},
+            profile_provider=valid_profile,
             clock=lambda: reference,
         )
     )
@@ -543,7 +553,7 @@ def test_structural_or_unknown_window_issue_remains_technical(
                 "Service", (), {"evaluate": lambda self, **kwargs: make_result()}
             )(),
             weather_provider=lambda lat, lon: weather,
-            profile_provider=lambda: {},
+            profile_provider=valid_profile,
             clock=lambda: reference,
         )
     )
@@ -563,7 +573,7 @@ def test_internally_inconsistent_decision_is_rejected_before_transport():
         create_app(
             service_factory=lambda: Service(),
             weather_provider=lambda lat, lon: object(),
-            profile_provider=lambda: {},
+            profile_provider=valid_profile,
         )
     )
 
@@ -584,7 +594,7 @@ def test_unresolved_location_timezone_stops_before_evaluation():
         create_app(
             service_factory=lambda: None,
             weather_provider=unresolved_timezone,
-            profile_provider=lambda: {},
+            profile_provider=valid_profile,
         )
     )
 

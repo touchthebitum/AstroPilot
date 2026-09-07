@@ -219,7 +219,7 @@ def test_report_modes_route_to_exactly_one_runner(mode, forecast_cli):
 
 @pytest.mark.parametrize(
     ("extra_args", "expected_equipment"),
-    [([], None), (["--equipment", "fra400_2600"], "fra400_2600")],
+    [([], "samyang_183"), (["--equipment", "fra400_2600"], "fra400_2600")],
 )
 def test_tonight_mode_routes_application_result_without_second_forecast(
     monkeypatch,
