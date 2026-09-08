@@ -172,6 +172,26 @@ def test_mission_preserves_reasons_and_computed_results(
     )
 
 
+def test_mission_preserves_unknown_summary_confidence(
+    frozen_time,
+    summary,
+    context,
+    isolated_dependencies,
+):
+    summary.confidence = None
+
+    mission = MissionAssembler.build(
+        target="M31",
+        summary=summary,
+        context=context,
+        equipment=[],
+        alternatives=[],
+        mission_input=mission_input(frozen_time, WeatherForecast()),
+    )
+
+    assert mission.confidence is None
+
+
 def test_mission_input_weather_takes_precedence_over_explicit_weather(
     frozen_time,
     summary,

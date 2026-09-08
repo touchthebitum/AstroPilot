@@ -8,7 +8,7 @@ class DecisionSummaryEngine:
 
         summary = DecisionSummary(
             title="Pourquoi cette recommandation ?",
-            confidence=1.0,
+            confidence=None,
         )
 
         for c in contributions:

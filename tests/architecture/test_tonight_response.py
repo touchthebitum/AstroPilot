@@ -332,6 +332,32 @@ def test_complete_result_maps_only_json_compatible_values():
     ]
 
 
+def test_unknown_recommendation_and_mission_confidence_remain_none():
+    candidate = make_candidate()
+    recommendation = Recommendation(
+        opportunity=Opportunity(
+            action=Action.START_PROJECT,
+            candidate=candidate,
+        ),
+        confidence=None,
+    )
+    mission = NightMission(
+        target="Andromeda",
+        confidence=None,
+    )
+
+    response = TonightResponse.from_result(
+        TonightResult(
+            night={"date": date(2026, 9, 1)},
+            recommendation=recommendation,
+            mission=mission,
+        )
+    )
+
+    assert response.recommendation_confidence is None
+    assert response.mission_confidence is None
+
+
 @pytest.mark.parametrize(
     ("score", "label"),
     [

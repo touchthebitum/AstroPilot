@@ -18,7 +18,7 @@ class MissionReason:
 @dataclass(frozen=True)
 class NightMission:
     target: str
-    confidence: str
+    confidence: float | str | None
     reasons: list[MissionReason] = field(default_factory=list)
     equipment: list[str] = field(default_factory=list)
     window_start: datetime | None = None
