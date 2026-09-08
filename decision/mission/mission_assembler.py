@@ -199,6 +199,7 @@ class MissionAssembler:
         risk_context = ProjectRiskContextBuilder.build(
             target=target,
             context=context,
+            observation_time=window_start,
         )
 
         risk = RiskEngine.evaluate(risk_context)

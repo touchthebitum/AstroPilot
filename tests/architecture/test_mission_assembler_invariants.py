@@ -67,7 +67,10 @@ def isolated_dependencies(monkeypatch):
     monkeypatch.setattr(
         module.ProjectRiskContextBuilder,
         "build",
-        lambda **kwargs: SimpleNamespace(**kwargs),
+        lambda **kwargs: (
+            captured.update(risk_kwargs=kwargs)
+            or SimpleNamespace(**kwargs)
+        ),
     )
     monkeypatch.setattr(module.RiskEngine, "evaluate", lambda value: risk)
     monkeypatch.setattr(module.NightPlanner, "build", lambda value: tasks)
@@ -163,6 +166,10 @@ def test_mission_preserves_reasons_and_computed_results(
     assert mission.night_slices == ["slice"]
     assert mission.astro_quality is isolated_dependencies.astro_quality
     assert mission.dew_risk is isolated_dependencies.dew_risk
+    assert (
+        isolated_dependencies.captured["risk_kwargs"]["observation_time"]
+        is input_data.window_start
+    )
 
 
 def test_mission_input_weather_takes_precedence_over_explicit_weather(

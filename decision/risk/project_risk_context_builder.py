@@ -7,7 +7,7 @@ from decision.season.season_resolver import SeasonResolver
 class ProjectRiskContextBuilder:
 
     @staticmethod
-    def build(target, context):
+    def build(target, context, observation_time=None):
 
         remaining_hours = (
             context.portfolio.total_remaining_hours
@@ -18,7 +18,11 @@ class ProjectRiskContextBuilder:
             target=target,
             latitude=context.site.latitude,
             longitude=context.site.longitude,
-            observation_time=context.session.start_time,
+            observation_time=(
+                observation_time
+                if observation_time is not None
+                else context.session.start_time
+            ),
         )
 
         season = SeasonResolver.resolve(
