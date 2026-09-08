@@ -100,7 +100,7 @@ def test_winner_duration_and_objects_are_passed_to_project_selection():
     assert captured["available_hours"] == 4.5
 
 
-def test_missing_duration_defaults_to_three_hours():
+def test_missing_duration_stays_unknown():
     captured = {}
 
     def recommend(objects, *, available_hours):
@@ -111,7 +111,7 @@ def test_missing_duration_defaults_to_three_hours():
 
     context.runner.run(top_nights=[{}], night_capacities=[])
 
-    assert captured["available_hours"] == 3.0
+    assert captured["available_hours"] is None
 
 
 def test_missing_recommendation_skips_mission_but_keeps_forecast():
