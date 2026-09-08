@@ -1,4 +1,11 @@
 from dataclasses import dataclass, field
+from enum import Enum
+
+
+class CandidateProvenance(str, Enum):
+    PROJECT = "project"
+    DISCOVERY = "discovery"
+
 
 @dataclass
 class Candidate:
@@ -19,6 +26,7 @@ class Candidate:
     closure_bonus: float | None
 
     acquired_hours: float | None = 0.0
+    provenance: CandidateProvenance = CandidateProvenance.PROJECT
     reasons: list[str] = field(default_factory=list)
     strategy_scores: dict = field(default_factory=dict)
 

@@ -70,6 +70,7 @@ from decision.portfolio.portfolio_forecast_engine import PortfolioForecastEngine
 from decision.runners.report_runner import ReportRunner
 from decision.engines.night_strategy_engine import NightStrategyEngine
 from decision.engines.project_selection_engine import ProjectSelectionEngine
+from decision.models.candidate import CandidateProvenance
 from decision.portfolio.portfolio_presenter import (show_portfolio_completion_forecast,)
 from decision.rules.object_fit_rule import ObjectFitRule
 from datetime import datetime, timedelta, timezone
@@ -847,6 +848,7 @@ def recommend_project_for_night(
                 ),
                 strategy_scores=strategy_scores,
                 acquired_hours=acquired_hours,
+                provenance=CandidateProvenance.PROJECT,
             )
         )
 
@@ -869,6 +871,7 @@ def recommend_project_for_night(
                     reasons=[],
                     strategy_scores={},
                     acquired_hours=None,
+                    provenance=CandidateProvenance.DISCOVERY,
                 )
             )
 

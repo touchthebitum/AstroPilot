@@ -6,7 +6,7 @@ from decision.filtering.selected_filter import SelectedFilter
 from decision.intelligence.analysis_result import AnalysisResult
 from decision.mission.night_mission import MissionReason, NightMission
 from decision.mission.night_planner import NightTask
-from decision.models.candidate import Candidate
+from decision.models.candidate import Candidate, CandidateProvenance
 from decision.night_productivity.night_productivity_result import (
     NightProductivityResult,
 )
@@ -30,7 +30,7 @@ from decision.weather.weather_trust_decision import (
 )
 
 
-def make_candidate():
+def make_candidate(provenance=CandidateProvenance.PROJECT):
     return Candidate(
         name="Andromeda",
         catalog_key="M31",
@@ -43,6 +43,7 @@ def make_candidate():
         setup_score=68.0,
         best_setup="widefield",
         closure_bonus=0.0,
+        provenance=provenance,
     )
 
 
@@ -68,6 +69,7 @@ def test_partial_results_produce_stable_transport_status(status):
         "catalog_key": None,
         "target_common_name": None,
         "action": None,
+        "provenance": None,
         "recommendation_confidence": None,
         "mission_confidence": None,
         "scores": {},
@@ -197,6 +199,7 @@ def test_complete_result_maps_only_json_compatible_values():
     assert response["catalog_key"] == "M31"
     assert response["target_common_name"] == "Galaxie d’Andromède"
     assert response["action"] == "start_project"
+    assert response["provenance"] == "project"
     assert response["recommendation_confidence"] == 0.91
     assert response["scores"] == {
         "astro_score": 82.0,
@@ -330,6 +333,27 @@ def test_complete_result_maps_only_json_compatible_values():
             "message": "Aucun conseil particulier pour cette nuit.",
         }
     ]
+
+
+def test_discovery_provenance_is_mapped_from_recommendation_candidate():
+    candidate = make_candidate(CandidateProvenance.DISCOVERY)
+    recommendation = Recommendation(
+        opportunity=Opportunity(
+            action=Action.START_PROJECT,
+            candidate=candidate,
+        ),
+        confidence=None,
+    )
+
+    response = TonightResponse.from_result(
+        TonightResult(
+            night={"date": date(2026, 9, 1)},
+            recommendation=recommendation,
+            mission=None,
+        )
+    )
+
+    assert response.provenance == "discovery"
 
 
 def test_unknown_recommendation_and_mission_confidence_remain_none():
@@ -475,6 +499,7 @@ def test_refused_weather_decision_redacts_active_transport_only():
         "catalog_key": None,
         "target_common_name": None,
         "action": None,
+        "provenance": None,
         "recommendation_confidence": None,
         "mission_confidence": None,
         "scores": {},
