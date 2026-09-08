@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from decision.models.candidate_rejection import CandidateBuildResult
+
+
 class TonightRunner:
 
     def __init__(
@@ -54,9 +57,14 @@ class TonightRunner:
         recommendation_kwargs = {"available_hours": available_hours}
         if profile is not None:
             recommendation_kwargs["profile"] = profile
-        recommended_projects = self.recommend_project_for_night(
+        candidate_build = self.recommend_project_for_night(
             top_objects,
             **recommendation_kwargs,
+        )
+        recommended_projects = (
+            list(candidate_build.candidates)
+            if isinstance(candidate_build, CandidateBuildResult)
+            else candidate_build
         )
 
         if not recommended_projects:
