@@ -16,5 +16,5 @@ class RecommendationEngine:
 
         return Recommendation(
             opportunity=opportunity,
-            confidence=1.0,
+            confidence=None,
         )

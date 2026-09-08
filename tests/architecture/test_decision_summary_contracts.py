@@ -24,7 +24,7 @@ def test_summary_classifies_contributions_and_preserves_order():
     summary = DecisionSummaryEngine.build(contributions)
 
     assert summary.title == "Pourquoi cette recommandation ?"
-    assert summary.confidence == 1.0
+    assert summary.confidence is None
     assert summary.positives == ["Altitude excellente", "Bon cadrage"]
     assert summary.negatives == ["Lune présente", "Vent fort"]
     assert summary.recommendations == []

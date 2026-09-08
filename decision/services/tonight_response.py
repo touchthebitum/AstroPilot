@@ -508,6 +508,7 @@ class TonightResponse:
             recommendation_confidence=(
                 float(recommendation.confidence)
                 if recommendation is not None
+                and recommendation.confidence is not None
                 else None
             ),
             mission_confidence=(

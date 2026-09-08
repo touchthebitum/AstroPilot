@@ -24,7 +24,7 @@ def test_recommendation_engine_preserves_opportunity_identity():
 
     assert recommendation == Recommendation(
         opportunity=opportunity,
-        confidence=1.0,
+        confidence=None,
     )
     assert recommendation.opportunity is opportunity
 
