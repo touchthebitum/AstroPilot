@@ -10,6 +10,7 @@ from decision.mission.mission_assembler import ProductiveWindowAssessment
 from decision.services.candidate_assessment import (
     CandidateAssessment,
     CandidateViabilityEvaluator,
+    select_viable_alternatives,
 )
 from decision.validation.decision_consistency import DecisionConsistencyError
 from decision.validation.weather_window_coverage import WeatherWindowCoverageError
@@ -270,3 +271,41 @@ def test_shortlist_assessments_are_retained_by_catalog_key(monkeypatch):
             "build_mission_input": mission_input_builder,
         }
     ]
+
+
+def test_viable_alternatives_preserve_order_and_stop_at_two():
+    primary = SimpleNamespace(catalog_key="M31")
+    first = SimpleNamespace(catalog_key="M42")
+    second = SimpleNamespace(catalog_key="M33")
+    third = SimpleNamespace(catalog_key="M51")
+
+    alternatives = select_viable_alternatives(
+        (primary, first, second, third),
+        {"M31", "M42", "M33", "M51"},
+        primary_catalog_key="M31",
+    )
+
+    assert alternatives == (first, second)
+
+
+def test_viable_alternatives_do_not_fill_missing_slots():
+    first = SimpleNamespace(catalog_key="M42")
+    unclassified = SimpleNamespace(catalog_key="M33")
+
+    alternatives = select_viable_alternatives(
+        (first, unclassified),
+        {"M42"},
+        primary_catalog_key="M31",
+    )
+
+    assert alternatives == (first,)
+
+
+def test_viable_alternatives_are_empty_without_certified_identities():
+    candidate = SimpleNamespace(catalog_key="M42")
+
+    assert select_viable_alternatives(
+        (candidate,),
+        set(),
+        primary_catalog_key="M31",
+    ) == ()

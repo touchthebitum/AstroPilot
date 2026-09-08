@@ -22,6 +22,7 @@ from decision.services.tonight_response import (
 from decision.services.candidate_assessment import (
     CandidateAssessment,
     CandidateViabilityEvaluator,
+    select_viable_alternatives,
 )
 from decision.weather.provider_reliability import WeatherLocation
 from decision.weather.weather_trust_decision import (
@@ -428,6 +429,9 @@ class TonightResponseModel(BaseModel):
     provenance: Literal["project", "discovery"] | None = None
     target_decision_status: TargetDecisionStatus | None = None
     shortlist_entries: list[TonightShortlistEntryModel] = Field(
+        default_factory=list
+    )
+    alternatives: list[TonightShortlistEntryModel] = Field(
         default_factory=list
     )
     recommendation_confidence: float | None = None
@@ -875,10 +879,27 @@ def create_app(
                 },
             ) from exc
 
+        recommendation = getattr(result, "recommendation", None)
+        opportunity = (
+            recommendation.opportunity
+            if recommendation is not None
+            else None
+        )
+        selected_alternatives = select_viable_alternatives(
+            opportunity.shortlist_entries if opportunity is not None else (),
+            viable_shortlist_catalog_keys,
+            primary_catalog_key=(
+                opportunity.candidate.catalog_key
+                if opportunity is not None
+                else None
+            ),
+        )
+
         payload = TonightResponse.from_result(
             result,
             weather_decision=weather_decision,
             viable_shortlist_catalog_keys=viable_shortlist_catalog_keys,
+            selected_alternatives=selected_alternatives,
         ).to_dict()
         if isinstance(weather, WeatherSnapshot):
             payload["weather_trust"] = weather.trust_transport(weather_freshness)
