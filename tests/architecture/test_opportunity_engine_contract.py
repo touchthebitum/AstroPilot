@@ -9,7 +9,7 @@ def make_candidate(
     decision_score: float,
     final_score: float = 0,
     reasons=None,
-    acquired_hours: float = 0,
+    acquired_hours: float | None = 0,
 ) -> Candidate:
     return Candidate(
         name=name,
@@ -108,6 +108,23 @@ def test_starts_project_when_no_hours_are_acquired():
     )
 
     assert opportunity is not None
+    assert opportunity.action is Action.START_PROJECT
+
+
+def test_discovery_with_unknown_acquired_hours_starts_project():
+    candidate = make_candidate(
+        "M42",
+        decision_score=100,
+        acquired_hours=None,
+    )
+
+    opportunity = OpportunityEngine().evaluate(
+        candidates=[candidate],
+    )
+
+    assert opportunity is not None
+    assert opportunity.candidate is candidate
+    assert opportunity.candidate.acquired_hours is None
     assert opportunity.action is Action.START_PROJECT
 
 
