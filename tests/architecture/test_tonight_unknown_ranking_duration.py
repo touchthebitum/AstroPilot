@@ -2,6 +2,66 @@ from types import SimpleNamespace
 
 import astro_score
 import pytest
+from decision.engines.project_selection_engine import ProjectSelectionEngine
+from decision.models.candidate import CandidateProvenance
+from decision.opportunity.action import Action
+from decision.opportunity.opportunity import Opportunity
+from decision.recommendation.recommendation import Recommendation
+
+
+def test_candidate_provenance_has_exact_values_and_defaults_to_project():
+    assert {item.value for item in CandidateProvenance} == {
+        "project",
+        "discovery",
+    }
+
+    candidate = ProjectSelectionEngine.build_candidate(
+        name="Andromeda",
+        catalog_key="M31",
+        priority=1,
+        astro_score=80,
+        final_score=70,
+        decision_score=70,
+        portfolio_score=14,
+        global_score=80,
+        setup_score=10,
+        best_setup="samyang_183",
+        closure_bonus=0,
+        reasons=[],
+        strategy_scores={},
+        acquired_hours=2,
+    )
+
+    assert candidate.provenance is CandidateProvenance.PROJECT
+
+
+def test_candidate_identity_and_provenance_survive_winner_wrappers():
+    candidate = ProjectSelectionEngine.build_candidate(
+        name="Orion",
+        catalog_key="M42",
+        priority=None,
+        astro_score=90,
+        final_score=63,
+        decision_score=63,
+        portfolio_score=None,
+        global_score=90,
+        setup_score=12,
+        best_setup="samyang_183",
+        closure_bonus=None,
+        reasons=[],
+        strategy_scores={},
+        acquired_hours=None,
+        provenance=CandidateProvenance.DISCOVERY,
+    )
+
+    winner = ProjectSelectionEngine.rank_candidates([candidate])[0]
+    opportunity = Opportunity(action=Action.START_PROJECT, candidate=winner)
+    recommendation = Recommendation(opportunity=opportunity, confidence=None)
+
+    assert winner is candidate
+    assert opportunity.candidate is candidate
+    assert recommendation.opportunity.candidate is candidate
+    assert candidate.provenance is CandidateProvenance.DISCOVERY
 
 
 def test_unknown_duration_skips_roi_and_closure_scoring_and_reasons(monkeypatch):
@@ -49,6 +109,7 @@ def test_unknown_duration_skips_roi_and_closure_scoring_and_reasons(monkeypatch)
 
     assert len(candidates) == 1
     candidate = candidates[0]
+    assert candidate.provenance is CandidateProvenance.PROJECT
     assert candidate.closure_bonus == 0
     assert contributions["roi_bonus"] == 0
     assert contributions["closure_bonus"] == 0
@@ -165,6 +226,7 @@ def test_empty_projects_builds_ranked_discovery_from_evaluated_objects(
     assert candidates[0].acquired_hours is None
     assert candidates[0].reasons == []
     assert candidates[0].strategy_scores == {}
+    assert candidates[0].provenance is CandidateProvenance.DISCOVERY
 
 
 def test_viable_project_candidate_suppresses_discovery(monkeypatch):

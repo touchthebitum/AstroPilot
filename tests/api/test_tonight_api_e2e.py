@@ -8,7 +8,7 @@ from astropilot.app import create_app
 from decision.forecast.forecast_run import ForecastRun
 from decision.intelligence.analysis_result import AnalysisResult
 from decision.mission.night_mission import NightMission
-from decision.models.candidate import Candidate
+from decision.models.candidate import Candidate, CandidateProvenance
 from decision.night_productivity.night_productivity_result import (
     NightProductivityResult,
 )
@@ -244,6 +244,7 @@ def test_http_request_runs_real_application_composition_once(
     assert payload["status"] == "available"
     assert payload["target"] == "Andromeda"
     assert payload["catalog_key"] == "M31"
+    assert payload["provenance"] == CandidateProvenance.PROJECT.value
     assert payload["target_common_name"] == "Galaxie d’Andromède"
     assert payload["astro_quality"] == {
         "score": 84.0,

@@ -241,6 +241,7 @@ class TonightResponse:
     catalog_key: str | None = None
     target_common_name: str | None = None
     action: str | None = None
+    provenance: str | None = None
     recommendation_confidence: float | None = None
     mission_confidence: float | str | None = None
     scores: dict[str, float] = field(default_factory=dict)
@@ -503,6 +504,11 @@ class TonightResponse:
             action=(
                 recommendation.opportunity.action.value
                 if recommendation is not None
+                else None
+            ),
+            provenance=(
+                candidate.provenance.value
+                if candidate is not None
                 else None
             ),
             recommendation_confidence=(

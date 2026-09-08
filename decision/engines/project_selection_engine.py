@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decision.models.candidate import Candidate
+from decision.models.candidate import Candidate, CandidateProvenance
 
 
 class ProjectSelectionEngine:
@@ -28,6 +28,7 @@ class ProjectSelectionEngine:
         reasons: list[str],
         strategy_scores: dict[str, float],
         acquired_hours: float | None,
+        provenance: CandidateProvenance = CandidateProvenance.PROJECT,
     ) -> Candidate:
         return Candidate(
             name=name,
@@ -44,6 +45,7 @@ class ProjectSelectionEngine:
             reasons=reasons,
             strategy_scores=strategy_scores,
             acquired_hours=acquired_hours,
+            provenance=provenance,
         )
 
     @staticmethod

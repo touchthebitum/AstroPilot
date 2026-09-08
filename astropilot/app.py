@@ -409,6 +409,7 @@ class TonightResponseModel(BaseModel):
     catalog_key: str | None = None
     target_common_name: str | None = None
     action: str | None = None
+    provenance: Literal["project", "discovery"] | None = None
     recommendation_confidence: float | None = None
     mission_confidence: float | str | None = None
     scores: dict[str, float] = Field(default_factory=dict)
