@@ -132,10 +132,11 @@ def test_project_risk_pressure_compares_required_to_favorable_nights(
         ),
     )
 
-    monkeypatch.setattr(
-        "decision.risk.project_risk_context_builder."
-        "SeasonResolver.resolve",
-        lambda context: {
+    season_contexts = []
+
+    def resolve_season(context):
+        season_contexts.append(context)
+        return {
             "remaining_days": 100,
             "remaining_good_nights": 20,
             "urgency": "LOW",
@@ -144,12 +145,19 @@ def test_project_risk_pressure_compares_required_to_favorable_nights(
             "start_date": None,
             "end_date": None,
             "peak_date": None,
-        },
+        }
+
+    monkeypatch.setattr(
+        "decision.risk.project_risk_context_builder."
+        "SeasonResolver.resolve",
+        resolve_season,
     )
 
+    selected_window_start = start + timedelta(days=1)
     result = ProjectRiskContextBuilder.build(
         target="IC1396",
         context=context,
+        observation_time=selected_window_start,
     )
 
     assert result.required_nights == 3
@@ -158,3 +166,11 @@ def test_project_risk_pressure_compares_required_to_favorable_nights(
     assert result.productive_hours_per_night == 5
     assert result.night_capacity_source == "profile"
     assert result.historical_nights == 0
+    assert season_contexts[-1].observation_time is selected_window_start
+
+    ProjectRiskContextBuilder.build(
+        target="IC1396",
+        context=context,
+    )
+
+    assert season_contexts[-1].observation_time is context.session.start_time
