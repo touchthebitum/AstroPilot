@@ -261,6 +261,7 @@ def test_http_request_runs_real_application_composition_once(
     assert payload["target"] == "Andromeda"
     assert payload["catalog_key"] == "M31"
     assert payload["provenance"] == CandidateProvenance.PROJECT.value
+    assert payload["target_decision_status"] == "recommended"
     assert payload["shortlist_entries"] == [
         {
             "target": "Orion",

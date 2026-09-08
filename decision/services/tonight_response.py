@@ -14,6 +14,13 @@ from decision.weather.weather_trust_decision import (
 )
 
 
+class TargetDecisionStatus(str, Enum):
+    RECOMMENDED = "recommended"
+    VIABLE = "viable"
+    NOT_RECOMMENDED = "not_recommended"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+
 def _text(value) -> str | None:
     if value is None:
         return None
@@ -251,6 +258,7 @@ class TonightResponse:
     target_common_name: str | None = None
     action: str | None = None
     provenance: str | None = None
+    target_decision_status: TargetDecisionStatus | None = None
     shortlist_entries: list[TonightShortlistEntryResponse] = field(
         default_factory=list
     )
@@ -346,6 +354,20 @@ class TonightResponse:
             if recommendation is not None
             else []
         )
+
+        target_decision_status = None
+        if recommendation is not None:
+            target_decision_status = TargetDecisionStatus.RECOMMENDED
+        elif (
+            weather_decision is not None
+            and weather_decision.evidence_quality
+            is WeatherEvidenceQuality.INSUFFICIENT
+            and weather_decision.admissibility
+            is WeatherDecisionAdmissibility.REFUSED
+        ):
+            target_decision_status = (
+                TargetDecisionStatus.INSUFFICIENT_EVIDENCE
+            )
 
         selected_filter = None
         if mission is not None and mission.selected_filter is not None:
@@ -538,6 +560,7 @@ class TonightResponse:
                 if candidate is not None
                 else None
             ),
+            target_decision_status=target_decision_status,
             shortlist_entries=shortlist_entries,
             recommendation_confidence=(
                 float(recommendation.confidence)

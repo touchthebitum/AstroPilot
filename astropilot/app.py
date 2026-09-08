@@ -15,7 +15,10 @@ from decision.services.tonight_application_service import (
     TonightStatus,
     resolve_tonight_inputs,
 )
-from decision.services.tonight_response import TonightResponse
+from decision.services.tonight_response import (
+    TargetDecisionStatus,
+    TonightResponse,
+)
 from decision.weather.provider_reliability import WeatherLocation
 from decision.weather.weather_trust_decision import (
     WeatherDecisionAdmissibility,
@@ -418,6 +421,7 @@ class TonightResponseModel(BaseModel):
     target_common_name: str | None = None
     action: str | None = None
     provenance: Literal["project", "discovery"] | None = None
+    target_decision_status: TargetDecisionStatus | None = None
     shortlist_entries: list[TonightShortlistEntryModel] = Field(
         default_factory=list
     )

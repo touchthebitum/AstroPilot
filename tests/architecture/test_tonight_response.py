@@ -22,7 +22,10 @@ from decision.services.tonight_application_service import (
     TonightResult,
     TonightStatus,
 )
-from decision.services.tonight_response import TonightResponse
+from decision.services.tonight_response import (
+    TargetDecisionStatus,
+    TonightResponse,
+)
 from decision.weather.weather_trust_decision import (
     WeatherDecisionAdmissibility,
     WeatherEvidenceQuality,
@@ -54,6 +57,15 @@ def make_candidate(
     )
 
 
+def test_target_decision_status_has_exact_transport_values():
+    assert {status.value for status in TargetDecisionStatus} == {
+        "recommended",
+        "viable",
+        "not_recommended",
+        "insufficient_evidence",
+    }
+
+
 @pytest.mark.parametrize(
     "status",
     [
@@ -77,6 +89,7 @@ def test_partial_results_produce_stable_transport_status(status):
         "target_common_name": None,
         "action": None,
         "provenance": None,
+        "target_decision_status": None,
         "shortlist_entries": [],
         "recommendation_confidence": None,
         "mission_confidence": None,
@@ -208,6 +221,7 @@ def test_complete_result_maps_only_json_compatible_values():
     assert response["target_common_name"] == "Galaxie d’Andromède"
     assert response["action"] == "start_project"
     assert response["provenance"] == "project"
+    assert response["target_decision_status"] == "recommended"
     assert response["recommendation_confidence"] == 0.91
     assert response["scores"] == {
         "astro_score": 82.0,
@@ -362,6 +376,10 @@ def test_discovery_provenance_is_mapped_from_recommendation_candidate():
     )
 
     assert response.provenance == "discovery"
+    assert (
+        response.target_decision_status
+        is TargetDecisionStatus.RECOMMENDED
+    )
 
 
 def test_shortlist_entries_expose_only_compact_candidate_fields():
@@ -497,6 +515,7 @@ def test_caution_preserves_active_transport_and_internal_result_identities():
     assert response["status"] == "available"
     assert response["target"] == "Andromeda"
     assert response["action"] == "start_project"
+    assert response["target_decision_status"] == "recommended"
     assert response["weather_decision"] == {
         "evidence_quality": "insufficient",
         "admissibility": "caution",
@@ -558,6 +577,7 @@ def test_refused_weather_decision_redacts_active_transport_only():
         "target_common_name": None,
         "action": None,
         "provenance": None,
+        "target_decision_status": "insufficient_evidence",
         "shortlist_entries": [],
         "recommendation_confidence": None,
         "mission_confidence": None,
@@ -592,6 +612,25 @@ def test_refused_weather_decision_redacts_active_transport_only():
     }
     assert result.recommendation is recommendation
     assert result.mission is mission
+
+
+def test_invalid_refused_weather_does_not_infer_target_decision_status():
+    decision = WeatherTrustDecision(
+        evidence_quality=WeatherEvidenceQuality.INVALID,
+        admissibility=WeatherDecisionAdmissibility.REFUSED,
+        reasons=("weather_provider_mismatch",),
+    )
+
+    response = TonightResponse.from_result(
+        TonightResult(
+            night={"date": date(2026, 9, 1)},
+            recommendation=None,
+            mission=None,
+        ),
+        weather_decision=decision,
+    )
+
+    assert response.target_decision_status is None
 
 
 def test_weather_refusal_and_transport_status_cannot_diverge():
