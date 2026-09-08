@@ -1,8 +1,12 @@
+from dataclasses import dataclass
+from datetime import datetime
+
 from decision.mission.night_mission import NightMission, MissionReason
 from decision.risk.risk_engine import RiskEngine
 from decision.risk.project_risk_context_builder import ProjectRiskContextBuilder
 from decision.night_productivity.night_productivity_engine import NightProductivityEngine
 from decision.night_productivity.night_productivity_context import NightProductivityContext
+from decision.night_productivity.night_productivity_result import NightProductivityResult
 from decision.mission.night_planner import NightPlanner
 from decision.intelligence.season_analysis import SeasonAnalysis
 from decision.intelligence.analysis_context import AnalysisContext
@@ -21,37 +25,23 @@ def _average(values, fallback):
     return sum(values) / len(values)
 
 
-class MissionAssembler:
+@dataclass(frozen=True)
+class ProductiveWindowAssessment:
+    window_start: datetime | None
+    window_end: datetime | None
+    recommended_hours: float
+    expected_gain: float
+    productivity: NightProductivityResult
 
-    @staticmethod
+    @classmethod
     def build(
+        cls,
+        *,
         target,
-        summary,
         context,
-        equipment,
-        alternatives,
         weather=None,
         mission_input: MissionInput | None = None,
-    ):
-
-        reasons = []
-
-        for text in summary.positives:
-            reasons.append(
-                MissionReason(
-                    title=text,
-                    severity="success",
-                )
-            )
-
-        for text in summary.negatives:
-            reasons.append(
-                MissionReason(
-                    title=text,
-                    severity="warning",
-                )
-            )
-
+    ) -> "ProductiveWindowAssessment":
         selected_weather = (
             mission_input.weather
             if mission_input is not None and mission_input.weather is not None
@@ -97,10 +87,6 @@ class MissionAssembler:
             getattr(selected_weather, "hourly_seeing", None),
             getattr(context_weather, "seeing_arcsec", None),
         )
-        temperature = _average(
-            getattr(selected_weather, "hourly_temperature", None),
-            getattr(context_weather, "temperature_c", None),
-        )
         moon_penalty = (
             mission_input.moon_penalty
             if mission_input is not None
@@ -112,16 +98,15 @@ class MissionAssembler:
                 None,
             )
 
-        window_start = (
+        observation_time = (
             mission_input.window_start
             if mission_input is not None
             and mission_input.window_start is not None
             else getattr(context_session, "start_time", None)
         )
-
         display_start_hour = (
-            window_start.hour + window_start.minute / 60
-            if window_start is not None
+            observation_time.hour + observation_time.minute / 60
+            if observation_time is not None
             else 22
         )
 
@@ -148,9 +133,130 @@ class MissionAssembler:
                 target=CATALOG[target],
                 latitude=context.site.latitude,
                 longitude=context.site.longitude,
-                observation_time=window_start,
-                ),
+                observation_time=observation_time,
             )
+        )
+
+        requested_hours = (
+            mission_input.recommended_hours if mission_input is not None else 0
+        )
+        productive_hours = getattr(productivity, "productive_hours", None)
+        productive_windows = getattr(productivity, "windows", None)
+        if productive_windows == []:
+            operational_hours = 0.0
+        elif productive_hours is not None:
+            operational_hours = min(
+                requested_hours,
+                max(0.0, productive_hours),
+            )
+        else:
+            operational_hours = requested_hours
+        requested_gain = (
+            mission_input.expected_gain if mission_input is not None else 0
+        )
+        operational_gain = (
+            requested_gain * operational_hours / requested_hours
+            if requested_hours > 0
+            else 0
+        )
+
+        return cls(
+            window_start=(
+                mission_input.window_start
+                if mission_input is not None
+                else None
+            ),
+            window_end=(
+                mission_input.window_end
+                if mission_input is not None
+                else None
+            ),
+            recommended_hours=round(operational_hours, 2),
+            expected_gain=round(operational_gain, 2),
+            productivity=productivity,
+        )
+
+
+class MissionAssembler:
+
+    @staticmethod
+    def build(
+        target,
+        summary,
+        context,
+        equipment,
+        alternatives,
+        weather=None,
+        mission_input: MissionInput | None = None,
+    ):
+
+        reasons = []
+
+        for text in summary.positives:
+            reasons.append(
+                MissionReason(
+                    title=text,
+                    severity="success",
+                )
+            )
+
+        for text in summary.negatives:
+            reasons.append(
+                MissionReason(
+                    title=text,
+                    severity="warning",
+                )
+            )
+
+        selected_weather = (
+            mission_input.weather
+            if mission_input is not None and mission_input.weather is not None
+            else weather
+        )
+        context_weather = getattr(context, "weather", None)
+        context_session = getattr(context, "session", None)
+
+        cloud_cover = _average(
+            getattr(selected_weather, "hourly_clouds", None),
+            getattr(context_weather, "cloud_cover", None),
+        )
+        humidity = _average(
+            getattr(selected_weather, "hourly_humidity", None),
+            getattr(context_weather, "humidity", None),
+        )
+        seeing = _average(
+            getattr(selected_weather, "hourly_seeing", None),
+            getattr(context_weather, "seeing_arcsec", None),
+        )
+        temperature = _average(
+            getattr(selected_weather, "hourly_temperature", None),
+            getattr(context_weather, "temperature_c", None),
+        )
+        moon_penalty = (
+            mission_input.moon_penalty
+            if mission_input is not None
+            else None
+        )
+        if moon_penalty is None:
+            moon_penalty = _average(
+                getattr(selected_weather, "hourly_moon_penalty", None),
+                None,
+            )
+
+        window_start = (
+            mission_input.window_start
+            if mission_input is not None
+            and mission_input.window_start is not None
+            else getattr(context_session, "start_time", None)
+        )
+
+        assessment = ProductiveWindowAssessment.build(
+            target=target,
+            context=context,
+            weather=weather,
+            mission_input=mission_input,
+        )
+        productivity = assessment.productivity
         dew_risk = None
 
         if (
@@ -205,30 +311,6 @@ class MissionAssembler:
         risk = RiskEngine.evaluate(risk_context)
         tasks = NightPlanner.build(productivity)
 
-        requested_hours = (
-            mission_input.recommended_hours if mission_input is not None else 0
-        )
-        productive_hours = getattr(productivity, "productive_hours", None)
-        productive_windows = getattr(productivity, "windows", None)
-        if productive_windows == []:
-            operational_hours = 0.0
-        elif productive_hours is not None:
-            operational_hours = min(
-                requested_hours,
-                max(0.0, productive_hours),
-            )
-        else:
-            operational_hours = requested_hours
-        requested_gain = (
-            mission_input.expected_gain if mission_input is not None else 0
-        )
-        operational_gain = (
-            requested_gain * operational_hours / requested_hours
-            if requested_hours > 0
-            else 0
-        )
-
-
         analysis_context = AnalysisContext(
             target=target,
             weather=selected_weather,
@@ -270,18 +352,10 @@ class MissionAssembler:
             confidence=summary.confidence,
             reasons=reasons,
             equipment=equipment,
-            window_start=(
-                mission_input.window_start if mission_input is not None else None
-            ),
-            window_end=(
-                mission_input.window_end if mission_input is not None else None
-            ),
-            recommended_hours=(
-                round(operational_hours, 2)
-            ),
-            expected_gain=(
-                round(operational_gain, 2)
-            ),
+            window_start=assessment.window_start,
+            window_end=assessment.window_end,
+            recommended_hours=assessment.recommended_hours,
+            expected_gain=assessment.expected_gain,
             selected_filter=(
                 mission_input.selected_filter
                 if mission_input is not None
