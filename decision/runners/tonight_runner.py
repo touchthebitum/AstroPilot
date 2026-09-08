@@ -49,10 +49,7 @@ class TonightRunner:
         top_nights,
         profile=None,
     ):
-        available_hours = winner.get(
-            "duration",
-            3.0,
-        )
+        available_hours = winner.get("duration")
 
         recommendation_kwargs = {"available_hours": available_hours}
         if profile is not None:

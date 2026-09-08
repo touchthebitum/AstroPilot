@@ -679,7 +679,7 @@ night_strategy_engine = NightStrategyEngine(
 
 def recommend_project_for_night(
     top_objects,
-    available_hours=3.0,
+    available_hours=None,
     *,
     profile,
 ):
@@ -704,10 +704,14 @@ def recommend_project_for_night(
             continue
 
         priority = project_priority(catalog_key, projects)
-        roi = session_roi(
-            catalog_key,
-            available_hours,
-            projects=projects,
+        roi = (
+            session_roi(
+                catalog_key,
+                available_hours,
+                projects=projects,
+            )
+            if available_hours is not None
+            else None
         )
 
         future = future_engine.estimate(
@@ -745,10 +749,14 @@ def recommend_project_for_night(
             30,
         )
 
-        closure = closure_bonus(
-            catalog_key,
-            available_hours,
-            projects=projects,
+        closure = (
+            closure_bonus(
+                catalog_key,
+                available_hours,
+                projects=projects,
+            )
+            if available_hours is not None
+            else 0
         )
 
         opportunity_ratio = future.opportunity_ratio
@@ -766,7 +774,7 @@ def recommend_project_for_night(
         roi_bonus = min(
             15,
             roi * 0.2,
-        )
+        ) if roi is not None else 0
 
         portfolio_bonus = portfolio_candidate_bonus(
             project_part=project_part,
@@ -821,11 +829,17 @@ def recommend_project_for_night(
                 reasons=explain_recommendation(
                     {
                         "astro_score": astro_score,
-                        "roi": roi,
                         "postponement_risk": postponement_risk,
                         "marginal_progress_bonus": marginal_progress_bonus,
-                        "closure_bonus": closure,
                         "diversity_bonus": diversity_bonus,
+                        **(
+                            {
+                                "roi": roi,
+                                "closure_bonus": closure,
+                            }
+                            if available_hours is not None
+                            else {}
+                        ),
                     }
                 ),
                 strategy_scores=strategy_scores,

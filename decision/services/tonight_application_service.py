@@ -176,7 +176,7 @@ class TonightApplicationService:
         top_objects = night.get("top_objects") or []
         candidates = self.build_candidates(
             top_objects,
-            available_hours=night.get("duration", 3.0),
+            available_hours=night.get("duration"),
             profile=effective_profile,
         )
 

@@ -270,6 +270,29 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
     assert selected_objects[0]["window_score"] == 89.0
 
 
+def test_missing_night_duration_stays_unknown_for_candidate_ranking():
+    calls = []
+    night = {
+        "date": date(2026, 9, 1),
+        "top_objects": [],
+    }
+    service, _, _ = make_service(
+        forecast_nights=lambda *args, **kwargs: forecast_run([night]),
+        build_candidates=lambda objects, available_hours, *, profile: (
+            calls.append((objects, available_hours)) or []
+        ),
+    )
+
+    service.evaluate(
+        profile=make_profile(),
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=4,
+    )
+
+    assert calls == [([], None)]
+
+
 def test_missing_location_is_rejected_before_forecast():
     forecast_calls = []
     service, _, _ = make_service(
