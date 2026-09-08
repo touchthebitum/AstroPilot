@@ -692,14 +692,16 @@ def recommend_project_for_night(
 
     projects = profile.get("projects", {})
     candidates = []
+    discovery_objects = []
 
     for obj in top_objects:
         catalog_key = obj.get("catalog_key", obj.get("name"))
+        astro_score = obj.get("global_score", obj.get("score", 0))
 
         if catalog_key not in projects:
+            if astro_score > 0:
+                discovery_objects.append((obj, catalog_key, astro_score))
             continue
-
-        astro_score = obj.get("global_score", obj.get("score", 0))
 
         if astro_score <= 0:
             continue
@@ -847,6 +849,28 @@ def recommend_project_for_night(
                 acquired_hours=acquired_hours,
             )
         )
+
+    if not candidates:
+        for obj, catalog_key, astro_score in discovery_objects:
+            astro_part = astro_score * astro_weight
+            candidates.append(
+                project_selection_engine.build_candidate(
+                    name=obj["name"],
+                    catalog_key=catalog_key,
+                    priority=None,
+                    astro_score=astro_score,
+                    final_score=astro_part,
+                    decision_score=astro_part,
+                    portfolio_score=None,
+                    global_score=obj.get("global_score", astro_score),
+                    setup_score=obj.get("setup_score", 0),
+                    best_setup=obj.get("best_setup"),
+                    closure_bonus=None,
+                    reasons=[],
+                    strategy_scores={},
+                    acquired_hours=None,
+                )
+            )
 
     if not candidates:
         return None

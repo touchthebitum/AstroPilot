@@ -107,7 +107,6 @@ def test_replaces_an_existing_valid_configuration(tmp_path, monkeypatch):
         lambda candidate: candidate.pop("available_equipment"),
         lambda candidate: candidate.update(available_equipment=[]),
         lambda candidate: candidate.pop("projects"),
-        lambda candidate: candidate.update(projects={}),
         lambda candidate: candidate["projects"]["M31"].pop("target_hours"),
     ],
 )
@@ -122,6 +121,32 @@ def test_missing_v1_requirement_has_no_filesystem_effect(
     mutate(candidate)
 
     with pytest.raises(UserProfileError):
+        create_or_replace_user_configuration(candidate)
+
+    assert not data_dir.exists()
+
+
+def test_empty_projects_mapping_is_persisted_and_reloadable(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+    candidate = minimal_candidate()
+    candidate["projects"] = {}
+
+    written = create_or_replace_user_configuration(candidate)
+
+    assert written["projects"] == {}
+    assert load_user_profile() == written
+
+
+def test_projects_must_remain_a_mapping(tmp_path, monkeypatch):
+    data_dir = tmp_path / "missing"
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(data_dir))
+    candidate = minimal_candidate()
+    candidate["projects"] = []
+
+    with pytest.raises(UserProfileError, match="projects"):
         create_or_replace_user_configuration(candidate)
 
     assert not data_dir.exists()
