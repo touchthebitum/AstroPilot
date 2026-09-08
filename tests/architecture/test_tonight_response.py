@@ -30,14 +30,21 @@ from decision.weather.weather_trust_decision import (
 )
 
 
-def make_candidate(provenance=CandidateProvenance.PROJECT):
+def make_candidate(
+    provenance=CandidateProvenance.PROJECT,
+    *,
+    name="Andromeda",
+    catalog_key="M31",
+    decision_score=77.0,
+    final_score=79.0,
+):
     return Candidate(
-        name="Andromeda",
-        catalog_key="M31",
+        name=name,
+        catalog_key=catalog_key,
         priority=1.0,
         astro_score=82.0,
-        final_score=79.0,
-        decision_score=77.0,
+        final_score=final_score,
+        decision_score=decision_score,
         portfolio_score=75.0,
         global_score=81.0,
         setup_score=68.0,
@@ -70,6 +77,7 @@ def test_partial_results_produce_stable_transport_status(status):
         "target_common_name": None,
         "action": None,
         "provenance": None,
+        "shortlist_entries": [],
         "recommendation_confidence": None,
         "mission_confidence": None,
         "scores": {},
@@ -356,6 +364,56 @@ def test_discovery_provenance_is_mapped_from_recommendation_candidate():
     assert response.provenance == "discovery"
 
 
+def test_shortlist_entries_expose_only_compact_candidate_fields():
+    primary = make_candidate()
+    first = make_candidate(
+        CandidateProvenance.DISCOVERY,
+        name="Orion",
+        catalog_key="M42",
+        decision_score=74.0,
+        final_score=76.0,
+    )
+    second = make_candidate(
+        name="Triangulum",
+        catalog_key="M33",
+        decision_score=71.0,
+        final_score=73.0,
+    )
+    recommendation = Recommendation(
+        opportunity=Opportunity(
+            action=Action.START_PROJECT,
+            candidate=primary,
+            shortlist_entries=(first, second),
+        ),
+        confidence=None,
+    )
+
+    response = TonightResponse.from_result(
+        TonightResult(
+            night={"date": date(2026, 9, 1)},
+            recommendation=recommendation,
+            mission=None,
+        )
+    ).to_dict()
+
+    assert response["shortlist_entries"] == [
+        {
+            "target": "Orion",
+            "catalog_key": "M42",
+            "provenance": "discovery",
+            "decision_score": 74.0,
+            "final_score": 76.0,
+        },
+        {
+            "target": "Triangulum",
+            "catalog_key": "M33",
+            "provenance": "project",
+            "decision_score": 71.0,
+            "final_score": 73.0,
+        },
+    ]
+
+
 def test_unknown_recommendation_and_mission_confidence_remain_none():
     candidate = make_candidate()
     recommendation = Recommendation(
@@ -500,6 +558,7 @@ def test_refused_weather_decision_redacts_active_transport_only():
         "target_common_name": None,
         "action": None,
         "provenance": None,
+        "shortlist_entries": [],
         "recommendation_confidence": None,
         "mission_confidence": None,
         "scores": {},

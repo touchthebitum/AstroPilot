@@ -11,3 +11,4 @@ class Opportunity:
     action: Action
     candidate: Candidate
     reasons: list[OpportunityReason] = field(default_factory=list)
+    shortlist_entries: tuple[Candidate, ...] = ()

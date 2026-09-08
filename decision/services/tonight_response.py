@@ -178,6 +178,15 @@ class TonightWeatherDecisionResponse:
     presentation: TonightWeatherDecisionPresentationResponse
 
 
+@dataclass(frozen=True)
+class TonightShortlistEntryResponse:
+    target: str
+    catalog_key: str
+    provenance: str
+    decision_score: float
+    final_score: float
+
+
 _WEATHER_PRESENTATION_FALLBACKS = {
     WeatherDecisionAdmissibility.ADMISSIBLE: (
         "Météo validée pour cette décision",
@@ -242,6 +251,9 @@ class TonightResponse:
     target_common_name: str | None = None
     action: str | None = None
     provenance: str | None = None
+    shortlist_entries: list[TonightShortlistEntryResponse] = field(
+        default_factory=list
+    )
     recommendation_confidence: float | None = None
     mission_confidence: float | str | None = None
     scores: dict[str, float] = field(default_factory=dict)
@@ -319,6 +331,21 @@ class TonightResponse:
                 value = candidate.get(name)
                 if value is not None:
                     scores[name] = float(value)
+
+        shortlist_entries = (
+            [
+                TonightShortlistEntryResponse(
+                    target=entry.name,
+                    catalog_key=entry.catalog_key,
+                    provenance=entry.provenance.value,
+                    decision_score=float(entry.decision_score),
+                    final_score=float(entry.final_score),
+                )
+                for entry in recommendation.opportunity.shortlist_entries
+            ]
+            if recommendation is not None
+            else []
+        )
 
         selected_filter = None
         if mission is not None and mission.selected_filter is not None:
@@ -511,6 +538,7 @@ class TonightResponse:
                 if candidate is not None
                 else None
             ),
+            shortlist_entries=shortlist_entries,
             recommendation_confidence=(
                 float(recommendation.confidence)
                 if recommendation is not None

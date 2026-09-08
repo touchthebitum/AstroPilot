@@ -58,6 +58,23 @@ def test_selects_candidate_with_highest_decision_score():
     assert opportunity.candidate is higher
 
 
+def test_preserves_up_to_two_non_winners_in_incoming_order():
+    first = make_candidate("first", decision_score=70, final_score=100)
+    winner = make_candidate("winner", decision_score=100, final_score=90)
+    second = make_candidate("second", decision_score=80, final_score=80)
+    omitted = make_candidate("omitted", decision_score=60, final_score=70)
+
+    opportunity = OpportunityEngine().evaluate(
+        candidates=[first, winner, second, omitted],
+    )
+
+    assert opportunity is not None
+    assert opportunity.candidate is winner
+    assert opportunity.shortlist_entries == (first, second)
+    assert opportunity.shortlist_entries[0] is first
+    assert opportunity.shortlist_entries[1] is second
+
+
 def test_current_action_is_continue_project():
     candidate = make_candidate(
         "M31",
