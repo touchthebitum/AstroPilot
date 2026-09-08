@@ -272,6 +272,7 @@ def test_http_request_runs_real_application_composition_once(
             "target_decision_status": None,
         }
     ]
+    assert payload["alternatives"] == []
     assert payload["target_common_name"] == "Galaxie d’Andromède"
     assert payload["astro_quality"] == {
         "score": 84.0,

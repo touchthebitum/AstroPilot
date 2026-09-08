@@ -91,6 +91,7 @@ def test_partial_results_produce_stable_transport_status(status):
         "provenance": None,
         "target_decision_status": None,
         "shortlist_entries": [],
+        "alternatives": [],
         "recommendation_confidence": None,
         "mission_confidence": None,
         "scores": {},
@@ -466,6 +467,53 @@ def test_shortlist_publishes_only_prequalified_viable_entries():
     ] == ["viable", None]
 
 
+def test_alternatives_serialize_only_preselected_candidates():
+    primary = make_candidate()
+    first = make_candidate(name="Orion", catalog_key="M42")
+    second = make_candidate(name="Triangulum", catalog_key="M33")
+    recommendation = Recommendation(
+        opportunity=Opportunity(
+            action=Action.START_PROJECT,
+            candidate=primary,
+            shortlist_entries=(first, second),
+        ),
+        confidence=None,
+    )
+
+    response = TonightResponse.from_result(
+        TonightResult(
+            night={"date": date(2026, 9, 1)},
+            recommendation=recommendation,
+            mission=None,
+        ),
+        viable_shortlist_catalog_keys={"M42"},
+        selected_alternatives=(first,),
+    ).to_dict()
+
+    assert response["alternatives"] == [
+        {
+            "target": "Orion",
+            "catalog_key": "M42",
+            "provenance": "project",
+            "decision_score": first.decision_score,
+            "final_score": first.final_score,
+            "target_decision_status": "viable",
+        }
+    ]
+
+
+def test_alternatives_default_to_empty():
+    response = TonightResponse.from_result(
+        TonightResult(
+            night={"date": date(2026, 9, 1)},
+            recommendation=None,
+            mission=None,
+        )
+    ).to_dict()
+
+    assert response["alternatives"] == []
+
+
 def test_unknown_recommendation_and_mission_confidence_remain_none():
     candidate = make_candidate()
     recommendation = Recommendation(
@@ -613,6 +661,7 @@ def test_refused_weather_decision_redacts_active_transport_only():
         "provenance": None,
         "target_decision_status": "insufficient_evidence",
         "shortlist_entries": [],
+        "alternatives": [],
         "recommendation_confidence": None,
         "mission_confidence": None,
         "scores": {},

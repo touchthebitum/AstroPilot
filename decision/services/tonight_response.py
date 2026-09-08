@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import date, datetime
 from enum import Enum
@@ -264,6 +264,9 @@ class TonightResponse:
     shortlist_entries: list[TonightShortlistEntryResponse] = field(
         default_factory=list
     )
+    alternatives: list[TonightShortlistEntryResponse] = field(
+        default_factory=list
+    )
     recommendation_confidence: float | None = None
     mission_confidence: float | str | None = None
     scores: dict[str, float] = field(default_factory=dict)
@@ -300,6 +303,7 @@ class TonightResponse:
         *,
         weather_decision: WeatherTrustDecision | None = None,
         viable_shortlist_catalog_keys: Collection[str] | None = None,
+        selected_alternatives: Sequence | None = None,
     ) -> TonightResponse:
         refused = (
             weather_decision is not None
@@ -362,6 +366,22 @@ class TonightResponse:
                 for entry in recommendation.opportunity.shortlist_entries
             ]
             if recommendation is not None
+            else []
+        )
+        alternatives = (
+            [
+                TonightShortlistEntryResponse(
+                    target=entry.name,
+                    catalog_key=entry.catalog_key,
+                    provenance=entry.provenance.value,
+                    decision_score=float(entry.decision_score),
+                    final_score=float(entry.final_score),
+                    target_decision_status=TargetDecisionStatus.VIABLE,
+                )
+                for entry in selected_alternatives
+            ]
+            if recommendation is not None
+            and selected_alternatives is not None
             else []
         )
 
@@ -572,6 +592,7 @@ class TonightResponse:
             ),
             target_decision_status=target_decision_status,
             shortlist_entries=shortlist_entries,
+            alternatives=alternatives,
             recommendation_confidence=(
                 float(recommendation.confidence)
                 if recommendation is not None

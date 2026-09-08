@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -103,3 +103,21 @@ class CandidateViabilityEvaluator:
                 WeatherDecisionAdmissibility.CAUTION,
             }
         )
+
+
+def select_viable_alternatives(
+    shortlist_entries: Iterable[Any],
+    viable_catalog_keys: Collection[str],
+    *,
+    primary_catalog_key: str | None,
+) -> tuple[Any, ...]:
+    alternatives = []
+    for candidate in shortlist_entries:
+        if candidate.catalog_key == primary_catalog_key:
+            continue
+        if candidate.catalog_key not in viable_catalog_keys:
+            continue
+        alternatives.append(candidate)
+        if len(alternatives) == 2:
+            break
+    return tuple(alternatives)
