@@ -19,6 +19,10 @@ from decision.services.tonight_response import (
     TargetDecisionStatus,
     TonightResponse,
 )
+from decision.services.candidate_assessment import (
+    CandidateAssessment,
+    CandidateViabilityEvaluator,
+)
 from decision.weather.provider_reliability import WeatherLocation
 from decision.weather.weather_trust_decision import (
     WeatherDecisionAdmissibility,
@@ -240,6 +244,7 @@ class TonightShortlistEntryModel(BaseModel):
     provenance: Literal["project", "discovery"]
     decision_score: float
     final_score: float
+    target_decision_status: TargetDecisionStatus | None = None
 
 
 class TonightResponseModel(BaseModel):
@@ -452,6 +457,43 @@ def _production_service_factory():
     from astro_score import build_durable_tonight_application_service
 
     return build_durable_tonight_application_service()
+
+
+def _production_build_mission_input(evaluation, *, profile):
+    from astro_score import build_mission_input
+
+    return build_mission_input(evaluation, profile=profile)
+
+
+def _assess_shortlist_candidates(
+    result,
+    *,
+    profile,
+    weather_snapshot,
+    weather_freshness,
+    decision_location,
+    build_mission_input,
+):
+    recommendation = getattr(result, "recommendation", None)
+    night = getattr(result, "night", None) or {}
+    object_evaluations = night.get("object_evaluations", {})
+    if recommendation is None or not object_evaluations:
+        return {}
+
+    assessments = {}
+    for candidate in recommendation.opportunity.shortlist_entries:
+        if candidate.catalog_key not in object_evaluations:
+            continue
+        assessments[candidate.catalog_key] = CandidateAssessment.build(
+            candidate=candidate,
+            object_evaluations=object_evaluations,
+            profile=profile,
+            weather_snapshot=weather_snapshot,
+            weather_freshness=weather_freshness,
+            decision_location=decision_location,
+            build_mission_input=build_mission_input,
+        )
+    return assessments
 
 
 def _production_weather_provider(latitude: float, longitude: float):
@@ -735,6 +777,7 @@ def create_app(
             )
 
         weather_decision = None
+        candidate_assessments = {}
         if (
             result.status is TonightStatus.AVAILABLE
             and isinstance(weather, WeatherSnapshot)
@@ -788,9 +831,54 @@ def create_app(
                 ),
             )
 
+            try:
+                candidate_assessments = _assess_shortlist_candidates(
+                    result,
+                    profile=profile,
+                    weather_snapshot=weather,
+                    weather_freshness=weather_freshness,
+                    decision_location=WeatherLocation(
+                        latitude=location["latitude"],
+                        longitude=location["longitude"],
+                    ),
+                    build_mission_input=_production_build_mission_input,
+                )
+            except WeatherWindowCoverageError as exc:
+                weather_invalid = "invalid_weather_coverage" in exc.issues
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "code": (
+                            "weather_invalid"
+                            if weather_invalid
+                            else "decision_invalid"
+                        ),
+                        "message": (
+                            "Weather data failed validation."
+                            if weather_invalid
+                            else "The decision failed consistency validation."
+                        ),
+                    },
+                ) from exc
+
+        viable_shortlist_catalog_keys = set()
+        try:
+            for catalog_key, assessment in candidate_assessments.items():
+                if CandidateViabilityEvaluator.is_viable(assessment):
+                    viable_shortlist_catalog_keys.add(catalog_key)
+        except DecisionConsistencyError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": exc.code,
+                    "message": "The decision failed consistency validation.",
+                },
+            ) from exc
+
         payload = TonightResponse.from_result(
             result,
             weather_decision=weather_decision,
+            viable_shortlist_catalog_keys=viable_shortlist_catalog_keys,
         ).to_dict()
         if isinstance(weather, WeatherSnapshot):
             payload["weather_trust"] = weather.trust_transport(weather_freshness)

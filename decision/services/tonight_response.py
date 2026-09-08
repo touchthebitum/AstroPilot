@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import date, datetime
 from enum import Enum
@@ -192,6 +193,7 @@ class TonightShortlistEntryResponse:
     provenance: str
     decision_score: float
     final_score: float
+    target_decision_status: TargetDecisionStatus | None = None
 
 
 _WEATHER_PRESENTATION_FALLBACKS = {
@@ -297,6 +299,7 @@ class TonightResponse:
         result: TonightResult,
         *,
         weather_decision: WeatherTrustDecision | None = None,
+        viable_shortlist_catalog_keys: Collection[str] | None = None,
     ) -> TonightResponse:
         refused = (
             weather_decision is not None
@@ -348,6 +351,13 @@ class TonightResponse:
                     provenance=entry.provenance.value,
                     decision_score=float(entry.decision_score),
                     final_score=float(entry.final_score),
+                    target_decision_status=(
+                        TargetDecisionStatus.VIABLE
+                        if viable_shortlist_catalog_keys is not None
+                        and entry.catalog_key
+                        in viable_shortlist_catalog_keys
+                        else None
+                    ),
                 )
                 for entry in recommendation.opportunity.shortlist_entries
             ]

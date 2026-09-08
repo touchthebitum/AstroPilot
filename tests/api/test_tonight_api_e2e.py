@@ -269,6 +269,7 @@ def test_http_request_runs_real_application_composition_once(
             "provenance": "discovery",
             "decision_score": 70.0,
             "final_score": 72.0,
+            "target_decision_status": None,
         }
     ]
     assert payload["target_common_name"] == "Galaxie d’Andromède"

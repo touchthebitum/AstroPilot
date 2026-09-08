@@ -421,6 +421,7 @@ def test_shortlist_entries_expose_only_compact_candidate_fields():
             "provenance": "discovery",
             "decision_score": 74.0,
             "final_score": 76.0,
+            "target_decision_status": None,
         },
         {
             "target": "Triangulum",
@@ -428,8 +429,41 @@ def test_shortlist_entries_expose_only_compact_candidate_fields():
             "provenance": "project",
             "decision_score": 71.0,
             "final_score": 73.0,
+            "target_decision_status": None,
         },
     ]
+
+
+def test_shortlist_publishes_only_prequalified_viable_entries():
+    primary = make_candidate()
+    first = make_candidate(name="Orion", catalog_key="M42")
+    second = make_candidate(name="Triangulum", catalog_key="M33")
+    recommendation = Recommendation(
+        opportunity=Opportunity(
+            action=Action.START_PROJECT,
+            candidate=primary,
+            shortlist_entries=(first, second),
+        ),
+        confidence=None,
+    )
+
+    response = TonightResponse.from_result(
+        TonightResult(
+            night={"date": date(2026, 9, 1)},
+            recommendation=recommendation,
+            mission=None,
+        ),
+        viable_shortlist_catalog_keys={"M42"},
+    ).to_dict()
+
+    assert [entry["catalog_key"] for entry in response["shortlist_entries"]] == [
+        "M42",
+        "M33",
+    ]
+    assert [
+        entry["target_decision_status"]
+        for entry in response["shortlist_entries"]
+    ] == ["viable", None]
 
 
 def test_unknown_recommendation_and_mission_confidence_remain_none():

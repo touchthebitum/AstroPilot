@@ -5,14 +5,20 @@ from types import SimpleNamespace
 import pytest
 
 import decision.services.candidate_assessment as module
+from astropilot.app import _assess_shortlist_candidates
 from decision.mission.mission_assembler import ProductiveWindowAssessment
-from decision.services.candidate_assessment import CandidateAssessment
+from decision.services.candidate_assessment import (
+    CandidateAssessment,
+    CandidateViabilityEvaluator,
+)
+from decision.validation.decision_consistency import DecisionConsistencyError
 from decision.validation.weather_window_coverage import WeatherWindowCoverageError
 from decision.weather.provider_reliability import WeatherLocation
 from decision.weather.weather_ingress import WeatherFreshness, WeatherSnapshot
 from decision.weather.weather_trust_decision import (
     WeatherDecisionAdmissibility,
     WeatherEvidenceQuality,
+    WeatherTrustDecision,
 )
 
 
@@ -146,3 +152,121 @@ def test_candidate_assessment_preserves_invalid_window_exception(monkeypatch):
         )
 
     assert caught.value.issues == ("invalid_mission_window",)
+
+
+def viability_assessment(admissibility, *, windows=None, recommended_hours=1.0):
+    if windows is None:
+        windows = [
+            SimpleNamespace(
+                start_hour=0.0,
+                end_hour=1.0,
+                productivity=0.8,
+                productive=True,
+            )
+        ]
+    return CandidateAssessment(
+        productive_window=ProductiveWindowAssessment(
+            window_start=START,
+            window_end=START + timedelta(hours=2),
+            recommended_hours=recommended_hours,
+            expected_gain=0.0,
+            productivity=SimpleNamespace(
+                astronomical_hours=2.0,
+                productive_hours=1.0 if windows else 0.0,
+                confidence=0.5 if windows else 0.0,
+                windows=windows,
+            ),
+        ),
+        weather_decision=WeatherTrustDecision(
+            evidence_quality=WeatherEvidenceQuality.SUFFICIENT,
+            admissibility=admissibility,
+            reasons=(),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "admissibility",
+    [
+        WeatherDecisionAdmissibility.ADMISSIBLE,
+        WeatherDecisionAdmissibility.CAUTION,
+    ],
+)
+def test_viability_requires_consistency_productivity_and_usable_weather(
+    admissibility,
+):
+    assert CandidateViabilityEvaluator.is_viable(
+        viability_assessment(admissibility)
+    ) is True
+
+
+def test_viability_rejects_missing_refused_or_unproductive_assessment():
+    assert CandidateViabilityEvaluator.is_viable(None) is False
+    assert CandidateViabilityEvaluator.is_viable(
+        viability_assessment(WeatherDecisionAdmissibility.REFUSED)
+    ) is False
+    assert CandidateViabilityEvaluator.is_viable(
+        viability_assessment(
+            WeatherDecisionAdmissibility.ADMISSIBLE,
+            windows=[],
+            recommended_hours=0.0,
+        )
+    ) is False
+
+
+def test_viability_preserves_consistency_failure():
+    inconsistent = viability_assessment(
+        WeatherDecisionAdmissibility.ADMISSIBLE,
+        recommended_hours=2.0,
+    )
+
+    with pytest.raises(DecisionConsistencyError):
+        CandidateViabilityEvaluator.is_viable(inconsistent)
+
+
+def test_shortlist_assessments_are_retained_by_catalog_key(monkeypatch):
+    first = SimpleNamespace(catalog_key="M42")
+    missing = SimpleNamespace(catalog_key="M33")
+    result = SimpleNamespace(
+        recommendation=SimpleNamespace(
+            opportunity=SimpleNamespace(shortlist_entries=(first, missing))
+        ),
+        night={
+            "object_evaluations": {
+                "M42": {"catalog_key": "M42"},
+            }
+        },
+    )
+    assessment = viability_assessment(WeatherDecisionAdmissibility.CAUTION)
+    captured = []
+
+    def build(**kwargs):
+        captured.append(kwargs)
+        return assessment
+
+    monkeypatch.setattr(module.CandidateAssessment, "build", build)
+    weather = snapshot()
+    profile = {"projects": {}}
+    mission_input_builder = object()
+
+    assessments = _assess_shortlist_candidates(
+        result,
+        profile=profile,
+        weather_snapshot=weather,
+        weather_freshness=WeatherFreshness(5.0, "fresh", 90),
+        decision_location=SITE,
+        build_mission_input=mission_input_builder,
+    )
+
+    assert assessments == {"M42": assessment}
+    assert captured == [
+        {
+            "candidate": first,
+            "object_evaluations": result.night["object_evaluations"],
+            "profile": profile,
+            "weather_snapshot": weather,
+            "weather_freshness": WeatherFreshness(5.0, "fresh", 90),
+            "decision_location": SITE,
+            "build_mission_input": mission_input_builder,
+        }
+    ]
