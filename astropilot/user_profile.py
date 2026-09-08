@@ -546,10 +546,10 @@ def create_or_replace_user_configuration(
         )
 
     projects = normalized.get("projects")
-    if not isinstance(projects, Mapping) or not projects:
+    if not isinstance(projects, Mapping):
         raise UserProfileError(
             "Configuration utilisateur V1 invalide : "
-            "projects doit contenir au moins un projet."
+            "projects doit être un objet JSON."
         )
 
     normalized_projects = {}

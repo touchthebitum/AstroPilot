@@ -5,20 +5,20 @@ class Candidate:
     name: str
     catalog_key: str
 
-    priority: float
+    priority: float | None
     astro_score: float
     final_score: float
     decision_score: float
 
-    portfolio_score: float
+    portfolio_score: float | None
 
     global_score: float
     setup_score: float
     best_setup: str | None
 
-    closure_bonus: float
+    closure_bonus: float | None
 
-    acquired_hours: float = 0.0
+    acquired_hours: float | None = 0.0
     reasons: list[str] = field(default_factory=list)
     strategy_scores: dict = field(default_factory=dict)
 
