@@ -1,13 +1,18 @@
+from dataclasses import FrozenInstanceError, fields
 from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
 
 import decision.mission.mission_assembler as module
-from decision.mission.mission_assembler import MissionAssembler
+from decision.mission.mission_assembler import (
+    MissionAssembler,
+    ProductiveWindowAssessment,
+)
 from decision.mission.mission_input import MissionInput
 from decision.mission.night_mission import MissionReason
 from decision.weather.weather_forecast import WeatherForecast
+from decision.validation.decision_consistency import DecisionConsistencyGate
 
 
 @pytest.fixture
@@ -392,3 +397,78 @@ def test_no_productive_window_exposes_no_recommended_duration_or_gain(
 
     assert result.recommended_hours == 0.0
     assert result.expected_gain == 0.0
+
+
+def test_productive_window_assessment_is_immutable_and_gate_compatible(
+    frozen_time,
+    context,
+    isolated_dependencies,
+):
+    window = SimpleNamespace(
+        start_hour=0.0,
+        end_hour=1.0,
+        productivity=0.8,
+        productive=True,
+    )
+    productivity = isolated_dependencies.productivity
+    productivity.astronomical_hours = 2.0
+    productivity.productive_hours = 0.75
+    productivity.confidence = 0.375
+    productivity.windows = [window]
+    input_data = mission_input(
+        frozen_time,
+        WeatherForecast(),
+        recommended_hours=1.5,
+        expected_gain=6.0,
+    )
+
+    assessment = ProductiveWindowAssessment.build(
+        target="M31",
+        context=context,
+        mission_input=input_data,
+    )
+
+    assert [field.name for field in fields(assessment)] == [
+        "window_start",
+        "window_end",
+        "recommended_hours",
+        "expected_gain",
+        "productivity",
+    ]
+    assert assessment.window_start is input_data.window_start
+    assert assessment.window_end is input_data.window_end
+    assert assessment.recommended_hours == 0.75
+    assert assessment.expected_gain == 3.0
+    assert assessment.productivity is productivity
+    DecisionConsistencyGate.validate_mission(assessment)
+    assert DecisionConsistencyGate.has_productive_window(assessment) is True
+    with pytest.raises(FrozenInstanceError):
+        assessment.recommended_hours = 2.0
+
+
+def test_assessment_without_productive_window_is_consistent_but_ineligible(
+    frozen_time,
+    context,
+    isolated_dependencies,
+):
+    productivity = isolated_dependencies.productivity
+    productivity.astronomical_hours = 2.0
+    productivity.productive_hours = 0.75
+    productivity.confidence = 0.375
+    productivity.windows = []
+
+    assessment = ProductiveWindowAssessment.build(
+        target="M31",
+        context=context,
+        mission_input=mission_input(
+            frozen_time,
+            WeatherForecast(),
+            recommended_hours=1.5,
+            expected_gain=6.0,
+        ),
+    )
+
+    assert assessment.recommended_hours == 0.0
+    assert assessment.expected_gain == 0.0
+    DecisionConsistencyGate.validate_mission(assessment)
+    assert DecisionConsistencyGate.has_productive_window(assessment) is False
