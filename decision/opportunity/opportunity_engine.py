@@ -23,7 +23,10 @@ class OpportunityEngine:
 
         action = (
             Action.CONTINUE_PROJECT
-            if best.acquired_hours > 0
+            if (
+                best.acquired_hours is not None
+                and best.acquired_hours > 0
+            )
             else Action.START_PROJECT
         )
 
