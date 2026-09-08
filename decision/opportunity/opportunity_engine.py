@@ -36,4 +36,9 @@ class OpportunityEngine:
             reasons=OpportunityReasonBuilder.build(
                 candidate=best,
             ),
+            shortlist_entries=tuple(
+                candidate
+                for candidate in candidates
+                if candidate is not best
+            )[:2],
         )

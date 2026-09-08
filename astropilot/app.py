@@ -231,6 +231,14 @@ class TonightWeatherDecisionModel(BaseModel):
     presentation: TonightWeatherDecisionPresentationModel
 
 
+class TonightShortlistEntryModel(BaseModel):
+    target: str
+    catalog_key: str
+    provenance: Literal["project", "discovery"]
+    decision_score: float
+    final_score: float
+
+
 class TonightResponseModel(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -410,6 +418,9 @@ class TonightResponseModel(BaseModel):
     target_common_name: str | None = None
     action: str | None = None
     provenance: Literal["project", "discovery"] | None = None
+    shortlist_entries: list[TonightShortlistEntryModel] = Field(
+        default_factory=list
+    )
     recommendation_confidence: float | None = None
     mission_confidence: float | str | None = None
     scores: dict[str, float] = Field(default_factory=dict)

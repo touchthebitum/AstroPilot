@@ -56,10 +56,26 @@ def test_http_request_runs_real_application_composition_once(
         best_setup="widefield",
         closure_bonus=0.0,
     )
+    shortlist_candidate = Candidate(
+        name="Orion",
+        catalog_key="M42",
+        priority=None,
+        astro_score=76.0,
+        final_score=72.0,
+        decision_score=70.0,
+        portfolio_score=None,
+        global_score=76.0,
+        setup_score=64.0,
+        best_setup="widefield",
+        closure_bonus=None,
+        acquired_hours=None,
+        provenance=CandidateProvenance.DISCOVERY,
+    )
     recommendation = Recommendation(
         opportunity=Opportunity(
             action=Action.START_PROJECT,
             candidate=candidate,
+            shortlist_entries=(shortlist_candidate,),
         ),
         confidence=0.91,
     )
@@ -245,6 +261,15 @@ def test_http_request_runs_real_application_composition_once(
     assert payload["target"] == "Andromeda"
     assert payload["catalog_key"] == "M31"
     assert payload["provenance"] == CandidateProvenance.PROJECT.value
+    assert payload["shortlist_entries"] == [
+        {
+            "target": "Orion",
+            "catalog_key": "M42",
+            "provenance": "discovery",
+            "decision_score": 70.0,
+            "final_score": 72.0,
+        }
+    ]
     assert payload["target_common_name"] == "Galaxie d’Andromède"
     assert payload["astro_quality"] == {
         "score": 84.0,
