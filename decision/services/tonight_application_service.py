@@ -4,8 +4,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
-from astropilot.equipment_catalog import EQUIPMENT_PROFILES
-from astropilot.user_profile import UserProfileError, is_finite_number
+from astropilot.user_profile import (
+    UserProfileError,
+    is_finite_number,
+    resolve_equipment_definition,
+)
 from decision.forecast.forecast_run import ForecastRun
 from decision.mission.night_mission import NightMission
 from decision.recommendation.recommendation import Recommendation
@@ -37,7 +40,7 @@ def resolve_tonight_equipment(profile, requested_equipment) -> str:
 
     if (
         not isinstance(selected_equipment, str)
-        or selected_equipment not in EQUIPMENT_PROFILES
+        or resolve_equipment_definition(profile, selected_equipment) is None
         or not isinstance(available_equipment, list)
         or selected_equipment not in available_equipment
     ):

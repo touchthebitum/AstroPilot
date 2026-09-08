@@ -20,12 +20,28 @@ class UserProfileError(Exception):
 
 PROFILE_CONTAINER_TYPES = {
     "available_equipment": (list, "liste"),
+    "equipment_definitions": (dict, "objet JSON"),
     "preferences": (dict, "objet JSON"),
     "projects": (dict, "objet JSON"),
     "sessions": (list, "liste"),
     "location": (dict, "objet JSON"),
     "decision_weights": (dict, "objet JSON"),
 }
+
+CUSTOM_EQUIPMENT_STRING_FIELDS = (
+    "optics_manufacturer",
+    "optics_model",
+    "camera_manufacturer",
+    "camera_model",
+)
+CUSTOM_EQUIPMENT_POSITIVE_FIELDS = (
+    "focal_length_mm",
+    "aperture_mm",
+    "f_ratio",
+    "pixel_size_um",
+    "sensor_width_px",
+    "sensor_height_px",
+)
 
 
 def get_user_data_dir() -> Path:
@@ -43,6 +59,78 @@ def is_finite_number(value) -> bool:
         and not isinstance(value, bool)
         and math.isfinite(value)
     )
+
+
+def _validated_custom_equipment_definition(
+    equipment_id,
+    definition,
+    profile_path: Path,
+) -> dict:
+    definition_path = f"equipment_definitions[{equipment_id!r}]"
+    if not isinstance(equipment_id, str) or not equipment_id.strip():
+        raise UserProfileError(
+            f"Entrée equipment_definitions invalide dans {profile_path} : "
+            "identifiant non vide attendu."
+        )
+    if not isinstance(definition, dict):
+        raise UserProfileError(
+            f"Champ {definition_path} invalide dans {profile_path} : "
+            "objet JSON attendu."
+        )
+
+    for field_name in CUSTOM_EQUIPMENT_STRING_FIELDS:
+        value = definition.get(field_name)
+        if not isinstance(value, str) or not value.strip():
+            raise UserProfileError(
+                f"Champ {definition_path}.{field_name} invalide dans "
+                f"{profile_path} : chaîne non vide requise."
+            )
+
+    for field_name in CUSTOM_EQUIPMENT_POSITIVE_FIELDS:
+        value = definition.get(field_name)
+        if not is_finite_number(value) or value <= 0:
+            raise UserProfileError(
+                f"Champ {definition_path}.{field_name} invalide dans "
+                f"{profile_path} : nombre fini strictement positif requis."
+            )
+
+    if not isinstance(definition.get("monochrome"), bool):
+        raise UserProfileError(
+            f"Champ {definition_path}.monochrome invalide dans "
+            f"{profile_path} : booléen requis."
+        )
+
+    resolved = dict(definition)
+    pixel_size_um = definition["pixel_size_um"]
+    resolved["sensor_width_mm"] = (
+        definition["sensor_width_px"] * pixel_size_um / 1000
+    )
+    resolved["sensor_height_mm"] = (
+        definition["sensor_height_px"] * pixel_size_um / 1000
+    )
+    return resolved
+
+
+def resolve_equipment_definition(profile, equipment_id) -> dict | None:
+    preset = EQUIPMENT_PROFILES.get(equipment_id)
+    if preset is not None:
+        return preset
+
+    definitions = profile.get("equipment_definitions")
+    if not isinstance(definitions, dict):
+        return None
+    definition = definitions.get(equipment_id)
+    if definition is None:
+        return None
+
+    try:
+        return _validated_custom_equipment_definition(
+            equipment_id,
+            definition,
+            Path("user_profile.json"),
+        )
+    except UserProfileError:
+        return None
 
 
 def resolve_minimum_altitude_deg(preferences) -> float:
@@ -71,6 +159,16 @@ def validate_user_profile(profile, profile_path: Path):
                 f"Champ '{field_name}' invalide dans "
                 f"{profile_path} : {expected_label} attendu."
             )
+
+    for equipment_id, definition in profile.get(
+        "equipment_definitions",
+        {},
+    ).items():
+        _validated_custom_equipment_definition(
+            equipment_id,
+            definition,
+            profile_path,
+        )
 
     for rule_key, weight in profile.get("decision_weights", {}).items():
         if not is_finite_number(weight) or weight < 0:
@@ -386,7 +484,7 @@ def validate_user_profile(profile, profile_path: Path):
         )
 
     for index, equipment_name in enumerate(available_equipment):
-        if equipment_name not in EQUIPMENT_PROFILES:
+        if resolve_equipment_definition(profile, equipment_name) is None:
             raise UserProfileError(
                 f"Entrée available_equipment[{index}] invalide dans "
                 f"{profile_path} : matériel inconnu "

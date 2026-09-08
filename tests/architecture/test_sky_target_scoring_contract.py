@@ -1,9 +1,11 @@
 from datetime import datetime
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
 
 import astropilot.engines.sky_engine as sky_module
+import astro_score
 from astro_score import TARGET_OBJECTS, framing_score
 from astropilot.catalog import CATALOG
 from astropilot.engines.sky_engine import SkyEngine
@@ -140,3 +142,80 @@ def test_real_catalog_semantics_can_change_representative_target_ranking(
 def test_setup_specific_framing_remains_authoritative():
     assert framing_score(EQUIPMENT_PROFILES["samyang_183"], "M42") == 15
     assert framing_score(EQUIPMENT_PROFILES["fra400_2600"], "M42") == 25
+
+
+def custom_profile():
+    return {
+        "available_equipment": ["custom_fra300"],
+        "equipment_definitions": {
+            "custom_fra300": {
+                "optics_manufacturer": "Askar",
+                "optics_model": "FRA300",
+                "focal_length_mm": 300,
+                "aperture_mm": 60,
+                "f_ratio": 5,
+                "camera_manufacturer": "ZWO",
+                "camera_model": "ASI533MM",
+                "pixel_size_um": 3.76,
+                "sensor_width_px": 3008,
+                "sensor_height_px": 3008,
+                "monochrome": True,
+            }
+        },
+        "projects": {},
+    }
+
+
+def test_custom_setup_identity_traverses_setup_selection():
+    best_setup, _, ranking = astro_score.select_best_setup_for_object(
+        "M42",
+        custom_profile(),
+    )
+
+    assert best_setup == "custom_fra300"
+    assert ranking[0]["setup"] == "custom_fra300"
+    assert ranking[0]["arcsec_pixel"] == 2.59
+
+
+def test_custom_setup_definition_reaches_decision_context(monkeypatch):
+    class ContextReached(Exception):
+        pass
+
+    profile = custom_profile()
+    monkeypatch.setattr(
+        astro_score,
+        "compute_best_window_for_object",
+        lambda *args, **kwargs: {"score": 80},
+    )
+    monkeypatch.setattr(
+        astro_score,
+        "select_best_setup_for_object",
+        lambda *args, **kwargs: (
+            "custom_fra300",
+            20,
+            [{"reasons": [], "arcsec_pixel": 2.59}],
+        ),
+    )
+    monkeypatch.setattr(astro_score, "build_decision_engine", lambda: object())
+
+    def capture_context(**kwargs):
+        definition = kwargs["selected_setup_profile"]
+        assert definition["sensor_width_mm"] == pytest.approx(11.31008)
+        assert definition["sensor_height_mm"] == pytest.approx(11.31008)
+        raise ContextReached
+
+    monkeypatch.setattr(astro_score, "build_decision_context", capture_context)
+
+    with pytest.raises(ContextReached):
+        astro_score.evaluate_object(
+            "M42",
+            object(),
+            [],
+            0,
+            SimpleNamespace(name="Mont Sujet"),
+            47.0,
+            7.0,
+            4,
+            "deep_sky",
+            profile,
+        )

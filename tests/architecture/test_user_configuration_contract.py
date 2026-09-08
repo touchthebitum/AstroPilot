@@ -29,6 +29,22 @@ def minimal_candidate():
     }
 
 
+def custom_equipment_definition():
+    return {
+        "optics_manufacturer": "Askar",
+        "optics_model": "FRA300",
+        "focal_length_mm": 300,
+        "aperture_mm": 60,
+        "f_ratio": 5,
+        "camera_manufacturer": "ZWO",
+        "camera_model": "ASI533MM",
+        "pixel_size_um": 3.76,
+        "sensor_width_px": 3008,
+        "sensor_height_px": 3008,
+        "monochrome": True,
+    }
+
+
 def test_creates_normalized_reloadable_configuration_without_mutating_candidate(
     tmp_path,
     monkeypatch,
@@ -147,6 +163,113 @@ def test_unknown_equipment_is_rejected(tmp_path, monkeypatch):
     candidate["active_equipment"] = "unknown_setup"
 
     with pytest.raises(UserProfileError):
+        create_or_replace_user_configuration(candidate)
+
+    assert not data_dir.exists()
+
+
+def test_custom_equipment_is_persisted_and_resolved_without_mutation(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+    candidate = minimal_candidate()
+    definition = custom_equipment_definition()
+    candidate["equipment_definitions"] = {"custom_fra300": definition}
+    candidate["available_equipment"] = ["custom_fra300"]
+    candidate["active_equipment"] = "custom_fra300"
+    original = copy.deepcopy(candidate)
+
+    written = create_or_replace_user_configuration(candidate)
+    loaded = load_user_profile()
+    resolved = user_profile.resolve_equipment_definition(
+        loaded,
+        "custom_fra300",
+    )
+
+    assert written == loaded
+    assert candidate == original
+    assert "sensor_width_mm" not in loaded["equipment_definitions"]["custom_fra300"]
+    assert "sensor_height_mm" not in loaded["equipment_definitions"]["custom_fra300"]
+    assert resolved["sensor_width_mm"] == pytest.approx(11.31008)
+    assert resolved["sensor_height_mm"] == pytest.approx(11.31008)
+
+
+def test_preset_equipment_resolution_preserves_catalog_definition():
+    assert user_profile.resolve_equipment_definition(
+        {},
+        "samyang_183",
+    ) is user_profile.EQUIPMENT_PROFILES["samyang_183"]
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "optics_manufacturer",
+        "optics_model",
+        "focal_length_mm",
+        "aperture_mm",
+        "f_ratio",
+        "camera_manufacturer",
+        "camera_model",
+        "pixel_size_um",
+        "sensor_width_px",
+        "sensor_height_px",
+        "monochrome",
+    ],
+)
+def test_custom_equipment_requires_every_foundation_field(
+    tmp_path,
+    monkeypatch,
+    field_name,
+):
+    data_dir = tmp_path / "missing"
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(data_dir))
+    candidate = minimal_candidate()
+    definition = custom_equipment_definition()
+    definition.pop(field_name)
+    candidate["equipment_definitions"] = {"custom_fra300": definition}
+    candidate["available_equipment"] = ["custom_fra300"]
+    candidate["active_equipment"] = "custom_fra300"
+
+    with pytest.raises(UserProfileError, match=field_name):
+        create_or_replace_user_configuration(candidate)
+
+    assert not data_dir.exists()
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("optics_manufacturer", ""),
+        ("optics_model", " "),
+        ("camera_manufacturer", None),
+        ("camera_model", []),
+        ("focal_length_mm", 0),
+        ("aperture_mm", -1),
+        ("f_ratio", float("inf")),
+        ("pixel_size_um", True),
+        ("sensor_width_px", 0),
+        ("sensor_height_px", float("nan")),
+        ("monochrome", 1),
+    ],
+)
+def test_custom_equipment_rejects_invalid_foundation_values(
+    tmp_path,
+    monkeypatch,
+    field_name,
+    invalid_value,
+):
+    data_dir = tmp_path / "missing"
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(data_dir))
+    candidate = minimal_candidate()
+    definition = custom_equipment_definition()
+    definition[field_name] = invalid_value
+    candidate["equipment_definitions"] = {"custom_fra300": definition}
+    candidate["available_equipment"] = ["custom_fra300"]
+    candidate["active_equipment"] = "custom_fra300"
+
+    with pytest.raises(UserProfileError, match=field_name):
         create_or_replace_user_configuration(candidate)
 
     assert not data_dir.exists()
