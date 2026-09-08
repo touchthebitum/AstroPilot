@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from decision.runners.tonight_runner import TonightRunner
+from decision.models.candidate_rejection import CandidateBuildResult
 
 
 class RecordingReportRunner:
@@ -133,6 +134,22 @@ def test_missing_recommendation_skips_mission_but_keeps_forecast():
     assert context.report_runner.mission_calls == []
     assert context.forecast_engine.capacities == [capacities]
     assert context.report_runner.forecasts == [roadmap]
+
+
+def test_candidate_build_result_passes_only_admitted_candidates_to_opportunity():
+    candidates = [SimpleNamespace(name="M31"), SimpleNamespace(name="M42")]
+    context = make_runner(
+        recommend_project_for_night=lambda *args, **kwargs: CandidateBuildResult(
+            candidates=tuple(candidates),
+        ),
+    )
+
+    context.runner.run(
+        top_nights=[{"top_objects": []}],
+        night_capacities=[],
+    )
+
+    assert context.recommendation_service.candidate_calls == [candidates]
 
 
 def test_recommendation_runs_mission_with_original_context():

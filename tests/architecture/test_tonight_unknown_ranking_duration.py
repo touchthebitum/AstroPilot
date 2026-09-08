@@ -1,9 +1,15 @@
+from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 
 import astro_score
 import pytest
 from decision.engines.project_selection_engine import ProjectSelectionEngine
 from decision.models.candidate import CandidateProvenance
+from decision.models.candidate_rejection import (
+    CandidateBuildResult,
+    CandidateRejection,
+    CandidateRejectionBasis,
+)
 from decision.opportunity.action import Action
 from decision.opportunity.opportunity import Opportunity
 from decision.recommendation.recommendation import Recommendation
@@ -281,3 +287,80 @@ def test_discovery_is_used_when_configured_project_is_not_viable(monkeypatch):
     )
 
     assert [candidate.catalog_key for candidate in candidates] == ["M42"]
+
+
+def test_non_positive_project_and_discovery_scores_preserve_rejections():
+    result = astro_score.recommend_project_for_night(
+        [
+            {"name": "Andromeda", "catalog_key": "M31", "global_score": -2},
+            {"name": "Orion", "catalog_key": "M42", "score": 0},
+        ],
+        profile={"projects": {"M31": {}}},
+    )
+
+    assert isinstance(result, CandidateBuildResult)
+    assert result.candidates == ()
+    assert [rejection.target for rejection in result.rejections] == [
+        "Andromeda",
+        "Orion",
+    ]
+    assert [rejection.catalog_key for rejection in result.rejections] == [
+        "M31",
+        "M42",
+    ]
+    assert [rejection.provenance for rejection in result.rejections] == [
+        CandidateProvenance.PROJECT,
+        CandidateProvenance.DISCOVERY,
+    ]
+    assert all(
+        rejection.basis
+        is CandidateRejectionBasis.NON_POSITIVE_EVALUATION_SCORE
+        for rejection in result.rejections
+    )
+    assert [rejection.evaluation_score for rejection in result.rejections] == [
+        -2,
+        0,
+    ]
+
+
+def test_candidate_rejection_contract_is_exact_and_immutable():
+    assert {basis.value for basis in CandidateRejectionBasis} == {
+        "non_positive_evaluation_score"
+    }
+    rejection = CandidateRejection(
+        target="Orion",
+        catalog_key="M42",
+        provenance=CandidateProvenance.DISCOVERY,
+        basis=CandidateRejectionBasis.NON_POSITIVE_EVALUATION_SCORE,
+        evaluation_score=0,
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        rejection.evaluation_score = 1
+
+
+def test_missing_score_preserves_exclusion_without_explicit_rejection():
+    result = astro_score.recommend_project_for_night(
+        [{"name": "Unknown", "catalog_key": "M1"}],
+        profile={"projects": {}},
+    )
+
+    assert result.candidates == ()
+    assert result.rejections == ()
+
+
+def test_global_score_remains_the_selected_rejection_evidence():
+    result = astro_score.recommend_project_for_night(
+        [
+            {
+                "name": "Andromeda",
+                "catalog_key": "M31",
+                "global_score": -1,
+                "score": 80,
+            }
+        ],
+        profile={"projects": {"M31": {}}},
+    )
+
+    assert result.candidates == ()
+    assert result.rejections[0].evaluation_score == -1

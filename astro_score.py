@@ -71,6 +71,11 @@ from decision.runners.report_runner import ReportRunner
 from decision.engines.night_strategy_engine import NightStrategyEngine
 from decision.engines.project_selection_engine import ProjectSelectionEngine
 from decision.models.candidate import CandidateProvenance
+from decision.models.candidate_rejection import (
+    CandidateBuildResult,
+    CandidateRejection,
+    CandidateRejectionBasis,
+)
 from decision.portfolio.portfolio_presenter import (show_portfolio_completion_forecast,)
 from decision.rules.object_fit_rule import ObjectFitRule
 from datetime import datetime, timedelta, timezone
@@ -694,17 +699,47 @@ def recommend_project_for_night(
     projects = profile.get("projects", {})
     candidates = []
     discovery_objects = []
+    rejections = []
 
     for obj in top_objects:
         catalog_key = obj.get("catalog_key", obj.get("name"))
+        evaluation_score_present = (
+            "global_score" in obj or "score" in obj
+        )
         astro_score = obj.get("global_score", obj.get("score", 0))
 
         if catalog_key not in projects:
             if astro_score > 0:
                 discovery_objects.append((obj, catalog_key, astro_score))
+            elif evaluation_score_present:
+                rejections.append(
+                    CandidateRejection(
+                        target=obj["name"],
+                        catalog_key=catalog_key,
+                        provenance=CandidateProvenance.DISCOVERY,
+                        basis=(
+                            CandidateRejectionBasis
+                            .NON_POSITIVE_EVALUATION_SCORE
+                        ),
+                        evaluation_score=astro_score,
+                    )
+                )
             continue
 
         if astro_score <= 0:
+            if evaluation_score_present:
+                rejections.append(
+                    CandidateRejection(
+                        target=obj["name"],
+                        catalog_key=catalog_key,
+                        provenance=CandidateProvenance.PROJECT,
+                        basis=(
+                            CandidateRejectionBasis
+                            .NON_POSITIVE_EVALUATION_SCORE
+                        ),
+                        evaluation_score=astro_score,
+                    )
+                )
             continue
 
         priority = project_priority(catalog_key, projects)
@@ -876,11 +911,17 @@ def recommend_project_for_night(
             )
 
     if not candidates:
-        return None
+        return CandidateBuildResult(
+            candidates=(),
+            rejections=tuple(rejections),
+        )
 
     candidates = project_selection_engine.rank_candidates(candidates)
-    
-    return candidates
+
+    return CandidateBuildResult(
+        candidates=tuple(candidates),
+        rejections=tuple(rejections),
+    )
 
 
 def verdict(score: int) -> str:

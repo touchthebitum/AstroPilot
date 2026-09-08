@@ -11,6 +11,10 @@ from astropilot.user_profile import (
 )
 from decision.forecast.forecast_run import ForecastRun
 from decision.mission.night_mission import NightMission
+from decision.models.candidate_rejection import (
+    CandidateBuildResult,
+    CandidateRejection,
+)
 from decision.recommendation.recommendation import Recommendation
 from decision.validation.decision_consistency import DecisionConsistencyGate
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
@@ -100,6 +104,7 @@ class TonightResult:
     status: TonightStatus = TonightStatus.AVAILABLE
     forecast_evidence: DecisionForecastEvidence | None = None
     decision_id: str | None = None
+    candidate_rejections: tuple[CandidateRejection, ...] = ()
 
     @property
     def forecast_available(self) -> bool:
@@ -177,11 +182,17 @@ class TonightApplicationService:
 
         night = sorted(nights, key=lambda item: item["date"])[0]
         top_objects = night.get("top_objects") or []
-        candidates = self.build_candidates(
+        candidate_build = self.build_candidates(
             top_objects,
             available_hours=night.get("duration"),
             profile=effective_profile,
         )
+        if isinstance(candidate_build, CandidateBuildResult):
+            candidates = list(candidate_build.candidates)
+            candidate_rejections = candidate_build.rejections
+        else:
+            candidates = candidate_build
+            candidate_rejections = ()
 
         if not candidates:
             return TonightResult(
@@ -190,6 +201,7 @@ class TonightApplicationService:
                 None,
                 status=TonightStatus.NO_CANDIDATE,
                 forecast_evidence=forecast_evidence,
+                candidate_rejections=candidate_rejections,
             )
 
         recommendation = self.opportunity_recommendation_service.build(
@@ -202,6 +214,7 @@ class TonightApplicationService:
                 None,
                 status=TonightStatus.NO_RECOMMENDATION,
                 forecast_evidence=forecast_evidence,
+                candidate_rejections=candidate_rejections,
             )
 
         candidate = recommendation.opportunity.candidate
@@ -226,6 +239,7 @@ class TonightApplicationService:
                 None,
                 status=TonightStatus.NO_MISSION,
                 forecast_evidence=forecast_evidence,
+                candidate_rejections=candidate_rejections,
             )
 
         DecisionConsistencyGate.validate_mission(mission)
@@ -240,4 +254,5 @@ class TonightApplicationService:
                 else TonightStatus.NO_PRODUCTIVE_WINDOW
             ),
             forecast_evidence=forecast_evidence,
+            candidate_rejections=candidate_rejections,
         )

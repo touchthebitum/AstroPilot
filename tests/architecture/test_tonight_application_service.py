@@ -19,6 +19,12 @@ from decision.services.tonight_application_service import (
     TonightStatus,
     resolve_tonight_equipment,
 )
+from decision.models.candidate_rejection import (
+    CandidateBuildResult,
+    CandidateRejection,
+    CandidateRejectionBasis,
+)
+from decision.models.candidate import CandidateProvenance
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 
 
@@ -429,6 +435,37 @@ def test_no_candidates_preserves_night_and_skips_downstream_services():
     assert result.night is night
     assert recommendation_service.calls == []
     assert mission_service.calls == []
+
+
+def test_candidate_build_result_separates_admitted_candidates_and_rejections():
+    night = {"date": "2026-09-01", "top_objects": []}
+    candidates = [make_candidate(), make_candidate()]
+    rejection = CandidateRejection(
+        target="Orion",
+        catalog_key="M42",
+        provenance=CandidateProvenance.DISCOVERY,
+        basis=CandidateRejectionBasis.NON_POSITIVE_EVALUATION_SCORE,
+        evaluation_score=0,
+    )
+    recommendation = make_recommendation(candidates[0])
+    service, recommendation_service, _ = make_service(
+        forecast_nights=lambda *args, **kwargs: forecast_run([night]),
+        build_candidates=lambda *args, **kwargs: CandidateBuildResult(
+            candidates=tuple(candidates),
+            rejections=(rejection,),
+        ),
+        recommendation=recommendation,
+    )
+
+    result = service.evaluate(
+        profile=make_profile(),
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=3,
+    )
+
+    assert recommendation_service.calls == [candidates]
+    assert result.candidate_rejections == (rejection,)
 
 
 def test_no_recommendation_preserves_night_and_skips_mission():
