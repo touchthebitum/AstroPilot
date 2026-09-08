@@ -9,9 +9,11 @@ from decision.validation.weather_window_coverage import (
     WeatherWindowCoverageError,
     validate_selected_window_weather_coverage,
 )
+from decision.validation.decision_consistency import DecisionConsistencyGate
 from decision.weather.provider_reliability import WeatherLocation
 from decision.weather.weather_ingress import WeatherFreshness, WeatherSnapshot
 from decision.weather.weather_trust_decision import (
+    WeatherDecisionAdmissibility,
     WeatherDecisionContext,
     WeatherTrustDecision,
     WeatherTrustDecisionEvaluator,
@@ -79,4 +81,25 @@ class CandidateAssessment:
         return cls(
             productive_window=productive_window,
             weather_decision=weather_decision,
+        )
+
+
+class CandidateViabilityEvaluator:
+    @staticmethod
+    def is_viable(assessment: CandidateAssessment | None) -> bool:
+        if assessment is None:
+            return False
+
+        DecisionConsistencyGate.validate_mission(
+            assessment.productive_window
+        )
+        return (
+            DecisionConsistencyGate.has_productive_window(
+                assessment.productive_window
+            )
+            and assessment.weather_decision.admissibility
+            in {
+                WeatherDecisionAdmissibility.ADMISSIBLE,
+                WeatherDecisionAdmissibility.CAUTION,
+            }
         )
