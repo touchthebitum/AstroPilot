@@ -17,6 +17,7 @@ from decision.services.tonight_application_service import (
     TonightApplicationService,
     TonightResult,
     TonightStatus,
+    resolve_tonight_equipment,
 )
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 
@@ -31,6 +32,46 @@ def make_profile(*, available_equipment=None, active_equipment="samyang_183"):
         "active_equipment": active_equipment,
         "available_equipment": available_equipment or [active_equipment],
     }
+
+
+def test_tonight_equipment_resolver_accepts_valid_custom_identity():
+    profile = make_profile(
+        available_equipment=["custom_fra300"],
+        active_equipment="custom_fra300",
+    )
+    profile["equipment_definitions"] = {
+        "custom_fra300": {
+            "optics_manufacturer": "Askar",
+            "optics_model": "FRA300",
+            "focal_length_mm": 300,
+            "aperture_mm": 60,
+            "f_ratio": 5,
+            "camera_manufacturer": "ZWO",
+            "camera_model": "ASI533MM",
+            "pixel_size_um": 3.76,
+            "sensor_width_px": 3008,
+            "sensor_height_px": 3008,
+            "monochrome": True,
+        }
+    }
+
+    assert resolve_tonight_equipment(profile, None) == "custom_fra300"
+
+
+def test_tonight_equipment_resolver_rejects_invalid_custom_definition():
+    profile = make_profile(
+        available_equipment=["custom_fra300"],
+        active_equipment="custom_fra300",
+    )
+    profile["equipment_definitions"] = {
+        "custom_fra300": {"focal_length_mm": 300}
+    }
+
+    with pytest.raises(
+        tonight_service_module.TonightEquipmentSelectionError,
+        match="invalid_tonight_equipment",
+    ):
+        resolve_tonight_equipment(profile, None)
 
 
 def forecast_run(nights):

@@ -118,6 +118,7 @@ from astropilot.user_profile import (
     get_user_data_dir,
     load_user_profile,
     save_user_profile,
+    resolve_equipment_definition,
     resolve_minimum_altitude_deg,
     UserProfileError,
 )
@@ -1092,7 +1093,7 @@ def select_best_setup_for_object(
     setup_ranking = []
 
     for setup_name in profile.get("available_equipment", []):
-        setup = EQUIPMENT_PROFILES.get(setup_name)
+        setup = resolve_equipment_definition(profile, setup_name)
 
         if not setup:
             continue
@@ -1488,7 +1489,7 @@ def evaluate_object(
     best["arcsec_pixel"] = setup_ranking[0].get("arcsec_pixel") if setup_ranking else None
 
     selected_setup_profile = (
-        EQUIPMENT_PROFILES.get(best_setup)
+        resolve_equipment_definition(profile, best_setup)
         if best_setup is not None
         else None
     )
