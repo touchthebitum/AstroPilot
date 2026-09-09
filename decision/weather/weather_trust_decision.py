@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from decision.models.recommendation_reason import RecommendationReason
+
 from decision.weather.provider_reliability import WeatherLocation, WeatherVariable
 from decision.weather.provider_reliability_metrics import (
     EvidenceStatus,
@@ -127,6 +129,12 @@ class WeatherTrustDecision:
     evidence_quality: WeatherEvidenceQuality
     admissibility: WeatherDecisionAdmissibility
     reasons: tuple[str, ...]
+
+    @property
+    def structured_reasons(self) -> tuple[RecommendationReason, ...]:
+        from decision.services.recommendation_reason_builder import weather_decision_reasons
+
+        return weather_decision_reasons(self)
 
 
 class WeatherTrustDecisionEvaluator:
