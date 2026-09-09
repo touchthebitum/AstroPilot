@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from decision.filtering.selected_filter import SelectedFilter
+from decision.models.session_availability import SessionAvailability
 from decision.weather.weather_forecast import WeatherForecast
 
 
@@ -14,3 +15,4 @@ class MissionInput:
     recommended_hours: float
     expected_gain: float
     selected_filter: SelectedFilter | None = None
+    availability: SessionAvailability | None = None

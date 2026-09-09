@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from decision.mission.night_mission import NightMission, MissionReason
 from decision.risk.risk_engine import RiskEngine
@@ -13,6 +13,7 @@ from decision.intelligence.analysis_context import AnalysisContext
 from decision.season.dynamic_season_engine import DynamicSeasonEngine
 from astropilot.catalog import CATALOG
 from decision.mission.mission_input import MissionInput
+from decision.models.session_availability import SessionAvailability
 from decision.engines.image_quality_engine import ImageQualityEngine
 from decision.quality.astro_quality_context import AstroQualityContext
 from decision.quality.astro_quality_engine import AstroQualityEngine
@@ -177,6 +178,49 @@ class ProductiveWindowAssessment:
         )
 
 
+def _mission_timing_for_availability(
+    assessment: ProductiveWindowAssessment,
+    availability: SessionAvailability | None,
+):
+    timing = (
+        assessment.window_start,
+        assessment.window_end,
+        assessment.recommended_hours,
+        assessment.expected_gain,
+    )
+    if availability is None:
+        return timing
+
+    from decision.services.session_availability_windowing import (
+        select_duration_availability_window,
+    )
+
+    constrained = select_duration_availability_window(assessment, availability)
+    if constrained is None:
+        return None
+
+    capacity_hours = (
+        constrained.window_end.astimezone(timezone.utc)
+        - constrained.window_start.astimezone(timezone.utc)
+    ).total_seconds() / 3600
+    recommended_hours = min(assessment.recommended_hours, capacity_hours)
+    expected_gain = (
+        assessment.expected_gain
+        if recommended_hours == assessment.recommended_hours
+        else assessment.expected_gain
+        * recommended_hours
+        / assessment.recommended_hours
+        if assessment.recommended_hours > 0
+        else 0.0
+    )
+    return (
+        constrained.window_start,
+        constrained.window_end,
+        round(recommended_hours, 2),
+        round(expected_gain, 2),
+    )
+
+
 class MissionAssembler:
 
     @staticmethod
@@ -256,6 +300,18 @@ class MissionAssembler:
             weather=weather,
             mission_input=mission_input,
         )
+        mission_timing = _mission_timing_for_availability(
+            assessment,
+            mission_input.availability if mission_input is not None else None,
+        )
+        if mission_timing is None:
+            return None
+        (
+            mission_window_start,
+            mission_window_end,
+            mission_recommended_hours,
+            mission_expected_gain,
+        ) = mission_timing
         productivity = assessment.productivity
         dew_risk = None
 
@@ -352,10 +408,10 @@ class MissionAssembler:
             confidence=summary.confidence,
             reasons=reasons,
             equipment=equipment,
-            window_start=assessment.window_start,
-            window_end=assessment.window_end,
-            recommended_hours=assessment.recommended_hours,
-            expected_gain=assessment.expected_gain,
+            window_start=mission_window_start,
+            window_end=mission_window_end,
+            recommended_hours=mission_recommended_hours,
+            expected_gain=mission_expected_gain,
             selected_filter=(
                 mission_input.selected_filter
                 if mission_input is not None
