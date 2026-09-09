@@ -162,3 +162,127 @@ def test_api_comparisons_default_to_empty_and_have_exact_public_schema():
     assert set(reason["properties"]) == {
         "category", "scope", "direction", "importance", "basis", "message", "evidence_ref",
     }
+
+
+def test_api_preserves_stable_reason_codes_and_legacy_messages_exactly(monkeypatch):
+    from decision.models.recommendation_reason import (
+        RecommendationReason,
+        RecommendationReasonCategory,
+        RecommendationReasonScope,
+    )
+
+    stable_basis = "Provider.Mixed_CASE:cloud cover:évidence v1"
+    primary = candidate("M31")
+    alternative = candidate("M42")
+    result = TonightResult(
+        night=None,
+        recommendation=Recommendation(
+            opportunity=Opportunity(
+                action=Action.START_PROJECT,
+                candidate=primary,
+                shortlist_entries=(alternative,),
+            ),
+            confidence=None,
+        ),
+        mission=NightMission(
+            target="M31",
+            confidence=None,
+            window_start=START,
+            window_end=START + timedelta(hours=2),
+            recommended_hours=2.0,
+        ),
+    )
+    reason_sets = {
+        "M31": (
+            RecommendationReason(
+                category=RecommendationReasonCategory.RELIABILITY,
+                scope=RecommendationReasonScope.NIGHT,
+                direction="existing-direction",
+                importance="existing-importance",
+                basis=stable_basis,
+                message="First existing message",
+            ),
+            RecommendationReason(
+                scope=RecommendationReasonScope.TARGET,
+                basis=None,
+                message=stable_basis,
+            ),
+        ),
+        "M42": (
+            RecommendationReason(
+                category=RecommendationReasonCategory.RELIABILITY,
+                scope=RecommendationReasonScope.NIGHT,
+                direction="other-existing-direction",
+                importance="other-existing-importance",
+                basis=stable_basis,
+                message="Different existing message",
+            ),
+            RecommendationReason(
+                scope=RecommendationReasonScope.TARGET,
+                basis=None,
+                message=stable_basis,
+            ),
+        ),
+    }
+    monkeypatch.setattr(
+        Opportunity,
+        "structured_reasons",
+        property(lambda self: reason_sets[self.candidate.catalog_key]),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "candidate_reasons",
+        lambda source: reason_sets[source.catalog_key],
+    )
+    monkeypatch.setattr(
+        app_module,
+        "primary_window_reasons",
+        lambda **kwargs: (),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "candidate_assessment_reasons",
+        lambda **kwargs: (),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "_assess_shortlist_candidates",
+        lambda *args, **kwargs: {
+            "M42": assessment(WeatherTrustDecision(
+                Quality.SUFFICIENT,
+                Admissibility.ADMISSIBLE,
+                (),
+            ))
+        },
+    )
+
+    response = client_for(result).post("/v1/tonight", json={})
+    assert response.status_code == 200
+    comparison = response.json()["alternative_comparisons"][0]
+    assert comparison["shared_reasons"] == [{
+        "category": "reliability",
+        "scope": "night",
+        "direction": "existing-direction",
+        "importance": "existing-importance",
+        "basis": stable_basis,
+        "message": "First existing message",
+        "evidence_ref": None,
+    }]
+    assert comparison["primary_only_reasons"] == [{
+        "category": None,
+        "scope": "target",
+        "direction": None,
+        "importance": None,
+        "basis": None,
+        "message": stable_basis,
+        "evidence_ref": None,
+    }]
+    assert comparison["alternative_only_reasons"] == [{
+        "category": None,
+        "scope": "target",
+        "direction": None,
+        "importance": None,
+        "basis": None,
+        "message": stable_basis,
+        "evidence_ref": None,
+    }]

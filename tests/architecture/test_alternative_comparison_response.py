@@ -135,3 +135,57 @@ def test_structured_evidence_is_serialized_without_inventing_an_identifier():
             "reasons": ["provider_reliability_unavailable"],
         },
     }]
+
+
+def test_reason_transport_preserves_stable_basis_and_legacy_none_exactly():
+    from decision.models.recommendation_comparison import RecommendationComparison
+    from decision.services.tonight_comparisons import comparison_response
+
+    stable_basis = "Provider.Mixed_CASE:cloud cover:évidence v1"
+    first = RecommendationReason(
+        category=Category.RELIABILITY,
+        scope=Scope.NIGHT,
+        direction="existing-direction",
+        importance="existing-importance",
+        basis=stable_basis,
+        message="First existing message",
+    )
+    second = RecommendationReason(
+        category=Category.RELIABILITY,
+        scope=Scope.NIGHT,
+        direction="other-existing-direction",
+        importance="other-existing-importance",
+        basis=stable_basis,
+        message="Different existing message",
+    )
+    legacy = RecommendationReason(
+        scope=Scope.TARGET,
+        basis=None,
+        message=stable_basis,
+    )
+    response = comparison_response(RecommendationComparison(
+        primary_catalog_key="M31",
+        alternative_catalog_key="M42",
+        primary_only_reasons=(legacy,),
+        alternative_only_reasons=(),
+        shared_reasons=(first, second),
+    ))
+
+    assert [reason.message for reason in response.shared_reasons] == [
+        "First existing message",
+        "Different existing message",
+    ]
+    assert [reason.basis for reason in response.shared_reasons] == [
+        stable_basis,
+        stable_basis,
+    ]
+    assert [reason.direction for reason in response.shared_reasons] == [
+        "existing-direction",
+        "other-existing-direction",
+    ]
+    assert [reason.importance for reason in response.shared_reasons] == [
+        "existing-importance",
+        "other-existing-importance",
+    ]
+    assert response.primary_only_reasons[0].basis is None
+    assert response.primary_only_reasons[0].message == stable_basis
