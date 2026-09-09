@@ -29,6 +29,17 @@ class RecommendationReasonRenderingResponse:
 
 
 @dataclass(frozen=True, kw_only=True)
+class PrimaryRecommendationReasonResponse:
+    scope: RecommendationReasonScope
+    category: RecommendationReasonCategory | None = None
+    direction: str | None = None
+    importance: str | None = None
+    basis: str | None = None
+    message: str | None = None
+    rendered: RecommendationReasonRenderingResponse | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
 class RecommendationReasonResponse:
     category: RecommendationReasonCategory | None = None
     scope: RecommendationReasonScope
@@ -362,6 +373,9 @@ class TonightResponse:
     alternative_comparisons: list[RecommendationComparisonResponse] = field(
         default_factory=list
     )
+    primary_reasons: list[PrimaryRecommendationReasonResponse] = field(
+        default_factory=list
+    )
 
     def __post_init__(self):
         refused = (
@@ -385,6 +399,7 @@ class TonightResponse:
             TonightInsufficientEvidenceTargetResponse
         ] = (),
         alternative_comparisons: Sequence[RecommendationComparisonResponse] = (),
+        primary_reasons: Sequence[PrimaryRecommendationReasonResponse] = (),
     ) -> TonightResponse:
         refused = (
             weather_decision is not None
@@ -677,6 +692,7 @@ class TonightResponse:
             rejected_targets=list(rejected_targets),
             insufficient_evidence_targets=list(insufficient_evidence_targets),
             alternative_comparisons=list(alternative_comparisons),
+            primary_reasons=list(primary_reasons),
             recommendation_confidence=(
                 float(recommendation.confidence)
                 if recommendation is not None

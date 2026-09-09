@@ -265,6 +265,78 @@ def test_rendered_reason_response_is_exact_immutable_and_bound_to_source_reason(
     assert response.primary_only_reasons[2].rendered_reasons == ()
 
 
+def test_primary_reason_response_is_exact_immutable_and_preserves_order():
+    from decision.services.tonight_primary_reasons import primary_reason_responses
+
+    legacy = RecommendationReason(
+        scope=Scope.TARGET,
+        direction="existing-direction",
+        importance="existing-importance",
+        message="Excellent rendement",
+    )
+    renderable = RecommendationReason(
+        category=Category.RELIABILITY,
+        scope=Scope.NIGHT,
+        basis="weather_not_fresh",
+        message="Existing weather message",
+    )
+    unsupported = RecommendationReason(
+        category=Category.RELIABILITY,
+        scope=Scope.NIGHT,
+        basis="weather_provider_mismatch",
+        message="Existing unsupported message",
+    )
+
+    responses = primary_reason_responses((legacy, renderable, unsupported))
+
+    assert [reason.message for reason in responses] == [
+        "Excellent rendement",
+        "Existing weather message",
+        "Existing unsupported message",
+    ]
+    assert [field.name for field in fields(responses[0])] == [
+        "scope", "category", "direction", "importance", "basis", "message", "rendered",
+    ]
+    assert responses[0].rendered is None
+    assert responses[1].rendered is not None
+    assert responses[1].rendered.presentation_key == "weather_not_fresh"
+    assert responses[1].rendered.classic_text == "Les données météo ne sont pas assez récentes."
+    assert responses[1].rendered.pro_text == (
+        "La fraîcheur des données météo ne respecte pas le seuil requis pour la décision."
+    )
+    assert responses[2].rendered is None
+    assert legacy.basis is None
+    with pytest.raises(FrozenInstanceError):
+        responses[0].message = "changed"
+
+
+def test_tonight_only_serializes_already_mapped_primary_reasons(monkeypatch):
+    import decision.services.tonight_primary_reasons as module
+
+    entry, = module.primary_reason_responses((
+        RecommendationReason(scope=Scope.TARGET, message="Excellent rendement"),
+    ))
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Serialization must not map primary reasons")
+
+    monkeypatch.setattr(module, "primary_reason_responses", forbidden)
+    result = TonightResult(None, None, None, status=TonightStatus.NO_RECOMMENDATION)
+    baseline = TonightResponse.from_result(result).to_dict()
+    assert baseline.pop("primary_reasons") == []
+    response = TonightResponse.from_result(result, primary_reasons=(entry,)).to_dict()
+    assert response.pop("primary_reasons") == [{
+        "scope": "target",
+        "category": None,
+        "direction": None,
+        "importance": None,
+        "basis": None,
+        "message": "Excellent rendement",
+        "rendered": None,
+    }]
+    assert response == baseline
+
+
 def test_rendered_reasons_preserve_structured_reason_order_and_duplicates():
     from decision.models.recommendation_comparison import RecommendationComparison
     from decision.services.tonight_comparisons import comparison_response

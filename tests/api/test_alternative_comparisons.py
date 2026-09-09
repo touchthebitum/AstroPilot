@@ -172,6 +172,61 @@ def test_api_comparisons_default_to_empty_and_have_exact_public_schema():
         "pro_text",
     }
 
+    primary_field = public["properties"]["primary_reasons"]
+    assert primary_field["type"] == "array"
+    assert "primary_reasons" not in public.get("required", [])
+    primary_reason = schemas[primary_field["items"]["$ref"].split("/")[-1]]
+    assert set(primary_reason["properties"]) == {
+        "scope", "category", "direction", "importance", "basis", "message", "rendered",
+    }
+
+
+def test_api_exposes_primary_reasons_without_requiring_alternatives(monkeypatch):
+    primary = candidate("M31", ("Excellent rendement",))
+    result = TonightResult(
+        night=None,
+        recommendation=Recommendation(
+            opportunity=Opportunity(action=Action.START_PROJECT, candidate=primary),
+            confidence=None,
+        ),
+        mission=NightMission(
+            target="M31", confidence=None,
+            window_start=START, window_end=START + timedelta(hours=2),
+            recommended_hours=2.0,
+        ),
+    )
+    monkeypatch.setattr(app_module, "_assess_shortlist_candidates", lambda *a, **kw: {})
+
+    response = client_for(result).post("/v1/tonight", json={})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["alternatives"] == payload["alternative_comparisons"] == []
+    assert payload["primary_reasons"][0] == {
+        "scope": "target",
+        "category": None,
+        "direction": None,
+        "importance": None,
+        "basis": None,
+        "message": "Excellent rendement",
+        "rendered": None,
+    }
+    assert payload["primary_reasons"][1]["basis"] == "provider_reliability_unavailable"
+    assert payload["primary_reasons"][1]["rendered"] == {
+        "presentation_key": "provider_reliability_unavailable",
+        "classic_text": "La fiabilité historique du fournisseur météo n’est pas disponible.",
+        "pro_text": (
+            "Aucune évaluation historique de fiabilité du fournisseur météo "
+            "n’est disponible pour ce contexte."
+        ),
+    }
+
+
+def test_api_primary_reasons_default_empty_without_exposed_recommendation():
+    result = TonightResult(None, None, None, status=TonightStatus.NO_RECOMMENDATION)
+    payload = client_for(result).post("/v1/tonight", json={}).json()
+    assert payload["primary_reasons"] == []
+
 
 def test_api_preserves_stable_reason_codes_and_legacy_messages_exactly(monkeypatch):
     from decision.models.recommendation_reason import (
