@@ -292,6 +292,14 @@ class TonightInsufficientEvidenceTargetModel(BaseModel):
     )
 
 
+class RecommendationReasonRenderingResponseModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    presentation_key: str
+    classic_text: str
+    pro_text: str
+
+
 class RecommendationReasonResponseModel(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -302,6 +310,7 @@ class RecommendationReasonResponseModel(BaseModel):
     basis: str | None = None
     message: str | None = None
     evidence_ref: Any | None = None
+    rendered_reasons: tuple[RecommendationReasonRenderingResponseModel, ...] = ()
 
 
 class RecommendationComparisonResponseModel(BaseModel):

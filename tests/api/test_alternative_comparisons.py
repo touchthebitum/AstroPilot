@@ -161,6 +161,15 @@ def test_api_comparisons_default_to_empty_and_have_exact_public_schema():
     reason = schemas[comparison["properties"]["shared_reasons"]["items"]["$ref"].split("/")[-1]]
     assert set(reason["properties"]) == {
         "category", "scope", "direction", "importance", "basis", "message", "evidence_ref",
+        "rendered_reasons",
+    }
+    rendering = schemas[
+        reason["properties"]["rendered_reasons"]["items"]["$ref"].split("/")[-1]
+    ]
+    assert set(rendering["properties"]) == {
+        "presentation_key",
+        "classic_text",
+        "pro_text",
     }
 
 
@@ -267,6 +276,7 @@ def test_api_preserves_stable_reason_codes_and_legacy_messages_exactly(monkeypat
         "basis": stable_basis,
         "message": "First existing message",
         "evidence_ref": None,
+        "rendered_reasons": [],
     }]
     assert comparison["primary_only_reasons"] == [{
         "category": None,
@@ -276,6 +286,7 @@ def test_api_preserves_stable_reason_codes_and_legacy_messages_exactly(monkeypat
         "basis": None,
         "message": stable_basis,
         "evidence_ref": None,
+        "rendered_reasons": [],
     }]
     assert comparison["alternative_only_reasons"] == [{
         "category": None,
@@ -285,4 +296,5 @@ def test_api_preserves_stable_reason_codes_and_legacy_messages_exactly(monkeypat
         "basis": None,
         "message": stable_basis,
         "evidence_ref": None,
+        "rendered_reasons": [],
     }]
