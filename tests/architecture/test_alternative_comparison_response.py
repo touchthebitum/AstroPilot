@@ -51,7 +51,8 @@ def test_comparison_response_is_immutable_and_preserves_existing_structured_fiel
         assert len(source_reasons) == len(response_reasons)
         for source, mapped in zip(source_reasons, response_reasons):
             assert [f.name for f in fields(mapped)] == [
-                "category", "scope", "direction", "importance", "basis", "message", "evidence_ref",
+                "category", "scope", "direction", "importance", "basis", "message",
+                "evidence_ref", "rendered_reasons",
             ]
             for f in fields(source):
                 assert getattr(mapped, f.name) is getattr(source, f.name)
@@ -134,6 +135,16 @@ def test_structured_evidence_is_serialized_without_inventing_an_identifier():
             "evidence_quality": "insufficient", "admissibility": "caution",
             "reasons": ["provider_reliability_unavailable"],
         },
+        "rendered_reasons": [{
+            "presentation_key": "provider_reliability_unavailable",
+            "classic_text": (
+                "La fiabilité historique du fournisseur météo n’est pas disponible."
+            ),
+            "pro_text": (
+                "Aucune évaluation historique de fiabilité du fournisseur météo "
+                "n’est disponible pour ce contexte."
+            ),
+        }],
     }]
 
 
@@ -189,3 +200,111 @@ def test_reason_transport_preserves_stable_basis_and_legacy_none_exactly():
     ]
     assert response.primary_only_reasons[0].basis is None
     assert response.primary_only_reasons[0].message == stable_basis
+
+
+def test_rendered_reason_response_is_exact_immutable_and_bound_to_source_reason():
+    from decision.models.recommendation_comparison import RecommendationComparison
+    from decision.services.tonight_comparisons import comparison_response
+    from decision.services.tonight_response import (
+        RecommendationReasonRenderingResponse,
+    )
+
+    rendered = RecommendationReasonRenderingResponse(
+        presentation_key="weather_not_fresh",
+        classic_text="Les données météo ne sont pas assez récentes.",
+        pro_text=(
+            "La fraîcheur des données météo ne respecte pas le seuil requis pour "
+            "la décision."
+        ),
+    )
+    assert [field.name for field in fields(rendered)] == [
+        "presentation_key",
+        "classic_text",
+        "pro_text",
+    ]
+    with pytest.raises(FrozenInstanceError):
+        rendered.classic_text = "changed"
+
+    renderable = RecommendationReason(
+        category=Category.RELIABILITY,
+        scope=Scope.NIGHT,
+        basis="weather_not_fresh",
+        message="Existing message remains unchanged",
+    )
+    legacy = RecommendationReason(
+        scope=Scope.TARGET,
+        basis=None,
+        message="weather_not_fresh",
+    )
+    unsupported = RecommendationReason(
+        category=Category.RELIABILITY,
+        scope=Scope.NIGHT,
+        basis="weather_provider_mismatch",
+        message="Existing unsupported message",
+    )
+    response = comparison_response(RecommendationComparison(
+        primary_catalog_key="M31",
+        alternative_catalog_key="M42",
+        primary_only_reasons=(renderable, legacy, unsupported),
+        alternative_only_reasons=(),
+        shared_reasons=(),
+    ))
+
+    assert [reason.basis for reason in response.primary_only_reasons] == [
+        "weather_not_fresh",
+        None,
+        "weather_provider_mismatch",
+    ]
+    assert [reason.message for reason in response.primary_only_reasons] == [
+        "Existing message remains unchanged",
+        "weather_not_fresh",
+        "Existing unsupported message",
+    ]
+    assert response.primary_only_reasons[0].rendered_reasons == (rendered,)
+    assert response.primary_only_reasons[1].rendered_reasons == ()
+    assert response.primary_only_reasons[2].rendered_reasons == ()
+
+
+def test_rendered_reasons_preserve_structured_reason_order_and_duplicates():
+    from decision.models.recommendation_comparison import RecommendationComparison
+    from decision.services.tonight_comparisons import comparison_response
+
+    reasons = (
+        RecommendationReason(
+            category=Category.RELIABILITY,
+            scope=Scope.NIGHT,
+            basis="provider_reliability_unavailable",
+            message="First existing message",
+        ),
+        RecommendationReason(
+            category=Category.RELIABILITY,
+            scope=Scope.NIGHT,
+            basis="weather_not_fresh",
+            message="Second existing message",
+        ),
+        RecommendationReason(
+            category=Category.RELIABILITY,
+            scope=Scope.NIGHT,
+            basis="provider_reliability_unavailable",
+            message="Different existing message",
+        ),
+    )
+    response = comparison_response(RecommendationComparison(
+        primary_catalog_key="M31",
+        alternative_catalog_key="M42",
+        primary_only_reasons=reasons,
+        alternative_only_reasons=(),
+        shared_reasons=(),
+    ))
+
+    assert [reason.message for reason in response.primary_only_reasons] == [
+        reason.message for reason in reasons
+    ]
+    assert [
+        reason.rendered_reasons[0].presentation_key
+        for reason in response.primary_only_reasons
+    ] == [
+        "provider_reliability_unavailable",
+        "weather_not_fresh",
+        "provider_reliability_unavailable",
+    ]

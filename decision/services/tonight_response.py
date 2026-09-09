@@ -22,6 +22,13 @@ from decision.weather.weather_trust_decision import (
 
 
 @dataclass(frozen=True, kw_only=True)
+class RecommendationReasonRenderingResponse:
+    presentation_key: str
+    classic_text: str
+    pro_text: str
+
+
+@dataclass(frozen=True, kw_only=True)
 class RecommendationReasonResponse:
     category: RecommendationReasonCategory | None = None
     scope: RecommendationReasonScope
@@ -30,6 +37,7 @@ class RecommendationReasonResponse:
     basis: str | None = None
     message: str | None = None
     evidence_ref: object | None = None
+    rendered_reasons: tuple[RecommendationReasonRenderingResponse, ...] = ()
 
 
 @dataclass(frozen=True)
