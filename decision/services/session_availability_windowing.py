@@ -68,12 +68,15 @@ def _validated_timeline(assessment, total_hours: float):
 def select_duration_availability_window(
     assessment: ProductiveWindowAssessment,
     availability: SessionAvailability,
-) -> SessionAvailabilityWindow:
+) -> SessionAvailabilityWindow | None:
     if not isinstance(assessment, ProductiveWindowAssessment):
         raise TypeError("Expected ProductiveWindowAssessment")
     if not isinstance(availability, SessionAvailability):
         raise TypeError("Expected SessionAvailability")
-    if availability.mode is not SessionAvailabilityMode.DURATION:
+    if availability.mode not in {
+        SessionAvailabilityMode.DURATION,
+        SessionAvailabilityMode.START_AND_DURATION,
+    }:
         raise ValueError("session_availability_mode_inactive")
 
     window_start = assessment.window_start
@@ -89,6 +92,31 @@ def select_duration_availability_window(
         <= window_start.astimezone(timezone.utc)
     ):
         raise ValueError("productive_window_bounds_required")
+
+    if availability.mode is SessionAvailabilityMode.START_AND_DURATION:
+        availability_start = availability.start
+        availability_start_utc = availability_start.astimezone(timezone.utc)
+        availability_end_utc = availability_start_utc + availability.duration
+        window_start_utc = window_start.astimezone(timezone.utc)
+        window_end_utc = window_end.astimezone(timezone.utc)
+        overlap_start_utc = max(window_start_utc, availability_start_utc)
+        overlap_end_utc = min(window_end_utc, availability_end_utc)
+        if overlap_end_utc <= overlap_start_utc:
+            return None
+        overlap_start = (
+            window_start
+            if overlap_start_utc == window_start_utc
+            else availability_start
+        )
+        overlap_end = (
+            window_end
+            if overlap_end_utc == window_end_utc
+            else availability_end_utc.astimezone(availability_start.tzinfo)
+        )
+        return SessionAvailabilityWindow(
+            window_start=overlap_start,
+            window_end=overlap_end,
+        )
 
     capacity = availability.duration
     total_hours = _elapsed_hours(window_start, window_end)
