@@ -310,6 +310,48 @@ def test_primary_reason_response_is_exact_immutable_and_preserves_order():
         responses[0].message = "changed"
 
 
+def test_alternative_reason_response_is_exact_immutable_and_preserves_order():
+    from decision.services.tonight_alternative_reasons import (
+        alternative_reason_responses,
+    )
+
+    legacy = RecommendationReason(
+        scope=Scope.TARGET,
+        direction="existing-direction",
+        importance="existing-importance",
+        message="Projet prioritaire",
+    )
+    renderable = RecommendationReason(
+        category=Category.RELIABILITY,
+        scope=Scope.NIGHT,
+        basis="provider_reliability_unavailable",
+        message="Existing reliability message",
+    )
+    unsupported = RecommendationReason(
+        category=Category.RELIABILITY,
+        scope=Scope.NIGHT,
+        basis="weather_provider_mismatch",
+        message="Existing unsupported message",
+    )
+
+    responses = alternative_reason_responses((legacy, renderable, unsupported))
+
+    assert [reason.message for reason in responses] == [
+        "Projet prioritaire",
+        "Existing reliability message",
+        "Existing unsupported message",
+    ]
+    assert [field.name for field in fields(responses[0])] == [
+        "scope", "category", "direction", "importance", "basis", "message", "rendered",
+    ]
+    assert responses[0].rendered is None
+    assert responses[1].rendered is not None
+    assert responses[1].rendered.presentation_key == "provider_reliability_unavailable"
+    assert responses[2].rendered is None
+    with pytest.raises(FrozenInstanceError):
+        responses[0].message = "changed"
+
+
 def test_tonight_only_serializes_already_mapped_primary_reasons(monkeypatch):
     import decision.services.tonight_primary_reasons as module
 
