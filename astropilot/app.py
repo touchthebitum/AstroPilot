@@ -18,6 +18,11 @@ from decision.services.tonight_application_service import (
     resolve_tonight_inputs,
 )
 from decision.services.tonight_rejected_targets import map_rejected_targets
+from decision.services.tonight_target_evidence import (
+    map_target_evidence_insufficiencies,
+    qualify_candidate_evidence_insufficiency,
+    qualify_primary_evidence_insufficiency,
+)
 from decision.services.tonight_response import (
     TargetDecisionStatus,
     TonightResponse,
@@ -32,6 +37,7 @@ from decision.weather.weather_trust_decision import (
     WeatherDecisionAdmissibility,
     WeatherDecisionContext,
     WeatherEvidenceQuality,
+    WeatherTrustDecision,
     WeatherTrustDecisionEvaluator,
     WeatherTrustEvidence,
 )
@@ -264,6 +270,18 @@ class TonightRejectedTargetModel(BaseModel):
     )
 
 
+class TonightInsufficientEvidenceTargetModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    target: str
+    catalog_key: str
+    provenance: CandidateProvenance
+    weather_decision: WeatherTrustDecision
+    target_decision_status: Literal[TargetDecisionStatus.INSUFFICIENT_EVIDENCE] = (
+        TargetDecisionStatus.INSUFFICIENT_EVIDENCE
+    )
+
+
 class TonightResponseModel(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -472,6 +490,9 @@ class TonightResponseModel(BaseModel):
     weather_trust: TonightWeatherTrustModel | None = None
     weather_decision: TonightWeatherDecisionModel | None = None
     rejected_targets: list[TonightRejectedTargetModel] = Field(default_factory=list)
+    insufficient_evidence_targets: list[TonightInsufficientEvidenceTargetModel] = Field(
+        default_factory=list
+    )
 
 
 def _production_service_factory():
@@ -912,12 +933,31 @@ def create_app(
             ),
         )
 
+        target_insufficiencies = []
+        if opportunity is not None:
+            primary_insufficiency = qualify_primary_evidence_insufficiency(
+                candidate=opportunity.candidate,
+                weather_decision=weather_decision,
+            )
+            if primary_insufficiency is not None:
+                target_insufficiencies.append(primary_insufficiency)
+            for candidate in opportunity.shortlist_entries:
+                insufficiency = qualify_candidate_evidence_insufficiency(
+                    candidate=candidate,
+                    assessment=candidate_assessments.get(candidate.catalog_key),
+                )
+                if insufficiency is not None:
+                    target_insufficiencies.append(insufficiency)
+
         payload = TonightResponse.from_result(
             result,
             weather_decision=weather_decision,
             viable_shortlist_catalog_keys=viable_shortlist_catalog_keys,
             selected_alternatives=selected_alternatives,
             rejected_targets=map_rejected_targets(result.candidate_rejections),
+            insufficient_evidence_targets=map_target_evidence_insufficiencies(
+                tuple(target_insufficiencies)
+            ),
         ).to_dict()
         if isinstance(weather, WeatherSnapshot):
             payload["weather_trust"] = weather.trust_transport(weather_freshness)

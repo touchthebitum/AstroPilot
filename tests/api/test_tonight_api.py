@@ -945,3 +945,113 @@ def test_openapi_exposes_dedicated_rejected_target_contract():
     assert entry["properties"]["evaluation_score"]["type"] == "number"
     assert entry["properties"]["provenance"]["$ref"].endswith("CandidateProvenance")
     assert entry["properties"]["basis"]["$ref"].endswith("CandidateRejectionBasis")
+
+
+@pytest.mark.parametrize("primary_refused", [False, True])
+def test_target_insufficiency_api_binds_each_decision_to_its_own_candidate(monkeypatch, primary_refused):
+    from types import SimpleNamespace
+    from decision.mission.mission_assembler import ProductiveWindowAssessment
+    from decision.services.candidate_assessment import CandidateAssessment
+    from decision.weather.weather_trust_decision import (
+        WeatherDecisionAdmissibility as Admissibility,
+        WeatherEvidenceQuality as Quality,
+        WeatherTrustDecision,
+    )
+
+    result = make_result()
+    primary = result.recommendation.opportunity.candidate
+    candidates = tuple(
+        replace(primary, name=key, catalog_key=key)
+        for key in ("M42", "M33", "M45", "M51", "M81")
+    )
+    result = replace(result, recommendation=replace(
+        result.recommendation,
+        opportunity=replace(result.recommendation.opportunity, shortlist_entries=candidates),
+    ))
+    decisions = (
+        WeatherTrustDecision(Quality.INSUFFICIENT, Admissibility.REFUSED,
+                             ("selected_window_uncovered", "candidate_reason", "candidate_reason")),
+        WeatherTrustDecision(Quality.INSUFFICIENT, Admissibility.CAUTION,
+                             ("provider_reliability_unavailable",)),
+        WeatherTrustDecision(Quality.INVALID, Admissibility.REFUSED,
+                             ("weather_location_mismatch",)),
+        WeatherTrustDecision(Quality.SUFFICIENT, Admissibility.REFUSED, ()),
+    )
+    assessments = {
+        candidate.catalog_key: CandidateAssessment(
+            productive_window=ProductiveWindowAssessment(
+                window_start=result.mission.window_start,
+                window_end=result.mission.window_start + timedelta(hours=2),
+                recommended_hours=1.0,
+                expected_gain=0.0,
+                productivity=SimpleNamespace(
+                    astronomical_hours=2.0, productive_hours=1.0, confidence=0.5,
+                    windows=[SimpleNamespace(
+                        start_hour=0.0, end_hour=1.0, productivity=0.8, productive=True,
+                    )],
+                ),
+            ),
+            weather_decision=decision,
+        )
+        for candidate, decision in zip(candidates, decisions)
+    }
+    monkeypatch.setattr(app_module, "_assess_shortlist_candidates", lambda *a, **kw: assessments)
+    reference = datetime(2026, 8, 29, 20, tzinfo=timezone.utc)
+    weather = make_weather_snapshot(
+        reference - timedelta(minutes=5),
+        valid_until=datetime(2026, 9, 1, 23, tzinfo=timezone.utc) if primary_refused else None,
+    )
+    client = TestClient(create_app(
+        service_factory=lambda: type("Service", (), {"evaluate": lambda self, **kw: result})(),
+        weather_provider=lambda lat, lon: weather,
+        profile_provider=valid_profile,
+        clock=lambda: reference,
+    ))
+    response = client.post("/v1/tonight", json={})
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    entries = payload["insufficient_evidence_targets"]
+    assert [entry["catalog_key"] for entry in entries] == (
+        ["M31", "M42"] if primary_refused else ["M42"]
+    )
+    assert entries[-1]["weather_decision"]["reasons"] == list(decisions[0].reasons)
+    assert all(entry["target_decision_status"] == "insufficient_evidence" for entry in entries)
+    if primary_refused:
+        assert entries[0]["weather_decision"]["reasons"] == ["selected_window_uncovered"]
+        assert payload["target_decision_status"] == "insufficient_evidence"
+        assert payload["target"] is None
+        assert payload["shortlist_entries"] == []
+        assert payload["alternatives"] == []
+    else:
+        assert payload["target_decision_status"] == "recommended"
+        assert payload["target"] == "Andromeda"
+        assert [entry["catalog_key"] for entry in payload["alternatives"]] == ["M33"]
+        assert [entry["target_decision_status"] for entry in payload["shortlist_entries"]] == [
+            None, "viable", None, None, None,
+        ]
+        assert [entry["catalog_key"] for entry in payload["shortlist_entries"]] == [
+            candidate.catalog_key for candidate in candidates
+        ]
+    assert payload["rejected_targets"] == []
+    assert result.recommendation.opportunity.candidate is primary
+    assert assessments["M42"].weather_decision is decisions[0]
+
+
+def test_target_insufficiency_api_defaults_and_openapi_contract():
+    result = TonightResult(None, None, None, status=TonightStatus.NO_RECOMMENDATION)
+    client = make_client(result=result)
+    payload = client.post("/v1/tonight", json={}).json()
+    assert payload["insufficient_evidence_targets"] == []
+    assert payload["target_decision_status"] is None
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    response = schemas["TonightResponseModel"]
+    field = response["properties"]["insufficient_evidence_targets"]
+    assert field["type"] == "array"
+    assert "insufficient_evidence_targets" not in response.get("required", [])
+    entry = schemas[field["items"]["$ref"].split("/")[-1]]
+    assert set(entry["properties"]) == {
+        "target", "catalog_key", "provenance", "weather_decision", "target_decision_status",
+    }
+    assert entry["properties"]["target_decision_status"]["const"] == "insufficient_evidence"
+    weather = schemas[entry["properties"]["weather_decision"]["$ref"].split("/")[-1]]
+    assert set(weather["properties"]) == {"evidence_quality", "admissibility", "reasons"}
