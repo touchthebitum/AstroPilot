@@ -87,6 +87,19 @@ class TargetDecisionStatus(str, Enum):
 
 
 @dataclass(frozen=True)
+class TargetExplanationResponse:
+    catalog_key: str
+    target_decision_status: TargetDecisionStatus
+    reasons: tuple[
+        PrimaryRecommendationReasonResponse | AlternativeReasonResponse,
+        ...,
+    ] = ()
+
+    def __post_init__(self):
+        object.__setattr__(self, "reasons", tuple(self.reasons))
+
+
+@dataclass(frozen=True)
 class TonightRejectedTargetResponse:
     target: str
     catalog_key: str
@@ -401,6 +414,9 @@ class TonightResponse:
     primary_reasons: list[PrimaryRecommendationReasonResponse] = field(
         default_factory=list
     )
+    target_explanations: list[TargetExplanationResponse] = field(
+        default_factory=list
+    )
 
     def __post_init__(self):
         refused = (
@@ -426,6 +442,7 @@ class TonightResponse:
         ] = (),
         alternative_comparisons: Sequence[RecommendationComparisonResponse] = (),
         primary_reasons: Sequence[PrimaryRecommendationReasonResponse] = (),
+        target_explanations: Sequence[TargetExplanationResponse] = (),
     ) -> TonightResponse:
         refused = (
             weather_decision is not None
@@ -731,6 +748,7 @@ class TonightResponse:
             insufficient_evidence_targets=list(insufficient_evidence_targets),
             alternative_comparisons=list(alternative_comparisons),
             primary_reasons=list(primary_reasons),
+            target_explanations=list(target_explanations),
             recommendation_confidence=(
                 float(recommendation.confidence)
                 if recommendation is not None

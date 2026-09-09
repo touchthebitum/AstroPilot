@@ -24,7 +24,10 @@ from decision.services.recommendation_reason_builder import (
 from decision.services.tonight_comparisons import build_alternative_comparisons
 from decision.services.tonight_alternative_reasons import alternative_reason_responses
 from decision.services.tonight_primary_reasons import primary_reason_responses
-from decision.services.target_explanation import build_target_explanations
+from decision.services.target_explanation import (
+    build_target_explanations,
+    target_explanation_responses,
+)
 from decision.services.tonight_application_service import (
     TonightEquipmentSelectionError,
     TonightStatus,
@@ -337,6 +340,14 @@ class PrimaryRecommendationReasonResponseModel(BaseModel):
     rendered: RecommendationReasonRenderingResponseModel | None = None
 
 
+class TargetExplanationResponseModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    catalog_key: str
+    target_decision_status: TargetDecisionStatus
+    reasons: tuple[PrimaryRecommendationReasonResponseModel, ...] = ()
+
+
 class RecommendationReasonResponseModel(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -575,6 +586,9 @@ class TonightResponseModel(BaseModel):
         default_factory=list
     )
     primary_reasons: list[PrimaryRecommendationReasonResponseModel] = Field(
+        default_factory=list
+    )
+    target_explanations: list[TargetExplanationResponseModel] = Field(
         default_factory=list
     )
 
@@ -1063,16 +1077,18 @@ def create_app(
                 for reasons in alternative_reason_sets
             )
 
-        _target_explanations = build_target_explanations(
-            primary=(
-                (opportunity.candidate.catalog_key, primary_reason_entries)
-                if opportunity is not None and not weather_refused
-                else None
-            ),
-            alternatives=tuple(
-                (candidate.catalog_key, alternative_reason_entries[index])
-                for index, candidate in enumerate(selected_alternatives)
-            ) if not weather_refused else (),
+        target_explanations = target_explanation_responses(
+            build_target_explanations(
+                primary=(
+                    (opportunity.candidate.catalog_key, primary_reason_entries)
+                    if opportunity is not None and not weather_refused
+                    else None
+                ),
+                alternatives=tuple(
+                    (candidate.catalog_key, alternative_reason_entries[index])
+                    for index, candidate in enumerate(selected_alternatives)
+                ) if not weather_refused else (),
+            )
         )
 
         alternative_comparisons = ()
@@ -1105,6 +1121,7 @@ def create_app(
             ),
             alternative_comparisons=alternative_comparisons,
             primary_reasons=primary_reason_entries,
+            target_explanations=target_explanations,
         ).to_dict()
         if isinstance(weather, WeatherSnapshot):
             payload["weather_trust"] = weather.trust_transport(weather_freshness)
