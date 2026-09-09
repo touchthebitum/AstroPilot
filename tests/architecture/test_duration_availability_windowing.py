@@ -238,15 +238,100 @@ def test_until_returns_none_when_limit_precedes_or_equals_productive_start(
     ) is None
 
 
+def test_fixed_window_preserves_productive_window_fully_inside_availability():
+    from decision.services.session_availability_windowing import (
+        select_duration_availability_window,
+    )
+
+    source = assessment(hours=4, scores=[0.1, 0.9, 0.8, 0.1])
+    availability = SessionAvailability(
+        mode=SessionAvailabilityMode.FIXED_WINDOW,
+        start=START - timedelta(hours=1),
+        end=START + timedelta(hours=5),
+    )
+
+    window = select_duration_availability_window(source, availability)
+
+    assert window.window_start is source.window_start
+    assert window.window_end is source.window_end
+
+
+@pytest.mark.parametrize(
+    ("fixed_start", "fixed_end", "expected_start", "expected_end"),
+    [
+        (
+            START + timedelta(hours=1),
+            START + timedelta(hours=5),
+            START + timedelta(hours=1),
+            START + timedelta(hours=4),
+        ),
+        (
+            START - timedelta(hours=1),
+            START + timedelta(hours=2),
+            START,
+            START + timedelta(hours=2),
+        ),
+        (
+            START + timedelta(hours=1),
+            START + timedelta(hours=3),
+            START + timedelta(hours=1),
+            START + timedelta(hours=3),
+        ),
+    ],
+)
+def test_fixed_window_returns_only_exact_productive_overlap(
+    fixed_start,
+    fixed_end,
+    expected_start,
+    expected_end,
+):
+    from decision.services.session_availability_windowing import (
+        select_duration_availability_window,
+    )
+
+    source = assessment(hours=4, scores=[0.9, 0.1, 0.1, 0.9])
+    availability = SessionAvailability(
+        mode=SessionAvailabilityMode.FIXED_WINDOW,
+        start=fixed_start,
+        end=fixed_end,
+    )
+
+    window = select_duration_availability_window(source, availability)
+
+    assert window.window_start == expected_start
+    assert window.window_end == expected_end
+    assert window.window_end.date() >= window.window_start.date()
+
+
+@pytest.mark.parametrize(
+    ("fixed_start", "fixed_end"),
+    [
+        (START - timedelta(hours=2), START),
+        (START + timedelta(hours=4), START + timedelta(hours=5)),
+    ],
+)
+def test_fixed_window_returns_none_without_positive_productive_overlap(
+    fixed_start,
+    fixed_end,
+):
+    from decision.services.session_availability_windowing import (
+        select_duration_availability_window,
+    )
+
+    assert select_duration_availability_window(
+        assessment(hours=4, scores=[0.1, 0.9, 0.8, 0.1]),
+        SessionAvailability(
+            mode=SessionAvailabilityMode.FIXED_WINDOW,
+            start=fixed_start,
+            end=fixed_end,
+        ),
+    ) is None
+
+
 @pytest.mark.parametrize(
     "availability",
     [
         SessionAvailability(mode=SessionAvailabilityMode.ALL_NIGHT),
-        SessionAvailability(
-            mode=SessionAvailabilityMode.FIXED_WINDOW,
-            start=START,
-            end=START + timedelta(hours=2),
-        ),
     ],
 )
 def test_other_availability_modes_remain_inactive(availability):
