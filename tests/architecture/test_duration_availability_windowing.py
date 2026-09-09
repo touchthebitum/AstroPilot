@@ -182,14 +182,66 @@ def test_start_and_duration_returns_none_without_productive_overlap(availability
     ) is None
 
 
+@pytest.mark.parametrize("offset_hours", [4, 6])
+def test_until_preserves_productive_window_when_limit_reaches_or_follows_end(
+    offset_hours,
+):
+    from decision.services.session_availability_windowing import (
+        select_duration_availability_window,
+    )
+
+    source = assessment(hours=4, scores=[0.1, 0.9, 0.8, 0.1])
+    availability = SessionAvailability(
+        mode=SessionAvailabilityMode.UNTIL,
+        end=START + timedelta(hours=offset_hours),
+    )
+
+    window = select_duration_availability_window(source, availability)
+
+    assert window.window_start is source.window_start
+    assert window.window_end is source.window_end
+
+
+def test_until_truncates_only_productive_window_end_at_explicit_limit():
+    from decision.services.session_availability_windowing import (
+        select_duration_availability_window,
+    )
+
+    source = assessment(hours=4, scores=[0.9, 0.1, 0.1, 0.9])
+    until = START + timedelta(hours=2, minutes=15)
+    availability = SessionAvailability(
+        mode=SessionAvailabilityMode.UNTIL,
+        end=until,
+    )
+
+    window = select_duration_availability_window(source, availability)
+
+    assert window.window_start is source.window_start
+    assert window.window_end is until
+    assert window.window_end.date() > window.window_start.date()
+
+
+@pytest.mark.parametrize("offset_hours", [-1, 0])
+def test_until_returns_none_when_limit_precedes_or_equals_productive_start(
+    offset_hours,
+):
+    from decision.services.session_availability_windowing import (
+        select_duration_availability_window,
+    )
+
+    assert select_duration_availability_window(
+        assessment(hours=4, scores=[0.1, 0.9, 0.8, 0.1]),
+        SessionAvailability(
+            mode=SessionAvailabilityMode.UNTIL,
+            end=START + timedelta(hours=offset_hours),
+        ),
+    ) is None
+
+
 @pytest.mark.parametrize(
     "availability",
     [
         SessionAvailability(mode=SessionAvailabilityMode.ALL_NIGHT),
-        SessionAvailability(
-            mode=SessionAvailabilityMode.UNTIL,
-            end=START + timedelta(hours=2),
-        ),
         SessionAvailability(
             mode=SessionAvailabilityMode.FIXED_WINDOW,
             start=START,
