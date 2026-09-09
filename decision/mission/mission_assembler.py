@@ -406,6 +406,22 @@ class MissionAssembler:
         return NightMission(
             target=target,
             confidence=summary.confidence,
+            site_name=context.site.name,
+            mission_id=(
+                mission_input.mission_id
+                if mission_input is not None
+                else None
+            ),
+            decision_id=(
+                mission_input.decision_id
+                if mission_input is not None
+                else None
+            ),
+            selection_id=(
+                mission_input.selection_id
+                if mission_input is not None
+                else None
+            ),
             reasons=reasons,
             equipment=equipment,
             window_start=mission_window_start,

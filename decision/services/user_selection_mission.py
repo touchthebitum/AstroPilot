@@ -27,6 +27,7 @@ class UserSelectionMissionService:
     def create(
         self,
         *,
+        mission_id: str,
         selection: UserSelection,
         decision_context: UserSelectionDecisionContext,
         recommendation: Recommendation,
@@ -34,6 +35,8 @@ class UserSelectionMissionService:
         profile: Mapping,
         availability: SessionAvailability | None = None,
     ) -> NightMission | None:
+        if not isinstance(mission_id, str) or not mission_id.strip():
+            raise ValueError("mission_id_required")
         validated_selection = validate_user_selection(
             selection,
             decision_context,
@@ -66,9 +69,13 @@ class UserSelectionMissionService:
                 evaluation,
                 profile=profile,
             )
-            if availability is None:
-                return mission_input
-            return replace(mission_input, availability=availability)
+            return replace(
+                mission_input,
+                availability=availability,
+                mission_id=mission_id,
+                decision_id=validated_selection.decision_id,
+                selection_id=validated_selection.selection_id,
+            )
 
         mission = self.tonight_mission_service.create(
             winner=night,
@@ -80,8 +87,27 @@ class UserSelectionMissionService:
             return None
         if not isinstance(mission, NightMission):
             raise TypeError("Expected NightMission or None")
-        return replace(
-            mission,
-            decision_id=validated_selection.decision_id,
-            selection_id=validated_selection.selection_id,
+        if mission.target != selected_catalog_key:
+            raise UserSelectionValidationError("mission_target_mismatch")
+
+        selected_evaluation = object_evaluations[selected_catalog_key]
+        decision_context_value = (
+            selected_evaluation.get("decision_context")
+            if isinstance(selected_evaluation, Mapping)
+            else None
         )
+        site = getattr(decision_context_value, "site", None)
+        site_name = getattr(site, "name", None)
+        if (
+            not isinstance(site_name, str)
+            or not site_name.strip()
+            or mission.site_name != site_name
+        ):
+            raise UserSelectionValidationError("mission_site_identity_mismatch")
+        if (
+            mission.mission_id != mission_id
+            or mission.decision_id != validated_selection.decision_id
+            or mission.selection_id != validated_selection.selection_id
+        ):
+            raise UserSelectionValidationError("mission_provenance_mismatch")
+        return mission
