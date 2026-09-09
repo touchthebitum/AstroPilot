@@ -70,3 +70,41 @@ def test_target_explanations_require_an_existing_bound_primary_collection():
     assert explanation.catalog_key == "M31"
     assert explanation.target_decision_status is TargetDecisionStatus.RECOMMENDED
     assert explanation.reasons == ()
+
+
+def test_target_explanation_responses_are_exact_immutable_and_preserve_order():
+    from decision.services.target_explanation import (
+        build_target_explanations,
+        target_explanation_responses,
+    )
+
+    primary_reasons = primary_reason_responses((
+        RecommendationReason(
+            category=RecommendationReasonCategory.RELIABILITY,
+            scope=RecommendationReasonScope.NIGHT,
+            basis="weather_not_fresh",
+        ),
+    ))
+    alternative_reasons = alternative_reason_responses((
+        RecommendationReason(
+            scope=RecommendationReasonScope.TARGET,
+            message="Projet prioritaire",
+        ),
+    ))
+    explanations = build_target_explanations(
+        primary=("M31", primary_reasons),
+        alternatives=(("M42", alternative_reasons), ("M45", ())),
+    )
+
+    responses = target_explanation_responses(explanations)
+
+    assert [field.name for field in fields(responses[0])] == [
+        "catalog_key", "target_decision_status", "reasons",
+    ]
+    assert [entry.catalog_key for entry in responses] == ["M31", "M42", "M45"]
+    assert responses[0].reasons[0] is primary_reasons[0]
+    assert responses[1].reasons[0] is alternative_reasons[0]
+    assert responses[2].reasons == ()
+    assert responses[0].reasons[0].rendered is primary_reasons[0].rendered
+    with pytest.raises(FrozenInstanceError):
+        responses[0].target_decision_status = TargetDecisionStatus.VIABLE

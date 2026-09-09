@@ -5,6 +5,7 @@ from decision.services.tonight_response import (
     AlternativeReasonResponse,
     PrimaryRecommendationReasonResponse,
     TargetDecisionStatus,
+    TargetExplanationResponse,
 )
 
 
@@ -50,3 +51,16 @@ def build_target_explanations(
         for catalog_key, reasons in alternatives
     )
     return tuple(explanations)
+
+
+def target_explanation_responses(
+    explanations: Sequence[TargetExplanation],
+) -> tuple[TargetExplanationResponse, ...]:
+    return tuple(
+        TargetExplanationResponse(
+            catalog_key=explanation.catalog_key,
+            target_decision_status=explanation.target_decision_status,
+            reasons=explanation.reasons,
+        )
+        for explanation in explanations
+    )
