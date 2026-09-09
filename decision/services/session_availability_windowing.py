@@ -76,6 +76,7 @@ def select_duration_availability_window(
     if availability.mode not in {
         SessionAvailabilityMode.DURATION,
         SessionAvailabilityMode.START_AND_DURATION,
+        SessionAvailabilityMode.UNTIL,
     }:
         raise ValueError("session_availability_mode_inactive")
 
@@ -92,6 +93,18 @@ def select_duration_availability_window(
         <= window_start.astimezone(timezone.utc)
     ):
         raise ValueError("productive_window_bounds_required")
+
+    if availability.mode is SessionAvailabilityMode.UNTIL:
+        until = availability.end
+        until_utc = until.astimezone(timezone.utc)
+        window_start_utc = window_start.astimezone(timezone.utc)
+        window_end_utc = window_end.astimezone(timezone.utc)
+        if until_utc <= window_start_utc:
+            return None
+        return SessionAvailabilityWindow(
+            window_start=window_start,
+            window_end=(window_end if until_utc >= window_end_utc else until),
+        )
 
     if availability.mode is SessionAvailabilityMode.START_AND_DURATION:
         availability_start = availability.start
