@@ -16,3 +16,14 @@ class MissionInput:
     expected_gain: float
     selected_filter: SelectedFilter | None = None
     availability: SessionAvailability | None = None
+    mission_id: str | None = None
+    decision_id: str | None = None
+    selection_id: str | None = None
+
+    def __post_init__(self):
+        provenance = (self.mission_id, self.decision_id, self.selection_id)
+        if any(value is not None for value in provenance) and any(
+            not isinstance(value, str) or not value.strip()
+            for value in provenance
+        ):
+            raise ValueError("mission_provenance_required")
