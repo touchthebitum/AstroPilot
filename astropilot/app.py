@@ -22,6 +22,7 @@ from decision.services.recommendation_reason_builder import (
     primary_window_reasons,
 )
 from decision.services.tonight_comparisons import build_alternative_comparisons
+from decision.services.tonight_primary_reasons import primary_reason_responses
 from decision.services.tonight_application_service import (
     TonightEquipmentSelectionError,
     TonightStatus,
@@ -300,6 +301,18 @@ class RecommendationReasonRenderingResponseModel(BaseModel):
     pro_text: str
 
 
+class PrimaryRecommendationReasonResponseModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    scope: RecommendationReasonScope
+    category: RecommendationReasonCategory | None = None
+    direction: str | None = None
+    importance: str | None = None
+    basis: str | None = None
+    message: str | None = None
+    rendered: RecommendationReasonRenderingResponseModel | None = None
+
+
 class RecommendationReasonResponseModel(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -535,6 +548,9 @@ class TonightResponseModel(BaseModel):
         default_factory=list
     )
     alternative_comparisons: list[RecommendationComparisonResponseModel] = Field(
+        default_factory=list
+    )
+    primary_reasons: list[PrimaryRecommendationReasonResponseModel] = Field(
         default_factory=list
     )
 
@@ -993,21 +1009,27 @@ def create_app(
                 if insufficiency is not None:
                     target_insufficiencies.append(insufficiency)
 
-        alternative_comparisons = ()
-        if (
-            opportunity is not None
-            and selected_alternatives
-            and not (
-                weather_decision is not None
-                and weather_decision.admissibility is WeatherDecisionAdmissibility.REFUSED
-            )
-        ):
+        weather_refused = (
+            weather_decision is not None
+            and weather_decision.admissibility is WeatherDecisionAdmissibility.REFUSED
+        )
+        primary_reasons = ()
+        primary_reason_entries = ()
+        if opportunity is not None and not weather_refused:
             primary_reasons = opportunity.structured_reasons
             if weather_decision is not None:
                 primary_reasons += primary_window_reasons(
                     candidate=opportunity.candidate,
                     weather_decision=weather_decision,
                 )
+            primary_reason_entries = primary_reason_responses(primary_reasons)
+
+        alternative_comparisons = ()
+        if (
+            opportunity is not None
+            and selected_alternatives
+            and not weather_refused
+        ):
             alternative_comparisons = build_alternative_comparisons(
                 primary_catalog_key=opportunity.candidate.catalog_key,
                 primary_reasons=primary_reasons,
@@ -1033,6 +1055,7 @@ def create_app(
                 tuple(target_insufficiencies)
             ),
             alternative_comparisons=alternative_comparisons,
+            primary_reasons=primary_reason_entries,
         ).to_dict()
         if isinstance(weather, WeatherSnapshot):
             payload["weather_trust"] = weather.trust_transport(weather_freshness)
