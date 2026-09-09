@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -18,6 +18,7 @@ from decision.services.tonight_application_service import (
     TonightResult,
     TonightStatus,
     resolve_tonight_equipment,
+    resolve_tonight_inputs,
 )
 from decision.models.candidate_rejection import (
     CandidateBuildResult,
@@ -25,6 +26,10 @@ from decision.models.candidate_rejection import (
     CandidateRejectionBasis,
 )
 from decision.models.candidate import CandidateProvenance
+from decision.models.session_availability import (
+    SessionAvailability,
+    SessionAvailabilityMode,
+)
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 
 
@@ -169,6 +174,56 @@ def test_evaluate_requires_explicit_bortle_keyword():
             weather=object(),
             reference_time_utc=REFERENCE_TIME,
         )
+
+
+def test_tonight_inputs_preserve_optional_availability_identity():
+    profile = make_profile()
+    availability = SessionAvailability(
+        SessionAvailabilityMode.DURATION,
+        duration=timedelta(hours=2),
+    )
+
+    omitted = resolve_tonight_inputs(profile, bortle=4)
+    explicit = resolve_tonight_inputs(
+        profile,
+        bortle=4,
+        availability=availability,
+    )
+
+    assert omitted.availability is None
+    assert explicit.availability is availability
+
+
+def test_evaluate_carries_typed_availability_to_composition_boundary(monkeypatch):
+    availability = SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)
+    resolved_availability = []
+    original_resolver = tonight_service_module.resolve_tonight_inputs
+
+    def recording_resolver(*args, **kwargs):
+        inputs = original_resolver(*args, **kwargs)
+        resolved_availability.append(inputs.availability)
+        return inputs
+
+    monkeypatch.setattr(
+        tonight_service_module,
+        "resolve_tonight_inputs",
+        recording_resolver,
+    )
+    service, _, _ = make_service(
+        forecast_nights=lambda *args, **kwargs: forecast_run([]),
+        build_candidates=lambda *args, **kwargs: [],
+    )
+
+    service.evaluate(
+        profile=make_profile(),
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=4,
+        availability=availability,
+    )
+
+    assert resolved_availability == [availability]
+    assert resolved_availability[0] is availability
 
 
 def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():

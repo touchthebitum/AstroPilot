@@ -15,6 +15,7 @@ from decision.models.candidate_rejection import (
     CandidateBuildResult,
     CandidateRejection,
 )
+from decision.models.session_availability import SessionAvailability
 from decision.recommendation.recommendation import Recommendation
 from decision.validation.decision_consistency import DecisionConsistencyGate
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
@@ -58,6 +59,7 @@ class TonightInputs:
     location: dict
     bortle: int
     equipment: str
+    availability: SessionAvailability | None = None
 
 
 def resolve_tonight_inputs(
@@ -66,6 +68,7 @@ def resolve_tonight_inputs(
     location=None,
     bortle=None,
     equipment=None,
+    availability: SessionAvailability | None = None,
 ) -> TonightInputs:
     """Resolve only Tonight's critical local inputs, without I/O or mutation."""
     selected_equipment = resolve_tonight_equipment(profile, equipment)
@@ -93,7 +96,15 @@ def resolve_tonight_inputs(
     ):
         raise UserProfileError("Configuration Tonight : Bortle requis, entier de 1 à 9.")
 
-    return TonightInputs(dict(selected_location), selected_bortle, selected_equipment)
+    if availability is not None and not isinstance(availability, SessionAvailability):
+        raise TypeError("Expected SessionAvailability or None")
+
+    return TonightInputs(
+        dict(selected_location),
+        selected_bortle,
+        selected_equipment,
+        availability,
+    )
 
 
 @dataclass(frozen=True)
@@ -139,8 +150,14 @@ class TonightApplicationService:
         goal="balanced",
         target="deep_sky",
         bortle,
+        availability: SessionAvailability | None = None,
     ) -> TonightResult:
-        inputs = resolve_tonight_inputs(profile, equipment=equipment, bortle=bortle)
+        inputs = resolve_tonight_inputs(
+            profile,
+            equipment=equipment,
+            bortle=bortle,
+            availability=availability,
+        )
         selected_equipment = inputs.equipment
         effective_profile = {
             **profile,
