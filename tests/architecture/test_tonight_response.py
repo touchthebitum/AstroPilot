@@ -1,3 +1,4 @@
+from dataclasses import FrozenInstanceError
 from datetime import date, datetime, timezone
 
 import pytest
@@ -7,6 +8,10 @@ from decision.intelligence.analysis_result import AnalysisResult
 from decision.mission.night_mission import MissionReason, NightMission
 from decision.mission.night_planner import NightTask
 from decision.models.candidate import Candidate, CandidateProvenance
+from decision.models.candidate_rejection import (
+    CandidateRejection,
+    CandidateRejectionBasis,
+)
 from decision.night_productivity.night_productivity_result import (
     NightProductivityResult,
 )
@@ -92,6 +97,7 @@ def test_partial_results_produce_stable_transport_status(status):
         "target_decision_status": None,
         "shortlist_entries": [],
         "alternatives": [],
+        "rejected_targets": [],
         "recommendation_confidence": None,
         "mission_confidence": None,
         "scores": {},
@@ -662,6 +668,7 @@ def test_refused_weather_decision_redacts_active_transport_only():
         "target_decision_status": "insufficient_evidence",
         "shortlist_entries": [],
         "alternatives": [],
+        "rejected_targets": [],
         "recommendation_confidence": None,
         "mission_confidence": None,
         "scores": {},
@@ -817,3 +824,127 @@ def test_multiple_weather_reasons_use_admissibility_fallback_without_combining()
             "incomplètes ou indisponibles."
         ),
     }
+
+
+def make_rejection(catalog_key="M42", score=0.0):
+    return CandidateRejection(
+        target="Orion",
+        catalog_key=catalog_key,
+        provenance=CandidateProvenance.DISCOVERY,
+        basis=CandidateRejectionBasis.NON_POSITIVE_EVALUATION_SCORE,
+        evaluation_score=score,
+    )
+
+
+@pytest.mark.parametrize("count", [0, 1, 4])
+def test_rejected_target_mapper_preserves_every_record_in_order(count):
+    from decision.services.tonight_rejected_targets import map_rejected_targets
+
+    # Repeated keys and repeated records must survive, including more than two.
+    first = make_rejection("Z", -2.5)
+    source = (first, make_rejection("A"), make_rejection("Z", -1.0), first)[:count]
+    mapped = map_rejected_targets(source)
+
+    assert isinstance(mapped, tuple)
+    assert len(mapped) == count
+    for entry, rejection in zip(mapped, source):
+        assert entry.target == rejection.target
+        assert entry.catalog_key == rejection.catalog_key
+        assert entry.provenance is rejection.provenance
+        assert entry.basis is rejection.basis
+        assert entry.evaluation_score == rejection.evaluation_score
+        assert entry.target_decision_status is TargetDecisionStatus.NOT_RECOMMENDED
+
+
+def test_rejected_target_entry_is_immutable_and_status_cannot_be_overridden():
+    from decision.services.tonight_rejected_targets import map_rejected_targets
+
+    entry, = map_rejected_targets((make_rejection(),))
+    with pytest.raises(FrozenInstanceError):
+        entry.target = "changed"
+    with pytest.raises(FrozenInstanceError):
+        entry.target_decision_status = TargetDecisionStatus.VIABLE
+    with pytest.raises(TypeError):
+        type(entry)(
+            target=entry.target,
+            catalog_key=entry.catalog_key,
+            provenance=entry.provenance,
+            basis=entry.basis,
+            evaluation_score=entry.evaluation_score,
+            target_decision_status=TargetDecisionStatus.VIABLE,
+        )
+
+
+@pytest.mark.parametrize("value", [None, {}, make_candidate()])
+def test_rejected_target_mapper_accepts_only_candidate_rejection_records(value):
+    from decision.services.tonight_rejected_targets import map_rejected_targets
+
+    with pytest.raises(TypeError):
+        map_rejected_targets((value,))
+
+
+@pytest.mark.parametrize("status", [
+    TonightStatus.NO_CANDIDATE,
+    TonightStatus.NO_RECOMMENDATION,
+    TonightStatus.NO_MISSION,
+    TonightStatus.NO_PRODUCTIVE_WINDOW,
+    TonightStatus.AVAILABLE,
+])
+@pytest.mark.parametrize("refused", [False, True])
+def test_rejections_are_serialized_without_changing_existing_decisions(status, refused):
+    from decision.services.tonight_rejected_targets import map_rejected_targets
+
+    candidate = make_candidate(decision_score=None, final_score=None)
+    shortlist = (make_candidate(catalog_key="M33"), make_candidate(catalog_key="M42"))
+    recommendation = Recommendation(
+        opportunity=Opportunity(
+            action=Action.START_PROJECT,
+            candidate=candidate,
+            shortlist_entries=shortlist,
+        ),
+        confidence=None,
+    ) if status not in {TonightStatus.NO_CANDIDATE, TonightStatus.NO_RECOMMENDATION} else None
+    result = TonightResult(
+        night=None,
+        recommendation=recommendation,
+        mission=None,
+        status=status,
+        candidate_rejections=(make_rejection(),),
+    )
+    weather = WeatherTrustDecision(
+        evidence_quality=WeatherEvidenceQuality.INSUFFICIENT,
+        admissibility=WeatherDecisionAdmissibility.REFUSED,
+        reasons=("selected_window_uncovered",),
+    ) if refused else None
+    kwargs = dict(
+        weather_decision=weather,
+        viable_shortlist_catalog_keys=set(),
+        selected_alternatives=(),
+    )
+    # Raw records, absent scores/assessment/mission, and non-viable shortlist
+    # entries cannot cause serialization to assign rejection status itself.
+    baseline = TonightResponse.from_result(result, **kwargs).to_dict()
+    assert baseline["rejected_targets"] == []
+    response = TonightResponse.from_result(
+        result,
+        rejected_targets=map_rejected_targets(result.candidate_rejections),
+        **kwargs,
+    ).to_dict()
+    assert response.pop("rejected_targets") == [{
+        "target": "Orion",
+        "catalog_key": "M42",
+        "provenance": "discovery",
+        "basis": "non_positive_evaluation_score",
+        "evaluation_score": 0.0,
+        "target_decision_status": "not_recommended",
+    }]
+    baseline.pop("rejected_targets")
+    assert response == baseline
+    assert result.recommendation is recommendation
+
+
+def test_rejected_target_list_defaults_are_independent():
+    first = TonightResponse(status="no_candidate")
+    second = TonightResponse(status="no_candidate")
+    assert first.rejected_targets == second.rejected_targets == []
+    assert first.rejected_targets is not second.rejected_targets

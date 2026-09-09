@@ -7,6 +7,8 @@ from enum import Enum
 
 from astropilot.catalog import CATALOG
 from decision.advisor.night_advisor import NightAdvisor
+from decision.models.candidate import CandidateProvenance
+from decision.models.candidate_rejection import CandidateRejectionBasis
 from decision.services.tonight_application_service import TonightResult
 from decision.weather.weather_trust_decision import (
     WeatherDecisionAdmissibility,
@@ -20,6 +22,19 @@ class TargetDecisionStatus(str, Enum):
     VIABLE = "viable"
     NOT_RECOMMENDED = "not_recommended"
     INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+
+@dataclass(frozen=True)
+class TonightRejectedTargetResponse:
+    target: str
+    catalog_key: str
+    provenance: CandidateProvenance
+    basis: CandidateRejectionBasis
+    evaluation_score: float
+    target_decision_status: TargetDecisionStatus = field(
+        default=TargetDecisionStatus.NOT_RECOMMENDED,
+        init=False,
+    )
 
 
 def _text(value) -> str | None:
@@ -286,6 +301,9 @@ class TonightResponse:
     tasks: list[TonightTaskResponse] = field(default_factory=list)
     advices: list[TonightAdviceResponse] = field(default_factory=list)
     weather_decision: TonightWeatherDecisionResponse | None = None
+    rejected_targets: list[TonightRejectedTargetResponse] = field(
+        default_factory=list
+    )
 
     def __post_init__(self):
         refused = (
@@ -304,6 +322,7 @@ class TonightResponse:
         weather_decision: WeatherTrustDecision | None = None,
         viable_shortlist_catalog_keys: Collection[str] | None = None,
         selected_alternatives: Sequence | None = None,
+        rejected_targets: Sequence[TonightRejectedTargetResponse] = (),
     ) -> TonightResponse:
         refused = (
             weather_decision is not None
@@ -593,6 +612,7 @@ class TonightResponse:
             target_decision_status=target_decision_status,
             shortlist_entries=shortlist_entries,
             alternatives=alternatives,
+            rejected_targets=list(rejected_targets),
             recommendation_confidence=(
                 float(recommendation.confidence)
                 if recommendation is not None
