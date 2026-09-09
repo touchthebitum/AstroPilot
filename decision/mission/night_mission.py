@@ -33,3 +33,5 @@ class NightMission:
     tasks: list[NightTask] = field(default_factory=list)
     night_slices: list = field(default_factory=list)
     selected_filter: SelectedFilter | None = None
+    decision_id: str | None = None
+    selection_id: str | None = None
