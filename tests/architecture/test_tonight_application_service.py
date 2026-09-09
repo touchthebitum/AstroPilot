@@ -1,12 +1,17 @@
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
 import decision.services.tonight_application_service as tonight_service_module
+import decision.mission.mission_assembler as mission_assembler_module
+import decision.services.session_availability_windowing as availability_windowing
 
 from astropilot.user_profile import UserProfileError
 from decision.forecast.forecast_run import ForecastRun
 from decision.mission.night_mission import NightMission
+from decision.mission.mission_assembler import ProductiveWindowAssessment
+from decision.mission.mission_input import MissionInput
 from decision.night_productivity.night_productivity_result import NightProductivityResult
 from decision.night_productivity.night_window import NightWindow
 from decision.models.candidate import Candidate
@@ -224,6 +229,219 @@ def test_evaluate_carries_typed_availability_to_composition_boundary(monkeypatch
 
     assert resolved_availability == [availability]
     assert resolved_availability[0] is availability
+
+
+def test_evaluate_attaches_availability_to_mission_input(monkeypatch):
+    availability = SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)
+    mission_input = MissionInput(
+        window_start=datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+        window_end=datetime(2026, 9, 2, 2, tzinfo=timezone.utc),
+        astronomical_hours=4.0,
+        weather=None,
+        moon_penalty=None,
+        recommended_hours=3.0,
+        expected_gain=1.0,
+    )
+    candidate = make_candidate()
+    service, _, mission_service = make_service(
+        forecast_nights=lambda *args, **kwargs: forecast_run(
+            [
+                {
+                    "date": date(2026, 9, 1),
+                    "duration": 4.0,
+                    "top_objects": [{"catalog_key": "M31"}],
+                }
+            ]
+        ),
+        build_candidates=lambda *args, **kwargs: [candidate],
+        recommendation=make_recommendation(candidate),
+        mission=object(),
+        build_mission_input=lambda evaluation, *, profile: mission_input,
+    )
+    monkeypatch.setattr(
+        tonight_service_module.DecisionConsistencyGate,
+        "validate_mission",
+        lambda mission: None,
+    )
+    monkeypatch.setattr(
+        tonight_service_module.DecisionConsistencyGate,
+        "has_productive_window",
+        lambda mission: True,
+    )
+
+    result = service.evaluate(
+        profile=make_profile(),
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=4,
+        availability=availability,
+    )
+
+    transported = mission_service.calls[0]["build_mission_input"](object())
+    assert transported.availability is availability
+    assert result.recommendation.opportunity.candidate is candidate
+    assert mission_service.calls[0]["recommended_key"] == "M31"
+
+
+def _productive_assessment():
+    return ProductiveWindowAssessment(
+        window_start=datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+        window_end=datetime(2026, 9, 2, 2, tzinfo=timezone.utc),
+        recommended_hours=3.0,
+        expected_gain=1.2,
+        productivity=SimpleNamespace(
+            timeline=(
+                SimpleNamespace(
+                    start_hour=0.0,
+                    end_hour=1.0,
+                    productivity_score=0.1,
+                ),
+                SimpleNamespace(
+                    start_hour=1.0,
+                    end_hour=3.0,
+                    productivity_score=0.9,
+                ),
+                SimpleNamespace(
+                    start_hour=3.0,
+                    end_hour=4.0,
+                    productivity_score=0.2,
+                ),
+            )
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("availability", "expected_start", "expected_end", "expected_hours"),
+    [
+        (
+            SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
+            datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+            datetime(2026, 9, 2, 2, tzinfo=timezone.utc),
+            3.0,
+        ),
+        (
+            SessionAvailability(
+                SessionAvailabilityMode.DURATION,
+                duration=timedelta(hours=2),
+            ),
+            datetime(2026, 9, 1, 23, tzinfo=timezone.utc),
+            datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
+            2.0,
+        ),
+        (
+            SessionAvailability(
+                SessionAvailabilityMode.START_AND_DURATION,
+                start=datetime(2026, 9, 2, 0, tzinfo=timezone.utc),
+                duration=timedelta(hours=3),
+            ),
+            datetime(2026, 9, 2, 0, tzinfo=timezone.utc),
+            datetime(2026, 9, 2, 2, tzinfo=timezone.utc),
+            2.0,
+        ),
+        (
+            SessionAvailability(
+                SessionAvailabilityMode.UNTIL,
+                end=datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
+            ),
+            datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+            datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
+            3.0,
+        ),
+        (
+            SessionAvailability(
+                SessionAvailabilityMode.FIXED_WINDOW,
+                start=datetime(2026, 9, 1, 23, 30, tzinfo=timezone.utc),
+                end=datetime(2026, 9, 2, 0, 30, tzinfo=timezone.utc),
+            ),
+            datetime(2026, 9, 1, 23, 30, tzinfo=timezone.utc),
+            datetime(2026, 9, 2, 0, 30, tzinfo=timezone.utc),
+            1.0,
+        ),
+    ],
+)
+def test_mission_timing_uses_existing_availability_windowing(
+    availability,
+    expected_start,
+    expected_end,
+    expected_hours,
+):
+    timing = mission_assembler_module._mission_timing_for_availability(
+        _productive_assessment(),
+        availability,
+    )
+
+    assert timing[:3] == (expected_start, expected_end, expected_hours)
+
+
+def test_mission_timing_omitted_availability_preserves_assessment(monkeypatch):
+    assessment = _productive_assessment()
+    monkeypatch.setattr(
+        availability_windowing,
+        "select_duration_availability_window",
+        lambda *args, **kwargs: pytest.fail("windowing must not be invoked"),
+    )
+
+    timing = mission_assembler_module._mission_timing_for_availability(
+        assessment,
+        None,
+    )
+
+    assert timing == (
+        assessment.window_start,
+        assessment.window_end,
+        assessment.recommended_hours,
+        assessment.expected_gain,
+    )
+
+
+def test_mission_timing_empty_intersection_returns_none():
+    availability = SessionAvailability(
+        SessionAvailabilityMode.FIXED_WINDOW,
+        start=datetime(2026, 9, 2, 3, tzinfo=timezone.utc),
+        end=datetime(2026, 9, 2, 4, tzinfo=timezone.utc),
+    )
+
+    assert (
+        mission_assembler_module._mission_timing_for_availability(
+            _productive_assessment(),
+            availability,
+        )
+        is None
+    )
+
+
+def test_empty_availability_mission_reuses_no_productive_window_status():
+    candidate = make_candidate()
+    service, _, _ = make_service(
+        forecast_nights=lambda *args, **kwargs: forecast_run(
+            [
+                {
+                    "date": date(2026, 9, 1),
+                    "duration": 4.0,
+                    "top_objects": [{"catalog_key": "M31"}],
+                }
+            ]
+        ),
+        build_candidates=lambda *args, **kwargs: [candidate],
+        recommendation=make_recommendation(candidate),
+        mission=None,
+    )
+
+    result = service.evaluate(
+        profile=make_profile(),
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=4,
+        availability=SessionAvailability(
+            SessionAvailabilityMode.FIXED_WINDOW,
+            start=datetime(2026, 9, 2, 3, tzinfo=timezone.utc),
+            end=datetime(2026, 9, 2, 4, tzinfo=timezone.utc),
+        ),
+    )
+
+    assert result.mission is None
+    assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW
 
 
 def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():

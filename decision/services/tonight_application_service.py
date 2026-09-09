@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import Enum
 
@@ -239,14 +239,24 @@ class TonightApplicationService:
             "catalog_key",
             candidate.get("name"),
         )
+
+        def build_operational_mission_input(evaluation):
+            mission_input = self.build_mission_input(
+                evaluation,
+                profile=effective_profile,
+            )
+            if inputs.availability is None:
+                return mission_input
+            return replace(
+                mission_input,
+                availability=inputs.availability,
+            )
+
         mission = self.tonight_mission_service.create(
             winner=night,
             objects=top_objects,
             recommended_key=recommended_key,
-            build_mission_input=lambda evaluation: self.build_mission_input(
-                evaluation,
-                profile=effective_profile,
-            ),
+            build_mission_input=build_operational_mission_input,
         )
 
         if mission is None:
@@ -254,7 +264,11 @@ class TonightApplicationService:
                 night,
                 recommendation,
                 None,
-                status=TonightStatus.NO_MISSION,
+                status=(
+                    TonightStatus.NO_PRODUCTIVE_WINDOW
+                    if inputs.availability is not None
+                    else TonightStatus.NO_MISSION
+                ),
                 forecast_evidence=forecast_evidence,
                 candidate_rejections=candidate_rejections,
             )
