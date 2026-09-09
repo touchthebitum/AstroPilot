@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
@@ -12,6 +12,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from astropilot.user_profile import UserProfileError
 from decision.models.candidate import CandidateProvenance
 from decision.models.candidate_rejection import CandidateRejectionBasis
+from decision.models.recommendation_reason import (
+    RecommendationReasonCategory,
+    RecommendationReasonScope,
+)
+from decision.services.recommendation_reason_builder import (
+    candidate_assessment_reasons,
+    candidate_reasons,
+    primary_window_reasons,
+)
+from decision.services.tonight_comparisons import build_alternative_comparisons
 from decision.services.tonight_application_service import (
     TonightEquipmentSelectionError,
     TonightStatus,
@@ -282,6 +292,28 @@ class TonightInsufficientEvidenceTargetModel(BaseModel):
     )
 
 
+class RecommendationReasonResponseModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    category: RecommendationReasonCategory | None = None
+    scope: RecommendationReasonScope
+    direction: str | None = None
+    importance: str | None = None
+    basis: str | None = None
+    message: str | None = None
+    evidence_ref: Any | None = None
+
+
+class RecommendationComparisonResponseModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    primary_catalog_key: str
+    alternative_catalog_key: str
+    primary_only_reasons: tuple[RecommendationReasonResponseModel, ...] = ()
+    alternative_only_reasons: tuple[RecommendationReasonResponseModel, ...] = ()
+    shared_reasons: tuple[RecommendationReasonResponseModel, ...] = ()
+
+
 class TonightResponseModel(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -491,6 +523,9 @@ class TonightResponseModel(BaseModel):
     weather_decision: TonightWeatherDecisionModel | None = None
     rejected_targets: list[TonightRejectedTargetModel] = Field(default_factory=list)
     insufficient_evidence_targets: list[TonightInsufficientEvidenceTargetModel] = Field(
+        default_factory=list
+    )
+    alternative_comparisons: list[RecommendationComparisonResponseModel] = Field(
         default_factory=list
     )
 
@@ -949,6 +984,36 @@ def create_app(
                 if insufficiency is not None:
                     target_insufficiencies.append(insufficiency)
 
+        alternative_comparisons = ()
+        if (
+            opportunity is not None
+            and selected_alternatives
+            and not (
+                weather_decision is not None
+                and weather_decision.admissibility is WeatherDecisionAdmissibility.REFUSED
+            )
+        ):
+            primary_reasons = opportunity.structured_reasons
+            if weather_decision is not None:
+                primary_reasons += primary_window_reasons(
+                    candidate=opportunity.candidate,
+                    weather_decision=weather_decision,
+                )
+            alternative_comparisons = build_alternative_comparisons(
+                primary_catalog_key=opportunity.candidate.catalog_key,
+                primary_reasons=primary_reasons,
+                alternatives=tuple(
+                    (
+                        candidate.catalog_key,
+                        candidate_reasons(candidate) + candidate_assessment_reasons(
+                            candidate=candidate,
+                            assessment=candidate_assessments.get(candidate.catalog_key),
+                        ),
+                    )
+                    for candidate in selected_alternatives
+                ),
+            )
+
         payload = TonightResponse.from_result(
             result,
             weather_decision=weather_decision,
@@ -958,6 +1023,7 @@ def create_app(
             insufficient_evidence_targets=map_target_evidence_insufficiencies(
                 tuple(target_insufficiencies)
             ),
+            alternative_comparisons=alternative_comparisons,
         ).to_dict()
         if isinstance(weather, WeatherSnapshot):
             payload["weather_trust"] = weather.trust_transport(weather_freshness)

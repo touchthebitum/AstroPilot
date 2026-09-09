@@ -9,12 +9,44 @@ from astropilot.catalog import CATALOG
 from decision.advisor.night_advisor import NightAdvisor
 from decision.models.candidate import CandidateProvenance
 from decision.models.candidate_rejection import CandidateRejectionBasis
+from decision.models.recommendation_reason import (
+    RecommendationReasonCategory,
+    RecommendationReasonScope,
+)
 from decision.services.tonight_application_service import TonightResult
 from decision.weather.weather_trust_decision import (
     WeatherDecisionAdmissibility,
     WeatherEvidenceQuality,
     WeatherTrustDecision,
 )
+
+
+@dataclass(frozen=True, kw_only=True)
+class RecommendationReasonResponse:
+    category: RecommendationReasonCategory | None = None
+    scope: RecommendationReasonScope
+    direction: str | None = None
+    importance: str | None = None
+    basis: str | None = None
+    message: str | None = None
+    evidence_ref: object | None = None
+
+
+@dataclass(frozen=True)
+class RecommendationComparisonResponse:
+    primary_catalog_key: str
+    alternative_catalog_key: str
+    primary_only_reasons: tuple[RecommendationReasonResponse, ...] = ()
+    alternative_only_reasons: tuple[RecommendationReasonResponse, ...] = ()
+    shared_reasons: tuple[RecommendationReasonResponse, ...] = ()
+
+    def __post_init__(self):
+        for name in (
+            "primary_only_reasons",
+            "alternative_only_reasons",
+            "shared_reasons",
+        ):
+            object.__setattr__(self, name, tuple(getattr(self, name)))
 
 
 class TargetDecisionStatus(str, Enum):
@@ -319,6 +351,9 @@ class TonightResponse:
     insufficient_evidence_targets: list[TonightInsufficientEvidenceTargetResponse] = (
         field(default_factory=list)
     )
+    alternative_comparisons: list[RecommendationComparisonResponse] = field(
+        default_factory=list
+    )
 
     def __post_init__(self):
         refused = (
@@ -341,6 +376,7 @@ class TonightResponse:
         insufficient_evidence_targets: Sequence[
             TonightInsufficientEvidenceTargetResponse
         ] = (),
+        alternative_comparisons: Sequence[RecommendationComparisonResponse] = (),
     ) -> TonightResponse:
         refused = (
             weather_decision is not None
@@ -632,6 +668,7 @@ class TonightResponse:
             alternatives=alternatives,
             rejected_targets=list(rejected_targets),
             insufficient_evidence_targets=list(insufficient_evidence_targets),
+            alternative_comparisons=list(alternative_comparisons),
             recommendation_confidence=(
                 float(recommendation.confidence)
                 if recommendation is not None
