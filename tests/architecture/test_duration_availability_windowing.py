@@ -328,22 +328,39 @@ def test_fixed_window_returns_none_without_positive_productive_overlap(
     ) is None
 
 
-@pytest.mark.parametrize(
-    "availability",
-    [
-        SessionAvailability(mode=SessionAvailabilityMode.ALL_NIGHT),
-    ],
-)
-def test_other_availability_modes_remain_inactive(availability):
+def test_all_night_preserves_existing_productive_window_without_timeline():
     from decision.services.session_availability_windowing import (
         select_duration_availability_window,
     )
 
-    with pytest.raises(ValueError, match="session_availability_mode_inactive"):
-        select_duration_availability_window(
-            assessment(hours=2, scores=[0.5, 0.6]),
-            availability,
-        )
+    source = assessment(hours=4, scores=[])
+
+    window = select_duration_availability_window(
+        source,
+        SessionAvailability(mode=SessionAvailabilityMode.ALL_NIGHT),
+    )
+
+    assert window.window_start is source.window_start
+    assert window.window_end is source.window_end
+
+
+def test_all_night_returns_none_without_an_existing_productive_window():
+    from decision.services.session_availability_windowing import (
+        select_duration_availability_window,
+    )
+
+    source = ProductiveWindowAssessment(
+        window_start=None,
+        window_end=None,
+        recommended_hours=0.0,
+        expected_gain=0.0,
+        productivity=SimpleNamespace(timeline=[]),
+    )
+
+    assert select_duration_availability_window(
+        source,
+        SessionAvailability(mode=SessionAvailabilityMode.ALL_NIGHT),
+    ) is None
 
 
 def test_duration_fails_closed_when_temporal_evidence_is_incomplete():

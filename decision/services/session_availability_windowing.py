@@ -74,6 +74,7 @@ def select_duration_availability_window(
     if not isinstance(availability, SessionAvailability):
         raise TypeError("Expected SessionAvailability")
     if availability.mode not in {
+        SessionAvailabilityMode.ALL_NIGHT,
         SessionAvailabilityMode.DURATION,
         SessionAvailabilityMode.FIXED_WINDOW,
         SessionAvailabilityMode.START_AND_DURATION,
@@ -83,6 +84,11 @@ def select_duration_availability_window(
 
     window_start = assessment.window_start
     window_end = assessment.window_end
+    if (
+        availability.mode is SessionAvailabilityMode.ALL_NIGHT
+        and (window_start is None or window_end is None)
+    ):
+        return None
     if (
         not isinstance(window_start, datetime)
         or not isinstance(window_end, datetime)
@@ -94,6 +100,12 @@ def select_duration_availability_window(
         <= window_start.astimezone(timezone.utc)
     ):
         raise ValueError("productive_window_bounds_required")
+
+    if availability.mode is SessionAvailabilityMode.ALL_NIGHT:
+        return SessionAvailabilityWindow(
+            window_start=window_start,
+            window_end=window_end,
+        )
 
     if availability.mode is SessionAvailabilityMode.FIXED_WINDOW:
         availability_start = availability.start
