@@ -1,4 +1,4 @@
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, fields
 from datetime import date, datetime, timezone
 
 import pytest
@@ -98,6 +98,7 @@ def test_partial_results_produce_stable_transport_status(status):
         "shortlist_entries": [],
         "alternatives": [],
         "rejected_targets": [],
+        "insufficient_evidence_targets": [],
         "recommendation_confidence": None,
         "mission_confidence": None,
         "scores": {},
@@ -669,6 +670,7 @@ def test_refused_weather_decision_redacts_active_transport_only():
         "shortlist_entries": [],
         "alternatives": [],
         "rejected_targets": [],
+        "insufficient_evidence_targets": [],
         "recommendation_confidence": None,
         "mission_confidence": None,
         "scores": {},
@@ -948,3 +950,129 @@ def test_rejected_target_list_defaults_are_independent():
     second = TonightResponse(status="no_candidate")
     assert first.rejected_targets == second.rejected_targets == []
     assert first.rejected_targets is not second.rejected_targets
+
+
+@pytest.mark.parametrize("quality", list(WeatherEvidenceQuality))
+@pytest.mark.parametrize("admissibility", list(WeatherDecisionAdmissibility))
+def test_target_insufficiency_requires_explicit_insufficient_refusal(quality, admissibility):
+    from decision.services.candidate_assessment import CandidateAssessment
+    from decision.services.tonight_target_evidence import (
+        qualify_candidate_evidence_insufficiency,
+        qualify_primary_evidence_insufficiency,
+    )
+
+    candidate = make_candidate(decision_score=None, final_score=None)
+    reasons = ("selected_window_uncovered", "original_reason", "original_reason")
+    decision = WeatherTrustDecision(quality, admissibility, reasons)
+    assessment = CandidateAssessment(productive_window=None, weather_decision=decision)
+    records = (
+        qualify_candidate_evidence_insufficiency(candidate=candidate, assessment=assessment),
+        qualify_primary_evidence_insufficiency(candidate=candidate, weather_decision=decision),
+    )
+    qualifies = (
+        quality is WeatherEvidenceQuality.INSUFFICIENT
+        and admissibility is WeatherDecisionAdmissibility.REFUSED
+    )
+    for record in records:
+        if not qualifies:
+            assert record is None
+            continue
+        assert [f.name for f in fields(record)] == [
+            "target", "catalog_key", "provenance", "weather_decision",
+        ]
+        assert record.target == candidate.name
+        assert record.catalog_key == candidate.catalog_key
+        assert record.provenance is candidate.provenance
+        assert record.weather_decision is decision
+        assert record.weather_decision.reasons is reasons
+        with pytest.raises(FrozenInstanceError):
+            record.target = "changed"
+
+
+def test_target_insufficiency_requires_typed_identity_and_assessment():
+    from decision.services.candidate_assessment import CandidateAssessment
+    from decision.services.tonight_target_evidence import (
+        qualify_candidate_evidence_insufficiency,
+        qualify_primary_evidence_insufficiency,
+    )
+
+    candidate = make_candidate()
+    decision = WeatherTrustDecision(
+        WeatherEvidenceQuality.INSUFFICIENT,
+        WeatherDecisionAdmissibility.REFUSED,
+        ("selected_window_uncovered",),
+    )
+    assessment = CandidateAssessment(productive_window=None, weather_decision=decision)
+    assert qualify_candidate_evidence_insufficiency(candidate=candidate, assessment=None) is None
+    assert qualify_primary_evidence_insufficiency(candidate=candidate, weather_decision=None) is None
+    for invalid_candidate in (None, make_rejection(), {"catalog_key": "M42"}):
+        with pytest.raises(TypeError):
+            qualify_candidate_evidence_insufficiency(
+                candidate=invalid_candidate, assessment=assessment,
+            )
+    for invalid_assessment in (make_rejection(), decision, {"weather_decision": decision}):
+        with pytest.raises(TypeError):
+            qualify_candidate_evidence_insufficiency(
+                candidate=candidate, assessment=invalid_assessment,
+            )
+
+
+def test_target_insufficiency_record_rejects_nonqualifying_weather():
+    from decision.models.target_evidence_insufficiency import TargetEvidenceInsufficiency
+
+    for quality, admissibility in (
+        (WeatherEvidenceQuality.INSUFFICIENT, WeatherDecisionAdmissibility.CAUTION),
+        (WeatherEvidenceQuality.INVALID, WeatherDecisionAdmissibility.REFUSED),
+        (WeatherEvidenceQuality.SUFFICIENT, WeatherDecisionAdmissibility.REFUSED),
+    ):
+        with pytest.raises(ValueError):
+            TargetEvidenceInsufficiency(
+                target="Orion", catalog_key="M42", provenance=CandidateProvenance.DISCOVERY,
+                weather_decision=WeatherTrustDecision(quality, admissibility, ()),
+            )
+
+
+@pytest.mark.parametrize("refused", [False, True])
+def test_target_insufficiency_transport_only_serializes_supplied_entries(refused):
+    from decision.services.tonight_target_evidence import (
+        map_target_evidence_insufficiencies,
+        qualify_primary_evidence_insufficiency,
+    )
+
+    decision = WeatherTrustDecision(
+        WeatherEvidenceQuality.INSUFFICIENT,
+        WeatherDecisionAdmissibility.REFUSED,
+        ("selected_window_uncovered", "second_reason", "second_reason"),
+    )
+    record = qualify_primary_evidence_insufficiency(
+        candidate=make_candidate(), weather_decision=decision,
+    )
+    entries = map_target_evidence_insufficiencies((record, record))
+    assert entries[0].weather_decision is decision
+    assert entries[0].target_decision_status is TargetDecisionStatus.INSUFFICIENT_EVIDENCE
+    with pytest.raises(FrozenInstanceError):
+        entries[0].target_decision_status = TargetDecisionStatus.VIABLE
+    with pytest.raises(TypeError):
+        type(entries[0])(
+            target=record.target, catalog_key=record.catalog_key,
+            provenance=record.provenance, weather_decision=decision,
+            target_decision_status=TargetDecisionStatus.VIABLE,
+        )
+    result = TonightResult(None, None, None, status=TonightStatus.NO_RECOMMENDATION)
+    weather = decision if refused else None
+    baseline = TonightResponse.from_result(result, weather_decision=weather).to_dict()
+    assert baseline.pop("insufficient_evidence_targets") == []
+    response = TonightResponse.from_result(
+        result, weather_decision=weather, insufficient_evidence_targets=entries,
+    ).to_dict()
+    assert response.pop("insufficient_evidence_targets") == [{
+        "target": "Andromeda", "catalog_key": "M31", "provenance": "project",
+        "weather_decision": {
+            "evidence_quality": "insufficient", "admissibility": "refused",
+            "reasons": list(decision.reasons),
+        },
+        "target_decision_status": "insufficient_evidence",
+    }] * 2
+    assert response == baseline
+    with pytest.raises(TypeError):
+        map_target_evidence_insufficiencies((make_rejection(),))

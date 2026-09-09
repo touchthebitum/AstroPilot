@@ -37,6 +37,18 @@ class TonightRejectedTargetResponse:
     )
 
 
+@dataclass(frozen=True)
+class TonightInsufficientEvidenceTargetResponse:
+    target: str
+    catalog_key: str
+    provenance: CandidateProvenance
+    weather_decision: WeatherTrustDecision
+    target_decision_status: TargetDecisionStatus = field(
+        default=TargetDecisionStatus.INSUFFICIENT_EVIDENCE,
+        init=False,
+    )
+
+
 def _text(value) -> str | None:
     if value is None:
         return None
@@ -304,6 +316,9 @@ class TonightResponse:
     rejected_targets: list[TonightRejectedTargetResponse] = field(
         default_factory=list
     )
+    insufficient_evidence_targets: list[TonightInsufficientEvidenceTargetResponse] = (
+        field(default_factory=list)
+    )
 
     def __post_init__(self):
         refused = (
@@ -323,6 +338,9 @@ class TonightResponse:
         viable_shortlist_catalog_keys: Collection[str] | None = None,
         selected_alternatives: Sequence | None = None,
         rejected_targets: Sequence[TonightRejectedTargetResponse] = (),
+        insufficient_evidence_targets: Sequence[
+            TonightInsufficientEvidenceTargetResponse
+        ] = (),
     ) -> TonightResponse:
         refused = (
             weather_decision is not None
@@ -613,6 +631,7 @@ class TonightResponse:
             shortlist_entries=shortlist_entries,
             alternatives=alternatives,
             rejected_targets=list(rejected_targets),
+            insufficient_evidence_targets=list(insufficient_evidence_targets),
             recommendation_confidence=(
                 float(recommendation.confidence)
                 if recommendation is not None
