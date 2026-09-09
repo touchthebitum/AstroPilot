@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import astropilot.app as app_module
+import decision.services.session_availability_windowing as availability_windowing
 from astropilot.app import create_app
 from astropilot.user_profile import UserProfileError
 from decision.mission.night_mission import NightMission
@@ -12,6 +13,10 @@ from decision.models.candidate import Candidate, CandidateProvenance
 from decision.models.candidate_rejection import (
     CandidateRejection,
     CandidateRejectionBasis,
+)
+from decision.models.session_availability import (
+    SessionAvailability,
+    SessionAvailabilityMode,
 )
 from decision.opportunity.action import Action
 from decision.opportunity.opportunity import Opportunity
@@ -176,6 +181,7 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
             "goal": "galaxies",
             "target": "deep_sky",
             "bortle": 4,
+            "availability": None,
         }
     ]
     payload = response.json()
@@ -185,6 +191,154 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
     assert payload["catalog_key"] == "M31"
     assert payload["target_common_name"] == "Galaxie d’Andromède"
     assert payload["recommended_hours"] == 3.5
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (
+            {"mode": "all_night"},
+            SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
+        ),
+        (
+            {"mode": "duration", "duration": "PT2H"},
+            SessionAvailability(
+                SessionAvailabilityMode.DURATION,
+                duration=timedelta(hours=2),
+            ),
+        ),
+        (
+            {
+                "mode": "start_and_duration",
+                "start": "2026-09-01T23:00:00+02:00",
+                "duration": "PT90M",
+            },
+            SessionAvailability(
+                SessionAvailabilityMode.START_AND_DURATION,
+                start=datetime.fromisoformat("2026-09-01T23:00:00+02:00"),
+                duration=timedelta(minutes=90),
+            ),
+        ),
+        (
+            {"mode": "until", "end": "2026-09-02T02:00:00+02:00"},
+            SessionAvailability(
+                SessionAvailabilityMode.UNTIL,
+                end=datetime.fromisoformat("2026-09-02T02:00:00+02:00"),
+            ),
+        ),
+        (
+            {
+                "mode": "fixed_window",
+                "start": "2026-09-01T23:00:00+02:00",
+                "end": "2026-09-02T02:00:00+02:00",
+            },
+            SessionAvailability(
+                SessionAvailabilityMode.FIXED_WINDOW,
+                start=datetime.fromisoformat("2026-09-01T23:00:00+02:00"),
+                end=datetime.fromisoformat("2026-09-02T02:00:00+02:00"),
+            ),
+        ),
+    ],
+)
+def test_tonight_maps_explicit_availability_to_domain(payload, expected):
+    evaluation_calls = []
+
+    class Service:
+        def evaluate(self, **kwargs):
+            evaluation_calls.append(kwargs)
+            return make_result()
+
+    app = create_app(
+        service_factory=lambda: Service(),
+        weather_provider=lambda lat, lon: object(),
+        profile_provider=valid_profile,
+    )
+
+    response = TestClient(app).post(
+        "/v1/tonight",
+        json={"availability": payload},
+    )
+
+    assert response.status_code == 200
+    assert evaluation_calls[0]["availability"] == expected
+    assert isinstance(evaluation_calls[0]["availability"], SessionAvailability)
+
+
+def test_tonight_omitted_availability_remains_none_through_service_call():
+    evaluation_calls = []
+
+    class Service:
+        def evaluate(self, **kwargs):
+            evaluation_calls.append(kwargs)
+            return make_result()
+
+    app = create_app(
+        service_factory=lambda: Service(),
+        weather_provider=lambda lat, lon: object(),
+        profile_provider=valid_profile,
+    )
+
+    response = TestClient(app).post("/v1/tonight", json={})
+
+    assert response.status_code == 200
+    assert evaluation_calls[0]["availability"] is None
+
+
+def test_tonight_availability_transport_does_not_invoke_windowing(monkeypatch):
+    monkeypatch.setattr(
+        availability_windowing,
+        "select_duration_availability_window",
+        lambda *args, **kwargs: pytest.fail("windowing must not be invoked"),
+    )
+
+    class Service:
+        def evaluate(self, **kwargs):
+            return make_result()
+
+    app = create_app(
+        service_factory=lambda: Service(),
+        weather_provider=lambda lat, lon: object(),
+        profile_provider=valid_profile,
+    )
+
+    response = TestClient(app).post(
+        "/v1/tonight",
+        json={"availability": {"mode": "all_night"}},
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "availability",
+    [
+        {"mode": "duration"},
+        {"mode": "all_night", "duration": "PT1H"},
+        {
+            "mode": "start_and_duration",
+            "start": "2026-09-01T23:00:00+02:00",
+        },
+        {"mode": "until", "end": "2026-09-02T02:00:00"},
+        {
+            "mode": "fixed_window",
+            "start": "2026-09-02T02:00:00+02:00",
+            "end": "2026-09-01T23:00:00+02:00",
+        },
+    ],
+)
+def test_tonight_rejects_invalid_availability_combinations(availability):
+    app = create_app(
+        service_factory=lambda: pytest.fail("service must not be called"),
+        weather_provider=lambda lat, lon: pytest.fail("weather must not be called"),
+        profile_provider=valid_profile,
+    )
+
+    response = TestClient(app).post(
+        "/v1/tonight",
+        json={"availability": availability},
+    )
+
+    assert response.status_code == 422
 
 
 def test_tonight_uses_profile_bortle_without_request_override():

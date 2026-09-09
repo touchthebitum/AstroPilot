@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astropilot.user_profile import UserProfileError
 from decision.models.candidate import CandidateProvenance
 from decision.models.candidate_rejection import CandidateRejectionBasis
+from decision.models.session_availability import (
+    SessionAvailability,
+    SessionAvailabilityMode,
+)
 from decision.models.recommendation_reason import (
     RecommendationReasonCategory,
     RecommendationReasonScope,
@@ -80,6 +84,31 @@ class LocationRequest(BaseModel):
     longitude: float = Field(ge=-180.0, le=180.0)
 
 
+class SessionAvailabilityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    mode: SessionAvailabilityMode
+    start: datetime | None = None
+    end: datetime | None = None
+    duration: timedelta | None = None
+
+    def to_domain(self) -> SessionAvailability:
+        return SessionAvailability(
+            mode=self.mode,
+            start=self.start,
+            end=self.end,
+            duration=self.duration,
+        )
+
+    @model_validator(mode="after")
+    def validate_domain_contract(self):
+        try:
+            self.to_domain()
+        except (TypeError, ValueError) as exc:
+            raise ValueError(str(exc)) from exc
+        return self
+
+
 class TonightRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -101,6 +130,7 @@ class TonightRequest(BaseModel):
     )
 
     location: LocationRequest | None = None
+    availability: SessionAvailabilityRequest | None = None
     equipment: str | None = None
     goal: Literal[
         "balanced",
@@ -813,6 +843,11 @@ def create_app(
                 ),
                 bortle=request.bortle,
                 equipment=request.equipment,
+                availability=(
+                    request.availability.to_domain()
+                    if request.availability is not None
+                    else None
+                ),
             )
         except UserProfileError:
             return JSONResponse(
@@ -888,6 +923,7 @@ def create_app(
                 goal=request.goal,
                 target=request.target,
                 bortle=effective_bortle,
+                availability=inputs.availability,
             )
         except DecisionConsistencyError as exc:
             raise HTTPException(
