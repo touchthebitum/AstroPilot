@@ -137,6 +137,23 @@ def test_api_comparisons_match_only_exposed_alternatives_in_order(monkeypatch, r
         assert [entry["catalog_key"] for entry in payload["shortlist_entries"]] == [
             "M33", "M42", "M45", "M51",
         ]
+        assert payload["alternatives"][0]["reasons"] == []
+        assert payload["alternatives"][1]["reasons"][0] == {
+            "scope": "target",
+            "category": None,
+            "direction": None,
+            "importance": None,
+            "basis": None,
+            "message": "Projet prioritaire",
+            "rendered": None,
+        }
+        assert payload["alternatives"][1]["reasons"][1]["basis"] == (
+            "provider_reliability_unavailable"
+        )
+        assert payload["alternatives"][1]["reasons"][1]["rendered"][
+            "presentation_key"
+        ] == "provider_reliability_unavailable"
+        assert all("reasons" not in entry for entry in payload["shortlist_entries"])
     assert [entry["catalog_key"] for entry in payload["rejected_targets"]] == ["M81"]
     assert "M33" in [entry["catalog_key"] for entry in payload["insufficient_evidence_targets"]]
     assert result.recommendation.opportunity.candidate is primary
@@ -179,6 +196,22 @@ def test_api_comparisons_default_to_empty_and_have_exact_public_schema():
     assert set(primary_reason["properties"]) == {
         "scope", "category", "direction", "importance", "basis", "message", "rendered",
     }
+
+    alternative_field = public["properties"]["alternatives"]
+    alternative = schemas[alternative_field["items"]["$ref"].split("/")[-1]]
+    assert set(alternative["properties"]) == {
+        "target", "catalog_key", "provenance", "decision_score", "final_score",
+        "target_decision_status", "reasons",
+    }
+    alternative_reason = schemas[
+        alternative["properties"]["reasons"]["items"]["$ref"].split("/")[-1]
+    ]
+    assert set(alternative_reason["properties"]) == {
+        "scope", "category", "direction", "importance", "basis", "message", "rendered",
+    }
+    shortlist_field = public["properties"]["shortlist_entries"]
+    shortlist = schemas[shortlist_field["items"]["$ref"].split("/")[-1]]
+    assert "reasons" not in shortlist["properties"]
 
 
 def test_api_exposes_primary_reasons_without_requiring_alternatives(monkeypatch):
@@ -322,7 +355,28 @@ def test_api_preserves_stable_reason_codes_and_legacy_messages_exactly(monkeypat
 
     response = client_for(result).post("/v1/tonight", json={})
     assert response.status_code == 200
-    comparison = response.json()["alternative_comparisons"][0]
+    payload = response.json()
+    comparison = payload["alternative_comparisons"][0]
+    assert payload["alternatives"][0]["reasons"] == [
+        {
+            "scope": "night",
+            "category": "reliability",
+            "direction": "other-existing-direction",
+            "importance": "other-existing-importance",
+            "basis": stable_basis,
+            "message": "Different existing message",
+            "rendered": None,
+        },
+        {
+            "scope": "target",
+            "category": None,
+            "direction": None,
+            "importance": None,
+            "basis": None,
+            "message": stable_basis,
+            "rendered": None,
+        },
+    ]
     assert comparison["shared_reasons"] == [{
         "category": "reliability",
         "scope": "night",

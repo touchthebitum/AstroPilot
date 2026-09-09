@@ -40,6 +40,17 @@ class PrimaryRecommendationReasonResponse:
 
 
 @dataclass(frozen=True, kw_only=True)
+class AlternativeReasonResponse:
+    scope: RecommendationReasonScope
+    category: RecommendationReasonCategory | None = None
+    direction: str | None = None
+    importance: str | None = None
+    basis: str | None = None
+    message: str | None = None
+    rendered: RecommendationReasonRenderingResponse | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
 class RecommendationReasonResponse:
     category: RecommendationReasonCategory | None = None
     scope: RecommendationReasonScope
@@ -274,6 +285,20 @@ class TonightShortlistEntryResponse:
     target_decision_status: TargetDecisionStatus | None = None
 
 
+@dataclass(frozen=True)
+class TonightAlternativeResponse:
+    target: str
+    catalog_key: str
+    provenance: str
+    decision_score: float
+    final_score: float
+    target_decision_status: TargetDecisionStatus | None = None
+    reasons: tuple[AlternativeReasonResponse, ...] = ()
+
+    def __post_init__(self):
+        object.__setattr__(self, "reasons", tuple(self.reasons))
+
+
 _WEATHER_PRESENTATION_FALLBACKS = {
     WeatherDecisionAdmissibility.ADMISSIBLE: (
         "Météo validée pour cette décision",
@@ -342,7 +367,7 @@ class TonightResponse:
     shortlist_entries: list[TonightShortlistEntryResponse] = field(
         default_factory=list
     )
-    alternatives: list[TonightShortlistEntryResponse] = field(
+    alternatives: list[TonightAlternativeResponse] = field(
         default_factory=list
     )
     recommendation_confidence: float | None = None
@@ -394,6 +419,7 @@ class TonightResponse:
         weather_decision: WeatherTrustDecision | None = None,
         viable_shortlist_catalog_keys: Collection[str] | None = None,
         selected_alternatives: Sequence | None = None,
+        alternative_reasons: Sequence[Sequence[AlternativeReasonResponse]] | None = None,
         rejected_targets: Sequence[TonightRejectedTargetResponse] = (),
         insufficient_evidence_targets: Sequence[
             TonightInsufficientEvidenceTargetResponse
@@ -464,17 +490,29 @@ class TonightResponse:
             if recommendation is not None
             else []
         )
+        if (
+            recommendation is not None
+            and alternative_reasons is not None
+            and selected_alternatives is not None
+            and len(alternative_reasons) != len(selected_alternatives)
+        ):
+            raise ValueError("alternative_reason_transport_length_mismatch")
         alternatives = (
             [
-                TonightShortlistEntryResponse(
+                TonightAlternativeResponse(
                     target=entry.name,
                     catalog_key=entry.catalog_key,
                     provenance=entry.provenance.value,
                     decision_score=float(entry.decision_score),
                     final_score=float(entry.final_score),
                     target_decision_status=TargetDecisionStatus.VIABLE,
+                    reasons=(
+                        alternative_reasons[index]
+                        if alternative_reasons is not None
+                        else ()
+                    ),
                 )
-                for entry in selected_alternatives
+                for index, entry in enumerate(selected_alternatives)
             ]
             if recommendation is not None
             and selected_alternatives is not None

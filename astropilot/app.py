@@ -22,6 +22,7 @@ from decision.services.recommendation_reason_builder import (
     primary_window_reasons,
 )
 from decision.services.tonight_comparisons import build_alternative_comparisons
+from decision.services.tonight_alternative_reasons import alternative_reason_responses
 from decision.services.tonight_primary_reasons import primary_reason_responses
 from decision.services.tonight_application_service import (
     TonightEquipmentSelectionError,
@@ -266,6 +267,28 @@ class TonightShortlistEntryModel(BaseModel):
     decision_score: float
     final_score: float
     target_decision_status: TargetDecisionStatus | None = None
+
+
+class AlternativeReasonResponseModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    scope: RecommendationReasonScope
+    category: RecommendationReasonCategory | None = None
+    direction: str | None = None
+    importance: str | None = None
+    basis: str | None = None
+    message: str | None = None
+    rendered: RecommendationReasonRenderingResponseModel | None = None
+
+
+class TonightAlternativeModel(BaseModel):
+    target: str
+    catalog_key: str
+    provenance: Literal["project", "discovery"]
+    decision_score: float
+    final_score: float
+    target_decision_status: TargetDecisionStatus | None = None
+    reasons: tuple[AlternativeReasonResponseModel, ...] = ()
 
 
 class TonightRejectedTargetModel(BaseModel):
@@ -519,7 +542,7 @@ class TonightResponseModel(BaseModel):
     shortlist_entries: list[TonightShortlistEntryModel] = Field(
         default_factory=list
     )
-    alternatives: list[TonightShortlistEntryModel] = Field(
+    alternatives: list[TonightAlternativeModel] = Field(
         default_factory=list
     )
     recommendation_confidence: float | None = None
@@ -1024,6 +1047,21 @@ def create_app(
                 )
             primary_reason_entries = primary_reason_responses(primary_reasons)
 
+        alternative_reason_sets = ()
+        alternative_reason_entries = ()
+        if opportunity is not None and selected_alternatives and not weather_refused:
+            alternative_reason_sets = tuple(
+                candidate_reasons(candidate) + candidate_assessment_reasons(
+                    candidate=candidate,
+                    assessment=candidate_assessments.get(candidate.catalog_key),
+                )
+                for candidate in selected_alternatives
+            )
+            alternative_reason_entries = tuple(
+                alternative_reason_responses(reasons)
+                for reasons in alternative_reason_sets
+            )
+
         alternative_comparisons = ()
         if (
             opportunity is not None
@@ -1036,12 +1074,9 @@ def create_app(
                 alternatives=tuple(
                     (
                         candidate.catalog_key,
-                        candidate_reasons(candidate) + candidate_assessment_reasons(
-                            candidate=candidate,
-                            assessment=candidate_assessments.get(candidate.catalog_key),
-                        ),
+                        alternative_reason_sets[index],
                     )
-                    for candidate in selected_alternatives
+                    for index, candidate in enumerate(selected_alternatives)
                 ),
             )
 
@@ -1050,6 +1085,7 @@ def create_app(
             weather_decision=weather_decision,
             viable_shortlist_catalog_keys=viable_shortlist_catalog_keys,
             selected_alternatives=selected_alternatives,
+            alternative_reasons=alternative_reason_entries,
             rejected_targets=map_rejected_targets(result.candidate_rejections),
             insufficient_evidence_targets=map_target_evidence_insufficiencies(
                 tuple(target_insufficiencies)

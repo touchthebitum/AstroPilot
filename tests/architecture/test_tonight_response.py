@@ -505,10 +505,11 @@ def test_alternatives_serialize_only_preselected_candidates():
             "catalog_key": "M42",
             "provenance": "project",
             "decision_score": first.decision_score,
-            "final_score": first.final_score,
-            "target_decision_status": "viable",
-        }
-    ]
+                "final_score": first.final_score,
+                "target_decision_status": "viable",
+                "reasons": [],
+            }
+        ]
 
 
 def test_alternatives_default_to_empty():
