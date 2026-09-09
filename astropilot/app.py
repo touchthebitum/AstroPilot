@@ -24,6 +24,7 @@ from decision.services.recommendation_reason_builder import (
 from decision.services.tonight_comparisons import build_alternative_comparisons
 from decision.services.tonight_alternative_reasons import alternative_reason_responses
 from decision.services.tonight_primary_reasons import primary_reason_responses
+from decision.services.target_explanation import build_target_explanations
 from decision.services.tonight_application_service import (
     TonightEquipmentSelectionError,
     TonightStatus,
@@ -1061,6 +1062,18 @@ def create_app(
                 alternative_reason_responses(reasons)
                 for reasons in alternative_reason_sets
             )
+
+        _target_explanations = build_target_explanations(
+            primary=(
+                (opportunity.candidate.catalog_key, primary_reason_entries)
+                if opportunity is not None and not weather_refused
+                else None
+            ),
+            alternatives=tuple(
+                (candidate.catalog_key, alternative_reason_entries[index])
+                for index, candidate in enumerate(selected_alternatives)
+            ) if not weather_refused else (),
+        )
 
         alternative_comparisons = ()
         if (
