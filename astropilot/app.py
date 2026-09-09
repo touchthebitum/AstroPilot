@@ -10,11 +10,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
 from astropilot.user_profile import UserProfileError
+from decision.models.candidate import CandidateProvenance
+from decision.models.candidate_rejection import CandidateRejectionBasis
 from decision.services.tonight_application_service import (
     TonightEquipmentSelectionError,
     TonightStatus,
     resolve_tonight_inputs,
 )
+from decision.services.tonight_rejected_targets import map_rejected_targets
 from decision.services.tonight_response import (
     TargetDecisionStatus,
     TonightResponse,
@@ -248,6 +251,19 @@ class TonightShortlistEntryModel(BaseModel):
     target_decision_status: TargetDecisionStatus | None = None
 
 
+class TonightRejectedTargetModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    target: str
+    catalog_key: str
+    provenance: CandidateProvenance
+    basis: CandidateRejectionBasis
+    evaluation_score: float
+    target_decision_status: Literal[TargetDecisionStatus.NOT_RECOMMENDED] = (
+        TargetDecisionStatus.NOT_RECOMMENDED
+    )
+
+
 class TonightResponseModel(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -455,6 +471,7 @@ class TonightResponseModel(BaseModel):
     advices: list[TonightAdviceModel] = Field(default_factory=list)
     weather_trust: TonightWeatherTrustModel | None = None
     weather_decision: TonightWeatherDecisionModel | None = None
+    rejected_targets: list[TonightRejectedTargetModel] = Field(default_factory=list)
 
 
 def _production_service_factory():
@@ -900,6 +917,7 @@ def create_app(
             weather_decision=weather_decision,
             viable_shortlist_catalog_keys=viable_shortlist_catalog_keys,
             selected_alternatives=selected_alternatives,
+            rejected_targets=map_rejected_targets(result.candidate_rejections),
         ).to_dict()
         if isinstance(weather, WeatherSnapshot):
             payload["weather_trust"] = weather.trust_transport(weather_freshness)

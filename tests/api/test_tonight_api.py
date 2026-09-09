@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -7,7 +8,11 @@ import astropilot.app as app_module
 from astropilot.app import create_app
 from astropilot.user_profile import UserProfileError
 from decision.mission.night_mission import NightMission
-from decision.models.candidate import Candidate
+from decision.models.candidate import Candidate, CandidateProvenance
+from decision.models.candidate_rejection import (
+    CandidateRejection,
+    CandidateRejectionBasis,
+)
 from decision.opportunity.action import Action
 from decision.opportunity.opportunity import Opportunity
 from decision.recommendation.recommendation import Recommendation
@@ -466,18 +471,30 @@ def test_fresh_weather_transport_exposes_server_calculated_age(monkeypatch):
     assert service_calls[0]["reference_time_utc"] is reference
 
 
-def test_uncovered_mission_window_returns_refused_without_active_mission():
+@pytest.mark.parametrize("explicit_rejection", [False, True])
+def test_uncovered_mission_window_returns_refused_without_active_mission(explicit_rejection):
     reference = datetime(2026, 8, 29, 20, 0, tzinfo=timezone.utc)
     weather = make_weather_snapshot(
         reference - timedelta(minutes=5),
         valid_until=datetime(2026, 9, 1, 23, tzinfo=timezone.utc),
     )
     evaluation_calls = []
+    rejection = CandidateRejection(
+        target="Orion",
+        catalog_key="M42",
+        provenance=CandidateProvenance.DISCOVERY,
+        basis=CandidateRejectionBasis.NON_POSITIVE_EVALUATION_SCORE,
+        evaluation_score=0.0,
+    )
+    result = replace(
+        make_result(),
+        candidate_rejections=(rejection,) if explicit_rejection else (),
+    )
 
     class Service:
         def evaluate(self, **kwargs):
             evaluation_calls.append(kwargs)
-            return make_result()
+            return result
 
     client = TestClient(
         create_app(
@@ -493,6 +510,15 @@ def test_uncovered_mission_window_returns_refused_without_active_mission():
     assert len(evaluation_calls) == 1
     assert response.status_code == 200
     payload = response.json()
+    assert payload["rejected_targets"] == ([{
+        "target": "Orion",
+        "catalog_key": "M42",
+        "provenance": "discovery",
+        "basis": "non_positive_evaluation_score",
+        "evaluation_score": 0.0,
+        "target_decision_status": "not_recommended",
+    }] if explicit_rejection else [])
+    assert payload["target_decision_status"] == "insufficient_evidence"
     assert payload["status"] == "weather_refused"
     assert payload["weather_decision"] == {
         "evidence_quality": "insufficient",
@@ -862,3 +888,60 @@ def test_openapi_documents_tonight_operation_and_error_examples():
     assert error_examples["location_timezone_unresolved"]["value"]["detail"][
         "code"
     ] == "location_timezone_unresolved"
+
+
+@pytest.mark.parametrize("count", [0, 1, 4])
+@pytest.mark.parametrize("has_recommendation", [False, True])
+def test_api_exposes_only_explicit_rejections_without_changing_existing_payload(count, has_recommendation):
+    source = tuple(
+        CandidateRejection(
+            target="Orion",
+            catalog_key=key,
+            provenance=CandidateProvenance.DISCOVERY,
+            basis=CandidateRejectionBasis.NON_POSITIVE_EVALUATION_SCORE,
+            evaluation_score=score,
+        )
+        for key, score in [("Z", -2.5), ("A", 0.0), ("Z", -1.0), ("Z", -2.5)][:count]
+    )
+    original = make_result() if has_recommendation else TonightResult(
+        None, None, None, status=TonightStatus.NO_CANDIDATE,
+    )
+    baseline = make_client(result=original).post("/v1/tonight", json={})
+    result = replace(original, candidate_rejections=source)
+    response = make_client(result=result).post("/v1/tonight", json={})
+
+    assert baseline.status_code == response.status_code == 200
+    baseline_payload = baseline.json()
+    assert baseline_payload.pop("rejected_targets") == []
+    payload = response.json()
+    assert payload.pop("rejected_targets") == [
+        {
+            "target": rejection.target,
+            "catalog_key": rejection.catalog_key,
+            "provenance": "discovery",
+            "basis": "non_positive_evaluation_score",
+            "evaluation_score": rejection.evaluation_score,
+            "target_decision_status": "not_recommended",
+        }
+        for rejection in source
+    ]
+    assert payload == baseline_payload
+    assert result.recommendation is original.recommendation
+    assert result.mission is original.mission
+
+
+def test_openapi_exposes_dedicated_rejected_target_contract():
+    schemas = make_client(result=make_result()).get("/openapi.json").json()["components"]["schemas"]
+    response = schemas["TonightResponseModel"]
+    field = response["properties"]["rejected_targets"]
+    assert field["type"] == "array"
+    assert "rejected_targets" not in response.get("required", [])
+    entry = schemas[field["items"]["$ref"].split("/")[-1]]
+    assert set(entry["properties"]) == {
+        "target", "catalog_key", "provenance", "basis",
+        "evaluation_score", "target_decision_status",
+    }
+    assert entry["properties"]["target_decision_status"]["const"] == "not_recommended"
+    assert entry["properties"]["evaluation_score"]["type"] == "number"
+    assert entry["properties"]["provenance"]["$ref"].endswith("CandidateProvenance")
+    assert entry["properties"]["basis"]["$ref"].endswith("CandidateRejectionBasis")
