@@ -1,17 +1,35 @@
-from dataclasses import FrozenInstanceError
-from datetime import datetime, timezone
+import json
+from dataclasses import FrozenInstanceError, asdict
+from datetime import datetime, timedelta, timezone
 from inspect import getsource
 from uuid import UUID
 
 import pytest
 
+import astropilot.user_profile as user_profile
 from astropilot.decision_forecast_evidence_store import (
     FileDecisionForecastEvidenceStore,
+)
+from decision.mission.night_mission import NightMission
+from decision.models.execution import Execution, ExecutionStatus
+from decision.models.outcome_evidence import (
+    AcquisitionOutcomeEvidence,
+    OutcomeEvidenceCategory,
+    OutcomeEvidenceSource,
+)
+from decision.models.portfolio_credit import PortfolioCredit
+from decision.models.portfolio_credit_application import (
+    PortfolioCreditApplication,
+    PortfolioCreditApplicationOutcome,
+    PortfolioCreditDestinationKind,
 )
 import decision.services.durable_tonight_application_service as durable_module
 from decision.services.durable_tonight_application_service import (
     DurableTonightApplicationService,
     generate_decision_id,
+)
+from decision.services.execution_outcome_application import (
+    ExecutionOutcomeApplicationService,
 )
 from decision.services.tonight_application_service import (
     TonightResult,
@@ -284,3 +302,340 @@ def test_wrapper_has_no_clock_network_or_domain_specific_dependency():
     assert "meteoswiss" not in source.lower()
     assert "field_validation" not in source
     assert "provider_reliability" not in source
+
+
+CREDIT_START = datetime(2026, 9, 10, 22, tzinfo=timezone.utc)
+CREDIT_END = datetime(2026, 9, 11, 1, tzinfo=timezone.utc)
+CREDIT_DURATION = timedelta(hours=3)
+USABLE_DURATION = timedelta(hours=1, minutes=15)
+
+
+def credit_mission():
+    return NightMission(
+        target="M31",
+        confidence="HIGH",
+        equipment=["setup"],
+        site_name="Mont Sujet",
+        mission_id="mission-credit",
+        decision_id="decision-credit",
+        selection_id="selection-credit",
+    )
+
+
+def terminal_execution(status, execution_id="execution-credit"):
+    return Execution(
+        execution_id=execution_id,
+        mission_id="mission-credit",
+        status=status,
+        actual_start=CREDIT_START,
+        actual_end=CREDIT_END,
+        actual_duration=CREDIT_DURATION,
+    )
+
+
+def acquisition_evidence(
+    evidence_id="evidence-credit",
+    execution_id="execution-credit",
+):
+    return AcquisitionOutcomeEvidence(
+        evidence_id=evidence_id,
+        execution_id=execution_id,
+        category=OutcomeEvidenceCategory.ACQUISITION,
+        observed_at=CREDIT_END,
+        source=OutcomeEvidenceSource.USER,
+        actual_capture_duration=timedelta(hours=2, minutes=45),
+        usable_integration_duration=USABLE_DURATION,
+    )
+
+
+def portfolio_credit(
+    credit_id="credit-1",
+    evidence_id="evidence-credit",
+    execution_id="execution-credit",
+):
+    return PortfolioCredit(
+        credit_id=credit_id,
+        execution_id=execution_id,
+        evidence_ids=(evidence_id,),
+        usable_integration_duration=USABLE_DURATION,
+        credited_at=CREDIT_END,
+    )
+
+
+def credit_application(credit_id="credit-1", object_name="M31"):
+    return PortfolioCreditApplication(
+        application_id=f"application-{credit_id}",
+        credit_id=credit_id,
+        object_name=object_name,
+        destination_kind=PortfolioCreditDestinationKind.PROJECT,
+        applied_duration=USABLE_DURATION,
+        applied_at=CREDIT_END,
+    )
+
+
+def profile_callbacks(profile_path):
+    def load_profile():
+        return json.loads(profile_path.read_text(encoding="utf-8"))
+
+    def save_profile(profile):
+        profile_path.write_text(json.dumps(profile), encoding="utf-8")
+
+    return load_profile, save_profile
+
+
+def composed_credit_service(tmp_path, status=ExecutionStatus.COMPLETED):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "projects": {
+                    "M31": {
+                        "hours": 2.0,
+                        "target_hours": 20.0,
+                        "importance": 8,
+                    }
+                },
+                "sessions": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    load_profile, save_profile = profile_callbacks(profile_path)
+    outer = DurableTonightApplicationService(
+        application_service=FakeApplicationService(),
+        evidence_store=FakeStore(),
+        decision_id_factory=IdFactory("unused"),
+        profile_loader=load_profile,
+        profile_saver=save_profile,
+    )
+    mission = credit_mission()
+    execution_service = ExecutionOutcomeApplicationService(
+        mission_loader=lambda mission_id: (
+            mission if mission_id == mission.mission_id else None
+        )
+    )
+    execution_service.create_execution(
+        execution_id="execution-credit",
+        mission_id="mission-credit",
+    )
+    execution_service.transition_execution(
+        Execution(
+            execution_id="execution-credit",
+            mission_id="mission-credit",
+            status=ExecutionStatus.IN_PROGRESS,
+            actual_start=CREDIT_START,
+            actual_end=None,
+            actual_duration=None,
+        )
+    )
+    source_execution = terminal_execution(status)
+    execution_service.transition_execution(source_execution)
+    source_evidence = acquisition_evidence()
+    execution_service.record_outcome_evidence(
+        execution_id="execution-credit",
+        evidence=source_evidence,
+    )
+    outer._execution_outcome_service = execution_service
+    return (
+        outer,
+        execution_service,
+        profile_path,
+        source_execution,
+        source_evidence,
+    )
+
+
+@pytest.mark.parametrize(
+    "status",
+    [ExecutionStatus.COMPLETED, ExecutionStatus.INTERRUPTED],
+)
+def test_composed_credit_uses_exact_v1_execution_and_evidence(tmp_path, status):
+    outer, execution_service, profile_path, source_execution, source_evidence = (
+        composed_credit_service(tmp_path, status)
+    )
+    execution_calls = []
+    evidence_calls = []
+    load_execution = execution_service.load_execution
+    load_evidence = execution_service.load_outcome_evidence
+
+    def observed_execution_loader(execution_id):
+        loaded = load_execution(execution_id)
+        execution_calls.append((execution_id, loaded))
+        return loaded
+
+    def observed_evidence_loader(evidence_id):
+        loaded = load_evidence(evidence_id)
+        evidence_calls.append((evidence_id, loaded))
+        return loaded
+
+    execution_service.load_execution = observed_execution_loader
+    execution_service.load_outcome_evidence = observed_evidence_loader
+    execution_before = asdict(source_execution)
+    evidence_before = asdict(source_evidence)
+    credit = portfolio_credit()
+    credit_before = asdict(credit)
+
+    applied = outer.apply_portfolio_credit(credit_application(), credit)
+    persisted = json.loads(profile_path.read_text(encoding="utf-8"))
+
+    assert applied.outcome is PortfolioCreditApplicationOutcome.APPLIED
+    assert execution_calls == [("execution-credit", source_execution)]
+    assert execution_calls[0][1] is source_execution
+    assert evidence_calls == [("evidence-credit", source_evidence)]
+    assert evidence_calls[0][1] is source_evidence
+    assert persisted["projects"]["M31"]["hours"] == 3.25
+    assert persisted["projects"]["M31"]["hours"] != 5.0
+    assert persisted["projects"]["M31"]["hours"] != 4.75
+    assert persisted["sessions"] == []
+    assert set(persisted["projects"]) == {"M31"}
+    assert not any(
+        key in persisted
+        for key in (
+            "outcome_assessments",
+            "learning_eligibility",
+            "learning_signals",
+            "learning_applications",
+        )
+    )
+    assert asdict(source_execution) == execution_before
+    assert asdict(source_evidence) == evidence_before
+    assert asdict(credit) == credit_before
+    assert not hasattr(outer, "outcome_assessment")
+    assert not hasattr(outer, "learning")
+
+
+def test_composed_credit_missing_execution_and_evidence_fail_closed(tmp_path):
+    outer, execution_service, profile_path, _, _ = composed_credit_service(tmp_path)
+    before = profile_path.read_bytes()
+
+    execution_service._executions.clear()
+    with pytest.raises(ValueError, match="execution_not_found"):
+        outer.apply_portfolio_credit(credit_application(), portfolio_credit())
+    assert profile_path.read_bytes() == before
+
+    outer._portfolio_credit_service = None
+    execution_service._executions["execution-credit"] = terminal_execution(
+        ExecutionStatus.COMPLETED
+    )
+    execution_service._evidence.clear()
+    with pytest.raises(ValueError, match="evidence_not_found"):
+        outer.apply_portfolio_credit(credit_application(), portfolio_credit())
+    assert profile_path.read_bytes() == before
+
+
+def test_composed_credit_rejects_cross_execution_evidence(tmp_path):
+    outer, execution_service, profile_path, _, _ = composed_credit_service(tmp_path)
+    cross_evidence = acquisition_evidence(
+        evidence_id="evidence-cross",
+        execution_id="execution-other",
+    )
+    execution_service.create_execution(
+        execution_id="execution-other",
+        mission_id="mission-credit",
+    )
+    execution_service.record_outcome_evidence(
+        execution_id="execution-other",
+        evidence=cross_evidence,
+    )
+    before = profile_path.read_bytes()
+
+    with pytest.raises(ValueError, match="evidence_execution_mismatch"):
+        outer.apply_portfolio_credit(
+            credit_application(),
+            portfolio_credit(evidence_id="evidence-cross"),
+        )
+
+    assert profile_path.read_bytes() == before
+
+
+def test_composed_credit_does_not_fabricate_an_unknown_project(tmp_path):
+    outer, _, profile_path, _, _ = composed_credit_service(tmp_path)
+    before = profile_path.read_bytes()
+
+    with pytest.raises(ValueError, match="project_destination_unresolved"):
+        outer.apply_portfolio_credit(
+            credit_application(object_name="NGC7000"),
+            portfolio_credit(),
+        )
+
+    assert profile_path.read_bytes() == before
+
+
+def test_composed_replay_survives_service_reconstruction(tmp_path):
+    outer, _, profile_path, _, _ = composed_credit_service(tmp_path)
+    first = outer.apply_portfolio_credit(credit_application(), portfolio_credit())
+    same_service_replay = outer.apply_portfolio_credit(
+        credit_application(),
+        portfolio_credit(),
+    )
+    load_profile, save_profile = profile_callbacks(profile_path)
+    reconstructed = DurableTonightApplicationService(
+        application_service=FakeApplicationService(),
+        evidence_store=FakeStore(),
+        decision_id_factory=IdFactory("unused"),
+        profile_loader=load_profile,
+        profile_saver=save_profile,
+    )
+    reconstructed._execution_outcome_service = ExecutionOutcomeApplicationService(
+        mission_loader=lambda _: None
+    )
+
+    reconstructed_replay = reconstructed.apply_portfolio_credit(
+        credit_application(),
+        portfolio_credit(),
+    )
+    persisted = json.loads(profile_path.read_text(encoding="utf-8"))
+
+    assert first.outcome is PortfolioCreditApplicationOutcome.APPLIED
+    assert same_service_replay.outcome is PortfolioCreditApplicationOutcome.ALREADY_APPLIED
+    assert reconstructed_replay.outcome is PortfolioCreditApplicationOutcome.ALREADY_APPLIED
+    assert persisted["projects"]["M31"]["hours"] == 3.25
+
+
+def test_composed_distinct_credits_apply_independently(tmp_path):
+    outer, execution_service, profile_path, _, _ = composed_credit_service(tmp_path)
+    second_evidence = acquisition_evidence(evidence_id="evidence-credit-2")
+    execution_service.record_outcome_evidence(
+        execution_id="execution-credit",
+        evidence=second_evidence,
+    )
+
+    outer.apply_portfolio_credit(credit_application(), portfolio_credit())
+    outer.apply_portfolio_credit(
+        credit_application("credit-2"),
+        portfolio_credit("credit-2", evidence_id="evidence-credit-2"),
+    )
+    persisted = json.loads(profile_path.read_text(encoding="utf-8"))
+
+    assert persisted["projects"]["M31"]["hours"] == 4.5
+    assert set(persisted["portfolio_credit_applications"]) == {
+        "credit-1",
+        "credit-2",
+    }
+
+
+def test_composed_credit_never_calls_legacy_record_session(
+    tmp_path,
+    monkeypatch,
+):
+    outer, _, profile_path, _, _ = composed_credit_service(tmp_path)
+
+    def forbidden_record_session(*args, **kwargs):
+        pytest.fail("V1 credit composition must not call record_session")
+
+    monkeypatch.setattr(user_profile, "record_session", forbidden_record_session)
+
+    outer.apply_portfolio_credit(credit_application(), portfolio_credit())
+    persisted = json.loads(profile_path.read_text(encoding="utf-8"))
+
+    assert persisted["sessions"] == []
+    assert persisted["projects"]["M31"]["hours"] == 3.25
+
+
+def test_production_factory_supplies_canonical_profile_callbacks():
+    import astro_score
+
+    service = astro_score.build_durable_tonight_application_service()
+
+    assert service.profile_loader is astro_score.load_user_profile
+    assert service.profile_saver is astro_score.save_user_profile

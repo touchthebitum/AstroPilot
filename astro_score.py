@@ -1997,6 +1997,8 @@ def build_durable_tonight_application_service(
             get_user_data_dir() / "decision_forecast_evidence"
         ),
         decision_id_factory=generate_decision_id,
+        profile_loader=load_user_profile,
+        profile_saver=save_user_profile,
     )
 
 

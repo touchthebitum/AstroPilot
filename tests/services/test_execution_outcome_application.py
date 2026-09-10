@@ -186,6 +186,27 @@ def test_typed_outcome_evidence_is_recorded_without_changing_execution(kind, cat
     assert created.status is ExecutionStatus.NOT_STARTED
 
 
+def test_execution_and_outcome_loaders_return_exact_typed_instances():
+    application = service(mission())
+    created = application.create_execution(
+        execution_id="execution-1",
+        mission_id="mission-1",
+    )
+    record = evidence(
+        AcquisitionOutcomeEvidence,
+        OutcomeEvidenceCategory.ACQUISITION,
+    )
+    application.record_outcome_evidence(
+        execution_id="execution-1",
+        evidence=record,
+    )
+
+    assert application.load_execution("execution-1") is created
+    assert application.load_outcome_evidence("evidence-1") is record
+    assert application.load_execution("missing") is None
+    assert application.load_outcome_evidence("missing") is None
+
+
 def test_evidence_for_unknown_or_different_execution_fails_closed():
     application = service(mission())
     application.create_execution(execution_id="execution-1", mission_id="mission-1")

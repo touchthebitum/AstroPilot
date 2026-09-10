@@ -52,6 +52,9 @@ class ExecutionOutcomeApplicationService:
     def load_execution(self, execution_id: str) -> Execution | None:
         return self._executions.get(execution_id)
 
+    def load_outcome_evidence(self, evidence_id: str) -> OutcomeEvidence | None:
+        return self._evidence.get(evidence_id)
+
     def transition_execution(self, destination: Execution) -> Execution:
         if not isinstance(destination, Execution):
             raise TypeError("Expected Execution")
