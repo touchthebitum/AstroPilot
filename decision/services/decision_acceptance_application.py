@@ -60,6 +60,7 @@ class DecisionAcceptanceApplicationService:
         self.selection_mission_service = selection_mission_service
         self.context_store = context_store
         self.mission_id_factory = mission_id_factory
+        self._missions: dict[str, NightMission] = {}
 
     def register_decision(
         self,
@@ -125,4 +126,10 @@ class DecisionAcceptanceApplicationService:
             or mission.selection_id != selection.selection_id
         ):
             raise DecisionAcceptanceError("mission_provenance_mismatch")
+        if mission_id in self._missions:
+            raise DecisionAcceptanceError("mission_id_conflict")
+        self._missions[mission_id] = mission
         return mission
+
+    def load_mission(self, mission_id: str) -> NightMission | None:
+        return self._missions.get(mission_id)

@@ -330,3 +330,43 @@ def test_http_request_runs_real_application_composition_once(
     assert accepted.json()["selection_id"] == "selection-e2e"
     assert accepted.json()["mission_id"]
     assert len(calls["mission"]) == 1
+
+    created_execution = client.post(
+        "/v1/executions",
+        json={
+            "execution_id": "execution-e2e",
+            "mission_id": accepted.json()["mission_id"],
+        },
+    )
+    started_execution = client.post(
+        "/v1/execution-transitions",
+        json={
+            "execution_id": "execution-e2e",
+            "mission_id": accepted.json()["mission_id"],
+            "status": "in_progress",
+            "actual_start": "2026-09-10T22:00:00+00:00",
+            "actual_end": None,
+            "actual_duration": None,
+        },
+    )
+    recorded_evidence = client.post(
+        "/v1/outcome-evidence",
+        json={
+            "evidence_id": "evidence-e2e",
+            "execution_id": "execution-e2e",
+            "category": "field",
+            "observed_at": "2026-09-10T23:00:00+00:00",
+            "source": "user",
+        },
+    )
+
+    assert created_execution.status_code == 200, created_execution.json()
+    assert created_execution.json()["status"] == "not_started"
+    assert created_execution.json()["actual_start"] is None
+    assert started_execution.status_code == 200, started_execution.json()
+    assert started_execution.json()["status"] == "in_progress"
+    assert started_execution.json()["execution_id"] == "execution-e2e"
+    assert started_execution.json()["mission_id"] == accepted.json()["mission_id"]
+    assert recorded_evidence.status_code == 200, recorded_evidence.json()
+    assert recorded_evidence.json()["evidence_id"] == "evidence-e2e"
+    assert recorded_evidence.json()["execution_id"] == "execution-e2e"

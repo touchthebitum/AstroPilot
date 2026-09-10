@@ -1425,3 +1425,96 @@ def test_gp11_selection_endpoint_rejects_unknown_decision_without_fallback():
 
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "decision_context_not_found"
+
+
+def test_gp08_execution_transition_and_evidence_command_path():
+    class Service:
+        def __init__(self):
+            self.execution = None
+            self.evidence = None
+
+        def create_execution(self, *, execution_id, mission_id):
+            self.execution = Execution(
+                execution_id,
+                mission_id,
+                ExecutionStatus.NOT_STARTED,
+                None,
+                None,
+                None,
+            )
+            return self.execution
+
+        def transition_execution(self, execution):
+            self.execution = execution
+            return execution
+
+        def record_outcome_evidence(self, *, execution_id, evidence):
+            self.evidence = evidence
+            return evidence
+
+    from decision.models.execution import Execution, ExecutionStatus
+
+    service = Service()
+    client = TestClient(create_app(
+        service_factory=lambda: service,
+        weather_provider=lambda lat, lon: object(),
+        profile_provider=valid_profile,
+    ))
+    created = client.post(
+        "/v1/executions",
+        json={"execution_id": "execution-1", "mission_id": "mission-1"},
+    )
+    transitioned = client.post(
+        "/v1/execution-transitions",
+        json={
+            "execution_id": "execution-1",
+            "mission_id": "mission-1",
+            "status": "in_progress",
+            "actual_start": "2026-09-10T22:00:00+00:00",
+            "actual_end": None,
+            "actual_duration": None,
+        },
+    )
+    recorded = client.post(
+        "/v1/outcome-evidence",
+        json={
+            "evidence_id": "evidence-1",
+            "execution_id": "execution-1",
+            "category": "acquisition",
+            "observed_at": "2026-09-11T02:00:00+00:00",
+            "source": "user",
+            "actual_capture_duration": "PT2H",
+            "usable_integration_duration": "PT90M",
+        },
+    )
+
+    assert created.status_code == 200
+    assert created.json()["status"] == "not_started"
+    assert created.json()["actual_start"] is None
+    assert transitioned.status_code == 200
+    assert transitioned.json()["status"] == "in_progress"
+    assert recorded.status_code == 200
+    assert recorded.json()["evidence_id"] == "evidence-1"
+    assert recorded.json()["category"] == "acquisition"
+    assert service.execution.status is ExecutionStatus.IN_PROGRESS
+    assert service.evidence.execution_id == "execution-1"
+
+
+def test_execution_creation_payload_rejects_state_and_hidden_timing_shortcuts():
+    client = TestClient(create_app(
+        service_factory=lambda: object(),
+        weather_provider=lambda lat, lon: object(),
+        profile_provider=valid_profile,
+    ))
+
+    response = client.post(
+        "/v1/executions",
+        json={
+            "execution_id": "execution-1",
+            "mission_id": "mission-1",
+            "status": "in_progress",
+            "actual_start": "2026-09-10T22:00:00+00:00",
+        },
+    )
+
+    assert response.status_code == 422
