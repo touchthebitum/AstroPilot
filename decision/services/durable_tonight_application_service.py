@@ -16,6 +16,9 @@ from decision.services.tonight_application_service import (
 from decision.services.execution_outcome_application import (
     ExecutionOutcomeApplicationService,
 )
+from decision.services.durable_portfolio_credit_application import (
+    DurablePortfolioCreditApplicationService,
+)
 from decision.services.user_selection_mission import UserSelectionMissionService
 from decision.weather.decision_forecast_evidence_persistence import (
     DecisionForecastEvidenceStore,
@@ -38,12 +41,17 @@ class DurableTonightApplicationService:
         evidence_store: DecisionForecastEvidenceStore,
         decision_id_factory: Callable[[], str],
         acceptance_service: DecisionAcceptanceApplicationService | None = None,
+        profile_loader: Callable | None = None,
+        profile_saver: Callable | None = None,
     ) -> None:
         self.application_service = application_service
         self.evidence_store = evidence_store
         self.decision_id_factory = decision_id_factory
         self._acceptance_service = acceptance_service
         self._execution_outcome_service = None
+        self.profile_loader = profile_loader
+        self.profile_saver = profile_saver
+        self._portfolio_credit_service = None
 
     def evaluate(self, **kwargs) -> TonightResult:
         result = self.application_service.evaluate(**kwargs)
@@ -101,4 +109,25 @@ class DurableTonightApplicationService:
         return self._execution_outcome_application_service().record_outcome_evidence(
             execution_id=execution_id,
             evidence=evidence,
+        )
+
+    def _durable_portfolio_credit_application_service(
+        self,
+    ) -> DurablePortfolioCreditApplicationService:
+        if self.profile_loader is None or self.profile_saver is None:
+            raise RuntimeError("portfolio_credit_persistence_unavailable")
+        if self._portfolio_credit_service is None:
+            execution_service = self._execution_outcome_application_service()
+            self._portfolio_credit_service = DurablePortfolioCreditApplicationService(
+                load_profile=self.profile_loader,
+                save_profile=self.profile_saver,
+                execution_loader=execution_service.load_execution,
+                evidence_loader=execution_service.load_outcome_evidence,
+            )
+        return self._portfolio_credit_service
+
+    def apply_portfolio_credit(self, application, credit):
+        return self._durable_portfolio_credit_application_service().apply(
+            application,
+            credit,
         )
