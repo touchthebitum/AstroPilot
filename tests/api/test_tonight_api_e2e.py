@@ -1,4 +1,6 @@
+from dataclasses import replace
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,6 +10,7 @@ from astropilot.app import create_app
 from decision.forecast.forecast_run import ForecastRun
 from decision.intelligence.analysis_result import AnalysisResult
 from decision.mission.night_mission import NightMission
+from decision.mission.mission_input import MissionInput
 from decision.models.candidate import Candidate, CandidateProvenance
 from decision.night_productivity.night_productivity_result import (
     NightProductivityResult,
@@ -42,6 +45,13 @@ def test_http_request_runs_real_application_composition_once(
         "date": date(2026, 9, 1),
         "duration": 3.5,
         "top_objects": selected_objects,
+        "object_evaluations": {
+            "M31": {
+                "decision_context": SimpleNamespace(
+                    site=SimpleNamespace(name="Mont Sujet")
+                )
+            }
+        },
     }
     candidate = Candidate(
         name="Andromeda",
@@ -169,7 +179,16 @@ def test_http_request_runs_real_application_composition_once(
     class MissionService:
         def create(self, **kwargs):
             calls["mission"].append(kwargs)
-            return mission
+            mission_input = kwargs["build_mission_input"](
+                selected_night["object_evaluations"][kwargs["recommended_key"]]
+            )
+            return replace(
+                mission,
+                site_name="Mont Sujet",
+                mission_id=mission_input.mission_id,
+                decision_id=mission_input.decision_id,
+                selection_id=mission_input.selection_id,
+            )
 
     monkeypatch.setattr(astro_score, "fetch_weather", fetch_weather)
     monkeypatch.setattr(astro_score, "forecast_astro", forecast)
@@ -187,6 +206,19 @@ def test_http_request_runs_real_application_composition_once(
         astro_score,
         "tonight_mission_service",
         MissionService(),
+    )
+    monkeypatch.setattr(
+        astro_score,
+        "build_mission_input",
+        lambda evaluation, *, profile: MissionInput(
+            window_start=mission.window_start,
+            window_end=mission.window_end,
+            astronomical_hours=6.0,
+            weather=None,
+            moon_penalty=None,
+            recommended_hours=mission.recommended_hours,
+            expected_gain=mission.expected_gain,
+        ),
     )
     profile_loads = []
 
@@ -210,7 +242,8 @@ def test_http_request_runs_real_application_composition_once(
         lambda mission: pytest.fail("API must not print the mission"),
     )
 
-    response = TestClient(create_app(clock=lambda: reference_time)).post(
+    client = TestClient(create_app(clock=lambda: reference_time))
+    response = client.post(
         "/v1/tonight",
         json={
             "location": {
@@ -252,12 +285,11 @@ def test_http_request_runs_real_application_composition_once(
         )
     ]
     assert calls["recommendation"] == [[candidate]]
-    assert len(calls["mission"]) == 1
-    assert calls["mission"][0]["winner"] is selected_night
-    assert calls["mission"][0]["objects"] is selected_objects
-    assert calls["mission"][0]["recommended_key"] == "M31"
+    assert calls["mission"] == []
     payload = response.json()
     assert payload["status"] == "available"
+    assert isinstance(payload["decision_id"], str)
+    assert payload["decision_id"]
     assert payload["target"] == "Andromeda"
     assert payload["catalog_key"] == "M31"
     assert payload["provenance"] == CandidateProvenance.PROJECT.value
@@ -274,21 +306,27 @@ def test_http_request_runs_real_application_composition_once(
     ]
     assert payload["alternatives"] == []
     assert payload["target_common_name"] == "Galaxie d’Andromède"
-    assert payload["astro_quality"] == {
-        "score": 84.0,
-        "confidence": 0.9,
-        "label": "very_good",
-        "limiting_factor": "clouds",
-        "metrics": {"altitude": 92.0, "clouds": 70.0},
-    }
-    assert payload["productivity"]["productive_hours"] == 3.5
-    assert payload["productivity"]["windows"][0]["start_time"] == "23:00"
-    assert payload["productivity"]["windows"][0]["end_time"] == "02:00"
-    assert payload["dew_risk"]["level"] == "HIGH"
-    assert payload["postponement_risk"]["required_nights"] == 2
-    assert payload["season"] == {
-        "analysis_name": "season",
-        "conclusion": "Prime autumn window",
-        "confidence": 0.89,
-        "data": {"peak_month": "October"},
-    }
+    assert payload["mission_confidence"] is None
+    assert payload["astro_quality"] is None
+    assert payload["productivity"] is None
+    assert payload["dew_risk"] is None
+    assert payload["postponement_risk"] is None
+    assert payload["season"] is None
+
+    accepted = client.post(
+        "/v1/decision-selections",
+        json={
+            "decision_id": payload["decision_id"],
+            "selection_id": "selection-e2e",
+            "source": "primary_recommendation",
+            "selected_catalog_key": "M31",
+            "selected_at": "2026-09-10T20:00:00+00:00",
+        },
+    )
+
+    assert accepted.status_code == 200, accepted.json()
+    assert accepted.json()["catalog_key"] == "M31"
+    assert accepted.json()["decision_id"] == payload["decision_id"]
+    assert accepted.json()["selection_id"] == "selection-e2e"
+    assert accepted.json()["mission_id"]
+    assert len(calls["mission"]) == 1

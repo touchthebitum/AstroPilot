@@ -20,6 +20,7 @@ from decision.models.session_availability import (
     SessionAvailability,
     SessionAvailabilityMode,
 )
+from decision.models.user_selection import UserSelectionSource
 from decision.opportunity.action import Action
 from decision.opportunity.opportunity import Opportunity
 from decision.recommendation.recommendation import Recommendation
@@ -1335,3 +1336,92 @@ def test_target_insufficiency_api_defaults_and_openapi_contract():
     assert entry["properties"]["target_decision_status"]["const"] == "insufficient_evidence"
     weather = schemas[entry["properties"]["weather_decision"]["$ref"].split("/")[-1]]
     assert set(weather["properties"]) == {"evidence_quality", "admissibility", "reasons"}
+
+
+def test_gp01_tonight_then_explicit_selection_creates_bound_mission():
+    result = replace(make_result(decision_id="decision-123"), mission=None)
+
+    class Service:
+        def __init__(self):
+            self.registered = []
+            self.selections = []
+
+        def evaluate(self, **kwargs):
+            return result
+
+        def register_decision_context(self, **kwargs):
+            self.registered.append(kwargs)
+
+        def accept(self, user_selection):
+            self.selections.append(user_selection)
+            return NightMission(
+                target=user_selection.selected_catalog_key,
+                confidence="HIGH",
+                equipment=["widefield"],
+                site_name="Mont Sujet",
+                mission_id="mission-123",
+                decision_id=user_selection.decision_id,
+                selection_id=user_selection.selection_id,
+            )
+
+    service = Service()
+    client = TestClient(create_app(
+        service_factory=lambda: service,
+        weather_provider=lambda lat, lon: object(),
+        profile_provider=valid_profile,
+    ))
+
+    tonight = client.post("/v1/tonight", json={})
+    accepted = client.post(
+        "/v1/decision-selections",
+        json={
+            "decision_id": "decision-123",
+            "selection_id": "selection-123",
+            "source": "primary_recommendation",
+            "selected_catalog_key": "M31",
+            "selected_at": "2026-09-10T20:00:00+00:00",
+        },
+    )
+
+    assert tonight.status_code == 200
+    assert tonight.json()["decision_id"] == "decision-123"
+    assert result.mission is None
+    assert len(service.registered) == 1
+    assert accepted.status_code == 200
+    assert accepted.json() == {
+        "status": "accepted",
+        "mission_id": "mission-123",
+        "decision_id": "decision-123",
+        "selection_id": "selection-123",
+        "catalog_key": "M31",
+    }
+    assert service.selections[0].source is UserSelectionSource.PRIMARY_RECOMMENDATION
+
+
+def test_gp11_selection_endpoint_rejects_unknown_decision_without_fallback():
+    class Service:
+        def accept(self, user_selection):
+            from decision.services.decision_acceptance_application import (
+                DecisionAcceptanceError,
+            )
+
+            raise DecisionAcceptanceError("decision_context_not_found")
+
+    client = TestClient(create_app(
+        service_factory=lambda: Service(),
+        weather_provider=lambda lat, lon: object(),
+        profile_provider=valid_profile,
+    ))
+    response = client.post(
+        "/v1/decision-selections",
+        json={
+            "decision_id": "unknown-decision",
+            "selection_id": "selection-123",
+            "source": "primary_recommendation",
+            "selected_catalog_key": "M31",
+            "selected_at": "2026-09-10T20:00:00+00:00",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "decision_context_not_found"

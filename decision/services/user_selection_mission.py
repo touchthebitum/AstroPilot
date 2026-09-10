@@ -63,6 +63,18 @@ class UserSelectionMissionService:
             raise UserSelectionValidationError(
                 "selected_target_evaluation_unavailable"
             )
+        selected_object = next(
+            (
+                item
+                for item in (night.get("top_objects") or ())
+                if _candidate_catalog_key(item) == selected_catalog_key
+            ),
+            None,
+        )
+        if not isinstance(selected_object, Mapping):
+            raise UserSelectionValidationError(
+                "selected_target_evaluation_unavailable"
+            )
 
         def build_selected_mission_input(evaluation):
             mission_input = self.build_mission_input(
@@ -87,7 +99,11 @@ class UserSelectionMissionService:
             return None
         if not isinstance(mission, NightMission):
             raise TypeError("Expected NightMission or None")
-        if mission.target != selected_catalog_key:
+        expected_mission_targets = {
+            selected_catalog_key,
+            selected_object.get("name"),
+        }
+        if mission.target not in expected_mission_targets:
             raise UserSelectionValidationError("mission_target_mismatch")
 
         selected_evaluation = object_evaluations[selected_catalog_key]

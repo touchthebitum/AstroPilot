@@ -231,7 +231,7 @@ def test_evaluate_carries_typed_availability_to_composition_boundary(monkeypatch
     assert resolved_availability[0] is availability
 
 
-def test_evaluate_attaches_availability_to_mission_input(monkeypatch):
+def test_evaluate_defers_availability_bound_mission_until_selection():
     availability = SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)
     mission_input = MissionInput(
         window_start=datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
@@ -258,17 +258,6 @@ def test_evaluate_attaches_availability_to_mission_input(monkeypatch):
         mission=object(),
         build_mission_input=lambda evaluation, *, profile: mission_input,
     )
-    monkeypatch.setattr(
-        tonight_service_module.DecisionConsistencyGate,
-        "validate_mission",
-        lambda mission: None,
-    )
-    monkeypatch.setattr(
-        tonight_service_module.DecisionConsistencyGate,
-        "has_productive_window",
-        lambda mission: True,
-    )
-
     result = service.evaluate(
         profile=make_profile(),
         weather=object(),
@@ -277,10 +266,10 @@ def test_evaluate_attaches_availability_to_mission_input(monkeypatch):
         availability=availability,
     )
 
-    transported = mission_service.calls[0]["build_mission_input"](object())
-    assert transported.availability is availability
     assert result.recommendation.opportunity.candidate is candidate
-    assert mission_service.calls[0]["recommended_key"] == "M31"
+    assert result.mission is None
+    assert result.status is TonightStatus.AVAILABLE
+    assert mission_service.calls == []
 
 
 def _productive_assessment():
@@ -411,9 +400,9 @@ def test_mission_timing_empty_intersection_returns_none():
     )
 
 
-def test_empty_availability_mission_reuses_no_productive_window_status():
+def test_empty_availability_is_resolved_only_after_user_selection():
     candidate = make_candidate()
-    service, _, _ = make_service(
+    service, _, mission_service = make_service(
         forecast_nights=lambda *args, **kwargs: forecast_run(
             [
                 {
@@ -441,7 +430,8 @@ def test_empty_availability_mission_reuses_no_productive_window_status():
     )
 
     assert result.mission is None
-    assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW
+    assert result.status is TonightStatus.AVAILABLE
+    assert mission_service.calls == []
 
 
 def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
@@ -565,20 +555,13 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
     assert forecast_profile["location"] == profile["location"]
     assert forecast_profile["location"] is not profile["location"]
     assert recommendation_service.calls == [candidates]
-    assert mission_service.calls[0]["winner"] is selected
-    assert mission_service.calls[0]["objects"] is selected_objects
-    assert mission_service.calls[0]["recommended_key"] == "M31"
-    evaluation = object()
-    assert mission_service.calls[0]["build_mission_input"](evaluation) == (
-        evaluation,
-        effective_profile,
-    )
+    assert mission_service.calls == []
     assert profile["active_equipment"] == "samyang_183"
     assert profile["available_equipment"] is original_available
     assert profile["available_equipment"] == ["samyang_183", "fra400_2600"]
     assert result.night is selected
     assert result.recommendation is recommendation
-    assert result.mission is mission
+    assert result.mission is None
     assert result.forecast_evidence is FORECAST_EVIDENCE
     assert selected["top_objects"] is selected_objects
     assert selected_objects[0]["global_score"] == 91.0
@@ -767,7 +750,7 @@ def test_no_recommendation_preserves_night_and_skips_mission():
     assert mission_service.calls == []
 
 
-def test_missing_mission_preserves_exact_night_and_recommendation():
+def test_recommendation_result_defers_mission_creation():
     night = {"date": "2026-09-01", "top_objects": []}
     candidate = make_candidate()
     candidates = [candidate]
@@ -789,12 +772,40 @@ def test_missing_mission_preserves_exact_night_and_recommendation():
     assert result.night is night
     assert result.recommendation is recommendation
     assert result.mission is None
-    assert result.status is TonightStatus.NO_MISSION
+    assert result.status is TonightStatus.AVAILABLE
     assert result.forecast_evidence is FORECAST_EVIDENCE
-    assert len(mission_service.calls) == 1
+    assert mission_service.calls == []
 
 
-def test_night_without_a_productive_window_is_not_available():
+def test_recommendation_does_not_create_a_mission_before_user_selection():
+    night = {"date": "2026-09-01", "top_objects": []}
+    candidate = make_candidate()
+    recommendation = make_recommendation(candidate)
+    provenance_free_mission = NightMission(
+        target="M31",
+        confidence=0.9,
+    )
+    service, _, mission_service = make_service(
+        forecast_nights=lambda *args, **kwargs: forecast_run([night]),
+        build_candidates=lambda *args, **kwargs: [candidate],
+        recommendation=recommendation,
+        mission=provenance_free_mission,
+    )
+
+    result = service.evaluate(
+        profile=make_profile(),
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=3,
+    )
+
+    assert result.status is TonightStatus.AVAILABLE
+    assert result.recommendation is recommendation
+    assert result.mission is None
+    assert mission_service.calls == []
+
+
+def test_productivity_mission_status_is_deferred_until_selection():
     night = {"date": "2026-09-01", "top_objects": []}
     candidate = make_candidate()
     recommendation = make_recommendation(candidate)
@@ -815,7 +826,7 @@ def test_night_without_a_productive_window_is_not_available():
             windows=[],
         ),
     )
-    service, _, _ = make_service(
+    service, _, mission_service = make_service(
         forecast_nights=lambda *args, **kwargs: forecast_run([night]),
         build_candidates=lambda *args, **kwargs: [candidate],
         recommendation=recommendation,
@@ -829,9 +840,10 @@ def test_night_without_a_productive_window_is_not_available():
         bortle=3,
     )
 
-    assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW
-    assert result.mission is mission
+    assert result.status is TonightStatus.AVAILABLE
+    assert result.mission is None
     assert result.forecast_evidence is FORECAST_EVIDENCE
+    assert mission_service.calls == []
 
 
 @pytest.mark.parametrize(
