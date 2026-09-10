@@ -310,3 +310,15 @@ def test_record_session_persists_filter_type_when_provided(
             "filter_type": "LRGB",
         }
     ]
+
+
+def test_portfolio_credit_ledger_requires_a_json_object(tmp_path, monkeypatch):
+    profile_path = tmp_path / "user_profile.json"
+    write_profile(profile_path)
+    profile = json.loads(profile_path.read_text())
+    profile["portfolio_credit_applications"] = []
+    profile_path.write_text(json.dumps(profile))
+    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+
+    with pytest.raises(user_profile.UserProfileError, match="portfolio_credit_applications"):
+        user_profile.load_user_profile()

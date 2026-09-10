@@ -23,6 +23,7 @@ PROFILE_CONTAINER_TYPES = {
     "equipment_definitions": (dict, "objet JSON"),
     "preferences": (dict, "objet JSON"),
     "projects": (dict, "objet JSON"),
+    "portfolio_credit_applications": (dict, "objet JSON"),
     "sessions": (list, "liste"),
     "location": (dict, "objet JSON"),
     "decision_weights": (dict, "objet JSON"),
