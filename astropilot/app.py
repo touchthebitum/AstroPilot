@@ -17,6 +17,15 @@ from decision.models.session_availability import (
     SessionAvailabilityMode,
 )
 from decision.models.user_selection import UserSelection, UserSelectionSource
+from decision.models.execution import Execution, ExecutionStatus
+from decision.models.outcome_evidence import (
+    AcquisitionOutcomeEvidence,
+    FieldOutcomeEvidence,
+    ImageOutcomeEvidence,
+    OutcomeEvidenceCategory,
+    OutcomeEvidenceSource,
+    TechnicalOutcomeEvidence,
+)
 from decision.models.recommendation_reason import (
     RecommendationReasonCategory,
     RecommendationReasonScope,
@@ -54,6 +63,10 @@ from decision.services.candidate_assessment import (
     select_actionable_alternatives,
 )
 from decision.services.decision_acceptance_application import DecisionAcceptanceError
+from decision.services.execution_outcome_application import (
+    ExecutionOutcomeApplicationError,
+)
+from decision.services.execution_transition import ExecutionTransitionError
 from decision.services.user_selection_validator import UserSelectionValidationError
 from decision.weather.provider_reliability import WeatherLocation
 from decision.weather.weather_trust_decision import (
@@ -187,6 +200,123 @@ class UserSelectionResponse(BaseModel):
     decision_id: str
     selection_id: str
     catalog_key: str | None = None
+
+
+class ExecutionCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    execution_id: str
+    mission_id: str
+
+    @model_validator(mode="after")
+    def validate_domain_contract(self):
+        try:
+            Execution(
+                execution_id=self.execution_id,
+                mission_id=self.mission_id,
+                status=ExecutionStatus.NOT_STARTED,
+                actual_start=None,
+                actual_end=None,
+                actual_duration=None,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(str(exc)) from exc
+        return self
+
+
+class ExecutionTransitionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    execution_id: str
+    mission_id: str
+    status: ExecutionStatus
+    actual_start: datetime | None
+    actual_end: datetime | None
+    actual_duration: timedelta | None
+
+    def to_domain(self) -> Execution:
+        return Execution(
+            execution_id=self.execution_id,
+            mission_id=self.mission_id,
+            status=self.status,
+            actual_start=self.actual_start,
+            actual_end=self.actual_end,
+            actual_duration=self.actual_duration,
+        )
+
+    @model_validator(mode="after")
+    def validate_domain_contract(self):
+        try:
+            self.to_domain()
+        except (TypeError, ValueError) as exc:
+            raise ValueError(str(exc)) from exc
+        return self
+
+
+class ExecutionResponse(BaseModel):
+    execution_id: str
+    mission_id: str
+    status: ExecutionStatus
+    actual_start: datetime | None
+    actual_end: datetime | None
+    actual_duration: timedelta | None
+
+
+class OutcomeEvidenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    evidence_id: str
+    execution_id: str
+    category: OutcomeEvidenceCategory
+    observed_at: datetime
+    source: OutcomeEvidenceSource
+    actual_capture_duration: timedelta | None = None
+    usable_integration_duration: timedelta | None = None
+
+    def to_domain(self):
+        common = {
+            "evidence_id": self.evidence_id,
+            "execution_id": self.execution_id,
+            "category": self.category,
+            "observed_at": self.observed_at,
+            "source": self.source,
+        }
+        kinds = {
+            OutcomeEvidenceCategory.FIELD: FieldOutcomeEvidence,
+            OutcomeEvidenceCategory.TECHNICAL: TechnicalOutcomeEvidence,
+            OutcomeEvidenceCategory.ACQUISITION: AcquisitionOutcomeEvidence,
+            OutcomeEvidenceCategory.IMAGE: ImageOutcomeEvidence,
+        }
+        kind = kinds[self.category]
+        if kind is AcquisitionOutcomeEvidence:
+            common.update(
+                actual_capture_duration=self.actual_capture_duration,
+                usable_integration_duration=self.usable_integration_duration,
+            )
+        elif (
+            self.actual_capture_duration is not None
+            or self.usable_integration_duration is not None
+        ):
+            raise ValueError("acquisition_duration_category_mismatch")
+        return kind(**common)
+
+    @model_validator(mode="after")
+    def validate_domain_contract(self):
+        try:
+            self.to_domain()
+        except (TypeError, ValueError) as exc:
+            raise ValueError(str(exc)) from exc
+        return self
+
+
+class OutcomeEvidenceResponse(BaseModel):
+    evidence_id: str
+    execution_id: str
+    category: OutcomeEvidenceCategory
+    observed_at: datetime
+    source: OutcomeEvidenceSource
+    actual_capture_duration: timedelta | None = None
+    usable_integration_duration: timedelta | None = None
 
 
 class TonightReasonModel(BaseModel):
@@ -1275,6 +1405,97 @@ def create_app(
             selection_id=selection.selection_id,
             catalog_key=(
                 selection.selected_catalog_key if mission is not None else None
+            ),
+        )
+
+    def execution_response(execution: Execution) -> ExecutionResponse:
+        return ExecutionResponse(
+            execution_id=execution.execution_id,
+            mission_id=execution.mission_id,
+            status=execution.status,
+            actual_start=execution.actual_start,
+            actual_end=execution.actual_end,
+            actual_duration=execution.actual_duration,
+        )
+
+    def execution_command(name: str):
+        command = getattr(application_service(), name, None)
+        if command is None:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "execution_commands_unavailable"},
+            )
+        return command
+
+    def raise_execution_command_error(exc: Exception):
+        code = str(exc)
+        raise HTTPException(
+            status_code=(
+                404
+                if code in {"mission_not_found", "execution_not_found"}
+                else 409
+            ),
+            detail={"code": code},
+        ) from exc
+
+    @application.post(
+        "/v1/executions",
+        response_model=ExecutionResponse,
+        summary="Create an execution for an exact mission",
+    )
+    def create_execution(request: ExecutionCreateRequest):
+        try:
+            created = execution_command("create_execution")(
+                execution_id=request.execution_id,
+                mission_id=request.mission_id,
+            )
+        except ExecutionOutcomeApplicationError as exc:
+            raise_execution_command_error(exc)
+        return execution_response(created)
+
+    @application.post(
+        "/v1/execution-transitions",
+        response_model=ExecutionResponse,
+        summary="Transition an exact execution",
+    )
+    def transition_execution(request: ExecutionTransitionRequest):
+        try:
+            transitioned = execution_command("transition_execution")(
+                request.to_domain()
+            )
+        except (ExecutionOutcomeApplicationError, ExecutionTransitionError) as exc:
+            raise_execution_command_error(exc)
+        return execution_response(transitioned)
+
+    @application.post(
+        "/v1/outcome-evidence",
+        response_model=OutcomeEvidenceResponse,
+        summary="Record typed evidence for an exact execution",
+    )
+    def record_outcome_evidence(request: OutcomeEvidenceRequest):
+        evidence = request.to_domain()
+        try:
+            recorded = execution_command("record_outcome_evidence")(
+                execution_id=request.execution_id,
+                evidence=evidence,
+            )
+        except ExecutionOutcomeApplicationError as exc:
+            raise_execution_command_error(exc)
+        return OutcomeEvidenceResponse(
+            evidence_id=recorded.evidence_id,
+            execution_id=recorded.execution_id,
+            category=recorded.category,
+            observed_at=recorded.observed_at,
+            source=recorded.source,
+            actual_capture_duration=getattr(
+                recorded,
+                "actual_capture_duration",
+                None,
+            ),
+            usable_integration_duration=getattr(
+                recorded,
+                "usable_integration_duration",
+                None,
             ),
         )
 
