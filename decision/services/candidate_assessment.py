@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from decision.mission.mission_assembler import ProductiveWindowAssessment
+from decision.models.session_availability import SessionAvailability
+from decision.services.session_availability_windowing import (
+    select_duration_availability_window,
+)
 from decision.validation.weather_window_coverage import (
     WeatherWindowCoverageError,
     validate_selected_window_weather_coverage,
@@ -116,6 +120,45 @@ def select_viable_alternatives(
         if candidate.catalog_key == primary_catalog_key:
             continue
         if candidate.catalog_key not in viable_catalog_keys:
+            continue
+        alternatives.append(candidate)
+        if len(alternatives) == 2:
+            break
+    return tuple(alternatives)
+
+
+def select_actionable_alternatives(
+    shortlist_entries: Iterable[Any],
+    viable_catalog_keys: Collection[str],
+    candidate_assessments: Mapping[str, CandidateAssessment],
+    availability: SessionAvailability | None,
+    *,
+    primary_catalog_key: str | None,
+) -> tuple[Any, ...]:
+    """Expose physically viable alternatives with a usable session window."""
+    if availability is None:
+        return select_viable_alternatives(
+            shortlist_entries,
+            viable_catalog_keys,
+            primary_catalog_key=primary_catalog_key,
+        )
+    if not isinstance(availability, SessionAvailability):
+        raise TypeError("Expected SessionAvailability or None")
+
+    alternatives = []
+    for candidate in shortlist_entries:
+        if candidate.catalog_key == primary_catalog_key:
+            continue
+        if candidate.catalog_key not in viable_catalog_keys:
+            continue
+        assessment = candidate_assessments.get(candidate.catalog_key)
+        if assessment is None:
+            continue
+        actionable_window = select_duration_availability_window(
+            assessment.productive_window,
+            availability,
+        )
+        if actionable_window is None:
             continue
         alternatives.append(candidate)
         if len(alternatives) == 2:

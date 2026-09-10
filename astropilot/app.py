@@ -50,7 +50,7 @@ from decision.services.tonight_response import (
 from decision.services.candidate_assessment import (
     CandidateAssessment,
     CandidateViabilityEvaluator,
-    select_viable_alternatives,
+    select_actionable_alternatives,
 )
 from decision.weather.provider_reliability import WeatherLocation
 from decision.weather.weather_trust_decision import (
@@ -1057,9 +1057,11 @@ def create_app(
             if recommendation is not None
             else None
         )
-        selected_alternatives = select_viable_alternatives(
+        selected_alternatives = select_actionable_alternatives(
             opportunity.shortlist_entries if opportunity is not None else (),
             viable_shortlist_catalog_keys,
+            candidate_assessments,
+            inputs.availability,
             primary_catalog_key=(
                 opportunity.candidate.catalog_key
                 if opportunity is not None
