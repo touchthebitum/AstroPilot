@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,6 +10,7 @@ import decision.services.session_availability_windowing as availability_windowin
 from astropilot.app import create_app
 from astropilot.user_profile import UserProfileError
 from decision.mission.night_mission import NightMission
+from decision.mission.mission_assembler import ProductiveWindowAssessment
 from decision.models.candidate import Candidate, CandidateProvenance
 from decision.models.candidate_rejection import (
     CandidateRejection,
@@ -25,11 +27,20 @@ from decision.services.tonight_application_service import (
     TonightResult,
     TonightStatus,
 )
+from decision.services.candidate_assessment import (
+    CandidateAssessment,
+    CandidateViabilityEvaluator,
+)
 import decision.services.tonight_application_service as tonight_service_module
 from decision.weather.weather_ingress import (
     WeatherIngressError,
     WeatherInsufficientError,
     WeatherSnapshot,
+)
+from decision.weather.weather_trust_decision import (
+    WeatherDecisionAdmissibility,
+    WeatherEvidenceQuality,
+    WeatherTrustDecision,
 )
 from decision.validation.weather_window_coverage import WeatherWindowCoverageError
 from decision.validation.decision_consistency import DecisionConsistencyError
@@ -282,6 +293,121 @@ def test_tonight_omitted_availability_remains_none_through_service_call():
 
     assert response.status_code == 200
     assert evaluation_calls[0]["availability"] is None
+
+
+def test_gp04_api_exposes_only_physically_viable_actionable_alternatives(monkeypatch):
+    reference = datetime(2026, 8, 29, 20, tzinfo=timezone.utc)
+    weather = make_weather_snapshot(reference - timedelta(minutes=5))
+    primary = make_result().recommendation.opportunity.candidate
+    unavailable = replace(
+        primary,
+        name="Orion",
+        catalog_key="M42",
+        decision_score=76.0,
+        final_score=77.0,
+    )
+    actionable = replace(
+        primary,
+        name="Triangulum",
+        catalog_key="M33",
+        decision_score=72.0,
+        final_score=73.0,
+    )
+    recommendation = Recommendation(
+        opportunity=Opportunity(
+            action=Action.START_PROJECT,
+            candidate=primary,
+            shortlist_entries=(unavailable, actionable),
+        ),
+        confidence=0.91,
+    )
+    result = replace(make_result(), recommendation=recommendation)
+
+    def physical_assessment(start, end):
+        hours = (end - start).total_seconds() / 3600
+        return CandidateAssessment(
+            productive_window=ProductiveWindowAssessment(
+                window_start=start,
+                window_end=end,
+                recommended_hours=hours,
+                expected_gain=0.0,
+                productivity=SimpleNamespace(
+                    astronomical_hours=hours,
+                    productive_hours=hours,
+                    confidence=1.0,
+                    windows=[SimpleNamespace(
+                        start_hour=0.0,
+                        end_hour=hours,
+                        productivity=1.0,
+                        productive=True,
+                    )],
+                    timeline=(SimpleNamespace(
+                        start_hour=0.0,
+                        end_hour=hours,
+                        productivity_score=1.0,
+                    ),),
+                ),
+            ),
+            weather_decision=WeatherTrustDecision(
+                evidence_quality=WeatherEvidenceQuality.SUFFICIENT,
+                admissibility=WeatherDecisionAdmissibility.ADMISSIBLE,
+                reasons=(),
+            ),
+        )
+
+    assessments = {
+        "M42": physical_assessment(
+            datetime(2026, 9, 1, 20, tzinfo=timezone.utc),
+            datetime(2026, 9, 1, 21, tzinfo=timezone.utc),
+        ),
+        "M33": physical_assessment(
+            datetime(2026, 9, 1, 23, tzinfo=timezone.utc),
+            datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
+        ),
+    }
+    monkeypatch.setattr(
+        app_module,
+        "_assess_shortlist_candidates",
+        lambda *args, **kwargs: assessments,
+    )
+
+    class Service:
+        def evaluate(self, **kwargs):
+            return result
+
+    client = TestClient(create_app(
+        service_factory=lambda: Service(),
+        weather_provider=lambda lat, lon: weather,
+        profile_provider=valid_profile,
+        clock=lambda: reference,
+    ))
+    response = client.post(
+        "/v1/tonight",
+        json={
+            "availability": {
+                "mode": "fixed_window",
+                "start": "2026-09-01T23:30:00+00:00",
+                "end": "2026-09-02T00:30:00+00:00",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert CandidateViabilityEvaluator.is_viable(assessments["M42"]) is True
+    assert CandidateViabilityEvaluator.is_viable(assessments["M33"]) is True
+    assert [entry["catalog_key"] for entry in payload["alternatives"]] == ["M33"]
+    physical_shortlist = {
+        entry["catalog_key"]: entry for entry in payload["shortlist_entries"]
+    }
+    assert physical_shortlist["M42"]["target_decision_status"] == "viable"
+    assert all(entry["catalog_key"] != "M42" for entry in payload["rejected_targets"])
+    assert all(
+        entry["catalog_key"] != "M42"
+        for entry in payload["insufficient_evidence_targets"]
+    )
+    assert payload["target"] == "Andromeda"
+    assert payload["catalog_key"] == "M31"
 
 
 def test_tonight_availability_transport_does_not_invoke_windowing(monkeypatch):
