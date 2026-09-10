@@ -26,6 +26,12 @@ from decision.models.outcome_evidence import (
     OutcomeEvidenceSource,
     TechnicalOutcomeEvidence,
 )
+from decision.models.portfolio_credit import PortfolioCredit
+from decision.models.portfolio_credit_application import (
+    PortfolioCreditApplication,
+    PortfolioCreditApplicationOutcome,
+    PortfolioCreditDestinationKind,
+)
 from decision.models.recommendation_reason import (
     RecommendationReasonCategory,
     RecommendationReasonScope,
@@ -317,6 +323,79 @@ class OutcomeEvidenceResponse(BaseModel):
     source: OutcomeEvidenceSource
     actual_capture_duration: timedelta | None = None
     usable_integration_duration: timedelta | None = None
+
+
+class PortfolioCreditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    credit_id: str
+    execution_id: str
+    evidence_ids: tuple[str, ...]
+    usable_integration_duration: timedelta
+    credited_at: datetime
+
+    def to_domain(self) -> PortfolioCredit:
+        return PortfolioCredit(
+            credit_id=self.credit_id,
+            execution_id=self.execution_id,
+            evidence_ids=self.evidence_ids,
+            usable_integration_duration=self.usable_integration_duration,
+            credited_at=self.credited_at,
+        )
+
+    @model_validator(mode="after")
+    def validate_domain_contract(self):
+        try:
+            self.to_domain()
+        except (TypeError, ValueError) as exc:
+            raise ValueError(str(exc)) from exc
+        return self
+
+
+class PortfolioCreditApplicationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    application_id: str
+    credit_id: str
+    object_name: str
+    destination_kind: PortfolioCreditDestinationKind
+    applied_duration: timedelta
+    applied_at: datetime
+
+    def to_domain(self) -> PortfolioCreditApplication:
+        return PortfolioCreditApplication(
+            application_id=self.application_id,
+            credit_id=self.credit_id,
+            object_name=self.object_name,
+            destination_kind=self.destination_kind,
+            applied_duration=self.applied_duration,
+            applied_at=self.applied_at,
+        )
+
+    @model_validator(mode="after")
+    def validate_domain_contract(self):
+        try:
+            self.to_domain()
+        except (TypeError, ValueError) as exc:
+            raise ValueError(str(exc)) from exc
+        return self
+
+
+class PortfolioCreditApplicationCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    credit: PortfolioCreditRequest
+    application: PortfolioCreditApplicationRequest
+
+
+class PortfolioCreditApplicationResponse(BaseModel):
+    outcome: PortfolioCreditApplicationOutcome
+    application_id: str
+    credit_id: str
+    object_name: str
+    destination_kind: PortfolioCreditDestinationKind
+    applied_duration: timedelta
+    applied_at: datetime
 
 
 class TonightReasonModel(BaseModel):
@@ -1497,6 +1576,61 @@ def create_app(
                 "usable_integration_duration",
                 None,
             ),
+        )
+
+    @application.post(
+        "/v1/portfolio-credit-applications",
+        response_model=PortfolioCreditApplicationResponse,
+        summary="Apply validated portfolio credit to an explicit destination",
+    )
+    def apply_durable_portfolio_credit(
+        request: PortfolioCreditApplicationCommand,
+    ):
+        command = getattr(application_service(), "apply_portfolio_credit", None)
+        if command is None:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "portfolio_credit_application_unavailable"},
+            )
+        try:
+            result = command(
+                request.application.to_domain(),
+                request.credit.to_domain(),
+            )
+        except OSError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "portfolio_credit_persistence_unavailable"},
+            ) from exc
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": str(exc)},
+            ) from exc
+        except (TypeError, ValueError) as exc:
+            code = str(exc)
+            raise HTTPException(
+                status_code=(
+                    404
+                    if code in {
+                        "execution_not_found",
+                        "evidence_not_found",
+                        "project_destination_unresolved",
+                    }
+                    else 409
+                ),
+                detail={"code": code},
+            ) from exc
+
+        applied = result.application
+        return PortfolioCreditApplicationResponse(
+            outcome=result.outcome,
+            application_id=applied.application_id,
+            credit_id=applied.credit_id,
+            object_name=applied.object_name,
+            destination_kind=applied.destination_kind,
+            applied_duration=applied.applied_duration,
+            applied_at=applied.applied_at,
         )
 
     return application

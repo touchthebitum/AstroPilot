@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import astropilot.app as app_module
+import astropilot.user_profile as user_profile
 import decision.services.session_availability_windowing as availability_windowing
 from astropilot.app import create_app
 from astropilot.user_profile import UserProfileError
@@ -27,6 +28,9 @@ from decision.recommendation.recommendation import Recommendation
 from decision.services.tonight_application_service import (
     TonightResult,
     TonightStatus,
+)
+from decision.services.durable_tonight_application_service import (
+    DurableTonightApplicationService,
 )
 from decision.services.candidate_assessment import (
     CandidateAssessment,
@@ -1518,3 +1522,400 @@ def test_execution_creation_payload_rejects_state_and_hidden_timing_shortcuts():
     )
 
     assert response.status_code == 422
+
+
+def test_portfolio_credit_application_command_preserves_explicit_provenance():
+    calls = []
+
+    class Service:
+        def apply_portfolio_credit(self, application, credit):
+            calls.append((application, credit))
+            from decision.models.portfolio_credit_application import (
+                PortfolioCreditApplicationOutcome,
+                PortfolioCreditApplicationResult,
+            )
+
+            return PortfolioCreditApplicationResult(
+                application,
+                PortfolioCreditApplicationOutcome.APPLIED,
+            )
+
+    client = TestClient(create_app(
+        service_factory=lambda: Service(),
+        weather_provider=lambda lat, lon: object(),
+        profile_provider=valid_profile,
+    ))
+    response = client.post(
+        "/v1/portfolio-credit-applications",
+        json={
+            "credit": {
+                "credit_id": "credit-1",
+                "execution_id": "execution-1",
+                "evidence_ids": ["evidence-1"],
+                "usable_integration_duration": "PT1H12M",
+                "credited_at": "2026-09-10T23:12:00+00:00",
+            },
+            "application": {
+                "application_id": "application-1",
+                "credit_id": "credit-1",
+                "object_name": "M31",
+                "destination_kind": "project",
+                "applied_duration": "PT1H12M",
+                "applied_at": "2026-09-11T01:00:00+00:00",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "outcome": "applied",
+        "application_id": "application-1",
+        "credit_id": "credit-1",
+        "object_name": "M31",
+        "destination_kind": "project",
+        "applied_duration": "PT1H12M",
+        "applied_at": "2026-09-11T01:00:00Z",
+    }
+    recorded_application, recorded_credit = calls[0]
+    assert recorded_credit.usable_integration_duration == timedelta(hours=1, minutes=12)
+    assert recorded_application.applied_duration == timedelta(hours=1, minutes=12)
+
+
+GP08_START = datetime(2026, 9, 10, 22, tzinfo=timezone.utc)
+GP08_END = datetime(2026, 9, 10, 23, 12, tzinfo=timezone.utc)
+
+
+class GP08MissionStore:
+    def __init__(self, mission):
+        self.mission = mission
+
+    def load_mission(self, mission_id):
+        if mission_id == self.mission.mission_id:
+            return self.mission
+        return None
+
+
+def gp08_mission():
+    return NightMission(
+        target="M31",
+        confidence="HIGH",
+        equipment=["widefield"],
+        window_start=GP08_START,
+        window_end=GP08_START + timedelta(hours=4),
+        recommended_hours=4.0,
+        site_name="Mont Sujet",
+        mission_id="mission-gp08",
+        decision_id="decision-gp08",
+        selection_id="selection-gp08",
+    )
+
+
+def gp08_profile():
+    return {
+        "active_equipment": "samyang_183",
+        "available_equipment": ["samyang_183"],
+        "projects": {
+            "M31": {
+                "hours": 2.0,
+                "target_hours": 20.0,
+                "importance": 8,
+            }
+        },
+        "sessions": [],
+    }
+
+
+def gp08_service(mission):
+    return DurableTonightApplicationService(
+        application_service=object(),
+        evidence_store=object(),
+        decision_id_factory=lambda: "unused",
+        acceptance_service=GP08MissionStore(mission),
+        profile_loader=user_profile.load_user_profile,
+        profile_saver=user_profile.save_user_profile,
+    )
+
+
+def gp08_client(mission):
+    return TestClient(
+        create_app(
+            service_factory=lambda: gp08_service(mission),
+            weather_provider=lambda lat, lon: object(),
+            profile_provider=valid_profile,
+        )
+    )
+
+
+def gp08_credit_command(
+    *,
+    object_name="M31",
+    credit_duration="PT1H12M",
+    application_duration="PT1H12M",
+    applied_at="2026-09-11T01:00:00+00:00",
+):
+    return {
+        "credit": {
+            "credit_id": "credit-gp08",
+            "execution_id": "execution-gp08",
+            "evidence_ids": ["evidence-gp08"],
+            "usable_integration_duration": credit_duration,
+            "credited_at": "2026-09-10T23:12:00+00:00",
+        },
+        "application": {
+            "application_id": "application-gp08",
+            "credit_id": "credit-gp08",
+            "object_name": object_name,
+            "destination_kind": "project",
+            "applied_duration": application_duration,
+            "applied_at": applied_at,
+        },
+    }
+
+
+def create_gp08_execution(client):
+    response = client.post(
+        "/v1/executions",
+        json={
+            "execution_id": "execution-gp08",
+            "mission_id": "mission-gp08",
+        },
+    )
+    assert response.status_code == 200, response.json()
+    return response
+
+
+def transition_gp08_in_progress(client):
+    response = client.post(
+        "/v1/execution-transitions",
+        json={
+            "execution_id": "execution-gp08",
+            "mission_id": "mission-gp08",
+            "status": "in_progress",
+            "actual_start": GP08_START.isoformat(),
+            "actual_end": None,
+            "actual_duration": None,
+        },
+    )
+    assert response.status_code == 200, response.json()
+    return response
+
+
+def transition_gp08_interrupted(client):
+    response = client.post(
+        "/v1/execution-transitions",
+        json={
+            "execution_id": "execution-gp08",
+            "mission_id": "mission-gp08",
+            "status": "interrupted",
+            "actual_start": GP08_START.isoformat(),
+            "actual_end": GP08_END.isoformat(),
+            "actual_duration": "PT1H12M",
+        },
+    )
+    assert response.status_code == 200, response.json()
+    return response
+
+
+def record_gp08_evidence(client):
+    response = client.post(
+        "/v1/outcome-evidence",
+        json={
+            "evidence_id": "evidence-gp08",
+            "execution_id": "execution-gp08",
+            "category": "acquisition",
+            "observed_at": "2026-09-10T23:20:00+00:00",
+            "source": "user",
+            "actual_capture_duration": "PT2H",
+            "usable_integration_duration": "PT1H12M",
+        },
+    )
+    assert response.status_code == 200, response.json()
+    return response
+
+
+def prepare_creditable_gp08(client):
+    created = create_gp08_execution(client)
+    in_progress = transition_gp08_in_progress(client)
+    interrupted = transition_gp08_interrupted(client)
+    evidence = record_gp08_evidence(client)
+    return created, in_progress, interrupted, evidence
+
+
+def test_gp08_planned_four_hours_interrupted_and_credits_only_one_hour_twelve(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+    user_profile.save_user_profile(gp08_profile())
+
+    def forbidden_record_session(*args, **kwargs):
+        pytest.fail("GP-08 must not call legacy record_session")
+
+    monkeypatch.setattr(user_profile, "record_session", forbidden_record_session)
+    mission = gp08_mission()
+    client = gp08_client(mission)
+    created, in_progress, interrupted, evidence = prepare_creditable_gp08(client)
+
+    applied = client.post(
+        "/v1/portfolio-credit-applications",
+        json=gp08_credit_command(),
+    )
+    persisted_after_apply = user_profile.load_user_profile()
+
+    reconstructed_client = gp08_client(mission)
+    replay = reconstructed_client.post(
+        "/v1/portfolio-credit-applications",
+        json=gp08_credit_command(),
+    )
+    persisted_after_replay = user_profile.load_user_profile()
+
+    assert mission.recommended_hours == 4.0
+    assert mission.window_end - mission.window_start == timedelta(hours=4)
+    assert (mission.mission_id, mission.decision_id, mission.selection_id) == (
+        "mission-gp08",
+        "decision-gp08",
+        "selection-gp08",
+    )
+    assert created.json()["status"] == "not_started"
+    assert in_progress.json()["status"] == "in_progress"
+    assert interrupted.json()["status"] == "interrupted"
+    assert interrupted.json()["actual_duration"] == "PT1H12M"
+    assert evidence.json()["usable_integration_duration"] == "PT1H12M"
+    assert applied.status_code == 200, applied.json()
+    assert applied.json()["outcome"] == "applied"
+    assert persisted_after_apply["projects"]["M31"]["hours"] == 3.2
+    assert persisted_after_apply["projects"]["M31"]["hours"] != 6.0
+    assert persisted_after_apply["projects"]["M31"]["hours"] != 4.0
+    assert persisted_after_apply["sessions"] == []
+    assert replay.status_code == 200, replay.json()
+    assert replay.json()["outcome"] == "already_applied"
+    assert persisted_after_replay == persisted_after_apply
+
+
+def test_portfolio_credit_api_unknown_execution_and_evidence_fail_closed(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+    user_profile.save_user_profile(gp08_profile())
+    client = gp08_client(gp08_mission())
+
+    missing_execution = client.post(
+        "/v1/portfolio-credit-applications",
+        json=gp08_credit_command(),
+    )
+    create_gp08_execution(client)
+    transition_gp08_in_progress(client)
+    transition_gp08_interrupted(client)
+    missing_evidence = client.post(
+        "/v1/portfolio-credit-applications",
+        json=gp08_credit_command(),
+    )
+
+    assert missing_execution.status_code == 404
+    assert missing_execution.json()["detail"]["code"] == "execution_not_found"
+    assert missing_evidence.status_code == 404
+    assert missing_evidence.json()["detail"]["code"] == "evidence_not_found"
+    assert user_profile.load_user_profile()["projects"]["M31"]["hours"] == 2.0
+
+
+def test_portfolio_credit_api_ineligible_execution_fails_closed(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+    user_profile.save_user_profile(gp08_profile())
+    client = gp08_client(gp08_mission())
+    create_gp08_execution(client)
+    record_gp08_evidence(client)
+
+    response = client.post(
+        "/v1/portfolio-credit-applications",
+        json=gp08_credit_command(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "execution_status_ineligible"
+    assert user_profile.load_user_profile()["projects"]["M31"]["hours"] == 2.0
+
+
+def test_portfolio_credit_api_rejects_evidenced_duration_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+    user_profile.save_user_profile(gp08_profile())
+    client = gp08_client(gp08_mission())
+    prepare_creditable_gp08(client)
+
+    response = client.post(
+        "/v1/portfolio-credit-applications",
+        json=gp08_credit_command(
+            credit_duration="PT1H",
+            application_duration="PT1H",
+        ),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "usable_integration_total_mismatch"
+    assert user_profile.load_user_profile()["projects"]["M31"]["hours"] == 2.0
+
+
+def test_portfolio_credit_api_unresolved_project_fails_closed(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+    user_profile.save_user_profile(gp08_profile())
+    client = gp08_client(gp08_mission())
+    prepare_creditable_gp08(client)
+
+    response = client.post(
+        "/v1/portfolio-credit-applications",
+        json=gp08_credit_command(object_name="NGC7000"),
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "project_destination_unresolved"
+    assert set(user_profile.load_user_profile()["projects"]) == {"M31"}
+
+
+def test_portfolio_credit_api_rejects_timezone_naive_applied_at():
+    client = TestClient(
+        create_app(
+            service_factory=lambda: object(),
+            weather_provider=lambda lat, lon: object(),
+            profile_provider=valid_profile,
+        )
+    )
+
+    response = client.post(
+        "/v1/portfolio-credit-applications",
+        json=gp08_credit_command(applied_at="2026-09-11T01:00:00"),
+    )
+
+    assert response.status_code == 422
+
+
+def test_portfolio_credit_api_persistence_failure_is_not_success():
+    class FailingService:
+        def apply_portfolio_credit(self, application, credit):
+            raise OSError("replace failed")
+
+    client = TestClient(
+        create_app(
+            service_factory=lambda: FailingService(),
+            weather_provider=lambda lat, lon: object(),
+            profile_provider=valid_profile,
+        )
+    )
+
+    response = client.post(
+        "/v1/portfolio-credit-applications",
+        json=gp08_credit_command(),
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == (
+        "portfolio_credit_persistence_unavailable"
+    )
