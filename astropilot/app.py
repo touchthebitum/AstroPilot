@@ -16,6 +16,7 @@ from decision.models.session_availability import (
     SessionAvailability,
     SessionAvailabilityMode,
 )
+from decision.models.user_selection import UserSelection, UserSelectionSource
 from decision.models.recommendation_reason import (
     RecommendationReasonCategory,
     RecommendationReasonScope,
@@ -52,6 +53,8 @@ from decision.services.candidate_assessment import (
     CandidateViabilityEvaluator,
     select_actionable_alternatives,
 )
+from decision.services.decision_acceptance_application import DecisionAcceptanceError
+from decision.services.user_selection_validator import UserSelectionValidationError
 from decision.weather.provider_reliability import WeatherLocation
 from decision.weather.weather_trust_decision import (
     WeatherDecisionAdmissibility,
@@ -149,6 +152,41 @@ class TonightRequest(BaseModel):
         "nightscape",
     ] = "deep_sky"
     bortle: int | None = Field(default=None, ge=1, le=9)
+
+
+class UserSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    decision_id: str
+    selection_id: str
+    source: UserSelectionSource
+    selected_catalog_key: str | None = None
+    selected_at: datetime
+
+    def to_domain(self) -> UserSelection:
+        return UserSelection(
+            selection_id=self.selection_id,
+            decision_id=self.decision_id,
+            selected_catalog_key=self.selected_catalog_key,
+            source=self.source,
+            selected_at=self.selected_at,
+        )
+
+    @model_validator(mode="after")
+    def validate_domain_contract(self):
+        try:
+            self.to_domain()
+        except (TypeError, ValueError) as exc:
+            raise ValueError(str(exc)) from exc
+        return self
+
+
+class UserSelectionResponse(BaseModel):
+    status: Literal["accepted", "declined"]
+    mission_id: str | None = None
+    decision_id: str
+    selection_id: str
+    catalog_key: str | None = None
 
 
 class TonightReasonModel(BaseModel):
@@ -690,6 +728,14 @@ def create_app(
     clock: Callable[[], datetime] = _utc_now,
 ) -> FastAPI:
     application = FastAPI(title="AstroPilot API", version="1.0.0")
+    resolved_service = None
+
+    def application_service():
+        nonlocal resolved_service
+        if resolved_service is None:
+            resolved_service = service_factory()
+        return resolved_service
+
     web_root = Path(__file__).with_name("web")
     application.mount(
         "/ui",
@@ -915,7 +961,7 @@ def create_app(
             )
 
         try:
-            result = service_factory().evaluate(
+            result = application_service().evaluate(
                 profile=profile,
                 weather=weather,
                 reference_time_utc=reference_time_utc,
@@ -1147,6 +1193,36 @@ def create_app(
                 ),
             )
 
+        register_decision_context = getattr(
+            application_service(),
+            "register_decision_context",
+            None,
+        )
+        if (
+            register_decision_context is not None
+            and result.decision_id is not None
+            and opportunity is not None
+            and result.night is not None
+        ):
+            object_evaluations = result.night.get("object_evaluations") or {}
+            register_decision_context(
+                decision_id=result.decision_id,
+                recommendation=recommendation,
+                night=result.night,
+                profile={
+                    **profile,
+                    "location": inputs.location,
+                    "active_equipment": inputs.equipment,
+                    "available_equipment": [inputs.equipment],
+                },
+                availability=inputs.availability,
+                primary_catalog_key=opportunity.candidate.catalog_key,
+                exposed_alternative_catalog_keys=tuple(
+                    candidate.catalog_key for candidate in selected_alternatives
+                ),
+                explicitly_evaluated_catalog_keys=tuple(object_evaluations),
+            )
+
         payload = TonightResponse.from_result(
             result,
             weather_decision=weather_decision,
@@ -1164,6 +1240,43 @@ def create_app(
         if isinstance(weather, WeatherSnapshot):
             payload["weather_trust"] = weather.trust_transport(weather_freshness)
         return payload
+
+    @application.post(
+        "/v1/decision-selections",
+        response_model=UserSelectionResponse,
+        summary="Accept or decline an exact Tonight decision",
+    )
+    def accept_decision(request: UserSelectionRequest):
+        selection = request.to_domain()
+        accept = getattr(application_service(), "accept", None)
+        if accept is None:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "decision_acceptance_unavailable"},
+            )
+        try:
+            mission = accept(selection)
+        except DecisionAcceptanceError as exc:
+            code = str(exc)
+            raise HTTPException(
+                status_code=404 if code == "decision_context_not_found" else 409,
+                detail={"code": code},
+            ) from exc
+        except UserSelectionValidationError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": str(exc)},
+            ) from exc
+
+        return UserSelectionResponse(
+            status="declined" if mission is None else "accepted",
+            mission_id=mission.mission_id if mission is not None else None,
+            decision_id=selection.decision_id,
+            selection_id=selection.selection_id,
+            catalog_key=(
+                selection.selected_catalog_key if mission is not None else None
+            ),
+        )
 
     return application
 

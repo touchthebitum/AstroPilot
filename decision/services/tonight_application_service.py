@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
@@ -17,7 +17,6 @@ from decision.models.candidate_rejection import (
 )
 from decision.models.session_availability import SessionAvailability
 from decision.recommendation.recommendation import Recommendation
-from decision.validation.decision_consistency import DecisionConsistencyGate
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 
 
@@ -234,56 +233,11 @@ class TonightApplicationService:
                 candidate_rejections=candidate_rejections,
             )
 
-        candidate = recommendation.opportunity.candidate
-        recommended_key = candidate.get(
-            "catalog_key",
-            candidate.get("name"),
-        )
-
-        def build_operational_mission_input(evaluation):
-            mission_input = self.build_mission_input(
-                evaluation,
-                profile=effective_profile,
-            )
-            if inputs.availability is None:
-                return mission_input
-            return replace(
-                mission_input,
-                availability=inputs.availability,
-            )
-
-        mission = self.tonight_mission_service.create(
-            winner=night,
-            objects=top_objects,
-            recommended_key=recommended_key,
-            build_mission_input=build_operational_mission_input,
-        )
-
-        if mission is None:
-            return TonightResult(
-                night,
-                recommendation,
-                None,
-                status=(
-                    TonightStatus.NO_PRODUCTIVE_WINDOW
-                    if inputs.availability is not None
-                    else TonightStatus.NO_MISSION
-                ),
-                forecast_evidence=forecast_evidence,
-                candidate_rejections=candidate_rejections,
-            )
-
-        DecisionConsistencyGate.validate_mission(mission)
-
         return TonightResult(
             night,
             recommendation,
-            mission,
-            status=(
-                TonightStatus.AVAILABLE
-                if DecisionConsistencyGate.has_productive_window(mission)
-                else TonightStatus.NO_PRODUCTIVE_WINDOW
-            ),
+            None,
+            status=TonightStatus.AVAILABLE,
             forecast_evidence=forecast_evidence,
             candidate_rejections=candidate_rejections,
         )
