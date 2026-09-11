@@ -2,6 +2,7 @@ import json
 import requests
 import warnings
 from dataclasses import replace
+from math import isfinite
 from decision.services.tonight_mission_service import (
     TonightMissionService,
 )
@@ -87,6 +88,7 @@ from decision.models.context.sky_context import SkyContext
 from decision.models.context.equipment_context import EquipmentContext
 from decision.models.context.portfolio_context import PortfolioContext
 from decision.models.context.preferences_context import PreferencesContext
+from decision.validation.decision_consistency import DecisionConsistencyError
 from decision.models.sky.celestial_object import CelestialObject
 from decision.models.equipment.camera import Camera
 from decision.models.equipment.mount import Mount
@@ -1228,7 +1230,49 @@ def build_decision_context(
     lon,
     bortle,
 ):
-    clouds = best.get("clouds", 0)
+    issues = []
+    selected_start = best.get("start")
+    selected_end = best.get("end")
+    for name, value in (
+        ("start", selected_start),
+        ("end", selected_end),
+    ):
+        if name not in best:
+            issues.append(f"missing_session_{name}")
+        elif (
+            not isinstance(value, datetime)
+            or value.tzinfo is None
+            or value.utcoffset() is None
+        ):
+            issues.append(f"invalid_session_{name}")
+    if (
+        isinstance(selected_start, datetime)
+        and selected_start.tzinfo is not None
+        and isinstance(selected_end, datetime)
+        and selected_end.tzinfo is not None
+        and selected_end <= selected_start
+    ):
+        issues.append("session_window_not_forward")
+
+    critical_weather = {}
+    for name in ("clouds", "humidity", "wind", "seeing", "visibility"):
+        if name not in best:
+            issues.append(f"missing_{name}")
+            continue
+        value = best[name]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(value)
+        ):
+            issues.append(f"invalid_{name}")
+            continue
+        critical_weather[name] = value
+
+    if issues:
+        raise DecisionConsistencyError(issues)
+
+    clouds = critical_weather["clouds"]
 
     camera = Camera(
         manufacturer=selected_setup_profile["camera_manufacturer"],
@@ -1273,16 +1317,13 @@ def build_decision_context(
         angular_size_arcmin=CATALOG.get(obj_name, {}).get("size_arcmin"),
     )
 
-    selected_start = best.get("start")
-    session_zone = getattr(selected_start, "tzinfo", None)
-    if session_zone is None:
-        session_zone = LocationTimeResolver.resolve(lat, lon).zone
-    session_start = datetime.now(session_zone)
+    session_zone = selected_start.tzinfo
+    available_duration = selected_end - selected_start
 
     session_context = SessionContext(
-        start_time=session_start,
-        end_time=session_start + timedelta(hours=3),
-        available_duration=timedelta(hours=3),
+        start_time=selected_start,
+        end_time=selected_end,
+        available_duration=available_duration,
     )
 
     site_context = SiteContext(
@@ -1297,16 +1338,13 @@ def build_decision_context(
 
     weather_context = WeatherContext(
         cloud_cover=clouds,
-        humidity=best.get("humidity", 0),
-        wind_speed_kmh=best.get("wind", 0),
-        seeing_arcsec=best.get("seeing"),
+        humidity=critical_weather["humidity"],
+        wind_speed_kmh=critical_weather["wind"],
+        seeing_arcsec=critical_weather["seeing"],
         transparency=None,
         temperature_c=None,
         forecast_confidence=None,
-        visibility=best.get(
-            "visibility",
-            best.get("visibility_m", 0),
-        ),
+        visibility=critical_weather["visibility"],
     )
 
     sky_context = SkyContext(
