@@ -23,7 +23,7 @@ def test_configuration_service_persists_valid_filter_targets():
 
     service = FilterTargetConfigurationService(
         load_profile=lambda: profile,
-        save_profile=lambda value: saved.setdefault(
+        save_profile=lambda value, **kwargs: saved.setdefault(
             "profile",
             value,
         ),
@@ -142,7 +142,7 @@ def test_configuration_service_clears_filter_targets():
 
     service = FilterTargetConfigurationService(
         load_profile=lambda: profile,
-        save_profile=lambda value: saved.setdefault(
+        save_profile=lambda value, **kwargs: saved.setdefault(
             "profile",
             value,
         ),
@@ -248,6 +248,34 @@ def test_configuration_service_get_rejects_unknown_project():
         service.get(
             project_name="UNKNOWN",
         )
+
+
+@pytest.mark.parametrize("operation", ["configure", "clear"])
+def test_mutating_operations_pass_loaded_revision_to_saver(operation):
+    profile = _profile()
+    profile["profile_revision"] = 7
+    profile["projects"]["IC1396"]["filter_targets"] = {
+        "Ha": 6.0,
+        "OIII": 5.0,
+        "SII": 4.0,
+    }
+    saves = []
+    service = FilterTargetConfigurationService(
+        load_profile=lambda: profile,
+        save_profile=lambda value, *, expected_revision: saves.append(
+            (value, expected_revision)
+        ),
+    )
+
+    if operation == "configure":
+        service.configure(
+            project_name="IC1396",
+            filter_targets={"LRGB": 15.0},
+        )
+    else:
+        service.clear(project_name="IC1396")
+
+    assert saves[0][1] == 7
 
 def test_configuration_service_describes_configured_project():
     profile = _profile()

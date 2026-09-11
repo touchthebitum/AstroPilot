@@ -1,10 +1,12 @@
 import copy
+import fcntl
 import json
 import math
 import os
 import sys
 import tempfile
 from collections.abc import Mapping
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
@@ -16,6 +18,24 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 
 class UserProfileError(Exception):
     pass
+
+
+class ProfileRevisionConflictError(UserProfileError):
+    pass
+
+
+def _profile_revision(profile, profile_path: Path) -> int:
+    revision = profile.get("profile_revision", 0)
+    if (
+        not isinstance(revision, int)
+        or isinstance(revision, bool)
+        or revision < 0
+    ):
+        raise UserProfileError(
+            f"Champ profile_revision invalide dans {profile_path} : "
+            "entier positif ou nul attendu."
+        )
+    return revision
 
 
 PROFILE_CONTAINER_TYPES = {
@@ -147,6 +167,8 @@ def validate_user_profile(profile, profile_path: Path):
             f"Structure invalide dans {profile_path} : "
             "objet JSON attendu à la racine."
         )
+
+    _profile_revision(profile, profile_path)
 
     for field_name, (
         expected_type,
@@ -497,6 +519,8 @@ def validate_user_profile(profile, profile_path: Path):
 
 def create_or_replace_user_configuration(
     candidate: Mapping[str, object],
+    *,
+    expected_revision: int | None = None,
 ) -> dict:
     if not isinstance(candidate, Mapping):
         raise UserProfileError(
@@ -584,7 +608,6 @@ def create_or_replace_user_configuration(
     normalized.setdefault("sessions", [])
 
     validate_user_profile(normalized, Path("user_profile.json"))
-
     try:
         document = json.dumps(
             normalized,
@@ -600,37 +623,10 @@ def create_or_replace_user_configuration(
             "document JSON non sérialisable."
         ) from error
 
-    data_dir = get_user_data_dir()
-    data_dir.mkdir(parents=True, exist_ok=True)
-    profile_path = data_dir / "user_profile.json"
-    temporary_path = None
-
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=data_dir,
-            prefix=".user_profile.",
-            suffix=".tmp",
-            delete=False,
-        ) as temporary:
-            temporary_path = Path(temporary.name)
-            temporary.write(document)
-            temporary.flush()
-            os.fsync(temporary.fileno())
-
-        os.replace(temporary_path, profile_path)
-        temporary_path = None
-    finally:
-        if temporary_path is not None:
-            primary_error = sys.exception()
-            try:
-                temporary_path.unlink(missing_ok=True)
-            except OSError:
-                if primary_error is None:
-                    raise
-
-    return normalized
+    return save_user_profile(
+        normalized,
+        expected_revision=expected_revision,
+    )
 
 
 def load_user_profile():
@@ -651,7 +647,9 @@ def load_user_profile():
             f"(ligne {exc.lineno}, colonne {exc.colno})."
         ) from exc
 
-    return validate_user_profile(profile, profile_path)
+    validated = validate_user_profile(profile, profile_path)
+    validated.setdefault("profile_revision", 0)
+    return validated
 
 
 def load_locations():
@@ -665,20 +663,99 @@ def favorite_targets():
         .get("favorite_targets", ["galaxy", "nebula"])
     )
 
-def save_user_profile(profile):
+@contextmanager
+def _profile_write_lock(data_dir: Path):
+    lock_path = data_dir / ".user_profile.lock"
+    with lock_path.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _load_current_profile(path: Path) -> dict | None:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            profile = json.load(handle)
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError as exc:
+        raise UserProfileError(
+            f"Profil utilisateur JSON invalide : {path} "
+            f"(ligne {exc.lineno}, colonne {exc.colno})."
+        ) from exc
+    return validate_user_profile(profile, path)
+
+
+def save_user_profile(profile, *, expected_revision: int | None = None):
+    if not isinstance(profile, Mapping):
+        raise UserProfileError("Structure profil invalide : mapping attendu.")
     data_dir = get_user_data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
     path = data_dir / "user_profile.json"
-    temp_path = data_dir / "user_profile.json.tmp"
+    candidate = copy.deepcopy(dict(profile))
+    candidate_revision = _profile_revision(candidate, path)
+    if expected_revision is None and "profile_revision" in candidate:
+        expected_revision = candidate_revision
+    if expected_revision is not None and (
+        not isinstance(expected_revision, int)
+        or isinstance(expected_revision, bool)
+        or expected_revision < 0
+    ):
+        raise UserProfileError("expected_revision must be a non-negative integer")
 
-    with open(temp_path, "w", encoding="utf-8") as f:
-        json.dump(
-            profile,
-            f,
-            indent=4,
-            ensure_ascii=False,
+    with _profile_write_lock(data_dir):
+        current = _load_current_profile(path)
+        current_revision = (
+            _profile_revision(current, path) if current is not None else 0
         )
+        if expected_revision is None:
+            if current is not None:
+                raise ProfileRevisionConflictError("profile_revision_conflict")
+            expected_revision = 0
+        if expected_revision != current_revision:
+            raise ProfileRevisionConflictError("profile_revision_conflict")
+        if "profile_revision" in candidate and candidate_revision != expected_revision:
+            raise ProfileRevisionConflictError("profile_revision_conflict")
 
-    temp_path.replace(path)
+        candidate["profile_revision"] = expected_revision + 1
+        validate_user_profile(candidate, path)
+        try:
+            document = json.dumps(
+                candidate,
+                indent=4,
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+        except (TypeError, ValueError) as exc:
+            raise UserProfileError("Profil utilisateur non sérialisable.") from exc
+
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=data_dir,
+                prefix=".user_profile.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                temporary.write(document)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            temporary_path.replace(path)
+            temporary_path = None
+        finally:
+            if temporary_path is not None:
+                primary_error = sys.exception()
+                try:
+                    temporary_path.unlink(missing_ok=True)
+                except OSError:
+                    if primary_error is None:
+                        raise
+    return candidate
 
 
 def record_session(
@@ -691,6 +768,7 @@ def record_session(
         raise ValueError("hours must be positive")
 
     profile = load_user_profile()
+    expected_revision = profile["profile_revision"]
     projects = profile.get("projects", {})
 
     if project_name not in projects:
@@ -733,4 +811,4 @@ def record_session(
 
     sessions.append(session)
 
-    save_user_profile(profile)
+    save_user_profile(profile, expected_revision=expected_revision)

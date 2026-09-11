@@ -1,4 +1,7 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+from threading import Barrier
 
 import pytest
 
@@ -277,7 +280,8 @@ def test_save_user_profile_uses_atomic_replace(
 
     user_profile.save_user_profile(profile)
 
-    assert replaced["source"].name == "user_profile.json.tmp"
+    assert replaced["source"].name.startswith(".user_profile.")
+    assert replaced["source"].name.endswith(".tmp")
     assert replaced["target"].name == "user_profile.json"
 
 def test_record_session_persists_filter_type_when_provided(
@@ -322,3 +326,134 @@ def test_portfolio_credit_ledger_requires_a_json_object(tmp_path, monkeypatch):
 
     with pytest.raises(user_profile.UserProfileError, match="portfolio_credit_applications"):
         user_profile.load_user_profile()
+
+
+def test_legacy_profile_loads_at_revision_zero(tmp_path, monkeypatch):
+    write_profile(tmp_path / "user_profile.json")
+    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+
+    assert user_profile.load_user_profile()["profile_revision"] == 0
+
+
+@pytest.mark.parametrize("invalid_revision", [-1, 1.5, True, "1"])
+def test_profile_revision_must_be_a_non_negative_integer(
+    tmp_path,
+    monkeypatch,
+    invalid_revision,
+):
+    profile_path = tmp_path / "user_profile.json"
+    write_profile(profile_path)
+    profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    profile["profile_revision"] = invalid_revision
+    profile_path.write_text(json.dumps(profile), encoding="utf-8")
+    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+
+    with pytest.raises(user_profile.UserProfileError, match="profile_revision"):
+        user_profile.load_user_profile()
+
+
+def test_first_cas_write_increments_revision_once(tmp_path, monkeypatch):
+    write_profile(tmp_path / "user_profile.json")
+    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+    profile = user_profile.load_user_profile()
+    profile["projects"]["M31"]["hours"] = 4.0
+
+    saved = user_profile.save_user_profile(profile, expected_revision=0)
+
+    assert saved["profile_revision"] == 1
+    assert user_profile.load_user_profile()["profile_revision"] == 1
+
+
+def test_stale_cas_write_preserves_newer_document(tmp_path, monkeypatch):
+    write_profile(tmp_path / "user_profile.json")
+    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+    first = user_profile.load_user_profile()
+    stale = deepcopy(first)
+    first["preferences"] = {"bortle": 4}
+    user_profile.save_user_profile(first, expected_revision=0)
+    before = (tmp_path / "user_profile.json").read_bytes()
+    stale["projects"]["M31"]["hours"] = 9.0
+    monkeypatch.setattr(
+        user_profile.Path,
+        "replace",
+        lambda *args: pytest.fail("conflict must precede replacement"),
+    )
+
+    with pytest.raises(user_profile.ProfileRevisionConflictError):
+        user_profile.save_user_profile(stale, expected_revision=0)
+
+    assert (tmp_path / "user_profile.json").read_bytes() == before
+
+
+def test_record_session_rejects_stale_loaded_profile(tmp_path, monkeypatch):
+    write_profile(tmp_path / "user_profile.json")
+    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+    stale = deepcopy(user_profile.load_user_profile())
+    newer = deepcopy(stale)
+    newer["preferences"] = {"bortle": 4}
+    user_profile.save_user_profile(newer, expected_revision=0)
+    before = (tmp_path / "user_profile.json").read_bytes()
+    monkeypatch.setattr(
+        user_profile,
+        "load_user_profile",
+        lambda: deepcopy(stale),
+    )
+
+    with pytest.raises(user_profile.ProfileRevisionConflictError):
+        user_profile.record_session(
+            "M31",
+            1.0,
+            "2026-09-11",
+        )
+
+    assert (tmp_path / "user_profile.json").read_bytes() == before
+
+
+def test_concurrent_cas_writers_allow_exactly_one_commit(tmp_path, monkeypatch):
+    write_profile(tmp_path / "user_profile.json")
+    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+    snapshots = [deepcopy(user_profile.load_user_profile()) for _ in range(2)]
+    snapshots[0]["projects"]["M31"]["hours"] = 4.0
+    snapshots[1]["projects"]["M31"]["hours"] = 5.0
+    barrier = Barrier(2)
+
+    def save(snapshot):
+        barrier.wait()
+        try:
+            user_profile.save_user_profile(snapshot, expected_revision=0)
+            return "saved"
+        except user_profile.ProfileRevisionConflictError:
+            return "conflict"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(save, snapshots))
+
+    persisted = user_profile.load_user_profile()
+    assert sorted(outcomes) == ["conflict", "saved"]
+    assert persisted["profile_revision"] == 1
+    assert persisted["projects"]["M31"]["hours"] in {4.0, 5.0}
+
+
+def test_cas_uses_unique_temporary_files_and_cleans_them(
+    tmp_path,
+    monkeypatch,
+):
+    write_profile(tmp_path / "user_profile.json")
+    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+    temporary_names = []
+    original_replace = user_profile.Path.replace
+
+    def record_replace(path, target):
+        temporary_names.append(path.name)
+        return original_replace(path, target)
+
+    monkeypatch.setattr(user_profile.Path, "replace", record_replace)
+    for hours in (4.0, 5.0):
+        profile = user_profile.load_user_profile()
+        revision = profile["profile_revision"]
+        profile["projects"]["M31"]["hours"] = hours
+        user_profile.save_user_profile(profile, expected_revision=revision)
+
+    assert len(set(temporary_names)) == 2
+    assert user_profile.load_user_profile()["profile_revision"] == 2
+    assert not list(tmp_path.glob(".user_profile.*.tmp"))

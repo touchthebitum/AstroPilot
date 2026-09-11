@@ -375,10 +375,24 @@ def credit_application(credit_id="credit-1", object_name="M31"):
 
 def profile_callbacks(profile_path):
     def load_profile():
-        return json.loads(profile_path.read_text(encoding="utf-8"))
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+        profile.setdefault("profile_revision", 0)
+        return profile
 
-    def save_profile(profile):
-        profile_path.write_text(json.dumps(profile), encoding="utf-8")
+    def save_profile(profile, *, expected_revision):
+        current = json.loads(profile_path.read_text(encoding="utf-8"))
+        current_revision = current.get("profile_revision", 0)
+        if expected_revision != current_revision:
+            raise user_profile.ProfileRevisionConflictError(
+                "profile_revision_conflict"
+            )
+        candidate = json.loads(json.dumps(profile))
+        if candidate.get("profile_revision", 0) != expected_revision:
+            raise user_profile.ProfileRevisionConflictError(
+                "profile_revision_conflict"
+            )
+        candidate["profile_revision"] = expected_revision + 1
+        profile_path.write_text(json.dumps(candidate), encoding="utf-8")
 
     return load_profile, save_profile
 
