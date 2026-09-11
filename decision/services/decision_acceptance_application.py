@@ -3,12 +3,24 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Protocol
 
 from decision.mission.night_mission import NightMission
 from decision.models.session_availability import SessionAvailability
 from decision.models.user_selection import UserSelection, UserSelectionSource
-from decision.services.user_selection_validator import UserSelectionDecisionContext
+from decision.services.user_selection_validator import (
+    UserSelectionDecisionContext,
+    validate_user_selection,
+)
+from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
+from decision.weather.decision_forecast_evidence_persistence import (
+    DecisionForecastEvidencePersistenceError,
+)
+from decision.weather.weather_ingress import (
+    WeatherIngressError,
+    validate_weather_retrieval_freshness,
+)
 
 
 class DecisionAcceptanceError(ValueError):
@@ -49,6 +61,10 @@ class InMemoryDecisionAcceptanceContextStore:
         return deepcopy(context) if context is not None else None
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class DecisionAcceptanceApplicationService:
     def __init__(
         self,
@@ -56,11 +72,84 @@ class DecisionAcceptanceApplicationService:
         selection_mission_service,
         context_store: DecisionAcceptanceContextStore,
         mission_id_factory: Callable[[], str],
+        evidence_loader: Callable | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.selection_mission_service = selection_mission_service
         self.context_store = context_store
         self.mission_id_factory = mission_id_factory
+        self.evidence_loader = evidence_loader
+        self.clock = clock or _utc_now
         self._missions: dict[str, NightMission] = {}
+
+    def _acceptance_time(self) -> datetime:
+        value = self.clock()
+        if (
+            not isinstance(value, datetime)
+            or value.tzinfo is None
+            or value.utcoffset() is None
+        ):
+            raise DecisionAcceptanceError("decision_context_stale")
+        return value
+
+    def _validate_forecast_freshness(
+        self,
+        *,
+        decision_id: str,
+        reference_time: datetime,
+    ) -> None:
+        if self.evidence_loader is None:
+            raise DecisionAcceptanceError("decision_context_stale")
+        try:
+            evidence = self.evidence_loader(decision_id=decision_id)
+        except (DecisionForecastEvidencePersistenceError, OSError) as exc:
+            raise DecisionAcceptanceError("decision_context_stale") from exc
+        if not isinstance(evidence, DecisionForecastEvidence):
+            raise DecisionAcceptanceError("decision_context_stale")
+        points = evidence.forecast_points
+        if not points:
+            raise DecisionAcceptanceError("decision_context_stale")
+        retrieved_at = points[0].retrieved_at_utc
+        if any(point.retrieved_at_utc != retrieved_at for point in points[1:]):
+            raise DecisionAcceptanceError("decision_context_stale")
+        try:
+            validate_weather_retrieval_freshness(
+                retrieved_at,
+                reference_time_utc=reference_time,
+            )
+        except WeatherIngressError as exc:
+            raise DecisionAcceptanceError("decision_context_stale") from exc
+
+    def _validate_selected_window(
+        self,
+        *,
+        context: DecisionAcceptanceContext,
+        selection: UserSelection,
+        reference_time: datetime,
+    ) -> None:
+        if selection.source is UserSelectionSource.DECLINED:
+            return
+        evaluations = context.night.get("object_evaluations")
+        evaluation = (
+            evaluations.get(selection.selected_catalog_key)
+            if isinstance(evaluations, Mapping)
+            else None
+        )
+        decision_context = (
+            evaluation.get("decision_context")
+            if isinstance(evaluation, Mapping)
+            else None
+        )
+        session = getattr(decision_context, "session", None)
+        window_end = getattr(session, "end_time", None)
+        if (
+            not isinstance(window_end, datetime)
+            or window_end.tzinfo is None
+            or window_end.utcoffset() is None
+            or window_end.astimezone(timezone.utc)
+            <= reference_time.astimezone(timezone.utc)
+        ):
+            raise DecisionAcceptanceError("decision_context_stale")
 
     def register_decision(
         self,
@@ -101,6 +190,18 @@ class DecisionAcceptanceApplicationService:
             raise DecisionAcceptanceError("decision_context_mismatch")
         if not isinstance(context, DecisionAcceptanceContext):
             raise DecisionAcceptanceError("decision_context_incomplete")
+
+        reference_time = self._acceptance_time()
+        self._validate_forecast_freshness(
+            decision_id=selection.decision_id,
+            reference_time=reference_time,
+        )
+        validate_user_selection(selection, decision_context)
+        self._validate_selected_window(
+            context=context,
+            selection=selection,
+            reference_time=reference_time,
+        )
 
         mission_id = self.mission_id_factory()
         if not isinstance(mission_id, str) or not mission_id.strip():

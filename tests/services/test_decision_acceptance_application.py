@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -11,9 +11,38 @@ from decision.services.decision_acceptance_application import (
     InMemoryDecisionAcceptanceContextStore,
 )
 from decision.services.user_selection_validator import UserSelectionDecisionContext
+from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
+from decision.weather.provider_reliability import (
+    WeatherForecastPoint,
+    WeatherLocation,
+    WeatherValue,
+    WeatherVariable,
+)
 
 
 SELECTED_AT = datetime(2026, 9, 10, 20, tzinfo=timezone.utc)
+ACCEPTED_AT = datetime(2026, 9, 10, 21, tzinfo=timezone.utc)
+SITE = WeatherLocation(46.75, 6.55)
+DEFAULT_EVIDENCE = object()
+
+
+def forecast_evidence(*retrieved_at_values):
+    return DecisionForecastEvidence(tuple(
+        WeatherForecastPoint(
+            provider_id="open_meteo",
+            model_id="best_match",
+            retrieved_at_utc=retrieved_at,
+            forecast_for_utc=ACCEPTED_AT + timedelta(hours=index + 1),
+            requested_location=SITE,
+            grid_location=SITE,
+            values=(WeatherValue(
+                WeatherVariable.CLOUD_COVER_PERCENT,
+                20.0,
+                "%",
+            ),),
+        )
+        for index, retrieved_at in enumerate(retrieved_at_values)
+    ))
 
 
 class RecordingSelectionMissionService:
@@ -36,30 +65,56 @@ class RecordingSelectionMissionService:
         )
 
 
-def selection(source, target, *, decision_id="decision-1"):
+def selection(
+    source,
+    target,
+    *,
+    decision_id="decision-1",
+    selected_at=SELECTED_AT,
+):
     return UserSelection(
         selection_id="selection-1",
         decision_id=decision_id,
         selected_catalog_key=target,
         source=source,
-        selected_at=SELECTED_AT,
+        selected_at=selected_at,
     )
 
 
-def registered_service():
+def registered_service(
+    *,
+    evidence=DEFAULT_EVIDENCE,
+    accepted_at=ACCEPTED_AT,
+    window_end=None,
+):
+    if evidence is DEFAULT_EVIDENCE:
+        evidence = forecast_evidence(accepted_at - timedelta(minutes=30))
+    if window_end is None:
+        window_end = accepted_at + timedelta(hours=2)
     composer = RecordingSelectionMissionService()
     store = InMemoryDecisionAcceptanceContextStore()
     service = DecisionAcceptanceApplicationService(
         selection_mission_service=composer,
         context_store=store,
         mission_id_factory=lambda: "mission-1",
+        evidence_loader=lambda *, decision_id: evidence,
+        clock=lambda: accepted_at,
     )
     recommendation = SimpleNamespace(
         opportunity=SimpleNamespace(
             candidate=SimpleNamespace(catalog_key="M31")
         )
     )
-    night = {"object_evaluations": {key: {} for key in ("M31", "M42", "M33")}}
+    night = {
+        "object_evaluations": {
+            key: {
+                "decision_context": SimpleNamespace(
+                    session=SimpleNamespace(end_time=window_end)
+                )
+            }
+            for key in ("M31", "M42", "M33")
+        }
+    }
     service.register_decision(
         decision_id="decision-1",
         recommendation=recommendation,
@@ -170,3 +225,93 @@ def test_registration_snapshots_source_context_without_mutating_recommendation()
     assert stored.recommendation is not recommendation
     assert stored.decision_context.primary_catalog_key == original_primary
     assert recommendation.opportunity.candidate.catalog_key == "M31"
+
+
+@pytest.mark.parametrize(
+    "retrieved_at",
+    [
+        ACCEPTED_AT - timedelta(minutes=90, microseconds=1),
+        ACCEPTED_AT + timedelta(minutes=5, microseconds=1),
+    ],
+    ids=["too-old", "too-far-in-future"],
+)
+def test_stale_or_future_forecast_evidence_rejects_before_mission(retrieved_at):
+    evidence = forecast_evidence(retrieved_at)
+    service, composer, store, recommendation = registered_service(
+        evidence=evidence
+    )
+    service.mission_id_factory = lambda: pytest.fail(
+        "stale acceptance must stop before mission identity allocation"
+    )
+    before = store.load(decision_id="decision-1")
+
+    with pytest.raises(DecisionAcceptanceError, match="decision_context_stale"):
+        service.accept(selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"))
+
+    assert composer.calls == []
+    assert store.load(decision_id="decision-1") == before
+    assert recommendation.opportunity.candidate.catalog_key == "M31"
+    assert evidence == forecast_evidence(retrieved_at)
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        None,
+        DecisionForecastEvidence(()),
+        forecast_evidence(
+            ACCEPTED_AT - timedelta(minutes=20),
+            ACCEPTED_AT - timedelta(minutes=10),
+        ),
+    ],
+    ids=["missing", "empty", "inconsistent-retrieval-times"],
+)
+def test_unusable_forecast_evidence_fails_closed(evidence):
+    service, composer, _, _ = registered_service(evidence=evidence)
+    service.mission_id_factory = lambda: pytest.fail(
+        "unusable evidence must stop before mission identity allocation"
+    )
+
+    with pytest.raises(DecisionAcceptanceError, match="decision_context_stale"):
+        service.accept(selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"))
+
+    assert composer.calls == []
+
+
+def test_expired_selected_window_rejects_before_mission():
+    service, composer, _, _ = registered_service(
+        window_end=ACCEPTED_AT - timedelta(microseconds=1)
+    )
+    service.mission_id_factory = lambda: pytest.fail(
+        "expired window must stop before mission identity allocation"
+    )
+
+    with pytest.raises(DecisionAcceptanceError, match="decision_context_stale"):
+        service.accept(selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"))
+
+    assert composer.calls == []
+
+
+@pytest.mark.parametrize(
+    "selected_at",
+    [
+        ACCEPTED_AT - timedelta(days=30),
+        ACCEPTED_AT + timedelta(days=30),
+    ],
+    ids=["caller-past", "caller-future"],
+)
+def test_selected_at_cannot_override_authoritative_freshness_clock(selected_at):
+    stale = forecast_evidence(ACCEPTED_AT - timedelta(minutes=91))
+    service, composer, _, _ = registered_service(evidence=stale)
+    service.mission_id_factory = lambda: pytest.fail(
+        "caller time must not reach mission identity allocation"
+    )
+
+    with pytest.raises(DecisionAcceptanceError, match="decision_context_stale"):
+        service.accept(selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            selected_at=selected_at,
+        ))
+
+    assert composer.calls == []
