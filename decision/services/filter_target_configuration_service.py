@@ -52,6 +52,7 @@ class FilterTargetConfigurationService:
         profile, project = self._load_project(
             project_name=project_name,
         )
+        expected_revision = profile.get("profile_revision", 0)
 
         normalized_targets = {
             filter_type: float(hours)
@@ -73,7 +74,7 @@ class FilterTargetConfigurationService:
 
         project["filter_targets"] = normalized_targets
 
-        self.save_profile(profile)
+        self.save_profile(profile, expected_revision=expected_revision)
 
         return self._describe_project(
             project_name=project_name,
@@ -136,6 +137,7 @@ class FilterTargetConfigurationService:
         profile, project = self._load_project(
             project_name=project_name,
         )
+        expected_revision = profile.get("profile_revision", 0)
 
         if "filter_targets" not in project:
             return self._describe_project(
@@ -145,7 +147,7 @@ class FilterTargetConfigurationService:
 
         del project["filter_targets"]
 
-        self.save_profile(profile)
+        self.save_profile(profile, expected_revision=expected_revision)
 
         return self._describe_project(
             project_name=project_name,

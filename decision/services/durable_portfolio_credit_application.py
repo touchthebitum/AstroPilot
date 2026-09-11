@@ -226,6 +226,7 @@ class DurablePortfolioCreditApplicationService:
         if not isinstance(persisted_profile, Mapping):
             raise TypeError("profile_must_be_mapping")
         profile = deepcopy(dict(persisted_profile))
+        expected_revision = profile.get("profile_revision", 0)
         applications, credits = _load_ledger(profile)
         prior_credit = credits.get(credit.credit_id)
         if prior_credit is not None:
@@ -266,7 +267,7 @@ class DurablePortfolioCreditApplicationService:
             )
             for recorded_credit_id, recorded_application in applications.items()
         }
-        self.save_profile(profile)
+        self.save_profile(profile, expected_revision=expected_revision)
         if result.outcome is not PortfolioCreditApplicationOutcome.APPLIED:
             raise ValueError("portfolio_credit_ledger_inconsistent")
         return result

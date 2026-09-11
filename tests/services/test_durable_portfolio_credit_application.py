@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
@@ -19,6 +20,9 @@ from decision.models.portfolio_credit_application import (
 )
 from decision.services.durable_portfolio_credit_application import (
     DurablePortfolioCreditApplicationService,
+)
+from decision.services.filter_target_configuration_service import (
+    FilterTargetConfigurationService,
 )
 
 
@@ -86,8 +90,10 @@ def service(profile_path, *, status=ExecutionStatus.INTERRUPTED, saver=None):
     def load_profile():
         return json.loads(profile_path.read_text(encoding="utf-8"))
 
-    def save_profile(profile):
-        profile_path.write_text(json.dumps(profile), encoding="utf-8")
+    def save_profile(profile, *, expected_revision):
+        saved = deepcopy(profile)
+        saved["profile_revision"] = expected_revision + 1
+        profile_path.write_text(json.dumps(saved), encoding="utf-8")
 
     return (
         DurablePortfolioCreditApplicationService(
@@ -140,7 +146,9 @@ def test_same_credit_replay_after_fresh_service_reload_is_not_applied_twice(tmp_
 
     reloaded = DurablePortfolioCreditApplicationService(
         load_profile=lambda: json.loads(profile_path.read_text(encoding="utf-8")),
-        save_profile=lambda profile: pytest.fail("replay must not rewrite state"),
+        save_profile=lambda profile, **kwargs: pytest.fail(
+            "replay must not rewrite state"
+        ),
         execution_loader=unavailable,
         evidence_loader=unavailable,
     )
@@ -195,7 +203,9 @@ def test_zero_credit_is_recorded_without_progress_change(tmp_path):
     source_evidence = evidence(timedelta(0))
     application_service = DurablePortfolioCreditApplicationService(
         load_profile=lambda: json.loads(profile_path.read_text(encoding="utf-8")),
-        save_profile=lambda profile: profile_path.write_text(json.dumps(profile)),
+        save_profile=lambda profile, *, expected_revision: profile_path.write_text(
+            json.dumps({**profile, "profile_revision": expected_revision + 1})
+        ),
         execution_loader=lambda _: execution(),
         evidence_loader=lambda _: source_evidence,
     )
@@ -223,7 +233,9 @@ def test_unresolved_project_and_save_failure_leave_persisted_state_unchanged(tmp
 
     failing, _, _ = service(
         profile_path,
-        saver=lambda profile: (_ for _ in ()).throw(OSError("save failed")),
+        saver=lambda profile, **kwargs: (_ for _ in ()).throw(
+            OSError("save failed")
+        ),
     )
     with pytest.raises(OSError, match="save failed"):
         failing.apply(application(), credit())
@@ -335,7 +347,7 @@ def test_project_capacity_overflow_fails_before_save_and_leaves_profile_unchange
     saves = []
     application_service, _, _ = service(
         profile_path,
-        saver=lambda profile: saves.append(profile),
+        saver=lambda profile, **kwargs: saves.append(profile),
     )
 
     with pytest.raises(ValueError, match="project_capacity_exceeded"):
@@ -407,3 +419,53 @@ def test_real_atomic_writer_failure_preserves_previous_complete_profile(
         application_service.apply(application(), credit())
 
     assert profile_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("first_writer", ["filter", "credit"])
+def test_credit_and_filter_writers_cannot_erase_each_others_updates(
+    tmp_path,
+    monkeypatch,
+    first_writer,
+):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(json.dumps(valid_profile_document()))
+    credit_snapshot = deepcopy(user_profile.load_user_profile())
+    filter_snapshot = deepcopy(credit_snapshot)
+    credit_service = DurablePortfolioCreditApplicationService(
+        load_profile=lambda: deepcopy(credit_snapshot),
+        save_profile=user_profile.save_user_profile,
+        execution_loader=lambda _: execution(),
+        evidence_loader=lambda _: evidence(),
+    )
+    filter_service = FilterTargetConfigurationService(
+        load_profile=lambda: deepcopy(filter_snapshot),
+        save_profile=user_profile.save_user_profile,
+    )
+
+    def configure():
+        return filter_service.configure(
+            project_name="M31",
+            filter_targets={"LRGB": 20.0},
+        )
+
+    first, stale = (
+        (configure, lambda: credit_service.apply(application(), credit()))
+        if first_writer == "filter"
+        else (lambda: credit_service.apply(application(), credit()), configure)
+    )
+    first()
+
+    with pytest.raises(user_profile.ProfileRevisionConflictError):
+        stale()
+
+    persisted = user_profile.load_user_profile()
+    assert persisted["profile_revision"] == 1
+    if first_writer == "filter":
+        assert persisted["projects"]["M31"]["filter_targets"] == {"LRGB": 20.0}
+        assert persisted["projects"]["M31"]["hours"] == 2.0
+        assert "portfolio_credit_applications" not in persisted
+    else:
+        assert persisted["projects"]["M31"]["hours"] == 3.2
+        assert "credit-1" in persisted["portfolio_credit_applications"]
+        assert "filter_targets" not in persisted["projects"]["M31"]

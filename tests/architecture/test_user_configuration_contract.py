@@ -1,10 +1,12 @@
 import copy
+from pathlib import Path
 from types import MappingProxyType
 
 import pytest
 
 import astropilot.user_profile as user_profile
 from astropilot.user_profile import (
+    ProfileRevisionConflictError,
     UserProfileError,
     create_or_replace_user_configuration,
     load_user_profile,
@@ -91,11 +93,34 @@ def test_replaces_an_existing_valid_configuration(tmp_path, monkeypatch):
     replacement = minimal_candidate()
     replacement["location"]["name"] = "Mont Sujet"
 
-    written = create_or_replace_user_configuration(replacement)
+    written = create_or_replace_user_configuration(
+        replacement,
+        expected_revision=first["profile_revision"],
+    )
 
     assert written["location"]["name"] == "Mont Sujet"
     assert written != first
     assert load_user_profile() == written
+
+
+def test_cannot_replace_existing_configuration_without_expected_revision(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+    original = create_or_replace_user_configuration(minimal_candidate())
+    original_bytes = (tmp_path / "user_profile.json").read_bytes()
+    replacement = minimal_candidate()
+    replacement["location"]["name"] = "Mont Sujet"
+
+    with pytest.raises(
+        ProfileRevisionConflictError,
+        match="profile_revision_conflict",
+    ):
+        create_or_replace_user_configuration(replacement)
+
+    assert (tmp_path / "user_profile.json").read_bytes() == original_bytes
+    assert load_user_profile() == original
 
 
 @pytest.mark.parametrize(
@@ -423,7 +448,7 @@ def test_replace_error_preserves_profile_and_cleans_temporary_file(
     monkeypatch,
 ):
     monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
-    create_or_replace_user_configuration(minimal_candidate())
+    current = create_or_replace_user_configuration(minimal_candidate())
     profile_path = tmp_path / "user_profile.json"
     original = profile_path.read_bytes()
     replacement = minimal_candidate()
@@ -432,12 +457,16 @@ def test_replace_error_preserves_profile_and_cleans_temporary_file(
     def fail_replace(source, destination):
         raise PermissionError("replacement denied")
 
-    monkeypatch.setattr(user_profile.os, "replace", fail_replace)
+    monkeypatch.setattr(Path, "replace", fail_replace)
 
     with pytest.raises(PermissionError, match="replacement denied"):
-        create_or_replace_user_configuration(replacement)
+        create_or_replace_user_configuration(
+            replacement,
+            expected_revision=current["profile_revision"],
+        )
 
     assert profile_path.read_bytes() == original
     assert {path.name for path in tmp_path.iterdir()} == {
-        "user_profile.json"
+        ".user_profile.lock",
+        "user_profile.json",
     }
