@@ -1,5 +1,6 @@
 import json
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
@@ -8,6 +9,31 @@ from fastapi.testclient import TestClient
 import astro_score
 from astropilot.app import create_app
 from decision.forecast.forecast_run import ForecastRun
+from decision.weather.weather_ingress import WeatherSnapshot
+
+
+WEATHER_REFERENCE_TIME = datetime(2026, 8, 29, 20, 0, tzinfo=timezone.utc)
+
+
+def valid_weather_snapshot():
+    return WeatherSnapshot(
+        payload={"hourly": {}},
+        provider="Open-Meteo",
+        retrieved_at_utc=WEATHER_REFERENCE_TIME - timedelta(minutes=5),
+        requested_latitude=47.12,
+        requested_longitude=7.04,
+        grid_latitude=47.12,
+        grid_longitude=7.04,
+        grid_distance_km=0.0,
+        elevation_m=1000.0,
+        timezone="Europe/Zurich",
+        timezone_source="coordinates_local",
+        utc_offset_seconds=7200,
+        valid_from=datetime(2026, 9, 1, tzinfo=timezone.utc),
+        valid_until=datetime(2026, 9, 3, tzinfo=timezone.utc),
+        hour_count=48,
+        completeness=1.0,
+    )
 
 
 def profile():
@@ -119,11 +145,15 @@ def test_http_resolves_effective_values_without_mutating_profile(monkeypatch, ov
     elif missing == "bortle":
         persisted["preferences"].pop("bortle")
     before = deepcopy(persisted)
-    weather_value = object()
+    weather_value = valid_weather_snapshot()
     weather = Mock(return_value=weather_value)
     forecast = Mock(return_value=ForecastRun(nights=(), evidence=None))
     monkeypatch.setattr(astro_score, "forecast_astro", forecast)
-    client = TestClient(create_app(profile_provider=lambda: persisted, weather_provider=weather))
+    client = TestClient(create_app(
+        profile_provider=lambda: persisted,
+        weather_provider=weather,
+        clock=lambda: WEATHER_REFERENCE_TIME,
+    ))
 
     response = client.post("/v1/tonight", json=overrides)
 

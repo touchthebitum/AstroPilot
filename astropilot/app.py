@@ -1135,7 +1135,9 @@ def create_app(
                 location["latitude"],
                 location["longitude"],
             )
-            if isinstance(weather, WeatherSnapshot):
+            if weather is not None and not isinstance(weather, WeatherSnapshot):
+                raise WeatherIngressError(["invalid_weather_snapshot"])
+            if weather is not None:
                 weather_freshness = validate_weather_freshness(
                     weather,
                     reference_time_utc=reference_time_utc,

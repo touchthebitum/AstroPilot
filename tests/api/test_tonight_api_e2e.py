@@ -1,11 +1,12 @@
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 import astro_score
+import astropilot.app as app_module
 from astropilot.app import create_app
 from decision.forecast.forecast_run import ForecastRun
 from decision.intelligence.analysis_result import AnalysisResult
@@ -24,6 +25,7 @@ from decision.recommendation.recommendation import Recommendation
 from decision.risk.project_risk_context import ProjectRiskContext
 from decision.risk.risk_report import RiskReport
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
+from decision.weather.weather_ingress import WeatherSnapshot
 
 
 def test_http_request_runs_real_application_composition_once(
@@ -39,7 +41,24 @@ def test_http_request_runs_real_application_composition_once(
         "recommendation": [],
         "mission": [],
     }
-    weather = {"hourly": True}
+    weather = WeatherSnapshot(
+        payload={"hourly": {}},
+        provider="Open-Meteo",
+        retrieved_at_utc=reference_time - timedelta(minutes=5),
+        requested_latitude=47.1,
+        requested_longitude=6.8,
+        grid_latitude=47.1,
+        grid_longitude=6.8,
+        grid_distance_km=0.0,
+        elevation_m=1000.0,
+        timezone="Europe/Zurich",
+        timezone_source="coordinates_local",
+        utc_offset_seconds=7200,
+        valid_from=datetime(2026, 9, 1, tzinfo=timezone.utc),
+        valid_until=datetime(2026, 9, 3, tzinfo=timezone.utc),
+        hour_count=48,
+        completeness=1.0,
+    )
     selected_objects = [{"catalog_key": "M31", "name": "Andromeda"}]
     selected_night = {
         "date": date(2026, 9, 1),
@@ -240,6 +259,11 @@ def test_http_request_runs_real_application_composition_once(
         astro_score.MissionPresenter,
         "present",
         lambda mission: pytest.fail("API must not print the mission"),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "validate_selected_window_weather_coverage",
+        lambda mission, snapshot: None,
     )
 
     client = TestClient(create_app(clock=lambda: reference_time))
