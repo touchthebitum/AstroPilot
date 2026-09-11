@@ -131,8 +131,12 @@ def test_user_profile_error_is_a_controlled_service_error(profile_error):
 
 
 def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
-    weather = object()
     reference_time = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
+    weather = make_weather_snapshot(
+        reference_time - timedelta(minutes=5),
+        latitude=47.1,
+        longitude=6.8,
+    )
     weather_calls = []
     evaluation_calls = []
     persisted_profile = {
@@ -266,8 +270,9 @@ def test_tonight_maps_explicit_availability_to_domain(payload, expected):
 
     app = create_app(
         service_factory=lambda: Service(),
-        weather_provider=lambda lat, lon: object(),
+        weather_provider=lambda lat, lon: DEFAULT_WEATHER,
         profile_provider=valid_profile,
+        clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
     )
 
     response = TestClient(app).post(
@@ -290,8 +295,9 @@ def test_tonight_omitted_availability_remains_none_through_service_call():
 
     app = create_app(
         service_factory=lambda: Service(),
-        weather_provider=lambda lat, lon: object(),
+        weather_provider=lambda lat, lon: DEFAULT_WEATHER,
         profile_provider=valid_profile,
+        clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
     )
 
     response = TestClient(app).post("/v1/tonight", json={})
@@ -428,8 +434,9 @@ def test_tonight_availability_transport_does_not_invoke_windowing(monkeypatch):
 
     app = create_app(
         service_factory=lambda: Service(),
-        weather_provider=lambda lat, lon: object(),
+        weather_provider=lambda lat, lon: DEFAULT_WEATHER,
         profile_provider=valid_profile,
+        clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
     )
 
     response = TestClient(app).post(
@@ -482,7 +489,7 @@ def test_tonight_uses_profile_bortle_without_request_override():
 
     app = create_app(
         service_factory=lambda: Service(),
-        weather_provider=lambda lat, lon: object(),
+        weather_provider=lambda lat, lon: DEFAULT_WEATHER,
         profile_provider=lambda: {
             **valid_profile(),
             "location": {
@@ -492,6 +499,7 @@ def test_tonight_uses_profile_bortle_without_request_override():
             },
             "preferences": {"bortle": 6},
         },
+        clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
     )
 
     response = TestClient(app).post("/v1/tonight", json={})
@@ -541,8 +549,9 @@ def test_persistence_failure_is_a_controlled_service_error(error):
     client = TestClient(
         create_app(
             service_factory=lambda: Service(),
-            weather_provider=lambda lat, lon: object(),
+            weather_provider=lambda lat, lon: DEFAULT_WEATHER,
             profile_provider=valid_profile,
+            clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
         )
     )
 
@@ -555,19 +564,27 @@ def test_persistence_failure_is_a_controlled_service_error(error):
     }
 
 
-DEFAULT_WEATHER = {"weather": True}
+DEFAULT_WEATHER_REFERENCE_TIME = datetime(
+    2026, 8, 29, 20, 0, tzinfo=timezone.utc
+)
 
 
-def make_weather_snapshot(retrieved_at_utc, *, valid_until=None):
+def make_weather_snapshot(
+    retrieved_at_utc,
+    *,
+    valid_until=None,
+    latitude=46.7508,
+    longitude=6.5495,
+):
     valid_from = datetime(2026, 9, 1, tzinfo=timezone.utc)
     return WeatherSnapshot(
         payload={"hourly": {}},
         provider="Open-Meteo",
         retrieved_at_utc=retrieved_at_utc,
-        requested_latitude=46.7508,
-        requested_longitude=6.5495,
-        grid_latitude=46.75,
-        grid_longitude=6.55,
+        requested_latitude=latitude,
+        requested_longitude=longitude,
+        grid_latitude=latitude,
+        grid_longitude=longitude,
         grid_distance_km=0.1,
         elevation_m=837.0,
         timezone="Europe/Zurich",
@@ -580,6 +597,11 @@ def make_weather_snapshot(retrieved_at_utc, *, valid_until=None):
     )
 
 
+DEFAULT_WEATHER = make_weather_snapshot(
+    DEFAULT_WEATHER_REFERENCE_TIME - timedelta(minutes=5)
+)
+
+
 def make_client(*, result, weather=DEFAULT_WEATHER):
     class Service:
         def evaluate(self, **kwargs):
@@ -590,6 +612,7 @@ def make_client(*, result, weather=DEFAULT_WEATHER):
             service_factory=lambda: Service(),
             weather_provider=lambda lat, lon: weather,
             profile_provider=valid_profile,
+            clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
         )
     )
 
@@ -611,6 +634,33 @@ def test_weather_unavailable_is_a_service_error_before_evaluation():
 
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "weather_unavailable"
+
+
+@pytest.mark.parametrize(
+    "invalid_weather",
+    [object(), {"weather": True}, "not-a-weather-snapshot"],
+    ids=["object", "dict", "string"],
+)
+def test_non_weather_snapshot_is_rejected_before_evaluation(invalid_weather):
+    class Service:
+        def evaluate(self, **kwargs):
+            raise AssertionError("service must not run with invalid weather")
+
+    client = TestClient(
+        create_app(
+            service_factory=lambda: Service(),
+            weather_provider=lambda lat, lon: invalid_weather,
+            profile_provider=valid_profile,
+        )
+    )
+
+    response = client.post("/v1/tonight", json={})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "weather_invalid",
+        "message": "Weather data failed validation.",
+    }
 
 
 def test_invalid_weather_is_rejected_before_evaluation():
@@ -883,8 +933,9 @@ def test_internally_inconsistent_decision_is_rejected_before_transport():
     client = TestClient(
         create_app(
             service_factory=lambda: Service(),
-            weather_provider=lambda lat, lon: object(),
+            weather_provider=lambda lat, lon: DEFAULT_WEATHER,
             profile_provider=valid_profile,
+            clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
         )
     )
 
@@ -1342,8 +1393,13 @@ def test_target_insufficiency_api_defaults_and_openapi_contract():
     assert set(weather["properties"]) == {"evidence_quality", "admissibility", "reasons"}
 
 
-def test_gp01_tonight_then_explicit_selection_creates_bound_mission():
+def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch):
     result = replace(make_result(decision_id="decision-123"), mission=None)
+    monkeypatch.setattr(
+        app_module,
+        "validate_selected_window_weather_coverage",
+        lambda mission, snapshot: None,
+    )
 
     class Service:
         def __init__(self):
@@ -1371,8 +1427,9 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission():
     service = Service()
     client = TestClient(create_app(
         service_factory=lambda: service,
-        weather_provider=lambda lat, lon: object(),
+        weather_provider=lambda lat, lon: DEFAULT_WEATHER,
         profile_provider=valid_profile,
+        clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
     ))
 
     tonight = client.post("/v1/tonight", json={})
