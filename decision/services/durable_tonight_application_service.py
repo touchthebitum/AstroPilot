@@ -41,6 +41,7 @@ class DurableTonightApplicationService:
         evidence_store: DecisionForecastEvidenceStore,
         decision_id_factory: Callable[[], str],
         acceptance_service: DecisionAcceptanceApplicationService | None = None,
+        clock: Callable | None = None,
         profile_loader: Callable | None = None,
         profile_saver: Callable | None = None,
     ) -> None:
@@ -48,6 +49,7 @@ class DurableTonightApplicationService:
         self.evidence_store = evidence_store
         self.decision_id_factory = decision_id_factory
         self._acceptance_service = acceptance_service
+        self.clock = clock
         self._execution_outcome_service = None
         self.profile_loader = profile_loader
         self.profile_saver = profile_saver
@@ -76,6 +78,8 @@ class DurableTonightApplicationService:
                 ),
                 context_store=InMemoryDecisionAcceptanceContextStore(),
                 mission_id_factory=generate_mission_id,
+                evidence_loader=self.evidence_store.load,
+                clock=self.clock,
             )
         return self._acceptance_service
 

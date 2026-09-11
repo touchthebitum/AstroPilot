@@ -116,9 +116,28 @@ def validate_weather_freshness(
     maximum_age: timedelta = MAXIMUM_SNAPSHOT_AGE,
     future_tolerance: timedelta = FUTURE_RETRIEVAL_TOLERANCE,
 ) -> WeatherFreshness:
+    return validate_weather_retrieval_freshness(
+        snapshot.retrieved_at_utc,
+        reference_time_utc=reference_time_utc,
+        maximum_age=maximum_age,
+        future_tolerance=future_tolerance,
+    )
+
+
+def validate_weather_retrieval_freshness(
+    retrieved_at_utc: datetime,
+    *,
+    reference_time_utc: datetime,
+    maximum_age: timedelta = MAXIMUM_SNAPSHOT_AGE,
+    future_tolerance: timedelta = FUTURE_RETRIEVAL_TOLERANCE,
+) -> WeatherFreshness:
+    if not isinstance(reference_time_utc, datetime):
+        raise WeatherIngressError(["invalid_reference_time"])
     if reference_time_utc.tzinfo is None:
         raise WeatherIngressError(["reference_time_without_timezone"])
-    if snapshot.retrieved_at_utc.tzinfo is None:
+    if not isinstance(retrieved_at_utc, datetime):
+        raise WeatherIngressError(["invalid_retrieval_time"])
+    if retrieved_at_utc.tzinfo is None:
         raise WeatherIngressError(["retrieval_time_without_timezone"])
     if maximum_age < timedelta(0):
         raise ValueError("maximum_age must not be negative")
@@ -127,7 +146,7 @@ def validate_weather_freshness(
 
     age = (
         reference_time_utc.astimezone(timezone.utc)
-        - snapshot.retrieved_at_utc.astimezone(timezone.utc)
+        - retrieved_at_utc.astimezone(timezone.utc)
     )
     if age < -future_tolerance:
         raise WeatherIngressError(["retrieval_time_in_future"])

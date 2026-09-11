@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 import astro_score
 import astropilot.app as app_module
+import decision.services.decision_acceptance_application as acceptance_module
 from astropilot.app import create_app
 from decision.forecast.forecast_run import ForecastRun
 from decision.intelligence.analysis_result import AnalysisResult
@@ -24,7 +25,9 @@ from decision.quality.dew_risk_result import DewRiskResult
 from decision.recommendation.recommendation import Recommendation
 from decision.risk.project_risk_context import ProjectRiskContext
 from decision.risk.risk_report import RiskReport
-from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
+from decision.weather.decision_forecast_evidence import (
+    build_decision_forecast_evidence,
+)
 from decision.weather.weather_ingress import WeatherSnapshot
 
 
@@ -67,7 +70,10 @@ def test_http_request_runs_real_application_composition_once(
         "object_evaluations": {
             "M31": {
                 "decision_context": SimpleNamespace(
-                    site=SimpleNamespace(name="Mont Sujet")
+                    site=SimpleNamespace(name="Mont Sujet"),
+                    session=SimpleNamespace(
+                        end_time=datetime(2026, 9, 2, 4, tzinfo=timezone.utc)
+                    ),
                 )
             }
         },
@@ -183,7 +189,16 @@ def test_http_request_runs_real_application_composition_once(
                 {"date": date(2026, 9, 2), "top_objects": []},
                 selected_night,
             ),
-            evidence=DecisionForecastEvidence(()),
+            evidence=build_decision_forecast_evidence(
+                weather,
+                [{
+                    "time": datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+                    "temperature_2m": 8.0,
+                    "relative_humidity_2m": 60.0,
+                    "wind_speed_10m": 5.0,
+                    "cloud_cover": 20.0,
+                }],
+            ),
         )
 
     def build_candidates(objects, available_hours, *, profile):
@@ -265,6 +280,7 @@ def test_http_request_runs_real_application_composition_once(
         "validate_selected_window_weather_coverage",
         lambda mission, snapshot: None,
     )
+    monkeypatch.setattr(acceptance_module, "_utc_now", lambda: reference_time)
 
     client = TestClient(create_app(clock=lambda: reference_time))
     response = client.post(
