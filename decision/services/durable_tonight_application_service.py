@@ -41,6 +41,7 @@ class DurableTonightApplicationService:
         evidence_store: DecisionForecastEvidenceStore,
         decision_id_factory: Callable[[], str],
         acceptance_lineage_store=None,
+        execution_lineage_store=None,
         acceptance_service: DecisionAcceptanceApplicationService | None = None,
         clock: Callable | None = None,
         profile_loader: Callable | None = None,
@@ -50,6 +51,7 @@ class DurableTonightApplicationService:
         self.evidence_store = evidence_store
         self.decision_id_factory = decision_id_factory
         self.acceptance_lineage_store = acceptance_lineage_store
+        self.execution_lineage_store = execution_lineage_store
         self._acceptance_service = acceptance_service
         self.clock = clock
         self._execution_outcome_service = None
@@ -106,6 +108,7 @@ class DurableTonightApplicationService:
         if self._execution_outcome_service is None:
             self._execution_outcome_service = ExecutionOutcomeApplicationService(
                 mission_loader=self._decision_acceptance_service().load_mission,
+                lineage_store=self.execution_lineage_store,
             )
         return self._execution_outcome_service
 
@@ -124,6 +127,16 @@ class DurableTonightApplicationService:
         return self._execution_outcome_application_service().record_outcome_evidence(
             execution_id=execution_id,
             evidence=evidence,
+        )
+
+    def load_execution(self, execution_id: str):
+        return self._execution_outcome_application_service().load_execution(
+            execution_id
+        )
+
+    def load_outcome_evidence(self, evidence_id: str):
+        return self._execution_outcome_application_service().load_outcome_evidence(
+            evidence_id
         )
 
     def _durable_portfolio_credit_application_service(

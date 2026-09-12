@@ -8,6 +8,7 @@ from astropilot.decision_forecast_evidence_store import (
 from astropilot.decision_acceptance_lineage_store import (
     FileDecisionAcceptanceLineageStore,
 )
+from astropilot.execution_lineage_store import FileExecutionLineageStore
 from decision.services.durable_tonight_application_service import (
     DurableTonightApplicationService,
     generate_decision_id,
@@ -54,6 +55,10 @@ def test_durable_factory_wraps_pure_service_with_canonical_store(
     )
     assert service.acceptance_lineage_store._directory == (
         tmp_path / "decision_lineage"
+    )
+    assert isinstance(service.execution_lineage_store, FileExecutionLineageStore)
+    assert service.execution_lineage_store._directory == (
+        tmp_path / "execution_lineage"
     )
     assert service.decision_id_factory is generate_decision_id
 
