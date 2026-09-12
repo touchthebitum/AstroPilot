@@ -10,6 +10,10 @@ import astropilot.user_profile as user_profile
 from astropilot.decision_forecast_evidence_store import (
     FileDecisionForecastEvidenceStore,
 )
+from astropilot.decision_acceptance_lineage_store import (
+    FileDecisionAcceptanceLineageStore,
+)
+from astropilot.execution_lineage_store import FileExecutionLineageStore
 from decision.mission.night_mission import NightMission
 from decision.models.execution import Execution, ExecutionStatus
 from decision.models.outcome_evidence import (
@@ -17,6 +21,7 @@ from decision.models.outcome_evidence import (
     OutcomeEvidenceCategory,
     OutcomeEvidenceSource,
 )
+from decision.models.user_selection import UserSelection, UserSelectionSource
 from decision.models.portfolio_credit import PortfolioCredit
 from decision.models.portfolio_credit_application import (
     PortfolioCreditApplication,
@@ -29,7 +34,14 @@ from decision.services.durable_tonight_application_service import (
     generate_decision_id,
 )
 from decision.services.execution_outcome_application import (
+    ExecutionOutcomeApplicationError,
     ExecutionOutcomeApplicationService,
+)
+from decision.services.decision_acceptance_application import (
+    DecisionAcceptanceContext,
+)
+from decision.services.user_selection_validator import (
+    UserSelectionDecisionContext,
 )
 from decision.services.tonight_application_service import (
     TonightResult,
@@ -71,6 +83,8 @@ EVIDENCE = DecisionForecastEvidence(
 
 
 class FakeApplicationService:
+    tonight_mission_service = object()
+
     def __init__(self, result=None, error=None):
         self.result = result
         self.error = error
@@ -81,6 +95,10 @@ class FakeApplicationService:
         if self.error is not None:
             raise self.error
         return self.result
+
+    @staticmethod
+    def build_mission_input(*args, **kwargs):
+        raise AssertionError("acceptance mission creation is not used here")
 
 
 class FakeStore:
@@ -653,3 +671,258 @@ def test_production_factory_supplies_canonical_profile_callbacks():
 
     assert service.profile_loader is astro_score.load_user_profile
     assert service.profile_saver is astro_score.save_user_profile
+
+
+def durable_acceptance_lineage(tmp_path):
+    store = FileDecisionAcceptanceLineageStore(tmp_path / "decision_lineage")
+    context = DecisionAcceptanceContext(
+        decision_context=UserSelectionDecisionContext(
+            decision_id="decision-credit",
+            primary_catalog_key="M31",
+            exposed_alternative_catalog_keys=(),
+            explicitly_evaluated_catalog_keys=("M31",),
+        ),
+        recommendation={"catalog_key": "M31"},
+        night={},
+        profile={},
+        availability=None,
+    )
+    selection = UserSelection(
+        selection_id="selection-credit",
+        decision_id="decision-credit",
+        selected_catalog_key="M31",
+        source=UserSelectionSource.PRIMARY_RECOMMENDATION,
+        selected_at=CREDIT_START,
+    )
+    mission = NightMission(
+        target="M31",
+        confidence="HIGH",
+        equipment=["setup"],
+        recommended_hours=3.0,
+        site_name="Mont Sujet",
+        mission_id="mission-credit",
+        decision_id="decision-credit",
+        selection_id="selection-credit",
+    )
+    store.create_context(context)
+    store.commit_selection_and_mission(selection, mission)
+    return store, mission
+
+
+def reconstructed_lineage_service(tmp_path, profile_path):
+    load_profile, save_profile = profile_callbacks(profile_path)
+    return DurableTonightApplicationService(
+        application_service=FakeApplicationService(),
+        evidence_store=FileDecisionForecastEvidenceStore(
+            tmp_path / "decision_forecast_evidence"
+        ),
+        decision_id_factory=IdFactory("unused"),
+        acceptance_lineage_store=FileDecisionAcceptanceLineageStore(
+            tmp_path / "decision_lineage"
+        ),
+        execution_lineage_store=FileExecutionLineageStore(
+            tmp_path / "execution_lineage"
+        ),
+        profile_loader=load_profile,
+        profile_saver=save_profile,
+    )
+
+
+def test_gp08_new_credit_uses_durable_execution_and_evidence_after_reconstruction(
+    tmp_path,
+    monkeypatch,
+):
+    _, mission = durable_acceptance_lineage(tmp_path)
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps({
+            "projects": {
+                "M31": {"hours": 2.0, "target_hours": 20.0, "importance": 8}
+            },
+            "sessions": [],
+        }),
+        encoding="utf-8",
+    )
+    execution_start = CREDIT_START
+    execution_end = execution_start + timedelta(hours=1, minutes=12)
+    usable_duration = timedelta(hours=1, minutes=12)
+    capture_duration = timedelta(hours=2, minutes=45)
+    first = reconstructed_lineage_service(tmp_path, profile_path)
+    first.create_execution(
+        execution_id="execution-credit",
+        mission_id=mission.mission_id,
+    )
+    first.transition_execution(Execution(
+        execution_id="execution-credit",
+        mission_id=mission.mission_id,
+        status=ExecutionStatus.IN_PROGRESS,
+        actual_start=execution_start,
+        actual_end=None,
+        actual_duration=None,
+    ))
+    interrupted = Execution(
+        execution_id="execution-credit",
+        mission_id=mission.mission_id,
+        status=ExecutionStatus.INTERRUPTED,
+        actual_start=execution_start,
+        actual_end=execution_end,
+        actual_duration=usable_duration,
+    )
+    first.transition_execution(interrupted)
+    source_evidence = AcquisitionOutcomeEvidence(
+        evidence_id="evidence-credit",
+        execution_id="execution-credit",
+        category=OutcomeEvidenceCategory.ACQUISITION,
+        observed_at=execution_end,
+        source=OutcomeEvidenceSource.USER,
+        actual_capture_duration=capture_duration,
+        usable_integration_duration=usable_duration,
+    )
+    first.record_outcome_evidence(
+        execution_id="execution-credit",
+        evidence=source_evidence,
+    )
+
+    def forbidden_record_session(*args, **kwargs):
+        pytest.fail("durable V1 credit must not call record_session")
+
+    monkeypatch.setattr(user_profile, "record_session", forbidden_record_session)
+    reconstructed = reconstructed_lineage_service(tmp_path, profile_path)
+    credit = PortfolioCredit(
+        credit_id="credit-reconstructed",
+        execution_id="execution-credit",
+        evidence_ids=("evidence-credit",),
+        usable_integration_duration=usable_duration,
+        credited_at=execution_end,
+    )
+    application = PortfolioCreditApplication(
+        application_id="application-reconstructed",
+        credit_id=credit.credit_id,
+        object_name="M31",
+        destination_kind=PortfolioCreditDestinationKind.PROJECT,
+        applied_duration=usable_duration,
+        applied_at=execution_end,
+    )
+
+    assert reconstructed.load_execution("execution-credit") == interrupted
+    assert type(reconstructed.load_outcome_evidence("evidence-credit")) is (
+        AcquisitionOutcomeEvidence
+    )
+    applied = reconstructed.apply_portfolio_credit(application, credit)
+    persisted_after_apply = json.loads(profile_path.read_text(encoding="utf-8"))
+
+    replayed = reconstructed_lineage_service(
+        tmp_path,
+        profile_path,
+    ).apply_portfolio_credit(application, credit)
+    persisted_after_replay = json.loads(profile_path.read_text(encoding="utf-8"))
+
+    assert mission.recommended_hours == 3.0
+    assert interrupted.actual_duration == timedelta(hours=1, minutes=12)
+    assert source_evidence.actual_capture_duration == capture_duration
+    assert source_evidence.usable_integration_duration == usable_duration
+    assert applied.outcome is PortfolioCreditApplicationOutcome.APPLIED
+    assert persisted_after_apply["projects"]["M31"]["hours"] == 3.2
+    assert persisted_after_apply["projects"]["M31"]["hours"] != 5.0
+    assert persisted_after_apply["projects"]["M31"]["hours"] != 4.75
+    assert replayed.outcome is PortfolioCreditApplicationOutcome.ALREADY_APPLIED
+    assert persisted_after_replay["projects"]["M31"]["hours"] == 3.2
+    assert persisted_after_replay["sessions"] == []
+
+
+def test_reconstructed_execution_commands_fail_closed(tmp_path):
+    _, mission = durable_acceptance_lineage(tmp_path)
+    store = FileExecutionLineageStore(tmp_path / "execution_lineage")
+    application = ExecutionOutcomeApplicationService(
+        mission_loader=lambda mission_id: mission if mission_id == mission.mission_id else None,
+        lineage_store=store,
+    )
+
+    with pytest.raises(ExecutionOutcomeApplicationError, match="execution_not_found"):
+        application.transition_execution(terminal_execution(ExecutionStatus.COMPLETED))
+    assert application.load_execution("missing") is None
+    assert application.load_outcome_evidence("missing") is None
+
+    application.create_execution(
+        execution_id="execution-credit",
+        mission_id="mission-credit",
+    )
+    with pytest.raises(
+        ExecutionOutcomeApplicationError,
+        match="evidence_execution_mismatch",
+    ):
+        application.record_outcome_evidence(
+            execution_id="execution-credit",
+            evidence=acquisition_evidence(execution_id="execution-other"),
+        )
+
+
+def test_stale_transition_and_persistence_failure_do_not_report_success(tmp_path):
+    _, mission = durable_acceptance_lineage(tmp_path)
+    backing = FileExecutionLineageStore(tmp_path / "execution_lineage")
+
+    class InterferingStore:
+        def create_execution(self, source):
+            return backing.create_execution(source)
+
+        def load_execution(self, execution_id):
+            return backing.load_execution(execution_id)
+
+        def replace_execution(self, destination, *, expected_execution):
+            backing.replace_execution(
+                Execution(
+                    execution_id="execution-credit",
+                    mission_id="mission-credit",
+                    status=ExecutionStatus.UNCONFIRMED,
+                    actual_start=None,
+                    actual_end=None,
+                    actual_duration=None,
+                ),
+                expected_execution=expected_execution,
+            )
+            return backing.replace_execution(
+                destination,
+                expected_execution=expected_execution,
+            )
+
+        def append_evidence(self, source):
+            return backing.append_evidence(source)
+
+        def load_evidence(self, evidence_id):
+            return backing.load_evidence(evidence_id)
+
+    application = ExecutionOutcomeApplicationService(
+        mission_loader=lambda _: mission,
+        lineage_store=InterferingStore(),
+    )
+    application.create_execution(
+        execution_id="execution-credit",
+        mission_id="mission-credit",
+    )
+
+    with pytest.raises(ExecutionOutcomeApplicationError, match="execution_stale_state"):
+        application.transition_execution(Execution(
+            execution_id="execution-credit",
+            mission_id="mission-credit",
+            status=ExecutionStatus.IN_PROGRESS,
+            actual_start=CREDIT_START,
+            actual_end=None,
+            actual_duration=None,
+        ))
+    assert backing.load_execution("execution-credit").status is (
+        ExecutionStatus.UNCONFIRMED
+    )
+
+    class FailingStore(InterferingStore):
+        def create_execution(self, source):
+            raise OSError("write failed")
+
+    failing = ExecutionOutcomeApplicationService(
+        mission_loader=lambda _: mission,
+        lineage_store=FailingStore(),
+    )
+    with pytest.raises(OSError, match="write failed"):
+        failing.create_execution(
+            execution_id="execution-failing",
+            mission_id="mission-credit",
+        )
