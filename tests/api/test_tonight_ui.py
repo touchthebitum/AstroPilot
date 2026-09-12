@@ -36,6 +36,33 @@ def test_root_serves_tonight_classic_ui():
     assert "Fraîcheur météo" in response.text
     assert "Âge du snapshot" not in response.text
     assert 'id="mission-dialog"' in response.text
+    assert 'id="onboarding"' in response.text
+    assert 'id="site-step"' in response.text
+    assert 'id="equipment-step"' in response.text
+    assert 'id="projects-step"' in response.text
+    assert 'id="review-step"' in response.text
+    assert 'id="availability-step"' in response.text
+    assert 'id="configuration-error"' in response.text
+    assert 'id="edit-configuration"' in response.text
+    assert "Modifier ma configuration" in response.text
+    assert "Site d’observation" in response.text
+    assert "Votre matériel" in response.text
+    assert "Aucun projet pour l’instant" in response.text
+    assert "Configuration enregistrée" in response.text
+    for field_id in (
+        "custom-optics-manufacturer",
+        "custom-optics-model",
+        "custom-focal-length-mm",
+        "custom-aperture-mm",
+        "custom-f-ratio",
+        "custom-camera-manufacturer",
+        "custom-camera-model",
+        "custom-pixel-size-um",
+        "custom-sensor-width-px",
+        "custom-sensor-height-px",
+        "custom-monochrome",
+    ):
+        assert f'id="{field_id}"' in response.text
     assert "confidence-value" not in response.text
     assert 'src="/ui/app.js"' in response.text
 
@@ -49,8 +76,48 @@ def test_tonight_ui_assets_are_served():
     assert stylesheet.status_code == 200
     assert stylesheet.headers["content-type"].startswith("text/css")
     assert script.status_code == 200
+    assert 'fetch("/v1/configuration"' in script.text
+    assert 'method: "PUT"' in script.text
     assert "fetch(\"/v1/tonight\"" in script.text
-    assert script.text.count("fetch(") == 1
+    assert script.text.count("fetch(") == 3
+    assert script.text.rstrip().endswith("loadConfiguration();")
+    assert "body: JSON.stringify({})," not in script.text
+    assert 'setView("site")' in script.text
+    assert 'setView("availability")' in script.text
+    assert 'projects: {},' in script.text
+    assert "expected_revision" in script.text
+    assert "profile_revision" in script.text
+    assert 'detail?.code === "configuration_revision_conflict"' in script.text
+    assert "await loadConfiguration({ afterConflict: true })" in script.text
+    assert "retryConfigurationSave" not in script.text
+    assert "navigator.geolocation.getCurrentPosition" in script.text
+    assert "La saisie manuelle reste disponible" in script.text
+    assert "choice.name" in script.text
+    assert "choice.id" in script.text
+    assert "renderReview" in script.text
+    assert "prefillConfiguration" in script.text
+    assert "configuration_invalid_site" in script.text
+    assert "configuration_invalid_bortle" in script.text
+    assert "configuration_invalid_equipment" in script.text
+    assert "configuration_invalid_custom_equipment" in script.text
+    assert "configuration_invalid_project" in script.text
+    assert "configuration_corrupt" in script.text
+    assert "configuration_persistence_error" in script.text
+    for field_name in (
+        "optics_manufacturer",
+        "optics_model",
+        "focal_length_mm",
+        "aperture_mm",
+        "f_ratio",
+        "camera_manufacturer",
+        "camera_model",
+        "pixel_size_um",
+        "sensor_width_px",
+        "sensor_height_px",
+        "monochrome",
+    ):
+        assert field_name in script.text
+    assert "localStorage" not in script.text
     assert "currentDecision" in script.text
     assert "target_common_name" in script.text
     assert "weather_trust" in script.text
@@ -82,8 +149,8 @@ def test_tonight_ui_assets_are_served():
     assert 'detail?.code === "decision_invalid"' in script.text
     assert 'detail?.code === "location_timezone_unresolved"' in script.text
     assert 'payload?.error === "user_profile_unavailable"' in script.text
-    assert "Un profil utilisateur valide est requis" in script.text
-    assert "ASTROPILOT_DATA_DIR et user_profile.json" in script.text
+    assert "ASTROPILOT_DATA_DIR" not in script.text
+    assert "user_profile.json" not in script.text
     assert "weatherTrust.timezone" in script.text
     assert "productive_hours ?? decision.recommended_hours" in script.text
     assert "showModal()" in script.text
