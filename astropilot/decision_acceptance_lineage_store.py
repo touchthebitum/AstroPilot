@@ -118,11 +118,24 @@ class FileDecisionAcceptanceLineageStore:
                 )
             self._write(DecisionAcceptanceAggregate(context=context))
 
+    def save(self, context: DecisionAcceptanceContext) -> None:
+        self.create_context(context)
+
     def load_context(self, decision_id: str) -> DecisionAcceptanceContext:
         path = self._path(decision_id)
         if not path.exists():
             raise AcceptanceLineageNotFoundError("decision_context_not_found")
         return self._load_path(path).context
+
+    def load(
+        self,
+        *,
+        decision_id: str,
+    ) -> DecisionAcceptanceContext | None:
+        try:
+            return self.load_context(decision_id)
+        except AcceptanceLineageNotFoundError:
+            return None
 
     def commit_selection_and_mission(
         self,

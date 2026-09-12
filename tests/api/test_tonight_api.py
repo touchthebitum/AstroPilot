@@ -8,8 +8,16 @@ from fastapi.testclient import TestClient
 import astropilot.app as app_module
 import astropilot.user_profile as user_profile
 import decision.services.session_availability_windowing as availability_windowing
+import decision.services.durable_tonight_application_service as durable_module
+from astropilot.decision_acceptance_lineage_store import (
+    FileDecisionAcceptanceLineageStore,
+)
+from astropilot.decision_forecast_evidence_store import (
+    FileDecisionForecastEvidenceStore,
+)
 from astropilot.app import create_app
 from astropilot.user_profile import UserProfileError
+from decision.mission.mission_input import MissionInput
 from decision.mission.night_mission import NightMission
 from decision.mission.mission_assembler import ProductiveWindowAssessment
 from decision.models.candidate import Candidate, CandidateProvenance
@@ -21,6 +29,19 @@ from decision.models.session_availability import (
     SessionAvailability,
     SessionAvailabilityMode,
 )
+from decision.models.context.decision_context import DecisionContext
+from decision.models.context.equipment_context import EquipmentContext
+from decision.models.context.portfolio_context import PortfolioContext
+from decision.models.context.preferences_context import PreferencesContext
+from decision.models.context.session_context import SessionContext
+from decision.models.context.site_context import SiteContext
+from decision.models.context.sky_context import SkyContext
+from decision.models.context.weather_context import WeatherContext
+from decision.models.equipment.camera import Camera
+from decision.models.equipment.imaging_optics import ImagingOptics
+from decision.models.equipment.imaging_setup import ImagingSetup
+from decision.models.equipment.mount import Mount
+from decision.models.sky.celestial_object import CelestialObject
 from decision.models.user_selection import UserSelectionSource
 from decision.opportunity.action import Action
 from decision.opportunity.opportunity import Opportunity
@@ -51,6 +72,16 @@ from decision.validation.weather_window_coverage import WeatherWindowCoverageErr
 from decision.validation.decision_consistency import DecisionConsistencyError
 from decision.weather.decision_forecast_evidence_persistence import (
     DecisionForecastEvidencePersistenceError,
+)
+from decision.acceptance_lineage_persistence import (
+    AcceptanceLineageNotFoundError,
+)
+from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
+from decision.weather.provider_reliability import (
+    WeatherForecastPoint,
+    WeatherLocation,
+    WeatherValue,
+    WeatherVariable,
 )
 from decision.location.location_time import LocationTimeError
 
@@ -1457,6 +1488,320 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
         "catalog_key": "M31",
     }
     assert service.selections[0].source is UserSelectionSource.PRIMARY_RECOMMENDATION
+
+
+LINEAGE_START = datetime(2026, 9, 1, 22, tzinfo=timezone.utc)
+LINEAGE_END = LINEAGE_START + timedelta(hours=3)
+
+
+class LineageTonightMissionService:
+    def create(self, *, winner, objects, recommended_key, build_mission_input):
+        mission_input = build_mission_input(
+            winner["object_evaluations"][recommended_key]
+        )
+        return NightMission(
+            target="Andromeda",
+            confidence="HIGH",
+            equipment=["samyang_183"],
+            window_start=mission_input.window_start,
+            window_end=mission_input.window_end,
+            recommended_hours=mission_input.recommended_hours,
+            expected_gain=mission_input.expected_gain,
+            mission_id=mission_input.mission_id,
+            decision_id=mission_input.decision_id,
+            selection_id=mission_input.selection_id,
+            site_name="Buttes",
+        )
+
+
+class LineageTonightApplicationService:
+    tonight_mission_service = LineageTonightMissionService()
+
+    @staticmethod
+    def build_mission_input(evaluation, *, profile):
+        return MissionInput(
+            window_start=LINEAGE_START,
+            window_end=LINEAGE_END,
+            astronomical_hours=3.0,
+            weather=None,
+            moon_penalty=0.1,
+            recommended_hours=3.0,
+            expected_gain=1.0,
+        )
+
+    def __init__(self, result):
+        self.result = result
+
+    def evaluate(self, **kwargs):
+        return self.result
+
+
+def lineage_decision_context():
+    return DecisionContext(
+        session=SessionContext(
+            LINEAGE_START,
+            LINEAGE_END,
+            LINEAGE_END - LINEAGE_START,
+        ),
+        site=SiteContext("Buttes", 46.7508, 6.5495, 837.0, 3),
+        equipment=EquipmentContext(
+            ImagingSetup(
+                mount=Mount("Sky-Watcher", "HEQ5"),
+                optics=ImagingOptics("Samyang", "135", 135.0, 67.5),
+                camera=Camera("ZWO", "ASI183", 2.4, 5496, 3672, True),
+            )
+        ),
+        weather=WeatherContext(20.0, 60.0, 5.0),
+        sky=SkyContext(
+            CelestialObject("Andromeda", "galaxy", 190.0),
+            0.2,
+            80.0,
+            55.0,
+            True,
+        ),
+        portfolio=PortfolioContext(1, 10.0, 8, 0.5),
+        preferences=PreferencesContext(0.7, 0.3, 25.0, 20.0),
+    )
+
+
+def lineage_result(reference_time):
+    base = make_result()
+    source_context = lineage_decision_context()
+    location = WeatherLocation(46.7508, 6.5495, 837.0)
+    evidence = DecisionForecastEvidence((
+        WeatherForecastPoint(
+            provider_id="open_meteo",
+            model_id="best_match",
+            retrieved_at_utc=reference_time - timedelta(minutes=5),
+            forecast_for_utc=LINEAGE_START,
+            requested_location=location,
+            grid_location=location,
+            values=(WeatherValue(
+                WeatherVariable.CLOUD_COVER_PERCENT,
+                20.0,
+                "%",
+            ),),
+        ),
+    ))
+    return replace(
+        base,
+        night={
+            "date": "2026-09-01",
+            "top_objects": [{
+                "catalog_key": "M31",
+                "name": "Andromeda",
+                "decision_context": source_context,
+            }],
+            "object_evaluations": {
+                "M31": {"decision_context": source_context}
+            },
+        },
+        forecast_evidence=evidence,
+    )
+
+
+def lineage_service(tmp_path, reference_time, *, lineage_store=None):
+    return DurableTonightApplicationService(
+        application_service=LineageTonightApplicationService(
+            lineage_result(reference_time)
+        ),
+        evidence_store=FileDecisionForecastEvidenceStore(
+            tmp_path / "decision_forecast_evidence"
+        ),
+        acceptance_lineage_store=(
+            lineage_store
+            or FileDecisionAcceptanceLineageStore(
+                tmp_path / "decision_lineage"
+            )
+        ),
+        decision_id_factory=lambda: "decision-lineage",
+        clock=lambda: reference_time,
+    )
+
+
+def lineage_client(tmp_path, reference_time, *, lineage_store=None):
+    return TestClient(create_app(
+        service_factory=lambda: lineage_service(
+            tmp_path,
+            reference_time,
+            lineage_store=lineage_store,
+        ),
+        weather_provider=lambda lat, lon: make_weather_snapshot(
+            reference_time - timedelta(minutes=5)
+        ),
+        profile_provider=valid_profile,
+        clock=lambda: reference_time,
+    ))
+
+
+def lineage_selection_payload(
+    *,
+    source="primary_recommendation",
+    selected_at=None,
+    selection_id="selection-lineage",
+    decision_id="decision-lineage",
+):
+    return {
+        "decision_id": decision_id,
+        "selection_id": selection_id,
+        "source": source,
+        "selected_catalog_key": None if source == "declined" else "M31",
+        "selected_at": (
+            selected_at or DEFAULT_WEATHER_REFERENCE_TIME
+        ).isoformat(),
+    }
+
+
+def test_durable_acceptance_lineage_survives_two_api_reconstructions(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(durable_module, "generate_mission_id", lambda: "mission-lineage")
+    reference = DEFAULT_WEATHER_REFERENCE_TIME
+    tonight = lineage_client(tmp_path, reference).post("/v1/tonight", json={})
+    store = FileDecisionAcceptanceLineageStore(tmp_path / "decision_lineage")
+
+    accepted = lineage_client(tmp_path, reference).post(
+        "/v1/decision-selections",
+        json=lineage_selection_payload(),
+    )
+    reconstructed = lineage_service(tmp_path, reference)
+
+    assert tonight.status_code == 200, tonight.json()
+    assert tonight.json()["decision_id"] == "decision-lineage"
+    assert accepted.status_code == 200, accepted.json()
+    assert accepted.json()["mission_id"] == "mission-lineage"
+    assert store.load_context("decision-lineage").decision_context.decision_id == (
+        "decision-lineage"
+    )
+    assert reconstructed.load_selection("selection-lineage").decision_id == (
+        "decision-lineage"
+    )
+    persisted_mission = reconstructed.load_mission("mission-lineage")
+    assert (
+        persisted_mission.decision_id,
+        persisted_mission.selection_id,
+    ) == ("decision-lineage", "selection-lineage")
+
+
+@pytest.mark.parametrize(
+    "selected_at",
+    [
+        DEFAULT_WEATHER_REFERENCE_TIME - timedelta(days=30),
+        DEFAULT_WEATHER_REFERENCE_TIME + timedelta(days=30),
+    ],
+)
+def test_stale_reconstructed_decision_cannot_be_bypassed_by_selected_at(
+    tmp_path,
+    selected_at,
+):
+    initial = DEFAULT_WEATHER_REFERENCE_TIME
+    assert lineage_client(tmp_path, initial).post("/v1/tonight", json={}).status_code == 200
+    stale_reference = initial + timedelta(minutes=91)
+    response = lineage_client(tmp_path, stale_reference).post(
+        "/v1/decision-selections",
+        json=lineage_selection_payload(selected_at=selected_at),
+    )
+    store = FileDecisionAcceptanceLineageStore(tmp_path / "decision_lineage")
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "decision_context_stale"
+    with pytest.raises(AcceptanceLineageNotFoundError, match="selection_not_found"):
+        store.load_selection("selection-lineage")
+    with pytest.raises(AcceptanceLineageNotFoundError, match="mission_not_found"):
+        store.load_mission("mission-lineage")
+
+
+def test_reconstructed_decline_persists_selection_without_mission(tmp_path):
+    reference = DEFAULT_WEATHER_REFERENCE_TIME
+    lineage_client(tmp_path, reference).post("/v1/tonight", json={})
+
+    response = lineage_client(tmp_path, reference).post(
+        "/v1/decision-selections",
+        json=lineage_selection_payload(source="declined"),
+    )
+    store = FileDecisionAcceptanceLineageStore(tmp_path / "decision_lineage")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "declined"
+    assert store.load_selection("selection-lineage").source.value == "declined"
+    with pytest.raises(AcceptanceLineageNotFoundError, match="mission_not_found"):
+        store.load_mission("mission-lineage")
+
+
+def test_forecast_only_and_unknown_decisions_remain_not_found(tmp_path):
+    reference = DEFAULT_WEATHER_REFERENCE_TIME
+    evidence_store = FileDecisionForecastEvidenceStore(
+        tmp_path / "decision_forecast_evidence"
+    )
+    evidence_store.save(
+        decision_id="forecast-only",
+        evidence=lineage_result(reference).forecast_evidence,
+    )
+    client = lineage_client(tmp_path, reference)
+
+    for decision_id in ("forecast-only", "unknown-decision"):
+        response = client.post(
+            "/v1/decision-selections",
+            json=lineage_selection_payload(decision_id=decision_id),
+        )
+        assert response.status_code == 404
+        assert response.json()["detail"]["code"] == "decision_context_not_found"
+
+
+def test_context_and_acceptance_persistence_failures_do_not_return_success(
+    tmp_path,
+):
+    class FailingStore:
+        def __init__(self):
+            self.context = None
+
+        def create_context(self, context):
+            self.context = context
+            raise OSError("context write failed")
+
+        def save(self, context):
+            self.create_context(context)
+
+        def load_context(self, decision_id):
+            return self.context
+
+        def load(self, *, decision_id):
+            return self.load_context(decision_id)
+
+        def commit_selection_and_mission(self, selection, mission):
+            raise OSError("acceptance write failed")
+
+        def load_selection(self, selection_id):
+            raise AssertionError("nothing persisted")
+
+        def load_mission(self, mission_id):
+            raise AssertionError("nothing persisted")
+
+    reference = DEFAULT_WEATHER_REFERENCE_TIME
+    store = FailingStore()
+    context_client = lineage_client(tmp_path, reference, lineage_store=store)
+    context_response = TestClient(
+        context_client.app,
+        raise_server_exceptions=False,
+    ).post("/v1/tonight", json={})
+    assert context_response.status_code == 500
+
+    store.context = None
+    healthy = FileDecisionAcceptanceLineageStore(tmp_path / "decision_lineage")
+    assert lineage_client(tmp_path, reference, lineage_store=healthy).post(
+        "/v1/tonight", json={}
+    ).status_code == 200
+    stored_context = healthy.load_context("decision-lineage")
+    store.context = stored_context
+    acceptance = lineage_client(tmp_path, reference, lineage_store=store).post(
+        "/v1/decision-selections",
+        json=lineage_selection_payload(),
+    )
+    assert acceptance.status_code == 409
+    assert acceptance.json()["detail"]["code"] == (
+        "decision_lineage_persistence_error"
+    )
 
 
 def test_gp11_selection_endpoint_rejects_unknown_decision_without_fallback():

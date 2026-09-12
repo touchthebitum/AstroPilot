@@ -5,7 +5,8 @@ import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, fields
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from types import SimpleNamespace
 
 from decision.filtering.selected_filter import SelectedFilter
 from decision.intelligence.analysis_result import AnalysisResult
@@ -178,10 +179,19 @@ def _encode(value: object) -> object:
         if value.tzinfo is None or value.utcoffset() is None:
             raise AcceptanceLineageCorruptionError("datetime_timezone_required")
         return {"$type": "datetime", "value": value.isoformat()}
+    if type(value) is date:
+        return {"$type": "date", "value": value.isoformat()}
     if type(value) is timedelta:
         return {
             "$type": "timedelta",
             "microseconds": _duration_microseconds(value),
+        }
+    if type(value) is SimpleNamespace:
+        return {
+            "$type": "simple_namespace",
+            "attributes": {
+                key: _encode(item) for key, item in vars(value).items()
+            },
         }
     dataclass_tag = _DATACLASS_TAG_BY_TYPE.get(type(value))
     if dataclass_tag is not None:
@@ -243,6 +253,20 @@ def _decode(value: object) -> object:
         if result.tzinfo is None or result.utcoffset() is None:
             raise AcceptanceLineageCorruptionError("invalid_datetime")
         return result
+    if kind == "date":
+        document = _exact_mapping(
+            value, frozenset(("$type", "value")), "invalid_date_document"
+        )
+        raw = document["value"]
+        if not isinstance(raw, str):
+            raise AcceptanceLineageCorruptionError("invalid_date")
+        try:
+            result = date.fromisoformat(raw)
+        except ValueError as error:
+            raise AcceptanceLineageCorruptionError("invalid_date") from error
+        if result.isoformat() != raw:
+            raise AcceptanceLineageCorruptionError("invalid_date")
+        return result
     if kind == "timedelta":
         document = _exact_mapping(
             value,
@@ -256,6 +280,22 @@ def _decode(value: object) -> object:
             return timedelta(microseconds=raw)
         except OverflowError as error:
             raise AcceptanceLineageCorruptionError("invalid_timedelta") from error
+    if kind == "simple_namespace":
+        document = _exact_mapping(
+            value,
+            frozenset(("$type", "attributes")),
+            "invalid_simple_namespace_document",
+        )
+        attributes = document["attributes"]
+        if type(attributes) is not dict or any(
+            not isinstance(key, str) for key in attributes
+        ):
+            raise AcceptanceLineageCorruptionError(
+                "invalid_simple_namespace_attributes"
+            )
+        return SimpleNamespace(
+            **{key: _decode(item) for key, item in attributes.items()}
+        )
     if kind == "enum":
         document = _exact_mapping(
             value,
