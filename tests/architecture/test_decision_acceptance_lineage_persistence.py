@@ -1,8 +1,9 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from threading import Barrier
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,6 +15,8 @@ from decision.acceptance_lineage_persistence import (
     AcceptanceLineageConflictError,
     AcceptanceLineageCorruptionError,
     AcceptanceLineageNotFoundError,
+    _decode,
+    _encode,
     deserialize_decision_acceptance_context,
     deserialize_night_mission,
     deserialize_user_selection,
@@ -68,6 +71,38 @@ from decision.services.user_selection_validator import (
 
 START = datetime(2026, 9, 12, 20, 30, tzinfo=timezone.utc)
 END = datetime(2026, 9, 13, 0, 30, tzinfo=timezone.utc)
+
+
+def test_plain_date_round_trip_is_lossless_and_datetime_remains_datetime():
+    observing_date = date(2026, 9, 12)
+
+    restored_date = _decode(_encode(observing_date))
+    restored_datetime = _decode(_encode(START))
+
+    assert restored_date == observing_date
+    assert type(restored_date) is date
+    assert restored_datetime == START
+    assert type(restored_datetime) is datetime
+
+
+@pytest.mark.parametrize("raw", ["not-a-date", "20260912", "2026-09-12T00:00:00"])
+def test_malformed_or_noncanonical_date_representation_fails_closed(raw):
+    with pytest.raises(AcceptanceLineageCorruptionError, match="invalid_date"):
+        _decode({"$type": "date", "value": raw})
+
+
+def test_nested_namespace_with_date_round_trip_is_lossless():
+    value = SimpleNamespace(
+        observing_date=date(2026, 9, 12),
+        session=SimpleNamespace(end_time=END),
+    )
+
+    restored = _decode(_encode(value))
+
+    assert restored == value
+    assert type(restored) is SimpleNamespace
+    assert type(restored.observing_date) is date
+    assert type(restored.session.end_time) is datetime
 
 
 def candidate(catalog_key="M31"):
@@ -137,6 +172,7 @@ def context(decision_id="decision-1"):
             confidence=0.91,
         ),
         night={
+            "date": date(2026, 9, 12),
             "top_objects": [
                 {
                     "catalog_key": "M31",
@@ -254,6 +290,8 @@ def test_decision_acceptance_context_full_typed_round_trip():
     assert type(restored_context) is DecisionContext
     assert type(restored_context.session) is SessionContext
     assert type(restored_context.equipment.setup) is ImagingSetup
+    assert restored.night["date"] == date(2026, 9, 12)
+    assert type(restored.night["date"]) is date
     assert type(restored.night["selected_window"]) is tuple
     assert type(restored.availability) is SessionAvailability
 

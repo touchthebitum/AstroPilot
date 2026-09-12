@@ -2029,10 +2029,17 @@ def build_tonight_application_service() -> TonightApplicationService:
 
 def build_durable_tonight_application_service(
 ) -> DurableTonightApplicationService:
+    from astropilot.decision_acceptance_lineage_store import (
+        FileDecisionAcceptanceLineageStore,
+    )
+
     return DurableTonightApplicationService(
         application_service=build_tonight_application_service(),
         evidence_store=FileDecisionForecastEvidenceStore(
             get_user_data_dir() / "decision_forecast_evidence"
+        ),
+        acceptance_lineage_store=FileDecisionAcceptanceLineageStore(
+            get_user_data_dir() / "decision_lineage"
         ),
         decision_id_factory=generate_decision_id,
         profile_loader=load_user_profile,

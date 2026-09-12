@@ -40,6 +40,7 @@ class DurableTonightApplicationService:
         application_service: TonightApplicationService,
         evidence_store: DecisionForecastEvidenceStore,
         decision_id_factory: Callable[[], str],
+        acceptance_lineage_store=None,
         acceptance_service: DecisionAcceptanceApplicationService | None = None,
         clock: Callable | None = None,
         profile_loader: Callable | None = None,
@@ -48,6 +49,7 @@ class DurableTonightApplicationService:
         self.application_service = application_service
         self.evidence_store = evidence_store
         self.decision_id_factory = decision_id_factory
+        self.acceptance_lineage_store = acceptance_lineage_store
         self._acceptance_service = acceptance_service
         self.clock = clock
         self._execution_outcome_service = None
@@ -69,6 +71,9 @@ class DurableTonightApplicationService:
 
     def _decision_acceptance_service(self) -> DecisionAcceptanceApplicationService:
         if self._acceptance_service is None:
+            context_store = self.acceptance_lineage_store
+            if context_store is None:
+                context_store = InMemoryDecisionAcceptanceContextStore()
             self._acceptance_service = DecisionAcceptanceApplicationService(
                 selection_mission_service=UserSelectionMissionService(
                     tonight_mission_service=(
@@ -76,7 +81,7 @@ class DurableTonightApplicationService:
                     ),
                     build_mission_input=self.application_service.build_mission_input,
                 ),
-                context_store=InMemoryDecisionAcceptanceContextStore(),
+                context_store=context_store,
                 mission_id_factory=generate_mission_id,
                 evidence_loader=self.evidence_store.load,
                 clock=self.clock,
@@ -88,6 +93,12 @@ class DurableTonightApplicationService:
 
     def accept(self, selection: UserSelection):
         return self._decision_acceptance_service().accept(selection)
+
+    def load_selection(self, selection_id: str):
+        return self._decision_acceptance_service().load_selection(selection_id)
+
+    def load_mission(self, mission_id: str):
+        return self._decision_acceptance_service().load_mission(mission_id)
 
     def _execution_outcome_application_service(
         self,

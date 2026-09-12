@@ -41,12 +41,24 @@ class DecisionAcceptanceContextStore(Protocol):
 
     def load(self, *, decision_id: str) -> DecisionAcceptanceContext | None: ...
 
+    def commit_selection_and_mission(
+        self,
+        selection: UserSelection,
+        mission: NightMission | None,
+    ) -> None: ...
+
+    def load_selection(self, selection_id: str) -> UserSelection: ...
+
+    def load_mission(self, mission_id: str) -> NightMission: ...
+
 
 class InMemoryDecisionAcceptanceContextStore:
     """Keeps immutable decision snapshots for the lifetime of the application."""
 
     def __init__(self) -> None:
         self._contexts: dict[str, DecisionAcceptanceContext] = {}
+        self._selections: dict[str, UserSelection] = {}
+        self._missions: dict[str, NightMission] = {}
 
     def save(self, context: DecisionAcceptanceContext) -> None:
         if not isinstance(context, DecisionAcceptanceContext):
@@ -59,6 +71,37 @@ class InMemoryDecisionAcceptanceContextStore:
     def load(self, *, decision_id: str) -> DecisionAcceptanceContext | None:
         context = self._contexts.get(decision_id)
         return deepcopy(context) if context is not None else None
+
+    def commit_selection_and_mission(
+        self,
+        selection: UserSelection,
+        mission: NightMission | None,
+    ) -> None:
+        existing_selection = self._selections.get(selection.selection_id)
+        if existing_selection is not None:
+            if existing_selection == selection and (
+                mission is None
+                or self._missions.get(mission.mission_id) == mission
+            ):
+                return
+            raise DecisionAcceptanceError("selection_id_conflict")
+        if mission is not None and mission.mission_id in self._missions:
+            raise DecisionAcceptanceError("mission_id_conflict")
+        self._selections[selection.selection_id] = deepcopy(selection)
+        if mission is not None:
+            self._missions[mission.mission_id] = mission
+
+    def load_selection(self, selection_id: str) -> UserSelection:
+        selection = self._selections.get(selection_id)
+        if selection is None:
+            raise DecisionAcceptanceError("selection_not_found")
+        return deepcopy(selection)
+
+    def load_mission(self, mission_id: str) -> NightMission:
+        mission = self._missions.get(mission_id)
+        if mission is None:
+            raise DecisionAcceptanceError("mission_not_found")
+        return mission
 
 
 def _utc_now() -> datetime:
@@ -80,7 +123,6 @@ class DecisionAcceptanceApplicationService:
         self.mission_id_factory = mission_id_factory
         self.evidence_loader = evidence_loader
         self.clock = clock or _utc_now
-        self._missions: dict[str, NightMission] = {}
 
     def _acceptance_time(self) -> datetime:
         value = self.clock()
@@ -218,6 +260,7 @@ class DecisionAcceptanceApplicationService:
         if selection.source is UserSelectionSource.DECLINED:
             if mission is not None:
                 raise DecisionAcceptanceError("declined_selection_created_mission")
+            self._commit_selection_and_mission(selection, None)
             return None
         if not isinstance(mission, NightMission):
             raise DecisionAcceptanceError("mission_creation_failed")
@@ -227,10 +270,39 @@ class DecisionAcceptanceApplicationService:
             or mission.selection_id != selection.selection_id
         ):
             raise DecisionAcceptanceError("mission_provenance_mismatch")
-        if mission_id in self._missions:
-            raise DecisionAcceptanceError("mission_id_conflict")
-        self._missions[mission_id] = mission
+        self._commit_selection_and_mission(selection, mission)
         return mission
 
+    def _commit_selection_and_mission(
+        self,
+        selection: UserSelection,
+        mission: NightMission | None,
+    ) -> None:
+        try:
+            self.context_store.commit_selection_and_mission(selection, mission)
+        except OSError as exc:
+            raise DecisionAcceptanceError(
+                "decision_lineage_persistence_error"
+            ) from exc
+        except ValueError as exc:
+            if isinstance(exc, DecisionAcceptanceError):
+                raise
+            raise DecisionAcceptanceError(str(exc)) from exc
+
+    def load_selection(self, selection_id: str) -> UserSelection:
+        try:
+            return self.context_store.load_selection(selection_id)
+        except ValueError as exc:
+            if isinstance(exc, DecisionAcceptanceError):
+                raise
+            raise DecisionAcceptanceError(str(exc)) from exc
+
     def load_mission(self, mission_id: str) -> NightMission | None:
-        return self._missions.get(mission_id)
+        try:
+            return self.context_store.load_mission(mission_id)
+        except ValueError as exc:
+            if str(exc) == "mission_not_found":
+                return None
+            if isinstance(exc, DecisionAcceptanceError):
+                raise
+            raise DecisionAcceptanceError(str(exc)) from exc
