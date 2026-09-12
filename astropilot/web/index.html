@@ -25,12 +25,17 @@
         <span class="context-label">Ce soir</span>
         <time id="night-date">—</time>
       </div>
-      <button class="refresh-button" id="refresh" type="button">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M20 6v5h-5M4 18v-5h5M6.1 9A7 7 0 0 1 18 6l2 5M3.9 13 6 18a7 7 0 0 0 11.9-3"/>
-        </svg>
-        <span>Actualiser</span>
-      </button>
+      <div class="header-actions">
+        <button class="secondary-button" id="edit-configuration" type="button" hidden>
+          Modifier ma configuration
+        </button>
+        <button class="refresh-button" id="refresh" type="button" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20 6v5h-5M4 18v-5h5M6.1 9A7 7 0 0 1 18 6l2 5M3.9 13 6 18a7 7 0 0 0 11.9-3"/>
+          </svg>
+          <span>Actualiser</span>
+        </button>
+      </div>
     </header>
 
     <main class="shell">
@@ -40,7 +45,146 @@
         <p>Une recommandation unique, calculée à partir du ciel, de votre matériel et de vos projets.</p>
       </section>
 
-      <section id="loading-state" class="state-panel loading-panel" aria-live="polite">
+      <section id="configuration-loading" class="state-panel loading-panel" aria-live="polite">
+        <div class="orbit" aria-hidden="true"><span></span></div>
+        <div>
+          <p class="state-kicker">Préparation</p>
+          <h2>Chargement de votre configuration…</h2>
+          <p>AstroPilot vérifie votre site et votre matériel.</p>
+        </div>
+      </section>
+
+      <section id="configuration-error" class="state-panel message-panel" hidden aria-live="assertive">
+        <span class="message-icon" aria-hidden="true">!</span>
+        <div>
+          <p class="state-kicker">Configuration indisponible</p>
+          <h2>Impossible de charger votre configuration.</h2>
+          <p id="configuration-error-message"></p>
+        </div>
+        <button class="secondary-button" id="configuration-retry" type="button">Réessayer</button>
+      </section>
+
+      <section id="onboarding" class="onboarding" hidden aria-labelledby="onboarding-title">
+        <div class="wizard-heading">
+          <div>
+            <p class="state-kicker">Première configuration</p>
+            <h2 id="onboarding-title">Préparons AstroPilot.</h2>
+          </div>
+          <ol class="wizard-progress" aria-label="Progression">
+            <li data-progress="site">Site</li>
+            <li data-progress="equipment">Matériel</li>
+            <li data-progress="projects">Projets</li>
+            <li data-progress="review">Confirmation</li>
+          </ol>
+        </div>
+
+        <p id="configuration-form-error" class="form-error" role="alert" hidden></p>
+
+        <section id="site-step" class="wizard-step" data-step="site" aria-labelledby="site-title">
+          <p class="eyebrow">Étape 1</p>
+          <h2 id="site-title" tabindex="-1">Site d’observation</h2>
+          <p class="step-intro">Indiquez l’endroit depuis lequel vous observez habituellement.</p>
+          <div class="form-grid two-columns">
+            <label class="field full-width" for="site-name">
+              <span>Nom du site</span>
+              <input id="site-name" name="site-name" type="text" autocomplete="organization" required>
+            </label>
+            <label class="field" for="site-latitude">
+              <span>Latitude</span>
+              <input id="site-latitude" name="site-latitude" type="number" min="-90" max="90" step="any" inputmode="decimal" required>
+            </label>
+            <label class="field" for="site-longitude">
+              <span>Longitude</span>
+              <input id="site-longitude" name="site-longitude" type="number" min="-180" max="180" step="any" inputmode="decimal" required>
+            </label>
+            <label class="field full-width" for="site-bortle">
+              <span>Pollution lumineuse / qualité du ciel (Bortle)</span>
+              <input id="site-bortle" name="site-bortle" type="number" min="1" max="9" step="1" inputmode="numeric" required>
+              <small>1 correspond à un ciel très sombre, 9 à un ciel urbain très lumineux.</small>
+            </label>
+          </div>
+          <div class="geolocation-row">
+            <button class="secondary-button" id="use-geolocation" type="button">Utiliser ma position</button>
+            <p id="geolocation-message" class="field-note" aria-live="polite"></p>
+          </div>
+          <div class="wizard-actions end">
+            <button class="primary-button" id="site-next" type="button">Continuer</button>
+          </div>
+        </section>
+
+        <section id="equipment-step" class="wizard-step" data-step="equipment" aria-labelledby="equipment-title" hidden>
+          <p class="eyebrow">Étape 2</p>
+          <h2 id="equipment-title" tabindex="-1">Votre matériel</h2>
+          <p class="step-intro">Choisissez une configuration connue ou décrivez votre optique et votre caméra.</p>
+          <div class="choice-tabs" role="radiogroup" aria-label="Type de matériel">
+            <label><input type="radio" name="equipment-kind" value="preset" checked> Configuration proposée</label>
+            <label><input type="radio" name="equipment-kind" value="custom"> Mon matériel</label>
+          </div>
+          <div id="preset-equipment" class="equipment-choices"></div>
+          <fieldset id="custom-equipment" class="custom-equipment" hidden>
+            <legend>Optique et caméra</legend>
+            <div class="form-grid two-columns">
+              <label class="field" for="custom-optics-manufacturer"><span>Fabricant de l’optique</span><input id="custom-optics-manufacturer" type="text"></label>
+              <label class="field" for="custom-optics-model"><span>Modèle de l’optique</span><input id="custom-optics-model" type="text"></label>
+              <label class="field" for="custom-focal-length-mm"><span>Focale (mm)</span><input id="custom-focal-length-mm" type="number" min="0" step="any"></label>
+              <label class="field" for="custom-aperture-mm"><span>Ouverture (mm)</span><input id="custom-aperture-mm" type="number" min="0" step="any"></label>
+              <label class="field" for="custom-f-ratio"><span>Rapport focal</span><input id="custom-f-ratio" type="number" min="0" step="any"></label>
+              <label class="field" for="custom-camera-manufacturer"><span>Fabricant de la caméra</span><input id="custom-camera-manufacturer" type="text"></label>
+              <label class="field" for="custom-camera-model"><span>Modèle de la caméra</span><input id="custom-camera-model" type="text"></label>
+              <label class="field" for="custom-pixel-size-um"><span>Taille des pixels (µm)</span><input id="custom-pixel-size-um" type="number" min="0" step="any"></label>
+              <label class="field" for="custom-sensor-width-px"><span>Largeur du capteur (px)</span><input id="custom-sensor-width-px" type="number" min="0" step="any"></label>
+              <label class="field" for="custom-sensor-height-px"><span>Hauteur du capteur (px)</span><input id="custom-sensor-height-px" type="number" min="0" step="any"></label>
+              <label class="check-field full-width" for="custom-monochrome"><input id="custom-monochrome" type="checkbox"><span>Caméra monochrome</span></label>
+            </div>
+          </fieldset>
+          <div class="wizard-actions">
+            <button class="secondary-button" data-back="site" type="button">Retour</button>
+            <button class="primary-button" id="equipment-next" type="button">Continuer</button>
+          </div>
+        </section>
+
+        <section id="projects-step" class="wizard-step" data-step="projects" aria-labelledby="projects-title" hidden>
+          <p class="eyebrow">Étape 3</p>
+          <h2 id="projects-title" tabindex="-1">Vos projets</h2>
+          <p class="step-intro">Vous pourrez organiser vos projets plus tard.</p>
+          <div id="existing-projects" class="project-summary" hidden></div>
+          <label class="project-none" for="zero-projects">
+            <input id="zero-projects" type="checkbox" checked>
+            <span><strong>Aucun projet pour l’instant</strong><small>AstroPilot peut déjà découvrir une cible adaptée sans projet.</small></span>
+          </label>
+          <div class="wizard-actions">
+            <button class="secondary-button" data-back="equipment" type="button">Retour</button>
+            <button class="primary-button" id="projects-next" type="button">Continuer</button>
+          </div>
+        </section>
+
+        <section id="review-step" class="wizard-step" data-step="review" aria-labelledby="review-title" hidden>
+          <p class="eyebrow">Étape 4</p>
+          <h2 id="review-title" tabindex="-1">Vérifiez votre configuration</h2>
+          <dl class="review-grid">
+            <div><dt>Site</dt><dd id="review-site">—</dd></div>
+            <div><dt>Coordonnées</dt><dd id="review-coordinates">—</dd></div>
+            <div><dt>Ciel</dt><dd id="review-bortle">—</dd></div>
+            <div><dt>Matériel</dt><dd id="review-equipment">—</dd></div>
+            <div><dt>Projets</dt><dd id="review-projects">—</dd></div>
+          </dl>
+          <div class="wizard-actions">
+            <button class="secondary-button" data-back="projects" type="button">Retour</button>
+            <button class="primary-button" id="save-configuration" type="button">Enregistrer ma configuration</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="availability-step" class="state-panel availability-placeholder" hidden aria-live="polite">
+        <span class="message-icon good-icon" aria-hidden="true">✓</span>
+        <div>
+          <p class="state-kicker">Configuration prête</p>
+          <h2>Configuration enregistrée.</h2>
+          <p>Choisissez maintenant votre disponibilité pour ce soir.</p>
+        </div>
+      </section>
+
+      <section id="loading-state" class="state-panel loading-panel" hidden aria-live="polite">
         <div class="orbit" aria-hidden="true"><span></span></div>
         <div>
           <p class="state-kicker">Analyse en cours</p>

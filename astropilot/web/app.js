@@ -1,10 +1,18 @@
 "use strict";
 
 const ui = Object.freeze({
+  configurationLoading: document.querySelector("#configuration-loading"),
+  configurationError: document.querySelector("#configuration-error"),
+  configurationErrorMessage: document.querySelector("#configuration-error-message"),
+  configurationRetry: document.querySelector("#configuration-retry"),
+  onboarding: document.querySelector("#onboarding"),
+  formError: document.querySelector("#configuration-form-error"),
+  availability: document.querySelector("#availability-step"),
   loading: document.querySelector("#loading-state"),
   message: document.querySelector("#message-state"),
   decision: document.querySelector("#decision"),
   refresh: document.querySelector("#refresh"),
+  editConfiguration: document.querySelector("#edit-configuration"),
   retry: document.querySelector("#message-retry"),
   mission: document.querySelector("#mission-dialog"),
   openMission: document.querySelector("#open-mission"),
@@ -12,7 +20,45 @@ const ui = Object.freeze({
   missionBack: document.querySelector("#mission-back"),
 });
 
-const state = { currentDecision: null };
+const state = {
+  view: "loading_configuration",
+  configuration: null,
+  configurationDraft: {
+    site: null,
+    equipment: null,
+    projects: {},
+  },
+  currentDecision: null,
+  savingConfiguration: false,
+};
+
+const wizardStates = Object.freeze(["site", "equipment", "projects", "review"]);
+
+function setView(view) {
+  state.view = view;
+  const wizardVisible = wizardStates.includes(view);
+  ui.configurationLoading.hidden = view !== "loading_configuration";
+  ui.configurationError.hidden = view !== "configuration_error";
+  ui.onboarding.hidden = !wizardVisible;
+  ui.availability.hidden = view !== "availability";
+  ui.loading.hidden = view !== "loading_recommendation";
+  ui.message.hidden = true;
+  ui.decision.hidden = true;
+  ui.refresh.hidden = true;
+  ui.editConfiguration.hidden = !state.configuration?.configured || wizardVisible;
+
+  for (const step of document.querySelectorAll("[data-step]")) {
+    step.hidden = step.dataset.step !== view;
+  }
+  for (const marker of document.querySelectorAll("[data-progress]")) {
+    marker.classList.toggle("active", marker.dataset.progress === view);
+  }
+  if (wizardVisible) {
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-step="${view}"] h2`)?.focus();
+    });
+  }
+}
 
 const labels = Object.freeze({
   actions: {
@@ -45,7 +91,11 @@ function text(selector, value) {
 }
 
 function show(view) {
-  ui.loading.hidden = view !== "loading";
+  if (view === "loading") {
+    setView("loading_recommendation");
+    return;
+  }
+  setView("recommendation");
   ui.message.hidden = view !== "message";
   ui.decision.hidden = view !== "decision";
 }
@@ -287,6 +337,308 @@ function renderDecision(decision) {
   show("decision");
 }
 
+const customEquipmentFields = Object.freeze([
+  ["optics_manufacturer", "#custom-optics-manufacturer", "text"],
+  ["optics_model", "#custom-optics-model", "text"],
+  ["focal_length_mm", "#custom-focal-length-mm", "number"],
+  ["aperture_mm", "#custom-aperture-mm", "number"],
+  ["f_ratio", "#custom-f-ratio", "number"],
+  ["camera_manufacturer", "#custom-camera-manufacturer", "text"],
+  ["camera_model", "#custom-camera-model", "text"],
+  ["pixel_size_um", "#custom-pixel-size-um", "number"],
+  ["sensor_width_px", "#custom-sensor-width-px", "number"],
+  ["sensor_height_px", "#custom-sensor-height-px", "number"],
+  ["monochrome", "#custom-monochrome", "boolean"],
+]);
+
+const configurationErrorSteps = Object.freeze({
+  configuration_invalid_site: "site",
+  configuration_invalid_bortle: "site",
+  configuration_invalid_equipment: "equipment",
+  configuration_invalid_custom_equipment: "equipment",
+  configuration_invalid_project: "projects",
+});
+
+function copyProjects(projects) {
+  return JSON.parse(JSON.stringify(projects || {}));
+}
+
+function draftFromConfiguration(configuration) {
+  const active = (configuration.available_equipment || []).find(
+    (equipment) => equipment.id === configuration.active_equipment_id,
+  );
+  let equipment = null;
+  if (active?.kind === "custom") {
+    equipment = {
+      custom: Object.fromEntries(
+        customEquipmentFields.map(([name]) => [name, active[name]]),
+      ),
+    };
+  } else if (active) {
+    equipment = { preset_id: active.id };
+  } else if (configuration.preset_equipment?.length) {
+    equipment = { preset_id: configuration.preset_equipment[0].id };
+  }
+  return {
+    site: configuration.site ? { ...configuration.site } : null,
+    equipment,
+    projects: copyProjects(configuration.projects),
+  };
+}
+
+function showFormError(message) {
+  ui.formError.textContent = message || "";
+  ui.formError.hidden = !message;
+}
+
+function renderPresetChoices() {
+  const container = document.querySelector("#preset-equipment");
+  container.replaceChildren();
+  for (const choice of state.configuration?.preset_equipment || []) {
+    const label = document.createElement("label");
+    const radio = document.createElement("input");
+    const copy = document.createElement("span");
+    const name = document.createElement("strong");
+    const details = document.createElement("small");
+    label.className = "equipment-choice";
+    radio.type = "radio";
+    radio.name = "preset-equipment";
+    radio.value = choice.id;
+    name.textContent = choice.name;
+    details.textContent = `${choice.optics_manufacturer} ${choice.optics_model} · ${choice.camera_manufacturer} ${choice.camera_model}`;
+    copy.append(name, details);
+    label.append(radio, copy);
+    container.append(label);
+  }
+}
+
+function toggleEquipmentKind() {
+  const kind = document.querySelector('input[name="equipment-kind"]:checked')?.value;
+  document.querySelector("#preset-equipment").hidden = kind !== "preset";
+  document.querySelector("#custom-equipment").hidden = kind !== "custom";
+}
+
+function renderProjects() {
+  const projects = state.configurationDraft.projects || {};
+  const entries = Object.entries(projects);
+  const summary = document.querySelector("#existing-projects");
+  const zeroProjects = document.querySelector("#zero-projects");
+  summary.replaceChildren();
+  summary.hidden = !entries.length;
+  if (entries.length) {
+    const heading = document.createElement("p");
+    heading.textContent = "Projets actuellement conservés";
+    const list = document.createElement("ul");
+    for (const [catalogKey, project] of entries) {
+      const item = document.createElement("li");
+      item.textContent = `${catalogKey} · ${project.hours} h sur ${project.target_hours} h`;
+      list.append(item);
+    }
+    summary.append(heading, list);
+    zeroProjects.checked = false;
+    zeroProjects.disabled = false;
+  } else {
+    zeroProjects.checked = true;
+    zeroProjects.disabled = true;
+  }
+}
+
+function prefillConfiguration() {
+  renderPresetChoices();
+  const site = state.configurationDraft.site || {};
+  document.querySelector("#site-name").value = site.name || "";
+  document.querySelector("#site-latitude").value = site.latitude ?? "";
+  document.querySelector("#site-longitude").value = site.longitude ?? "";
+  document.querySelector("#site-bortle").value = site.bortle ?? "";
+
+  const custom = state.configurationDraft.equipment?.custom;
+  const kind = custom ? "custom" : "preset";
+  document.querySelector(`input[name="equipment-kind"][value="${kind}"]`).checked = true;
+  const presetId = state.configurationDraft.equipment?.preset_id;
+  const preset = [...document.querySelectorAll('input[name="preset-equipment"]')]
+    .find((input) => input.value === presetId);
+  if (preset) preset.checked = true;
+  for (const [name, selector, type] of customEquipmentFields) {
+    const input = document.querySelector(selector);
+    if (type === "boolean") input.checked = Boolean(custom?.[name]);
+    else input.value = custom?.[name] ?? "";
+  }
+  toggleEquipmentKind();
+  renderProjects();
+}
+
+function readSite() {
+  const latitudeInput = document.querySelector("#site-latitude").value.trim();
+  const longitudeInput = document.querySelector("#site-longitude").value.trim();
+  const bortleInput = document.querySelector("#site-bortle").value.trim();
+  const site = {
+    name: document.querySelector("#site-name").value.trim(),
+    latitude: Number(latitudeInput),
+    longitude: Number(longitudeInput),
+    bortle: Number(bortleInput),
+  };
+  if (!site.name) return [null, "Donnez un nom à votre site."];
+  if (!latitudeInput || !Number.isFinite(site.latitude) || site.latitude < -90 || site.latitude > 90) {
+    return [null, "La latitude doit être comprise entre −90 et 90."];
+  }
+  if (!longitudeInput || !Number.isFinite(site.longitude) || site.longitude < -180 || site.longitude > 180) {
+    return [null, "La longitude doit être comprise entre −180 et 180."];
+  }
+  if (!bortleInput || !Number.isInteger(site.bortle) || site.bortle < 1 || site.bortle > 9) {
+    return [null, "La valeur Bortle doit être un entier de 1 à 9."];
+  }
+  return [site, null];
+}
+
+function readCustomEquipment() {
+  const custom = {};
+  for (const [name, selector, type] of customEquipmentFields) {
+    const input = document.querySelector(selector);
+    if (type === "boolean") {
+      custom[name] = input.checked;
+    } else if (type === "number") {
+      custom[name] = Number(input.value);
+      if (!Number.isFinite(custom[name]) || custom[name] <= 0) {
+        return [null, "Toutes les mesures du matériel doivent être positives."];
+      }
+    } else {
+      custom[name] = input.value.trim();
+      if (!custom[name]) {
+        return [null, "Renseignez le fabricant et le modèle de l’optique et de la caméra."];
+      }
+    }
+  }
+  return [custom, null];
+}
+
+function readEquipment() {
+  const kind = document.querySelector('input[name="equipment-kind"]:checked')?.value;
+  if (kind === "custom") {
+    const [custom, error] = readCustomEquipment();
+    return [custom ? { custom } : null, error];
+  }
+  const selected = document.querySelector('input[name="preset-equipment"]:checked');
+  if (!selected) return [null, "Choisissez une configuration matérielle."];
+  return [{ preset_id: selected.value }, null];
+}
+
+function selectedEquipmentName() {
+  const equipment = state.configurationDraft.equipment;
+  if (equipment?.custom) {
+    const custom = equipment.custom;
+    return `${custom.optics_manufacturer} ${custom.optics_model} + ${custom.camera_manufacturer} ${custom.camera_model}`;
+  }
+  const choice = (state.configuration?.preset_equipment || []).find(
+    (preset) => preset.id === equipment?.preset_id,
+  );
+  return choice?.name || "Matériel à confirmer";
+}
+
+function renderReview() {
+  const site = state.configurationDraft.site;
+  text("#review-site", site.name);
+  text("#review-coordinates", `${site.latitude}, ${site.longitude}`);
+  text("#review-bortle", `Bortle ${site.bortle}`);
+  text("#review-equipment", selectedEquipmentName());
+  const count = Object.keys(state.configurationDraft.projects || {}).length;
+  text("#review-projects", count ? `${count} projet${count > 1 ? "s" : ""} conservé${count > 1 ? "s" : ""}` : "Aucun projet pour l’instant");
+}
+
+function configurationPayload() {
+  const payload = {
+    site: state.configurationDraft.site,
+    equipment: state.configurationDraft.equipment,
+    projects: copyProjects(state.configurationDraft.projects),
+  };
+  if (state.configuration?.configured) {
+    payload.expected_revision = state.configuration.profile_revision;
+  }
+  return payload;
+}
+
+function showConfigurationError(message) {
+  ui.configurationErrorMessage.textContent = message;
+  setView("configuration_error");
+}
+
+async function loadConfiguration({ afterConflict = false } = {}) {
+  setView("loading_configuration");
+  try {
+    const response = await fetch("/v1/configuration");
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const code = payload?.detail?.code;
+      const message = code === "configuration_corrupt"
+        ? "La configuration enregistrée ne peut pas être relue. Réessayez dans un instant."
+        : "La configuration est temporairement inaccessible. Réessayez dans un instant.";
+      showConfigurationError(message);
+      return;
+    }
+    state.configuration = payload;
+    state.configurationDraft = draftFromConfiguration(payload);
+    prefillConfiguration();
+    if (afterConflict) {
+      showFormError("La configuration a changé. Vérifiez les dernières valeurs avant de l’enregistrer à nouveau.");
+      renderReview();
+      setView("review");
+    } else if (payload.configured) {
+      showFormError("");
+      setView("availability");
+    } else {
+      showFormError("");
+      setView("site");
+    }
+  } catch (_error) {
+    showConfigurationError("AstroPilot ne parvient pas à charger la configuration. La saisie pourra reprendre après reconnexion.");
+  }
+}
+
+async function saveConfiguration() {
+  if (state.savingConfiguration) return;
+  state.savingConfiguration = true;
+  const button = document.querySelector("#save-configuration");
+  button.disabled = true;
+  showFormError("");
+  try {
+    const response = await fetch("/v1/configuration", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(configurationPayload()),
+    });
+    const payload = await response.json().catch(() => ({}));
+    const detail = payload?.detail;
+    if (!response.ok) {
+      if (response.status === 409 && detail?.code === "configuration_revision_conflict") {
+        await loadConfiguration({ afterConflict: true });
+        return;
+      }
+      const target = configurationErrorSteps[detail?.code];
+      if (target) {
+        showFormError("Certaines informations doivent être corrigées avant l’enregistrement.");
+        setView(target);
+        return;
+      }
+      if (["configuration_corrupt", "configuration_persistence_error"].includes(detail?.code)) {
+        showConfigurationError("La configuration ne peut pas être enregistrée pour le moment. Réessayez dans un instant.");
+        return;
+      }
+      showFormError("La configuration n’a pas pu être validée.");
+      setView("review");
+      return;
+    }
+    state.configuration = payload;
+    state.configurationDraft = draftFromConfiguration(payload);
+    prefillConfiguration();
+    setView("availability");
+  } catch (_error) {
+    showFormError("Connexion impossible pendant l’enregistrement. Vérifiez vos informations puis réessayez.");
+    setView("review");
+  } finally {
+    state.savingConfiguration = false;
+    button.disabled = false;
+  }
+}
+
 const partialMessages = Object.freeze({
   no_night: ["Aucune nuit exploitable", "Les prévisions ne montrent pas encore de fenêtre adaptée. Revenez lorsque les conditions évoluent."],
   no_candidate: ["Aucune cible adaptée", "AstroPilot n’a trouvé aucune cible compatible avec cette nuit et votre configuration."],
@@ -306,7 +658,7 @@ function showMessage(title, body, { kicker = "Décision indisponible", retry = t
 function normalizeError(response, payload) {
   const detail = payload?.detail;
   if (payload?.error === "user_profile_unavailable") {
-    return ["Configuration requise", "AstroPilot n’est pas encore configuré. Un profil utilisateur valide est requis. Vérifiez ASTROPILOT_DATA_DIR et user_profile.json."];
+    return ["Configuration requise", "AstroPilot doit relire votre configuration avant de préparer la nuit."];
   }
   if (response.status === 503) {
     if (detail?.code === "weather_unavailable") {
@@ -338,7 +690,7 @@ function normalizeError(response, payload) {
   return ["AstroPilot n’a pas pu répondre", "Une erreur inattendue empêche la préparation de votre nuit."];
 }
 
-async function loadTonight() {
+async function loadTonight(availability) {
   show("loading");
   ui.refresh.disabled = true;
   state.currentDecision = null;
@@ -347,7 +699,7 @@ async function loadTonight() {
     const response = await fetch("/v1/tonight", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ availability }),
     });
     const payload = await response.json().catch(() => ({}));
 
@@ -380,8 +732,80 @@ async function loadTonight() {
   }
 }
 
-ui.refresh.addEventListener("click", loadTonight);
-ui.retry.addEventListener("click", loadTonight);
+document.querySelector("#site-next").addEventListener("click", () => {
+  const [site, error] = readSite();
+  if (error) {
+    showFormError(error);
+    return;
+  }
+  state.configurationDraft.site = site;
+  showFormError("");
+  setView("equipment");
+});
+
+document.querySelector("#equipment-next").addEventListener("click", () => {
+  const [equipment, error] = readEquipment();
+  if (error) {
+    showFormError(error);
+    return;
+  }
+  state.configurationDraft.equipment = equipment;
+  showFormError("");
+  renderProjects();
+  setView("projects");
+});
+
+document.querySelector("#projects-next").addEventListener("click", () => {
+  if (document.querySelector("#zero-projects").checked) {
+    state.configurationDraft.projects = {};
+  }
+  showFormError("");
+  renderReview();
+  setView("review");
+});
+
+for (const button of document.querySelectorAll("[data-back]")) {
+  button.addEventListener("click", () => {
+    showFormError("");
+    setView(button.dataset.back);
+  });
+}
+
+for (const input of document.querySelectorAll('input[name="equipment-kind"]')) {
+  input.addEventListener("change", toggleEquipmentKind);
+}
+
+document.querySelector("#save-configuration").addEventListener("click", saveConfiguration);
+ui.configurationRetry.addEventListener("click", loadConfiguration);
+ui.editConfiguration.addEventListener("click", () => {
+  state.configurationDraft = draftFromConfiguration(state.configuration);
+  prefillConfiguration();
+  showFormError("");
+  setView("site");
+});
+ui.refresh.addEventListener("click", () => setView("availability"));
+ui.retry.addEventListener("click", () => setView("availability"));
+
+document.querySelector("#use-geolocation").addEventListener("click", () => {
+  const message = document.querySelector("#geolocation-message");
+  if (!navigator.geolocation) {
+    message.textContent = "La géolocalisation n’est pas disponible. La saisie manuelle reste disponible.";
+    return;
+  }
+  message.textContent = "Recherche de votre position…";
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      document.querySelector("#site-latitude").value = position.coords.latitude.toFixed(6);
+      document.querySelector("#site-longitude").value = position.coords.longitude.toFixed(6);
+      message.textContent = "Coordonnées ajoutées. Vous pouvez les corriger manuellement.";
+    },
+    () => {
+      message.textContent = "Position non disponible. La saisie manuelle reste disponible.";
+    },
+    { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 },
+  );
+});
+
 ui.openMission.addEventListener("click", () => {
   if (state.currentDecision) ui.mission.showModal();
 });
@@ -390,4 +814,4 @@ ui.missionBack.addEventListener("click", () => ui.mission.close());
 ui.mission.addEventListener("click", (event) => {
   if (event.target === ui.mission) ui.mission.close();
 });
-loadTonight();
+loadConfiguration();
