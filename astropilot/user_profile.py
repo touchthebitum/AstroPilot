@@ -71,7 +71,30 @@ def get_user_data_dir() -> Path:
     if configured_dir:
         return Path(configured_dir).expanduser()
 
-    return DATA_DIR
+    return _default_user_data_dir()
+
+
+def _default_user_data_dir() -> Path:
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "AstroPilot"
+    if os.name == "nt":
+        configured_root = os.environ.get("LOCALAPPDATA") or os.environ.get(
+            "APPDATA"
+        )
+        root = (
+            Path(configured_root).expanduser()
+            if configured_root
+            else Path.home() / "AppData" / "Local"
+        )
+        return root / "AstroPilot"
+
+    configured_root = os.environ.get("XDG_DATA_HOME")
+    root = (
+        Path(configured_root).expanduser()
+        if configured_root
+        else Path.home() / ".local" / "share"
+    )
+    return root / "astropilot"
 
 
 def is_finite_number(value) -> bool:
