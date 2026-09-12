@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import copy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from astropilot.user_profile import UserProfileError
+from astropilot.equipment_catalog import EQUIPMENT_PROFILES
+from astropilot.user_profile import (
+    ProfileRevisionConflictError,
+    UserProfileError,
+    create_or_replace_user_configuration,
+    get_user_data_dir,
+    load_user_profile,
+    resolve_equipment_definition,
+)
 from decision.models.candidate import CandidateProvenance
 from decision.models.candidate_rejection import CandidateRejectionBasis
 from decision.models.session_availability import (
@@ -104,6 +115,122 @@ class LocationRequest(BaseModel):
     name: str
     latitude: float = Field(ge=-90.0, le=90.0)
     longitude: float = Field(ge=-180.0, le=180.0)
+
+
+class ConfigurationSiteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    latitude: float = Field(ge=-90.0, le=90.0)
+    longitude: float = Field(ge=-180.0, le=180.0)
+    bortle: int = Field(ge=1, le=9)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("site_name_required")
+        return normalized
+
+
+class CustomEquipmentConfigurationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    optics_manufacturer: str
+    optics_model: str
+    focal_length_mm: float = Field(gt=0)
+    aperture_mm: float = Field(gt=0)
+    f_ratio: float = Field(gt=0)
+    camera_manufacturer: str
+    camera_model: str
+    pixel_size_um: float = Field(gt=0)
+    sensor_width_px: float = Field(gt=0)
+    sensor_height_px: float = Field(gt=0)
+    monochrome: bool
+
+    @field_validator(
+        "optics_manufacturer",
+        "optics_model",
+        "camera_manufacturer",
+        "camera_model",
+    )
+    @classmethod
+    def normalize_label(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("equipment_label_required")
+        return normalized
+
+
+class EquipmentConfigurationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    preset_id: str | None = None
+    custom: CustomEquipmentConfigurationRequest | None = None
+
+    @model_validator(mode="after")
+    def require_exactly_one_kind(self):
+        if (self.preset_id is None) == (self.custom is None):
+            raise ValueError("exactly_one_equipment_kind_required")
+        return self
+
+
+class ProjectConfigurationModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    target_hours: float = Field(ge=0)
+    hours: float = Field(ge=0)
+    importance: float | None = Field(default=None, ge=0, le=10)
+
+    @model_validator(mode="after")
+    def validate_progress(self):
+        if self.hours > self.target_hours:
+            raise ValueError("project_hours_exceed_target")
+        return self
+
+
+class ConfigurationWriteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    site: ConfigurationSiteRequest
+    equipment: EquipmentConfigurationRequest
+    projects: dict[str, ProjectConfigurationModel]
+    expected_revision: int | None = Field(default=None, ge=0)
+
+
+class EquipmentConfigurationModel(BaseModel):
+    id: str
+    name: str
+    kind: Literal["preset", "custom"]
+    optics_manufacturer: str
+    optics_model: str
+    focal_length_mm: float
+    aperture_mm: float
+    f_ratio: float
+    camera_manufacturer: str
+    camera_model: str
+    pixel_size_um: float
+    sensor_width_px: float
+    sensor_height_px: float
+    monochrome: bool
+
+
+class ConfigurationSiteModel(BaseModel):
+    name: str
+    latitude: float
+    longitude: float
+    bortle: int
+
+
+class ConfigurationResponse(BaseModel):
+    configured: bool
+    profile_revision: int | None
+    site: ConfigurationSiteModel | None
+    active_equipment_id: str | None
+    available_equipment: list[EquipmentConfigurationModel]
+    projects: dict[str, ProjectConfigurationModel]
+    preset_equipment: list[EquipmentConfigurationModel]
 
 
 class SessionAvailabilityRequest(BaseModel):
@@ -929,6 +1056,163 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+_CUSTOM_EQUIPMENT_ID = "custom"
+_EQUIPMENT_PROJECTION_FIELDS = (
+    "optics_manufacturer",
+    "optics_model",
+    "focal_length_mm",
+    "aperture_mm",
+    "f_ratio",
+    "camera_manufacturer",
+    "camera_model",
+    "pixel_size_um",
+    "sensor_width_px",
+    "sensor_height_px",
+    "monochrome",
+)
+
+
+def _equipment_configuration_projection(
+    profile: dict,
+    equipment_id: str,
+) -> EquipmentConfigurationModel:
+    definition = resolve_equipment_definition(profile, equipment_id)
+    if definition is None:
+        raise UserProfileError("configuration equipment is unresolved")
+    kind = "preset" if equipment_id in EQUIPMENT_PROFILES else "custom"
+    name = definition.get("name")
+    if not isinstance(name, str) or not name.strip():
+        name = " + ".join(
+            (
+                f"{definition['optics_manufacturer']} {definition['optics_model']}",
+                f"{definition['camera_manufacturer']} {definition['camera_model']}",
+            )
+        )
+    return EquipmentConfigurationModel(
+        id=equipment_id,
+        name=name,
+        kind=kind,
+        **{field: definition[field] for field in _EQUIPMENT_PROJECTION_FIELDS},
+    )
+
+
+def _preset_equipment_projection() -> list[EquipmentConfigurationModel]:
+    return [
+        _equipment_configuration_projection({}, equipment_id)
+        for equipment_id in sorted(EQUIPMENT_PROFILES)
+    ]
+
+
+def _configuration_projection(profile: dict | None) -> ConfigurationResponse:
+    presets = _preset_equipment_projection()
+    if profile is None:
+        return ConfigurationResponse(
+            configured=False,
+            profile_revision=None,
+            site=None,
+            active_equipment_id=None,
+            available_equipment=[],
+            projects={},
+            preset_equipment=presets,
+        )
+
+    location = profile.get("location")
+    preferences = profile.get("preferences")
+    if not isinstance(location, dict) or not isinstance(preferences, dict):
+        raise UserProfileError("configuration site is incomplete")
+    bortle = preferences.get("bortle")
+    if bortle is None:
+        raise UserProfileError("configuration bortle is incomplete")
+
+    projects = {
+        project_id: ProjectConfigurationModel(
+            target_hours=project["target_hours"],
+            hours=project["hours"],
+            importance=project.get("importance"),
+        )
+        for project_id, project in profile.get("projects", {}).items()
+    }
+    available_ids = profile.get("available_equipment", [])
+    return ConfigurationResponse(
+        configured=True,
+        profile_revision=profile["profile_revision"],
+        site=ConfigurationSiteModel(
+            name=location["name"],
+            latitude=location["latitude"],
+            longitude=location["longitude"],
+            bortle=bortle,
+        ),
+        active_equipment_id=profile.get("active_equipment"),
+        available_equipment=[
+            _equipment_configuration_projection(profile, equipment_id)
+            for equipment_id in available_ids
+        ],
+        projects=projects,
+        preset_equipment=presets,
+    )
+
+
+def _configuration_candidate(
+    request: ConfigurationWriteRequest,
+    *,
+    existing_profile: dict | None = None,
+) -> dict:
+    candidate = copy.deepcopy(existing_profile) if existing_profile else {}
+    equipment = request.equipment
+    if equipment.preset_id is not None:
+        equipment_id = equipment.preset_id
+        if equipment_id not in EQUIPMENT_PROFILES:
+            raise UserProfileError("configuration invalid preset equipment")
+    else:
+        equipment_id = _CUSTOM_EQUIPMENT_ID
+        definitions = dict(candidate.get("equipment_definitions", {}))
+        definitions[equipment_id] = equipment.custom.model_dump()
+        candidate["equipment_definitions"] = definitions
+
+    preferences = dict(candidate.get("preferences", {}))
+    preferences["bortle"] = request.site.bortle
+    existing_projects = candidate.get("projects", {})
+    projects = {}
+    for project_id, project in request.projects.items():
+        persisted_project = project.model_dump(exclude_none=True)
+        previous = existing_projects.get(project_id, {})
+        if "filter_targets" in previous:
+            persisted_project["filter_targets"] = copy.deepcopy(
+                previous["filter_targets"]
+            )
+        projects[project_id] = persisted_project
+
+    candidate.update(
+        {
+            "location": {
+                "name": request.site.name,
+                "latitude": request.site.latitude,
+                "longitude": request.site.longitude,
+            },
+            "preferences": preferences,
+            "available_equipment": [equipment_id],
+            "active_equipment": equipment_id,
+            "projects": projects,
+        }
+    )
+    return candidate
+
+
+def _configuration_validation_code(exc: UserProfileError) -> str:
+    message = str(exc).lower()
+    if "json invalide" in message or "structure invalide" in message:
+        return "configuration_corrupt"
+    if "project" in message or "projet" in message:
+        return "configuration_invalid_project"
+    if "custom" in message or "equipment_definitions" in message:
+        return "configuration_invalid_custom_equipment"
+    if "equipment" in message or "matériel" in message:
+        return "configuration_invalid_equipment"
+    if "bortle" in message:
+        return "configuration_invalid_bortle"
+    return "configuration_invalid_site"
+
+
 def create_app(
     *,
     service_factory: Callable = _production_service_factory,
@@ -938,6 +1222,36 @@ def create_app(
 ) -> FastAPI:
     application = FastAPI(title="AstroPilot API", version="1.0.0")
     resolved_service = None
+
+    @application.exception_handler(RequestValidationError)
+    async def configuration_request_validation_error(
+        request: Request,
+        exc: RequestValidationError,
+    ):
+        if request.url.path != "/v1/configuration":
+            return await request_validation_exception_handler(request, exc)
+        locations = [tuple(error.get("loc", ())) for error in exc.errors()]
+        if any("bortle" in location for location in locations):
+            code = "configuration_invalid_bortle"
+        elif any("site" in location for location in locations):
+            code = "configuration_invalid_site"
+        elif any("custom" in location for location in locations):
+            code = "configuration_invalid_custom_equipment"
+        elif any("equipment" in location for location in locations):
+            code = "configuration_invalid_equipment"
+        elif any("projects" in location for location in locations):
+            code = "configuration_invalid_project"
+        else:
+            code = "configuration_revision_conflict"
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": {
+                    "code": code,
+                    "message": "The configuration request is invalid.",
+                }
+            },
+        )
 
     def application_service():
         nonlocal resolved_service
@@ -955,6 +1269,91 @@ def create_app(
     @application.get("/", include_in_schema=False)
     def tonight_ui():
         return FileResponse(web_root / "index.html")
+
+    @application.get(
+        "/v1/configuration",
+        response_model=ConfigurationResponse,
+        summary="Read the first-run user configuration",
+    )
+    def get_configuration():
+        try:
+            profile_path = get_user_data_dir() / "user_profile.json"
+            if not profile_path.exists():
+                return _configuration_projection(None)
+            return _configuration_projection(load_user_profile())
+        except UserProfileError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "configuration_corrupt",
+                    "message": "The saved configuration is invalid.",
+                },
+            ) from exc
+        except OSError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "configuration_persistence_error",
+                    "message": "The configuration could not be read.",
+                },
+            ) from exc
+
+    @application.put(
+        "/v1/configuration",
+        response_model=ConfigurationResponse,
+        summary="Create or replace the first-run user configuration",
+    )
+    def put_configuration(request: ConfigurationWriteRequest):
+        try:
+            profile_path = get_user_data_dir() / "user_profile.json"
+            existing_profile = (
+                load_user_profile() if profile_path.exists() else None
+            )
+            if (
+                existing_profile is not None
+                and request.expected_revision is None
+            ):
+                raise ProfileRevisionConflictError(
+                    "profile_revision_conflict"
+                )
+            profile = create_or_replace_user_configuration(
+                _configuration_candidate(
+                    request,
+                    existing_profile=existing_profile,
+                ),
+                expected_revision=request.expected_revision,
+            )
+            return _configuration_projection(profile)
+        except ProfileRevisionConflictError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "configuration_revision_conflict",
+                    "message": (
+                        "The configuration changed. Reload it before saving."
+                    ),
+                },
+            ) from exc
+        except UserProfileError as exc:
+            code = _configuration_validation_code(exc)
+            status_code = 503 if code == "configuration_corrupt" else 422
+            message = (
+                "The saved configuration is invalid."
+                if code == "configuration_corrupt"
+                else "The configuration request is invalid."
+            )
+            raise HTTPException(
+                status_code=status_code,
+                detail={"code": code, "message": message},
+            ) from exc
+        except OSError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "configuration_persistence_error",
+                    "message": "The configuration could not be saved.",
+                },
+            ) from exc
 
     @application.post(
         "/v1/tonight",

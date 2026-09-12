@@ -52,11 +52,78 @@ def test_user_data_dir_environment_overrides_legacy_path(
     ] == 3.0
 
 
-def test_user_data_dir_defaults_to_legacy_path(tmp_path, monkeypatch):
+def test_user_data_dir_defaults_to_writable_per_user_path(tmp_path, monkeypatch):
     monkeypatch.delenv("ASTROPILOT_DATA_DIR", raising=False)
-    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(
+        user_profile,
+        "_default_user_data_dir",
+        lambda: tmp_path / "user-data",
+    )
 
-    assert user_profile.get_user_data_dir() == tmp_path
+    assert user_profile.get_user_data_dir() == tmp_path / "user-data"
+
+
+def test_default_user_data_dir_is_outside_package_data(monkeypatch):
+    monkeypatch.delenv("ASTROPILOT_DATA_DIR", raising=False)
+
+    default = user_profile.get_user_data_dir()
+
+    assert default != user_profile.DATA_DIR
+    if user_profile.sys.platform == "darwin":
+        assert default == (
+            user_profile.Path.home()
+            / "Library"
+            / "Application Support"
+            / "AstroPilot"
+        )
+    elif user_profile.os.name == "nt":
+        assert default.name == "AstroPilot"
+    else:
+        assert default.name == "astropilot"
+
+
+def test_default_user_data_dir_supports_new_profile_write(tmp_path, monkeypatch):
+    data_dir = tmp_path / "per-user" / "AstroPilot"
+    monkeypatch.delenv("ASTROPILOT_DATA_DIR", raising=False)
+    monkeypatch.setattr(
+        user_profile,
+        "_default_user_data_dir",
+        lambda: data_dir,
+    )
+
+    saved = user_profile.save_user_profile(
+        {
+            "active_equipment": "samyang_183",
+            "available_equipment": ["samyang_183"],
+            "projects": {},
+            "sessions": [],
+        }
+    )
+
+    assert saved["profile_revision"] == 1
+    assert (data_dir / "user_profile.json").is_file()
+    assert not user_profile.DATA_DIR.is_relative_to(tmp_path)
+
+
+def test_all_canonical_durable_stores_share_user_data_root(
+    tmp_path,
+    monkeypatch,
+):
+    import astro_score
+
+    monkeypatch.setattr(astro_score, "get_user_data_dir", lambda: tmp_path)
+
+    service = astro_score.build_durable_tonight_application_service()
+
+    assert service.evidence_store._directory == (
+        tmp_path / "decision_forecast_evidence"
+    )
+    assert service.acceptance_lineage_store._directory == (
+        tmp_path / "decision_lineage"
+    )
+    assert service.execution_lineage_store._directory == (
+        tmp_path / "execution_lineage"
+    )
 
 
 @pytest.mark.parametrize(
@@ -125,11 +192,7 @@ def test_record_session_updates_project_and_history(
     profile_path = tmp_path / "user_profile.json"
     write_profile(profile_path)
 
-    monkeypatch.setattr(
-        user_profile,
-        "DATA_DIR",
-        tmp_path,
-    )
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
 
     user_profile.record_session(
         "M31",
@@ -160,11 +223,7 @@ def test_record_session_caps_hours_at_project_target(
         target_hours=20.0,
     )
 
-    monkeypatch.setattr(
-        user_profile,
-        "DATA_DIR",
-        tmp_path,
-    )
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
 
     user_profile.record_session(
         "M31",
@@ -184,11 +243,7 @@ def test_record_session_rejects_unknown_project(
     profile_path = tmp_path / "user_profile.json"
     write_profile(profile_path)
 
-    monkeypatch.setattr(
-        user_profile,
-        "DATA_DIR",
-        tmp_path,
-    )
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
 
     with pytest.raises(ValueError):
         user_profile.record_session(
@@ -205,11 +260,7 @@ def test_record_session_rejects_non_positive_hours(
     profile_path = tmp_path / "user_profile.json"
     write_profile(profile_path)
 
-    monkeypatch.setattr(
-        user_profile,
-        "DATA_DIR",
-        tmp_path,
-    )
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
 
     with pytest.raises(ValueError):
         user_profile.record_session(
@@ -226,11 +277,7 @@ def test_save_user_profile_replaces_file_atomically(
         tmp_path / "user_profile.json"
     )
 
-    monkeypatch.setattr(
-        user_profile,
-        "DATA_DIR",
-        tmp_path,
-    )
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
 
     profile = user_profile.load_user_profile()
     profile["projects"]["M31"]["hours"] = 7.5
@@ -253,11 +300,7 @@ def test_save_user_profile_uses_atomic_replace(
         tmp_path / "user_profile.json"
     )
 
-    monkeypatch.setattr(
-        user_profile,
-        "DATA_DIR",
-        tmp_path,
-    )
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
 
     replaced = {}
 
@@ -291,11 +334,7 @@ def test_record_session_persists_filter_type_when_provided(
     profile_path = tmp_path / "user_profile.json"
     write_profile(profile_path)
 
-    monkeypatch.setattr(
-        user_profile,
-        "DATA_DIR",
-        tmp_path,
-    )
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
 
     user_profile.record_session(
         "M31",
@@ -322,7 +361,7 @@ def test_portfolio_credit_ledger_requires_a_json_object(tmp_path, monkeypatch):
     profile = json.loads(profile_path.read_text())
     profile["portfolio_credit_applications"] = []
     profile_path.write_text(json.dumps(profile))
-    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
 
     with pytest.raises(user_profile.UserProfileError, match="portfolio_credit_applications"):
         user_profile.load_user_profile()
@@ -330,7 +369,7 @@ def test_portfolio_credit_ledger_requires_a_json_object(tmp_path, monkeypatch):
 
 def test_legacy_profile_loads_at_revision_zero(tmp_path, monkeypatch):
     write_profile(tmp_path / "user_profile.json")
-    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
 
     assert user_profile.load_user_profile()["profile_revision"] == 0
 
@@ -346,7 +385,7 @@ def test_profile_revision_must_be_a_non_negative_integer(
     profile = json.loads(profile_path.read_text(encoding="utf-8"))
     profile["profile_revision"] = invalid_revision
     profile_path.write_text(json.dumps(profile), encoding="utf-8")
-    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
 
     with pytest.raises(user_profile.UserProfileError, match="profile_revision"):
         user_profile.load_user_profile()
@@ -354,7 +393,7 @@ def test_profile_revision_must_be_a_non_negative_integer(
 
 def test_first_cas_write_increments_revision_once(tmp_path, monkeypatch):
     write_profile(tmp_path / "user_profile.json")
-    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
     profile = user_profile.load_user_profile()
     profile["projects"]["M31"]["hours"] = 4.0
 
@@ -366,7 +405,7 @@ def test_first_cas_write_increments_revision_once(tmp_path, monkeypatch):
 
 def test_stale_cas_write_preserves_newer_document(tmp_path, monkeypatch):
     write_profile(tmp_path / "user_profile.json")
-    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
     first = user_profile.load_user_profile()
     stale = deepcopy(first)
     first["preferences"] = {"bortle": 4}
@@ -387,7 +426,7 @@ def test_stale_cas_write_preserves_newer_document(tmp_path, monkeypatch):
 
 def test_record_session_rejects_stale_loaded_profile(tmp_path, monkeypatch):
     write_profile(tmp_path / "user_profile.json")
-    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
     stale = deepcopy(user_profile.load_user_profile())
     newer = deepcopy(stale)
     newer["preferences"] = {"bortle": 4}
@@ -411,7 +450,7 @@ def test_record_session_rejects_stale_loaded_profile(tmp_path, monkeypatch):
 
 def test_concurrent_cas_writers_allow_exactly_one_commit(tmp_path, monkeypatch):
     write_profile(tmp_path / "user_profile.json")
-    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
     snapshots = [deepcopy(user_profile.load_user_profile()) for _ in range(2)]
     snapshots[0]["projects"]["M31"]["hours"] = 4.0
     snapshots[1]["projects"]["M31"]["hours"] = 5.0
@@ -439,7 +478,7 @@ def test_cas_uses_unique_temporary_files_and_cleans_them(
     monkeypatch,
 ):
     write_profile(tmp_path / "user_profile.json")
-    monkeypatch.setattr(user_profile, "DATA_DIR", tmp_path)
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
     temporary_names = []
     original_replace = user_profile.Path.replace
 
