@@ -8,11 +8,15 @@ const ui = Object.freeze({
   onboarding: document.querySelector("#onboarding"),
   formError: document.querySelector("#configuration-form-error"),
   availability: document.querySelector("#availability-step"),
+  availabilityForm: document.querySelector("#availability-form"),
+  availabilityError: document.querySelector("#availability-error"),
+  recommendationSubmit: document.querySelector("#request-recommendation"),
   loading: document.querySelector("#loading-state"),
   message: document.querySelector("#message-state"),
   decision: document.querySelector("#decision"),
   refresh: document.querySelector("#refresh"),
   editConfiguration: document.querySelector("#edit-configuration"),
+  editAvailability: document.querySelector("#edit-availability"),
   retry: document.querySelector("#message-retry"),
   mission: document.querySelector("#mission-dialog"),
   openMission: document.querySelector("#open-mission"),
@@ -28,8 +32,10 @@ const state = {
     equipment: null,
     projects: {},
   },
+  availability: null,
   currentDecision: null,
   savingConfiguration: false,
+  requestingRecommendation: false,
 };
 
 const wizardStates = Object.freeze(["site", "equipment", "projects", "review"]);
@@ -44,7 +50,8 @@ function setView(view) {
   ui.loading.hidden = view !== "loading_recommendation";
   ui.message.hidden = true;
   ui.decision.hidden = true;
-  ui.refresh.hidden = true;
+  ui.refresh.hidden = view !== "recommendation";
+  ui.editAvailability.hidden = view !== "recommendation";
   ui.editConfiguration.hidden = !state.configuration?.configured || wizardVisible;
 
   for (const step of document.querySelectorAll("[data-step]")) {
@@ -56,6 +63,10 @@ function setView(view) {
   if (wizardVisible) {
     requestAnimationFrame(() => {
       document.querySelector(`[data-step="${view}"] h2`)?.focus();
+    });
+  } else if (view === "availability") {
+    requestAnimationFrame(() => {
+      document.querySelector("#availability-title")?.focus();
     });
   }
 }
@@ -639,6 +650,144 @@ async function saveConfiguration() {
   }
 }
 
+const availabilityFieldsByMode = Object.freeze({
+  all_night: [],
+  duration: ["duration"],
+  start_and_duration: ["start", "duration"],
+  until: ["end"],
+  fixed_window: ["start", "end"],
+});
+
+const availabilityValidationMessages = Object.freeze({
+  availability_mode_required: "Choisissez votre disponibilité pour cette nuit.",
+  availability_duration_required: "Indiquez une durée positive en heures.",
+  availability_start_required: "Indiquez une heure de début valide.",
+  availability_end_required: "Indiquez une heure de fin valide.",
+  availability_end_must_follow_start: "L’heure de fin doit être postérieure à l’heure de début.",
+});
+
+function showAvailabilityError(message) {
+  ui.availabilityError.textContent = message || "";
+  ui.availabilityError.hidden = !message;
+}
+
+function hoursToIsoDuration(rawValue) {
+  if (String(rawValue).trim() === "") return null;
+  const hours = Number(rawValue);
+  if (!Number.isFinite(hours) || hours <= 0) return null;
+  const totalMinutes = Math.round(hours * 60);
+  if (totalMinutes <= 0 || Math.abs(totalMinutes / 60 - hours) > 1e-9) return null;
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `PT${wholeHours ? `${wholeHours}H` : ""}${minutes ? `${minutes}M` : ""}`;
+}
+
+function localDateTimeToRfc3339(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const expected = match.slice(1).map(Number);
+  const actual = [
+    parsed.getFullYear(),
+    parsed.getMonth() + 1,
+    parsed.getDate(),
+    parsed.getHours(),
+    parsed.getMinutes(),
+  ];
+  if (expected.some((part, index) => part !== actual[index])) return null;
+  const offsetMinutes = -parsed.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffset = Math.abs(offsetMinutes);
+  const offsetHours = String(Math.floor(absoluteOffset / 60)).padStart(2, "0");
+  const offsetRemainder = String(absoluteOffset % 60).padStart(2, "0");
+  return `${value}:00${sign}${offsetHours}:${offsetRemainder}`;
+}
+
+function availabilityInputError(code) {
+  const error = new Error(code);
+  error.availabilityCode = code;
+  return error;
+}
+
+function collectAvailabilityPayload() {
+  const mode = document.querySelector('input[name="availability-mode"]:checked')?.value;
+  if (!mode) throw availabilityInputError("availability_mode_required");
+
+  if (mode === "all_night") return { mode: "all_night" };
+
+  const duration = hoursToIsoDuration(
+    document.querySelector("#availability-duration").value,
+  );
+  const startValue = document.querySelector("#availability-start").value;
+  const endValue = document.querySelector("#availability-end").value;
+  const start = localDateTimeToRfc3339(startValue);
+  const end = localDateTimeToRfc3339(endValue);
+
+  if (mode === "duration") {
+    if (!duration) throw availabilityInputError("availability_duration_required");
+    const availability = { mode: "duration" };
+    availability.duration = duration;
+    return availability;
+  }
+  if (mode === "start_and_duration") {
+    if (!start) throw availabilityInputError("availability_start_required");
+    if (!duration) throw availabilityInputError("availability_duration_required");
+    const availability = { mode: "start_and_duration" };
+    availability.start = start;
+    availability.duration = duration;
+    return availability;
+  }
+  if (mode === "until") {
+    if (!end) throw availabilityInputError("availability_end_required");
+    const availability = { mode: "until" };
+    availability.end = end;
+    return availability;
+  }
+  if (mode === "fixed_window") {
+    if (!start) throw availabilityInputError("availability_start_required");
+    if (!end) throw availabilityInputError("availability_end_required");
+    if (new Date(endValue) <= new Date(startValue)) {
+      throw availabilityInputError("availability_end_must_follow_start");
+    }
+    const availability = { mode: "fixed_window" };
+    availability.start = start;
+    availability.end = end;
+    return availability;
+  }
+  throw availabilityInputError("availability_mode_required");
+}
+
+function updateAvailabilityFields() {
+  const mode = document.querySelector('input[name="availability-mode"]:checked')?.value;
+  const required = availabilityFieldsByMode[mode] || [];
+  for (const field of document.querySelectorAll("[data-availability-field]")) {
+    const visible = required.includes(field.dataset.availabilityField);
+    field.hidden = !visible;
+    field.querySelector("input").disabled = !visible;
+  }
+  showAvailabilityError("");
+}
+
+function backendAvailabilityMessage(detail) {
+  const descriptions = Array.isArray(detail)
+    ? detail.map((item) => `${item?.msg || ""} ${item?.ctx?.error || ""}`).join(" ")
+    : `${detail?.message || ""}`;
+  if (descriptions.includes("session_availability_timezone_required")) {
+    return "L’heure saisie doit inclure un fuseau horaire valide.";
+  }
+  if (descriptions.includes("session_availability_duration_must_be_positive")) {
+    return "La durée doit être supérieure à zéro.";
+  }
+  if (descriptions.includes("session_availability_end_must_follow_start")) {
+    return "L’heure de fin doit être postérieure à l’heure de début.";
+  }
+  if (descriptions.includes("invalid_session_availability_fields") || descriptions.includes("Field required")) {
+    return "Complétez uniquement les horaires requis pour le mode choisi.";
+  }
+  return "Vérifiez les informations de disponibilité avant de réessayer.";
+}
+
 const partialMessages = Object.freeze({
   no_night: ["Aucune nuit exploitable", "Les prévisions ne montrent pas encore de fenêtre adaptée. Revenez lorsque les conditions évoluent."],
   no_candidate: ["Aucune cible adaptée", "AstroPilot n’a trouvé aucune cible compatible avec cette nuit et votre configuration."],
@@ -691,6 +840,16 @@ function normalizeError(response, payload) {
 }
 
 async function loadTonight(availability) {
+  if (!availability) {
+    showAvailabilityError("Choisissez votre disponibilité avant de préparer la nuit.");
+    setView("availability");
+    return;
+  }
+  if (state.requestingRecommendation) return;
+  state.requestingRecommendation = true;
+  state.availability = { ...availability };
+  ui.recommendationSubmit.disabled = true;
+  showAvailabilityError("");
   show("loading");
   ui.refresh.disabled = true;
   state.currentDecision = null;
@@ -704,8 +863,32 @@ async function loadTonight(availability) {
     const payload = await response.json().catch(() => ({}));
 
     if (!response.ok) {
+      if (payload?.error === "user_profile_unavailable") {
+        showConfigurationError("Votre configuration doit être rechargée avant de préparer la nuit.");
+        return;
+      }
+      if (payload?.detail?.code === "location_timezone_unresolved") {
+        state.configurationDraft = draftFromConfiguration(state.configuration);
+        prefillConfiguration();
+        showFormError("Vérifiez les coordonnées du site avant de préparer la nuit.");
+        setView("site");
+        return;
+      }
+      if (payload?.detail?.code === "invalid_tonight_equipment") {
+        state.configurationDraft = draftFromConfiguration(state.configuration);
+        prefillConfiguration();
+        showFormError("Vérifiez le matériel actif avant de préparer la nuit.");
+        setView("equipment");
+        return;
+      }
+      if (response.status === 422) {
+        showAvailabilityError(backendAvailabilityMessage(payload?.detail));
+        setView("availability");
+        return;
+      }
       const [title, body] = normalizeError(response, payload);
-      showMessage(title, body, { kicker: response.status === 422 ? "Entrée invalide" : "Service indisponible" });
+      showAvailabilityError(`${title} ${body}`);
+      setView("availability");
       return;
     }
 
@@ -726,8 +909,11 @@ async function loadTonight(availability) {
 
     renderDecision(payload);
   } catch (_error) {
-    showMessage("Connexion impossible", "AstroPilot ne parvient pas à joindre le service de décision. Vérifiez la connexion puis réessayez.", { kicker: "Hors ligne" });
+    showAvailabilityError("Connexion impossible. Vos horaires sont conservés; réessayez dans un instant.");
+    setView("availability");
   } finally {
+    state.requestingRecommendation = false;
+    ui.recommendationSubmit.disabled = false;
     ui.refresh.disabled = false;
   }
 }
@@ -775,16 +961,45 @@ for (const input of document.querySelectorAll('input[name="equipment-kind"]')) {
   input.addEventListener("change", toggleEquipmentKind);
 }
 
-document.querySelector("#save-configuration").addEventListener("click", saveConfiguration);
-ui.configurationRetry.addEventListener("click", loadConfiguration);
-ui.editConfiguration.addEventListener("click", () => {
+function editConfiguration() {
   state.configurationDraft = draftFromConfiguration(state.configuration);
   prefillConfiguration();
   showFormError("");
   setView("site");
+}
+
+document.querySelector("#save-configuration").addEventListener("click", saveConfiguration);
+ui.configurationRetry.addEventListener("click", loadConfiguration);
+ui.editConfiguration.addEventListener("click", editConfiguration);
+document.querySelector("#availability-edit-configuration").addEventListener("click", editConfiguration);
+ui.editAvailability.addEventListener("click", () => setView("availability"));
+ui.refresh.addEventListener("click", () => {
+  if (state.availability) loadTonight(state.availability);
+  else setView("availability");
 });
-ui.refresh.addEventListener("click", () => setView("availability"));
-ui.retry.addEventListener("click", () => setView("availability"));
+ui.retry.addEventListener("click", () => {
+  if (state.availability) loadTonight(state.availability);
+  else setView("availability");
+});
+
+for (const input of document.querySelectorAll('input[name="availability-mode"]')) {
+  input.addEventListener("change", updateAvailabilityFields);
+}
+
+ui.availabilityForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (state.requestingRecommendation) return;
+  try {
+    const availability = collectAvailabilityPayload();
+    showAvailabilityError("");
+    loadTonight(availability);
+  } catch (error) {
+    const message = availabilityValidationMessages[error.availabilityCode]
+      || "Vérifiez votre disponibilité avant de continuer.";
+    showAvailabilityError(message);
+    setView("availability");
+  }
+});
 
 document.querySelector("#use-geolocation").addEventListener("click", () => {
   const message = document.querySelector("#geolocation-message");

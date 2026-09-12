@@ -26,6 +26,9 @@
         <time id="night-date">—</time>
       </div>
       <div class="header-actions">
+        <button class="secondary-button" id="edit-availability" type="button" hidden>
+          Modifier ma disponibilité
+        </button>
         <button class="secondary-button" id="edit-configuration" type="button" hidden>
           Modifier ma configuration
         </button>
@@ -175,13 +178,44 @@
         </section>
       </section>
 
-      <section id="availability-step" class="state-panel availability-placeholder" hidden aria-live="polite">
-        <span class="message-icon good-icon" aria-hidden="true">✓</span>
-        <div>
+      <section id="availability-step" class="availability-panel" hidden aria-labelledby="availability-title">
+        <div class="availability-heading">
           <p class="state-kicker">Configuration prête</p>
-          <h2>Configuration enregistrée.</h2>
-          <p>Choisissez maintenant votre disponibilité pour ce soir.</p>
+          <h2 id="availability-title" tabindex="-1">Quand êtes-vous disponible ce soir&nbsp;?</h2>
+          <p>Configuration enregistrée. AstroPilot utilisera uniquement la plage que vous indiquez pour cette recommandation.</p>
         </div>
+        <form id="availability-form" novalidate>
+          <fieldset class="availability-modes">
+            <legend>Ma disponibilité</legend>
+            <label><input type="radio" name="availability-mode" value="all_night"><span><strong>Toute la nuit</strong><small>Je peux observer pendant toute la nuit astronomique.</small></span></label>
+            <label><input type="radio" name="availability-mode" value="duration"><span><strong>Pendant environ X heures</strong><small>AstroPilot place cette durée dans la meilleure fenêtre.</small></span></label>
+            <label><input type="radio" name="availability-mode" value="start_and_duration"><span><strong>À partir de HH:MM pendant X heures</strong><small>Je connais mon heure de début.</small></span></label>
+            <label><input type="radio" name="availability-mode" value="until"><span><strong>Jusqu’à HH:MM</strong><small>Je dois avoir terminé avant cette heure.</small></span></label>
+            <label><input type="radio" name="availability-mode" value="fixed_window"><span><strong>Entre HH:MM et HH:MM</strong><small>Je dispose d’une plage précise.</small></span></label>
+          </fieldset>
+
+          <div class="availability-fields">
+            <label class="field" data-availability-field="duration" for="availability-duration" hidden>
+              <span>Durée disponible (heures)</span>
+              <input id="availability-duration" type="number" min="0.25" step="0.25" inputmode="decimal">
+              <small>Exemple&nbsp;: 1,5 pour 1 h 30.</small>
+            </label>
+            <label class="field" data-availability-field="start" for="availability-start" hidden>
+              <span>Début</span>
+              <input id="availability-start" type="datetime-local">
+            </label>
+            <label class="field" data-availability-field="end" for="availability-end" hidden>
+              <span>Fin</span>
+              <input id="availability-end" type="datetime-local">
+            </label>
+          </div>
+
+          <p id="availability-error" class="form-error availability-error" role="alert" hidden></p>
+          <div class="wizard-actions availability-actions">
+            <button class="secondary-button" id="availability-edit-configuration" type="button">Modifier ma configuration</button>
+            <button class="primary-button" id="request-recommendation" type="submit">Préparer ma nuit</button>
+          </div>
+        </form>
       </section>
 
       <section id="loading-state" class="state-panel loading-panel" hidden aria-live="polite">

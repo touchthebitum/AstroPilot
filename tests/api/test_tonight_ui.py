@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 from fastapi.testclient import TestClient
 
@@ -42,6 +43,27 @@ def test_root_serves_tonight_classic_ui():
     assert 'id="projects-step"' in response.text
     assert 'id="review-step"' in response.text
     assert 'id="availability-step"' in response.text
+    assert 'id="availability-form"' in response.text
+    assert 'id="availability-error"' in response.text
+    assert 'id="request-recommendation"' in response.text
+    assert 'id="edit-availability"' in response.text
+    assert 'id="availability-duration"' in response.text
+    assert 'id="availability-start"' in response.text
+    assert 'id="availability-end"' in response.text
+    for mode in (
+        "all_night",
+        "duration",
+        "start_and_duration",
+        "until",
+        "fixed_window",
+    ):
+        assert f'value="{mode}"' in response.text
+    availability_radios = re.findall(
+        r'<input[^>]+name="availability-mode"[^>]*>',
+        response.text,
+    )
+    assert len(availability_radios) == 5
+    assert all("checked" not in radio for radio in availability_radios)
     assert 'id="configuration-error"' in response.text
     assert 'id="edit-configuration"' in response.text
     assert "Modifier ma configuration" in response.text
@@ -82,6 +104,35 @@ def test_tonight_ui_assets_are_served():
     assert script.text.count("fetch(") == 3
     assert script.text.rstrip().endswith("loadConfiguration();")
     assert "body: JSON.stringify({})," not in script.text
+    assert "collectAvailabilityPayload" in script.text
+    assert "hoursToIsoDuration" in script.text
+    assert 'return "PT1H30M"' not in script.text
+    assert "localDateTimeToRfc3339" in script.text
+    assert "getTimezoneOffset()" in script.text
+    assert 'mode: "all_night"' in script.text
+    assert 'mode: "duration"' in script.text
+    assert 'mode: "start_and_duration"' in script.text
+    assert 'mode: "until"' in script.text
+    assert 'mode: "fixed_window"' in script.text
+    assert "availability.duration =" in script.text
+    assert "availability.start =" in script.text
+    assert "availability.end =" in script.text
+    assert "JSON.stringify({ availability })" in script.text
+    assert "state.availability" in script.text
+    assert "requestingRecommendation" in script.text
+    assert "invalid_session_availability_fields" in script.text
+    assert "session_availability_timezone_required" in script.text
+    assert "session_availability_duration_must_be_positive" in script.text
+    assert "session_availability_end_must_follow_start" in script.text
+    assert 'setView("availability")' in script.text
+    assert 'ui.editAvailability.addEventListener("click"' in script.text
+    assert "loadTonight(state.availability)" in script.text
+    configuration_payload = script.text.split(
+        "function configurationPayload()",
+        1,
+    )[1].split("function showConfigurationError", 1)[0]
+    assert "availability" not in configuration_payload
+    assert ".reset()" not in script.text
     assert 'setView("site")' in script.text
     assert 'setView("availability")' in script.text
     assert 'projects: {},' in script.text
