@@ -248,6 +248,10 @@
             <h2 id="target-name">—</h2>
             <p class="catalog-key" id="catalog-key"></p>
           </div>
+          <div class="recommendation-reliability" aria-labelledby="recommendation-confidence-label">
+            <span id="recommendation-confidence-label">Fiabilité de la recommandation</span>
+            <strong id="recommendation-confidence-value">Non disponible</strong>
+          </div>
         </div>
 
         <div class="decision-grid">
@@ -320,6 +324,17 @@
             <ul id="risks-list"></ul>
           </section>
         </div>
+
+        <section class="alternatives-panel" id="alternatives-section" aria-labelledby="alternatives-title" hidden>
+          <div class="section-heading">
+            <span class="heading-icon alternative" aria-hidden="true">↗</span>
+            <div>
+              <p class="metric-label">Autres options exploitables</p>
+              <h3 id="alternatives-title">Alternatives pour cette nuit</h3>
+            </div>
+          </div>
+          <div class="alternatives-list" id="alternatives-list"></div>
+        </section>
 
         <section class="weather-trust-panel" id="weather-trust" aria-labelledby="classic-weather-title">
           <div class="weather-trust-heading">

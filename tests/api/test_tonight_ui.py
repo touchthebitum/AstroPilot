@@ -83,7 +83,10 @@ def test_root_serves_tonight_classic_ui():
         "custom-monochrome",
     ):
         assert f'id="{field_id}"' in response.text
-    assert "confidence-value" not in response.text
+    assert 'id="recommendation-confidence-value"' in response.text
+    assert "Fiabilité de la recommandation" in response.text
+    assert 'id="alternatives-section"' in response.text
+    assert 'id="alternatives-list"' in response.text
     assert 'src="/ui/app.js"' in response.text
 
 
@@ -92,6 +95,7 @@ def test_tonight_ui_assets_are_served():
 
     stylesheet = client.get("/ui/styles.css")
     script = client.get("/ui/app.js")
+    page = client.get("/")
 
     assert stylesheet.status_code == 200
     assert stylesheet.headers["content-type"].startswith("text/css")
@@ -205,13 +209,14 @@ def test_tonight_ui_assets_are_served():
     assert "productive_hours ?? decision.recommended_hours" in script.text
     assert "showModal()" in script.text
     assert 'source: "primary_recommendation"' in script.text
-    assert "selected_catalog_key: decision.catalog_key" in script.text
-    assert "decision_id: decision.decision_id" in script.text
+    assert 'source: "alternative"' in script.text
+    assert "selected_catalog_key: selectedCatalogKey" in script.text
+    assert "decision_id: expectedDecisionId" in script.text
     assert "payload.mission" in script.text
     assert "acceptedMission" in script.text
     assert "acceptingRecommendation" in script.text
     acceptance_function = script.text.split(
-        "async function acceptPrimaryRecommendation()",
+        "async function acceptRecommendation(",
         1,
     )[1].split("async function loadTonight", 1)[0]
     acceptance_request = acceptance_function.split(
@@ -224,12 +229,48 @@ def test_tonight_ui_assets_are_served():
     assert "decision_context_stale" in script.text
     assert "decision_context_not_found" in script.text
     assert "selected_target_not_primary_recommendation" in script.text
+    assert "selected_target_not_exposed_alternative" in script.text
     assert "acceptance_lineage_conflict" in script.text
     assert "decision_lineage_persistence_error" in script.text
     render_decision = script.text.split("function renderDecision(decision)", 1)[1].split("const customEquipmentFields", 1)[0]
     assert "renderMission(decision)" not in render_decision
     assert "showModal()" not in render_decision
     assert "resetMissionPresentation" in script.text
+    assert "decision.alternatives" in script.text
+    assert ".slice(0, 2)" in script.text
+    render_alternatives = script.text.split(
+        "function renderAlternatives(decision)",
+        1,
+    )[1].split("function renderDecision(decision)", 1)[0]
+    assert "shortlist_entries" not in render_alternatives
+    assert 'alternative.target_decision_status === "viable"' in render_alternatives
+    assert "alternative.catalog_key" in render_alternatives
+    assert "reason?.rendered?.classic_text" in script.text
+    assert "reason?.message" in script.text
+    assert "Photographier ${displayTarget}" in render_alternatives
+    assert "expectedDecisionId: decision.decision_id" in render_alternatives
+    assert "selectedCatalogKey: alternative.catalog_key" in render_alternatives
+    assert "disableAcceptanceControls" in script.text
+    assert "clearAlternatives" in script.text
+    assert "ui.alternativesList.replaceChildren()" in script.text
+    assert "state.currentDecision?.decision_id !== expectedDecisionId" in acceptance_function
+    assert "payload.catalog_key === selectedCatalogKey" in acceptance_function
+    assert 'source === "alternative"' in acceptance_function
+    assert "AstroPilot recommandait ${decision.target || decision.catalog_key}. Vous avez choisi ${selectedTarget}." in acceptance_function
+    assert 'text("#target-name"' not in acceptance_function
+    assert 'text("#recommendation"' not in acceptance_function
+    assert "recommendation_confidence" in script.text
+    assert "Number.isFinite" in script.text
+    assert "Math.round(value * 100)" in script.text
+    assert "value < 0 || value > 1" in script.text
+    assert 'return "Non disponible"' in script.text
+    assert "renderMission(mission)" in acceptance_function
+    assert "decision_score" not in script.text
+    assert "final_score" not in script.text
+    assert "execution" not in page.text.lower()
+    assert "outcome" not in page.text.lower()
+    assert 'source: "declined"' not in script.text
+    assert "other_evaluated_target" not in script.text
 
 
 def test_web_assets_are_declared_as_package_data():
