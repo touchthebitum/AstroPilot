@@ -273,6 +273,70 @@ def test_tonight_ui_assets_are_served():
     assert "other_evaluated_target" not in script.text
 
 
+def test_existing_projects_are_preserved_by_the_configuration_wizard():
+    client = make_client()
+
+    page = client.get("/").text
+    script = client.get("/ui/app.js").text
+
+    assert 'id="zero-projects"' in page
+    assert 'id="zero-projects-wrap"' in page
+    assert "Aucun projet pour l’instant" in page
+
+    render_projects = script.split(
+        "function renderProjects()",
+        1,
+    )[1].split("function prefillConfiguration()", 1)[0]
+    assert "Projets actuellement conservés" in render_projects
+    assert "Vos projets existants sont conservés." in render_projects
+    assert "Leur création et leur modification seront disponibles dans une prochaine version bêta." in render_projects
+    assert "Changer votre site ou votre matériel ne les supprimera pas." in render_projects
+    assert "zeroProjectsControl.hidden = Boolean(entries.length)" in render_projects
+    assert "project.id" not in render_projects
+    assert "project_id" not in render_projects
+
+    projects_next = script.split(
+        'document.querySelector("#projects-next").addEventListener("click", () => {',
+        1,
+    )[1].split("});", 1)[0]
+    assert "state.configurationDraft.projects = {}" not in projects_next
+    assert "renderReview()" in projects_next
+
+    payload = script.split(
+        "function configurationPayload()",
+        1,
+    )[1].split("function showConfigurationError", 1)[0]
+    assert "projects: copyProjects(state.configurationDraft.projects)" in payload
+    assert "expected_revision" in payload
+
+    review = script.split(
+        "function renderReview()",
+        1,
+    )[1].split("function configurationPayload()", 1)[0]
+    assert "Object.keys(state.configurationDraft.projects || {}).length" in review
+    assert "conservé" in review
+    assert "Aucun projet pour l’instant" in review
+
+    conflict = script.split(
+        "async function loadConfiguration({ afterConflict = false } = {})",
+        1,
+    )[1].split("async function saveConfiguration()", 1)[0]
+    assert "state.configurationDraft = draftFromConfiguration(payload)" in conflict
+    assert "renderReview()" in conflict
+
+
+def test_new_profile_can_keep_the_explicit_zero_project_state():
+    script = make_client().get("/ui/app.js").text
+
+    assert "projects: {}," in script
+    render_projects = script.split(
+        "function renderProjects()",
+        1,
+    )[1].split("function prefillConfiguration()", 1)[0]
+    assert "zeroProjects.checked = true" in render_projects
+    assert "zeroProjects.disabled = true" in render_projects
+
+
 def test_web_assets_are_declared_as_package_data():
     project = Path(__file__).parents[2]
     pyproject = (project / "pyproject.toml").read_text()

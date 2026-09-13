@@ -554,20 +554,24 @@ function renderProjects() {
   const entries = Object.entries(projects);
   const summary = document.querySelector("#existing-projects");
   const zeroProjects = document.querySelector("#zero-projects");
+  const zeroProjectsControl = document.querySelector("#zero-projects-wrap");
   summary.replaceChildren();
   summary.hidden = !entries.length;
+  zeroProjectsControl.hidden = Boolean(entries.length);
   if (entries.length) {
     const heading = document.createElement("p");
     heading.textContent = "Projets actuellement conservés";
+    const explanation = document.createElement("p");
+    explanation.textContent = "Vos projets existants sont conservés. Leur création et leur modification seront disponibles dans une prochaine version bêta. Changer votre site ou votre matériel ne les supprimera pas.";
     const list = document.createElement("ul");
     for (const [catalogKey, project] of entries) {
       const item = document.createElement("li");
       item.textContent = `${catalogKey} · ${project.hours} h sur ${project.target_hours} h`;
       list.append(item);
     }
-    summary.append(heading, list);
+    summary.append(heading, explanation, list);
     zeroProjects.checked = false;
-    zeroProjects.disabled = false;
+    zeroProjects.disabled = true;
   } else {
     zeroProjects.checked = true;
     zeroProjects.disabled = true;
@@ -1197,9 +1201,6 @@ document.querySelector("#equipment-next").addEventListener("click", () => {
 });
 
 document.querySelector("#projects-next").addEventListener("click", () => {
-  if (document.querySelector("#zero-projects").checked) {
-    state.configurationDraft.projects = {};
-  }
   showFormError("");
   renderReview();
   setView("review");
