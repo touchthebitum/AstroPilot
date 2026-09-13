@@ -357,7 +357,6 @@ def test_http_request_runs_real_application_composition_once(
         "/v1/decision-selections",
         json={
             "decision_id": payload["decision_id"],
-            "selection_id": "selection-e2e",
             "source": "primary_recommendation",
             "selected_catalog_key": "M31",
             "selected_at": "2026-09-10T20:00:00+00:00",
@@ -367,8 +366,11 @@ def test_http_request_runs_real_application_composition_once(
     assert accepted.status_code == 200, accepted.json()
     assert accepted.json()["catalog_key"] == "M31"
     assert accepted.json()["decision_id"] == payload["decision_id"]
-    assert accepted.json()["selection_id"] == "selection-e2e"
+    assert accepted.json()["selection_id"]
     assert accepted.json()["mission_id"]
+    assert accepted.json()["mission"]["mission_id"] == accepted.json()["mission_id"]
+    assert accepted.json()["mission"]["selection_id"] == accepted.json()["selection_id"]
+    assert accepted.json()["mission"]["decision_id"] == payload["decision_id"]
     assert len(calls["mission"]) == 1
 
     created_execution = client.post(

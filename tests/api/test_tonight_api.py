@@ -1461,6 +1461,7 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
         weather_provider=lambda lat, lon: DEFAULT_WEATHER,
         profile_provider=valid_profile,
         clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
+        selection_id_factory=lambda: "selection-123",
     ))
 
     tonight = client.post("/v1/tonight", json={})
@@ -1468,7 +1469,6 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
         "/v1/decision-selections",
         json={
             "decision_id": "decision-123",
-            "selection_id": "selection-123",
             "source": "primary_recommendation",
             "selected_catalog_key": "M31",
             "selected_at": "2026-09-10T20:00:00+00:00",
@@ -1486,8 +1486,40 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
         "decision_id": "decision-123",
         "selection_id": "selection-123",
         "catalog_key": "M31",
+        "mission": {
+            "mission_id": "mission-123",
+            "decision_id": "decision-123",
+            "selection_id": "selection-123",
+            "target": "M31",
+            "confidence": "HIGH",
+            "equipment": ["widefield"],
+            "site_name": "Mont Sujet",
+            "window_start": None,
+            "window_end": None,
+            "recommended_hours": 0.0,
+            "expected_gain": 0.0,
+            "selected_filter": None,
+            "tasks": [],
+        },
     }
     assert service.selections[0].source is UserSelectionSource.PRIMARY_RECOMMENDATION
+
+
+def test_selection_endpoint_rejects_client_supplied_selection_id():
+    client = make_client(result=make_result())
+
+    response = client.post(
+        "/v1/decision-selections",
+        json={
+            "decision_id": "decision-123",
+            "selection_id": "client-invented",
+            "source": "primary_recommendation",
+            "selected_catalog_key": "M31",
+            "selected_at": "2026-09-10T20:00:00+00:00",
+        },
+    )
+
+    assert response.status_code == 422
 
 
 LINEAGE_START = datetime(2026, 9, 1, 22, tzinfo=timezone.utc)
@@ -1631,6 +1663,7 @@ def lineage_client(tmp_path, reference_time, *, lineage_store=None):
         ),
         profile_provider=valid_profile,
         clock=lambda: reference_time,
+        selection_id_factory=lambda: "selection-lineage",
     ))
 
 
@@ -1638,12 +1671,10 @@ def lineage_selection_payload(
     *,
     source="primary_recommendation",
     selected_at=None,
-    selection_id="selection-lineage",
     decision_id="decision-lineage",
 ):
     return {
         "decision_id": decision_id,
-        "selection_id": selection_id,
         "source": source,
         "selected_catalog_key": None if source == "declined" else "M31",
         "selected_at": (
@@ -1671,6 +1702,7 @@ def test_durable_acceptance_lineage_survives_two_api_reconstructions(
     assert tonight.json()["decision_id"] == "decision-lineage"
     assert accepted.status_code == 200, accepted.json()
     assert accepted.json()["mission_id"] == "mission-lineage"
+    assert accepted.json()["selection_id"] == "selection-lineage"
     assert store.load_context("decision-lineage").decision_context.decision_id == (
         "decision-lineage"
     )
@@ -1678,6 +1710,26 @@ def test_durable_acceptance_lineage_survives_two_api_reconstructions(
         "decision-lineage"
     )
     persisted_mission = reconstructed.load_mission("mission-lineage")
+    mission_payload = accepted.json()["mission"]
+    assert datetime.fromisoformat(mission_payload.pop("window_start")) == (
+        persisted_mission.window_start
+    )
+    assert datetime.fromisoformat(mission_payload.pop("window_end")) == (
+        persisted_mission.window_end
+    )
+    assert mission_payload == {
+        "mission_id": persisted_mission.mission_id,
+        "decision_id": persisted_mission.decision_id,
+        "selection_id": persisted_mission.selection_id,
+        "target": persisted_mission.target,
+        "confidence": persisted_mission.confidence,
+        "equipment": list(persisted_mission.equipment),
+        "site_name": persisted_mission.site_name,
+        "recommended_hours": persisted_mission.recommended_hours,
+        "expected_gain": persisted_mission.expected_gain,
+        "selected_filter": None,
+        "tasks": [],
+    }
     assert (
         persisted_mission.decision_id,
         persisted_mission.selection_id,
@@ -1723,7 +1775,14 @@ def test_reconstructed_decline_persists_selection_without_mission(tmp_path):
     store = FileDecisionAcceptanceLineageStore(tmp_path / "decision_lineage")
 
     assert response.status_code == 200
-    assert response.json()["status"] == "declined"
+    assert response.json() == {
+        "status": "declined",
+        "mission_id": None,
+        "decision_id": "decision-lineage",
+        "selection_id": "selection-lineage",
+        "catalog_key": None,
+        "mission": None,
+    }
     assert store.load_selection("selection-lineage").source.value == "declined"
     with pytest.raises(AcceptanceLineageNotFoundError, match="mission_not_found"):
         store.load_mission("mission-lineage")
@@ -1822,7 +1881,6 @@ def test_gp11_selection_endpoint_rejects_unknown_decision_without_fallback():
         "/v1/decision-selections",
         json={
             "decision_id": "unknown-decision",
-            "selection_id": "selection-123",
             "source": "primary_recommendation",
             "selected_catalog_key": "M31",
             "selected_at": "2026-09-10T20:00:00+00:00",

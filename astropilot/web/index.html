@@ -341,9 +341,10 @@
         <footer class="decision-footer">
           <div>
             <p id="decision-footnote">Décision calculée pour votre configuration actuelle.</p>
+            <p id="acceptance-status" class="acceptance-status" role="status" hidden></p>
           </div>
           <button class="mission-button" id="open-mission" type="button">
-            Voir ma mission
+            Photographier cette cible
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
           </button>
         </footer>
@@ -399,33 +400,8 @@
             </section>
           </div>
 
-          <section class="mission-section advice-section" aria-labelledby="advice-title">
-            <div class="mission-section-heading">
-              <span aria-hidden="true">03</span>
-              <h3 id="advice-title">Conseils pour cette nuit</h3>
-            </div>
-            <ul class="advice-list" id="mission-advices"></ul>
-          </section>
-
-          <section class="weather-trust-panel mission-weather-trust" aria-labelledby="mission-weather-title">
-            <div class="weather-trust-heading">
-              <div>
-                <p class="metric-label">Confiance météo</p>
-                <h3 id="mission-weather-title">Données validées de la mission</h3>
-              </div>
-              <span class="trust-badge" id="mission-weather-status">À confirmer</span>
-            </div>
-            <dl class="weather-trust-grid">
-              <div><dt>Source</dt><dd id="mission-weather-provider">—</dd></div>
-              <div><dt>Fraîcheur météo</dt><dd id="mission-weather-age">—</dd></div>
-              <div><dt>Récupération</dt><dd id="mission-weather-retrieved">—</dd></div>
-              <div><dt>Période couverte</dt><dd id="mission-weather-coverage">—</dd></div>
-            </dl>
-            <p class="weather-trust-note" id="mission-weather-timezone">Cette mission utilise les mêmes données météo validées que Classic.</p>
-          </section>
-
           <footer class="mission-footer">
-            <p>Cette mission reprend la décision Classic déjà calculée.</p>
+            <p>Mission créée après votre choix explicite et enregistrée par AstroPilot.</p>
             <button class="secondary-button" id="mission-back" type="button">Retour à Classic</button>
           </footer>
         </div>
