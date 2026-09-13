@@ -23,6 +23,9 @@ const ui = Object.freeze({
   closeMission: document.querySelector("#close-mission"),
   missionBack: document.querySelector("#mission-back"),
   acceptanceStatus: document.querySelector("#acceptance-status"),
+  recommendationConfidence: document.querySelector("#recommendation-confidence-value"),
+  alternatives: document.querySelector("#alternatives-section"),
+  alternativesList: document.querySelector("#alternatives-list"),
 });
 
 const state = {
@@ -284,6 +287,96 @@ function showAcceptanceStatus(message, { error = false } = {}) {
   ui.acceptanceStatus.classList.toggle("error", error);
 }
 
+function formatRecommendationConfidence(confidence) {
+  if (typeof confidence !== "number" || !Number.isFinite(confidence)) {
+    return "Non disponible";
+  }
+  const value = confidence;
+  if (value < 0 || value > 1) return "Non disponible";
+  return `${Math.round(value * 100)} %`;
+}
+
+function clearAlternatives() {
+  ui.alternativesList.replaceChildren();
+  ui.alternatives.hidden = true;
+}
+
+function alternativeReasonText(reason) {
+  return reason?.rendered?.classic_text || reason?.message || null;
+}
+
+function renderAlternatives(decision) {
+  clearAlternatives();
+  const alternatives = (Array.isArray(decision.alternatives) ? decision.alternatives : [])
+    .filter((alternative) => (
+      typeof alternative?.catalog_key === "string"
+      && alternative.catalog_key.trim()
+      && alternative.target_decision_status === "viable"
+    ))
+    .slice(0, 2);
+  if (!alternatives.length || !decision.decision_id) return;
+
+  for (const alternative of alternatives) {
+    const displayTarget = alternative.target || alternative.catalog_key;
+    const card = document.createElement("article");
+    const copy = document.createElement("div");
+    const name = document.createElement("h4");
+    const reasons = document.createElement("ul");
+    const button = document.createElement("button");
+    card.className = "alternative-card";
+    copy.className = "alternative-copy";
+    name.textContent = displayTarget;
+    reasons.className = "alternative-reasons";
+    const reasonTexts = (alternative.reasons || [])
+      .map(alternativeReasonText)
+      .filter(Boolean)
+      .slice(0, 2);
+    for (const reasonText of reasonTexts) {
+      const item = document.createElement("li");
+      item.textContent = reasonText;
+      reasons.append(item);
+    }
+    copy.append(name);
+    if (reasonTexts.length) copy.append(reasons);
+
+    button.type = "button";
+    button.className = "mission-button alternative-button";
+    button.textContent = `Photographier ${displayTarget}`;
+    button.dataset.acceptanceSource = "alternative";
+    button.dataset.catalogKey = alternative.catalog_key;
+    button.dataset.decisionId = decision.decision_id;
+    button.addEventListener("click", () => acceptRecommendation({
+      source: "alternative",
+      selectedCatalogKey: alternative.catalog_key,
+      expectedDecisionId: decision.decision_id,
+      triggerButton: button,
+      selectedTarget: displayTarget,
+    }));
+    card.append(copy, button);
+    ui.alternativesList.append(card);
+  }
+  ui.alternatives.hidden = false;
+}
+
+function acceptanceControls() {
+  return [ui.openMission, ...ui.alternativesList.querySelectorAll("button")];
+}
+
+function disableAcceptanceControls(disabled) {
+  for (const button of acceptanceControls()) button.disabled = disabled;
+}
+
+function restoreAcceptanceControls() {
+  disableAcceptanceControls(Boolean(state.acceptanceBlocked || state.acceptedMission));
+  if (state.acceptedMission) {
+    const selected = acceptanceControls().find((button) => (
+      button.dataset.acceptanceSource === state.acceptedMission.source
+      && button.dataset.catalogKey === state.acceptedMission.selectedCatalogKey
+    ));
+    if (selected) selected.disabled = false;
+  }
+}
+
 function resetMissionPresentation() {
   text("#mission-title", "—");
   text("#mission-summary", "—");
@@ -303,6 +396,7 @@ function clearAcceptedMission() {
   showAcceptanceStatus("");
   if (ui.mission.open) ui.mission.close();
   resetMissionPresentation();
+  clearAlternatives();
 }
 
 function renderDecision(decision) {
@@ -337,6 +431,9 @@ function renderDecision(decision) {
   text("#quality-title", qualityCopy[0]);
   text("#quality-summary", qualityCopy[1]);
   text("#limiting-factor", limiting ? (labels.factors[limiting] || limiting.replaceAll("_", " ")) : "Aucun identifié");
+  ui.recommendationConfidence.textContent = formatRecommendationConfidence(
+    decision.recommendation_confidence,
+  );
   renderWeatherTrust(weatherTrust, weatherDecision, "classic");
 
   const circumference = 2 * Math.PI * 48;
@@ -364,6 +461,10 @@ function renderDecision(decision) {
   );
   ui.openMission.hidden = !actionablePrimary;
   ui.openMission.disabled = !actionablePrimary;
+  ui.openMission.dataset.acceptanceSource = "primary_recommendation";
+  ui.openMission.dataset.catalogKey = decision.catalog_key || "";
+  ui.openMission.dataset.decisionId = decision.decision_id || "";
+  renderAlternatives(decision);
   show("decision");
 }
 
@@ -868,6 +969,9 @@ function acceptanceError(code, status) {
   if (code === "selected_target_not_primary_recommendation") {
     return ["La cible affichée ne correspond plus à cette décision. Actualisez la recommandation.", true];
   }
+  if (code === "selected_target_not_exposed_alternative") {
+    return ["Cette alternative n’est plus disponible pour cette décision. Actualisez la recommandation.", true];
+  }
   if (["selection_id_conflict", "mission_id_conflict", "acceptance_lineage_conflict"].includes(code)) {
     return ["AstroPilot ne peut pas confirmer cette acceptation. Aucune mission n’est affichée.", true];
   }
@@ -883,29 +987,47 @@ function acceptanceError(code, status) {
   return ["L’acceptation n’a pas pu être confirmée. La recommandation reste affichée.", false];
 }
 
-async function acceptPrimaryRecommendation() {
-  if (state.acceptingRecommendation || state.acceptanceBlocked) return;
+async function acceptRecommendation({
+  source,
+  selectedCatalogKey,
+  expectedDecisionId,
+  triggerButton,
+  selectedTarget,
+}) {
+  if (state.acceptingRecommendation) return;
   const decision = state.currentDecision;
-  if (
-    !decision?.decision_id
-    || !decision.catalog_key
-    || decision.target_decision_status !== "recommended"
-  ) {
-    showAcceptanceStatus("Cette recommandation ne peut plus être acceptée. Actualisez-la.", { error: true });
-    ui.openMission.disabled = true;
+  if (state.acceptedMission) {
+    if (
+      state.acceptedMission.decision_id === expectedDecisionId
+      && state.acceptedMission.source === source
+      && state.acceptedMission.selectedCatalogKey === selectedCatalogKey
+    ) {
+      renderMission(state.acceptedMission.mission);
+      ui.mission.showModal();
+    }
     return;
   }
-  if (state.acceptedMission?.decision_id === decision.decision_id) {
-    renderMission(state.acceptedMission.mission);
-    ui.mission.showModal();
+  if (state.acceptanceBlocked) return;
+  if (!decision || state.currentDecision?.decision_id !== expectedDecisionId) {
     return;
   }
-
-  const displayedDecisionId = decision.decision_id;
-  if (displayedDecisionId !== state.currentDecision?.decision_id) return;
+  const validPrimary = source === "primary_recommendation"
+    && selectedCatalogKey === decision.catalog_key
+    && decision.target_decision_status === "recommended";
+  const validAlternative = source === "alternative"
+    && (decision.alternatives || []).some((alternative) => (
+      alternative.catalog_key === selectedCatalogKey
+      && alternative.target_decision_status === "viable"
+    ));
+  if (!validPrimary && !validAlternative) {
+    state.acceptanceBlocked = true;
+    showAcceptanceStatus("Cette cible n’est plus sélectionnable. Actualisez la recommandation.", { error: true });
+    disableAcceptanceControls(true);
+    return;
+  }
   state.acceptingRecommendation = true;
-  ui.openMission.disabled = true;
-  ui.openMission.setAttribute("aria-busy", "true");
+  disableAcceptanceControls(true);
+  triggerButton.setAttribute("aria-busy", "true");
   showAcceptanceStatus("Enregistrement de votre choix et création de la mission…");
 
   try {
@@ -913,14 +1035,14 @@ async function acceptPrimaryRecommendation() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        decision_id: decision.decision_id,
-        source: "primary_recommendation",
-        selected_catalog_key: decision.catalog_key,
+        decision_id: expectedDecisionId,
+        source,
+        selected_catalog_key: selectedCatalogKey,
         selected_at: new Date().toISOString(),
       }),
     });
     const payload = await response.json().catch(() => ({}));
-    if (state.currentDecision?.decision_id !== displayedDecisionId) return;
+    if (state.currentDecision?.decision_id !== expectedDecisionId) return;
 
     if (!response.ok) {
       const [message, blocked] = acceptanceError(payload?.detail?.code, response.status);
@@ -931,8 +1053,8 @@ async function acceptPrimaryRecommendation() {
     const mission = payload.mission;
     const validAcceptedMission = payload.status === "accepted"
       && mission
-      && payload.decision_id === displayedDecisionId
-      && payload.catalog_key === decision.catalog_key
+      && payload.decision_id === expectedDecisionId
+      && payload.catalog_key === selectedCatalogKey
       && payload.mission_id === mission.mission_id
       && payload.selection_id === mission.selection_id
       && payload.decision_id === mission.decision_id;
@@ -945,22 +1067,28 @@ async function acceptPrimaryRecommendation() {
       decision_id: payload.decision_id,
       selection_id: payload.selection_id,
       mission_id: payload.mission_id,
+      selectedCatalogKey: payload.catalog_key,
+      source,
       mission,
     };
-    showAcceptanceStatus("Mission enregistrée.");
+    showAcceptanceStatus(
+      source === "alternative"
+        ? `AstroPilot recommandait ${decision.target || decision.catalog_key}. Vous avez choisi ${selectedTarget}.`
+        : "Mission enregistrée.",
+    );
     renderMission(mission);
     ui.mission.showModal();
   } catch (_error) {
-    if (state.currentDecision?.decision_id !== displayedDecisionId) return;
+    if (state.currentDecision?.decision_id !== expectedDecisionId) return;
     showAcceptanceStatus(
       "La réponse du serveur n’a pas été reçue. Le statut de l’acceptation ne peut pas être confirmé ; aucun nouvel essai automatique n’a été lancé.",
       { error: true },
     );
   } finally {
-    if (state.currentDecision?.decision_id === displayedDecisionId) {
+    if (state.currentDecision?.decision_id === expectedDecisionId) {
       state.acceptingRecommendation = false;
-      ui.openMission.removeAttribute("aria-busy");
-      ui.openMission.disabled = state.acceptanceBlocked;
+      triggerButton.removeAttribute("aria-busy");
+      restoreAcceptanceControls();
     }
   }
 }
@@ -1148,7 +1276,13 @@ document.querySelector("#use-geolocation").addEventListener("click", () => {
   );
 });
 
-ui.openMission.addEventListener("click", acceptPrimaryRecommendation);
+ui.openMission.addEventListener("click", () => acceptRecommendation({
+  source: "primary_recommendation",
+  selectedCatalogKey: state.currentDecision?.catalog_key,
+  expectedDecisionId: state.currentDecision?.decision_id,
+  triggerButton: ui.openMission,
+  selectedTarget: state.currentDecision?.target,
+}));
 ui.closeMission.addEventListener("click", () => ui.mission.close());
 ui.missionBack.addEventListener("click", () => ui.mission.close());
 ui.mission.addEventListener("click", (event) => {
