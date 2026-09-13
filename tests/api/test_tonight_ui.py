@@ -27,13 +27,11 @@ def test_root_serves_tonight_classic_ui():
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "Ce soir — AstroPilot" in response.text
-    assert "Voir ma mission" in response.text
+    assert "Photographier cette cible" in response.text
     assert "Données météo par Open-Meteo.com" in response.text
     assert 'id="weather-trust"' in response.text
     assert 'id="classic-weather-coverage"' in response.text
-    assert 'id="mission-weather-coverage"' in response.text
     assert 'id="classic-weather-status"' in response.text
-    assert 'id="mission-weather-status"' in response.text
     assert "Fraîcheur météo" in response.text
     assert "Âge du snapshot" not in response.text
     assert 'id="mission-dialog"' in response.text
@@ -101,7 +99,8 @@ def test_tonight_ui_assets_are_served():
     assert 'fetch("/v1/configuration"' in script.text
     assert 'method: "PUT"' in script.text
     assert "fetch(\"/v1/tonight\"" in script.text
-    assert script.text.count("fetch(") == 3
+    assert 'fetch("/v1/decision-selections"' in script.text
+    assert script.text.count("fetch(") == 4
     assert script.text.rstrip().endswith("loadConfiguration();")
     assert "body: JSON.stringify({})," not in script.text
     assert "collectAvailabilityPayload" in script.text
@@ -182,7 +181,7 @@ def test_tonight_ui_assets_are_served():
     assert "weatherTrust.valid_until" in script.text
     assert "weatherTrust.retrieved_at_utc" in script.text
     assert 'renderWeatherTrust(weatherTrust, weatherDecision, "classic")' in script.text
-    assert 'renderWeatherTrust(weatherTrust, weatherDecision, "mission")' in script.text
+    assert 'renderWeatherTrust(weatherTrust, weatherDecision, "mission")' not in script.text
     assert "weatherDecision?.presentation?.label" in script.text
     assert "weatherDecision?.presentation?.summary" in script.text
     assert 'payload.status === "weather_refused"' in script.text
@@ -205,6 +204,32 @@ def test_tonight_ui_assets_are_served():
     assert "weatherTrust.timezone" in script.text
     assert "productive_hours ?? decision.recommended_hours" in script.text
     assert "showModal()" in script.text
+    assert 'source: "primary_recommendation"' in script.text
+    assert "selected_catalog_key: decision.catalog_key" in script.text
+    assert "decision_id: decision.decision_id" in script.text
+    assert "payload.mission" in script.text
+    assert "acceptedMission" in script.text
+    assert "acceptingRecommendation" in script.text
+    acceptance_function = script.text.split(
+        "async function acceptPrimaryRecommendation()",
+        1,
+    )[1].split("async function loadTonight", 1)[0]
+    acceptance_request = acceptance_function.split(
+        "body: JSON.stringify({",
+        1,
+    )[1].split("}),", 1)[0]
+    assert "selection_id" not in acceptance_request
+    assert "mission_id" not in acceptance_request
+    assert "randomUUID" not in script.text
+    assert "decision_context_stale" in script.text
+    assert "decision_context_not_found" in script.text
+    assert "selected_target_not_primary_recommendation" in script.text
+    assert "acceptance_lineage_conflict" in script.text
+    assert "decision_lineage_persistence_error" in script.text
+    render_decision = script.text.split("function renderDecision(decision)", 1)[1].split("const customEquipmentFields", 1)[0]
+    assert "renderMission(decision)" not in render_decision
+    assert "showModal()" not in render_decision
+    assert "resetMissionPresentation" in script.text
 
 
 def test_web_assets_are_declared_as_package_data():

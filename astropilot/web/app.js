@@ -22,6 +22,7 @@ const ui = Object.freeze({
   openMission: document.querySelector("#open-mission"),
   closeMission: document.querySelector("#close-mission"),
   missionBack: document.querySelector("#mission-back"),
+  acceptanceStatus: document.querySelector("#acceptance-status"),
 });
 
 const state = {
@@ -34,6 +35,9 @@ const state = {
   },
   availability: null,
   currentDecision: null,
+  acceptedMission: null,
+  acceptingRecommendation: false,
+  acceptanceBlocked: false,
   savingConfiguration: false,
   requestingRecommendation: false,
 };
@@ -221,19 +225,18 @@ function setList(selector, items, fallback) {
   }
 }
 
-function renderMission(decision) {
-  const start = clock(decision.window_start);
-  const end = clock(decision.window_end);
-  text("#mission-title", decision.target || "Mission de cette nuit");
-  const missionAction = labels.actions[decision.action] || "Session recommandée";
-  text("#mission-summary", decision.target_common_name ? `${decision.target_common_name} · ${missionAction}` : missionAction);
+function renderMission(mission) {
+  const start = clock(mission.window_start);
+  const end = clock(mission.window_end);
+  text("#mission-title", mission.target || "Mission de cette nuit");
+  text("#mission-summary", mission.site_name ? `Mission acceptée · ${mission.site_name}` : "Mission acceptée");
   text("#mission-window", start && end ? `${start} — ${end}` : "À confirmer");
-  text("#mission-duration", duration(decision.recommended_hours));
-  text("#mission-gain", Number(decision.expected_gain) > 0 ? `+${Math.round(Number(decision.expected_gain))} %` : "Non estimé");
+  text("#mission-duration", duration(mission.recommended_hours));
+  text("#mission-gain", Number(mission.expected_gain) > 0 ? `+${Math.round(Number(mission.expected_gain))} %` : "Non estimé");
 
   const equipment = document.querySelector("#mission-equipment");
   equipment.replaceChildren();
-  const equipmentItems = (decision.equipment || []).filter(Boolean);
+  const equipmentItems = (mission.equipment || []).filter(Boolean);
   for (const value of equipmentItems.length ? equipmentItems : ["Configuration non précisée"]) {
     const item = document.createElement("li");
     item.textContent = value;
@@ -241,13 +244,13 @@ function renderMission(decision) {
     equipment.append(item);
   }
 
-  const filter = decision.selected_filter;
+  const filter = mission.selected_filter;
   document.querySelector("#mission-filter-wrap").hidden = !filter;
   text("#mission-filter", filter?.name || "—");
 
   const tasks = document.querySelector("#mission-tasks");
   tasks.replaceChildren();
-  const taskItems = (decision.tasks || []).filter((task) => task?.title);
+  const taskItems = (mission.tasks || []).filter((task) => task?.title);
   for (const task of taskItems) {
     const item = document.createElement("li");
     const time = document.createElement("span");
@@ -273,26 +276,37 @@ function renderMission(decision) {
     tasks.append(item);
   }
 
-  const advices = document.querySelector("#mission-advices");
-  advices.replaceChildren();
-  const adviceItems = (decision.advices || []).filter((advice) => advice?.message);
-  for (const advice of adviceItems) {
-    const item = document.createElement("li");
-    const time = document.createElement("span");
-    time.className = "advice-time";
-    time.textContent = advice.time || "Cette nuit";
-    item.append(time, document.createTextNode(advice.message));
-    advices.append(item);
-  }
-  if (!adviceItems.length) {
-    const item = document.createElement("li");
-    item.className = "mission-empty";
-    item.textContent = "Aucun conseil particulier pour cette nuit.";
-    advices.append(item);
-  }
+}
+
+function showAcceptanceStatus(message, { error = false } = {}) {
+  ui.acceptanceStatus.textContent = message || "";
+  ui.acceptanceStatus.hidden = !message;
+  ui.acceptanceStatus.classList.toggle("error", error);
+}
+
+function resetMissionPresentation() {
+  text("#mission-title", "—");
+  text("#mission-summary", "—");
+  text("#mission-window", "—");
+  text("#mission-duration", "—");
+  text("#mission-gain", "—");
+  text("#mission-filter", "—");
+  document.querySelector("#mission-filter-wrap").hidden = true;
+  document.querySelector("#mission-equipment").replaceChildren();
+  document.querySelector("#mission-tasks").replaceChildren();
+}
+
+function clearAcceptedMission() {
+  state.acceptedMission = null;
+  state.acceptingRecommendation = false;
+  state.acceptanceBlocked = false;
+  showAcceptanceStatus("");
+  if (ui.mission.open) ui.mission.close();
+  resetMissionPresentation();
 }
 
 function renderDecision(decision) {
+  clearAcceptedMission();
   state.currentDecision = decision;
 
   const productivity = decision.productivity;
@@ -324,7 +338,6 @@ function renderDecision(decision) {
   text("#quality-summary", qualityCopy[1]);
   text("#limiting-factor", limiting ? (labels.factors[limiting] || limiting.replaceAll("_", " ")) : "Aucun identifié");
   renderWeatherTrust(weatherTrust, weatherDecision, "classic");
-  renderWeatherTrust(weatherTrust, weatherDecision, "mission");
 
   const circumference = 2 * Math.PI * 48;
   const progress = document.querySelector("#quality-progress");
@@ -344,7 +357,13 @@ function renderDecision(decision) {
 
   setList("#insights-list", [...positives, ...information], "Aucune explication supplémentaire disponible.");
   setList("#risks-list", risks, "Aucun risque essentiel signalé.");
-  renderMission(decision);
+  const actionablePrimary = Boolean(
+    decision.decision_id
+    && decision.catalog_key
+    && decision.target_decision_status === "recommended"
+  );
+  ui.openMission.hidden = !actionablePrimary;
+  ui.openMission.disabled = !actionablePrimary;
   show("decision");
 }
 
@@ -839,6 +858,113 @@ function normalizeError(response, payload) {
   return ["AstroPilot n’a pas pu répondre", "Une erreur inattendue empêche la préparation de votre nuit."];
 }
 
+function acceptanceError(code, status) {
+  if (code === "decision_context_stale") {
+    return ["Cette recommandation a expiré. Actualisez-la avant de choisir votre cible.", true];
+  }
+  if (code === "decision_context_not_found") {
+    return ["Cette recommandation n’est plus disponible. Demandez une nouvelle recommandation.", true];
+  }
+  if (code === "selected_target_not_primary_recommendation") {
+    return ["La cible affichée ne correspond plus à cette décision. Actualisez la recommandation.", true];
+  }
+  if (["selection_id_conflict", "mission_id_conflict", "acceptance_lineage_conflict"].includes(code)) {
+    return ["AstroPilot ne peut pas confirmer cette acceptation. Aucune mission n’est affichée.", true];
+  }
+  if (code === "decision_lineage_persistence_error") {
+    return ["La mission n’a pas pu être enregistrée. Réessayez lorsque le stockage est disponible.", false];
+  }
+  if (code === "decision_acceptance_unavailable" || status === 503) {
+    return ["L’acceptation est temporairement indisponible. Vous pourrez réessayer plus tard.", false];
+  }
+  if (status === 422) {
+    return ["La demande d’acceptation n’est pas valide. Actualisez la recommandation.", true];
+  }
+  return ["L’acceptation n’a pas pu être confirmée. La recommandation reste affichée.", false];
+}
+
+async function acceptPrimaryRecommendation() {
+  if (state.acceptingRecommendation || state.acceptanceBlocked) return;
+  const decision = state.currentDecision;
+  if (
+    !decision?.decision_id
+    || !decision.catalog_key
+    || decision.target_decision_status !== "recommended"
+  ) {
+    showAcceptanceStatus("Cette recommandation ne peut plus être acceptée. Actualisez-la.", { error: true });
+    ui.openMission.disabled = true;
+    return;
+  }
+  if (state.acceptedMission?.decision_id === decision.decision_id) {
+    renderMission(state.acceptedMission.mission);
+    ui.mission.showModal();
+    return;
+  }
+
+  const displayedDecisionId = decision.decision_id;
+  if (displayedDecisionId !== state.currentDecision?.decision_id) return;
+  state.acceptingRecommendation = true;
+  ui.openMission.disabled = true;
+  ui.openMission.setAttribute("aria-busy", "true");
+  showAcceptanceStatus("Enregistrement de votre choix et création de la mission…");
+
+  try {
+    const response = await fetch("/v1/decision-selections", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        decision_id: decision.decision_id,
+        source: "primary_recommendation",
+        selected_catalog_key: decision.catalog_key,
+        selected_at: new Date().toISOString(),
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (state.currentDecision?.decision_id !== displayedDecisionId) return;
+
+    if (!response.ok) {
+      const [message, blocked] = acceptanceError(payload?.detail?.code, response.status);
+      state.acceptanceBlocked = blocked;
+      showAcceptanceStatus(message, { error: true });
+      return;
+    }
+    const mission = payload.mission;
+    const validAcceptedMission = payload.status === "accepted"
+      && mission
+      && payload.decision_id === displayedDecisionId
+      && payload.catalog_key === decision.catalog_key
+      && payload.mission_id === mission.mission_id
+      && payload.selection_id === mission.selection_id
+      && payload.decision_id === mission.decision_id;
+    if (!validAcceptedMission) {
+      state.acceptanceBlocked = true;
+      showAcceptanceStatus("La réponse d’acceptation est incomplète. Aucune mission n’est affichée.", { error: true });
+      return;
+    }
+    state.acceptedMission = {
+      decision_id: payload.decision_id,
+      selection_id: payload.selection_id,
+      mission_id: payload.mission_id,
+      mission,
+    };
+    showAcceptanceStatus("Mission enregistrée.");
+    renderMission(mission);
+    ui.mission.showModal();
+  } catch (_error) {
+    if (state.currentDecision?.decision_id !== displayedDecisionId) return;
+    showAcceptanceStatus(
+      "La réponse du serveur n’a pas été reçue. Le statut de l’acceptation ne peut pas être confirmé ; aucun nouvel essai automatique n’a été lancé.",
+      { error: true },
+    );
+  } finally {
+    if (state.currentDecision?.decision_id === displayedDecisionId) {
+      state.acceptingRecommendation = false;
+      ui.openMission.removeAttribute("aria-busy");
+      ui.openMission.disabled = state.acceptanceBlocked;
+    }
+  }
+}
+
 async function loadTonight(availability) {
   if (!availability) {
     showAvailabilityError("Choisissez votre disponibilité avant de préparer la nuit.");
@@ -852,6 +978,7 @@ async function loadTonight(availability) {
   showAvailabilityError("");
   show("loading");
   ui.refresh.disabled = true;
+  clearAcceptedMission();
   state.currentDecision = null;
 
   try {
@@ -1021,9 +1148,7 @@ document.querySelector("#use-geolocation").addEventListener("click", () => {
   );
 });
 
-ui.openMission.addEventListener("click", () => {
-  if (state.currentDecision) ui.mission.showModal();
-});
+ui.openMission.addEventListener("click", acceptPrimaryRecommendation);
 ui.closeMission.addEventListener("click", () => ui.mission.close());
 ui.missionBack.addEventListener("click", () => ui.mission.close());
 ui.mission.addEventListener("click", (event) => {

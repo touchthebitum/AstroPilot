@@ -4,6 +4,7 @@ import copy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import request_validation_exception_handler
@@ -28,6 +29,7 @@ from decision.models.session_availability import (
     SessionAvailabilityMode,
 )
 from decision.models.user_selection import UserSelection, UserSelectionSource
+from decision.mission.night_mission import NightMission
 from decision.models.execution import Execution, ExecutionStatus
 from decision.models.outcome_evidence import (
     AcquisitionOutcomeEvidence,
@@ -304,14 +306,13 @@ class UserSelectionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     decision_id: str
-    selection_id: str
     source: UserSelectionSource
     selected_catalog_key: str | None = None
     selected_at: datetime
 
-    def to_domain(self) -> UserSelection:
+    def to_domain(self, *, selection_id: str) -> UserSelection:
         return UserSelection(
-            selection_id=self.selection_id,
+            selection_id=selection_id,
             decision_id=self.decision_id,
             selected_catalog_key=self.selected_catalog_key,
             source=self.source,
@@ -321,10 +322,40 @@ class UserSelectionRequest(BaseModel):
     @model_validator(mode="after")
     def validate_domain_contract(self):
         try:
-            self.to_domain()
+            self.to_domain(selection_id="validation-selection-id")
         except (TypeError, ValueError) as exc:
             raise ValueError(str(exc)) from exc
         return self
+
+
+class AcceptedMissionFilterResponse(BaseModel):
+    name: str
+    filter_type: str
+    bandwidth_nm: float | None = None
+
+
+class AcceptedMissionTaskResponse(BaseModel):
+    start: str
+    end: str
+    title: str
+    description: str = ""
+    priority: int = 0
+
+
+class AcceptedMissionResponse(BaseModel):
+    mission_id: str
+    decision_id: str
+    selection_id: str
+    target: str
+    confidence: float | str | None = None
+    equipment: list[str] = Field(default_factory=list)
+    site_name: str
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    recommended_hours: float = 0.0
+    expected_gain: float = 0.0
+    selected_filter: AcceptedMissionFilterResponse | None = None
+    tasks: list[AcceptedMissionTaskResponse] = Field(default_factory=list)
 
 
 class UserSelectionResponse(BaseModel):
@@ -333,6 +364,7 @@ class UserSelectionResponse(BaseModel):
     decision_id: str
     selection_id: str
     catalog_key: str | None = None
+    mission: AcceptedMissionResponse | None = None
 
 
 class ExecutionCreateRequest(BaseModel):
@@ -1009,6 +1041,47 @@ def _production_build_mission_input(evaluation, *, profile):
     return build_mission_input(evaluation, profile=profile)
 
 
+def _generate_selection_id() -> str:
+    return str(uuid4())
+
+
+def _accepted_mission_response(mission: NightMission) -> AcceptedMissionResponse:
+    if not isinstance(mission, NightMission):
+        raise TypeError("Expected NightMission")
+    return AcceptedMissionResponse(
+        mission_id=mission.mission_id,
+        decision_id=mission.decision_id,
+        selection_id=mission.selection_id,
+        target=mission.target,
+        confidence=mission.confidence,
+        equipment=list(mission.equipment),
+        site_name=mission.site_name,
+        window_start=mission.window_start,
+        window_end=mission.window_end,
+        recommended_hours=float(mission.recommended_hours),
+        expected_gain=float(mission.expected_gain),
+        selected_filter=(
+            AcceptedMissionFilterResponse(
+                name=mission.selected_filter.name,
+                filter_type=mission.selected_filter.filter_type,
+                bandwidth_nm=mission.selected_filter.bandwidth_nm,
+            )
+            if mission.selected_filter is not None
+            else None
+        ),
+        tasks=[
+            AcceptedMissionTaskResponse(
+                start=task.start,
+                end=task.end,
+                title=task.title,
+                description=task.description,
+                priority=task.priority,
+            )
+            for task in mission.tasks
+        ],
+    )
+
+
 def _assess_shortlist_candidates(
     result,
     *,
@@ -1219,6 +1292,7 @@ def create_app(
     weather_provider: Callable = _production_weather_provider,
     profile_provider: Callable = _production_profile_provider,
     clock: Callable[[], datetime] = _utc_now,
+    selection_id_factory: Callable[[], str] = _generate_selection_id,
 ) -> FastAPI:
     application = FastAPI(title="AstroPilot API", version="1.0.0")
     resolved_service = None
@@ -1857,7 +1931,13 @@ def create_app(
         summary="Accept or decline an exact Tonight decision",
     )
     def accept_decision(request: UserSelectionRequest):
-        selection = request.to_domain()
+        selection_id = selection_id_factory()
+        if not isinstance(selection_id, str) or not selection_id.strip():
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "decision_acceptance_unavailable"},
+            )
+        selection = request.to_domain(selection_id=selection_id)
         accept = getattr(application_service(), "accept", None)
         if accept is None:
             raise HTTPException(
@@ -1885,6 +1965,11 @@ def create_app(
             selection_id=selection.selection_id,
             catalog_key=(
                 selection.selected_catalog_key if mission is not None else None
+            ),
+            mission=(
+                _accepted_mission_response(mission)
+                if mission is not None
+                else None
             ),
         )
 
