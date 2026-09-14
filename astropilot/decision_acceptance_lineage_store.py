@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from decision.acceptance_lineage_persistence import (
+    AcceptanceRequestMapping,
     AcceptanceLineageConflictError,
     AcceptanceLineageCorruptionError,
     AcceptanceLineageNotFoundError,
@@ -141,7 +142,9 @@ class FileDecisionAcceptanceLineageStore:
         self,
         selection: UserSelection,
         mission: NightMission | None,
-    ) -> None:
+        *,
+        acceptance_request_id: str | None = None,
+    ) -> tuple[UserSelection, NightMission | None]:
         if type(selection) is not UserSelection:
             raise AcceptanceLineageCorruptionError("invalid_user_selection")
         if selection.source is UserSelectionSource.DECLINED:
@@ -156,14 +159,55 @@ class FileDecisionAcceptanceLineageStore:
             or mission.selection_id != selection.selection_id
         ):
             raise AcceptanceLineageConflictError("mission_provenance_mismatch")
+        request_id = None
+        if acceptance_request_id is not None:
+            request_id = validate_lineage_identity(
+                acceptance_request_id,
+                field="acceptance_request_id",
+            )
 
         path = self._path(selection.decision_id)
         with self._locked():
+            aggregates = self._load_all()
+            if request_id is not None:
+                request_matches = [
+                    (item, request)
+                    for item in aggregates
+                    for request in item.acceptance_requests
+                    if request.acceptance_request_id == request_id
+                ]
+                if len(request_matches) > 1:
+                    raise AcceptanceLineageConflictError(
+                        "acceptance_request_conflict"
+                    )
+                if request_matches:
+                    aggregate, request = request_matches[0]
+                    canonical_selection = next(
+                        stored
+                        for stored in aggregate.selections
+                        if stored.selection_id == request.selection_id
+                    )
+                    canonical_mission = (
+                        None
+                        if request.mission_id is None
+                        else next(
+                            stored
+                            for stored in aggregate.missions
+                            if stored.mission_id == request.mission_id
+                        )
+                    )
+                    if not self._same_acceptance_payload(
+                        canonical_selection,
+                        selection,
+                    ):
+                        raise AcceptanceLineageConflictError(
+                            "acceptance_request_conflict"
+                        )
+                    return canonical_selection, canonical_mission
             if not path.exists():
                 raise AcceptanceLineageNotFoundError(
                     "decision_context_not_found"
                 )
-            aggregates = self._load_all()
             target = next(
                 (
                     item
@@ -215,9 +259,9 @@ class FileDecisionAcceptanceLineageStore:
 
             if matching_selections:
                 if mission is None and not matching_missions:
-                    return
+                    return selection, None
                 if mission is not None and matching_missions:
-                    return
+                    return selection, mission
                 raise AcceptanceLineageConflictError(
                     "acceptance_lineage_conflict"
                 )
@@ -226,17 +270,84 @@ class FileDecisionAcceptanceLineageStore:
                     "acceptance_lineage_conflict"
                 )
 
-            self._write(
-                DecisionAcceptanceAggregate(
-                    context=target.context,
-                    selections=target.selections + (selection,),
-                    missions=(
-                        target.missions
-                        if mission is None
-                        else target.missions + (mission,)
-                    ),
-                )
+            updated = DecisionAcceptanceAggregate(
+                context=target.context,
+                selections=target.selections + (selection,),
+                missions=(
+                    target.missions
+                    if mission is None
+                    else target.missions + (mission,)
+                ),
+                acceptance_requests=(
+                    target.acceptance_requests
+                    if request_id is None
+                    else target.acceptance_requests + (
+                        AcceptanceRequestMapping(
+                            acceptance_request_id=request_id,
+                            selection_id=selection.selection_id,
+                            mission_id=(
+                                None if mission is None else mission.mission_id
+                            ),
+                        ),
+                    )
+                ),
             )
+            self._write(updated)
+            return selection, mission
+
+    @staticmethod
+    def _same_acceptance_payload(
+        left: UserSelection,
+        right: UserSelection,
+    ) -> bool:
+        return (
+            left.decision_id,
+            left.source,
+            left.selected_catalog_key,
+            left.selected_at,
+        ) == (
+            right.decision_id,
+            right.source,
+            right.selected_catalog_key,
+            right.selected_at,
+        )
+
+    def load_acceptance(
+        self,
+        acceptance_request_id: str,
+    ) -> tuple[UserSelection, NightMission | None] | None:
+        request_id = validate_lineage_identity(
+            acceptance_request_id,
+            field="acceptance_request_id",
+        )
+        matches = [
+            (aggregate, request)
+            for aggregate in self._load_all()
+            for request in aggregate.acceptance_requests
+            if request.acceptance_request_id == request_id
+        ]
+        if not matches:
+            return None
+        if len(matches) != 1:
+            raise AcceptanceLineageConflictError(
+                "acceptance_request_conflict"
+            )
+        aggregate, request = matches[0]
+        canonical_selection = next(
+            stored
+            for stored in aggregate.selections
+            if stored.selection_id == request.selection_id
+        )
+        canonical_mission = (
+            None
+            if request.mission_id is None
+            else next(
+                stored
+                for stored in aggregate.missions
+                if stored.mission_id == request.mission_id
+            )
+        )
+        return canonical_selection, canonical_mission
 
     def load_selection(self, selection_id: str) -> UserSelection:
         identity = validate_lineage_identity(selection_id, field="selection_id")
