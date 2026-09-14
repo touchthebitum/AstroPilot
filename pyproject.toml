@@ -21,6 +21,10 @@ astropilot = "astro_score:main"
 astropilot-app = "astropilot.launcher:main"
 
 [project.optional-dependencies]
+packaging = [
+    "pyinstaller>=6.22,<7.0",
+    "tzdata>=2025.2",
+]
 test = [
     "httpx2>=2.0,<3.0",
     "pytest>=8.0,<9.0",

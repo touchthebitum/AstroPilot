@@ -1,5 +1,9 @@
 from pathlib import Path
+import importlib.util
+import sys
 import tomllib
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +29,29 @@ def test_installed_runtime_declares_uvicorn_for_api_and_ui_serving():
     assert "uvicorn>=0.52,<1.0" in dependencies
 
 
+def test_packaging_dependencies_are_isolated_from_runtime_dependencies():
+    project = _pyproject()["project"]
+
+    assert project["dependencies"] == [
+        "astral>=3.2,<4.0",
+        "astropy>=7.2,<8.0",
+        "fastapi>=0.116,<1.0",
+        "requests>=2.32,<3.0",
+        "timezonefinder>=8,<9",
+        "uvicorn>=0.52,<1.0",
+    ]
+    packaging_dependencies = project["optional-dependencies"]["packaging"]
+    assert any(
+        dependency.lower().startswith("pyinstaller>=6.")
+        and "<7" in dependency
+        for dependency in packaging_dependencies
+    )
+    assert any(
+        dependency.lower().startswith("tzdata")
+        for dependency in packaging_dependencies
+    )
+
+
 def test_wheel_excludes_internal_decision_tests():
     package_finder = _pyproject()["tool"]["setuptools"]["packages"]["find"]
 
@@ -44,3 +71,158 @@ def test_wheel_includes_only_immutable_product_assets():
 
 def test_obsolete_image_quality_demo_is_not_shipped_as_a_module():
     assert not (ROOT / "decision" / "test_decision_context_image_quality.py").exists()
+
+
+def test_launcher_is_directly_executable_without_changing_entry_points():
+    launcher = (ROOT / "astropilot" / "launcher.py").read_text(encoding="utf-8")
+    scripts = _pyproject()["project"]["scripts"]
+
+    assert 'if __name__ == "__main__":' in launcher
+    assert scripts == {
+        "astropilot": "astro_score:main",
+        "astropilot-app": "astropilot.launcher:main",
+    }
+
+
+def test_spec_defines_arm64_windowed_onedir_application():
+    spec = (ROOT / "AstroPilot.spec").read_text(encoding="utf-8")
+
+    assert 'astropilot" / "launcher.py"' in spec
+    assert 'name="AstroPilot"' in spec
+    assert "exclude_binaries=True" in spec
+    assert "COLLECT(" in spec
+    assert "console=False" in spec
+    assert 'target_arch="arm64"' in spec
+    assert 'name="AstroPilot.app"' in spec
+    assert 'bundle_identifier="fr.astropilot.desktop"' in spec
+    assert 'version="0.0.0"' in spec
+
+
+def test_spec_collects_exact_runtime_assets_without_broad_hidden_imports():
+    spec = (ROOT / "AstroPilot.spec").read_text(encoding="utf-8")
+
+    for asset in ("index.html", "app.js", "styles.css"):
+        assert asset in spec
+    assert '"astropilot/web"' in spec
+    assert '"*.json"' in spec
+    assert '"astropilot/knowledge/objects"' in spec
+    assert 'collect_data_files("timezonefinder_data")' in spec
+    assert 'collect_data_files("astropy_iers_data")' in spec
+    assert 'collect_data_files("tzdata")' in spec
+    assert 'copy_metadata("astropilot")' in spec
+    assert "hiddenimports=[]" in spec
+    assert "collect_submodules" not in spec
+    assert "tests/data" not in spec
+
+
+def _build_module():
+    path = ROOT / "scripts" / "build_macos.py"
+    spec = importlib.util.spec_from_file_location("astropilot_build_macos", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_build_script_rejects_unsupported_platform_and_architecture(monkeypatch):
+    build = _build_module()
+
+    monkeypatch.setattr(build.sys, "platform", "linux")
+    with pytest.raises(RuntimeError, match="macOS"):
+        build.validate_target()
+
+    monkeypatch.setattr(build.sys, "platform", "darwin")
+    monkeypatch.setattr(build.platform, "machine", lambda: "x86_64")
+    with pytest.raises(RuntimeError, match="arm64"):
+        build.validate_target()
+
+
+def test_build_script_documents_isolated_locked_packaging_environment():
+    script = (ROOT / "scripts" / "build_macos.py").read_text(encoding="utf-8")
+
+    assert (
+        "UV_PROJECT_ENVIRONMENT=.venv-packaging "
+        "uv sync --locked --extra packaging"
+    ) in script
+
+
+def test_build_script_cleans_only_repository_local_outputs(tmp_path):
+    build = _build_module()
+    outside = tmp_path.parent / "outside-build-sentinel"
+    outside.mkdir(exist_ok=True)
+    for name in ("build", "dist"):
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / "artifact").write_text("generated", encoding="utf-8")
+
+    build.clean_outputs(tmp_path)
+
+    assert not (tmp_path / "build").exists()
+    assert not (tmp_path / "dist").exists()
+    assert outside.is_dir()
+
+
+def test_build_script_invokes_current_python_and_verifies_bundle(
+    tmp_path,
+    monkeypatch,
+):
+    build = _build_module()
+    calls = []
+    monkeypatch.setattr(build.sys, "platform", "darwin")
+    monkeypatch.setattr(build.platform, "machine", lambda: "arm64")
+
+    def runner(command, *, cwd, check):
+        calls.append((command, cwd, check))
+        (tmp_path / "dist" / "AstroPilot.app").mkdir(parents=True)
+
+    output = build.build(root=tmp_path, runner=runner)
+
+    assert calls == [
+        (
+            [
+                sys.executable,
+                "-m",
+                "PyInstaller",
+                "--noconfirm",
+                "--clean",
+                "AstroPilot.spec",
+            ],
+            tmp_path,
+            True,
+        )
+    ]
+    assert output == tmp_path / "dist" / "AstroPilot.app"
+
+
+def test_build_script_fails_when_bundle_is_missing(tmp_path, monkeypatch):
+    build = _build_module()
+    monkeypatch.setattr(build.sys, "platform", "darwin")
+    monkeypatch.setattr(build.platform, "machine", lambda: "arm64")
+
+    with pytest.raises(RuntimeError, match="dist/AstroPilot.app"):
+        build.build(root=tmp_path, runner=lambda *args, **kwargs: None)
+
+
+def test_generated_packaging_outputs_are_ignored():
+    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+    assert "build/" in ignored
+    assert "dist/" in ignored
+    assert ".venv-packaging/" in ignored
+    assert "AstroPilot.spec" not in ignored
+    assert "scripts/build_macos.py" not in ignored
+
+
+def test_build_definition_has_no_local_paths_or_release_operations():
+    sources = "\n".join(
+        (ROOT / path).read_text(encoding="utf-8")
+        for path in ("AstroPilot.spec", "scripts/build_macos.py")
+    )
+
+    assert "/Users/" not in sources
+    assert ".venv/" not in sources
+    assert "Anaconda" not in sources
+    assert "Miniconda" not in sources
+    assert "codesign" not in sources
+    assert "notar" not in sources.lower()
+    assert "dmg" not in sources.lower()
+    assert "zip" not in sources.lower()
