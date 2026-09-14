@@ -53,6 +53,9 @@ from decision.services.tonight_application_service import (
 from decision.services.durable_tonight_application_service import (
     DurableTonightApplicationService,
 )
+from decision.services.decision_acceptance_application import (
+    DecisionAcceptanceResult,
+)
 from decision.services.candidate_assessment import (
     CandidateAssessment,
     CandidateViabilityEvaluator,
@@ -1590,9 +1593,14 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
         def register_decision_context(self, **kwargs):
             self.registered.append(kwargs)
 
-        def accept(self, user_selection):
-            self.selections.append(user_selection)
-            return NightMission(
+        def accept_idempotently(
+            self,
+            user_selection,
+            *,
+            acceptance_request_id,
+        ):
+            self.selections.append((acceptance_request_id, user_selection))
+            mission = NightMission(
                 target=user_selection.selected_catalog_key,
                 confidence="HIGH",
                 equipment=["widefield"],
@@ -1601,6 +1609,7 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
                 decision_id=user_selection.decision_id,
                 selection_id=user_selection.selection_id,
             )
+            return DecisionAcceptanceResult(user_selection, mission)
 
     service = Service()
     client = TestClient(create_app(
@@ -1615,6 +1624,7 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
     accepted = client.post(
         "/v1/decision-selections",
         json={
+            "acceptance_request_id": "request-123",
             "decision_id": "decision-123",
             "source": "primary_recommendation",
             "selected_catalog_key": "M31",
@@ -1649,7 +1659,8 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
             "tasks": [],
         },
     }
-    assert service.selections[0].source is UserSelectionSource.PRIMARY_RECOMMENDATION
+    assert service.selections[0][0] == "request-123"
+    assert service.selections[0][1].source is UserSelectionSource.PRIMARY_RECOMMENDATION
 
 
 def test_selection_endpoint_rejects_client_supplied_selection_id():
@@ -1658,6 +1669,7 @@ def test_selection_endpoint_rejects_client_supplied_selection_id():
     response = client.post(
         "/v1/decision-selections",
         json={
+            "acceptance_request_id": "request-123",
             "decision_id": "decision-123",
             "selection_id": "client-invented",
             "source": "primary_recommendation",
@@ -1665,6 +1677,29 @@ def test_selection_endpoint_rejects_client_supplied_selection_id():
             "selected_at": "2026-09-10T20:00:00+00:00",
         },
     )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "acceptance_request_id",
+    [None, "", "invalid/request", "x" * 129],
+    ids=["missing", "empty", "invalid-character", "too-long"],
+)
+def test_selection_endpoint_requires_valid_acceptance_request_id(
+    acceptance_request_id,
+):
+    client = make_client(result=make_result())
+    payload = {
+        "decision_id": "decision-123",
+        "source": "primary_recommendation",
+        "selected_catalog_key": "M31",
+        "selected_at": "2026-09-10T20:00:00+00:00",
+    }
+    if acceptance_request_id is not None:
+        payload["acceptance_request_id"] = acceptance_request_id
+
+    response = client.post("/v1/decision-selections", json=payload)
 
     assert response.status_code == 422
 
@@ -1798,7 +1833,13 @@ def lineage_service(tmp_path, reference_time, *, lineage_store=None):
     )
 
 
-def lineage_client(tmp_path, reference_time, *, lineage_store=None):
+def lineage_client(
+    tmp_path,
+    reference_time,
+    *,
+    lineage_store=None,
+    selection_id="selection-lineage",
+):
     return TestClient(create_app(
         service_factory=lambda: lineage_service(
             tmp_path,
@@ -1810,7 +1851,7 @@ def lineage_client(tmp_path, reference_time, *, lineage_store=None):
         ),
         profile_provider=valid_profile,
         clock=lambda: reference_time,
-        selection_id_factory=lambda: "selection-lineage",
+        selection_id_factory=lambda: selection_id,
     ))
 
 
@@ -1819,11 +1860,16 @@ def lineage_selection_payload(
     source="primary_recommendation",
     selected_at=None,
     decision_id="decision-lineage",
+    acceptance_request_id="request-lineage",
+    selected_catalog_key="M31",
 ):
     return {
+        "acceptance_request_id": acceptance_request_id,
         "decision_id": decision_id,
         "source": source,
-        "selected_catalog_key": None if source == "declined" else "M31",
+        "selected_catalog_key": (
+            None if source == "declined" else selected_catalog_key
+        ),
         "selected_at": (
             selected_at or DEFAULT_WEATHER_REFERENCE_TIME
         ).isoformat(),
@@ -1883,6 +1929,107 @@ def test_durable_acceptance_lineage_survives_two_api_reconstructions(
     ) == ("decision-lineage", "selection-lineage")
 
 
+def test_public_api_replays_canonical_acceptance_after_staleness(
+    tmp_path,
+    monkeypatch,
+):
+    generated_missions = []
+
+    def mission_id():
+        generated_missions.append("mission-lineage")
+        return "mission-lineage"
+
+    monkeypatch.setattr(durable_module, "generate_mission_id", mission_id)
+    reference = DEFAULT_WEATHER_REFERENCE_TIME
+    initial_client = lineage_client(
+        tmp_path,
+        reference,
+        selection_id="selection-canonical",
+    )
+    assert initial_client.post("/v1/tonight", json={}).status_code == 200
+    request = lineage_selection_payload()
+    first = initial_client.post("/v1/decision-selections", json=request)
+
+    replay = lineage_client(
+        tmp_path,
+        reference + timedelta(minutes=91),
+        selection_id="selection-retry",
+    ).post("/v1/decision-selections", json=request)
+
+    assert first.status_code == replay.status_code == 200
+    assert replay.json() == first.json()
+    assert replay.json()["selection_id"] == "selection-canonical"
+    assert replay.json()["mission_id"] == "mission-lineage"
+    assert replay.json()["selection_id"] != "request-lineage"
+    assert replay.json()["mission_id"] != "request-lineage"
+    assert len(generated_missions) == 1
+
+
+def test_public_api_maps_acceptance_request_payload_conflict(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        durable_module,
+        "generate_mission_id",
+        lambda: "mission-lineage",
+    )
+    reference = DEFAULT_WEATHER_REFERENCE_TIME
+    client = lineage_client(tmp_path, reference)
+    assert client.post("/v1/tonight", json={}).status_code == 200
+    first = client.post(
+        "/v1/decision-selections",
+        json=lineage_selection_payload(),
+    )
+
+    conflict = lineage_client(
+        tmp_path,
+        reference,
+        selection_id="selection-conflict",
+    ).post(
+        "/v1/decision-selections",
+        json=lineage_selection_payload(
+            selected_at=DEFAULT_WEATHER_REFERENCE_TIME + timedelta(seconds=1)
+        ),
+    )
+    store = FileDecisionAcceptanceLineageStore(tmp_path / "decision_lineage")
+
+    assert first.status_code == 200
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "acceptance_request_conflict"
+    canonical_selection, canonical_mission = store.load_acceptance(
+        "request-lineage"
+    )
+    assert canonical_selection.selection_id == "selection-lineage"
+    assert canonical_mission.mission_id == "mission-lineage"
+
+
+def test_public_acceptance_preserves_source_and_target_validation(tmp_path):
+    reference = DEFAULT_WEATHER_REFERENCE_TIME
+    client = lineage_client(tmp_path, reference)
+    assert client.post("/v1/tonight", json={}).status_code == 200
+
+    invalid_source = client.post(
+        "/v1/decision-selections",
+        json={
+            **lineage_selection_payload(
+                acceptance_request_id="request-invalid-source"
+            ),
+            "source": "unsupported",
+        },
+    )
+    invalid_target = client.post(
+        "/v1/decision-selections",
+        json=lineage_selection_payload(
+            acceptance_request_id="request-invalid-target",
+            selected_catalog_key="M42",
+        ),
+    )
+
+    assert invalid_source.status_code == 422
+    assert invalid_target.status_code == 409
+    assert invalid_target.json()["detail"]["code"] == (
+        "selected_target_not_primary_recommendation"
+    )
+
+
 @pytest.mark.parametrize(
     "selected_at",
     [
@@ -1934,6 +2081,19 @@ def test_reconstructed_decline_persists_selection_without_mission(tmp_path):
     with pytest.raises(AcceptanceLineageNotFoundError, match="mission_not_found"):
         store.load_mission("mission-lineage")
 
+    replay = lineage_client(
+        tmp_path,
+        reference + timedelta(minutes=91),
+        selection_id="selection-decline-retry",
+    ).post(
+        "/v1/decision-selections",
+        json=lineage_selection_payload(source="declined"),
+    )
+    assert replay.status_code == 200
+    assert replay.json()["selection_id"] == "selection-lineage"
+    assert replay.json()["mission_id"] is None
+    assert replay.json()["mission"] is None
+
 
 def test_forecast_only_and_unknown_decisions_remain_not_found(tmp_path):
     reference = DEFAULT_WEATHER_REFERENCE_TIME
@@ -1975,7 +2135,16 @@ def test_context_and_acceptance_persistence_failures_do_not_return_success(
         def load(self, *, decision_id):
             return self.load_context(decision_id)
 
-        def commit_selection_and_mission(self, selection, mission):
+        def load_acceptance(self, acceptance_request_id):
+            return None
+
+        def commit_selection_and_mission(
+            self,
+            selection,
+            mission,
+            *,
+            acceptance_request_id=None,
+        ):
             raise OSError("acceptance write failed")
 
         def load_selection(self, selection_id):
@@ -2012,7 +2181,12 @@ def test_context_and_acceptance_persistence_failures_do_not_return_success(
 
 def test_gp11_selection_endpoint_rejects_unknown_decision_without_fallback():
     class Service:
-        def accept(self, user_selection):
+        def accept_idempotently(
+            self,
+            user_selection,
+            *,
+            acceptance_request_id,
+        ):
             from decision.services.decision_acceptance_application import (
                 DecisionAcceptanceError,
             )
@@ -2027,6 +2201,7 @@ def test_gp11_selection_endpoint_rejects_unknown_decision_without_fallback():
     response = client.post(
         "/v1/decision-selections",
         json={
+            "acceptance_request_id": "request-unknown",
             "decision_id": "unknown-decision",
             "source": "primary_recommendation",
             "selected_catalog_key": "M31",
