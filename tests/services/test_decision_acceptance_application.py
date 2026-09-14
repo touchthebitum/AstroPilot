@@ -69,11 +69,12 @@ def selection(
     source,
     target,
     *,
+    selection_id="selection-1",
     decision_id="decision-1",
     selected_at=SELECTED_AT,
 ):
     return UserSelection(
-        selection_id="selection-1",
+        selection_id=selection_id,
         decision_id=decision_id,
         selected_catalog_key=target,
         source=source,
@@ -159,6 +160,160 @@ def test_declined_selection_resolves_exact_decision_and_creates_no_mission():
     service, composer, _, _ = registered_service()
 
     assert service.accept(selection(UserSelectionSource.DECLINED, None)) is None
+    assert len(composer.calls) == 1
+
+
+def test_first_idempotent_acceptance_and_replay_return_canonical_lineage():
+    service, composer, store, recommendation = registered_service()
+
+    first = service.accept_idempotently(
+        selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"),
+        acceptance_request_id="request-1",
+    )
+    replay = service.accept_idempotently(
+        selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            selection_id="selection-retry",
+        ),
+        acceptance_request_id="request-1",
+    )
+
+    assert first == replay
+    assert replay.selection.selection_id == "selection-1"
+    assert replay.mission.mission_id == "mission-1"
+    assert replay.mission.selection_id == replay.selection.selection_id
+    assert store.load_acceptance("request-1") == (
+        replay.selection,
+        replay.mission,
+    )
+    assert len(composer.calls) == 1
+    assert recommendation.opportunity.candidate.catalog_key == "M31"
+
+
+@pytest.mark.parametrize(
+    "conflicting",
+    [
+        selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            selection_id="selection-2",
+            decision_id="decision-2",
+        ),
+        selection(
+            UserSelectionSource.ALTERNATIVE,
+            "M42",
+            selection_id="selection-2",
+        ),
+        selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M42",
+            selection_id="selection-2",
+        ),
+        selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            selection_id="selection-2",
+            selected_at=SELECTED_AT + timedelta(seconds=1),
+        ),
+    ],
+    ids=["decision", "source", "target", "selected-at"],
+)
+def test_idempotency_key_reuse_with_different_payload_fails_closed(conflicting):
+    service, composer, store, _ = registered_service()
+    service.accept_idempotently(
+        selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"),
+        acceptance_request_id="request-1",
+    )
+    canonical = store.load_acceptance("request-1")
+
+    with pytest.raises(
+        DecisionAcceptanceError,
+        match="acceptance_request_conflict",
+    ):
+        service.accept_idempotently(
+            conflicting,
+            acceptance_request_id="request-1",
+        )
+
+    assert store.load_acceptance("request-1") == canonical
+    assert len(composer.calls) == 1
+
+
+def test_committed_acceptance_replays_before_staleness_validation():
+    service, composer, _, _ = registered_service()
+    first = service.accept_idempotently(
+        selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"),
+        acceptance_request_id="request-1",
+    )
+    service.clock = lambda: ACCEPTED_AT + timedelta(hours=3)
+
+    replay = service.accept_idempotently(
+        selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            selection_id="selection-retry",
+        ),
+        acceptance_request_id="request-1",
+    )
+
+    assert replay == first
+    assert len(composer.calls) == 1
+
+
+def test_stale_first_idempotent_acceptance_persists_nothing():
+    stale = forecast_evidence(ACCEPTED_AT - timedelta(minutes=91))
+    service, composer, store, _ = registered_service(evidence=stale)
+
+    with pytest.raises(DecisionAcceptanceError, match="decision_context_stale"):
+        service.accept_idempotently(
+            selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"),
+            acceptance_request_id="request-1",
+        )
+
+    assert store.load_acceptance("request-1") is None
+    assert composer.calls == []
+
+
+def test_idempotency_lookup_failure_uses_existing_persistence_error():
+    service, composer, _, _ = registered_service()
+
+    class FailingLookupStore:
+        def load_acceptance(self, acceptance_request_id):
+            raise OSError("read failed")
+
+    service.context_store = FailingLookupStore()
+
+    with pytest.raises(
+        DecisionAcceptanceError,
+        match="decision_lineage_persistence_error",
+    ):
+        service.accept_idempotently(
+            selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"),
+            acceptance_request_id="request-1",
+        )
+
+    assert composer.calls == []
+
+
+def test_declined_idempotent_replay_preserves_selection_and_no_mission():
+    service, composer, _, _ = registered_service()
+    first = service.accept_idempotently(
+        selection(UserSelectionSource.DECLINED, None),
+        acceptance_request_id="request-declined",
+    )
+    replay = service.accept_idempotently(
+        selection(
+            UserSelectionSource.DECLINED,
+            None,
+            selection_id="selection-retry",
+        ),
+        acceptance_request_id="request-declined",
+    )
+
+    assert replay == first
+    assert replay.selection.selection_id == "selection-1"
+    assert replay.mission is None
     assert len(composer.calls) == 1
 
 

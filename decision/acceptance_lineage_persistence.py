@@ -57,11 +57,12 @@ from decision.services.user_selection_validator import (
 from decision.weather.weather_forecast import WeatherForecast
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _IDENTITY_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
-_ROOT_FIELDS = frozenset(
+_LEGACY_ROOT_FIELDS = frozenset(
     ("schema_version", "decision_id", "context", "selections", "missions")
 )
+_ROOT_FIELDS = _LEGACY_ROOT_FIELDS | frozenset(("acceptance_requests",))
 
 
 class AcceptanceLineagePersistenceError(ValueError):
@@ -141,10 +142,18 @@ _ENUM_TAG_BY_TYPE = {value: tag for tag, value in _ENUM_BY_TAG.items()}
 
 
 @dataclass(frozen=True, slots=True)
+class AcceptanceRequestMapping:
+    acceptance_request_id: str
+    selection_id: str
+    mission_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class DecisionAcceptanceAggregate:
     context: DecisionAcceptanceContext
     selections: tuple[UserSelection, ...] = ()
     missions: tuple[NightMission, ...] = ()
+    acceptance_requests: tuple[AcceptanceRequestMapping, ...] = ()
 
     @property
     def decision_id(self) -> str:
@@ -423,16 +432,62 @@ def _validate_aggregate(aggregate: DecisionAcceptanceAggregate) -> None:
         if selection_id in selection_by_id:
             raise AcceptanceLineageCorruptionError("duplicate_selection_id")
         selection_by_id[selection_id] = selection
-    mission_ids = set()
+    mission_by_id = {}
     for mission in aggregate.missions:
         mission_id = validate_lineage_identity(mission.mission_id, field="mission_id")
         if mission.decision_id != decision_id:
             raise AcceptanceLineageCorruptionError("mission_decision_mismatch")
         if mission.selection_id not in selection_by_id:
             raise AcceptanceLineageCorruptionError("mission_selection_not_found")
-        if mission_id in mission_ids:
+        if (
+            selection_by_id[mission.selection_id].source
+            is UserSelectionSource.DECLINED
+        ):
+            raise AcceptanceLineageCorruptionError(
+                "declined_selection_mission_conflict"
+            )
+        if mission_id in mission_by_id:
             raise AcceptanceLineageCorruptionError("duplicate_mission_id")
-        mission_ids.add(mission_id)
+        mission_by_id[mission_id] = mission
+    request_ids = set()
+    for request in aggregate.acceptance_requests:
+        if type(request) is not AcceptanceRequestMapping:
+            raise AcceptanceLineageCorruptionError(
+                "invalid_acceptance_request_mapping"
+            )
+        request_id = validate_lineage_identity(
+            request.acceptance_request_id,
+            field="acceptance_request_id",
+        )
+        if request_id in request_ids:
+            raise AcceptanceLineageCorruptionError(
+                "duplicate_acceptance_request_id"
+            )
+        request_ids.add(request_id)
+        selection = selection_by_id.get(request.selection_id)
+        if selection is None:
+            raise AcceptanceLineageCorruptionError(
+                "acceptance_request_selection_not_found"
+            )
+        if request.mission_id is None:
+            if selection.source is not UserSelectionSource.DECLINED:
+                raise AcceptanceLineageCorruptionError(
+                    "acceptance_request_mission_required"
+                )
+            continue
+        mission = mission_by_id.get(request.mission_id)
+        if mission is None:
+            raise AcceptanceLineageCorruptionError(
+                "acceptance_request_mission_not_found"
+            )
+        if mission.selection_id != selection.selection_id:
+            raise AcceptanceLineageCorruptionError(
+                "acceptance_request_provenance_mismatch"
+            )
+        if selection.source is UserSelectionSource.DECLINED:
+            raise AcceptanceLineageCorruptionError(
+                "declined_selection_mission_conflict"
+            )
 
 
 def serialize_decision_acceptance_aggregate(
@@ -452,6 +507,13 @@ def serialize_decision_acceptance_aggregate(
         "missions": {
             item.mission_id: serialize_night_mission(item)
             for item in aggregate.missions
+        },
+        "acceptance_requests": {
+            item.acceptance_request_id: {
+                "selection_id": item.selection_id,
+                "mission_id": item.mission_id,
+            }
+            for item in aggregate.acceptance_requests
         },
     }
     try:
@@ -481,10 +543,20 @@ def deserialize_decision_acceptance_aggregate(
         payload = json.loads(document, parse_constant=_reject_json_constant)
     except (TypeError, ValueError, json.JSONDecodeError) as error:
         raise AcceptanceLineageCorruptionError("invalid_json_document") from error
-    root = _exact_mapping(payload, _ROOT_FIELDS, "invalid_root_fields")
-    version = root["schema_version"]
-    if isinstance(version, bool) or not isinstance(version, int) or version != 1:
+    if type(payload) is not dict:
+        raise AcceptanceLineageCorruptionError("invalid_root_fields")
+    version = payload.get("schema_version")
+    if (
+        isinstance(version, bool)
+        or not isinstance(version, int)
+        or version not in (1, SCHEMA_VERSION)
+    ):
         raise AcceptanceLineageCorruptionError("invalid_schema_version")
+    root = _exact_mapping(
+        payload,
+        _LEGACY_ROOT_FIELDS if version == 1 else _ROOT_FIELDS,
+        "invalid_root_fields",
+    )
     stored_decision_id = validate_lineage_identity(
         root["decision_id"], field="decision_id"
     )
@@ -495,10 +567,15 @@ def deserialize_decision_acceptance_aggregate(
     context = deserialize_decision_acceptance_context(root["context"])
     selections_document = root["selections"]
     missions_document = root["missions"]
+    acceptance_requests_document = (
+        {} if version == 1 else root["acceptance_requests"]
+    )
     if type(selections_document) is not dict:
         raise AcceptanceLineageCorruptionError("invalid_selections")
     if type(missions_document) is not dict:
         raise AcceptanceLineageCorruptionError("invalid_missions")
+    if type(acceptance_requests_document) is not dict:
+        raise AcceptanceLineageCorruptionError("invalid_acceptance_requests")
     selections = []
     for identity, item in selections_document.items():
         validate_lineage_identity(identity, field="selection_id")
@@ -513,10 +590,32 @@ def deserialize_decision_acceptance_aggregate(
         if mission.mission_id != identity:
             raise AcceptanceLineageCorruptionError("mission_id_mismatch")
         missions.append(mission)
+    acceptance_requests = []
+    for identity, item in acceptance_requests_document.items():
+        validate_lineage_identity(identity, field="acceptance_request_id")
+        mapping = _exact_mapping(
+            item,
+            frozenset(("selection_id", "mission_id")),
+            "invalid_acceptance_request_mapping",
+        )
+        selection_id = validate_lineage_identity(
+            mapping["selection_id"], field="selection_id"
+        )
+        mission_id = mapping["mission_id"]
+        if mission_id is not None:
+            mission_id = validate_lineage_identity(
+                mission_id, field="mission_id"
+            )
+        acceptance_requests.append(AcceptanceRequestMapping(
+            acceptance_request_id=identity,
+            selection_id=selection_id,
+            mission_id=mission_id,
+        ))
     aggregate = DecisionAcceptanceAggregate(
         context=context,
         selections=tuple(selections),
         missions=tuple(missions),
+        acceptance_requests=tuple(acceptance_requests),
     )
     if aggregate.decision_id != stored_decision_id:
         raise AcceptanceLineageCorruptionError("context_decision_mismatch")

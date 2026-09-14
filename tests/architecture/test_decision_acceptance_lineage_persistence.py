@@ -206,6 +206,8 @@ def selection(
     *,
     selection_id="selection-1",
     decision_id="decision-1",
+    selected_at=START - timedelta(minutes=15),
+    selected_catalog_key=None,
 ):
     targets = {
         UserSelectionSource.PRIMARY_RECOMMENDATION: "M31",
@@ -216,9 +218,13 @@ def selection(
     return UserSelection(
         selection_id=selection_id,
         decision_id=decision_id,
-        selected_catalog_key=targets[source],
+        selected_catalog_key=(
+            targets[source]
+            if selected_catalog_key is None
+            else selected_catalog_key
+        ),
         source=source,
-        selected_at=START - timedelta(minutes=15),
+        selected_at=selected_at,
     )
 
 
@@ -403,6 +409,250 @@ def test_exact_selection_and_mission_replay_is_idempotent(tmp_path):
     assert (tmp_path / "decision-1.json").read_bytes() == before
 
 
+def test_acceptance_request_replay_returns_canonical_lineage_without_rewrite(
+    tmp_path,
+):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    store.create_context(context())
+    first = store.commit_selection_and_mission(
+        selection(),
+        mission(),
+        acceptance_request_id="request-1",
+    )
+    before = (tmp_path / "decision-1.json").read_bytes()
+
+    replay = store.commit_selection_and_mission(
+        selection(selection_id="selection-retry"),
+        mission(mission_id="mission-retry", selection_id="selection-retry"),
+        acceptance_request_id="request-1",
+    )
+
+    assert first == replay == (selection(), mission())
+    assert store.load_acceptance("request-1") == (selection(), mission())
+    assert (tmp_path / "decision-1.json").read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "conflicting_selection",
+    [
+        selection(selection_id="selection-2", decision_id="decision-2"),
+        selection(
+            UserSelectionSource.ALTERNATIVE,
+            selection_id="selection-2",
+        ),
+        selection(
+            selection_id="selection-2",
+            selected_catalog_key="M42",
+        ),
+        selection(
+            selection_id="selection-2",
+            selected_at=START - timedelta(minutes=14),
+        ),
+    ],
+    ids=["decision", "source", "target", "selected-at"],
+)
+def test_acceptance_request_reuse_with_different_payload_fails_closed(
+    tmp_path,
+    conflicting_selection,
+):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    store.create_context(context("decision-1"))
+    store.create_context(context("decision-2"))
+    store.commit_selection_and_mission(
+        selection(),
+        mission(),
+        acceptance_request_id="request-1",
+    )
+    before = {
+        path.name: path.read_bytes()
+        for path in tmp_path.glob("*.json")
+    }
+
+    with pytest.raises(
+        AcceptanceLineageConflictError,
+        match="acceptance_request_conflict",
+    ):
+        store.commit_selection_and_mission(
+            conflicting_selection,
+            mission(
+                mission_id="mission-2",
+                decision_id=conflicting_selection.decision_id,
+                selection_id=conflicting_selection.selection_id,
+            ),
+            acceptance_request_id="request-1",
+        )
+
+    assert {
+        path.name: path.read_bytes()
+        for path in tmp_path.glob("*.json")
+    } == before
+
+
+def test_acceptance_request_replay_survives_store_reconstruction(tmp_path):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    store.create_context(context())
+    store.commit_selection_and_mission(
+        selection(),
+        mission(),
+        acceptance_request_id="request-1",
+    )
+
+    reconstructed = FileDecisionAcceptanceLineageStore(tmp_path)
+
+    replay = reconstructed.commit_selection_and_mission(
+        selection(selection_id="selection-retry"),
+        mission(mission_id="mission-retry", selection_id="selection-retry"),
+        acceptance_request_id="request-1",
+    )
+
+    assert replay == (
+        selection(),
+        mission(),
+    )
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda document: document["acceptance_requests"]["request-1"].update(
+            selection_id="missing-selection"
+        ),
+        lambda document: document["acceptance_requests"]["request-1"].update(
+            mission_id="missing-mission"
+        ),
+        lambda document: document["acceptance_requests"]["request-1"].update(
+            unexpected="value"
+        ),
+    ],
+    ids=["unknown-selection", "unknown-mission", "unexpected-field"],
+)
+def test_inconsistent_acceptance_request_mapping_fails_closed(tmp_path, mutate):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    store.create_context(context())
+    store.commit_selection_and_mission(
+        selection(),
+        mission(),
+        acceptance_request_id="request-1",
+    )
+    path = tmp_path / "decision-1.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    mutate(document)
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(AcceptanceLineageCorruptionError):
+        store.load_acceptance("request-1")
+
+
+def test_legacy_aggregate_loads_without_fabricated_request_mapping(tmp_path):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    store.create_context(context())
+    store.commit_selection_and_mission(selection(), mission())
+    path = tmp_path / "decision-1.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["schema_version"] = 1
+    document.pop("acceptance_requests")
+    legacy = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    path.write_text(legacy, encoding="utf-8")
+
+    reconstructed = FileDecisionAcceptanceLineageStore(tmp_path)
+
+    assert reconstructed.load_selection("selection-1") == selection()
+    assert reconstructed.load_mission("mission-1") == mission()
+    assert reconstructed.load_acceptance("request-1") is None
+    assert path.read_text(encoding="utf-8") == legacy
+
+
+def test_concurrent_identical_acceptance_requests_converge_on_one_lineage(tmp_path):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    store.create_context(context())
+    barrier = Barrier(2)
+
+    def commit(index):
+        proposed_selection = selection(selection_id=f"selection-{index}")
+        proposed_mission = mission(
+            mission_id=f"mission-{index}",
+            selection_id=proposed_selection.selection_id,
+        )
+        barrier.wait()
+        return store.commit_selection_and_mission(
+            proposed_selection,
+            proposed_mission,
+            acceptance_request_id="request-1",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(commit, (1, 2)))
+
+    assert results[0] == results[1]
+    document = json.loads((tmp_path / "decision-1.json").read_text())
+    assert len(document["acceptance_requests"]) == 1
+    assert len(document["selections"]) == 1
+    assert len(document["missions"]) == 1
+
+
+def test_concurrent_identical_declines_converge_without_mission(tmp_path):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    store.create_context(context())
+    barrier = Barrier(2)
+
+    def commit(index):
+        barrier.wait()
+        return store.commit_selection_and_mission(
+            selection(UserSelectionSource.DECLINED, selection_id=f"selection-{index}"),
+            None,
+            acceptance_request_id="request-1",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(commit, (1, 2)))
+
+    assert results[0] == results[1]
+    assert results[0][1] is None
+    document = json.loads((tmp_path / "decision-1.json").read_text())
+    assert len(document["acceptance_requests"]) == 1
+    assert len(document["selections"]) == 1
+    assert document["missions"] == {}
+
+
+def test_concurrent_same_request_with_different_payload_creates_one_lineage(
+    tmp_path,
+):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    store.create_context(context())
+    barrier = Barrier(2)
+
+    def commit(target):
+        proposed = selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION
+            if target == "M31"
+            else UserSelectionSource.ALTERNATIVE,
+            selection_id=f"selection-{target}",
+        )
+        barrier.wait()
+        try:
+            store.commit_selection_and_mission(
+                proposed,
+                mission(
+                    mission_id=f"mission-{target}",
+                    selection_id=proposed.selection_id,
+                ),
+                acceptance_request_id="request-1",
+            )
+            return "saved"
+        except AcceptanceLineageConflictError as exc:
+            assert str(exc) == "acceptance_request_conflict"
+            return "conflict"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(commit, ("M31", "M42")))
+
+    assert sorted(outcomes) == ["conflict", "saved"]
+    document = json.loads((tmp_path / "decision-1.json").read_text())
+    assert len(document["acceptance_requests"]) == 1
+    assert len(document["selections"]) == 1
+    assert len(document["missions"]) == 1
+
+
 @pytest.mark.parametrize("conflict_kind", ["selection", "mission"])
 def test_conflicting_duplicate_identity_fails_closed(tmp_path, conflict_kind):
     store = FileDecisionAcceptanceLineageStore(tmp_path)
@@ -490,7 +740,7 @@ def test_duplicate_identity_in_another_aggregate_fails_globally(
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda document: document.update(schema_version=2),
+        lambda document: document.update(schema_version=3),
         lambda document: document.pop("schema_version"),
         lambda document: document["context"].update(
             {"$type": "unsupported.DomainType"}
@@ -556,9 +806,14 @@ def test_atomic_replace_failure_preserves_previous_complete_aggregate(
     )
 
     with pytest.raises(OSError, match="replace failed"):
-        store.commit_selection_and_mission(selection(), mission())
+        store.commit_selection_and_mission(
+            selection(),
+            mission(),
+            acceptance_request_id="request-1",
+        )
 
     assert path.read_bytes() == before
+    assert store.load_acceptance("request-1") is None
     assert not list(tmp_path.glob(".decision-1.*.tmp"))
 
 
@@ -586,7 +841,7 @@ def test_concurrent_conflicting_commits_allow_exactly_one_success(tmp_path):
         outcomes = list(executor.map(commit, ("M31", "M42")))
 
     assert sorted(outcomes) == ["conflict", "saved"]
-    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 1
+    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 2
 
 
 def test_unique_temporary_files_are_cleaned(tmp_path, monkeypatch):
