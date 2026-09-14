@@ -115,3 +115,14 @@ AstroPilot stops without changing ports or terminating that application.
 
 Launcher diagnostics are stored in `~/Library/Logs/AstroPilot/AstroPilot.log`.
 Provide this log when reporting a startup problem.
+
+## Local macOS application build
+
+Create the isolated packaging environment and build the Apple Silicon app:
+
+```bash
+UV_PROJECT_ENVIRONMENT=.venv-packaging uv sync --locked --extra packaging
+.venv-packaging/bin/python scripts/build_macos.py
+```
+
+The application bundle is written to `dist/AstroPilot.app`.
