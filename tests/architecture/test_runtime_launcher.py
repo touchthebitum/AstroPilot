@@ -1,4 +1,5 @@
 import threading
+from pathlib import Path
 from urllib.error import URLError
 
 import pytest
@@ -23,12 +24,17 @@ class FakeClock:
 @pytest.fixture(autouse=True)
 def isolated_user_data_root(tmp_path, monkeypatch):
     monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path / "user-data"))
+    monkeypatch.setattr(launcher, "_home_directory", lambda: tmp_path)
     probe_port = launcher._probe_port
 
     def isolated_probe(**kwargs):
         return probe_port(**kwargs) if kwargs else launcher.PortState.FREE
 
     monkeypatch.setattr(launcher, "_probe_port", isolated_probe)
+
+
+def launcher_log():
+    return launcher._get_log_path().read_text(encoding="utf-8")
 
 
 class FakeResponse:
@@ -56,6 +62,73 @@ def test_launcher_has_stable_loopback_origin():
         == "http://127.0.0.1:8000/v1/runtime-identity"
     )
     assert callable(launcher.main)
+
+
+def test_log_path_uses_macos_user_logs_directory(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "_home_directory", lambda: tmp_path)
+
+    assert launcher._get_log_path() == (
+        tmp_path / "Library" / "Logs" / "AstroPilot" / "AstroPilot.log"
+    )
+
+
+def test_logger_creates_rotating_file_once(tmp_path):
+    log_path = tmp_path / "nested" / "AstroPilot.log"
+
+    first, first_path = launcher._configure_launcher_logger(log_path=log_path)
+    second, second_path = launcher._configure_launcher_logger(log_path=log_path)
+    first.info("persistent-test-entry")
+    for handler in first.handlers:
+        handler.flush()
+
+    managed = [
+        handler
+        for handler in first.handlers
+        if getattr(handler, "_astropilot_launcher_handler", False)
+    ]
+    assert first is second
+    assert first_path == second_path == log_path
+    assert len(managed) == 1
+    assert log_path.is_file()
+    assert "persistent-test-entry" in log_path.read_text(encoding="utf-8")
+
+
+def test_existing_instance_logs_runtime_metadata_and_browser_result(monkeypatch):
+    monkeypatch.setattr(launcher, "_runtime_version", lambda: "0.0.0")
+    monkeypatch.setattr(launcher.platform, "machine", lambda: "test-architecture")
+
+    launcher.run(
+        port_probe=lambda: launcher.PortState.EXISTING,
+        browser_open=lambda url: True,
+    )
+
+    log = launcher_log()
+    assert "launcher_start" in log
+    assert "version=0.0.0" in log
+    assert "python=" in log
+    assert "architecture=test-architecture" in log
+    assert "host=127.0.0.1" in log
+    assert "port=8000" in log
+    assert "preflight=existing_astropilot" in log
+    assert "existing_instance_detected" in log
+    assert "browser_open_succeeded" in log
+
+
+def test_browser_failure_is_diagnostic_without_marking_healthy_server_failed(
+    monkeypatch,
+    capsys,
+):
+    def browser_failure(url):
+        raise RuntimeError("browser unavailable")
+
+    result = launcher.run(
+        port_probe=lambda: launcher.PortState.EXISTING,
+        browser_open=browser_failure,
+    )
+
+    assert result is None
+    assert "browser_open_failed" in launcher_log()
+    assert str(launcher._get_log_path()) in capsys.readouterr().err
 
 
 def test_identity_probe_is_bounded_and_accepts_only_exact_identity():
@@ -148,7 +221,7 @@ def test_foreign_port_raises_without_browser_server_or_data_mutation(monkeypatch
     with pytest.raises(
         launcher.LauncherPortConflictError,
         match="port_8000_identity_unverified",
-    ):
+    ) as caught:
         launcher.run(
             port_probe=lambda: launcher.PortState.FOREIGN,
             config_factory=lambda *args, **kwargs: pytest.fail(
@@ -161,6 +234,9 @@ def test_foreign_port_raises_without_browser_server_or_data_mutation(monkeypatch
         )
 
     assert browser_calls == []
+    assert str(launcher._get_log_path()) in str(caught.value)
+    assert "preflight=foreign_or_indeterminate" in launcher_log()
+    assert "foreign_port_conflict" in launcher_log()
 
 
 def test_launcher_initializes_canonical_data_root_before_uvicorn(monkeypatch):
@@ -296,6 +372,12 @@ def test_launcher_reuses_existing_app_and_opens_browser_once_after_readiness():
     }
     assert browser_calls == ["http://127.0.0.1:8000/"]
     assert server.should_exit is True
+    log = launcher_log()
+    assert "preflight=free" in log
+    assert "owned_server_starting" in log
+    assert "owned_server_ready" in log
+    assert "browser_open_attempt" in log
+    assert "graceful_shutdown_requested" in log
 
 
 def test_startup_that_never_becomes_ready_does_not_open_browser():
@@ -319,6 +401,7 @@ def test_startup_that_never_becomes_ready_does_not_open_browser():
         )
 
     assert browser_calls == []
+    assert "startup_timeout" in launcher_log()
 
 
 def test_startup_failure_propagates_and_requests_shutdown():
@@ -334,7 +417,10 @@ def test_startup_failure_propagates_and_requests_shutdown():
         def run(self):
             raise failure
 
-    with pytest.raises(RuntimeError, match="bind failed"):
+    with pytest.raises(
+        launcher.LauncherStartupError,
+        match="launcher_startup_failed",
+    ) as caught:
         launcher.run(
             config_factory=lambda application, **options: object(),
             server_factory=FakeServer,
@@ -343,6 +429,8 @@ def test_startup_failure_propagates_and_requests_shutdown():
         )
 
     assert created[0].should_exit is True
+    assert str(launcher._get_log_path()) in str(caught.value)
+    assert "launcher_exception" in launcher_log()
 
 
 def test_keyboard_interrupt_requests_clean_owned_server_shutdown():
@@ -366,3 +454,28 @@ def test_keyboard_interrupt_requests_clean_owned_server_shutdown():
 
     assert result is created[0]
     assert created[0].should_exit is True
+    assert "keyboard_interrupt" in launcher_log()
+    assert "graceful_shutdown_requested" in launcher_log()
+
+
+def test_launcher_log_does_not_include_domain_payloads():
+    sensitive_value = "PRIVATE-PROFILE-SITE-ACCEPTANCE-MISSION"
+
+    launcher.run(
+        port_probe=lambda: launcher.PortState.EXISTING,
+        browser_open=lambda url: True,
+    )
+
+    assert sensitive_value not in launcher_log()
+
+
+def test_readme_documents_launcher_runtime_and_support_log():
+    readme = (Path(__file__).resolve().parents[2] / "README.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "astropilot-app" in readme
+    assert "http://127.0.0.1:8000/" in readme
+    assert "~/Library/Logs/AstroPilot" in readme
+    assert "existing AstroPilot" in readme
+    assert "port 8000" in readme

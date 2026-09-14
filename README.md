@@ -105,9 +105,13 @@ it separately before committing changes.
 Start the API and bundled UI after synchronizing the runtime environment:
 
 ```bash
-uv run --locked --no-sync python -m uvicorn astropilot.app:app \
-  --host 127.0.0.1 \
-  --port 8000
+uv run --locked --no-sync astropilot-app
 ```
 
-Open <http://127.0.0.1:8000/> in a browser.
+AstroPilot starts locally at <http://127.0.0.1:8000/> and opens that address
+in the default browser. A second launch detects the existing AstroPilot
+instance and reopens it. If another application is using port 8000,
+AstroPilot stops without changing ports or terminating that application.
+
+Launcher diagnostics are stored in `~/Library/Logs/AstroPilot/AstroPilot.log`.
+Provide this log when reporting a startup problem.
