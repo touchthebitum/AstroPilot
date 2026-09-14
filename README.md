@@ -126,3 +126,23 @@ UV_PROJECT_ENVIRONMENT=.venv-packaging uv sync --locked --extra packaging
 ```
 
 The application bundle is written to `dist/AstroPilot.app`.
+
+For a Developer ID release build, first store notarization credentials in the
+login keychain with Apple's interactive tool (never put credentials in this
+repository):
+
+```bash
+xcrun notarytool store-credentials "astropilot-notary"
+```
+
+Then run the release workflow with an existing Developer ID Application
+identity and that keychain profile:
+
+```bash
+ASTROPILOT_CODESIGN_IDENTITY="Developer ID Application: Name (TEAMID)" \
+  .venv-packaging/bin/python scripts/release_macos.py \
+  --notary-profile "astropilot-notary"
+```
+
+The workflow verifies the signature, notarizes and staples the app, checks it
+with Gatekeeper, and writes the versioned ZIP and SHA-256 sidecar under `dist/`.

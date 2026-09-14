@@ -1,5 +1,6 @@
 from pathlib import Path
 import importlib.util
+import platform
 import sys
 import tomllib
 from unittest.mock import ANY
@@ -111,6 +112,9 @@ def test_spec_defines_arm64_windowed_onedir_application():
     assert 'CFBundleVersion": BUNDLE_BUILD_NUMBER' in spec
     assert 'MARKETING_VERSION = f"{major}.{minor}.{patch}"' in spec
     assert "BUNDLE_BUILD_NUMBER = beta" in spec
+    assert 'os.environ.get("ASTROPILOT_CODESIGN_IDENTITY") or None' in spec
+    assert "codesign_identity=CODESIGN_IDENTITY" in spec
+    assert "entitlements_file=None" in spec
 
 
 def test_spec_collects_exact_runtime_assets_without_broad_hidden_imports():
@@ -218,6 +222,42 @@ def test_build_script_invokes_current_python_and_verifies_bundle(
     assert output == tmp_path / "dist" / "AstroPilot.app"
 
 
+def test_build_script_passes_configurable_codesign_identity(
+    tmp_path,
+    monkeypatch,
+):
+    build = _build_module()
+    calls = []
+    monkeypatch.setattr(build.sys, "platform", "darwin")
+    monkeypatch.setattr(build.platform, "machine", lambda: "arm64")
+
+    def runner(command, *, cwd, check, **options):
+        if command[:2] == ["git", "rev-parse"]:
+            return type("Result", (), {"stdout": "d3e0d4c\n"})()
+        calls.append(options["env"])
+        (tmp_path / "dist" / "AstroPilot.app").mkdir(parents=True)
+
+    build.build(
+        root=tmp_path,
+        runner=runner,
+        codesign_identity="Developer ID Application: Test Developer (TEAMID1234)",
+    )
+
+    assert calls[0]["ASTROPILOT_CODESIGN_IDENTITY"] == (
+        "Developer ID Application: Test Developer (TEAMID1234)"
+    )
+
+
+def test_build_script_keeps_local_ad_hoc_workflow(monkeypatch):
+    build = _build_module()
+    monkeypatch.delenv("ASTROPILOT_CODESIGN_IDENTITY", raising=False)
+
+    environment = build.build_environment("d3e0d4c", codesign_identity=None)
+
+    assert environment["ASTROPILOT_BUILD_COMMIT"] == "d3e0d4c"
+    assert "ASTROPILOT_CODESIGN_IDENTITY" not in environment
+
+
 def test_build_script_fails_when_bundle_is_missing(tmp_path, monkeypatch):
     build = _build_module()
     monkeypatch.setattr(build.sys, "platform", "darwin")
@@ -289,19 +329,131 @@ def test_generated_packaging_outputs_are_ignored():
     assert "scripts/build_macos.py" not in ignored
 
 
-def test_build_definition_has_no_local_paths_or_release_operations():
+def _release_module():
+    path = ROOT / "scripts" / "release_macos.py"
+    spec = importlib.util.spec_from_file_location("astropilot_release_macos", path)
+    module = importlib.util.module_from_spec(spec)
+    scripts_path = str(path.parent)
+    sys.path.insert(0, scripts_path)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(scripts_path)
+    return module
+
+
+def test_release_pipeline_requires_verified_notarized_stapled_zip_and_sha256(
+    tmp_path,
+    monkeypatch,
+):
+    release = _release_module()
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    calls = []
+    application = tmp_path / "dist" / "AstroPilot.app"
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nversion = "1.0.0b2"\n',
+        encoding="utf-8",
+    )
+
+    def build_function(**kwargs):
+        application.mkdir(parents=True)
+        calls.append(("build", kwargs))
+        return application
+
+    def runner(command, **kwargs):
+        calls.append((command, kwargs))
+        if command[:4] == ["ditto", "-c", "-k", "--keepParent"]:
+            Path(command[-1]).touch()
+        if command[:3] == ["xcrun", "notarytool", "submit"]:
+            return type(
+                "Result",
+                (),
+                {"stdout": '{"id":"submission-id","status":"Accepted"}'},
+            )()
+        if command[:3] == ["shasum", "-a", "256"]:
+            return type("Result", (), {"stdout": "a" * 64 + "  artifact.zip\n"})()
+        return type("Result", (), {"stdout": ""})()
+
+    result = release.release(
+        root=tmp_path,
+        codesign_identity="Developer ID Application: Test (TEAMID1234)",
+        notary_profile="astropilot-notary",
+        build_function=build_function,
+        runner=runner,
+    )
+
+    commands = [call[0] for call in calls[1:]]
+    notarize_index = next(
+        index for index, command in enumerate(commands)
+        if command[:3] == ["xcrun", "notarytool", "submit"]
+    )
+    staple_index = commands.index(["xcrun", "stapler", "staple", str(application)])
+    final_zip_index = next(
+        index for index, command in enumerate(commands)
+        if command[:4] == ["ditto", "-c", "-k", "--keepParent"]
+        and command[-1] == str(result.artifact)
+    )
+
+    assert calls[0][1]["codesign_identity"].startswith("Developer ID Application:")
+    assert ["codesign", "--verify", "--deep", "--strict", "--verbose=4", str(application)] in commands
+    assert notarize_index < staple_index < final_zip_index
+    assert ["xcrun", "stapler", "validate", str(application)] in commands
+    assert ["spctl", "--assess", "--type", "execute", "--verbose=4", str(application)] in commands
+    notarization_command = commands[notarize_index]
+    assert "--keychain-profile" in notarization_command
+    assert "astropilot-notary" in notarization_command
+    assert "--password" not in notarization_command
+    assert result.artifact.name == "AstroPilot-1.0.0-beta.2-macos-arm64.zip"
+    assert result.sha256 == "a" * 64
+    assert result.sidecar.read_text(encoding="utf-8") == (
+        f"{'a' * 64}  {result.artifact.name}\n"
+    )
+
+
+def test_release_rejects_unsupported_target_architecture(tmp_path):
+    release = _release_module()
+
+    with pytest.raises(RuntimeError, match="arm64"):
+        release.release(
+            root=tmp_path,
+            codesign_identity="Developer ID Application: Test (TEAMID1234)",
+            notary_profile="astropilot-notary",
+            target_architecture="x86_64",
+            build_function=lambda **kwargs: pytest.fail(
+                "unsupported target must fail before build"
+            ),
+        )
+
+    assert release.MACOS_RELEASE_TARGET_ARCHITECTURE == "arm64"
+
+
+def test_release_source_has_no_embedded_credentials_or_other_artifact_formats():
+    source = (ROOT / "scripts" / "release_macos.py").read_text(encoding="utf-8")
+
+    assert "--keychain-profile" in source
+    assert "--apple-id" not in source
+    assert "--password" not in source
+    assert "--key-id" not in source
+    assert ".dmg" not in source.lower()
+    assert ".pkg" not in source.lower()
+    assert "entitlements" not in source.lower()
+
+
+def test_build_definition_has_no_local_paths_or_unrequested_release_formats():
     sources = "\n".join(
         (ROOT / path).read_text(encoding="utf-8")
-        for path in ("AstroPilot.spec", "scripts/build_macos.py")
+        for path in (
+            "AstroPilot.spec",
+            "scripts/build_macos.py",
+            "scripts/release_macos.py",
+        )
     )
 
     assert "/Users/" not in sources
     assert ".venv/" not in sources
     assert "Anaconda" not in sources
     assert "Miniconda" not in sources
-    assert "codesign" not in sources
-    assert "notar" not in sources.lower()
     assert "dmg" not in sources.lower()
-    assert "zipfile" not in sources.lower()
-    assert "shutil.make_archive" not in sources
-    assert "ditto" not in sources.lower()
+    assert ".pkg" not in sources.lower()
+    assert "--apple-id" not in sources
+    assert "--password" not in sources

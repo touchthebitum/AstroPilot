@@ -67,17 +67,37 @@ def artifact_name(version: str, architecture: str) -> str:
     return f"AstroPilot-{tester_version_label(version)}-macos-{architecture}.zip"
 
 
+def build_environment(
+    build_commit: str,
+    *,
+    codesign_identity: str | None,
+) -> dict[str, str]:
+    environment = os.environ.copy()
+    environment["ASTROPILOT_BUILD_COMMIT"] = build_commit
+    resolved_identity = codesign_identity or environment.get(
+        "ASTROPILOT_CODESIGN_IDENTITY"
+    )
+    if resolved_identity:
+        environment["ASTROPILOT_CODESIGN_IDENTITY"] = resolved_identity
+    else:
+        environment.pop("ASTROPILOT_CODESIGN_IDENTITY", None)
+    return environment
+
+
 def build(
     *,
     root: Path = ROOT,
     runner: Callable[..., object] = subprocess.run,
+    codesign_identity: str | None = None,
 ) -> Path:
     validate_target()
     root = Path(root).resolve()
     clean_outputs(root)
     build_commit = resolve_build_commit(root, runner=runner)
-    build_environment = os.environ.copy()
-    build_environment["ASTROPILOT_BUILD_COMMIT"] = build_commit
+    environment = build_environment(
+        build_commit,
+        codesign_identity=codesign_identity,
+    )
     command: Sequence[str] = (
         sys.executable,
         "-m",
@@ -86,7 +106,7 @@ def build(
         "--clean",
         "AstroPilot.spec",
     )
-    runner(list(command), cwd=root, check=True, env=build_environment)
+    runner(list(command), cwd=root, check=True, env=environment)
 
     application = root / "dist" / "AstroPilot.app"
     if not application.is_dir():
