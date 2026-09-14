@@ -13,9 +13,10 @@ def _pyproject():
 def test_installed_package_exposes_astropilot_command():
     project = _pyproject()
 
-    assert project["project"]["scripts"] == {
-        "astropilot": "astro_score:main",
-    }
+    scripts = project["project"]["scripts"]
+
+    assert scripts["astropilot"] == "astro_score:main"
+    assert scripts["astropilot-app"] == "astropilot.launcher:main"
 
 
 def test_installed_runtime_declares_uvicorn_for_api_and_ui_serving():
