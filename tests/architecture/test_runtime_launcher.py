@@ -1,4 +1,5 @@
 import threading
+from urllib.error import URLError
 
 import pytest
 
@@ -22,6 +23,27 @@ class FakeClock:
 @pytest.fixture(autouse=True)
 def isolated_user_data_root(tmp_path, monkeypatch):
     monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path / "user-data"))
+    probe_port = launcher._probe_port
+
+    def isolated_probe(**kwargs):
+        return probe_port(**kwargs) if kwargs else launcher.PortState.FREE
+
+    monkeypatch.setattr(launcher, "_probe_port", isolated_probe)
+
+
+class FakeResponse:
+    def __init__(self, status, body):
+        self.status = status
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def read(self):
+        return self.body
 
 
 def test_launcher_has_stable_loopback_origin():
@@ -29,7 +51,116 @@ def test_launcher_has_stable_loopback_origin():
     assert launcher.HOST != "0.0.0.0"
     assert launcher.PORT == 8000
     assert launcher.BROWSER_URL == "http://127.0.0.1:8000/"
+    assert (
+        launcher.IDENTITY_URL
+        == "http://127.0.0.1:8000/v1/runtime-identity"
+    )
     assert callable(launcher.main)
+
+
+def test_identity_probe_is_bounded_and_accepts_only_exact_identity():
+    calls = []
+
+    def urlopen(url, *, timeout):
+        calls.append((url, timeout))
+        return FakeResponse(200, b'{"application":"astropilot"}')
+
+    assert launcher._probe_port(urlopen=urlopen) is launcher.PortState.EXISTING
+    assert calls == [(launcher.IDENTITY_URL, launcher.PROBE_TIMEOUT_SECONDS)]
+
+
+def test_connection_refusal_means_port_is_free():
+    def refused(url, *, timeout):
+        raise URLError(ConnectionRefusedError("connection refused"))
+
+    assert launcher._probe_port(urlopen=refused) is launcher.PortState.FREE
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        (404, b'{"application":"astropilot"}'),
+        (200, b"not-json"),
+        (200, b'{"application":"another"}'),
+        (200, b'{"application":"astropilot","extra":true}'),
+    ],
+)
+def test_foreign_http_responses_fail_closed(status, body):
+    state = launcher._probe_port(
+        urlopen=lambda url, timeout: FakeResponse(status, body)
+    )
+
+    assert state is launcher.PortState.FOREIGN
+
+
+def test_identity_probe_timeout_fails_closed():
+    def timeout(url, *, timeout):
+        raise TimeoutError("timed out")
+
+    assert launcher._probe_port(urlopen=timeout) is launcher.PortState.FOREIGN
+
+
+def test_identity_probe_response_failure_fails_closed():
+    class BrokenResponse(FakeResponse):
+        def read(self):
+            raise RuntimeError("connection ended during identity response")
+
+    state = launcher._probe_port(
+        urlopen=lambda url, timeout: BrokenResponse(200, b"")
+    )
+
+    assert state is launcher.PortState.FOREIGN
+
+
+def test_existing_instance_reopens_browser_without_server_or_data_mutation(
+    monkeypatch,
+):
+    browser_calls = []
+    monkeypatch.setattr(
+        launcher,
+        "get_user_data_dir",
+        lambda: pytest.fail("existing instance must not initialize user data"),
+    )
+
+    result = launcher.run(
+        port_probe=lambda: launcher.PortState.EXISTING,
+        config_factory=lambda *args, **kwargs: pytest.fail(
+            "existing instance must not configure Uvicorn"
+        ),
+        server_factory=lambda config: pytest.fail(
+            "existing instance must not create a server"
+        ),
+        browser_open=browser_calls.append,
+    )
+
+    assert result is None
+    assert browser_calls == ["http://127.0.0.1:8000/"]
+
+
+def test_foreign_port_raises_without_browser_server_or_data_mutation(monkeypatch):
+    browser_calls = []
+    monkeypatch.setattr(
+        launcher,
+        "get_user_data_dir",
+        lambda: pytest.fail("foreign port must not initialize user data"),
+    )
+
+    with pytest.raises(
+        launcher.LauncherPortConflictError,
+        match="port_8000_identity_unverified",
+    ):
+        launcher.run(
+            port_probe=lambda: launcher.PortState.FOREIGN,
+            config_factory=lambda *args, **kwargs: pytest.fail(
+                "foreign port must not configure Uvicorn"
+            ),
+            server_factory=lambda config: pytest.fail(
+                "foreign port must not create a server"
+            ),
+            browser_open=browser_calls.append,
+        )
+
+    assert browser_calls == []
 
 
 def test_launcher_initializes_canonical_data_root_before_uvicorn(monkeypatch):
@@ -47,6 +178,11 @@ def test_launcher_initializes_canonical_data_root_before_uvicorn(monkeypatch):
         def run(self):
             raise KeyboardInterrupt
 
+    monkeypatch.setattr(
+        launcher,
+        "_probe_port",
+        lambda: events.append("probe") or launcher.PortState.FREE,
+    )
     monkeypatch.setattr(launcher, "get_user_data_dir", lambda: DataRoot())
 
     launcher.run(
@@ -54,7 +190,7 @@ def test_launcher_initializes_canonical_data_root_before_uvicorn(monkeypatch):
         server_factory=FakeServer,
     )
 
-    assert events == [("mkdir", True, True), "config"]
+    assert events == ["probe", ("mkdir", True, True), "config"]
 
 
 def test_launcher_honors_data_root_override_from_arbitrary_cwd(
