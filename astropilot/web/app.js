@@ -5,6 +5,10 @@ const ui = Object.freeze({
   configurationError: document.querySelector("#configuration-error"),
   configurationErrorMessage: document.querySelector("#configuration-error-message"),
   configurationRetry: document.querySelector("#configuration-retry"),
+  configurationRecover: document.querySelector("#configuration-recover"),
+  configurationRecoveryConfirmation: document.querySelector("#configuration-recovery-confirmation"),
+  configurationRecoveryCancel: document.querySelector("#configuration-recovery-cancel"),
+  configurationRecoveryConfirm: document.querySelector("#configuration-recovery-confirm"),
   onboarding: document.querySelector("#onboarding"),
   formError: document.querySelector("#configuration-form-error"),
   availability: document.querySelector("#availability-step"),
@@ -45,6 +49,8 @@ const state = {
   acceptanceBlocked: false,
   savingConfiguration: false,
   requestingRecommendation: false,
+  configurationErrorCode: null,
+  recoveringConfiguration: false,
 };
 
 const wizardStates = Object.freeze(["site", "equipment", "projects", "review"]);
@@ -700,9 +706,33 @@ function configurationPayload() {
   return payload;
 }
 
-function showConfigurationError(message) {
+function hideRecoveryConfirmation() {
+  ui.configurationRecoveryConfirmation.hidden = true;
+}
+
+function showRecoveryConfirmation() {
+  if (state.configurationErrorCode !== "configuration_corrupt") return;
+  ui.configurationRecoveryConfirmation.hidden = false;
+  ui.configurationRecoveryConfirm.focus();
+}
+
+function showConfigurationError(message, { code = null } = {}) {
+  state.configurationErrorCode = code;
   ui.configurationErrorMessage.textContent = message;
+  hideRecoveryConfirmation();
+  ui.configurationRecover.hidden = code !== "configuration_corrupt";
   setView("configuration_error");
+}
+
+function initializeConfiguration(payload) {
+  invalidateAvailabilityForSiteChange(state.configuration?.site, payload.site);
+  state.configuration = payload;
+  state.configurationDraft = draftFromConfiguration(payload);
+  state.configurationErrorCode = null;
+  hideRecoveryConfirmation();
+  ui.configurationRecover.hidden = true;
+  prefillConfiguration();
+  renderAvailabilityTimezone();
 }
 
 function invalidateAvailabilityForSiteChange(previousSite, nextSite) {
@@ -726,14 +756,10 @@ async function loadConfiguration({ afterConflict = false } = {}) {
       const message = code === "configuration_corrupt"
         ? "La configuration enregistrée ne peut pas être relue. Réessayez dans un instant."
         : "La configuration est temporairement inaccessible. Réessayez dans un instant.";
-      showConfigurationError(message);
+      showConfigurationError(message, { code });
       return;
     }
-    invalidateAvailabilityForSiteChange(state.configuration?.site, payload.site);
-    state.configuration = payload;
-    state.configurationDraft = draftFromConfiguration(payload);
-    prefillConfiguration();
-    renderAvailabilityTimezone();
+    initializeConfiguration(payload);
     if (afterConflict) {
       showFormError("La configuration a changé. Vérifiez les dernières valeurs avant de l’enregistrer à nouveau.");
       renderReview();
@@ -747,6 +773,43 @@ async function loadConfiguration({ afterConflict = false } = {}) {
     }
   } catch (_error) {
     showConfigurationError("AstroPilot ne parvient pas à charger la configuration. La saisie pourra reprendre après reconnexion.");
+  }
+}
+
+async function recoverConfiguration() {
+  if (state.configurationErrorCode !== "configuration_corrupt") return;
+  if (state.recoveringConfiguration) return;
+  state.recoveringConfiguration = true;
+  ui.configurationRecoveryConfirm.disabled = true;
+  try {
+    const response = await fetch("/v1/configuration/recover", {
+      method: "POST",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok && payload.configured === false) {
+      initializeConfiguration(payload);
+      showFormError("");
+      setView("site");
+      return;
+    }
+    const detail = payload?.detail;
+    if (detail?.code === "configuration_recovery_conflict") {
+      hideRecoveryConfirmation();
+      await loadConfiguration();
+      return;
+    }
+    const message = detail?.code === "configuration_recovery_unavailable"
+      ? "La réinitialisation est temporairement indisponible. Vous pourrez réessayer plus tard."
+      : "La réinitialisation n’a pas pu être confirmée. Vous pouvez réessayer.";
+    showConfigurationError(message, { code: "configuration_corrupt" });
+  } catch (_error) {
+    showConfigurationError(
+      "Le résultat de la réinitialisation n’a pas pu être confirmé. Vérifiez votre connexion puis réessayez.",
+      { code: "configuration_corrupt" },
+    );
+  } finally {
+    state.recoveringConfiguration = false;
+    ui.configurationRecoveryConfirm.disabled = false;
   }
 }
 
@@ -1285,6 +1348,9 @@ function editConfiguration() {
 
 document.querySelector("#save-configuration").addEventListener("click", saveConfiguration);
 ui.configurationRetry.addEventListener("click", loadConfiguration);
+ui.configurationRecover.addEventListener("click", showRecoveryConfirmation);
+ui.configurationRecoveryCancel.addEventListener("click", hideRecoveryConfirmation);
+ui.configurationRecoveryConfirm.addEventListener("click", recoverConfiguration);
 ui.editConfiguration.addEventListener("click", editConfiguration);
 document.querySelector("#availability-edit-configuration").addEventListener("click", editConfiguration);
 ui.editAvailability.addEventListener("click", () => setView("availability"));
