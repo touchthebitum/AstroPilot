@@ -10,6 +10,8 @@ const ui = Object.freeze({
   availability: document.querySelector("#availability-step"),
   availabilityForm: document.querySelector("#availability-form"),
   availabilityError: document.querySelector("#availability-error"),
+  availabilitySiteTimezone: document.querySelector("#availability-site-timezone"),
+  availabilityTimezoneWarning: document.querySelector("#availability-timezone-warning"),
   recommendationSubmit: document.querySelector("#request-recommendation"),
   loading: document.querySelector("#loading-state"),
   message: document.querySelector("#message-state"),
@@ -484,6 +486,7 @@ const customEquipmentFields = Object.freeze([
 
 const configurationErrorSteps = Object.freeze({
   configuration_invalid_site: "site",
+  location_timezone_unresolved: "site",
   configuration_invalid_bortle: "site",
   configuration_invalid_equipment: "equipment",
   configuration_invalid_custom_equipment: "equipment",
@@ -680,8 +683,14 @@ function renderReview() {
 }
 
 function configurationPayload() {
+  const site = state.configurationDraft.site;
   const payload = {
-    site: state.configurationDraft.site,
+    site: {
+      name: site.name,
+      latitude: site.latitude,
+      longitude: site.longitude,
+      bortle: site.bortle,
+    },
     equipment: state.configurationDraft.equipment,
     projects: copyProjects(state.configurationDraft.projects),
   };
@@ -694,6 +703,17 @@ function configurationPayload() {
 function showConfigurationError(message) {
   ui.configurationErrorMessage.textContent = message;
   setView("configuration_error");
+}
+
+function invalidateAvailabilityForSiteChange(previousSite, nextSite) {
+  if (!previousSite || !nextSite) return;
+  const sameSite = previousSite.latitude === nextSite.latitude
+    && previousSite.longitude === nextSite.longitude
+    && previousSite.timezone === nextSite.timezone;
+  if (sameSite) return;
+  document.querySelector("#availability-start").value = "";
+  document.querySelector("#availability-end").value = "";
+  state.availability = null;
 }
 
 async function loadConfiguration({ afterConflict = false } = {}) {
@@ -709,9 +729,11 @@ async function loadConfiguration({ afterConflict = false } = {}) {
       showConfigurationError(message);
       return;
     }
+    invalidateAvailabilityForSiteChange(state.configuration?.site, payload.site);
     state.configuration = payload;
     state.configurationDraft = draftFromConfiguration(payload);
     prefillConfiguration();
+    renderAvailabilityTimezone();
     if (afterConflict) {
       showFormError("La configuration a changé. Vérifiez les dernières valeurs avant de l’enregistrer à nouveau.");
       renderReview();
@@ -749,7 +771,11 @@ async function saveConfiguration() {
       }
       const target = configurationErrorSteps[detail?.code];
       if (target) {
-        showFormError("Certaines informations doivent être corrigées avant l’enregistrement.");
+        showFormError(
+          detail?.code === "location_timezone_unresolved"
+            ? "Le fuseau horaire du site ne peut pas être déterminé. Vérifiez les coordonnées du site."
+            : "Certaines informations doivent être corrigées avant l’enregistrement.",
+        );
         setView(target);
         return;
       }
@@ -761,9 +787,11 @@ async function saveConfiguration() {
       setView("review");
       return;
     }
+    invalidateAvailabilityForSiteChange(state.configuration?.site, payload.site);
     state.configuration = payload;
     state.configurationDraft = draftFromConfiguration(payload);
     prefillConfiguration();
+    renderAvailabilityTimezone();
     setView("availability");
   } catch (_error) {
     showFormError("Connexion impossible pendant l’enregistrement. Vérifiez vos informations puis réessayez.");
@@ -788,11 +816,36 @@ const availabilityValidationMessages = Object.freeze({
   availability_start_required: "Indiquez une heure de début valide.",
   availability_end_required: "Indiquez une heure de fin valide.",
   availability_end_must_follow_start: "L’heure de fin doit être postérieure à l’heure de début.",
+  availability_timezone_unresolved: "Le fuseau horaire du site ne peut pas être déterminé. Vérifiez les coordonnées du site.",
 });
 
 function showAvailabilityError(message) {
   ui.availabilityError.textContent = message || "";
   ui.availabilityError.hidden = !message;
+}
+
+const wallClockAvailabilityModes = Object.freeze([
+  "start_and_duration",
+  "until",
+  "fixed_window",
+]);
+
+function currentSiteTimezone() {
+  const timezone = state.configuration?.site?.timezone;
+  return typeof timezone === "string" && timezone.trim() ? timezone.trim() : null;
+}
+
+function renderAvailabilityTimezone() {
+  const timezone = currentSiteTimezone();
+  ui.availabilitySiteTimezone.hidden = !timezone;
+  ui.availabilitySiteTimezone.textContent = timezone ? `Fuseau du site : ${timezone}` : "";
+  ui.availabilityTimezoneWarning.hidden = Boolean(timezone);
+  for (const mode of wallClockAvailabilityModes) {
+    const input = document.querySelector(`input[name="availability-mode"][value="${mode}"]`);
+    input.disabled = !timezone;
+    if (!timezone && input.checked) input.checked = false;
+  }
+  updateAvailabilityFields();
 }
 
 function hoursToIsoDuration(rawValue) {
@@ -806,26 +859,12 @@ function hoursToIsoDuration(rawValue) {
   return `PT${wholeHours ? `${wholeHours}H` : ""}${minutes ? `${minutes}M` : ""}`;
 }
 
-function localDateTimeToRfc3339(value) {
+function normalizeLocalDateTime(value) {
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
   if (!match) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  const expected = match.slice(1).map(Number);
-  const actual = [
-    parsed.getFullYear(),
-    parsed.getMonth() + 1,
-    parsed.getDate(),
-    parsed.getHours(),
-    parsed.getMinutes(),
-  ];
-  if (expected.some((part, index) => part !== actual[index])) return null;
-  const offsetMinutes = -parsed.getTimezoneOffset();
-  const sign = offsetMinutes >= 0 ? "+" : "-";
-  const absoluteOffset = Math.abs(offsetMinutes);
-  const offsetHours = String(Math.floor(absoluteOffset / 60)).padStart(2, "0");
-  const offsetRemainder = String(absoluteOffset % 60).padStart(2, "0");
-  return `${value}:00${sign}${offsetHours}:${offsetRemainder}`;
+  const [, , month, day, hour, minute] = match.map(Number);
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59) return null;
+  return value;
 }
 
 function availabilityInputError(code) {
@@ -839,14 +878,17 @@ function collectAvailabilityPayload() {
   if (!mode) throw availabilityInputError("availability_mode_required");
 
   if (mode === "all_night") return { mode: "all_night" };
+  if (wallClockAvailabilityModes.includes(mode) && !currentSiteTimezone()) {
+    throw availabilityInputError("availability_timezone_unresolved");
+  }
 
   const duration = hoursToIsoDuration(
     document.querySelector("#availability-duration").value,
   );
   const startValue = document.querySelector("#availability-start").value;
   const endValue = document.querySelector("#availability-end").value;
-  const start = localDateTimeToRfc3339(startValue);
-  const end = localDateTimeToRfc3339(endValue);
+  const start = normalizeLocalDateTime(startValue);
+  const end = normalizeLocalDateTime(endValue);
 
   if (mode === "duration") {
     if (!duration) throw availabilityInputError("availability_duration_required");
@@ -858,25 +900,25 @@ function collectAvailabilityPayload() {
     if (!start) throw availabilityInputError("availability_start_required");
     if (!duration) throw availabilityInputError("availability_duration_required");
     const availability = { mode: "start_and_duration" };
-    availability.start = start;
+    availability.start_local = start;
     availability.duration = duration;
     return availability;
   }
   if (mode === "until") {
     if (!end) throw availabilityInputError("availability_end_required");
     const availability = { mode: "until" };
-    availability.end = end;
+    availability.end_local = end;
     return availability;
   }
   if (mode === "fixed_window") {
     if (!start) throw availabilityInputError("availability_start_required");
     if (!end) throw availabilityInputError("availability_end_required");
-    if (new Date(endValue) <= new Date(startValue)) {
+    if (end <= start) {
       throw availabilityInputError("availability_end_must_follow_start");
     }
     const availability = { mode: "fixed_window" };
-    availability.start = start;
-    availability.end = end;
+    availability.start_local = start;
+    availability.end_local = end;
     return availability;
   }
   throw availabilityInputError("availability_mode_required");
@@ -894,6 +936,22 @@ function updateAvailabilityFields() {
 }
 
 function backendAvailabilityMessage(detail) {
+  const code = Array.isArray(detail) ? null : detail?.code;
+  if (code === "session_availability_local_datetime_invalid") {
+    return "Vérifiez la date et l’heure saisies.";
+  }
+  if (code === "session_availability_local_time_nonexistent") {
+    return "Cette heure locale n’existe pas à cause du changement d’heure. Choisissez une autre heure.";
+  }
+  if (code === "session_availability_local_time_ambiguous") {
+    return "Cette heure locale est ambiguë à cause du changement d’heure. Choisissez une autre heure.";
+  }
+  if (code === "session_availability_mixed_time_contract") {
+    return "Vérifiez votre disponibilité avant de réessayer.";
+  }
+  if (code === "session_availability_end_must_follow_start") {
+    return "L’heure de fin doit être postérieure à l’heure de début.";
+  }
   const descriptions = Array.isArray(detail)
     ? detail.map((item) => `${item?.msg || ""} ${item?.ctx?.error || ""}`).join(" ")
     : `${detail?.message || ""}`;
@@ -1127,9 +1185,10 @@ async function loadTonight(availability) {
         return;
       }
       if (payload?.detail?.code === "location_timezone_unresolved") {
+        state.availability = null;
         state.configurationDraft = draftFromConfiguration(state.configuration);
         prefillConfiguration();
-        showFormError("Vérifiez les coordonnées du site avant de préparer la nuit.");
+        showFormError("Le fuseau horaire du site ne peut pas être déterminé. Vérifiez les coordonnées du site avant de choisir une heure précise.");
         setView("site");
         return;
       }

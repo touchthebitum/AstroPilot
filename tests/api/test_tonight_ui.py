@@ -43,6 +43,8 @@ def test_root_serves_tonight_classic_ui():
     assert 'id="availability-step"' in response.text
     assert 'id="availability-form"' in response.text
     assert 'id="availability-error"' in response.text
+    assert 'id="availability-site-timezone"' in response.text
+    assert 'id="availability-timezone-warning"' in response.text
     assert 'id="request-recommendation"' in response.text
     assert 'id="edit-availability"' in response.text
     assert 'id="availability-duration"' in response.text
@@ -110,16 +112,17 @@ def test_tonight_ui_assets_are_served():
     assert "collectAvailabilityPayload" in script.text
     assert "hoursToIsoDuration" in script.text
     assert 'return "PT1H30M"' not in script.text
-    assert "localDateTimeToRfc3339" in script.text
-    assert "getTimezoneOffset()" in script.text
+    assert "normalizeLocalDateTime" in script.text
+    assert "localDateTimeToRfc3339" not in script.text
+    assert "getTimezoneOffset()" not in script.text
     assert 'mode: "all_night"' in script.text
     assert 'mode: "duration"' in script.text
     assert 'mode: "start_and_duration"' in script.text
     assert 'mode: "until"' in script.text
     assert 'mode: "fixed_window"' in script.text
     assert "availability.duration =" in script.text
-    assert "availability.start =" in script.text
-    assert "availability.end =" in script.text
+    assert "availability.start_local =" in script.text
+    assert "availability.end_local =" in script.text
     assert "JSON.stringify({ availability })" in script.text
     assert "state.availability" in script.text
     assert "requestingRecommendation" in script.text
@@ -271,6 +274,92 @@ def test_tonight_ui_assets_are_served():
     assert "outcome" not in page.text.lower()
     assert 'source: "declined"' not in script.text
     assert "other_evaluated_target" not in script.text
+
+
+def test_availability_uses_read_only_site_timezone_and_local_wall_clock_transport():
+    client = make_client()
+    page = client.get("/").text
+    script = client.get("/ui/app.js").text
+
+    assert "Fuseau du site" in page
+    assert "Le fuseau horaire du site ne peut pas être déterminé." in page
+    assert "state.configuration?.site?.timezone" in script
+    assert "Fuseau du site : ${timezone}" in script
+
+    normalization = script.split(
+        "function normalizeLocalDateTime(value)",
+        1,
+    )[1].split("function availabilityInputError", 1)[0]
+    assert "return value" in normalization
+    assert "new Date(" not in normalization
+    assert "getTimezoneOffset" not in normalization
+    assert '"Z"' not in normalization
+
+    collector = script.split(
+        "function collectAvailabilityPayload()",
+        1,
+    )[1].split("function updateAvailabilityFields()", 1)[0]
+    assert "availability.start_local = start" in collector
+    assert "availability.end_local = end" in collector
+    assert "availability.start =" not in collector
+    assert "availability.end =" not in collector
+    assert "availability.timezone" not in collector
+    assert "timezone:" not in collector
+    assert "new Date(" not in collector
+    assert "end <= start" in collector
+    assert 'return { mode: "all_night" }' in collector
+    assert 'const availability = { mode: "duration" }' in collector
+
+
+def test_wall_clock_modes_fail_closed_without_a_site_timezone():
+    script = make_client().get("/ui/app.js").text
+
+    renderer = script.split(
+        "function renderAvailabilityTimezone()",
+        1,
+    )[1].split("function hoursToIsoDuration", 1)[0]
+    for mode in ("start_and_duration", "until", "fixed_window"):
+        assert f'"{mode}"' in script
+    assert "for (const mode of wallClockAvailabilityModes)" in renderer
+    assert "input.disabled = !timezone" in renderer
+    assert "availability-timezone-warning" in script
+    assert "availability_timezone_unresolved" in script
+    assert 'location_timezone_unresolved: "site"' in script
+    assert "Vérifiez les coordonnées du site" in script
+
+
+def test_site_change_invalidates_only_stale_site_time_assumptions():
+    script = make_client().get("/ui/app.js").text
+
+    invalidation = script.split(
+        "function invalidateAvailabilityForSiteChange(previousSite, nextSite)",
+        1,
+    )[1].split("async function loadConfiguration", 1)[0]
+    assert "previousSite.latitude === nextSite.latitude" in invalidation
+    assert "previousSite.longitude === nextSite.longitude" in invalidation
+    assert "previousSite.timezone === nextSite.timezone" in invalidation
+    assert 'document.querySelector("#availability-start").value = ""' in invalidation
+    assert 'document.querySelector("#availability-end").value = ""' in invalidation
+    assert "state.availability = null" in invalidation
+    assert "if (sameSite) return" in invalidation
+    assert script.count("invalidateAvailabilityForSiteChange(") >= 3
+
+
+def test_site_timezone_and_dst_errors_have_controlled_french_messages():
+    script = make_client().get("/ui/app.js").text
+
+    messages = script.split(
+        "function backendAvailabilityMessage(detail)",
+        1,
+    )[1].split("const partialMessages", 1)[0]
+    assert "session_availability_local_datetime_invalid" in messages
+    assert "Vérifiez la date et l’heure saisies." in messages
+    assert "session_availability_local_time_nonexistent" in messages
+    assert "Cette heure locale n’existe pas" in messages
+    assert "session_availability_local_time_ambiguous" in messages
+    assert "Cette heure locale est ambiguë" in messages
+    assert "session_availability_mixed_time_contract" in messages
+    assert "Vérifiez votre disponibilité avant de réessayer." in messages
 
 
 def test_existing_projects_are_preserved_by_the_configuration_wizard():
