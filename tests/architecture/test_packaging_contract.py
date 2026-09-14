@@ -1,5 +1,6 @@
 from pathlib import Path
 import importlib.util
+import platform
 import sys
 import tomllib
 from unittest.mock import ANY
@@ -343,8 +344,10 @@ def _release_module():
 
 def test_release_pipeline_requires_verified_notarized_stapled_zip_and_sha256(
     tmp_path,
+    monkeypatch,
 ):
     release = _release_module()
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
     calls = []
     application = tmp_path / "dist" / "AstroPilot.app"
     (tmp_path / "pyproject.toml").write_text(
@@ -405,6 +408,23 @@ def test_release_pipeline_requires_verified_notarized_stapled_zip_and_sha256(
     assert result.sidecar.read_text(encoding="utf-8") == (
         f"{'a' * 64}  {result.artifact.name}\n"
     )
+
+
+def test_release_rejects_unsupported_target_architecture(tmp_path):
+    release = _release_module()
+
+    with pytest.raises(RuntimeError, match="arm64"):
+        release.release(
+            root=tmp_path,
+            codesign_identity="Developer ID Application: Test (TEAMID1234)",
+            notary_profile="astropilot-notary",
+            target_architecture="x86_64",
+            build_function=lambda **kwargs: pytest.fail(
+                "unsupported target must fail before build"
+            ),
+        )
+
+    assert release.MACOS_RELEASE_TARGET_ARCHITECTURE == "arm64"
 
 
 def test_release_source_has_no_embedded_credentials_or_other_artifact_formats():

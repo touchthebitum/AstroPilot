@@ -6,7 +6,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import platform
 import re
 import subprocess
 import tomllib
@@ -17,6 +16,7 @@ from build_macos import artifact_name, build
 
 ROOT = Path(__file__).resolve().parents[1]
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+MACOS_RELEASE_TARGET_ARCHITECTURE = "arm64"
 
 
 class ReleaseResult(NamedTuple):
@@ -49,6 +49,7 @@ def release(
     root: Path = ROOT,
     codesign_identity: str,
     notary_profile: str,
+    target_architecture: str = MACOS_RELEASE_TARGET_ARCHITECTURE,
     build_function: Callable[..., Path] = build,
     runner: Callable[..., object] = subprocess.run,
 ) -> ReleaseResult:
@@ -57,6 +58,8 @@ def release(
         raise RuntimeError("A Developer ID Application identity is required.")
     if not notary_profile.strip():
         raise RuntimeError("A notarytool keychain profile is required.")
+    if target_architecture != MACOS_RELEASE_TARGET_ARCHITECTURE:
+        raise RuntimeError("The macOS release target must be arm64.")
 
     application = build_function(
         root=root,
@@ -139,7 +142,7 @@ def release(
 
     artifact = root / "dist" / artifact_name(
         _project_version(root),
-        platform.machine(),
+        target_architecture,
     )
     artifact.unlink(missing_ok=True)
     _run(
