@@ -227,13 +227,15 @@ def test_tonight_ui_assets_are_served():
         "async function acceptRecommendation(",
         1,
     )[1].split("async function loadTonight", 1)[0]
-    acceptance_request = acceptance_function.split(
-        "body: JSON.stringify({",
+    acceptance_request = script.text.split(
+        "function acceptanceAttempt(intent)",
         1,
-    )[1].split("}),", 1)[0]
+    )[1].split("function clearPendingAcceptanceAttempt", 1)[0]
     assert "selection_id" not in acceptance_request
     assert "mission_id" not in acceptance_request
-    assert "randomUUID" not in script.text
+    assert "crypto.randomUUID()" in acceptance_request
+    assert "acceptance_request_id" in acceptance_request
+    assert "body: JSON.stringify(attempt)" in acceptance_function
     assert "decision_context_stale" in script.text
     assert "decision_context_not_found" in script.text
     assert "selected_target_not_primary_recommendation" in script.text
@@ -279,6 +281,69 @@ def test_tonight_ui_assets_are_served():
     assert "outcome" not in page.text.lower()
     assert 'source: "declined"' not in script.text
     assert "other_evaluated_target" not in script.text
+
+
+def test_acceptance_attempt_generates_identity_and_timestamp_once():
+    script = make_client().get("/ui/app.js").text
+    helper = script.split(
+        "function acceptanceAttempt(intent)",
+        1,
+    )[1].split("function clearPendingAcceptanceAttempt", 1)[0]
+
+    assert "state.pendingAcceptanceAttempt" in helper
+    assert "sameAcceptanceIntent(existing, intent)" in helper
+    assert "return existing" in helper
+    assert "crypto.randomUUID()" in helper
+    assert "selected_at: new Date().toISOString()" in helper
+    assert helper.count("crypto.randomUUID()") == 1
+    assert helper.count("new Date().toISOString()") == 1
+    assert "Object.freeze" in helper
+    assert "selection_id" not in helper
+    assert "mission_id" not in helper
+
+
+def test_uncertain_acceptance_retry_reuses_exact_pending_payload():
+    script = make_client().get("/ui/app.js").text
+    acceptance = script.split(
+        "async function acceptRecommendation(",
+        1,
+    )[1].split("async function loadTonight", 1)[0]
+    uncertain = acceptance.split("} catch (_error) {", 1)[1].split(
+        "} finally {", 1
+    )[0]
+
+    assert "const attempt = acceptanceAttempt({" in acceptance
+    assert "decision_id: expectedDecisionId" in acceptance
+    assert "source," in acceptance
+    assert "selected_catalog_key: selectedCatalogKey" in acceptance
+    assert "body: JSON.stringify(attempt)" in acceptance
+    assert "clearPendingAcceptanceAttempt()" not in uncertain
+    assert "statut de l’acceptation ne peut pas être confirmé" in uncertain
+    assert "restoreAcceptanceControls()" in acceptance
+
+
+def test_acceptance_attempt_clears_only_after_definite_outcome():
+    script = make_client().get("/ui/app.js").text
+    acceptance = script.split(
+        "async function acceptRecommendation(",
+        1,
+    )[1].split("async function loadTonight", 1)[0]
+    definite_failure = acceptance.split("if (!response.ok) {", 1)[1].split(
+        "const mission = payload.mission", 1
+    )[0]
+    after_validation = acceptance.split(
+        "if (!validAcceptedMission) {", 1
+    )[1]
+    uncertain_success, success = after_validation.split("return;\n    }", 1)
+    success = success.split("state.acceptedMission = {", 1)[0]
+
+    assert "clearPendingAcceptanceAttempt()" in definite_failure
+    assert "clearPendingAcceptanceAttempt()" in success
+    assert "clearPendingAcceptanceAttempt()" not in uncertain_success
+    assert 'code === "acceptance_request_conflict"' in script
+    assert "pendingAcceptanceAttempt" in script
+    assert "button.dataset.acceptanceSource === pending.source" in script
+    assert "button.dataset.catalogKey === pending.selected_catalog_key" in script
 
 
 def test_availability_uses_read_only_site_timezone_and_local_wall_clock_transport():

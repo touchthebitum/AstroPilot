@@ -356,6 +356,7 @@ def test_http_request_runs_real_application_composition_once(
     accepted = client.post(
         "/v1/decision-selections",
         json={
+            "acceptance_request_id": "c219f146-5106-48c3-b617-4b96cf6257a4",
             "decision_id": payload["decision_id"],
             "source": "primary_recommendation",
             "selected_catalog_key": "M31",

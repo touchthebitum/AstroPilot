@@ -373,6 +373,11 @@ class TonightRequest(BaseModel):
 class UserSelectionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    acceptance_request_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+    )
     decision_id: str
     source: UserSelectionSource
     selected_catalog_key: str | None = None
@@ -2103,14 +2108,17 @@ def create_app(
                 detail={"code": "decision_acceptance_unavailable"},
             )
         selection = request.to_domain(selection_id=selection_id)
-        accept = getattr(application_service(), "accept", None)
+        accept = getattr(application_service(), "accept_idempotently", None)
         if accept is None:
             raise HTTPException(
                 status_code=503,
                 detail={"code": "decision_acceptance_unavailable"},
             )
         try:
-            mission = accept(selection)
+            acceptance = accept(
+                selection,
+                acceptance_request_id=request.acceptance_request_id,
+            )
         except DecisionAcceptanceError as exc:
             code = str(exc)
             raise HTTPException(
@@ -2123,13 +2131,17 @@ def create_app(
                 detail={"code": str(exc)},
             ) from exc
 
+        canonical_selection = acceptance.selection
+        mission = acceptance.mission
         return UserSelectionResponse(
             status="declined" if mission is None else "accepted",
             mission_id=mission.mission_id if mission is not None else None,
-            decision_id=selection.decision_id,
-            selection_id=selection.selection_id,
+            decision_id=canonical_selection.decision_id,
+            selection_id=canonical_selection.selection_id,
             catalog_key=(
-                selection.selected_catalog_key if mission is not None else None
+                canonical_selection.selected_catalog_key
+                if mission is not None
+                else None
             ),
             mission=(
                 _accepted_mission_response(mission)

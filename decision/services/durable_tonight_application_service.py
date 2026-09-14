@@ -96,6 +96,17 @@ class DurableTonightApplicationService:
     def accept(self, selection: UserSelection):
         return self._decision_acceptance_service().accept(selection)
 
+    def accept_idempotently(
+        self,
+        selection: UserSelection,
+        *,
+        acceptance_request_id: str,
+    ):
+        return self._decision_acceptance_service().accept_idempotently(
+            selection,
+            acceptance_request_id=acceptance_request_id,
+        )
+
     def load_selection(self, selection_id: str):
         return self._decision_acceptance_service().load_selection(selection_id)
 
