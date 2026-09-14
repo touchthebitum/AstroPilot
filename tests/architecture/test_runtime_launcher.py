@@ -19,12 +19,69 @@ class FakeClock:
         self.value += duration
 
 
+@pytest.fixture(autouse=True)
+def isolated_user_data_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path / "user-data"))
+
+
 def test_launcher_has_stable_loopback_origin():
     assert launcher.HOST == "127.0.0.1"
     assert launcher.HOST != "0.0.0.0"
     assert launcher.PORT == 8000
     assert launcher.BROWSER_URL == "http://127.0.0.1:8000/"
     assert callable(launcher.main)
+
+
+def test_launcher_initializes_canonical_data_root_before_uvicorn(monkeypatch):
+    events = []
+
+    class DataRoot:
+        def mkdir(self, *, parents, exist_ok):
+            events.append(("mkdir", parents, exist_ok))
+
+    class FakeServer:
+        def __init__(self, config):
+            self.started = False
+            self.should_exit = False
+
+        def run(self):
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(launcher, "get_user_data_dir", lambda: DataRoot())
+
+    launcher.run(
+        config_factory=lambda application, **options: events.append("config"),
+        server_factory=FakeServer,
+    )
+
+    assert events == [("mkdir", True, True), "config"]
+
+
+def test_launcher_honors_data_root_override_from_arbitrary_cwd(
+    tmp_path,
+    monkeypatch,
+):
+    data_root = tmp_path / "configured" / "nested"
+    current_dir = tmp_path / "elsewhere"
+    current_dir.mkdir()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(data_root))
+    monkeypatch.chdir(current_dir)
+
+    resolved = launcher._initialize_user_data_root()
+
+    assert resolved == data_root
+    assert data_root.is_dir()
+
+
+def test_launcher_does_not_reset_existing_data_root(tmp_path, monkeypatch):
+    data_root = tmp_path / "existing"
+    data_root.mkdir()
+    sentinel = data_root / "user_profile.json"
+    sentinel.write_text("existing-profile", encoding="utf-8")
+    monkeypatch.setattr(launcher, "get_user_data_dir", lambda: data_root)
+
+    assert launcher._initialize_user_data_root() == data_root
+    assert sentinel.read_text(encoding="utf-8") == "existing-profile"
 
 
 def test_readiness_wait_is_bounded_and_requires_owned_server_started():
@@ -173,4 +230,3 @@ def test_keyboard_interrupt_requests_clean_owned_server_shutdown():
 
     assert result is created[0]
     assert created[0].should_exit is True
-

@@ -1,7 +1,7 @@
 import json
-import os
 from pathlib import Path
 
+from astropilot.user_profile import get_user_data_dir
 from decision.filtering.selected_filter import SelectedFilter
 
 
@@ -9,15 +9,7 @@ class FilterInventoryLoader:
     @staticmethod
     def load(path: str | Path | None = None) -> tuple[SelectedFilter, ...]:
         if path is None:
-            configured_dir = os.environ.get(
-                "ASTROPILOT_DATA_DIR"
-            )
-            path = (
-                Path(configured_dir).expanduser()
-                / "user_filters.json"
-                if configured_dir
-                else Path("user_filters.json")
-            )
+            path = get_user_data_dir() / "user_filters.json"
         else:
             path = Path(path)
 

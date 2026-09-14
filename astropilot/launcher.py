@@ -11,6 +11,7 @@ from typing import Any
 import uvicorn
 
 from astropilot.app import app
+from astropilot.user_profile import get_user_data_dir
 
 
 HOST = "127.0.0.1"
@@ -22,6 +23,12 @@ READINESS_POLL_INTERVAL_SECONDS = 0.05
 
 class LauncherStartupError(RuntimeError):
     """Raised when the owned server does not complete startup."""
+
+
+def _initialize_user_data_root():
+    data_root = get_user_data_dir()
+    data_root.mkdir(parents=True, exist_ok=True)
+    return data_root
 
 
 def _wait_until_started(
@@ -57,6 +64,7 @@ def run(
 ):
     """Run the existing AstroPilot application until its server exits."""
 
+    _initialize_user_data_root()
     config = config_factory(app, host=HOST, port=PORT)
     server = server_factory(config)
     stop_event = threading.Event()
@@ -108,4 +116,3 @@ def run(
 
 def main() -> None:
     run()
-
