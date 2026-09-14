@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 astropilot = "astro_score:main"
+astropilot-app = "astropilot.launcher:main"
 
 [project.optional-dependencies]
 test = [
