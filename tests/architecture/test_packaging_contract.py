@@ -2,6 +2,7 @@ from pathlib import Path
 import importlib.util
 import sys
 import tomllib
+from unittest.mock import ANY
 
 import pytest
 
@@ -21,6 +22,17 @@ def test_installed_package_exposes_astropilot_command():
 
     assert scripts["astropilot"] == "astro_score:main"
     assert scripts["astropilot-app"] == "astropilot.launcher:main"
+
+
+def test_project_declares_canonical_beta_version():
+    assert _pyproject()["project"]["version"] == "1.0.0b2"
+
+    lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
+    astropilot_package = lock.split('name = "astropilot"', 1)[1].split(
+        "[[package]]", 1
+    )[0]
+    assert 'version = "1.0.0b2"' in astropilot_package
+    assert 'version = "0.0.0"' not in astropilot_package
 
 
 def test_installed_runtime_declares_uvicorn_for_api_and_ui_serving():
@@ -95,7 +107,10 @@ def test_spec_defines_arm64_windowed_onedir_application():
     assert 'target_arch="arm64"' in spec
     assert 'name="AstroPilot.app"' in spec
     assert 'bundle_identifier="fr.astropilot.desktop"' in spec
-    assert 'version="0.0.0"' in spec
+    assert 'CFBundleShortVersionString": MARKETING_VERSION' in spec
+    assert 'CFBundleVersion": BUNDLE_BUILD_NUMBER' in spec
+    assert 'MARKETING_VERSION = f"{major}.{minor}.{patch}"' in spec
+    assert "BUNDLE_BUILD_NUMBER = beta" in spec
 
 
 def test_spec_collects_exact_runtime_assets_without_broad_hidden_imports():
@@ -170,13 +185,21 @@ def test_build_script_invokes_current_python_and_verifies_bundle(
     monkeypatch.setattr(build.sys, "platform", "darwin")
     monkeypatch.setattr(build.platform, "machine", lambda: "arm64")
 
-    def runner(command, *, cwd, check):
-        calls.append((command, cwd, check))
+    def runner(command, *, cwd, check, **options):
+        calls.append((command, cwd, check, options))
+        if command[:2] == ["git", "rev-parse"]:
+            return type("Result", (), {"stdout": "8541acc\n"})()
         (tmp_path / "dist" / "AstroPilot.app").mkdir(parents=True)
 
     output = build.build(root=tmp_path, runner=runner)
 
     assert calls == [
+        (
+            ["git", "rev-parse", "--short=7", "HEAD"],
+            tmp_path,
+            True,
+            {"capture_output": True, "text": True},
+        ),
         (
             [
                 sys.executable,
@@ -188,8 +211,10 @@ def test_build_script_invokes_current_python_and_verifies_bundle(
             ],
             tmp_path,
             True,
+            {"env": ANY},
         )
     ]
+    assert calls[1][3]["env"]["ASTROPILOT_BUILD_COMMIT"] == "8541acc"
     assert output == tmp_path / "dist" / "AstroPilot.app"
 
 
@@ -198,8 +223,60 @@ def test_build_script_fails_when_bundle_is_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(build.sys, "platform", "darwin")
     monkeypatch.setattr(build.platform, "machine", lambda: "arm64")
 
+    def runner(command, **kwargs):
+        if command[:2] == ["git", "rev-parse"]:
+            return type("Result", (), {"stdout": "8541acc\n"})()
+
     with pytest.raises(RuntimeError, match="dist/AstroPilot.app"):
-        build.build(root=tmp_path, runner=lambda *args, **kwargs: None)
+        build.build(root=tmp_path, runner=runner)
+
+
+@pytest.mark.parametrize("value", ["", "8541ac", "not-git", "8541acc8"])
+def test_build_script_rejects_invalid_short_git_commit(tmp_path, value):
+    build = _build_module()
+
+    with pytest.raises(RuntimeError, match="7 hexadecimal"):
+        build.resolve_build_commit(
+            tmp_path,
+            runner=lambda *args, **kwargs: type(
+                "Result", (), {"stdout": value}
+            )(),
+        )
+
+
+def test_tester_label_and_future_artifact_name_are_deterministic():
+    build = _build_module()
+
+    assert build.tester_version_label("1.0.0b2") == "1.0.0-beta.2"
+    assert build.artifact_name("1.0.0b2", "arm64") == (
+        "AstroPilot-1.0.0-beta.2-macos-arm64.zip"
+    )
+
+
+def test_runtime_identity_has_no_git_subprocess_dependency():
+    runtime_sources = "\n".join(
+        (ROOT / path).read_text(encoding="utf-8")
+        for path in ("astropilot/app.py", "astropilot/launcher.py")
+    )
+
+    assert "git rev-parse" not in runtime_sources
+    assert "subprocess" not in runtime_sources
+
+
+def test_build_identity_is_injected_by_generated_ignored_runtime_hook():
+    spec = (ROOT / "AstroPilot.spec").read_text(encoding="utf-8")
+    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+    assert "ASTROPILOT_BUILD_COMMIT" in spec
+    assert "runtime_hooks=[" in spec
+    assert "build/" in ignored
+
+
+def test_fastapi_version_derives_from_canonical_project_version():
+    from astropilot.app import canonical_version, create_app
+
+    assert canonical_version() == "1.0.0b2"
+    assert create_app().version == canonical_version()
 
 
 def test_generated_packaging_outputs_are_ignored():
@@ -225,4 +302,6 @@ def test_build_definition_has_no_local_paths_or_release_operations():
     assert "codesign" not in sources
     assert "notar" not in sources.lower()
     assert "dmg" not in sources.lower()
-    assert "zip" not in sources.lower()
+    assert "zipfile" not in sources.lower()
+    assert "shutil.make_archive" not in sources
+    assert "ditto" not in sources.lower()
