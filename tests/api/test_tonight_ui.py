@@ -65,6 +65,10 @@ def test_root_serves_tonight_classic_ui():
     assert len(availability_radios) == 5
     assert all("checked" not in radio for radio in availability_radios)
     assert 'id="configuration-error"' in response.text
+    assert 'id="configuration-recover"' in response.text
+    assert 'id="configuration-recovery-confirmation"' in response.text
+    assert 'id="configuration-recovery-cancel"' in response.text
+    assert 'id="configuration-recovery-confirm"' in response.text
     assert 'id="edit-configuration"' in response.text
     assert "Modifier ma configuration" in response.text
     assert "Site d’observation" in response.text
@@ -106,7 +110,8 @@ def test_tonight_ui_assets_are_served():
     assert 'method: "PUT"' in script.text
     assert "fetch(\"/v1/tonight\"" in script.text
     assert 'fetch("/v1/decision-selections"' in script.text
-    assert script.text.count("fetch(") == 4
+    assert 'fetch("/v1/configuration/recover"' in script.text
+    assert script.text.count("fetch(") == 5
     assert script.text.rstrip().endswith("loadConfiguration();")
     assert "body: JSON.stringify({})," not in script.text
     assert "collectAvailabilityPayload" in script.text
@@ -406,11 +411,18 @@ def test_existing_projects_are_preserved_by_the_configuration_wizard():
     assert "conservé" in review
     assert "Aucun projet pour l’instant" in review
 
+    initialization = script.split(
+        "function initializeConfiguration(payload)",
+        1,
+    )[1].split("async function loadConfiguration", 1)[0]
+    assert "state.configurationDraft = draftFromConfiguration(payload)" in initialization
+    assert "prefillConfiguration()" in initialization
+
     conflict = script.split(
         "async function loadConfiguration({ afterConflict = false } = {})",
         1,
-    )[1].split("async function saveConfiguration()", 1)[0]
-    assert "state.configurationDraft = draftFromConfiguration(payload)" in conflict
+    )[1].split("async function recoverConfiguration()", 1)[0]
+    assert "initializeConfiguration(payload)" in conflict
     assert "renderReview()" in conflict
 
 
@@ -424,6 +436,132 @@ def test_new_profile_can_keep_the_explicit_zero_project_state():
     )[1].split("function prefillConfiguration()", 1)[0]
     assert "zeroProjects.checked = true" in render_projects
     assert "zeroProjects.disabled = true" in render_projects
+
+
+def test_corrupt_configuration_alone_exposes_explicit_recovery():
+    script = make_client().get("/ui/app.js").text
+
+    error_renderer = script.split(
+        "function showConfigurationError(message, { code = null } = {})",
+        1,
+    )[1].split("function initializeConfiguration", 1)[0]
+    assert 'state.configurationErrorCode = code' in error_renderer
+    assert 'code !== "configuration_corrupt"' in error_renderer
+    assert "ui.configurationRecover.hidden" in error_renderer
+
+    loader = script.split(
+        "async function loadConfiguration({ afterConflict = false } = {})",
+        1,
+    )[1].split("async function recoverConfiguration()", 1)[0]
+    assert 'code === "configuration_corrupt"' in loader
+    assert 'showConfigurationError(message, { code })' in loader
+    assert 'showConfigurationError("AstroPilot ne parvient pas à charger la configuration.' in loader
+    assert "configuration_corrupt" in loader
+    assert "location_timezone_unresolved" not in error_renderer
+    assert "configuration_persistence_error" not in error_renderer
+
+
+def test_configuration_retry_remains_non_destructive():
+    script = make_client().get("/ui/app.js").text
+
+    retry_handler = script.split(
+        'ui.configurationRetry.addEventListener("click",',
+        1,
+    )[1].split(";", 1)[0]
+    assert "loadConfiguration" in retry_handler
+    assert "recoverConfiguration" not in retry_handler
+    assert "/v1/configuration/recover" not in retry_handler
+
+
+def test_recovery_requires_confirmation_and_cancel_sends_no_request():
+    page = make_client().get("/").text
+    script = make_client().get("/ui/app.js").text
+
+    assert "Réinitialiser ma configuration" in page
+    assert "votre site, votre matériel et vos projets" in page
+    assert "Une copie locale des données illisibles sera conservée" in page
+    assert "Annuler" in page
+    assert "quarantine" not in page.lower()
+    assert "user_profile.json" not in page
+
+    open_handler = script.split(
+        'ui.configurationRecover.addEventListener("click",',
+        1,
+    )[1].split(";", 1)[0]
+    assert "showRecoveryConfirmation" in open_handler
+    assert "recoverConfiguration" not in open_handler
+    assert "fetch(" not in open_handler
+
+    cancel_handler = script.split(
+        'ui.configurationRecoveryCancel.addEventListener("click",',
+        1,
+    )[1].split(";", 1)[0]
+    assert "hideRecoveryConfirmation" in cancel_handler
+    assert "recoverConfiguration" not in cancel_handler
+    assert "fetch(" not in cancel_handler
+
+
+def test_recovery_posts_once_and_prevents_duplicate_submission():
+    script = make_client().get("/ui/app.js").text
+    recovery = script.split(
+        "async function recoverConfiguration()",
+        1,
+    )[1].split("async function saveConfiguration()", 1)[0]
+
+    assert 'state.configurationErrorCode !== "configuration_corrupt"' in recovery
+    assert "if (state.recoveringConfiguration) return" in recovery
+    assert "state.recoveringConfiguration = true" in recovery
+    assert "ui.configurationRecoveryConfirm.disabled = true" in recovery
+    assert recovery.count('fetch("/v1/configuration/recover"') == 1
+    assert 'method: "POST"' in recovery
+    assert "body:" not in recovery
+    assert "state.recoveringConfiguration = false" in recovery
+    assert "ui.configurationRecoveryConfirm.disabled = false" in recovery
+
+
+def test_recovery_responses_preserve_authoritative_state_and_fail_closed():
+    script = make_client().get("/ui/app.js").text
+    recovery = script.split(
+        "async function recoverConfiguration()",
+        1,
+    )[1].split("async function saveConfiguration()", 1)[0]
+
+    assert "response.ok && payload.configured === false" in recovery
+    assert "initializeConfiguration(payload)" in recovery
+    assert 'setView("site")' in recovery
+    assert 'detail?.code === "configuration_recovery_conflict"' in recovery
+    assert "await loadConfiguration()" in recovery
+    assert 'detail?.code === "configuration_recovery_unavailable"' in recovery
+    assert "La réinitialisation est temporairement indisponible" in recovery
+    assert "Le résultat de la réinitialisation n’a pas pu être confirmé" in recovery
+    assert 'showConfigurationError(message, { code: "configuration_corrupt" })' in recovery
+    assert "supprim" not in recovery.lower()
+    assert "quarantine" not in recovery.lower()
+    assert "ASTROPILOT_DATA_DIR" not in recovery
+
+
+def test_recovered_projection_reuses_first_run_initialization():
+    script = make_client().get("/ui/app.js").text
+    initializer = script.split(
+        "function initializeConfiguration(payload)",
+        1,
+    )[1].split("async function loadConfiguration", 1)[0]
+    loader = script.split(
+        "async function loadConfiguration({ afterConflict = false } = {})",
+        1,
+    )[1].split("async function recoverConfiguration()", 1)[0]
+    recovery = script.split(
+        "async function recoverConfiguration()",
+        1,
+    )[1].split("async function saveConfiguration()", 1)[0]
+
+    assert "state.configuration = payload" in initializer
+    assert "state.configurationDraft = draftFromConfiguration(payload)" in initializer
+    assert "prefillConfiguration()" in initializer
+    assert "renderAvailabilityTimezone()" in initializer
+    assert "initializeConfiguration(payload)" in loader
+    assert "initializeConfiguration(payload)" in recovery
+    assert 'setView("site")' in recovery
 
 
 def test_web_assets_are_declared_as_package_data():

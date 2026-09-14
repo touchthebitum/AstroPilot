@@ -63,8 +63,33 @@
           <p class="state-kicker">Configuration indisponible</p>
           <h2>Impossible de charger votre configuration.</h2>
           <p id="configuration-error-message"></p>
+          <div class="wizard-actions">
+            <button class="secondary-button" id="configuration-retry" type="button">Réessayer</button>
+            <button class="secondary-button" id="configuration-recover" type="button" hidden>
+              Réinitialiser ma configuration
+            </button>
+          </div>
+          <div
+            id="configuration-recovery-confirmation"
+            role="alertdialog"
+            aria-labelledby="configuration-recovery-title"
+            aria-describedby="configuration-recovery-warning"
+            hidden
+          >
+            <h3 id="configuration-recovery-title">Confirmer la réinitialisation</h3>
+            <p id="configuration-recovery-warning">
+              AstroPilot ne peut pas lire la configuration enregistrée. La réinitialisation retirera cette
+              configuration active et vous devrez saisir à nouveau votre site, votre matériel et vos projets.
+              Une copie locale des données illisibles sera conservée.
+            </p>
+            <div class="wizard-actions">
+              <button class="secondary-button" id="configuration-recovery-cancel" type="button">Annuler</button>
+              <button class="primary-button" id="configuration-recovery-confirm" type="button">
+                Réinitialiser ma configuration
+              </button>
+            </div>
+          </div>
         </div>
-        <button class="secondary-button" id="configuration-retry" type="button">Réessayer</button>
       </section>
 
       <section id="onboarding" class="onboarding" hidden aria-labelledby="onboarding-title">
