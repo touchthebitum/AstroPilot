@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import errno
-import importlib.metadata
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -21,7 +20,7 @@ from urllib.request import urlopen as standard_urlopen
 
 import uvicorn
 
-from astropilot.app import app
+from astropilot.app import app, build_identifier, canonical_version
 from astropilot.user_profile import get_user_data_dir
 
 
@@ -61,16 +60,6 @@ def _get_log_path() -> Path:
         / "AstroPilot"
         / "AstroPilot.log"
     )
-
-
-def _runtime_version() -> str:
-    try:
-        package_version = importlib.metadata.metadata("astropilot").get("Version")
-    except importlib.metadata.PackageNotFoundError:
-        package_version = None
-    if package_version:
-        return f"package-{package_version}"
-    return f"api-{app.version}"
 
 
 def _configure_launcher_logger(
@@ -176,7 +165,8 @@ def _probe_port(
 
     return (
         PortState.EXISTING
-        if payload == {"application": "astropilot"}
+        if isinstance(payload, dict)
+        and payload.get("application") == "astropilot"
         else PortState.FOREIGN
     )
 
@@ -223,8 +213,9 @@ def run(
 
     logger, log_path = _configure_launcher_logger()
     logger.info(
-        "launcher_start version=%s python=%s architecture=%s host=%s port=%s",
-        _runtime_version(),
+        "launcher_start version=%s build=%s python=%s architecture=%s host=%s port=%s",
+        canonical_version(),
+        build_identifier(),
         platform.python_version(),
         platform.machine(),
         HOST,

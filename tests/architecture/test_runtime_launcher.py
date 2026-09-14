@@ -94,7 +94,8 @@ def test_logger_creates_rotating_file_once(tmp_path):
 
 
 def test_existing_instance_logs_runtime_metadata_and_browser_result(monkeypatch):
-    monkeypatch.setattr(launcher, "_runtime_version", lambda: "0.0.0")
+    monkeypatch.setattr(launcher, "canonical_version", lambda: "1.0.0b2")
+    monkeypatch.setattr(launcher, "build_identifier", lambda: "8541acc")
     monkeypatch.setattr(launcher.platform, "machine", lambda: "test-architecture")
 
     launcher.run(
@@ -104,7 +105,8 @@ def test_existing_instance_logs_runtime_metadata_and_browser_result(monkeypatch)
 
     log = launcher_log()
     assert "launcher_start" in log
-    assert "version=0.0.0" in log
+    assert "version=1.0.0b2" in log
+    assert "build=8541acc" in log
     assert "python=" in log
     assert "architecture=test-architecture" in log
     assert "host=127.0.0.1" in log
@@ -131,12 +133,23 @@ def test_browser_failure_is_diagnostic_without_marking_healthy_server_failed(
     assert str(launcher._get_log_path()) in capsys.readouterr().err
 
 
-def test_identity_probe_is_bounded_and_accepts_only_exact_identity():
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"application":"astropilot"}',
+        b'{"application":"astropilot","version":"1.0.0b2",'
+        b'"build":"8541acc","architecture":"arm64"}',
+        b'{"application":"astropilot","version":"9.9.9"}',
+        b'{"application":"astropilot","build":"fffffff"}',
+        b'{"application":"astropilot","architecture":"x86_64"}',
+    ],
+)
+def test_identity_probe_is_bounded_and_accepts_compatible_identity(body):
     calls = []
 
     def urlopen(url, *, timeout):
         calls.append((url, timeout))
-        return FakeResponse(200, b'{"application":"astropilot"}')
+        return FakeResponse(200, body)
 
     assert launcher._probe_port(urlopen=urlopen) is launcher.PortState.EXISTING
     assert calls == [(launcher.IDENTITY_URL, launcher.PROBE_TIMEOUT_SECONDS)]
@@ -154,8 +167,10 @@ def test_connection_refusal_means_port_is_free():
     [
         (404, b'{"application":"astropilot"}'),
         (200, b"not-json"),
+        (200, b'"astropilot"'),
+        (200, b'[]'),
+        (200, b'{}'),
         (200, b'{"application":"another"}'),
-        (200, b'{"application":"astropilot","extra":true}'),
     ],
 )
 def test_foreign_http_responses_fail_closed(status, body):

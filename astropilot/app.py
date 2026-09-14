@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime, timedelta, timezone
+import importlib.metadata
+import os
 from pathlib import Path
+import platform
+import re
+import tomllib
 from typing import Any, Callable, Literal
 from uuid import uuid4
 
@@ -118,6 +123,43 @@ from decision.location.location_time import (
     LocationTimeResolver,
     normalize_local_wall_time,
 )
+
+
+_BUILD_COMMIT_ENV = "ASTROPILOT_BUILD_COMMIT"
+_SHORT_COMMIT_PATTERN = re.compile(r"[0-9a-f]{7}")
+
+
+def canonical_version() -> str:
+    """Return the project version in source and installed/frozen runtimes."""
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    if pyproject.is_file():
+        with pyproject.open("rb") as handle:
+            version = tomllib.load(handle)["project"]["version"]
+        if version:
+            return str(version)
+    try:
+        return importlib.metadata.version("astropilot")
+    except importlib.metadata.PackageNotFoundError as exc:
+        raise RuntimeError("AstroPilot version metadata is unavailable.") from exc
+
+
+def build_identifier() -> str:
+    """Return the injected immutable build commit or a development marker."""
+
+    value = os.environ.get(_BUILD_COMMIT_ENV)
+    if value and _SHORT_COMMIT_PATTERN.fullmatch(value):
+        return value
+    return "development"
+
+
+def runtime_identity_payload() -> dict[str, str]:
+    return {
+        "application": "astropilot",
+        "version": canonical_version(),
+        "build": build_identifier(),
+        "architecture": platform.machine(),
+    }
 
 
 class LocationRequest(BaseModel):
@@ -1372,7 +1414,7 @@ def create_app(
     clock: Callable[[], datetime] = _utc_now,
     selection_id_factory: Callable[[], str] = _generate_selection_id,
 ) -> FastAPI:
-    application = FastAPI(title="AstroPilot API", version="1.0.0")
+    application = FastAPI(title="AstroPilot API", version=canonical_version())
     resolved_service = None
 
     @application.exception_handler(RequestValidationError)
@@ -1424,7 +1466,7 @@ def create_app(
 
     @application.get("/v1/runtime-identity", include_in_schema=False)
     def runtime_identity():
-        return {"application": "astropilot"}
+        return runtime_identity_payload()
 
     @application.get(
         "/v1/configuration",
