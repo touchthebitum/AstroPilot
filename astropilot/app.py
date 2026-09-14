@@ -1422,6 +1422,10 @@ def create_app(
     def tonight_ui():
         return FileResponse(web_root / "index.html")
 
+    @application.get("/v1/runtime-identity", include_in_schema=False)
+    def runtime_identity():
+        return {"application": "astropilot"}
+
     @application.get(
         "/v1/configuration",
         response_model=ConfigurationResponse,

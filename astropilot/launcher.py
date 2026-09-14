@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import errno
+import json
 import threading
 import time
 import webbrowser
 from collections.abc import Callable
+from enum import Enum
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import urlopen as standard_urlopen
 
 import uvicorn
 
@@ -17,12 +22,58 @@ from astropilot.user_profile import get_user_data_dir
 HOST = "127.0.0.1"
 PORT = 8000
 BROWSER_URL = "http://127.0.0.1:8000/"
+IDENTITY_URL = "http://127.0.0.1:8000/v1/runtime-identity"
+PROBE_TIMEOUT_SECONDS = 0.5
 READINESS_TIMEOUT_SECONDS = 15.0
 READINESS_POLL_INTERVAL_SECONDS = 0.05
 
 
 class LauncherStartupError(RuntimeError):
     """Raised when the owned server does not complete startup."""
+
+
+class LauncherPortConflictError(LauncherStartupError):
+    """Raised when port 8000 is occupied without verified AstroPilot identity."""
+
+
+class PortState(Enum):
+    FREE = "free"
+    EXISTING = "existing_astropilot"
+    FOREIGN = "foreign_or_indeterminate"
+
+
+def _is_connection_refused(error: BaseException) -> bool:
+    reason = getattr(error, "reason", error)
+    return isinstance(reason, ConnectionRefusedError) or (
+        isinstance(reason, OSError) and reason.errno == errno.ECONNREFUSED
+    )
+
+
+def _probe_port(
+    *,
+    urlopen: Callable[..., Any] = standard_urlopen,
+) -> PortState:
+    try:
+        with urlopen(IDENTITY_URL, timeout=PROBE_TIMEOUT_SECONDS) as response:
+            if response.status != 200:
+                return PortState.FOREIGN
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError:
+        return PortState.FOREIGN
+    except URLError as exc:
+        return PortState.FREE if _is_connection_refused(exc) else PortState.FOREIGN
+    except OSError as exc:
+        return PortState.FREE if _is_connection_refused(exc) else PortState.FOREIGN
+    except (AttributeError, TypeError, UnicodeError, ValueError):
+        return PortState.FOREIGN
+    except Exception:
+        return PortState.FOREIGN
+
+    return (
+        PortState.EXISTING
+        if payload == {"application": "astropilot"}
+        else PortState.FOREIGN
+    )
 
 
 def _initialize_user_data_root():
@@ -61,8 +112,19 @@ def run(
     browser_open: Callable[[str], Any] = webbrowser.open,
     readiness_timeout: float = READINESS_TIMEOUT_SECONDS,
     poll_interval: float = READINESS_POLL_INTERVAL_SECONDS,
+    port_probe: Callable[[], PortState] | None = None,
 ):
     """Run the existing AstroPilot application until its server exits."""
+
+    port_state = _probe_port() if port_probe is None else port_probe()
+    if port_state is PortState.EXISTING:
+        try:
+            browser_open(BROWSER_URL)
+        except BaseException as exc:
+            raise LauncherStartupError("browser_open_failed") from exc
+        return None
+    if port_state is not PortState.FREE:
+        raise LauncherPortConflictError("port_8000_identity_unverified")
 
     _initialize_user_data_root()
     config = config_factory(app, host=HOST, port=PORT)
