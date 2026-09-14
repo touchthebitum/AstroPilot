@@ -90,6 +90,7 @@ def test_get_projects_safe_preset_profile_and_omits_internal_state(
         "latitude": 47.1035,
         "longitude": 6.8328,
         "bortle": 4,
+        "timezone": "Europe/Zurich",
     }
     assert payload["active_equipment_id"] == "samyang_183"
     assert payload["available_equipment"][0]["kind"] == "preset"
@@ -113,6 +114,91 @@ def test_first_run_preset_with_zero_projects_is_canonical(client):
     assert profile["available_equipment"] == ["samyang_183"]
     assert "equipment_definitions" not in profile
     assert profile["projects"] == {}
+    assert "timezone" not in profile["location"]
+
+
+def test_configuration_timezone_is_derived_from_coordinates(client):
+    payload = configuration_payload()
+    payload["site"].update(
+        name="New York",
+        latitude=40.7128,
+        longitude=-74.0060,
+    )
+
+    response = client.put("/v1/configuration", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["site"]["timezone"] == "America/New_York"
+    assert "timezone" not in load_user_profile()["location"]
+
+
+def test_legacy_profile_without_timezone_is_projected_without_migration(client):
+    created = client.put("/v1/configuration", json=configuration_payload()).json()
+    revision = created["profile_revision"]
+
+    response = client.get("/v1/configuration")
+
+    assert response.status_code == 200
+    assert response.json()["site"]["timezone"] == "Europe/Zurich"
+    profile = load_user_profile()
+    assert profile["profile_revision"] == revision
+    assert "timezone" not in profile["location"]
+
+
+def test_configuration_rejects_client_supplied_timezone(client, tmp_path):
+    payload = configuration_payload()
+    payload["site"]["timezone"] = "UTC"
+
+    response = client.put("/v1/configuration", json=payload)
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "configuration_invalid_site"
+    assert not (tmp_path / "user_profile.json").exists()
+
+
+def test_unresolved_submitted_timezone_fails_before_configuration_write(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    class NoTimezoneFinder:
+        def timezone_at(self, **kwargs):
+            return None
+
+    monkeypatch.setattr(app_module.LocationTimeResolver, "_finder", NoTimezoneFinder())
+
+    response = client.put("/v1/configuration", json=configuration_payload())
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": "location_timezone_unresolved",
+        "message": "The site timezone could not be resolved.",
+    }
+    assert not (tmp_path / "user_profile.json").exists()
+
+
+def test_unresolved_legacy_timezone_fails_closed_without_profile_mutation(
+    client,
+    monkeypatch,
+):
+    created = client.put("/v1/configuration", json=configuration_payload()).json()
+    profile_before = load_user_profile()
+
+    class NoTimezoneFinder:
+        def timezone_at(self, **kwargs):
+            return None
+
+    monkeypatch.setattr(app_module.LocationTimeResolver, "_finder", NoTimezoneFinder())
+
+    response = client.get("/v1/configuration")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "location_timezone_unresolved",
+        "message": "The saved site timezone could not be resolved.",
+    }
+    assert load_user_profile() == profile_before
+    assert profile_before["profile_revision"] == created["profile_revision"]
 
 
 def test_custom_equipment_round_trips_and_resolves(client):
