@@ -29,6 +29,7 @@ build_identity_hook.write_text(
     f"os.environ['ASTROPILOT_BUILD_COMMIT'] = {BUILD_COMMIT!r}\n",
     encoding="utf-8",
 )
+CODESIGN_IDENTITY = os.environ.get("ASTROPILOT_CODESIGN_IDENTITY") or None
 
 datas = [
     (str(ROOT / "astropilot" / "web" / "index.html"), "astropilot/web"),
@@ -72,6 +73,8 @@ executable = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch="arm64",
+    codesign_identity=CODESIGN_IDENTITY,
+    entitlements_file=None,
 )
 collection = COLLECT(
     executable,
