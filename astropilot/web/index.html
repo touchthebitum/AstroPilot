@@ -264,6 +264,20 @@
         <button class="secondary-button" id="message-retry" type="button">Réessayer</button>
       </section>
 
+      <section id="pending-acceptance-state" class="state-panel message-panel" hidden aria-live="assertive">
+        <span class="message-icon" aria-hidden="true">!</span>
+        <div>
+          <p class="state-kicker">Sélection à vérifier</p>
+          <h2>Le résultat de votre sélection reste incertain.</h2>
+          <p id="pending-acceptance-message">
+            Le résultat de votre sélection n’a pas pu être confirmé. AstroPilot doit vérifier cette sélection avant de poursuivre.
+          </p>
+        </div>
+        <button class="primary-button" id="retry-pending-acceptance" type="button">
+          Réessayer la sélection
+        </button>
+      </section>
+
       <article id="decision" class="decision" hidden aria-live="polite">
         <div class="decision-head">
           <div>

@@ -179,7 +179,7 @@ def test_tonight_ui_assets_are_served():
         "monochrome",
     ):
         assert field_name in script.text
-    assert "localStorage" not in script.text
+    assert 'const PENDING_ACCEPTANCE_STORAGE_KEY = "astropilot.pendingAcceptance"' in script.text
     assert "currentDecision" in script.text
     assert "target_common_name" in script.text
     assert "weather_trust" in script.text
@@ -298,6 +298,7 @@ def test_acceptance_attempt_generates_identity_and_timestamp_once():
     assert helper.count("crypto.randomUUID()") == 1
     assert helper.count("new Date().toISOString()") == 1
     assert "Object.freeze" in helper
+    assert "persistPendingAcceptanceAttempt(attempt)" in helper
     assert "selection_id" not in helper
     assert "mission_id" not in helper
 
@@ -312,13 +313,14 @@ def test_uncertain_acceptance_retry_reuses_exact_pending_payload():
         "} finally {", 1
     )[0]
 
-    assert "const attempt = acceptanceAttempt({" in acceptance
+    assert "attempt = attemptOverride || acceptanceAttempt({" in acceptance
     assert "decision_id: expectedDecisionId" in acceptance
     assert "source," in acceptance
     assert "selected_catalog_key: selectedCatalogKey" in acceptance
     assert "body: JSON.stringify(attempt)" in acceptance
     assert "clearPendingAcceptanceAttempt()" not in uncertain
-    assert "statut de l’acceptation ne peut pas être confirmé" in uncertain
+    assert "showUnresolvedAcceptance()" in uncertain
+    assert "Le résultat de votre sélection n’a pas pu être confirmé" in script
     assert "restoreAcceptanceControls()" in acceptance
 
 
@@ -344,6 +346,156 @@ def test_acceptance_attempt_clears_only_after_definite_outcome():
     assert "pendingAcceptanceAttempt" in script
     assert "button.dataset.acceptanceSource === pending.source" in script
     assert "button.dataset.catalogKey === pending.selected_catalog_key" in script
+
+
+def test_unresolved_acceptance_is_persisted_before_network_submission():
+    script = make_client().get("/ui/app.js").text
+    attempt = script.split(
+        "function acceptanceAttempt(intent)",
+        1,
+    )[1].split("function clearPendingAcceptanceAttempt", 1)[0]
+    acceptance = script.split(
+        "async function acceptRecommendation(",
+        1,
+    )[1].split("async function loadTonight", 1)[0]
+    persistence = script.split(
+        "function persistPendingAcceptanceAttempt(attempt)",
+        1,
+    )[1].split("function restorePendingAcceptanceAttempt", 1)[0]
+
+    assert 'const PENDING_ACCEPTANCE_STORAGE_KEY = "astropilot.pendingAcceptance"' in script
+    assert 'version: PENDING_ACCEPTANCE_STORAGE_VERSION' in persistence
+    assert 'state: "unresolved"' in persistence
+    for field in (
+        "acceptance_request_id",
+        "decision_id",
+        "source",
+        "selected_catalog_key",
+        "selected_at",
+    ):
+        assert field in attempt
+    assert script.index("persistPendingAcceptanceAttempt(attempt)") < (
+        script.index('fetch("/v1/decision-selections"')
+    )
+    assert "selection_id" not in attempt
+    assert "mission_id" not in attempt
+
+
+def test_startup_restores_exact_retry_command_without_fabricating_success():
+    client = make_client()
+    page = client.get("/").text
+    script = client.get("/ui/app.js").text
+    restore = script.split(
+        "function restorePendingAcceptanceAttempt()",
+        1,
+    )[1].split("function showUnresolvedAcceptance", 1)[0]
+    startup = script.rsplit("\n", 4)
+
+    assert 'id="pending-acceptance-state"' in page
+    assert 'id="retry-pending-acceptance"' in page
+    assert "Réessayer la sélection" in page
+    assert "parsePendingAcceptance" in restore
+    assert "Object.freeze" in restore
+    assert "state.pendingAcceptanceAttempt = Object.freeze(attempt)" in restore
+    assert "renderMission" not in restore
+    assert "acceptedMission" not in restore
+    assert "Mission enregistrée" not in restore
+    assert any("restorePendingAcceptanceAttempt()" in line for line in startup)
+
+
+def test_restored_retry_reuses_exact_persisted_payload_and_timestamp():
+    script = make_client().get("/ui/app.js").text
+    retry = script.split(
+        "async function retryPendingAcceptance()",
+        1,
+    )[1].split("async function acceptRecommendation", 1)[0]
+    acceptance = script.split(
+        "async function acceptRecommendation(",
+        1,
+    )[1].split("async function loadTonight", 1)[0]
+
+    assert "const attempt = state.pendingAcceptanceAttempt" in retry
+    assert "attemptOverride: attempt" in retry
+    assert "acceptance_request_id" not in retry
+    assert "crypto.randomUUID" not in retry
+    assert "new Date" not in retry
+    assert "attempt = attemptOverride" in acceptance
+    assert "body: JSON.stringify(attempt)" in acceptance
+
+
+def test_unresolved_acceptance_guards_navigation_and_new_recommendations():
+    script = make_client().get("/ui/app.js").text
+    guard = script.split(
+        "function guardUnresolvedAcceptance()",
+        1,
+    )[1].split("function editConfiguration", 1)[0]
+    load_tonight = script.split(
+        "async function loadTonight(availability)",
+        1,
+    )[1].split('document.querySelector("#site-next")', 1)[0]
+
+    assert "showUnresolvedAcceptance()" in guard
+    assert "if (guardUnresolvedAcceptance()) return" in load_tonight
+    assert load_tonight.index("if (guardUnresolvedAcceptance()) return") < (
+        load_tonight.index('fetch("/v1/tonight"')
+    )
+    assert load_tonight.index("if (guardUnresolvedAcceptance()) return") < (
+        load_tonight.index("clearAcceptedMission()")
+    )
+    assert script.count("guardUnresolvedAcceptance()") >= 6
+    assert "ui.editConfiguration.addEventListener" in script
+    assert "ui.editAvailability.addEventListener" in script
+    assert "ui.refresh.addEventListener" in script
+
+
+def test_pending_storage_clears_only_after_definite_result():
+    script = make_client().get("/ui/app.js").text
+    acceptance = script.split(
+        "async function acceptRecommendation(",
+        1,
+    )[1].split("async function loadTonight", 1)[0]
+    definite_failure = acceptance.split("if (!response.ok) {", 1)[1].split(
+        "const mission = payload.mission", 1
+    )[0]
+    incomplete = acceptance.split("if (!validAcceptedMission) {", 1)[1].split(
+        "return;\n    }", 1
+    )[0]
+    success = acceptance.split("if (!validAcceptedMission) {", 1)[1].split(
+        "return;\n    }", 1
+    )[1].split("state.acceptedMission = {", 1)[0]
+    uncertain = acceptance.split("} catch (_error) {", 1)[1].split(
+        "} finally {", 1
+    )[0]
+
+    assert "clearPendingAcceptanceAttempt()" in definite_failure
+    assert "clearPendingAcceptanceAttempt()" in success
+    assert "clearPendingAcceptanceAttempt()" not in incomplete
+    assert "clearPendingAcceptanceAttempt()" not in uncertain
+    assert "showUnresolvedAcceptance" in incomplete
+    assert "showUnresolvedAcceptance" in uncertain
+    assert 'code === "acceptance_request_conflict"' in script
+
+
+def test_malformed_storage_fails_closed_and_storage_is_never_mission_authority():
+    script = make_client().get("/ui/app.js").text
+    parser = script.split(
+        "function parsePendingAcceptance(raw)",
+        1,
+    )[1].split("function persistPendingAcceptanceAttempt", 1)[0]
+    restore = script.split(
+        "function restorePendingAcceptanceAttempt()",
+        1,
+    )[1].split("function showUnresolvedAcceptance", 1)[0]
+
+    assert "JSON.parse(raw)" in parser
+    assert "Object.keys" in parser
+    assert "return null" in parser
+    assert "pendingAcceptanceStorageInvalid = true" in restore
+    assert "localStorage.removeItem" not in restore
+    assert "renderMission" not in parser + restore
+    assert "acceptedMission" not in parser + restore
+    assert "selection_id" not in parser
+    assert "mission_id" not in parser
 
 
 def test_availability_uses_read_only_site_timezone_and_local_wall_clock_transport():

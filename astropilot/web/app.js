@@ -19,6 +19,9 @@ const ui = Object.freeze({
   recommendationSubmit: document.querySelector("#request-recommendation"),
   loading: document.querySelector("#loading-state"),
   message: document.querySelector("#message-state"),
+  pendingAcceptance: document.querySelector("#pending-acceptance-state"),
+  pendingAcceptanceMessage: document.querySelector("#pending-acceptance-message"),
+  retryPendingAcceptance: document.querySelector("#retry-pending-acceptance"),
   decision: document.querySelector("#decision"),
   refresh: document.querySelector("#refresh"),
   editConfiguration: document.querySelector("#edit-configuration"),
@@ -46,6 +49,7 @@ const state = {
   currentDecision: null,
   acceptedMission: null,
   pendingAcceptanceAttempt: null,
+  pendingAcceptanceStorageInvalid: false,
   acceptingRecommendation: false,
   acceptanceBlocked: false,
   savingConfiguration: false,
@@ -53,6 +57,9 @@ const state = {
   configurationErrorCode: null,
   recoveringConfiguration: false,
 };
+
+const PENDING_ACCEPTANCE_STORAGE_KEY = "astropilot.pendingAcceptance";
+const PENDING_ACCEPTANCE_STORAGE_VERSION = 1;
 
 const wizardStates = Object.freeze(["site", "equipment", "projects", "review"]);
 
@@ -65,6 +72,7 @@ function setView(view) {
   ui.availability.hidden = view !== "availability";
   ui.loading.hidden = view !== "loading_recommendation";
   ui.message.hidden = true;
+  ui.pendingAcceptance.hidden = view !== "unresolved_acceptance";
   ui.decision.hidden = true;
   ui.refresh.hidden = view !== "recommendation";
   ui.editAvailability.hidden = view !== "recommendation";
@@ -403,6 +411,95 @@ function sameAcceptanceIntent(attempt, intent) {
     && attempt.selected_catalog_key === intent.selected_catalog_key;
 }
 
+function parsePendingAcceptance(raw) {
+  let stored;
+  try {
+    stored = JSON.parse(raw);
+  } catch (_error) {
+    return null;
+  }
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) return null;
+  const storedKeys = Object.keys(stored).sort();
+  if (storedKeys.join(",") !== "request,state,version") return null;
+  if (
+    stored.version !== PENDING_ACCEPTANCE_STORAGE_VERSION
+    || stored.state !== "unresolved"
+    || !stored.request
+    || typeof stored.request !== "object"
+    || Array.isArray(stored.request)
+  ) return null;
+  const request = stored.request;
+  const requestKeys = Object.keys(request).sort();
+  if (
+    requestKeys.join(",") !== "acceptance_request_id,decision_id,selected_at,selected_catalog_key,source"
+  ) return null;
+  const identityPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+  const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+  if (
+    !identityPattern.test(request.acceptance_request_id)
+    || !identityPattern.test(request.decision_id)
+    || !["primary_recommendation", "alternative"].includes(request.source)
+    || typeof request.selected_catalog_key !== "string"
+    || !request.selected_catalog_key.trim()
+    || !timestampPattern.test(request.selected_at)
+    || !Number.isFinite(Date.parse(request.selected_at))
+    || new Date(request.selected_at).toISOString() !== request.selected_at
+  ) return null;
+  return Object.freeze({
+    acceptance_request_id: request.acceptance_request_id,
+    decision_id: request.decision_id,
+    source: request.source,
+    selected_catalog_key: request.selected_catalog_key,
+    selected_at: request.selected_at,
+  });
+}
+
+function persistPendingAcceptanceAttempt(attempt) {
+  localStorage.setItem(PENDING_ACCEPTANCE_STORAGE_KEY, JSON.stringify({
+    version: PENDING_ACCEPTANCE_STORAGE_VERSION,
+    state: "unresolved",
+    request: attempt,
+  }));
+}
+
+function restorePendingAcceptanceAttempt() {
+  let raw;
+  try {
+    raw = localStorage.getItem(PENDING_ACCEPTANCE_STORAGE_KEY);
+  } catch (_error) {
+    state.pendingAcceptanceStorageInvalid = true;
+    return true;
+  }
+  if (raw === null) return false;
+  const attempt = parsePendingAcceptance(raw);
+  if (!attempt) {
+    state.pendingAcceptanceStorageInvalid = true;
+    return true;
+  }
+  state.pendingAcceptanceAttempt = Object.freeze(attempt);
+  return true;
+}
+
+function showUnresolvedAcceptance({ malformed = state.pendingAcceptanceStorageInvalid } = {}) {
+  ui.pendingAcceptanceMessage.textContent = malformed
+    ? "La sélection en attente ne peut pas être relue de façon sûre. AstroPilot bloque toute nouvelle sélection pour éviter un doublon."
+    : "Le résultat de votre sélection n’a pas pu être confirmé. AstroPilot doit vérifier cette sélection avant de poursuivre.";
+  ui.retryPendingAcceptance.disabled = malformed || state.acceptingRecommendation;
+  setView("unresolved_acceptance");
+}
+
+function hasUnresolvedAcceptance() {
+  return Boolean(
+    state.pendingAcceptanceAttempt || state.pendingAcceptanceStorageInvalid
+  );
+}
+
+function guardUnresolvedAcceptance() {
+  if (!hasUnresolvedAcceptance()) return false;
+  showUnresolvedAcceptance();
+  return true;
+}
+
 function acceptanceAttempt(intent) {
   const existing = state.pendingAcceptanceAttempt;
   if (existing) {
@@ -416,12 +513,15 @@ function acceptanceAttempt(intent) {
     selected_catalog_key: intent.selected_catalog_key,
     selected_at: new Date().toISOString(),
   });
+  persistPendingAcceptanceAttempt(attempt);
   state.pendingAcceptanceAttempt = attempt;
   return attempt;
 }
 
 function clearPendingAcceptanceAttempt() {
+  localStorage.removeItem(PENDING_ACCEPTANCE_STORAGE_KEY);
   state.pendingAcceptanceAttempt = null;
+  state.pendingAcceptanceStorageInvalid = false;
 }
 
 function resetMissionPresentation() {
@@ -438,7 +538,6 @@ function resetMissionPresentation() {
 
 function clearAcceptedMission() {
   state.acceptedMission = null;
-  clearPendingAcceptanceAttempt();
   state.acceptingRecommendation = false;
   state.acceptanceBlocked = false;
   showAcceptanceStatus("");
@@ -787,6 +886,7 @@ function invalidateAvailabilityForSiteChange(previousSite, nextSite) {
 }
 
 async function loadConfiguration({ afterConflict = false } = {}) {
+  if (guardUnresolvedAcceptance()) return;
   setView("loading_configuration");
   try {
     const response = await fetch("/v1/configuration");
@@ -1155,16 +1255,33 @@ function acceptanceError(code, status) {
   return ["L’acceptation n’a pas pu être confirmée. La recommandation reste affichée.", false];
 }
 
+async function retryPendingAcceptance() {
+  const attempt = state.pendingAcceptanceAttempt;
+  if (!attempt || state.pendingAcceptanceStorageInvalid) {
+    showUnresolvedAcceptance();
+    return;
+  }
+  await acceptRecommendation({
+    source: attempt.source,
+    selectedCatalogKey: attempt.selected_catalog_key,
+    expectedDecisionId: attempt.decision_id,
+    triggerButton: ui.retryPendingAcceptance,
+    selectedTarget: attempt.selected_catalog_key,
+    attemptOverride: attempt,
+  });
+}
+
 async function acceptRecommendation({
   source,
   selectedCatalogKey,
   expectedDecisionId,
   triggerButton,
   selectedTarget,
+  attemptOverride = null,
 }) {
   if (state.acceptingRecommendation) return;
   const decision = state.currentDecision;
-  if (state.acceptedMission) {
+  if (!attemptOverride && state.acceptedMission) {
     if (
       state.acceptedMission.decision_id === expectedDecisionId
       && state.acceptedMission.source === source
@@ -1175,29 +1292,40 @@ async function acceptRecommendation({
     }
     return;
   }
-  if (state.acceptanceBlocked) return;
-  if (!decision || state.currentDecision?.decision_id !== expectedDecisionId) {
+  if (!attemptOverride) {
+    if (state.acceptanceBlocked) return;
+    if (!decision || state.currentDecision?.decision_id !== expectedDecisionId) {
+      return;
+    }
+    const validPrimary = source === "primary_recommendation"
+      && selectedCatalogKey === decision.catalog_key
+      && decision.target_decision_status === "recommended";
+    const validAlternative = source === "alternative"
+      && (decision.alternatives || []).some((alternative) => (
+        alternative.catalog_key === selectedCatalogKey
+        && alternative.target_decision_status === "viable"
+      ));
+    if (!validPrimary && !validAlternative) {
+      state.acceptanceBlocked = true;
+      showAcceptanceStatus("Cette cible n’est plus sélectionnable. Actualisez la recommandation.", { error: true });
+      disableAcceptanceControls(true);
+      return;
+    }
+  }
+  let attempt;
+  try {
+    attempt = attemptOverride || acceptanceAttempt({
+      decision_id: expectedDecisionId,
+      source,
+      selected_catalog_key: selectedCatalogKey,
+    });
+  } catch (_storageError) {
+    showAcceptanceStatus(
+      "La sélection ne peut pas être enregistrée de façon sûre dans ce navigateur. Aucun envoi n’a été effectué.",
+      { error: true },
+    );
     return;
   }
-  const validPrimary = source === "primary_recommendation"
-    && selectedCatalogKey === decision.catalog_key
-    && decision.target_decision_status === "recommended";
-  const validAlternative = source === "alternative"
-    && (decision.alternatives || []).some((alternative) => (
-      alternative.catalog_key === selectedCatalogKey
-      && alternative.target_decision_status === "viable"
-    ));
-  if (!validPrimary && !validAlternative) {
-    state.acceptanceBlocked = true;
-    showAcceptanceStatus("Cette cible n’est plus sélectionnable. Actualisez la recommandation.", { error: true });
-    disableAcceptanceControls(true);
-    return;
-  }
-  const attempt = acceptanceAttempt({
-    decision_id: expectedDecisionId,
-    source,
-    selected_catalog_key: selectedCatalogKey,
-  });
   if (!attempt) {
     showAcceptanceStatus(
       "Une acceptation précédente reste à confirmer. Réessayez la même cible avant d’en choisir une autre.",
@@ -1208,7 +1336,7 @@ async function acceptRecommendation({
   }
   state.acceptingRecommendation = true;
   disableAcceptanceControls(true);
-  triggerButton.setAttribute("aria-busy", "true");
+  triggerButton?.setAttribute("aria-busy", "true");
   showAcceptanceStatus("Enregistrement de votre choix et création de la mission…");
 
   try {
@@ -1218,13 +1346,18 @@ async function acceptRecommendation({
       body: JSON.stringify(attempt),
     });
     const payload = await response.json().catch(() => ({}));
-    if (state.currentDecision?.decision_id !== expectedDecisionId) return;
 
     if (!response.ok) {
       clearPendingAcceptanceAttempt();
       const [message, blocked] = acceptanceError(payload?.detail?.code, response.status);
       state.acceptanceBlocked = blocked;
-      showAcceptanceStatus(message, { error: true });
+      if (decision?.decision_id === expectedDecisionId) {
+        show("decision");
+        showAcceptanceStatus(message, { error: true });
+      } else {
+        await loadConfiguration();
+        showAvailabilityError(message);
+      }
       return;
     }
     const mission = payload.mission;
@@ -1236,10 +1369,7 @@ async function acceptRecommendation({
       && payload.selection_id === mission.selection_id
       && payload.decision_id === mission.decision_id;
     if (!validAcceptedMission) {
-      showAcceptanceStatus(
-        "La réponse d’acceptation est incomplète. Son résultat ne peut pas être confirmé ; réessayez la même acceptation.",
-        { error: true },
-      );
+      showUnresolvedAcceptance();
       return;
     }
     clearPendingAcceptanceAttempt();
@@ -1251,29 +1381,37 @@ async function acceptRecommendation({
       source,
       mission,
     };
-    showAcceptanceStatus(
-      source === "alternative"
-        ? `AstroPilot recommandait ${decision.target || decision.catalog_key}. Vous avez choisi ${selectedTarget}.`
-        : "Mission enregistrée.",
-    );
+    if (decision?.decision_id === expectedDecisionId) {
+      show("decision");
+      showAcceptanceStatus(
+        source === "alternative"
+          ? `AstroPilot recommandait ${decision.target || decision.catalog_key}. Vous avez choisi ${selectedTarget}.`
+          : "Mission enregistrée.",
+      );
+    } else {
+      showMessage(
+        "Mission enregistrée",
+        "La réponse du serveur confirme votre sélection et votre mission.",
+        { kicker: "Sélection confirmée", retry: false },
+      );
+    }
     renderMission(mission);
     ui.mission.showModal();
   } catch (_error) {
-    if (state.currentDecision?.decision_id !== expectedDecisionId) return;
-    showAcceptanceStatus(
-      "La réponse du serveur n’a pas été reçue. Le statut de l’acceptation ne peut pas être confirmé ; aucun nouvel essai automatique n’a été lancé.",
-      { error: true },
-    );
+    showUnresolvedAcceptance();
   } finally {
-    if (state.currentDecision?.decision_id === expectedDecisionId) {
-      state.acceptingRecommendation = false;
-      triggerButton.removeAttribute("aria-busy");
+    state.acceptingRecommendation = false;
+    triggerButton?.removeAttribute("aria-busy");
+    if (hasUnresolvedAcceptance()) {
+      showUnresolvedAcceptance();
+    } else if (state.currentDecision?.decision_id === expectedDecisionId) {
       restoreAcceptanceControls();
     }
   }
 }
 
 async function loadTonight(availability) {
+  if (guardUnresolvedAcceptance()) return;
   if (!availability) {
     showAvailabilityError("Choisissez votre disponibilité avant de préparer la nuit.");
     setView("availability");
@@ -1395,6 +1533,7 @@ for (const input of document.querySelectorAll('input[name="equipment-kind"]')) {
 }
 
 function editConfiguration() {
+  if (guardUnresolvedAcceptance()) return;
   state.configurationDraft = draftFromConfiguration(state.configuration);
   prefillConfiguration();
   showFormError("");
@@ -1408,15 +1547,21 @@ ui.configurationRecoveryCancel.addEventListener("click", hideRecoveryConfirmatio
 ui.configurationRecoveryConfirm.addEventListener("click", recoverConfiguration);
 ui.editConfiguration.addEventListener("click", editConfiguration);
 document.querySelector("#availability-edit-configuration").addEventListener("click", editConfiguration);
-ui.editAvailability.addEventListener("click", () => setView("availability"));
+ui.editAvailability.addEventListener("click", () => {
+  if (guardUnresolvedAcceptance()) return;
+  setView("availability");
+});
 ui.refresh.addEventListener("click", () => {
+  if (guardUnresolvedAcceptance()) return;
   if (state.availability) loadTonight(state.availability);
   else setView("availability");
 });
 ui.retry.addEventListener("click", () => {
+  if (guardUnresolvedAcceptance()) return;
   if (state.availability) loadTonight(state.availability);
   else setView("availability");
 });
+ui.retryPendingAcceptance.addEventListener("click", retryPendingAcceptance);
 
 for (const input of document.querySelectorAll('input[name="availability-mode"]')) {
   input.addEventListener("change", updateAvailabilityFields);
@@ -1424,6 +1569,7 @@ for (const input of document.querySelectorAll('input[name="availability-mode"]')
 
 ui.availabilityForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (guardUnresolvedAcceptance()) return;
   if (state.requestingRecommendation) return;
   try {
     const availability = collectAvailabilityPayload();
@@ -1469,4 +1615,5 @@ ui.missionBack.addEventListener("click", () => ui.mission.close());
 ui.mission.addEventListener("click", (event) => {
   if (event.target === ui.mission) ui.mission.close();
 });
-loadConfiguration();
+if (restorePendingAcceptanceAttempt()) showUnresolvedAcceptance();
+else loadConfiguration();
