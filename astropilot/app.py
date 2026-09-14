@@ -110,7 +110,12 @@ from decision.validation.weather_window_coverage import (
     WeatherWindowCoverageError,
     validate_selected_window_weather_coverage,
 )
-from decision.location.location_time import LocationTimeError
+from decision.location.location_time import (
+    LocalWallTimeError,
+    LocationTimeError,
+    LocationTimeResolver,
+    normalize_local_wall_time,
+)
 
 
 class LocationRequest(BaseModel):
@@ -223,6 +228,7 @@ class ConfigurationSiteModel(BaseModel):
     latitude: float
     longitude: float
     bortle: int
+    timezone: str
 
 
 class ConfigurationResponse(BaseModel):
@@ -241,18 +247,74 @@ class SessionAvailabilityRequest(BaseModel):
     mode: SessionAvailabilityMode
     start: datetime | None = None
     end: datetime | None = None
+    start_local: str | None = None
+    end_local: str | None = None
     duration: timedelta | None = None
 
-    def to_domain(self) -> SessionAvailability:
+    @property
+    def has_local_wall_time(self) -> bool:
+        return self.start_local is not None or self.end_local is not None
+
+    def to_domain(self, *, site_zone=None) -> SessionAvailability:
+        if self.has_local_wall_time:
+            if self.start is not None or self.end is not None:
+                raise LocalWallTimeError(
+                    "session_availability_mixed_time_contract"
+                )
+            supplied_fields = {
+                name
+                for name, value in (
+                    ("start_local", self.start_local),
+                    ("end_local", self.end_local),
+                    ("duration", self.duration),
+                )
+                if value is not None
+            }
+            required_fields = {
+                SessionAvailabilityMode.ALL_NIGHT: set(),
+                SessionAvailabilityMode.DURATION: {"duration"},
+                SessionAvailabilityMode.START_AND_DURATION: {
+                    "start_local",
+                    "duration",
+                },
+                SessionAvailabilityMode.UNTIL: {"end_local"},
+                SessionAvailabilityMode.FIXED_WINDOW: {
+                    "start_local",
+                    "end_local",
+                },
+            }[self.mode]
+            if supplied_fields != required_fields:
+                raise LocalWallTimeError(
+                    "invalid_session_availability_fields"
+                )
+            if site_zone is None:
+                raise LocationTimeError("timezone_not_found")
+            start = (
+                normalize_local_wall_time(self.start_local, site_zone)
+                if self.start_local is not None
+                else None
+            )
+            end = (
+                normalize_local_wall_time(self.end_local, site_zone)
+                if self.end_local is not None
+                else None
+            )
+        else:
+            # Transitional compatibility for the aware start/end transport;
+            # Beta-2a2 moves the web UI to start_local/end_local.
+            start = self.start
+            end = self.end
         return SessionAvailability(
             mode=self.mode,
-            start=self.start,
-            end=self.end,
+            start=start,
+            end=end,
             duration=self.duration,
         )
 
     @model_validator(mode="after")
     def validate_domain_contract(self):
+        if self.has_local_wall_time:
+            return self
         try:
             self.to_domain()
         except (TypeError, ValueError) as exc:
@@ -1206,6 +1268,10 @@ def _configuration_projection(profile: dict | None) -> ConfigurationResponse:
         for project_id, project in profile.get("projects", {}).items()
     }
     available_ids = profile.get("available_equipment", [])
+    site_timezone = LocationTimeResolver.resolve(
+        location["latitude"],
+        location["longitude"],
+    ).timezone_name
     return ConfigurationResponse(
         configured=True,
         profile_revision=profile["profile_revision"],
@@ -1214,6 +1280,7 @@ def _configuration_projection(profile: dict | None) -> ConfigurationResponse:
             latitude=location["latitude"],
             longitude=location["longitude"],
             bortle=bortle,
+            timezone=site_timezone,
         ),
         active_equipment_id=profile.get("active_equipment"),
         available_equipment=[
@@ -1355,6 +1422,14 @@ def create_app(
             if not profile_path.exists():
                 return _configuration_projection(None)
             return _configuration_projection(load_user_profile())
+        except LocationTimeError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": exc.code,
+                    "message": "The saved site timezone could not be resolved.",
+                },
+            ) from exc
         except UserProfileError as exc:
             raise HTTPException(
                 status_code=503,
@@ -1390,6 +1465,10 @@ def create_app(
                 raise ProfileRevisionConflictError(
                     "profile_revision_conflict"
                 )
+            LocationTimeResolver.resolve(
+                request.site.latitude,
+                request.site.longitude,
+            )
             profile = create_or_replace_user_configuration(
                 _configuration_candidate(
                     request,
@@ -1406,6 +1485,14 @@ def create_app(
                     "message": (
                         "The configuration changed. Reload it before saving."
                     ),
+                },
+            ) from exc
+        except LocationTimeError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": exc.code,
+                    "message": "The site timezone could not be resolved.",
                 },
             ) from exc
         except UserProfileError as exc:
@@ -1562,21 +1649,52 @@ def create_app(
         reference_time_utc = clock()
         try:
             profile = dict(profile_provider())
-            inputs = resolve_tonight_inputs(
+            requested_location = (
+                request.location.model_dump()
+                if request.location is not None
+                else None
+            )
+            preliminary_inputs = resolve_tonight_inputs(
                 profile,
-                location=(
-                    request.location.model_dump()
-                    if request.location is not None
-                    else None
-                ),
+                location=requested_location,
                 bortle=request.bortle,
                 equipment=request.equipment,
-                availability=(
-                    request.availability.to_domain()
-                    if request.availability is not None
-                    else None
-                ),
+                availability=None,
             )
+            availability = None
+            if request.availability is not None:
+                site_zone = None
+                if request.availability.has_local_wall_time:
+                    site_zone = LocationTimeResolver.resolve(
+                        preliminary_inputs.location["latitude"],
+                        preliminary_inputs.location["longitude"],
+                    ).zone
+                availability = request.availability.to_domain(
+                    site_zone=site_zone
+                )
+            inputs = resolve_tonight_inputs(
+                profile,
+                location=requested_location,
+                bortle=request.bortle,
+                equipment=request.equipment,
+                availability=availability,
+            )
+        except LocalWallTimeError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": exc.code,
+                    "message": "The local session availability is invalid.",
+                },
+            ) from exc
+        except LocationTimeError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": exc.code,
+                    "message": "The location timezone could not be resolved.",
+                },
+            ) from exc
         except UserProfileError:
             return JSONResponse(
                 status_code=503,
@@ -1598,6 +1716,16 @@ def create_app(
                     ),
                 },
             ) from exc
+        except ValueError as exc:
+            if str(exc).startswith("session_availability_"):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": str(exc),
+                        "message": "The local session availability is invalid.",
+                    },
+                ) from exc
+            raise
         location = inputs.location
         profile["location"] = location
         effective_bortle = inputs.bortle

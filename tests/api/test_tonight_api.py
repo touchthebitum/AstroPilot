@@ -316,6 +316,153 @@ def test_tonight_maps_explicit_availability_to_domain(payload, expected):
     assert isinstance(evaluation_calls[0]["availability"], SessionAvailability)
 
 
+@pytest.mark.parametrize(
+    ("availability", "expected"),
+    [
+        (
+            {
+                "mode": "start_and_duration",
+                "start_local": "2026-09-01T22:00",
+                "duration": "PT90M",
+            },
+            SessionAvailability(
+                SessionAvailabilityMode.START_AND_DURATION,
+                start=datetime.fromisoformat("2026-09-01T22:00:00-04:00"),
+                duration=timedelta(minutes=90),
+            ),
+        ),
+        (
+            {"mode": "until", "end_local": "2026-09-02T02:00"},
+            SessionAvailability(
+                SessionAvailabilityMode.UNTIL,
+                end=datetime.fromisoformat("2026-09-02T02:00:00-04:00"),
+            ),
+        ),
+        (
+            {
+                "mode": "fixed_window",
+                "start_local": "2026-09-01T22:00",
+                "end_local": "2026-09-02T02:00",
+            },
+            SessionAvailability(
+                SessionAvailabilityMode.FIXED_WINDOW,
+                start=datetime.fromisoformat("2026-09-01T22:00:00-04:00"),
+                end=datetime.fromisoformat("2026-09-02T02:00:00-04:00"),
+            ),
+        ),
+    ],
+)
+def test_tonight_normalizes_local_availability_in_the_site_timezone(
+    availability,
+    expected,
+):
+    evaluation_calls = []
+    profile = valid_profile()
+    profile["location"] = {
+        "name": "New York",
+        "latitude": 40.7128,
+        "longitude": -74.0060,
+    }
+
+    class Service:
+        def evaluate(self, **kwargs):
+            evaluation_calls.append(kwargs)
+            return make_result()
+
+    app = create_app(
+        service_factory=lambda: Service(),
+        weather_provider=lambda lat, lon: DEFAULT_WEATHER,
+        profile_provider=lambda: profile,
+        clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
+    )
+
+    response = TestClient(app).post(
+        "/v1/tonight",
+        json={"availability": availability},
+    )
+
+    assert response.status_code == 200
+    assert evaluation_calls[0]["availability"] == expected
+
+
+@pytest.mark.parametrize(
+    ("availability", "expected_code"),
+    [
+        (
+            {
+                "mode": "start_and_duration",
+                "start_local": "2026-03-08T02:30",
+                "duration": "PT1H",
+            },
+            "session_availability_local_time_nonexistent",
+        ),
+        (
+            {"mode": "until", "end_local": "2026-11-01T01:30"},
+            "session_availability_local_time_ambiguous",
+        ),
+        (
+            {"mode": "until", "end_local": "2026-09-01T22:00:00"},
+            "session_availability_local_datetime_invalid",
+        ),
+        (
+            {
+                "mode": "until",
+                "end": "2026-09-02T02:00:00-04:00",
+                "end_local": "2026-09-02T02:00",
+            },
+            "session_availability_mixed_time_contract",
+        ),
+    ],
+)
+def test_tonight_rejects_invalid_local_availability_fail_closed(
+    availability,
+    expected_code,
+):
+    profile = valid_profile()
+    profile["location"] = {
+        "name": "New York",
+        "latitude": 40.7128,
+        "longitude": -74.0060,
+    }
+    app = create_app(
+        service_factory=lambda: pytest.fail("service must not be called"),
+        weather_provider=lambda lat, lon: pytest.fail("weather must not be called"),
+        profile_provider=lambda: profile,
+    )
+
+    response = TestClient(app).post(
+        "/v1/tonight",
+        json={"availability": availability},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == expected_code
+
+
+def test_fixed_local_window_order_is_checked_after_site_normalization():
+    app = create_app(
+        service_factory=lambda: pytest.fail("service must not be called"),
+        weather_provider=lambda lat, lon: pytest.fail("weather must not be called"),
+        profile_provider=valid_profile,
+    )
+
+    response = TestClient(app).post(
+        "/v1/tonight",
+        json={
+            "availability": {
+                "mode": "fixed_window",
+                "start_local": "2026-09-02T02:00",
+                "end_local": "2026-09-01T22:00",
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == (
+        "session_availability_end_must_follow_start"
+    )
+
+
 def test_tonight_omitted_availability_remains_none_through_service_call():
     evaluation_calls = []
 

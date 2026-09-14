@@ -3,7 +3,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from decision.location.location_time import LocationTimeError, LocationTimeResolver
+from decision.location.location_time import (
+    LocalWallTimeError,
+    LocationTimeError,
+    LocationTimeResolver,
+    normalize_local_wall_time,
+)
 from decision.engines.future_opportunity_engine import FutureOpportunityEngine
 from decision.weather.weather_ingress import (
     REQUIRED_HOURLY_UNITS,
@@ -49,6 +54,50 @@ def test_unresolved_valid_coordinates_fail_closed(monkeypatch):
 
     with pytest.raises(LocationTimeError, match="timezone_not_found"):
         LocationTimeResolver.resolve(0.0, 0.0)
+
+
+@pytest.mark.parametrize(
+    ("timezone_name", "local_value", "expected"),
+    [
+        (
+            "Europe/Zurich",
+            "2026-09-01T22:00",
+            "2026-09-01T22:00:00+02:00",
+        ),
+        (
+            "America/New_York",
+            "2026-09-01T22:00",
+            "2026-09-01T22:00:00-04:00",
+        ),
+    ],
+)
+def test_local_wall_time_normalizes_in_the_explicit_site_zone(
+    timezone_name,
+    local_value,
+    expected,
+):
+    normalized = normalize_local_wall_time(local_value, ZoneInfo(timezone_name))
+
+    assert normalized.isoformat() == expected
+
+
+@pytest.mark.parametrize(
+    ("local_value", "expected_code"),
+    [
+        ("2026-03-08T02:30", "session_availability_local_time_nonexistent"),
+        ("2026-11-01T01:30", "session_availability_local_time_ambiguous"),
+        ("2026-09-01T22:00:00", "session_availability_local_datetime_invalid"),
+        ("2026-09-01T22:00-04:00", "session_availability_local_datetime_invalid"),
+    ],
+)
+def test_invalid_or_non_unique_local_wall_time_fails_closed(
+    local_value,
+    expected_code,
+):
+    with pytest.raises(LocalWallTimeError) as raised:
+        normalize_local_wall_time(local_value, ZoneInfo("America/New_York"))
+
+    assert raised.value.code == expected_code
 
 
 def test_utc_instants_convert_across_spring_dst_without_ambiguity():
