@@ -15,11 +15,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 from astropilot.user_profile import (
+    ProfileRecoveryConflictError,
     ProfileRevisionConflictError,
     UserProfileError,
     create_or_replace_user_configuration,
     get_user_data_dir,
     load_user_profile,
+    quarantine_corrupt_user_profile,
     resolve_equipment_definition,
 )
 from decision.models.candidate import CandidateProvenance
@@ -204,6 +206,10 @@ class ConfigurationWriteRequest(BaseModel):
     equipment: EquipmentConfigurationRequest
     projects: dict[str, ProjectConfigurationModel]
     expected_revision: int | None = Field(default=None, ge=0)
+
+
+class ConfigurationRecoveryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
 
 class EquipmentConfigurationModel(BaseModel):
@@ -1444,6 +1450,37 @@ def create_app(
                 detail={
                     "code": "configuration_persistence_error",
                     "message": "The configuration could not be read.",
+                },
+            ) from exc
+
+    @application.post(
+        "/v1/configuration/recover",
+        response_model=ConfigurationResponse,
+        summary="Recover from an unreadable saved configuration",
+    )
+    def recover_configuration(
+        recovery_request: ConfigurationRecoveryRequest | None = None,
+    ):
+        del recovery_request
+        try:
+            quarantine_corrupt_user_profile(
+                validate_configuration=_configuration_projection,
+            )
+            return _configuration_projection(None)
+        except (ProfileRecoveryConflictError, LocationTimeError) as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "configuration_recovery_conflict",
+                    "message": "The active configuration is no longer corrupt.",
+                },
+            ) from exc
+        except OSError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "configuration_recovery_unavailable",
+                    "message": "The configuration could not be recovered.",
                 },
             ) from exc
 

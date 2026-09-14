@@ -1,7 +1,9 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from contextlib import contextmanager
 from threading import Barrier
+from types import SimpleNamespace
 
 import pytest
 
@@ -496,3 +498,143 @@ def test_cas_uses_unique_temporary_files_and_cleans_them(
     assert len(set(temporary_names)) == 2
     assert user_profile.load_user_profile()["profile_revision"] == 2
     assert not list(tmp_path.glob(".user_profile.*.tmp"))
+
+
+def test_corrupt_profile_is_quarantined_byte_for_byte_without_touching_other_data(
+    tmp_path,
+    monkeypatch,
+):
+    corrupt_bytes = b'{"broken": "exact bytes" trailing}'
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_bytes(corrupt_bytes)
+    sentinel = tmp_path / "decision_lineage" / "sentinel.json"
+    sentinel.parent.mkdir()
+    sentinel.write_bytes(b"lineage stays exact")
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    result = user_profile.quarantine_corrupt_user_profile(
+        validate_configuration=lambda profile: profile,
+    )
+
+    assert result == "quarantined"
+    assert not profile_path.exists()
+    quarantines = list(tmp_path.glob(".user_profile.corrupt.*.json"))
+    assert len(quarantines) == 1
+    assert quarantines[0].read_bytes() == corrupt_bytes
+    assert sentinel.read_bytes() == b"lineage stays exact"
+
+
+def test_valid_profile_is_protected_from_corrupt_recovery(tmp_path, monkeypatch):
+    profile_path = tmp_path / "user_profile.json"
+    write_profile(profile_path)
+    before = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    with pytest.raises(user_profile.ProfileRecoveryConflictError):
+        user_profile.quarantine_corrupt_user_profile(
+            validate_configuration=lambda profile: profile,
+        )
+
+    assert profile_path.read_bytes() == before
+    assert not list(tmp_path.glob(".user_profile.corrupt.*.json"))
+
+
+def test_profile_repaired_before_locked_revalidation_is_preserved(
+    tmp_path,
+    monkeypatch,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text("{broken", encoding="utf-8")
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+    original_lock = user_profile._profile_write_lock
+    repaired = {}
+
+    @contextmanager
+    def repair_before_lock_yields(data_dir):
+        with original_lock(data_dir):
+            write_profile(profile_path)
+            repaired["bytes"] = profile_path.read_bytes()
+            yield
+
+    monkeypatch.setattr(
+        user_profile,
+        "_profile_write_lock",
+        repair_before_lock_yields,
+    )
+
+    with pytest.raises(user_profile.ProfileRecoveryConflictError):
+        user_profile.quarantine_corrupt_user_profile(
+            validate_configuration=lambda profile: profile,
+        )
+
+    assert profile_path.read_bytes() == repaired["bytes"]
+    assert not list(tmp_path.glob(".user_profile.corrupt.*.json"))
+
+
+def test_quarantine_collision_generates_another_name(tmp_path, monkeypatch):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text("{broken", encoding="utf-8")
+    existing = tmp_path / ".user_profile.corrupt.collision.json"
+    existing.write_bytes(b"existing quarantine")
+    generated = iter(
+        [SimpleNamespace(hex="collision"), SimpleNamespace(hex="fresh")]
+    )
+    monkeypatch.setattr(user_profile, "uuid4", lambda: next(generated))
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    result = user_profile.quarantine_corrupt_user_profile(
+        validate_configuration=lambda profile: profile,
+    )
+
+    assert result == "quarantined"
+    assert existing.read_bytes() == b"existing quarantine"
+    assert (tmp_path / ".user_profile.corrupt.fresh.json").read_text(
+        encoding="utf-8"
+    ) == "{broken"
+
+
+def test_quarantine_rename_failure_preserves_active_profile(tmp_path, monkeypatch):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text("{private broken content", encoding="utf-8")
+    before = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        user_profile.Path,
+        "rename",
+        lambda *args: (_ for _ in ()).throw(OSError("private path detail")),
+    )
+
+    with pytest.raises(OSError, match="private path detail"):
+        user_profile.quarantine_corrupt_user_profile(
+            validate_configuration=lambda profile: profile,
+        )
+
+    assert profile_path.read_bytes() == before
+    assert not list(tmp_path.glob(".user_profile.corrupt.*.json"))
+
+
+def test_recovery_lock_failure_preserves_active_profile(tmp_path, monkeypatch):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text("{broken", encoding="utf-8")
+    before = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    @contextmanager
+    def unavailable_lock(data_dir):
+        del data_dir
+        raise OSError("private lock detail")
+        yield
+
+    monkeypatch.setattr(
+        user_profile,
+        "_profile_write_lock",
+        unavailable_lock,
+    )
+
+    with pytest.raises(OSError, match="private lock detail"):
+        user_profile.quarantine_corrupt_user_profile(
+            validate_configuration=lambda profile: profile,
+        )
+
+    assert profile_path.read_bytes() == before
+    assert not list(tmp_path.glob(".user_profile.corrupt.*.json"))
