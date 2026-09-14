@@ -310,6 +310,156 @@ def test_corrupt_profile_fails_closed_without_path_disclosure(client, tmp_path):
     assert str(tmp_path) not in response.text
 
 
+def test_explicit_recovery_quarantines_invalid_json_and_restores_first_run(
+    client,
+    tmp_path,
+):
+    profile_path = tmp_path / "user_profile.json"
+    original = b'{"private broken bytes":'
+    profile_path.write_bytes(original)
+
+    assert client.get("/v1/configuration").status_code == 503
+    assert profile_path.read_bytes() == original
+    assert not list(tmp_path.glob(".user_profile.corrupt.*.json"))
+
+    response = client.post("/v1/configuration/recover")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["configured"] is False
+    assert payload["profile_revision"] is None
+    assert payload["site"] is None
+    assert payload["active_equipment_id"] is None
+    assert payload["available_equipment"] == []
+    assert payload["projects"] == {}
+    assert payload["preset_equipment"]
+    assert not profile_path.exists()
+    quarantines = list(tmp_path.glob(".user_profile.corrupt.*.json"))
+    assert len(quarantines) == 1
+    assert quarantines[0].read_bytes() == original
+    assert client.get("/v1/configuration").json() == payload
+
+    retry = client.post("/v1/configuration/recover")
+
+    assert retry.status_code == 200
+    assert retry.json() == payload
+    assert quarantines[0].read_bytes() == original
+    assert list(tmp_path.glob(".user_profile.corrupt.*.json")) == quarantines
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        "[]",
+        '{"profile_revision": -1}',
+        '{"active_equipment": "missing", "available_equipment": [], "projects": {}}',
+    ],
+)
+def test_schema_corruption_uses_the_same_recovery_path(client, tmp_path, document):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(document, encoding="utf-8")
+
+    response = client.post("/v1/configuration/recover")
+
+    assert response.status_code == 200
+    assert response.json()["configured"] is False
+    assert not profile_path.exists()
+    assert len(list(tmp_path.glob(".user_profile.corrupt.*.json"))) == 1
+
+
+def test_projection_invalid_profile_is_recoverable(client, tmp_path):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "active_equipment": "samyang_183",
+                "available_equipment": ["samyang_183"],
+                "projects": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert client.get("/v1/configuration").json()["detail"]["code"] == (
+        "configuration_corrupt"
+    )
+    response = client.post("/v1/configuration/recover")
+
+    assert response.status_code == 200
+    assert response.json()["configured"] is False
+    assert not profile_path.exists()
+
+
+def test_recovery_refuses_a_valid_profile_without_mutation(client, tmp_path):
+    created = client.put("/v1/configuration", json=configuration_payload())
+    assert created.status_code == 200
+    profile_path = tmp_path / "user_profile.json"
+    before = profile_path.read_bytes()
+
+    response = client.post("/v1/configuration/recover")
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": {
+            "code": "configuration_recovery_conflict",
+            "message": "The active configuration is no longer corrupt.",
+        }
+    }
+    assert profile_path.read_bytes() == before
+    assert not list(tmp_path.glob(".user_profile.corrupt.*.json"))
+
+
+def test_recovery_without_an_active_profile_is_idempotent(client, tmp_path):
+    first = client.post("/v1/configuration/recover")
+    second = client.post("/v1/configuration/recover")
+
+    assert first.status_code == second.status_code == 200
+    assert first.json() == second.json()
+    assert first.json()["configured"] is False
+    assert not (tmp_path / "user_profile.json").exists()
+    assert not list(tmp_path.glob(".user_profile.corrupt.*.json"))
+
+
+def test_recovery_failure_is_controlled_and_preserves_private_details(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text("{broken", encoding="utf-8")
+
+    def unavailable(*args, **kwargs):
+        raise OSError(f"private failure at {profile_path}")
+
+    monkeypatch.setattr(
+        app_module,
+        "quarantine_corrupt_user_profile",
+        unavailable,
+    )
+
+    response = client.post("/v1/configuration/recover")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": {
+            "code": "configuration_recovery_unavailable",
+            "message": "The configuration could not be recovered.",
+        }
+    }
+    assert str(profile_path) not in response.text
+    assert "private failure" not in response.text
+    assert profile_path.read_text(encoding="utf-8") == "{broken"
+
+
+def test_recovery_request_rejects_client_supplied_fields(client):
+    response = client.post(
+        "/v1/configuration/recover",
+        json={"path": "private", "profile": {}},
+    )
+
+    assert response.status_code == 422
+
+
 def test_correct_revision_updates_once_and_stale_revision_preserves_newer_state(
     client,
 ):

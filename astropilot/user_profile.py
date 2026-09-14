@@ -5,6 +5,7 @@ import math
 import os
 import sys
 import tempfile
+from uuid import uuid4
 from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import date
@@ -21,6 +22,10 @@ class UserProfileError(Exception):
 
 
 class ProfileRevisionConflictError(UserProfileError):
+    pass
+
+
+class ProfileRecoveryConflictError(UserProfileError):
     pass
 
 
@@ -709,6 +714,38 @@ def _load_current_profile(path: Path) -> dict | None:
             f"(ligne {exc.lineno}, colonne {exc.colno})."
         ) from exc
     return validate_user_profile(profile, path)
+
+
+def quarantine_corrupt_user_profile(*, validate_configuration):
+    data_dir = get_user_data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    profile_path = data_dir / "user_profile.json"
+
+    with _profile_write_lock(data_dir):
+        try:
+            current = _load_current_profile(profile_path)
+        except UserProfileError:
+            pass
+        else:
+            if current is None:
+                return "absent"
+            try:
+                validate_configuration(current)
+            except UserProfileError:
+                pass
+            else:
+                raise ProfileRecoveryConflictError(
+                    "configuration_recovery_conflict"
+                )
+
+        while True:
+            quarantine_path = data_dir / (
+                f".user_profile.corrupt.{uuid4().hex}.json"
+            )
+            if not quarantine_path.exists():
+                break
+        profile_path.rename(quarantine_path)
+        return "quarantined"
 
 
 def save_user_profile(profile, *, expected_revision: int | None = None):
