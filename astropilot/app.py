@@ -1914,10 +1914,33 @@ def create_app(
             result.status is TonightStatus.AVAILABLE
             and isinstance(weather, WeatherSnapshot)
         ):
+            coverage_subject = result.mission
+            if coverage_subject is None:
+                recommendation = getattr(result, "recommendation", None)
+                opportunity = (
+                    recommendation.opportunity
+                    if recommendation is not None
+                    else None
+                )
+                night = getattr(result, "night", None) or {}
+                object_evaluations = night.get("object_evaluations", {})
+                primary_evaluation = (
+                    object_evaluations.get(opportunity.candidate.catalog_key)
+                    if opportunity is not None
+                    else None
+                )
+                if (
+                    isinstance(primary_evaluation, dict)
+                    and "window" in primary_evaluation
+                ):
+                    coverage_subject = _production_build_mission_input(
+                        primary_evaluation,
+                        profile=profile,
+                    )
             selected_window_covered = True
             try:
                 validate_selected_window_weather_coverage(
-                    result.mission,
+                    coverage_subject,
                     weather,
                 )
             except WeatherWindowCoverageError as exc:
