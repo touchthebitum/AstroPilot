@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import fcntl
 import os
 import sys
 import tempfile
-from contextlib import contextmanager
 from pathlib import Path
+
+from astropilot.file_lock import exclusive_file_lock
 
 from decision.acceptance_lineage_persistence import (
     AcceptanceRequestMapping,
@@ -32,16 +32,10 @@ class FileDecisionAcceptanceLineageStore:
         identity = validate_lineage_identity(decision_id, field="decision_id")
         return self._directory / f"{identity}.json"
 
-    @contextmanager
     def _locked(self):
-        self._directory.mkdir(parents=True, exist_ok=True)
-        lock_path = self._directory / ".decision_lineage.lock"
-        with lock_path.open("a+", encoding="utf-8") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        return exclusive_file_lock(
+            self._directory / ".decision_lineage.lock"
+        )
 
     def _load_path(self, path: Path) -> DecisionAcceptanceAggregate:
         try:
