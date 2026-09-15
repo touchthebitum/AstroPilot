@@ -1,5 +1,4 @@
 import copy
-import fcntl
 import json
 import math
 import os
@@ -7,12 +6,12 @@ import sys
 import tempfile
 from uuid import uuid4
 from collections.abc import Mapping
-from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
 from astropilot.catalog import CATALOG
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
+from astropilot.file_lock import exclusive_file_lock
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -691,15 +690,8 @@ def favorite_targets():
         .get("favorite_targets", ["galaxy", "nebula"])
     )
 
-@contextmanager
 def _profile_write_lock(data_dir: Path):
-    lock_path = data_dir / ".user_profile.lock"
-    with lock_path.open("a+", encoding="utf-8") as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    return exclusive_file_lock(data_dir / ".user_profile.lock")
 
 
 def _load_current_profile(path: Path) -> dict | None:
