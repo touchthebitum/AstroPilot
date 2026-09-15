@@ -1,6 +1,8 @@
+import pytest
 from fastapi.testclient import TestClient
 
-from astropilot.app import create_app
+import astropilot.app as app_module
+from astropilot.app import create_app, runtime_identity_payload
 
 
 def test_runtime_identity_is_exact_and_non_sensitive(tmp_path, monkeypatch):
@@ -47,3 +49,22 @@ def test_runtime_identity_has_controlled_development_build_fallback(monkeypatch)
 
     assert identity["version"] == "1.0.0b2"
     assert identity["build"] == "development"
+
+
+@pytest.mark.parametrize(
+    ("reported", "expected"),
+    (
+        ("AMD64", "x86_64"),
+        ("x86_64", "x86_64"),
+        ("arm64", "arm64"),
+        ("riscv64-test", "riscv64-test"),
+    ),
+)
+def test_runtime_architecture_is_canonical_and_unknown_values_pass_through(
+    monkeypatch,
+    reported,
+    expected,
+):
+    monkeypatch.setattr(app_module.platform, "machine", lambda: reported)
+
+    assert runtime_identity_payload()["architecture"] == expected
