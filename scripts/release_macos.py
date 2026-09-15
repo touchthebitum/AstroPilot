@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
+from tempfile import TemporaryDirectory
 import tomllib
 from typing import Callable, NamedTuple
+import zipfile
 
 from build_macos import artifact_name, build
 
@@ -42,6 +44,21 @@ def _run(
     if capture_output:
         options.update(capture_output=True, text=True)
     return runner(command, **options)
+
+
+def validate_release_zip(artifact: Path) -> None:
+    try:
+        with zipfile.ZipFile(artifact) as archive:
+            entries = tuple(archive.namelist())
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise RuntimeError("The release artifact is not a valid ZIP archive.") from exc
+
+    for entry in entries:
+        path = PurePosixPath(entry)
+        if "__MACOSX" in path.parts or path.name.startswith("._"):
+            raise RuntimeError(
+                f"The release artifact contains forbidden macOS metadata: {entry}"
+            )
 
 
 def release(
@@ -144,19 +161,64 @@ def release(
         _project_version(root),
         target_architecture,
     )
+    sidecar = artifact.with_suffix(artifact.suffix + ".sha256")
     artifact.unlink(missing_ok=True)
+    sidecar.unlink(missing_ok=True)
     _run(
         runner,
         [
             "ditto",
             "-c",
             "-k",
+            "--norsrc",
             "--keepParent",
             str(application),
             str(artifact),
         ],
         root=root,
     )
+    validate_release_zip(artifact)
+
+    with TemporaryDirectory(prefix="astropilot-release-") as temporary:
+        extraction_root = Path(temporary)
+        _run(
+            runner,
+            ["ditto", "-x", "-k", str(artifact), str(extraction_root)],
+            root=root,
+        )
+        extracted_application = extraction_root / application.name
+        if not extracted_application.is_dir():
+            raise RuntimeError("The release ZIP contains no AstroPilot application.")
+        _run(
+            runner,
+            [
+                "codesign",
+                "--verify",
+                "--deep",
+                "--strict",
+                "--verbose=4",
+                str(extracted_application),
+            ],
+            root=root,
+        )
+        _run(
+            runner,
+            ["xcrun", "stapler", "validate", str(extracted_application)],
+            root=root,
+        )
+        _run(
+            runner,
+            [
+                "spctl",
+                "--assess",
+                "--type",
+                "execute",
+                "--verbose=4",
+                str(extracted_application),
+            ],
+            root=root,
+        )
+
     checksum = _run(
         runner,
         ["shasum", "-a", "256", str(artifact)],
@@ -166,7 +228,6 @@ def release(
     digest = str(getattr(checksum, "stdout", "")).split(maxsplit=1)[0]
     if SHA256_PATTERN.fullmatch(digest) is None:
         raise RuntimeError("Could not determine the release artifact SHA-256.")
-    sidecar = artifact.with_suffix(artifact.suffix + ".sha256")
     sidecar.write_text(f"{digest}  {artifact.name}\n", encoding="utf-8")
     return ReleaseResult(artifact, sidecar, digest, submission_id)
 

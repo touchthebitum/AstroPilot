@@ -1,9 +1,11 @@
 from pathlib import Path
 import importlib.util
 import platform
+import subprocess
 import sys
 import tomllib
 from unittest.mock import ANY
+import zipfile
 
 import pytest
 
@@ -364,6 +366,13 @@ def test_release_pipeline_requires_verified_notarized_stapled_zip_and_sha256(
         calls.append((command, kwargs))
         if command[:4] == ["ditto", "-c", "-k", "--keepParent"]:
             Path(command[-1]).touch()
+        if command[:5] == [
+            "ditto", "-c", "-k", "--norsrc", "--keepParent"
+        ]:
+            with zipfile.ZipFile(command[-1], "w") as archive:
+                archive.writestr("AstroPilot.app/Contents/Info.plist", "plist")
+        if command[:3] == ["ditto", "-x", "-k"]:
+            (Path(command[-1]) / "AstroPilot.app").mkdir()
         if command[:3] == ["xcrun", "notarytool", "submit"]:
             return type(
                 "Result",
@@ -390,13 +399,43 @@ def test_release_pipeline_requires_verified_notarized_stapled_zip_and_sha256(
     staple_index = commands.index(["xcrun", "stapler", "staple", str(application)])
     final_zip_index = next(
         index for index, command in enumerate(commands)
-        if command[:4] == ["ditto", "-c", "-k", "--keepParent"]
+        if command[:5] == [
+            "ditto", "-c", "-k", "--norsrc", "--keepParent"
+        ]
         and command[-1] == str(result.artifact)
+    )
+    extraction_index = next(
+        index for index, command in enumerate(commands)
+        if command[:3] == ["ditto", "-x", "-k"]
+    )
+    extracted_application = Path(commands[extraction_index][-1]) / "AstroPilot.app"
+    extracted_codesign_index = commands.index([
+        "codesign", "--verify", "--deep", "--strict", "--verbose=4",
+        str(extracted_application),
+    ])
+    extracted_stapler_index = commands.index([
+        "xcrun", "stapler", "validate", str(extracted_application),
+    ])
+    extracted_gatekeeper_index = commands.index([
+        "spctl", "--assess", "--type", "execute", "--verbose=4",
+        str(extracted_application),
+    ])
+    checksum_index = next(
+        index for index, command in enumerate(commands)
+        if command[:3] == ["shasum", "-a", "256"]
     )
 
     assert calls[0][1]["codesign_identity"].startswith("Developer ID Application:")
     assert ["codesign", "--verify", "--deep", "--strict", "--verbose=4", str(application)] in commands
     assert notarize_index < staple_index < final_zip_index
+    assert (
+        final_zip_index
+        < extraction_index
+        < extracted_codesign_index
+        < extracted_stapler_index
+        < extracted_gatekeeper_index
+        < checksum_index
+    )
     assert ["xcrun", "stapler", "validate", str(application)] in commands
     assert ["spctl", "--assess", "--type", "execute", "--verbose=4", str(application)] in commands
     notarization_command = commands[notarize_index]
@@ -408,6 +447,88 @@ def test_release_pipeline_requires_verified_notarized_stapled_zip_and_sha256(
     assert result.sidecar.read_text(encoding="utf-8") == (
         f"{'a' * 64}  {result.artifact.name}\n"
     )
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "AstroPilot.app/Contents/MacOS/._AstroPilot",
+        "__MACOSX/AstroPilot.app/Contents/MacOS/AstroPilot",
+    ],
+)
+def test_release_zip_rejects_appledouble_and_macosx_entries(tmp_path, entry):
+    release = _release_module()
+    artifact = tmp_path / "release.zip"
+    with zipfile.ZipFile(artifact, "w") as archive:
+        archive.writestr("AstroPilot.app/Contents/MacOS/AstroPilot", "binary")
+        archive.writestr(entry, "metadata")
+
+    with pytest.raises(RuntimeError, match="macOS metadata"):
+        release.validate_release_zip(artifact)
+
+
+def test_release_zip_accepts_clean_bundle_entries(tmp_path):
+    release = _release_module()
+    artifact = tmp_path / "release.zip"
+    with zipfile.ZipFile(artifact, "w") as archive:
+        archive.writestr("AstroPilot.app/Contents/MacOS/AstroPilot", "binary")
+        archive.writestr("AstroPilot.app/Contents/Resources/app.js", "script")
+
+    release.validate_release_zip(artifact)
+
+
+def test_post_extraction_failure_prevents_checksum_and_sidecar(tmp_path):
+    release = _release_module()
+    calls = []
+    application = tmp_path / "dist" / "AstroPilot.app"
+    artifact = tmp_path / "dist" / "AstroPilot-1.0.0-beta.2-macos-arm64.zip"
+    sidecar = artifact.with_suffix(".zip.sha256")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nversion = "1.0.0b2"\n',
+        encoding="utf-8",
+    )
+    sidecar.parent.mkdir(parents=True)
+    sidecar.write_text("stale", encoding="utf-8")
+
+    def build_function(**kwargs):
+        application.mkdir(parents=True)
+        return application
+
+    def runner(command, **kwargs):
+        calls.append(command)
+        if command[:4] == ["ditto", "-c", "-k", "--keepParent"]:
+            Path(command[-1]).touch()
+        if command[:5] == [
+            "ditto", "-c", "-k", "--norsrc", "--keepParent"
+        ]:
+            with zipfile.ZipFile(command[-1], "w") as archive:
+                archive.writestr("AstroPilot.app/Contents/Info.plist", "plist")
+        if command[:3] == ["ditto", "-x", "-k"]:
+            (Path(command[-1]) / "AstroPilot.app").mkdir()
+        if command[:3] == ["xcrun", "notarytool", "submit"]:
+            return type(
+                "Result",
+                (),
+                {"stdout": '{"id":"submission-id","status":"Accepted"}'},
+            )()
+        if (
+            command[:2] == ["codesign", "--verify"]
+            and command[-1] != str(application)
+        ):
+            raise subprocess.CalledProcessError(1, command)
+        return type("Result", (), {"stdout": ""})()
+
+    with pytest.raises(subprocess.CalledProcessError):
+        release.release(
+            root=tmp_path,
+            codesign_identity="Developer ID Application: Test (TEAMID1234)",
+            notary_profile="astropilot-notary",
+            build_function=build_function,
+            runner=runner,
+        )
+
+    assert not any(command[:3] == ["shasum", "-a", "256"] for command in calls)
+    assert not sidecar.exists()
 
 
 def test_release_rejects_unsupported_target_architecture(tmp_path):
