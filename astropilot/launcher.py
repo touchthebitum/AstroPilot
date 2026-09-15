@@ -20,7 +20,12 @@ from urllib.request import urlopen as standard_urlopen
 
 import uvicorn
 
-from astropilot.app import app, build_identifier, canonical_version
+from astropilot.app import (
+    app,
+    build_identifier,
+    canonical_version,
+    runtime_architecture,
+)
 from astropilot.user_profile import get_user_data_dir
 
 
@@ -34,6 +39,9 @@ READINESS_POLL_INTERVAL_SECONDS = 0.05
 LOG_MAX_BYTES = 1_000_000
 LOG_BACKUP_COUNT = 2
 LOGGER_NAME = "astropilot.launcher"
+# The first Windows beta deliberately keeps a console for diagnostics and
+# KeyboardInterrupt-driven owned-server shutdown.
+WINDOWS_BETA_CONSOLE_ENABLED = True
 
 _home_directory = Path.home
 
@@ -53,6 +61,8 @@ class PortState(Enum):
 
 
 def _get_log_path() -> Path:
+    if sys.platform == "win32":
+        return get_user_data_dir() / "Logs" / "AstroPilot.log"
     return (
         _home_directory()
         / "Library"
@@ -217,7 +227,7 @@ def run(
         canonical_version(),
         build_identifier(),
         platform.python_version(),
-        platform.machine(),
+        runtime_architecture(),
         HOST,
         PORT,
     )

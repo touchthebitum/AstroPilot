@@ -65,11 +65,43 @@ def test_launcher_has_stable_loopback_origin():
 
 
 def test_log_path_uses_macos_user_logs_directory(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher.sys, "platform", "darwin")
     monkeypatch.setattr(launcher, "_home_directory", lambda: tmp_path)
 
     assert launcher._get_log_path() == (
         tmp_path / "Library" / "Logs" / "AstroPilot" / "AstroPilot.log"
     )
+
+
+def test_log_path_uses_windows_local_app_data_root(tmp_path, monkeypatch):
+    data_root = tmp_path / "LocalAppData" / "AstroPilot"
+    monkeypatch.setattr(launcher.sys, "platform", "win32")
+    monkeypatch.setattr(launcher, "get_user_data_dir", lambda: data_root)
+
+    assert launcher._get_log_path() == (
+        data_root / "Logs" / "AstroPilot.log"
+    )
+
+
+def test_windows_log_path_reuses_canonical_user_data_fallback(
+    tmp_path,
+    monkeypatch,
+):
+    fallback_root = tmp_path / "AppData" / "Local" / "AstroPilot"
+    monkeypatch.setattr(launcher.sys, "platform", "win32")
+    monkeypatch.setattr(
+        launcher,
+        "get_user_data_dir",
+        lambda: fallback_root,
+    )
+
+    assert launcher._get_log_path() == (
+        fallback_root / "Logs" / "AstroPilot.log"
+    )
+
+
+def test_first_windows_beta_lifecycle_is_console_first():
+    assert launcher.WINDOWS_BETA_CONSOLE_ENABLED is True
 
 
 def test_logger_creates_rotating_file_once(tmp_path):
@@ -96,7 +128,11 @@ def test_logger_creates_rotating_file_once(tmp_path):
 def test_existing_instance_logs_runtime_metadata_and_browser_result(monkeypatch):
     monkeypatch.setattr(launcher, "canonical_version", lambda: "1.0.0b2")
     monkeypatch.setattr(launcher, "build_identifier", lambda: "8541acc")
-    monkeypatch.setattr(launcher.platform, "machine", lambda: "test-architecture")
+    monkeypatch.setattr(
+        launcher,
+        "runtime_architecture",
+        lambda: "test-architecture",
+    )
 
     launcher.run(
         port_probe=lambda: launcher.PortState.EXISTING,

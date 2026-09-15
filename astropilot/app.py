@@ -153,12 +153,22 @@ def build_identifier() -> str:
     return "development"
 
 
+def normalize_runtime_architecture(architecture: str) -> str:
+    if architecture.lower() in {"amd64", "x86_64"}:
+        return "x86_64"
+    return architecture
+
+
+def runtime_architecture() -> str:
+    return normalize_runtime_architecture(platform.machine())
+
+
 def runtime_identity_payload() -> dict[str, str]:
     return {
         "application": "astropilot",
         "version": canonical_version(),
         "build": build_identifier(),
-        "architecture": platform.machine(),
+        "architecture": runtime_architecture(),
     }
 
 
