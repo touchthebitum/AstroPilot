@@ -40,10 +40,10 @@ analysis = Analysis(
     binaries=[],
     datas=datas,
     hiddenimports=[],
-    hookspath=[],
+    hookspath=[str(ROOT / "packaging" / "pyinstaller_hooks")],
     hooksconfig={},
     runtime_hooks=[str(build_identity_hook)],
-    excludes=[],
+    excludes=["astropy.visualization.wcsaxes"],
     noarchive=False,
     optimize=0,
 )

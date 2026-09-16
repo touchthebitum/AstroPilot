@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import ipaddress
 import socket
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -20,12 +21,31 @@ from decision.weather.weather_forecast import WeatherForecast
 
 @pytest.fixture(autouse=True)
 def block_live_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make every test fail immediately if production code opens a socket."""
+    """Forbid external network access while allowing numeric local loopback."""
+
+    original_connect = socket.socket.connect
+
+    def connect_loopback(sock, address):
+        if (
+            isinstance(address, tuple)
+            and len(address) in (2, 4)
+            and isinstance(address[0], str)
+        ):
+            try:
+                destination = ipaddress.ip_address(address[0])
+            except ValueError:
+                pass
+            else:
+                if (
+                    destination.version == 4 and destination.is_loopback
+                ) or destination == ipaddress.IPv6Address("::1"):
+                    return original_connect(sock, address)
+        raise AssertionError("Live network access is forbidden in tests")
 
     def deny_connection(*args, **kwargs):
         raise AssertionError("Live network access is forbidden in tests")
 
-    monkeypatch.setattr(socket.socket, "connect", deny_connection)
+    monkeypatch.setattr(socket.socket, "connect", connect_loopback)
     monkeypatch.setattr(socket, "create_connection", deny_connection)
 
 

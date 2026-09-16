@@ -9,6 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SPEC_PATH = ROOT / "AstroPilot-windows.spec"
 BUILD_SCRIPT_PATH = ROOT / "scripts" / "build_windows.py"
+ASTROPY_HOOK_PATH = ROOT / "packaging" / "pyinstaller_hooks" / "hook-astropy.py"
 
 
 def _build_module():
@@ -61,6 +62,17 @@ def test_windows_spec_collects_exact_runtime_assets_without_broad_imports():
     assert 'copy_metadata("astropilot")' in source
     assert "hiddenimports=[]" in source
     assert "collect_submodules" not in source
+
+
+def test_windows_spec_uses_local_astropy_hook_without_optional_wcsaxes():
+    spec = SPEC_PATH.read_text(encoding="utf-8")
+    hook = ASTROPY_HOOK_PATH.read_text(encoding="utf-8")
+
+    assert 'hookspath=[str(ROOT / "packaging" / "pyinstaller_hooks")]' in spec
+    assert 'collect_submodules(' in hook
+    assert 'name == "astropy.visualization.wcsaxes"' in hook
+    assert 'name.startswith("astropy.visualization.wcsaxes.")' in hook
+    assert 'excludes=["astropy.visualization.wcsaxes"]' in spec
 
 
 def test_windows_spec_injects_build_identity_without_runtime_git():
