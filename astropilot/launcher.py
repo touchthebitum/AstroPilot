@@ -8,6 +8,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import platform
 from pathlib import Path
+import socket
 import sys
 import threading
 import time
@@ -16,7 +17,7 @@ from collections.abc import Callable
 from enum import Enum
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import urlopen as standard_urlopen
+from urllib.request import ProxyHandler, build_opener
 
 import uvicorn
 
@@ -153,9 +154,31 @@ def _is_connection_refused(error: BaseException) -> bool:
     )
 
 
+def _direct_urlopen(url: str, *, timeout: float):
+    """Open a loopback URL without consulting user or system proxies."""
+
+    return build_opener(ProxyHandler({})).open(url, timeout=timeout)
+
+
+def _can_bind_loopback(
+    socket_factory: Callable[..., Any] = socket.socket,
+) -> bool:
+    """Confirm that the configured loopback port can be reserved locally."""
+
+    candidate = socket_factory(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        candidate.bind((HOST, PORT))
+    except OSError:
+        return False
+    finally:
+        candidate.close()
+    return True
+
+
 def _probe_port(
     *,
-    urlopen: Callable[..., Any] = standard_urlopen,
+    urlopen: Callable[..., Any] = _direct_urlopen,
+    can_bind: Callable[[], bool] = _can_bind_loopback,
 ) -> PortState:
     try:
         with urlopen(IDENTITY_URL, timeout=PROBE_TIMEOUT_SECONDS) as response:
@@ -165,9 +188,17 @@ def _probe_port(
     except HTTPError:
         return PortState.FOREIGN
     except URLError as exc:
-        return PortState.FREE if _is_connection_refused(exc) else PortState.FOREIGN
+        return (
+            PortState.FREE
+            if _is_connection_refused(exc) or can_bind()
+            else PortState.FOREIGN
+        )
     except OSError as exc:
-        return PortState.FREE if _is_connection_refused(exc) else PortState.FOREIGN
+        return (
+            PortState.FREE
+            if _is_connection_refused(exc) or can_bind()
+            else PortState.FOREIGN
+        )
     except (AttributeError, TypeError, UnicodeError, ValueError):
         return PortState.FOREIGN
     except Exception:

@@ -198,6 +198,81 @@ def test_connection_refusal_means_port_is_free():
     assert launcher._probe_port(urlopen=refused) is launcher.PortState.FREE
 
 
+def test_indeterminate_transport_failure_with_bindable_port_means_free():
+    def timeout(url, *, timeout):
+        raise URLError(TimeoutError("timed out"))
+
+    assert launcher._probe_port(
+        urlopen=timeout,
+        can_bind=lambda: True,
+    ) is launcher.PortState.FREE
+
+
+def test_loopback_bind_probe_closes_socket():
+    events = []
+
+    class FakeSocket:
+        def bind(self, address):
+            events.append(("bind", address))
+
+        def close(self):
+            events.append(("close",))
+
+    assert launcher._can_bind_loopback(
+        socket_factory=lambda family, kind: (
+            events.append(("socket", family, kind)) or FakeSocket()
+        )
+    ) is True
+    assert events == [
+        ("socket", launcher.socket.AF_INET, launcher.socket.SOCK_STREAM),
+        ("bind", (launcher.HOST, launcher.PORT)),
+        ("close",),
+    ]
+
+
+def test_loopback_bind_probe_fails_closed_and_closes_socket():
+    events = []
+
+    class FakeSocket:
+        def bind(self, address):
+            events.append(("bind", address))
+            raise OSError("port unavailable")
+
+        def close(self):
+            events.append(("close",))
+
+    assert launcher._can_bind_loopback(
+        socket_factory=lambda family, kind: FakeSocket()
+    ) is False
+    assert events == [
+        ("bind", (launcher.HOST, launcher.PORT)),
+        ("close",),
+    ]
+
+
+def test_default_identity_probe_bypasses_system_proxies(monkeypatch):
+    calls = []
+
+    class FakeOpener:
+        def open(self, url, *, timeout):
+            calls.append((url, timeout))
+            raise URLError(ConnectionRefusedError("connection refused"))
+
+    def build_opener(handler):
+        assert isinstance(handler, launcher.ProxyHandler)
+        assert handler.proxies == {}
+        return FakeOpener()
+
+    monkeypatch.setattr(launcher, "build_opener", build_opener)
+
+    with pytest.raises(URLError, match="connection refused"):
+        launcher._direct_urlopen(
+            launcher.IDENTITY_URL,
+            timeout=launcher.PROBE_TIMEOUT_SECONDS,
+        )
+    assert calls == [(launcher.IDENTITY_URL, launcher.PROBE_TIMEOUT_SECONDS)]
+
+
 @pytest.mark.parametrize(
     ("status", "body"),
     [
@@ -221,7 +296,10 @@ def test_identity_probe_timeout_fails_closed():
     def timeout(url, *, timeout):
         raise TimeoutError("timed out")
 
-    assert launcher._probe_port(urlopen=timeout) is launcher.PortState.FOREIGN
+    assert launcher._probe_port(
+        urlopen=timeout,
+        can_bind=lambda: False,
+    ) is launcher.PortState.FOREIGN
 
 
 def test_identity_probe_response_failure_fails_closed():
@@ -240,6 +318,8 @@ def test_existing_instance_reopens_browser_without_server_or_data_mutation(
     monkeypatch,
 ):
     browser_calls = []
+    log_path = launcher._get_log_path()
+    monkeypatch.setattr(launcher, "_get_log_path", lambda: log_path)
     monkeypatch.setattr(
         launcher,
         "get_user_data_dir",
@@ -263,6 +343,8 @@ def test_existing_instance_reopens_browser_without_server_or_data_mutation(
 
 def test_foreign_port_raises_without_browser_server_or_data_mutation(monkeypatch):
     browser_calls = []
+    log_path = launcher._get_log_path()
+    monkeypatch.setattr(launcher, "_get_log_path", lambda: log_path)
     monkeypatch.setattr(
         launcher,
         "get_user_data_dir",
@@ -292,6 +374,8 @@ def test_foreign_port_raises_without_browser_server_or_data_mutation(monkeypatch
 
 def test_launcher_initializes_canonical_data_root_before_uvicorn(monkeypatch):
     events = []
+    log_path = launcher._get_log_path()
+    monkeypatch.setattr(launcher, "_get_log_path", lambda: log_path)
 
     class DataRoot:
         def mkdir(self, *, parents, exist_ok):

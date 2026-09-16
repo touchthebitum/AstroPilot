@@ -325,7 +325,7 @@ def test_uncertain_acceptance_retry_reuses_exact_pending_payload():
 
 
 def test_acceptance_attempt_clears_only_after_definite_outcome():
-    script = make_client().get("/ui/app.js").text
+    script = make_client().get("/ui/app.js").text.replace("\r\n", "\n")
     acceptance = script.split(
         "async function acceptRecommendation(",
         1,
@@ -449,7 +449,7 @@ def test_unresolved_acceptance_guards_navigation_and_new_recommendations():
 
 
 def test_pending_storage_clears_only_after_definite_result():
-    script = make_client().get("/ui/app.js").text
+    script = make_client().get("/ui/app.js").text.replace("\r\n", "\n")
     acceptance = script.split(
         "async function acceptRecommendation(",
         1,
