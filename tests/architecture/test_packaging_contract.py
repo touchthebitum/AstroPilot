@@ -28,13 +28,13 @@ def test_installed_package_exposes_astropilot_command():
 
 
 def test_project_declares_canonical_beta_version():
-    assert _pyproject()["project"]["version"] == "1.0.0b2"
+    assert _pyproject()["project"]["version"] == "1.0.0b3"
 
     lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
     astropilot_package = lock.split('name = "astropilot"', 1)[1].split(
         "[[package]]", 1
     )[0]
-    assert 'version = "1.0.0b2"' in astropilot_package
+    assert 'version = "1.0.0b3"' in astropilot_package
     assert 'version = "0.0.0"' not in astropilot_package
 
 
@@ -289,9 +289,10 @@ def test_build_script_rejects_invalid_short_git_commit(tmp_path, value):
 def test_tester_label_and_future_artifact_name_are_deterministic():
     build = _build_module()
 
-    assert build.tester_version_label("1.0.0b2") == "1.0.0-beta.2"
-    assert build.artifact_name("1.0.0b2", "arm64") == (
-        "AstroPilot-1.0.0-beta.2-macos-arm64.zip"
+    version = _pyproject()["project"]["version"]
+    assert build.tester_version_label(version) == "1.0.0-beta.3"
+    assert build.artifact_name(version, "arm64") == (
+        "AstroPilot-1.0.0-beta.3-macos-arm64.zip"
     )
 
 
@@ -317,7 +318,7 @@ def test_build_identity_is_injected_by_generated_ignored_runtime_hook():
 def test_fastapi_version_derives_from_canonical_project_version():
     from astropilot.app import canonical_version, create_app
 
-    assert canonical_version() == "1.0.0b2"
+    assert canonical_version() == "1.0.0b3"
     assert create_app().version == canonical_version()
 
 
