@@ -226,7 +226,8 @@ def test_missing_compiler_fails_without_installing(builder, monkeypatch, tmp_pat
 
 
 @pytest.mark.parametrize("result", ("created", "missing", "failure"))
-def test_compiler_invocation_and_output_preserve_existing_files(builder, tmp_path, result):
+@pytest.mark.parametrize("version", ("2.3.4b5", "1.0.0b3"))
+def test_compiler_invocation_and_output_preserve_existing_files(builder, tmp_path, result, version):
     root = tmp_path / "Chemin avec espaces et accents é"
     source = root / "dist" / "AstroPilot"
     source.mkdir(parents=True)
@@ -241,14 +242,16 @@ def test_compiler_invocation_and_output_preserve_existing_files(builder, tmp_pat
     build_file = root / "build" / "keep.txt"
     build_file.parent.mkdir()
     build_file.write_bytes(b"keep")
-    (root / "pyproject.toml").write_text('[project]\nversion = "2.3.4b5"\n', encoding="utf-8")
+    if version == "1.0.0b3":
+        assert builder.read_version(ROOT) == version
+    (root / "pyproject.toml").write_text(f'[project]\nversion = "{version}"\n', encoding="utf-8")
     script = root / "packaging" / "windows" / "AstroPilot.iss"
     script.parent.mkdir(parents=True)
     script.write_text(ISS.read_text(encoding="utf-8"), encoding="utf-8")
     compiler = tmp_path / "ISCC.exe"
     compiler.write_bytes(b"stub")
     output_dir = root / "dist" / "installer"
-    output = output_dir / "AstroPilot-2.3.4b5-windows-x86_64-setup.exe"
+    output = output_dir / f"AstroPilot-{version}-windows-x86_64-setup.exe"
     calls = []
 
     def runner(command, *, cwd, check):
@@ -266,7 +269,7 @@ def test_compiler_invocation_and_output_preserve_existing_files(builder, tmp_pat
         with pytest.raises(error):
             builder.build(root=root, iscc=compiler, runner=runner)
     assert calls == [([
-        str(compiler.resolve()), "/DAppVersion=2.3.4b5",
+        str(compiler.resolve()), f"/DAppVersion={version}",
         f"/DSourceDir={source}", f"/DInstallerOutputDir={output_dir}", str(script),
     ], root, True)]
     assert executable.read_bytes() == b"existing program"
