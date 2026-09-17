@@ -43,19 +43,21 @@ def find_iscc(explicit: str | Path | None = None) -> Path:
     if on_path:
         return Path(on_path).resolve()
 
-    candidates = []
+    standard_roots = []
     for variable in ("ProgramFiles(x86)", "ProgramFiles"):
         base = os.environ.get(variable)
         if base:
-            candidates.append(Path(base) / "Inno Setup 6" / "ISCC.exe")
+            standard_roots.append(Path(base))
     local = os.environ.get("LOCALAPPDATA")
     if local:
-        candidates.append(Path(local) / "Programs" / "Inno Setup 6" / "ISCC.exe")
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate.resolve()
+        standard_roots.append(Path(local) / "Programs")
+    for directory in ("Inno Setup 7", "Inno Setup 6"):
+        for base in standard_roots:
+            candidate = base / directory / "ISCC.exe"
+            if candidate.is_file():
+                return candidate.resolve()
     raise RuntimeError(
-        "ISCC.exe not found. Install Inno Setup 6.3+ manually, then use "
+        "ISCC.exe not found. Install Inno Setup 7 (or 6.3+) manually, then use "
         "--iscc or ISCC_PATH to supply its executable path."
     )
 

@@ -137,13 +137,14 @@ def test_version_comes_unchanged_from_project_metadata(builder):
 
 
 @pytest.mark.parametrize("route", ("explicit", "environment", "path", "standard", "local"))
-def test_compiler_discovery(builder, monkeypatch, tmp_path, route):
+@pytest.mark.parametrize("version", ("7", "6"))
+def test_compiler_discovery(builder, monkeypatch, tmp_path, route, version):
     for name in ("ISCC_PATH", "ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(builder.shutil, "which", lambda name: None)
-    compiler = tmp_path / "Inno Setup 6" / "ISCC.exe"
+    compiler = tmp_path / f"Inno Setup {version}" / "ISCC.exe"
     if route == "local":
-        compiler = tmp_path / "Programs" / "Inno Setup 6" / "ISCC.exe"
+        compiler = tmp_path / "Programs" / f"Inno Setup {version}" / "ISCC.exe"
     compiler.parent.mkdir(parents=True)
     compiler.write_bytes(b"stub")
     explicit = None
@@ -159,6 +160,59 @@ def test_compiler_discovery(builder, monkeypatch, tmp_path, route):
     else:
         monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     assert builder.find_iscc(explicit) == compiler.resolve()
+
+
+@pytest.mark.parametrize("version7_location", ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"))
+def test_standard_locations_prefer_version7_over_version6(
+    builder, monkeypatch, tmp_path, version7_location,
+):
+    monkeypatch.delenv("ISCC_PATH", raising=False)
+    monkeypatch.setattr(builder.shutil, "which", lambda name: None)
+    version7_compiler = None
+    for variable in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
+        base = tmp_path / variable
+        monkeypatch.setenv(variable, str(base))
+        if variable == "LOCALAPPDATA":
+            base = base / "Programs"
+        version6 = base / "Inno Setup 6" / "ISCC.exe"
+        version6.parent.mkdir(parents=True)
+        version6.write_bytes(b"stub 6")
+        if variable == version7_location:
+            version7_compiler = base / "Inno Setup 7" / "ISCC.exe"
+            version7_compiler.parent.mkdir(parents=True)
+            version7_compiler.write_bytes(b"stub 7")
+    assert builder.find_iscc() == version7_compiler.resolve()
+
+
+@pytest.mark.parametrize("route", ("explicit", "environment", "path"))
+def test_configured_and_path_priority_over_standard_locations(
+    builder, monkeypatch, tmp_path, route,
+):
+    for name in ("ISCC_PATH", "ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
+        monkeypatch.delenv(name, raising=False)
+    compilers = {}
+    for name in ("explicit", "environment", "path", "Inno Setup 7"):
+        compiler = tmp_path / name / "ISCC.exe"
+        compiler.parent.mkdir()
+        compiler.write_bytes(b"stub")
+        compilers[name] = compiler
+    monkeypatch.setenv("ProgramFiles", str(tmp_path))
+    monkeypatch.setattr(builder.shutil, "which", lambda name: str(compilers["path"]))
+    if route in ("explicit", "environment"):
+        monkeypatch.setenv("ISCC_PATH", str(compilers["environment"]))
+    explicit = compilers["explicit"] if route == "explicit" else None
+    assert builder.find_iscc(explicit) == compilers[route].resolve()
+
+
+@pytest.mark.parametrize("route", ("explicit", "environment"))
+def test_invalid_configured_path_does_not_fall_back(builder, monkeypatch, tmp_path, route):
+    available = tmp_path / "ISCC.exe"
+    available.write_bytes(b"available compiler")
+    monkeypatch.setattr(builder.shutil, "which", lambda name: str(available))
+    invalid = tmp_path / "missing" / "ISCC.exe"
+    monkeypatch.setenv("ISCC_PATH", str(available if route == "explicit" else invalid))
+    with pytest.raises(RuntimeError, match="ISCC.exe not found at configured path"):
+        builder.find_iscc(invalid if route == "explicit" else None)
 
 
 def test_missing_compiler_fails_without_installing(builder, monkeypatch, tmp_path):

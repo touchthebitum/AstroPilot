@@ -8,7 +8,8 @@ not rebuild the application, change product versioning, or introduce signing.
 - Windows 11 x86_64 and a prepared project environment (Python 3.11–3.13).
 - An existing complete `dist/AstroPilot` build, including `AstroPilot.exe`
   and its `_internal` tree. Keep the whole directory together.
-- Inno Setup 6.3+ installed manually, including its preprocessor and `ISCC.exe`.
+- Inno Setup 7 installed manually, including its preprocessor and `ISCC.exe`.
+  Inno Setup 6.3+ remains supported as a fallback.
   The build tool never downloads or installs it.
 
 Run from the repository root in PowerShell:
@@ -27,13 +28,15 @@ never cleans either directory and never calls Step 1.
 If automatic compiler discovery fails:
 
 ```powershell
-uv run --locked --no-sync python scripts/build_windows_installer.py --iscc "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+uv run --locked --no-sync python scripts/build_windows_installer.py --iscc "C:\Program Files\Inno Setup 7\ISCC.exe"
 ```
 
 Alternatively set `$env:ISCC_PATH` to the full `ISCC.exe` path. CLI takes
 precedence over the environment; an invalid configured path fails explicitly.
-Discovery otherwise tries PATH, Program Files locations, and
-`$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe`.
+Discovery otherwise tries PATH, then standard locations under
+`$env:ProgramFiles(x86)`, `$env:ProgramFiles`, and `$env:LOCALAPPDATA\Programs`.
+All standard locations are checked for `Inno Setup 7\ISCC.exe` first, then
+for `Inno Setup 6\ISCC.exe`. If no compiler is found, the tool fails explicitly.
 
 Output: `dist/installer/AstroPilot-<version>-windows-x86_64-setup.exe`.
 The build tool prints its absolute path after successful compilation.
