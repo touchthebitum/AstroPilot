@@ -2,11 +2,18 @@
 
 AI-powered astrophotography planning platform.
 
-Closed-beta candidate: **1.0.0-beta.3** (canonical version `1.0.0b3`).
+Development candidate: **1.0.0-beta.4** (canonical version `1.0.0b4`), integrating
+hotfix PR #227: insufficient evidence must be non-actionable. Its macOS and
+Windows artifacts have not been rebuilt; both must subsequently be built from
+the same Git commit. No beta.4 tag or GitHub Release has been created.
+
+Published historical baseline: **v1.0.0-beta.3** (canonical version `1.0.0b3`).
 Current beta targets: macOS Apple Silicon and Windows x86_64. Linux, Android,
 iOS, and Windows ARM are outside this beta.
 
-Both candidate artifacts use source commit
+Historical beta.3 validation record (recorded before publication):
+
+Both beta.3 artifacts use source commit
 `c8566443c1caf612d122a8d217fe05884ac6aace`. macOS signing, notarization,
 stapling, Gatekeeper, and ZIP extraction checks are validated. Windows native
 installation, launch, update, uninstall, reinstall, and data preservation are
