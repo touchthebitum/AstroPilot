@@ -12,8 +12,8 @@ stapling, Gatekeeper, and ZIP extraction checks are validated. Windows native
 installation, launch, update, uninstall, reinstall, and data preservation are
 validated. The beta.3 clean-machine test on the Mac mini, native Windows user
 path with spaces/accented characters, and Windows Start Menu launch have passed.
-Full suites are validated on macOS and Windows. Final release review, tag
-creation, and GitHub Release remain pending.
+Full suites are validated on macOS and Windows. All beta.3 validation gates
+are closed. Tag creation and GitHub Release remain pending.
 
 See [closed-beta status and artifact SHA-256 values](docs/closed_beta.md),
 [release gates](docs/release_checklist.md), and

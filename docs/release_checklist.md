@@ -1,23 +1,20 @@
 # Release checklist: 1.0.0-beta.3
 
-Canonical version: `1.0.0b3`. Current status: technical validation recorded,
-**final release review pending**. Native macOS clean-machine, Windows complex
-user-path and Start Menu launch tests have passed, as have both platform full
-suites. Tag creation and GitHub Release remain pending.
+Canonical version: `1.0.0b3`.
+All beta.3 validation gates are closed. Tag creation and GitHub Release remain pending.
 
 Source commit shared by the existing macOS and Windows candidate artifacts:
 `c8566443c1caf612d122a8d217fe05884ac6aace`.
 See [closed-beta artifact names, SHA-256 values, and validation history](closed_beta.md).
 
 Checked items below reflect the confirmed validation record. Unchecked items
-require a native test, retained evidence, or final documentation review; they
-must be closed before distribution. This checklist does not execute builds or
+are the remaining tag creation and GitHub Release steps. This checklist does not execute builds or
 publish a release.
 
 ## Mandatory gates
 
 - [x] Same source commit for macOS and Windows, identified above.
-- [ ] Confirm retained evidence of clean working trees during both final builds.
+- [x] Confirm retained evidence of clean working trees during both final builds.
 - [x] Canonical version `1.0.0b3`; tester label `1.0.0-beta.3`.
 - [x] Full suite macOS beta.3: 2642 passed, 0 failed, 44 warnings; 25.67 s.
 - [x] Full suite Windows beta.3: 2641 passed, 0 failed, 1 skipped.
@@ -36,7 +33,7 @@ publish a release.
 - [x] Windows reinstall validated.
 - [x] Native Windows user path `C:\Users\Franck Testé` (space/accent) — PASS.
 - [x] Both candidate artifact SHA-256 values known (see below).
-- [ ] Final release review, including closed-beta documentation review, complete.
+- [x] Final release review, including closed-beta documentation review, complete.
 - [x] Candidate source/release commit identified above.
 - [ ] Create final tag only after every validation gate is closed.
 - [ ] Final GitHub Release — pending; no published release is recorded here.
@@ -52,8 +49,12 @@ Both returned to "Préparer ma nuit".
 The platform full-suite results above are supplied validation records, not tests
 rerun during this documentation update. Earlier targeted version tests: 161
 passed; `uv lock --check` and `git diff --check` passed.
-Confirmation of retained clean-build evidence remains part of final release
-review; no new clean-build evidence is asserted by this update.
+Retained evidence confirms that both final artifacts were built from source
+commit `c8566443c1caf612d122a8d217fe05884ac6aace`. Before the final Windows build
+and the signed/notarized macOS release build, each working tree was clean,
+`main == origin/main`, and HEAD matched that source commit. Final docs/release
+review is complete before tag creation and GitHub Release; neither publication
+step has been performed.
 
 ## Exact candidate identity
 

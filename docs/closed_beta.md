@@ -1,8 +1,8 @@
 # Closed beta: 1.0.0-beta.3
 
 Canonical version: `1.0.0b3`. Tester label: `1.0.0-beta.3`.
-The current multi-platform candidate replaces beta.2. Technical packaging
-validation is recorded below; distribution approval is still pending.
+The current multi-platform candidate replaces beta.2. All beta.3 validation
+gates are closed. Tag creation and GitHub Release remain pending.
 No final tag or GitHub Release is recorded as created/published, and no download
 URL is available in this record.
 
@@ -65,16 +65,15 @@ Reported after the beta.3 version bump (not rerun by this documentation update):
 - `uv lock --check`: passed.
 - `git diff --check`: passed.
 
-## Pending before distribution
+## Final review complete; publication pending
 
-- Final release review of all [release gates](release_checklist.md), including
-  retained evidence of clean working trees at final build time and final
-  documentation review.
-- Tag creation and GitHub Release only after final release review is complete.
-  Neither is recorded as created/published.
+Retained evidence confirms clean working trees, `main == origin/main`, and HEAD
+at `c8566443c1caf612d122a8d217fe05884ac6aace` before both final builds (Windows
+installer and signed/notarized macOS release). Final docs/release review is
+complete; all [beta.3 validation gates](release_checklist.md) are closed.
 
-The native macOS clean-machine, Windows complex user-path, Start Menu launch,
-and both platform full-suite gates are now validated.
+Only tag creation and GitHub Release remain pending. Neither is recorded as
+created/published; final review was completed before these publication steps.
 
 ## Outside beta.3 scope
 
