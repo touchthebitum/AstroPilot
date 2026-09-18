@@ -3,6 +3,27 @@
 Win-4 wraps the existing PyInstaller onedir build with Inno Setup. It does
 not rebuild the application, change product versioning, or introduce signing.
 
+## Recorded beta.3 status
+
+The current multi-platform candidate is `1.0.0-beta.3` (canonical `1.0.0b3`),
+from source commit `c8566443c1caf612d122a8d217fe05884ac6aace`.
+
+- Artifact: `AstroPilot-1.0.0b3-windows-x86_64-setup.exe`
+- SHA-256: `EC7AB793113FAACE22BB4691059FDB2BA002F2B4316C6465CDB8FC523B314DD8`
+- Size: 64,568,889 bytes.
+- Validated natively: installation under `{userpf}\AstroPilot` without observed
+  UAC elevation, launch, update/reinstallation over the existing installation,
+  uninstall, reinstall, and preservation/automatic rediscovery of the user
+  profile under `%LOCALAPPDATA%\AstroPilot`.
+- Pending: native Windows user paths containing spaces/accented characters.
+  Stub-compiler tests using such paths do not close this native gate.
+- Authenticode remains outside beta.3 scope. The final tag and GitHub Release
+  remain pending; see [the shared release gates](release_checklist.md).
+
+The checklist below is a reusable procedure, not an assertion that every
+individual observation (for example optional shortcuts or automatic restart)
+has been recorded for beta.3. The validated summary above is the current record.
+
 ## Prerequisites and build order
 
 - Windows 11 x86_64 and a prepared project environment (Python 3.11–3.13).
