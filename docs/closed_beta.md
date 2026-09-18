@@ -1,8 +1,8 @@
 # Closed beta: 1.0.0-beta.3
 
 Canonical version: `1.0.0b3`. Tester label: `1.0.0-beta.3`.
-The current multi-platform candidate replaces beta.2. Technical packaging
-validation is recorded below; distribution approval is still pending.
+The current multi-platform candidate replaces beta.2. All beta.3 validation
+gates are closed. Tag creation and GitHub Release remain pending.
 No final tag or GitHub Release is recorded as created/published, and no download
 URL is available in this record.
 
@@ -30,12 +30,23 @@ Windows installer size: 64,568,889 bytes.
 - Final ZIP protected against AppleDouble (`._*`) and `__MACOSX` entries.
 - Final ZIP extracted and its application revalidated by the release pipeline
   (signature, stapling, Gatekeeper).
+- Native beta.3 clean-machine test: **PASS**, on a clean test account on the
+  Mac mini. The candidate ZIP listed above had its SHA-256 verified before
+  extraction. Double-click launch produced no macOS alert; browser and UI
+  opened normally. The old data directory was removed, fresh onboarding was
+  confirmed, and a profile was created. After closing/reopening, the app
+  returned to "Préparer ma nuit" with data preserved.
 
 ### Windows
 
 - PyInstaller application build and compiled Inno Setup per-user installer.
 - Real installation under `{userpf}\AstroPilot`; no UAC elevation observed.
-- Launch validated.
+- Launch, including from the Windows Start Menu, validated.
+- Native complex user-path test: **PASS**, using standard account `Franck Testé`
+  with `USERPROFILE` set to `C:\Users\Franck Testé` (space and accented character).
+  No UAC elevation observed during installation; normal launch, fresh onboarding,
+  and profile creation confirmed. After closing/reopening, the app returned to
+  "Préparer ma nuit" with data preserved.
 - Update/reinstallation over the existing installation, uninstall, and reinstall
   validated.
 - User data under `%LOCALAPPDATA%\AstroPilot` preserved; existing profile
@@ -48,26 +59,21 @@ See [Windows installer contract and reusable native procedure](WINDOWS_INSTALLER
 
 Reported after the beta.3 version bump (not rerun by this documentation update):
 
-- Full suite: 2641 passed, 0 failed, 1 skipped.
+- Full suite macOS beta.3: 2642 passed, 0 failed, 44 warnings; 25.67 s.
+- Full suite Windows beta.3 (already recorded): 2641 passed, 0 failed, 1 skipped.
 - Targeted version tests: 161 passed.
 - `uv lock --check`: passed.
 - `git diff --check`: passed.
 
-The supplied aggregate suite result is not a separate per-platform execution
-record. The release checklist requires macOS and Windows suite evidence before
-final approval; do not infer a missing platform record from this aggregate.
+## Final review complete; publication pending
 
-## Pending before distribution
+Retained evidence confirms clean working trees, `main == origin/main`, and HEAD
+at `c8566443c1caf612d122a8d217fe05884ac6aace` before both final builds (Windows
+installer and signed/notarized macOS release). Final docs/release review is
+complete; all [beta.3 validation gates](release_checklist.md) are closed.
 
-- Real beta.3 macOS clean-machine user test on the Mac mini.
-- Native Windows test with spaces/accented characters in the user path.
-- Final review of all [release gates](release_checklist.md), including clean
-  working trees at final build time and platform-specific full-suite records.
-- Closed-beta documentation review, then final tag/GitHub Release only after
-  complete validation. Neither is recorded as created/published.
-
-The macOS pipeline's extracted-ZIP checks do not close the clean-machine gate.
-Automated Windows path checks do not close the native user-path gate.
+Only tag creation and GitHub Release remain pending. Neither is recorded as
+created/published; final review was completed before these publication steps.
 
 ## Outside beta.3 scope
 
