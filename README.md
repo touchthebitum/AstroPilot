@@ -2,10 +2,21 @@
 
 AI-powered astrophotography planning platform.
 
-Current targets:
-- macOS
-- Android
-- iOS
+Closed-beta candidate: **1.0.0-beta.3** (canonical version `1.0.0b3`).
+Current beta targets: macOS Apple Silicon and Windows x86_64. Linux, Android,
+iOS, and Windows ARM are outside this beta.
+
+Both candidate artifacts use source commit
+`c8566443c1caf612d122a8d217fe05884ac6aace`. macOS signing, notarization,
+stapling, Gatekeeper, and ZIP extraction checks are validated. Windows native
+installation, launch, update, uninstall, reinstall, and data preservation are
+validated. Distribution remains pending: the beta.3 macOS clean-machine test
+on the Mac mini and native Windows user paths with spaces/accented characters
+are still open. The final tag and GitHub Release remain pending.
+
+See [closed-beta status and artifact SHA-256 values](docs/closed_beta.md),
+[release gates](docs/release_checklist.md), and
+[Windows installer documentation](docs/WINDOWS_INSTALLER.md).
 
 Features:
 - Sky quality analysis
@@ -38,7 +49,7 @@ uv sync --locked --extra test
 Commands below use `--no-sync` and therefore assume that the corresponding
 synchronization step has already completed.
 
-## User data
+## User data (source checkout and installed wheel)
 
 AstroPilot requires an existing directory containing a valid
 `user_profile.json`. Automatic onboarding and profile creation are not yet
@@ -146,3 +157,8 @@ ASTROPILOT_CODESIGN_IDENTITY="Developer ID Application: Name (TEAMID)" \
 
 The workflow verifies the signature, notarizes and staples the app, checks it
 with Gatekeeper, and writes the versioned ZIP and SHA-256 sidecar under `dist/`.
+
+The final release ZIP excludes AppleDouble (`._*`) and `__MACOSX` entries.
+The workflow extracts that ZIP and rechecks the extracted application signature,
+stapling, and Gatekeeper before generating its SHA-256 sidecar. These pipeline
+checks do not replace the pending native beta.3 clean-machine test.
