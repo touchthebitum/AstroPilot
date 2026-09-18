@@ -453,3 +453,27 @@ def test_mission_window_is_planned_and_contains_no_execution_semantics():
     assert mission.window_start is START
     assert mission.window_end is END
     assert contract_fields.isdisjoint(forbidden_fields)
+
+
+def test_blocked_primary_does_not_block_exposed_viable_alternative():
+    from dataclasses import replace
+    context = replace(decision_context(), primary_catalog_key=None)
+    recorder = RecordingMissionService()
+    service = UserSelectionMissionService(
+        tonight_mission_service=recorder,
+        build_mission_input=lambda evaluation, **kw: MissionInput(
+            START, END, 4.0, None, None, 2.0, 0.0,
+        ),
+    )
+    with pytest.raises(UserSelectionValidationError, match='selected_target_not_primary_recommendation'):
+        service.create(
+            mission_id='mission-blocked', selection=user_selection(UserSelectionSource.PRIMARY_RECOMMENDATION, 'M31'),
+            decision_context=context, recommendation=recommendation(), night=night(), profile={},
+        )
+    assert recorder.calls == []
+    mission = service.create(
+        mission_id='mission-viable', selection=user_selection(UserSelectionSource.ALTERNATIVE, 'M42'),
+        decision_context=context, recommendation=recommendation(), night=night(), profile={},
+    )
+    assert mission.target == 'M42'
+    assert len(recorder.calls) == 1

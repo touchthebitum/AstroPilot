@@ -1910,6 +1910,7 @@ def create_app(
 
         weather_decision = None
         candidate_assessments = {}
+        coverage_subject = result.mission
         if (
             result.status is TonightStatus.AVAILABLE
             and isinstance(weather, WeatherSnapshot)
@@ -1949,7 +1950,9 @@ def create_app(
                     "window_starts_before_weather",
                     "window_ends_after_weather",
                 }
-                if issues and issues <= decisional_issues:
+                if (issues and issues <= decisional_issues) or (
+                    coverage_subject is None and issues == {"invalid_mission_window"}
+                ):
                     selected_window_covered = False
                 else:
                     weather_invalid = "invalid_weather_coverage" in issues
@@ -2068,9 +2071,16 @@ def create_app(
             weather_decision is not None
             and weather_decision.admissibility is WeatherDecisionAdmissibility.REFUSED
         )
+        primary_window_available = (
+            coverage_subject is not None
+            and coverage_subject.window_start is not None
+            and coverage_subject.window_end is not None
+            and coverage_subject.window_end > coverage_subject.window_start
+            and coverage_subject.recommended_hours > 0
+        )
         primary_reasons = ()
         primary_reason_entries = ()
-        if opportunity is not None and not weather_refused:
+        if opportunity is not None and not weather_refused and primary_window_available:
             primary_reasons = opportunity.structured_reasons
             if weather_decision is not None:
                 primary_reasons += primary_window_reasons(
@@ -2098,7 +2108,7 @@ def create_app(
             build_target_explanations(
                 primary=(
                     (opportunity.candidate.catalog_key, primary_reason_entries)
-                    if opportunity is not None and not weather_refused
+                    if opportunity is not None and not weather_refused and primary_window_available
                     else None
                 ),
                 alternatives=tuple(
@@ -2113,6 +2123,7 @@ def create_app(
             opportunity is not None
             and selected_alternatives
             and not weather_refused
+            and primary_window_available
         ):
             alternative_comparisons = build_alternative_comparisons(
                 primary_catalog_key=opportunity.candidate.catalog_key,
@@ -2126,6 +2137,21 @@ def create_app(
                 ),
             )
 
+        payload = TonightResponse.from_result(
+            result,
+            weather_decision=weather_decision,
+            primary_window_available=primary_window_available,
+            viable_shortlist_catalog_keys=viable_shortlist_catalog_keys,
+            selected_alternatives=selected_alternatives,
+            alternative_reasons=alternative_reason_entries,
+            rejected_targets=map_rejected_targets(result.candidate_rejections),
+            insufficient_evidence_targets=map_target_evidence_insufficiencies(
+                tuple(target_insufficiencies)
+            ),
+            alternative_comparisons=alternative_comparisons,
+            primary_reasons=primary_reason_entries,
+            target_explanations=target_explanations,
+        ).to_dict()
         register_decision_context = getattr(
             application_service(),
             "register_decision_context",
@@ -2149,27 +2175,26 @@ def create_app(
                     "available_equipment": [inputs.equipment],
                 },
                 availability=inputs.availability,
-                primary_catalog_key=opportunity.candidate.catalog_key,
+                primary_catalog_key=(
+                    opportunity.candidate.catalog_key
+                    if payload["target_decision_status"] == "recommended"
+                    else None
+                ),
                 exposed_alternative_catalog_keys=tuple(
                     candidate.catalog_key for candidate in selected_alternatives
                 ),
-                explicitly_evaluated_catalog_keys=tuple(object_evaluations),
+                explicitly_evaluated_catalog_keys=tuple(
+                    key for key in object_evaluations
+                    if not (
+                        key == opportunity.candidate.catalog_key
+                        and payload["target_decision_status"] != "recommended"
+                    )
+                    and key not in {
+                        entry.catalog_key for entry in target_insufficiencies
+                    }
+                ),
             )
 
-        payload = TonightResponse.from_result(
-            result,
-            weather_decision=weather_decision,
-            viable_shortlist_catalog_keys=viable_shortlist_catalog_keys,
-            selected_alternatives=selected_alternatives,
-            alternative_reasons=alternative_reason_entries,
-            rejected_targets=map_rejected_targets(result.candidate_rejections),
-            insufficient_evidence_targets=map_target_evidence_insufficiencies(
-                tuple(target_insufficiencies)
-            ),
-            alternative_comparisons=alternative_comparisons,
-            primary_reasons=primary_reason_entries,
-            target_explanations=target_explanations,
-        ).to_dict()
         if isinstance(weather, WeatherSnapshot):
             payload["weather_trust"] = weather.trust_transport(weather_freshness)
         return payload

@@ -433,6 +433,7 @@ class TonightResponse:
         result: TonightResult,
         *,
         weather_decision: WeatherTrustDecision | None = None,
+        primary_window_available: bool | None = None,
         viable_shortlist_catalog_keys: Collection[str] | None = None,
         selected_alternatives: Sequence | None = None,
         alternative_reasons: Sequence[Sequence[AlternativeReasonResponse]] | None = None,
@@ -538,7 +539,23 @@ class TonightResponse:
 
         target_decision_status = None
         if recommendation is not None:
-            target_decision_status = TargetDecisionStatus.RECOMMENDED
+            window_available = (
+                primary_window_available
+                if primary_window_available is not None
+                else mission is not None
+                and mission.window_start is not None
+                and mission.window_end is not None
+                and mission.window_end > mission.window_start
+                and mission.recommended_hours > 0
+            )
+            target_decision_status = (
+                TargetDecisionStatus.RECOMMENDED if window_available
+                and not any(
+                    entry.catalog_key == catalog_key
+                    for entry in insufficient_evidence_targets
+                )
+                else TargetDecisionStatus.INSUFFICIENT_EVIDENCE
+            )
         elif (
             weather_decision is not None
             and weather_decision.evidence_quality
@@ -748,7 +765,11 @@ class TonightResponse:
             insufficient_evidence_targets=list(insufficient_evidence_targets),
             alternative_comparisons=list(alternative_comparisons),
             primary_reasons=list(primary_reasons),
-            target_explanations=list(target_explanations),
+            target_explanations=[
+                entry for entry in target_explanations
+                if entry.catalog_key != catalog_key
+                or target_decision_status is TargetDecisionStatus.RECOMMENDED
+            ],
             recommendation_confidence=(
                 float(recommendation.confidence)
                 if recommendation is not None

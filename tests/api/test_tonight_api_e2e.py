@@ -69,6 +69,10 @@ def test_http_request_runs_real_application_composition_once(
         "top_objects": selected_objects,
         "object_evaluations": {
             "M31": {
+                "window": {
+                    "start": datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+                    "end": datetime(2026, 9, 2, 4, tzinfo=timezone.utc),
+                },
                 "decision_context": SimpleNamespace(
                     site=SimpleNamespace(name="Mont Sujet"),
                     session=SimpleNamespace(

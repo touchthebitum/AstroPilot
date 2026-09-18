@@ -786,3 +786,86 @@ def test_web_assets_are_declared_as_package_data():
     pyproject = (project / "pyproject.toml").read_text()
 
     assert '"web/*"' in pyproject
+
+
+def test_primary_status_controls_title_and_preserves_missing_values():
+    script = make_client().get('/ui/app.js').text
+    render = script.split('function renderDecision(decision) {', 1)[1].split('const customEquipmentFields', 1)[0]
+    assert 'decision.target_decision_status === "recommended"' in render
+    assert 'decision.target_decision_status === "insufficient_evidence"' in render
+    assert 'recommended ? "Cible prioritaire" : "Cible évaluée"' in render
+    assert '"Preuves insuffisantes"' in render
+    assert 'AstroPilot ne dispose pas d’assez d’éléments fiables' in render
+    assert 'ui.openMission.hidden = !actionablePrimary' in render
+    assert 'ui.openMission.disabled = !actionablePrimary' in render
+    assert '"À confirmer"' in render
+    assert '"Non évaluée"' in render
+    assert 'formatRecommendationConfidence(' in render
+
+
+def test_primary_status_render_executes_without_fabricating_missing_values(tmp_path):
+    import json
+    import shutil
+    import subprocess
+    import pytest
+
+    engine = shutil.which('node') or shutil.which('osascript')
+    if engine is None:
+        pytest.skip('A JavaScript runtime is required for the render execution test')
+    script = make_client().get('/ui/app.js').text
+    render = 'function renderDecision(decision) {' + script.split('function renderDecision(decision) {', 1)[1].split('const customEquipmentFields', 1)[0]
+    confidence = 'function formatRecommendationConfidence(confidence) {' + script.split('function formatRecommendationConfidence(confidence) {', 1)[1].split('function clearAlternatives', 1)[0]
+    harness = '''
+const values = {};
+const state = {};
+const ui = {openMission: {dataset: {}}, recommendationConfidence: {}};
+const document = {querySelector: () => ({style: {}})};
+const labels = {actions: {start_project: "Commencer ce projet"}, quality: {}, factors: {}};
+function clearAcceptedMission() {}
+function clock(value) {return value || null;}
+function duration(value) {return value ? String(value) : "Non précisée";}
+function dateLabel(value) {return value;}
+function text(key, value) {values[key] = value;}
+function setList(key, values, fallback) {text(key, values.length ? values : fallback);}
+function reasonText(value) {return value;}
+function renderWeatherTrust() {}
+function renderAlternatives() {}
+function show() {}
+'''
+    harness += render + confidence + '''
+function run() {
+  const results = {};
+  for (const status of ["insufficient_evidence", "not_recommended", "recommended"]) {
+    renderDecision({target: "IC1396", catalog_key: "IC1396", decision_id: "exact-decision",
+      action: "start_project", target_decision_status: status});
+    results[status] = {values: JSON.parse(JSON.stringify(values)),
+      hidden: ui.openMission.hidden, disabled: ui.openMission.disabled,
+      confidence: ui.recommendationConfidence.textContent};
+  }
+  return JSON.stringify(results);
+}
+'''
+    if Path(engine).name == 'node':
+        harness += '\nconsole.log(run());\n'
+        command = [engine]
+    else:
+        command = [engine, '-l', 'JavaScript']
+    path = tmp_path / 'render.js'
+    path.write_text(harness)
+    completed = subprocess.run([*command, str(path)], text=True, capture_output=True, check=True)
+    results = json.loads(completed.stdout)
+    for status in ('insufficient_evidence', 'not_recommended'):
+        rendered = results[status]
+        assert rendered['hidden'] and rendered['disabled']
+        assert rendered['values']['#target-label'] != 'Cible prioritaire'
+        assert rendered['values']['#recommendation'] != 'Commencer ce projet'
+    insufficient = results['insufficient_evidence']
+    assert insufficient['values']['#recommendation'] == 'Preuves insuffisantes'
+    assert 'assez d’éléments fiables' in insufficient['values']['#insights-list'][0]
+    assert insufficient['confidence'] == 'Non disponible'
+    assert insufficient['values']['#quality-title'] == 'Non évaluée'
+    assert insufficient['values']['#window-value'] == 'À confirmer'
+    assert insufficient['values']['#duration-value'] == 'Non précisée'
+    assert results['recommended']['values']['#recommendation'] == 'Commencer ce projet'
+    assert results['recommended']['values']['#target-label'] == 'Cible prioritaire'
+    assert not results['recommended']['disabled']

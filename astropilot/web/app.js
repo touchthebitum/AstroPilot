@@ -565,7 +565,12 @@ function renderDecision(decision) {
   const weatherDecision = decision.weather_decision;
 
   text("#night-date", dateLabel(decision.night_date));
-  text("#recommendation", labels.actions[decision.action] || "Session recommandée");
+  const recommended = decision.target_decision_status === "recommended";
+  const insufficient = decision.target_decision_status === "insufficient_evidence";
+  text("#target-label", recommended ? "Cible prioritaire" : "Cible évaluée");
+  text("#recommendation", recommended
+    ? (labels.actions[decision.action] || "Session recommandée")
+    : insufficient ? "Preuves insuffisantes" : "Cible non recommandée");
   text("#target-name", decision.target || "Cible à confirmer");
   text("#catalog-key", decision.target_common_name || (decision.catalog_key && decision.catalog_key !== decision.target ? decision.catalog_key : ""));
   text("#window-value", start && end ? `${start} — ${end}` : "À confirmer");
@@ -599,7 +604,10 @@ function renderDecision(decision) {
     risks.push(...(decision.postponement_risk.explanations || []));
   }
 
-  setList("#insights-list", [...positives, ...information], "Aucune explication supplémentaire disponible.");
+  const evidenceMessage = insufficient
+    ? "AstroPilot ne dispose pas d’assez d’éléments fiables pour recommander cette cible pour cette session."
+    : null;
+  setList("#insights-list", [...(evidenceMessage ? [evidenceMessage] : []), ...positives, ...information], "Aucune explication supplémentaire disponible.");
   setList("#risks-list", risks, "Aucun risque essentiel signalé.");
   const actionablePrimary = Boolean(
     decision.decision_id

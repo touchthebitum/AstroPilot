@@ -389,7 +389,7 @@ def test_discovery_provenance_is_mapped_from_recommendation_candidate():
     assert response.provenance == "discovery"
     assert (
         response.target_decision_status
-        is TargetDecisionStatus.RECOMMENDED
+        is TargetDecisionStatus.INSUFFICIENT_EVIDENCE
     )
 
 
@@ -588,7 +588,12 @@ def test_caution_preserves_active_transport_and_internal_result_identities():
         ),
         confidence=0.91,
     )
-    mission = NightMission(target="Andromeda", confidence=0.87)
+    mission = NightMission(
+        target="Andromeda", confidence=0.87,
+        window_start=datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+        window_end=datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
+        recommended_hours=3.0,
+    )
     result = TonightResult(
         night={"date": date(2026, 9, 1)},
         recommendation=recommendation,
@@ -1083,3 +1088,38 @@ def test_target_insufficiency_transport_only_serializes_supplied_entries(refused
     assert response == baseline
     with pytest.raises(TypeError):
         map_target_evidence_insufficiencies((make_rejection(),))
+
+
+def test_beta3_ic1396_missing_critical_window_is_an_evaluated_candidate():
+    candidate = make_candidate(name='IC1396', catalog_key='IC1396')
+    recommendation = Recommendation(Opportunity(Action.START_PROJECT, candidate), None)
+    payload = TonightResponse.from_result(TonightResult(
+        {'date': date(2026, 9, 1)}, recommendation, None,
+    )).to_dict()
+    assert payload['target'] == 'IC1396'
+    assert payload['target_decision_status'] == 'insufficient_evidence'
+    assert payload['recommendation_confidence'] is None
+    assert payload['astro_quality'] is None
+    assert payload['window_start'] is None and payload['window_end'] is None
+    assert payload['recommended_hours'] == 0.0
+    assert payload['productivity'] is None
+    assert payload['explanation'] is None
+
+
+def test_explicit_primary_insufficiency_overrides_available_window():
+    from decision.services.tonight_response import TonightInsufficientEvidenceTargetResponse
+    candidate = make_candidate()
+    record = TonightInsufficientEvidenceTargetResponse(
+        target=candidate.name, catalog_key=candidate.catalog_key,
+        provenance=candidate.provenance,
+        weather_decision=WeatherTrustDecision(
+            WeatherEvidenceQuality.INSUFFICIENT, WeatherDecisionAdmissibility.REFUSED,
+            ('selected_window_uncovered',),
+        ),
+    )
+    payload = TonightResponse.from_result(
+        TonightResult(None, Recommendation(Opportunity(Action.START_PROJECT, candidate), None), None),
+        primary_window_available=True, insufficient_evidence_targets=(record,),
+    ).to_dict()
+    assert payload['target_decision_status'] == 'insufficient_evidence'
+    assert payload['insufficient_evidence_targets'][0]['weather_decision']['reasons'] == ['selected_window_uncovered']
