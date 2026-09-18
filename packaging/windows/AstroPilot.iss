@@ -32,6 +32,12 @@ WizardStyle=modern
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 
+[InstallDelete]
+; Retire only AstroPilot distribution metadata left by older onedir payloads.
+; Processed before payload copy, which restores metadata supplied by the new build.
+; Never target application data or other packages.
+Type: filesandordirs; Name: "{app}\_internal\astropilot-*.dist-info"
+
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 

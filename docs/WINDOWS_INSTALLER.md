@@ -87,8 +87,13 @@ the previous installation and its uninstall log for subsequent updates.
 - User Start Menu shortcut is mandatory; user Desktop shortcut is optional
   via the unchecked `desktopicon` task. Both launch `{app}\AstroPilot.exe`.
 - Updates use the same AppId and previous installation directory; program
-  files in the new payload replace installed files. No broad cleanup is added;
-  files absent from a newer payload may remain until uninstall.
+  files in the new payload replace installed files. Before copying, `[InstallDelete]`
+  removes only `{app}\_internal\astropilot-*.dist-info` (matching directories
+  and their contents). This retires AstroPilot metadata left by older payloads
+  that could otherwise make `importlib.metadata.version("astropilot")` report an
+  obsolete version. Any metadata supplied by the new payload is then copied
+  normally. Other packages, program files, and user files are not cleanup targets;
+  other files absent from a newer payload may remain until uninstall.
 - `CloseApplications=yes` and `RestartApplications=yes` use Inno Setup's normal
   Restart Manager behavior, with no forced termination. Automatic restart
   depends on application registration with Windows `RegisterApplicationRestart`;
@@ -96,13 +101,38 @@ the previous installation and its uninstall log for subsequent updates.
   actual open-application behavior natively; this increment does not change
   the launcher.
 - Uninstall removes installed program files and owned shortcuts using Inno's
-  normal uninstall log. There are no custom delete rules.
+  normal uninstall log. There are no custom uninstall delete rules.
 - The installer never creates, manages, copies, or deletes the application data
   directory. Profiles, projects, and logs must survive install, update, uninstall,
   and reinstall. Reinstall lets the existing application find its previous data.
 
 The setup is currently unsigned. Authenticode signing, certificates, MSI,
 onefile builds, macOS packaging, and business logic changes are outside Win-4.
+
+## Beta.4 upgrade metadata regression
+
+Native beta.4 validation from source `423bb6a` showed a clean-build runtime
+version of `1.0.0b4`, but an upgrade over an older installation reported
+`1.0.0b2` with the same new build identity. The old
+`{app}\_internal\astropilot-1.0.0b2.dist-info` directory had survived the copy.
+The narrow cleanup above addresses this installed-program residue without
+changing version lookup, AppId, per-user installation, or user-data handling.
+The recorded beta.3 status above is historical and unchanged.
+
+Inno processes [InstallDelete](https://jrsoftware.org/ishelp/topic_installdeletesection.htm)
+before [Files](https://jrsoftware.org/ishelp/topic_installorder.htm).
+The `filesandordirs` type removes matching metadata directories recursively;
+the wildcard is confined to the AstroPilot metadata name under `{app}\_internal`.
+No whole-program or user-data cleanup is introduced. This also applies on fresh
+install/reinstall and is harmless when no matching metadata exists. An interrupted
+installation may require rerunning setup to restore the current payload metadata;
+this change does not promise transactional rollback of deleted obsolete metadata.
+
+Contract tests simulate cleanup followed by payload copy, with real Python
+metadata discovery for directory and archive layouts. They do not compile or
+execute Inno Setup. Native retest remains required: upgrade the old installation,
+confirm no beta.2 metadata survives, verify `/v1/runtime-identity` reports `1.0.0b4`
+and the new build, then validate launch, data preservation, uninstall, and reinstall.
 
 ## Automatic contract validation
 
@@ -138,6 +168,9 @@ back up existing data and record profile/project/log contents for comparison.
 - [ ] Build a subsequent installer retaining exactly the same AppId.
 - [ ] Previous installation recognized; same program directory and uninstall entry.
 - [ ] Updated payload replaces corresponding program files.
+- [ ] Obsolete AstroPilot metadata under `{app}\_internal` removed before copy;
+  other package metadata and user data preserved.
+- [ ] Installed `/v1/runtime-identity` matches the clean build version and commit.
 - [ ] Profile, projects, and logs preserved.
 - [ ] Test with AstroPilot open: observe normal close prompt and file replacement.
 - [ ] Observe actual restart behavior; if no automatic restart, verify manual launch.
