@@ -1575,7 +1575,13 @@ def test_target_insufficiency_api_defaults_and_openapi_contract():
 
 
 def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch):
-    result = replace(make_result(decision_id="decision-123"), mission=None)
+    base = make_result(decision_id="decision-123")
+    result = replace(base, mission=None, night={
+        **base.night,
+        "object_evaluations": {"M31": {"window": {
+            "start": base.mission.window_start, "end": base.mission.window_end,
+        }}},
+    })
     monkeypatch.setattr(
         app_module,
         "validate_selected_window_weather_coverage",
@@ -2701,3 +2707,41 @@ def test_portfolio_credit_api_persistence_failure_is_not_success():
     assert response.json()["detail"]["code"] == (
         "portfolio_credit_persistence_unavailable"
     )
+
+
+def test_missing_primary_window_fails_closed_without_inventing_evidence(tmp_path):
+    result = replace(lineage_result(DEFAULT_WEATHER_REFERENCE_TIME), mission=None)
+    service = DurableTonightApplicationService(
+        application_service=LineageTonightApplicationService(result),
+        evidence_store=FileDecisionForecastEvidenceStore(tmp_path / 'forecast'),
+        acceptance_lineage_store=FileDecisionAcceptanceLineageStore(tmp_path / 'lineage'),
+        decision_id_factory=lambda: 'decision-lineage',
+        clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
+    )
+    client = TestClient(create_app(
+        service_factory=lambda: service,
+        weather_provider=lambda lat, lon: DEFAULT_WEATHER,
+        profile_provider=valid_profile,
+        clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
+    ))
+    response = client.post('/v1/tonight', json={})
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload['target_decision_status'] == 'insufficient_evidence'
+    assert payload['window_start'] is None
+    assert payload['window_end'] is None
+    assert payload['astro_quality'] is None
+    assert payload['productivity'] is None
+    assert payload['recommendation_confidence'] is None
+    assert payload['primary_reasons'] == []
+    assert payload['target_explanations'] == []
+    assert payload['insufficient_evidence_targets'][0]['weather_decision']['reasons'] == ['selected_window_uncovered']
+    assert payload['recommended_hours'] == 0.0
+    rejected = client.post('/v1/decision-selections', json=lineage_selection_payload())
+    assert rejected.status_code == 409, rejected.json()
+    assert rejected.json()['detail']['code'] == 'selected_target_not_primary_recommendation'
+    bypass = client.post('/v1/decision-selections', json=lineage_selection_payload(
+        source='other_evaluated_target', acceptance_request_id='request-bypass',
+    ))
+    assert bypass.status_code == 409, bypass.json()
+    assert bypass.json()['detail']['code'] == 'selected_target_not_explicitly_evaluated'

@@ -49,7 +49,10 @@ class UserSelectionMissionService:
         primary_catalog_key = _candidate_catalog_key(
             recommendation.opportunity.candidate
         )
-        if primary_catalog_key != decision_context.primary_catalog_key:
+        if (
+            decision_context.primary_catalog_key is not None
+            and primary_catalog_key != decision_context.primary_catalog_key
+        ):
             raise UserSelectionValidationError(
                 "recommendation_decision_context_mismatch"
             )
