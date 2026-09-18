@@ -10,9 +10,10 @@ Both candidate artifacts use source commit
 `c8566443c1caf612d122a8d217fe05884ac6aace`. macOS signing, notarization,
 stapling, Gatekeeper, and ZIP extraction checks are validated. Windows native
 installation, launch, update, uninstall, reinstall, and data preservation are
-validated. Distribution remains pending: the beta.3 macOS clean-machine test
-on the Mac mini and native Windows user paths with spaces/accented characters
-are still open. The final tag and GitHub Release remain pending.
+validated. The beta.3 clean-machine test on the Mac mini, native Windows user
+path with spaces/accented characters, and Windows Start Menu launch have passed.
+Full suites are validated on macOS and Windows. Final release review, tag
+creation, and GitHub Release remain pending.
 
 See [closed-beta status and artifact SHA-256 values](docs/closed_beta.md),
 [release gates](docs/release_checklist.md), and
@@ -161,4 +162,4 @@ with Gatekeeper, and writes the versioned ZIP and SHA-256 sidecar under `dist/`.
 The final release ZIP excludes AppleDouble (`._*`) and `__MACOSX` entries.
 The workflow extracts that ZIP and rechecks the extracted application signature,
 stapling, and Gatekeeper before generating its SHA-256 sidecar. These pipeline
-checks do not replace the pending native beta.3 clean-machine test.
+checks are complemented by the passed native beta.3 clean-machine test.

@@ -15,8 +15,13 @@ from source commit `c8566443c1caf612d122a8d217fe05884ac6aace`.
   UAC elevation, launch, update/reinstallation over the existing installation,
   uninstall, reinstall, and preservation/automatic rediscovery of the user
   profile under `%LOCALAPPDATA%\AstroPilot`.
-- Pending: native Windows user paths containing spaces/accented characters.
-  Stub-compiler tests using such paths do not close this native gate.
+- Native user-path test: **PASS**, standard account `Franck Testé`,
+  `USERPROFILE=C:\Users\Franck Testé` (space and accented character).
+  Installation without observed UAC elevation, normal launch and Start Menu
+  launch, fresh onboarding, and profile creation validated. Closing/reopening
+  returned to "Préparer ma nuit" with data preserved.
+- Full suite Windows beta.3: 2641 passed, 0 failed, 1 skipped (recorded result;
+  not rerun during this documentation update).
 - Authenticode remains outside beta.3 scope. The final tag and GitHub Release
   remain pending; see [the shared release gates](release_checklist.md).
 
