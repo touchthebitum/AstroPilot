@@ -66,7 +66,7 @@ def test_entire_onedir_tree_is_copied_only_to_program_directory():
 
 
 @pytest.mark.parametrize("forbidden", (
-    "localappdata", "{localappdata}", "[uninstalldelete]", "[installdelete]",
+    "localappdata", "{localappdata}", "[uninstalldelete]",
     "[dirs]", "[registry]", "[code]", "[run]", "{commonprograms}",
     "{commondesktop}", "privilegesrequiredoverridesallowed", "privilegesrequired=admin",
     "closeapplications=force", "signtool", "signeduninstaller", ".msi", "onefile",
@@ -276,3 +276,95 @@ def test_compiler_invocation_and_output_preserve_existing_files(builder, tmp_pat
     assert internal.read_bytes() == b"runtime"
     assert data.read_bytes() == b"existing profile"
     assert build_file.read_bytes() == b"keep"
+
+
+def metadata_cleanup_rule():
+    """Read the actual Inno rule; simulations must not supply their own pattern."""
+    import re
+
+    source = ISS.read_text(encoding="utf-8")
+    assert "[InstallDelete]" in source
+    entries = source.split("[InstallDelete]", 1)[1].split("[", 1)[0]
+    entries = [line.strip() for line in entries.splitlines()
+               if line.strip() and not line.lstrip().startswith(";")]
+    assert len(entries) == 1
+    match = re.fullmatch(r'Type: filesandordirs; Name: "([^\"]+)"', entries[0])
+    assert match is not None
+    return match.group(1)
+
+
+def test_upgrade_cleanup_is_only_astropilot_metadata_in_program_internal():
+    assert metadata_cleanup_rule() == r"{app}\_internal\astropilot-*.dist-info"
+    source = ISS.read_text(encoding="utf-8").lower()
+    assert "[uninstalldelete]" not in source
+    assert "localappdata" not in source
+    assert "[code]" not in source
+
+
+@pytest.mark.parametrize("payload_metadata", ["directory", "archive"])
+def test_upgrade_removes_beta2_metadata_and_runtime_reports_beta4(
+    tmp_path, monkeypatch, payload_metadata,
+):
+    import importlib.metadata
+    import shutil
+    import sys
+    import zipfile
+    import astropilot.app as app_module
+
+    local = tmp_path / "LocalAppData"
+    app = local / "Programs" / "AstroPilot"
+    internal = app / "_internal"
+    old = internal / "astropilot-1.0.0b2.dist-info"
+    old.mkdir(parents=True)
+    (old / "METADATA").write_text("Name: astropilot\nVersion: 1.0.0b2\n")
+    (old / "nested").mkdir()
+    (old / "nested" / "obsolete.txt").write_text("obsolete metadata")
+    keep = [
+        internal / "requests-2.0.dist-info" / "METADATA",
+        internal / "astropilot_helper-1.0.dist-info" / "METADATA",
+        internal / "runtime.dll",
+        app / "user-note.txt",
+        app / "astropilot-1.0.0b2.dist-info" / "METADATA",
+        local / "AstroPilot" / "user_profile.json",
+        local / "AstroPilot" / "projects.json",
+        local / "AstroPilot" / "AstroPilot.log",
+        local / "AstroPilot" / "astropilot-1.0.0b2.dist-info" / "METADATA",
+    ]
+    for path in keep:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"preserved")
+
+    # A ZIP models embedded metadata when no dist-info directory is in the payload.
+    # Both layouts use real importlib.metadata discovery, not a stub version lookup.
+    payload = tmp_path / "payload" / "_internal"
+    payload.mkdir(parents=True)
+    metadata = "Name: astropilot\nVersion: 1.0.0b4\n"
+    if payload_metadata == "directory":
+        current = payload / "astropilot-1.0.0b4.dist-info"
+        current.mkdir()
+        (current / "METADATA").write_text(metadata)
+    else:
+        with zipfile.ZipFile(payload / "metadata.zip", "w") as archive:
+            archive.writestr("astropilot-1.0.0b4.dist-info/METADATA", metadata)
+        assert not list(payload.glob("astropilot-*.dist-info"))
+
+    monkeypatch.setattr(sys, "path", [str(internal), str(payload), str(payload / "metadata.zip")])
+    # Reproduce the installed/frozen fallback: no source pyproject.toml present.
+    monkeypatch.setattr(app_module, "__file__", str(internal / "astropilot" / "app.py"))
+    assert importlib.metadata.version("astropilot") == "1.0.0b2"
+    assert app_module.canonical_version() == "1.0.0b2"
+    pattern = metadata_cleanup_rule().removeprefix("{app}\\").replace("\\", "/")
+
+    # Contractual InstallDelete-before-Files simulation, repeated for reinstall.
+    for _ in range(2):
+        for path in app.glob(pattern):
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        shutil.copytree(payload, internal, dirs_exist_ok=True)
+        monkeypatch.setattr(sys, "path", [str(internal), str(internal / "metadata.zip")])
+        assert not old.exists()
+        assert app_module.canonical_version() == "1.0.0b4"
+        assert app_module.runtime_identity_payload()["version"] == "1.0.0b4"
+        assert all(path.read_bytes() == b"preserved" for path in keep)
