@@ -72,6 +72,12 @@ from decision.runners.report_runner import ReportRunner
 from decision.engines.night_strategy_engine import NightStrategyEngine
 from decision.engines.project_selection_engine import ProjectSelectionEngine
 from decision.models.candidate import CandidateProvenance
+from decision.definitions.production_imaging_fields import (
+    build_production_imaging_field_resolver,
+)
+from decision.services.project_imaging_field_resolution import (
+    resolve_project_imaging_field,
+)
 from decision.models.candidate_rejection import (
     CandidateBuildResult,
     CandidateRejection,
@@ -699,6 +705,7 @@ def recommend_project_for_night(
     decision_mode = prefs.get("decision_mode", "balanced")
 
     projects = profile.get("projects", {})
+    imaging_field_resolver = None
     candidates = []
     discovery_objects = []
     rejections = []
@@ -743,6 +750,13 @@ def recommend_project_for_night(
                     )
                 )
             continue
+
+        if imaging_field_resolver is None:
+            imaging_field_resolver = build_production_imaging_field_resolver()
+        imaging_field = resolve_project_imaging_field(
+            projects[catalog_key],
+            imaging_field_resolver,
+        )
 
         priority = project_priority(catalog_key, projects)
         roi = (
@@ -886,6 +900,11 @@ def recommend_project_for_night(
                 strategy_scores=strategy_scores,
                 acquired_hours=acquired_hours,
                 provenance=CandidateProvenance.PROJECT,
+                imaging_field_id=(
+                    imaging_field.imaging_field_id
+                    if imaging_field is not None
+                    else None
+                ),
             )
         )
 
@@ -909,6 +928,7 @@ def recommend_project_for_night(
                     strategy_scores={},
                     acquired_hours=None,
                     provenance=CandidateProvenance.DISCOVERY,
+                    imaging_field_id=None,
                 )
             )
 
