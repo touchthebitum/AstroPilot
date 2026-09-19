@@ -61,7 +61,17 @@ def select_continuous_actionable_productive_window(
 
     lower_bound = None
     upper_bound = None
-    duration_cap = None
+    duration_caps = []
+    maximum_mission_hours = assessment.maximum_mission_hours
+    if maximum_mission_hours is not None:
+        if (
+            not isinstance(maximum_mission_hours, (int, float))
+            or isinstance(maximum_mission_hours, bool)
+            or not isfinite(maximum_mission_hours)
+            or maximum_mission_hours < 0
+        ):
+            raise ValueError("maximum_mission_hours_invalid")
+        duration_caps.append(timedelta(hours=maximum_mission_hours))
     if availability is not None:
         if availability.mode is SessionAvailabilityMode.FIXED_WINDOW:
             lower_bound = availability.start
@@ -75,9 +85,16 @@ def select_continuous_actionable_productive_window(
         elif availability.mode is SessionAvailabilityMode.UNTIL:
             upper_bound = availability.end
         elif availability.mode is SessionAvailabilityMode.DURATION:
-            duration_cap = availability.duration
+            duration_caps.append(availability.duration)
         elif availability.mode is not SessionAvailabilityMode.ALL_NIGHT:
             raise ValueError("session_availability_mode_inactive")
+
+    duration_cap = min(duration_caps) if duration_caps else None
+    if (
+        duration_cap is not None
+        and duration_cap < MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW
+    ):
+        return None
 
     productive_windows = getattr(assessment.productivity, "windows", None)
     if productive_windows is None:
@@ -121,22 +138,67 @@ def select_continuous_actionable_productive_window(
             < end.astimezone(timezone.utc)
         ):
             end = upper_bound
-        if (
-            duration_cap is not None
-            and end.astimezone(timezone.utc) - start.astimezone(timezone.utc)
-            > duration_cap
-        ):
-            end = (
-                start.astimezone(timezone.utc) + duration_cap
-            ).astimezone(start.tzinfo)
-
-        duration = end.astimezone(timezone.utc) - start.astimezone(timezone.utc)
+        available_duration = (
+            end.astimezone(timezone.utc) - start.astimezone(timezone.utc)
+        )
+        duration = (
+            min(available_duration, duration_cap)
+            if duration_cap is not None
+            else available_duration
+        )
         if duration < MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW:
             continue
-        candidates.append((duration, productivity, start, end))
+        candidate_productivity = productivity
+        if duration < available_duration:
+            if (
+                availability is not None
+                and availability.mode is SessionAvailabilityMode.DURATION
+            ):
+                for score, selected_start_hour in _scored_duration_window_starts(
+                    assessment,
+                    analysis_hours,
+                    _elapsed_hours(analysis_start, start),
+                    _elapsed_hours(analysis_start, end),
+                    duration.total_seconds() / 3600,
+                ):
+                    selected_start = _at_elapsed_hour(
+                        analysis_start,
+                        selected_start_hour,
+                    )
+                    selected_end = (
+                        selected_start.astimezone(timezone.utc) + duration
+                    ).astimezone(selected_start.tzinfo)
+                    candidates.append(
+                        (duration, score, selected_start, selected_end)
+                    )
+                continue
+            end = (
+                start.astimezone(timezone.utc) + duration
+            ).astimezone(start.tzinfo)
+        candidates.append((duration, candidate_productivity, start, end))
 
     if not candidates:
         return None
+    if (
+        availability is not None
+        and availability.mode is SessionAvailabilityMode.DURATION
+    ):
+        best_duration = max(candidate[0] for candidate in candidates)
+        best_productivity = max(
+            candidate[1]
+            for candidate in candidates
+            if candidate[0] == best_duration
+        )
+        best_candidates = tuple(
+            candidate
+            for candidate in candidates
+            if candidate[0] == best_duration
+            and candidate[1] == best_productivity
+        )
+        if len(best_candidates) != 1:
+            raise ValueError("ambiguous_best_duration_window")
+        _, _, selected_start, selected_end = best_candidates[0]
+        return SessionAvailabilityWindow(selected_start, selected_end)
     _, _, selected_start, selected_end = max(
         candidates,
         key=lambda candidate: (
@@ -190,6 +252,66 @@ def _validated_timeline(assessment, total_hours: float):
     if cursor != total_hours:
         raise ValueError("duration_window_temporal_evidence_required")
     return tuple(timeline)
+
+
+def _scored_duration_window_starts(
+    assessment: ProductiveWindowAssessment,
+    total_hours: float,
+    window_start_hour: float,
+    window_end_hour: float,
+    capacity_hours: float,
+) -> tuple[tuple[float, float], ...]:
+    timeline = _validated_timeline(assessment, total_hours)
+    latest_start = window_end_hour - capacity_hours
+    boundaries = {
+        boundary
+        for slice_ in timeline
+        for boundary in (slice_.start_hour, slice_.end_hour)
+    }
+    candidate_starts = {window_start_hour, latest_start}
+    for boundary in boundaries:
+        if window_start_hour <= boundary <= latest_start:
+            candidate_starts.add(boundary)
+        shifted = boundary - capacity_hours
+        if window_start_hour <= shifted <= latest_start:
+            candidate_starts.add(shifted)
+
+    return tuple(
+        (
+            _productivity_between(
+                timeline,
+                start_hour,
+                start_hour + capacity_hours,
+            ) / capacity_hours,
+            start_hour,
+        )
+        for start_hour in sorted(candidate_starts)
+    )
+
+
+def _best_duration_window_start(
+    assessment: ProductiveWindowAssessment,
+    total_hours: float,
+    window_start_hour: float,
+    window_end_hour: float,
+    capacity_hours: float,
+) -> tuple[float, float]:
+    scored_starts = _scored_duration_window_starts(
+        assessment,
+        total_hours,
+        window_start_hour,
+        window_end_hour,
+        capacity_hours,
+    )
+    best_productivity = max(score for score, _ in scored_starts)
+    best_starts = tuple(
+        start_hour
+        for score, start_hour in scored_starts
+        if score == best_productivity
+    )
+    if len(best_starts) != 1:
+        raise ValueError("ambiguous_best_duration_window")
+    return best_starts[0], best_productivity
 
 
 def select_duration_availability_window(
@@ -304,47 +426,20 @@ def select_duration_availability_window(
             window_end=window_end,
         )
 
-    timeline = _validated_timeline(assessment, total_hours)
-    latest_start = total_hours - capacity_hours
-    boundaries = {
-        boundary
-        for slice_ in timeline
-        for boundary in (slice_.start_hour, slice_.end_hour)
-    }
-    candidate_starts = {0.0, latest_start}
-    for boundary in boundaries:
-        if 0.0 <= boundary <= latest_start:
-            candidate_starts.add(boundary)
-        shifted = boundary - capacity_hours
-        if 0.0 <= shifted <= latest_start:
-            candidate_starts.add(shifted)
-
-    scored_starts = tuple(
-        (
-            _productivity_between(
-                timeline,
-                start_hour,
-                start_hour + capacity_hours,
-            ),
-            start_hour,
-        )
-        for start_hour in sorted(candidate_starts)
+    best_start, _ = _best_duration_window_start(
+        assessment,
+        total_hours,
+        0.0,
+        total_hours,
+        capacity_hours,
     )
-    best_productivity = max(score for score, _ in scored_starts)
-    best_starts = tuple(
-        start_hour
-        for score, start_hour in scored_starts
-        if score == best_productivity
-    )
-    if len(best_starts) != 1:
-        raise ValueError("ambiguous_best_duration_window")
 
     start_utc = window_start.astimezone(timezone.utc)
     selected_start = (
-        start_utc + timedelta(hours=best_starts[0])
+        start_utc + timedelta(hours=best_start)
     ).astimezone(window_start.tzinfo)
     selected_end = (
-        start_utc + timedelta(hours=best_starts[0] + capacity_hours)
+        start_utc + timedelta(hours=best_start + capacity_hours)
     ).astimezone(window_start.tzinfo)
     return SessionAvailabilityWindow(
         window_start=selected_start,

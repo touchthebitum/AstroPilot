@@ -578,12 +578,14 @@ def test_productive_window_assessment_is_immutable_and_gate_compatible(
         "recommended_hours",
         "expected_gain",
         "productivity",
+        "maximum_mission_hours",
     ]
     assert assessment.window_start is input_data.window_start
     assert assessment.window_end is input_data.window_end
     assert assessment.recommended_hours == 0.75
     assert assessment.expected_gain == 3.0
     assert assessment.productivity is productivity
+    assert assessment.maximum_mission_hours == 1.5
     DecisionConsistencyGate.validate_mission(assessment)
     assert DecisionConsistencyGate.has_productive_window(assessment) is True
     with pytest.raises(FrozenInstanceError):

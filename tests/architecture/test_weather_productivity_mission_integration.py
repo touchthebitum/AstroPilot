@@ -75,7 +75,7 @@ def _build_mission(rows, frozen_time, buttes_site):
         astronomical_hours=1.0,
         weather=weather,
         moon_penalty=0.1,
-        recommended_hours=0.75,
+        recommended_hours=1.0,
         expected_gain=2.0,
     )
     context = SimpleNamespace(

@@ -209,7 +209,7 @@ def test_selected_window_conditions_reach_productivity_context(
     assert context.hourly_moon_penalty == [0.2, 0.5]
 
 
-def test_recommended_hours_is_the_real_continuous_selected_window(
+def test_recommended_hours_preserves_the_project_duration_cap(
     frozen_time,
     frozen_weather,
     mission_context,
@@ -227,7 +227,7 @@ def test_recommended_hours_is_the_real_continuous_selected_window(
         isolate_assembler,
     )
 
-    assert mission.recommended_hours == 2.0
+    assert mission.recommended_hours == 1.25
 
 
 def test_expected_gain_uses_existing_session_portfolio_gain(

@@ -33,6 +33,7 @@ class ProductiveWindowAssessment:
     recommended_hours: float
     expected_gain: float
     productivity: NightProductivityResult
+    maximum_mission_hours: float | None = None
 
     @classmethod
     def build(
@@ -175,6 +176,11 @@ class ProductiveWindowAssessment:
             recommended_hours=round(operational_hours, 2),
             expected_gain=round(operational_gain, 2),
             productivity=productivity,
+            maximum_mission_hours=(
+                mission_input.recommended_hours
+                if mission_input is not None
+                else None
+            ),
         )
 
 
