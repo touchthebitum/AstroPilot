@@ -306,13 +306,20 @@ def _productive_assessment():
 
 
 @pytest.mark.parametrize(
-    ("availability", "expected_start", "expected_end", "expected_hours"),
+    (
+        "availability",
+        "expected_start",
+        "expected_end",
+        "expected_hours",
+        "expected_gain",
+    ),
     [
         (
             SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
             datetime(2026, 9, 1, 23, tzinfo=timezone.utc),
             datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
             2.0,
+            0.8,
         ),
         (
             SessionAvailability(
@@ -322,6 +329,7 @@ def _productive_assessment():
             datetime(2026, 9, 1, 23, tzinfo=timezone.utc),
             datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
             2.0,
+            0.8,
         ),
         (
             SessionAvailability(
@@ -332,6 +340,7 @@ def _productive_assessment():
             datetime(2026, 9, 2, 0, tzinfo=timezone.utc),
             datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
             1.0,
+            0.4,
         ),
         (
             SessionAvailability(
@@ -341,6 +350,7 @@ def _productive_assessment():
             datetime(2026, 9, 1, 23, tzinfo=timezone.utc),
             datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
             2.0,
+            0.8,
         ),
         (
             SessionAvailability(
@@ -351,6 +361,7 @@ def _productive_assessment():
             datetime(2026, 9, 1, 23, 30, tzinfo=timezone.utc),
             datetime(2026, 9, 2, 0, 30, tzinfo=timezone.utc),
             1.0,
+            0.4,
         ),
     ],
 )
@@ -359,13 +370,19 @@ def test_mission_timing_uses_existing_availability_windowing(
     expected_start,
     expected_end,
     expected_hours,
+    expected_gain,
 ):
     timing = mission_assembler_module._mission_timing_for_availability(
         _productive_assessment(),
         availability,
     )
 
-    assert timing[:3] == (expected_start, expected_end, expected_hours)
+    assert timing == (
+        expected_start,
+        expected_end,
+        expected_hours,
+        expected_gain,
+    )
 
 
 def test_mission_timing_omitted_availability_selects_real_productive_window():
@@ -380,7 +397,7 @@ def test_mission_timing_omitted_availability_selects_real_productive_window():
         assessment.window_start + timedelta(hours=1),
         assessment.window_start + timedelta(hours=3),
         2.0,
-        assessment.expected_gain,
+        0.8,
     )
 
 

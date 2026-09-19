@@ -197,11 +197,20 @@ def _mission_timing_for_availability(
         constrained.window_end.astimezone(timezone.utc)
         - constrained.window_start.astimezone(timezone.utc)
     ).total_seconds() / 3600
+    reference_hours = assessment.recommended_hours
+    if reference_hours <= 0:
+        expected_gain = 0.0
+    else:
+        expected_gain = round(
+            assessment.expected_gain
+            * min(1.0, capacity_hours / reference_hours),
+            2,
+        )
     return (
         constrained.window_start,
         constrained.window_end,
         round(capacity_hours, 2),
-        assessment.expected_gain,
+        expected_gain,
     )
 
 

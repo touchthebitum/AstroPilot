@@ -31,7 +31,12 @@ from decision.weather.weather_trust_decision import (
 START = datetime(2026, 9, 20, 3, tzinfo=timezone(timedelta(hours=2)))
 
 
-def assessment(scores, *, slice_duration=timedelta(minutes=15)):
+def assessment(
+    scores,
+    *,
+    slice_duration=timedelta(minutes=15),
+    expected_gain=0.0,
+):
     slice_hours = slice_duration.total_seconds() / 3600
     slices = tuple(
         SimpleNamespace(
@@ -58,7 +63,7 @@ def assessment(scores, *, slice_duration=timedelta(minutes=15)):
         window_start=START,
         window_end=START + timedelta(hours=total_hours),
         recommended_hours=weighted_hours,
-        expected_gain=0.0,
+        expected_gain=expected_gain,
         productivity=SimpleNamespace(
             astronomical_hours=total_hours,
             productive_hours=weighted_hours,
@@ -83,7 +88,10 @@ def candidate(source, admissibility=WeatherDecisionAdmissibility.ADMISSIBLE):
 
 
 def test_soul_weighted_equivalent_does_not_create_an_actionable_window():
-    soul = assessment([0.713, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44])
+    soul = assessment(
+        [0.713, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44],
+        expected_gain=6.0,
+    )
 
     assert MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW == timedelta(hours=1)
     assert soul.productivity.astronomical_hours == 2.0
