@@ -47,6 +47,7 @@ class RecordingMissionService:
             mission_id=mission_input.mission_id,
             decision_id=mission_input.decision_id,
             selection_id=mission_input.selection_id,
+            imaging_field_id=mission_input.imaging_field_id,
             window_start=mission_input.window_start,
             window_end=mission_input.window_end,
             recommended_hours=mission_input.recommended_hours,
@@ -76,13 +77,20 @@ def decision_context(*, decision_id="decision-1", evaluated=None):
     )
 
 
-def user_selection(source, catalog_key, *, decision_id="decision-1"):
+def user_selection(
+    source,
+    catalog_key,
+    *,
+    decision_id="decision-1",
+    selected_imaging_field_id=None,
+):
     return UserSelection(
         selection_id="selection-1",
         decision_id=decision_id,
         selected_catalog_key=catalog_key,
         source=source,
         selected_at=datetime(2026, 9, 9, 20, tzinfo=timezone.utc),
+        selected_imaging_field_id=selected_imaging_field_id,
     )
 
 
@@ -338,6 +346,58 @@ def test_omitted_availability_adds_no_temporal_default():
     assert transported.mission_id == "mission-1"
     assert transported.decision_id == "decision-1"
     assert transported.selection_id == "selection-1"
+
+
+@pytest.mark.parametrize("imaging_field_id", [None, "sh2-129_ou4"])
+def test_selection_imaging_field_is_copied_exactly_without_resolution(
+    imaging_field_id,
+):
+    composer, mission_service, _ = service()
+    selection = user_selection(
+        UserSelectionSource.PRIMARY_RECOMMENDATION,
+        "M31",
+        selected_imaging_field_id=imaging_field_id,
+    )
+
+    mission = composer.create(
+        mission_id="mission-1",
+        selection=selection,
+        decision_context=decision_context(),
+        recommendation=recommendation(),
+        night=night(),
+        profile={},
+    )
+
+    assert mission_service.calls[0]["mission_input"].imaging_field_id == imaging_field_id
+    assert mission.imaging_field_id == imaging_field_id
+    assert selection.selected_imaging_field_id == imaging_field_id
+
+
+@pytest.mark.parametrize("value", ["", "   ", 42])
+def test_mission_models_reject_invalid_imaging_field_identity(value):
+    with pytest.raises(
+        ValueError,
+        match="imaging_field_id_must_be_non_empty_string",
+    ):
+        MissionInput(
+            window_start=START,
+            window_end=END,
+            astronomical_hours=4.0,
+            weather=None,
+            moon_penalty=None,
+            recommended_hours=3.0,
+            expected_gain=1.2,
+            imaging_field_id=value,
+        )
+    with pytest.raises(
+        ValueError,
+        match="imaging_field_id_must_be_non_empty_string",
+    ):
+        NightMission(
+            target="M31",
+            confidence="HIGH",
+            imaging_field_id=value,
+        )
 
 
 def test_mission_input_rejects_partial_provenance():

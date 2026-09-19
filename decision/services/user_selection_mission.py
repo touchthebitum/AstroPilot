@@ -90,6 +90,9 @@ class UserSelectionMissionService:
                 mission_id=mission_id,
                 decision_id=validated_selection.decision_id,
                 selection_id=validated_selection.selection_id,
+                imaging_field_id=(
+                    validated_selection.selected_imaging_field_id
+                ),
             )
 
         mission = self.tonight_mission_service.create(
@@ -129,4 +132,11 @@ class UserSelectionMissionService:
             or mission.selection_id != validated_selection.selection_id
         ):
             raise UserSelectionValidationError("mission_provenance_mismatch")
+        if (
+            mission.imaging_field_id
+            != validated_selection.selected_imaging_field_id
+        ):
+            raise UserSelectionValidationError(
+                "mission_imaging_field_mismatch"
+            )
         return mission

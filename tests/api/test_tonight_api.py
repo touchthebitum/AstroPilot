@@ -1608,6 +1608,7 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
                 mission_id="mission-123",
                 decision_id=user_selection.decision_id,
                 selection_id=user_selection.selection_id,
+                imaging_field_id="sh2-129_ou4",
             )
             return DecisionAcceptanceResult(
                 replace(
@@ -1654,6 +1655,7 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
             "mission_id": "mission-123",
             "decision_id": "decision-123",
             "selection_id": "selection-123",
+            "imaging_field_id": "sh2-129_ou4",
             "target": "M31",
             "confidence": "HIGH",
             "equipment": ["widefield"],
@@ -1940,6 +1942,7 @@ def test_durable_acceptance_lineage_survives_two_api_reconstructions(
         "mission_id": persisted_mission.mission_id,
         "decision_id": persisted_mission.decision_id,
         "selection_id": persisted_mission.selection_id,
+        "imaging_field_id": persisted_mission.imaging_field_id,
         "target": persisted_mission.target,
         "confidence": persisted_mission.confidence,
         "equipment": list(persisted_mission.equipment),

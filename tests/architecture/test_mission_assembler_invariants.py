@@ -178,6 +178,32 @@ def test_mission_preserves_reasons_and_computed_results(
     assert mission.expected_gain == 3.6
     assert mission.selected_filter is selected_filter
     assert mission.productivity is isolated_dependencies.productivity
+
+
+@pytest.mark.parametrize("imaging_field_id", [None, "sh2-129_ou4"])
+def test_mission_copies_imaging_field_identity_exactly(
+    frozen_time,
+    summary,
+    context,
+    isolated_dependencies,
+    imaging_field_id,
+):
+    input_data = mission_input(
+        frozen_time,
+        WeatherForecast(),
+        imaging_field_id=imaging_field_id,
+    )
+
+    mission = MissionAssembler.build(
+        target="M31",
+        summary=summary,
+        context=context,
+        equipment=["setup"],
+        alternatives=[],
+        mission_input=input_data,
+    )
+
+    assert mission.imaging_field_id == imaging_field_id
     assert mission.risk_report is isolated_dependencies.risk
     assert mission.season_analysis is isolated_dependencies.season
     assert mission.tasks is isolated_dependencies.tasks
