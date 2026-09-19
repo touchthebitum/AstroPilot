@@ -29,6 +29,7 @@ class ProjectSelectionEngine:
         strategy_scores: dict[str, float],
         acquired_hours: float | None,
         provenance: CandidateProvenance = CandidateProvenance.PROJECT,
+        imaging_field_id: str | None = None,
     ) -> Candidate:
         return Candidate(
             name=name,
@@ -46,6 +47,7 @@ class ProjectSelectionEngine:
             strategy_scores=strategy_scores,
             acquired_hours=acquired_hours,
             provenance=provenance,
+            imaging_field_id=imaging_field_id,
         )
 
     @staticmethod

@@ -15,12 +15,15 @@ from decision.acceptance_lineage_persistence import (
     AcceptanceLineageConflictError,
     AcceptanceLineageCorruptionError,
     AcceptanceLineageNotFoundError,
+    DecisionAcceptanceAggregate,
     _decode,
     _encode,
+    deserialize_decision_acceptance_aggregate,
     deserialize_decision_acceptance_context,
     deserialize_night_mission,
     deserialize_user_selection,
     serialize_decision_acceptance_context,
+    serialize_decision_acceptance_aggregate,
     serialize_night_mission,
     serialize_user_selection,
 )
@@ -105,7 +108,7 @@ def test_nested_namespace_with_date_round_trip_is_lossless():
     assert type(restored.session.end_time) is datetime
 
 
-def candidate(catalog_key="M31"):
+def candidate(catalog_key="M31", imaging_field_id="sh2-129_ou4"):
     return Candidate(
         name="Andromeda Galaxy",
         catalog_key=catalog_key,
@@ -120,9 +123,31 @@ def candidate(catalog_key="M31"):
         closure_bonus=0.5,
         acquired_hours=2.0,
         provenance=CandidateProvenance.PROJECT,
+        imaging_field_id=imaging_field_id,
         reasons=["high_altitude"],
         strategy_scores={"completion": 0.8},
     )
+
+
+def candidate_field_documents(value):
+    found = []
+
+    def visit(item):
+        if isinstance(item, dict):
+            if (
+                item.get("$type") == "dataclass"
+                and item.get("class")
+                == "decision.models.candidate.Candidate"
+            ):
+                found.append(item["fields"])
+            for nested in item.values():
+                visit(nested)
+        elif isinstance(item, list):
+            for nested in item:
+                visit(nested)
+
+    visit(value)
+    return found
 
 
 def decision_context():
@@ -300,6 +325,112 @@ def test_decision_acceptance_context_full_typed_round_trip():
     assert type(restored.night["date"]) is date
     assert type(restored.night["selected_window"]) is tuple
     assert type(restored.availability) is SessionAvailability
+    assert (
+        restored.recommendation.opportunity.candidate.imaging_field_id
+        == "sh2-129_ou4"
+    )
+
+
+def test_v3_candidate_document_contains_exact_imaging_field_key():
+    document = json.loads(
+        serialize_decision_acceptance_aggregate(
+            DecisionAcceptanceAggregate(context=context())
+        )
+    )
+    candidate_fields = candidate_field_documents(document)
+
+    assert document["schema_version"] == 3
+    assert candidate_fields
+    assert all(
+        fields["imaging_field_id"] == "sh2-129_ou4"
+        for fields in candidate_fields
+    )
+    assert all(
+        set(fields)
+        == {
+            "name",
+            "catalog_key",
+            "priority",
+            "astro_score",
+            "final_score",
+            "decision_score",
+            "portfolio_score",
+            "global_score",
+            "setup_score",
+            "best_setup",
+            "closure_bonus",
+            "acquired_hours",
+            "provenance",
+            "imaging_field_id",
+            "reasons",
+            "strategy_scores",
+        }
+        for fields in candidate_fields
+    )
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_legacy_candidate_without_imaging_field_loads_as_none_without_rewrite(
+    tmp_path,
+    version,
+):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    store.create_context(context())
+    path = tmp_path / "decision-1.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["schema_version"] = version
+    if version == 1:
+        document.pop("acceptance_requests")
+    for fields in candidate_field_documents(document):
+        fields.pop("imaging_field_id")
+    legacy = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    path.write_text(legacy, encoding="utf-8")
+
+    restored = FileDecisionAcceptanceLineageStore(tmp_path).load_context(
+        "decision-1"
+    )
+
+    assert restored.recommendation.opportunity.candidate.imaging_field_id is None
+    assert all(
+        item.imaging_field_id is None
+        for item in restored.recommendation.opportunity.shortlist_entries
+    )
+    assert path.read_text(encoding="utf-8") == legacy
+
+
+@pytest.mark.parametrize("malformation", ["missing", "extra", "empty", "typed"])
+def test_v3_candidate_imaging_field_malformation_fails_closed(malformation):
+    document = json.loads(
+        serialize_decision_acceptance_aggregate(
+            DecisionAcceptanceAggregate(context=context())
+        )
+    )
+    fields = candidate_field_documents(document)[0]
+    if malformation == "missing":
+        fields.pop("imaging_field_id")
+    elif malformation == "extra":
+        fields["unexpected"] = None
+    elif malformation == "empty":
+        fields["imaging_field_id"] = ""
+    else:
+        fields["imaging_field_id"] = 42
+
+    with pytest.raises(AcceptanceLineageCorruptionError):
+        deserialize_decision_acceptance_aggregate(json.dumps(document))
+
+
+def test_v3_candidate_raw_provenance_with_imaging_field_fails_closed():
+    document = json.loads(
+        serialize_decision_acceptance_aggregate(
+            DecisionAcceptanceAggregate(context=context())
+        )
+    )
+    fields = candidate_field_documents(document)[0]
+    assert fields["imaging_field_id"] is not None
+    fields["provenance"] = "discovery"
+
+    with pytest.raises(AcceptanceLineageCorruptionError):
+        deserialize_decision_acceptance_aggregate(json.dumps(document))
 
 
 @pytest.mark.parametrize(
@@ -551,6 +682,8 @@ def test_legacy_aggregate_loads_without_fabricated_request_mapping(tmp_path):
     document = json.loads(path.read_text(encoding="utf-8"))
     document["schema_version"] = 1
     document.pop("acceptance_requests")
+    for fields in candidate_field_documents(document):
+        fields.pop("imaging_field_id")
     legacy = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     path.write_text(legacy, encoding="utf-8")
 
@@ -740,7 +873,7 @@ def test_duplicate_identity_in_another_aggregate_fails_globally(
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda document: document.update(schema_version=3),
+        lambda document: document.update(schema_version=4),
         lambda document: document.pop("schema_version"),
         lambda document: document["context"].update(
             {"$type": "unsupported.DomainType"}
@@ -841,7 +974,7 @@ def test_concurrent_conflicting_commits_allow_exactly_one_success(tmp_path):
         outcomes = list(executor.map(commit, ("M31", "M42")))
 
     assert sorted(outcomes) == ["conflict", "saved"]
-    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 2
+    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 3
 
 
 def test_unique_temporary_files_are_cleaned(tmp_path, monkeypatch):

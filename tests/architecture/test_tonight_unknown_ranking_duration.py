@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import astro_score
 import pytest
 from decision.engines.project_selection_engine import ProjectSelectionEngine
-from decision.models.candidate import CandidateProvenance
+from decision.models.candidate import Candidate, CandidateProvenance
 from decision.models.candidate_rejection import (
     CandidateBuildResult,
     CandidateRejection,
@@ -13,6 +13,30 @@ from decision.models.candidate_rejection import (
 from decision.opportunity.action import Action
 from decision.opportunity.opportunity import Opportunity
 from decision.recommendation.recommendation import Recommendation
+from decision.services.project_imaging_field_resolution import (
+    ProjectImagingFieldResolutionError,
+)
+
+
+def build_project_candidate(monkeypatch, project):
+    monkeypatch.setattr(
+        astro_score.future_engine,
+        "estimate",
+        lambda *args, **kwargs: SimpleNamespace(
+            risk="FAIBLE",
+            opportunity_ratio=1.0,
+        ),
+    )
+    return astro_score.recommend_project_for_night(
+        [
+            {
+                "name": "Flying Bat and Squid Nebulae",
+                "catalog_key": "Sh2-129",
+                "global_score": 80,
+            }
+        ],
+        profile={"projects": {"Sh2-129": project}},
+    )[0]
 
 
 def test_candidate_provenance_has_exact_values_and_defaults_to_project():
@@ -41,7 +65,26 @@ def test_candidate_provenance_has_exact_values_and_defaults_to_project():
     assert candidate.provenance is CandidateProvenance.PROJECT
 
 
-def test_candidate_identity_and_provenance_survive_winner_wrappers():
+@pytest.mark.parametrize("provenance", ["project", "discovery", None])
+def test_candidate_rejects_raw_or_invalid_provenance(provenance):
+    with pytest.raises(ValueError, match="CandidateProvenance"):
+        Candidate(
+            name="Andromeda",
+            catalog_key="M31",
+            priority=1,
+            astro_score=80,
+            final_score=70,
+            decision_score=70,
+            portfolio_score=14,
+            global_score=80,
+            setup_score=10,
+            best_setup="samyang_183",
+            closure_bonus=0,
+            provenance=provenance,
+        )
+
+
+def test_candidate_imaging_field_and_provenance_survive_winner_wrappers():
     candidate = ProjectSelectionEngine.build_candidate(
         name="Orion",
         catalog_key="M42",
@@ -57,17 +100,89 @@ def test_candidate_identity_and_provenance_survive_winner_wrappers():
         reasons=[],
         strategy_scores={},
         acquired_hours=None,
-        provenance=CandidateProvenance.DISCOVERY,
+        provenance=CandidateProvenance.PROJECT,
+        imaging_field_id="sh2-129_ou4",
     )
 
     winner = ProjectSelectionEngine.rank_candidates([candidate])[0]
-    opportunity = Opportunity(action=Action.START_PROJECT, candidate=winner)
+    opportunity = Opportunity(
+        action=Action.START_PROJECT,
+        candidate=winner,
+        shortlist_entries=(winner,),
+    )
     recommendation = Recommendation(opportunity=opportunity, confidence=None)
 
     assert winner is candidate
     assert opportunity.candidate is candidate
     assert recommendation.opportunity.candidate is candidate
-    assert candidate.provenance is CandidateProvenance.DISCOVERY
+    assert opportunity.shortlist_entries[0].imaging_field_id == "sh2-129_ou4"
+    assert recommendation.opportunity.candidate.imaging_field_id == (
+        "sh2-129_ou4"
+    )
+    assert candidate.provenance is CandidateProvenance.PROJECT
+
+
+def test_project_candidate_carries_canonical_imaging_field_id(monkeypatch):
+    candidate = build_project_candidate(
+        monkeypatch,
+        {
+            "hours": 2,
+            "target_hours": 10,
+            "importance": 5,
+            "imaging_field_id": "sh2-129_ou4",
+        },
+    )
+
+    assert candidate.imaging_field_id == "sh2-129_ou4"
+
+
+def test_legacy_project_candidate_has_no_imaging_field_id(monkeypatch):
+    candidate = build_project_candidate(
+        monkeypatch,
+        {"hours": 2, "target_hours": 10, "importance": 5},
+    )
+
+    assert candidate.imaging_field_id is None
+
+
+@pytest.mark.parametrize("imaging_field_id", ["unknown", "", 42])
+def test_invalid_explicit_project_imaging_field_fails_closed(
+    monkeypatch,
+    imaging_field_id,
+):
+    with pytest.raises(ProjectImagingFieldResolutionError):
+        build_project_candidate(
+            monkeypatch,
+            {
+                "hours": 2,
+                "target_hours": 10,
+                "importance": 5,
+                "imaging_field_id": imaging_field_id,
+            },
+        )
+
+
+def test_project_candidate_reuses_project_imaging_field_resolver(monkeypatch):
+    calls = []
+    original = astro_score.resolve_project_imaging_field
+
+    def observe(project, resolver):
+        calls.append((project, resolver))
+        return original(project, resolver)
+
+    monkeypatch.setattr(astro_score, "resolve_project_imaging_field", observe)
+    project = {
+        "hours": 2,
+        "target_hours": 10,
+        "importance": 5,
+        "imaging_field_id": "sh2-129_ou4",
+    }
+
+    candidate = build_project_candidate(monkeypatch, project)
+
+    assert candidate.imaging_field_id == "sh2-129_ou4"
+    assert len(calls) == 1
+    assert calls[0][0] is project
 
 
 def test_unknown_duration_skips_roi_and_closure_scoring_and_reasons(monkeypatch):
@@ -233,6 +348,7 @@ def test_empty_projects_builds_ranked_discovery_from_evaluated_objects(
     assert candidates[0].reasons == []
     assert candidates[0].strategy_scores == {}
     assert candidates[0].provenance is CandidateProvenance.DISCOVERY
+    assert candidates[0].imaging_field_id is None
 
 
 def test_viable_project_candidate_suppresses_discovery(monkeypatch):

@@ -27,8 +27,23 @@ class Candidate:
 
     acquired_hours: float | None = 0.0
     provenance: CandidateProvenance = CandidateProvenance.PROJECT
+    imaging_field_id: str | None = None
     reasons: list[str] = field(default_factory=list)
     strategy_scores: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.provenance, CandidateProvenance):
+            raise ValueError("provenance must be a CandidateProvenance")
+        if (
+            self.provenance is CandidateProvenance.DISCOVERY
+            and self.imaging_field_id is not None
+        ):
+            raise ValueError("discovery candidates cannot have imaging_field_id")
+        if self.imaging_field_id is not None and (
+            not isinstance(self.imaging_field_id, str)
+            or not self.imaging_field_id.strip()
+        ):
+            raise ValueError("imaging_field_id must be a non-empty string")
 
     def __getitem__(self, key):
         return getattr(self, key)

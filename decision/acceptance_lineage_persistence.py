@@ -57,7 +57,7 @@ from decision.services.user_selection_validator import (
 from decision.weather.weather_forecast import WeatherForecast
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _IDENTITY_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _LEGACY_ROOT_FIELDS = frozenset(
     ("schema_version", "decision_id", "context", "selections", "missions")
@@ -238,7 +238,7 @@ def _exact_mapping(
     return value
 
 
-def _decode(value: object) -> object:
+def _decode(value: object, *, schema_version: int = SCHEMA_VERSION) -> object:
     if value is None or isinstance(value, (str, bool, int)):
         return value
     if isinstance(value, float):
@@ -303,7 +303,10 @@ def _decode(value: object) -> object:
                 "invalid_simple_namespace_attributes"
             )
         return SimpleNamespace(
-            **{key: _decode(item) for key, item in attributes.items()}
+            **{
+                key: _decode(item, schema_version=schema_version)
+                for key, item in attributes.items()
+            }
         )
     if kind == "enum":
         document = _exact_mapping(
@@ -327,7 +330,9 @@ def _decode(value: object) -> object:
         items = document["items"]
         if not isinstance(items, list):
             raise AcceptanceLineageCorruptionError(f"invalid_{kind}_items")
-        restored = [_decode(item) for item in items]
+        restored = [
+            _decode(item, schema_version=schema_version) for item in items
+        ]
         return tuple(restored) if kind == "tuple" else restored
     if kind == "mapping":
         document = _exact_mapping(
@@ -338,7 +343,10 @@ def _decode(value: object) -> object:
         items = document["items"]
         if type(items) is not dict or any(not isinstance(key, str) for key in items):
             raise AcceptanceLineageCorruptionError("invalid_mapping_items")
-        return {key: _decode(item) for key, item in items.items()}
+        return {
+            key: _decode(item, schema_version=schema_version)
+            for key, item in items.items()
+        }
     if kind == "dataclass":
         document = _exact_mapping(
             value,
@@ -350,13 +358,19 @@ def _decode(value: object) -> object:
             raise AcceptanceLineageCorruptionError("unsupported_dataclass_type")
         supplied = document["fields"]
         expected = frozenset(field.name for field in fields(dataclass_type))
+        if dataclass_type is Candidate and schema_version in (1, 2):
+            expected = expected - frozenset(("imaging_field_id",))
         supplied = _exact_mapping(
             supplied, expected, "invalid_dataclass_fields"
         )
+        restored_fields = {
+            name: _decode(item, schema_version=schema_version)
+            for name, item in supplied.items()
+        }
+        if dataclass_type is Candidate and schema_version in (1, 2):
+            restored_fields["imaging_field_id"] = None
         try:
-            return dataclass_type(
-                **{name: _decode(item) for name, item in supplied.items()}
-            )
+            return dataclass_type(**restored_fields)
         except AcceptanceLineagePersistenceError:
             raise
         except (TypeError, ValueError) as error:
@@ -375,8 +389,14 @@ def _typed_document(value: object, expected_type: type, code: str) -> dict:
     return encoded
 
 
-def _typed_value(document: object, expected_type: type, code: str):
-    value = _decode(document)
+def _typed_value(
+    document: object,
+    expected_type: type,
+    code: str,
+    *,
+    schema_version: int = SCHEMA_VERSION,
+):
+    value = _decode(document, schema_version=schema_version)
     if type(value) is not expected_type:
         raise AcceptanceLineageCorruptionError(code)
     return value
@@ -394,11 +414,14 @@ def serialize_decision_acceptance_context(
 
 def deserialize_decision_acceptance_context(
     document: object,
+    *,
+    schema_version: int = SCHEMA_VERSION,
 ) -> DecisionAcceptanceContext:
     return _typed_value(
         document,
         DecisionAcceptanceContext,
         "invalid_decision_acceptance_context",
+        schema_version=schema_version,
     )
 
 
@@ -406,16 +429,34 @@ def serialize_user_selection(selection: UserSelection) -> dict:
     return _typed_document(selection, UserSelection, "invalid_user_selection")
 
 
-def deserialize_user_selection(document: object) -> UserSelection:
-    return _typed_value(document, UserSelection, "invalid_user_selection")
+def deserialize_user_selection(
+    document: object,
+    *,
+    schema_version: int = SCHEMA_VERSION,
+) -> UserSelection:
+    return _typed_value(
+        document,
+        UserSelection,
+        "invalid_user_selection",
+        schema_version=schema_version,
+    )
 
 
 def serialize_night_mission(mission: NightMission) -> dict:
     return _typed_document(mission, NightMission, "invalid_night_mission")
 
 
-def deserialize_night_mission(document: object) -> NightMission:
-    return _typed_value(document, NightMission, "invalid_night_mission")
+def deserialize_night_mission(
+    document: object,
+    *,
+    schema_version: int = SCHEMA_VERSION,
+) -> NightMission:
+    return _typed_value(
+        document,
+        NightMission,
+        "invalid_night_mission",
+        schema_version=schema_version,
+    )
 
 
 def _validate_aggregate(aggregate: DecisionAcceptanceAggregate) -> None:
@@ -549,7 +590,7 @@ def deserialize_decision_acceptance_aggregate(
     if (
         isinstance(version, bool)
         or not isinstance(version, int)
-        or version not in (1, SCHEMA_VERSION)
+        or version not in (1, 2, SCHEMA_VERSION)
     ):
         raise AcceptanceLineageCorruptionError("invalid_schema_version")
     root = _exact_mapping(
@@ -564,7 +605,10 @@ def deserialize_decision_acceptance_aggregate(
         expected = validate_lineage_identity(decision_id, field="decision_id")
         if stored_decision_id != expected:
             raise AcceptanceLineageCorruptionError("decision_id_mismatch")
-    context = deserialize_decision_acceptance_context(root["context"])
+    context = deserialize_decision_acceptance_context(
+        root["context"],
+        schema_version=version,
+    )
     selections_document = root["selections"]
     missions_document = root["missions"]
     acceptance_requests_document = (
@@ -579,14 +623,14 @@ def deserialize_decision_acceptance_aggregate(
     selections = []
     for identity, item in selections_document.items():
         validate_lineage_identity(identity, field="selection_id")
-        selection = deserialize_user_selection(item)
+        selection = deserialize_user_selection(item, schema_version=version)
         if selection.selection_id != identity:
             raise AcceptanceLineageCorruptionError("selection_id_mismatch")
         selections.append(selection)
     missions = []
     for identity, item in missions_document.items():
         validate_lineage_identity(identity, field="mission_id")
-        mission = deserialize_night_mission(item)
+        mission = deserialize_night_mission(item, schema_version=version)
         if mission.mission_id != identity:
             raise AcceptanceLineageCorruptionError("mission_id_mismatch")
         missions.append(mission)
