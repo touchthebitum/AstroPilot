@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -63,6 +64,7 @@ class RecordingSelectionMissionService:
             mission_id=kwargs["mission_id"],
             decision_id=selection.decision_id,
             selection_id=selection.selection_id,
+            imaging_field_id=selection.selected_imaging_field_id,
         )
 
 
@@ -246,6 +248,7 @@ def test_acceptance_persists_canonical_selected_imaging_field(
     stored = store.load_selection("selection-1")
 
     assert stored.selected_imaging_field_id == "sh2-129_ou4"
+    assert store.load_mission("mission-1").imaging_field_id == "sh2-129_ou4"
     assert composer.calls[0]["selection"] == stored
 
 
@@ -271,6 +274,33 @@ def test_discovery_legacy_and_declined_persist_no_imaging_field(
     service.accept(selection(source, target))
 
     assert store.load_selection("selection-1").selected_imaging_field_id is None
+    if source is not UserSelectionSource.DECLINED:
+        assert store.load_mission("mission-1").imaging_field_id is None
+
+
+def test_mission_imaging_field_mismatch_fails_before_commit():
+    service, composer, store, _ = registered_service(
+        primary_imaging_field_id="sh2-129_ou4",
+        profile_projects={"M31": {"imaging_field_id": "sh2-129_ou4"}},
+    )
+    original_create = composer.create
+
+    def create_mismatched(**kwargs):
+        return replace(
+            original_create(**kwargs),
+            imaging_field_id="different-field",
+        )
+
+    composer.create = create_mismatched
+
+    with pytest.raises(
+        DecisionAcceptanceError,
+        match="mission_imaging_field_mismatch",
+    ):
+        service.accept(selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"))
+
+    with pytest.raises(DecisionAcceptanceError, match="selection_not_found"):
+        store.load_selection("selection-1")
 
 
 def test_candidate_profile_mismatch_fails_before_allocation_or_commit():
@@ -314,7 +344,10 @@ def test_invalid_project_imaging_field_fails_closed_before_commit():
 
 
 def test_first_idempotent_acceptance_and_replay_return_canonical_lineage():
-    service, composer, store, recommendation = registered_service()
+    service, composer, store, recommendation = registered_service(
+        primary_imaging_field_id="sh2-129_ou4",
+        profile_projects={"M31": {"imaging_field_id": "sh2-129_ou4"}},
+    )
 
     first = service.accept_idempotently(
         selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"),
@@ -333,6 +366,8 @@ def test_first_idempotent_acceptance_and_replay_return_canonical_lineage():
     assert replay.selection.selection_id == "selection-1"
     assert replay.mission.mission_id == "mission-1"
     assert replay.mission.selection_id == replay.selection.selection_id
+    assert replay.mission.imaging_field_id == replay.selection.selected_imaging_field_id
+    assert replay.mission.imaging_field_id == "sh2-129_ou4"
     assert store.load_acceptance("request-1") == (
         replay.selection,
         replay.mission,

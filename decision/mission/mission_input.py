@@ -19,6 +19,7 @@ class MissionInput:
     mission_id: str | None = None
     decision_id: str | None = None
     selection_id: str | None = None
+    imaging_field_id: str | None = None
 
     def __post_init__(self):
         provenance = (self.mission_id, self.decision_id, self.selection_id)
@@ -27,3 +28,8 @@ class MissionInput:
             for value in provenance
         ):
             raise ValueError("mission_provenance_required")
+        if self.imaging_field_id is not None and (
+            not isinstance(self.imaging_field_id, str)
+            or not self.imaging_field_id.strip()
+        ):
+            raise ValueError("imaging_field_id_must_be_non_empty_string")

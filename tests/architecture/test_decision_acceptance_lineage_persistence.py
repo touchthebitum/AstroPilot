@@ -29,6 +29,7 @@ from decision.acceptance_lineage_persistence import (
 )
 from decision.filtering.selected_filter import SelectedFilter
 from decision.intelligence.analysis_result import AnalysisResult
+from decision.mission.mission_input import MissionInput
 from decision.mission.night_mission import MissionReason, NightMission
 from decision.mission.night_planner import NightTask
 from decision.models.candidate import Candidate, CandidateProvenance
@@ -171,6 +172,23 @@ def user_selection_field_documents(value):
     return found
 
 
+def dataclass_field_documents(value, class_name):
+    found = []
+
+    def visit(item):
+        if isinstance(item, dict):
+            if item.get("$type") == "dataclass" and item.get("class") == class_name:
+                found.append(item["fields"])
+            for nested in item.values():
+                visit(nested)
+        elif isinstance(item, list):
+            for nested in item:
+                visit(nested)
+
+    visit(value)
+    return found
+
+
 def decision_context():
     setup = ImagingSetup(
         mount=Mount("Sky-Watcher", "HEQ5", 14.0),
@@ -288,6 +306,7 @@ def mission(
     mission_id="mission-1",
     decision_id="decision-1",
     selection_id="selection-1",
+    imaging_field_id=None,
 ):
     slice_value = night_slice()
     return NightMission(
@@ -318,6 +337,7 @@ def mission(
         decision_id=decision_id,
         selection_id=selection_id,
         site_name="Mont Sujet",
+        imaging_field_id=imaging_field_id,
     )
 
 
@@ -354,7 +374,7 @@ def test_decision_acceptance_context_full_typed_round_trip():
     )
 
 
-def test_v4_candidate_document_contains_exact_imaging_field_key():
+def test_v5_candidate_document_contains_exact_imaging_field_key():
     document = json.loads(
         serialize_decision_acceptance_aggregate(
             DecisionAcceptanceAggregate(context=context())
@@ -362,7 +382,7 @@ def test_v4_candidate_document_contains_exact_imaging_field_key():
     )
     candidate_fields = candidate_field_documents(document)
 
-    assert document["schema_version"] == 4
+    assert document["schema_version"] == 5
     assert candidate_fields
     assert all(
         fields["imaging_field_id"] == "sh2-129_ou4"
@@ -521,6 +541,89 @@ def test_complete_night_mission_typed_round_trip():
     assert type(restored.dew_risk) is DewRiskResult
     assert type(restored.tasks[0]) is NightTask
     assert type(restored.selected_filter) is SelectedFilter
+
+
+def test_v5_night_mission_contains_exact_imaging_field_key():
+    value = mission(imaging_field_id="sh2-129_ou4")
+    document = serialize_night_mission(value)
+
+    assert document["fields"]["imaging_field_id"] == "sh2-129_ou4"
+    assert deserialize_night_mission(document) == value
+
+
+def test_v5_mission_input_contains_exact_imaging_field_key():
+    value = MissionInput(
+        window_start=START,
+        window_end=END,
+        astronomical_hours=4.0,
+        weather=None,
+        moon_penalty=None,
+        recommended_hours=3.5,
+        expected_gain=1.25,
+        imaging_field_id="sh2-129_ou4",
+    )
+    document = _encode(value)
+
+    assert document["fields"]["imaging_field_id"] == "sh2-129_ou4"
+    assert _decode(document) == value
+
+
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
+def test_legacy_mission_input_without_imaging_field_loads_as_none(version):
+    document = _encode(MissionInput(
+        window_start=START,
+        window_end=END,
+        astronomical_hours=4.0,
+        weather=None,
+        moon_penalty=None,
+        recommended_hours=3.5,
+        expected_gain=1.25,
+    ))
+    document["fields"].pop("imaging_field_id")
+
+    assert _decode(document, schema_version=version).imaging_field_id is None
+
+
+@pytest.mark.parametrize("malformation", ["missing", "extra", "empty", "typed"])
+def test_v5_mission_input_imaging_field_malformation_fails_closed(malformation):
+    document = _encode(MissionInput(
+        window_start=START,
+        window_end=END,
+        astronomical_hours=4.0,
+        weather=None,
+        moon_penalty=None,
+        recommended_hours=3.5,
+        expected_gain=1.25,
+    ))
+    fields = document["fields"]
+    if malformation == "missing":
+        fields.pop("imaging_field_id")
+    elif malformation == "extra":
+        fields["unexpected"] = None
+    elif malformation == "empty":
+        fields["imaging_field_id"] = ""
+    else:
+        fields["imaging_field_id"] = 42
+
+    with pytest.raises(AcceptanceLineageCorruptionError):
+        _decode(document)
+
+
+@pytest.mark.parametrize("malformation", ["missing", "extra", "empty", "typed"])
+def test_v5_night_mission_imaging_field_malformation_fails_closed(malformation):
+    document = serialize_night_mission(mission())
+    fields = document["fields"]
+    if malformation == "missing":
+        fields.pop("imaging_field_id")
+    elif malformation == "extra":
+        fields["unexpected"] = None
+    elif malformation == "empty":
+        fields["imaging_field_id"] = ""
+    else:
+        fields["imaging_field_id"] = 42
+
+    with pytest.raises(AcceptanceLineageCorruptionError):
+        deserialize_night_mission(document)
 
 
 def test_store_creates_and_reloads_exact_context_after_reconstruction(tmp_path):
@@ -730,7 +833,7 @@ def test_inconsistent_acceptance_request_mapping_fails_closed(tmp_path, mutate):
         store.load_acceptance("request-1")
 
 
-@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
 def test_legacy_aggregate_loads_without_fabricated_imaging_field(
     tmp_path,
     version,
@@ -747,7 +850,13 @@ def test_legacy_aggregate_loads_without_fabricated_imaging_field(
         for fields in candidate_field_documents(document):
             fields.pop("imaging_field_id")
     for fields in user_selection_field_documents(document):
-        fields.pop("selected_imaging_field_id")
+        if version <= 3:
+            fields.pop("selected_imaging_field_id")
+    for fields in dataclass_field_documents(
+        document,
+        "decision.mission.night_mission.NightMission",
+    ):
+        fields.pop("imaging_field_id")
     legacy = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     path.write_text(legacy, encoding="utf-8")
 
@@ -758,7 +867,56 @@ def test_legacy_aggregate_loads_without_fabricated_imaging_field(
     assert reconstructed.load_selection(
         "selection-1"
     ).selected_imaging_field_id is None
+    assert reconstructed.load_mission("mission-1").imaging_field_id is None
     assert path.read_text(encoding="utf-8") == legacy
+
+
+def test_v4_selection_identity_loads_with_legacy_mission_none_without_rewrite(
+    tmp_path,
+):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    store.create_context(context())
+    store.commit_selection_and_mission(
+        selection(selected_imaging_field_id="sh2-129_ou4"),
+        mission(imaging_field_id="sh2-129_ou4"),
+        acceptance_request_id="request-1",
+    )
+    path = tmp_path / "decision-1.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["schema_version"] = 4
+    for fields in dataclass_field_documents(
+        document,
+        "decision.mission.night_mission.NightMission",
+    ):
+        fields.pop("imaging_field_id")
+    legacy = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    path.write_text(legacy, encoding="utf-8")
+
+    reconstructed = FileDecisionAcceptanceLineageStore(tmp_path)
+
+    assert (
+        reconstructed.load_selection("selection-1").selected_imaging_field_id
+        == "sh2-129_ou4"
+    )
+    assert reconstructed.load_mission("mission-1").imaging_field_id is None
+    assert path.read_text(encoding="utf-8") == legacy
+
+
+def test_v5_durable_restart_preserves_matching_imaging_field_identity(tmp_path):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    store.create_context(context())
+    store.commit_selection_and_mission(
+        selection(selected_imaging_field_id="sh2-129_ou4"),
+        mission(imaging_field_id="sh2-129_ou4"),
+        acceptance_request_id="request-1",
+    )
+
+    restored_selection, restored_mission = (
+        FileDecisionAcceptanceLineageStore(tmp_path).load_acceptance("request-1")
+    )
+
+    assert restored_selection.selected_imaging_field_id == "sh2-129_ou4"
+    assert restored_mission.imaging_field_id == "sh2-129_ou4"
 
 
 def test_concurrent_identical_acceptance_requests_converge_on_one_lineage(tmp_path):
@@ -939,7 +1097,7 @@ def test_duplicate_identity_in_another_aggregate_fails_globally(
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda document: document.update(schema_version=5),
+        lambda document: document.update(schema_version=6),
         lambda document: document.pop("schema_version"),
         lambda document: document["context"].update(
             {"$type": "unsupported.DomainType"}
@@ -1040,7 +1198,7 @@ def test_concurrent_conflicting_commits_allow_exactly_one_success(tmp_path):
         outcomes = list(executor.map(commit, ("M31", "M42")))
 
     assert sorted(outcomes) == ["conflict", "saved"]
-    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 4
+    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 5
 
 
 def test_unique_temporary_files_are_cleaned(tmp_path, monkeypatch):

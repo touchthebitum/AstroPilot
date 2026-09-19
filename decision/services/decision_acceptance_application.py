@@ -398,6 +398,8 @@ class DecisionAcceptanceApplicationService:
             or mission.selection_id != selection.selection_id
         ):
             raise DecisionAcceptanceError("mission_provenance_mismatch")
+        if mission.imaging_field_id != selection.selected_imaging_field_id:
+            raise DecisionAcceptanceError("mission_imaging_field_mismatch")
         return self._commit_selection_and_mission(
             selection,
             mission,

@@ -421,6 +421,11 @@ class MissionAssembler:
                 if mission_input is not None
                 else None
             ),
+            imaging_field_id=(
+                mission_input.imaging_field_id
+                if mission_input is not None
+                else None
+            ),
             reasons=reasons,
             equipment=equipment,
             window_start=mission_window_start,

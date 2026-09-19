@@ -480,6 +480,7 @@ class AcceptedMissionResponse(BaseModel):
     mission_id: str
     decision_id: str
     selection_id: str
+    imaging_field_id: str | None = None
     target: str
     confidence: float | str | None = None
     equipment: list[str] = Field(default_factory=list)
@@ -1187,6 +1188,7 @@ def _accepted_mission_response(mission: NightMission) -> AcceptedMissionResponse
         mission_id=mission.mission_id,
         decision_id=mission.decision_id,
         selection_id=mission.selection_id,
+        imaging_field_id=mission.imaging_field_id,
         target=mission.target,
         confidence=mission.confidence,
         equipment=list(mission.equipment),
