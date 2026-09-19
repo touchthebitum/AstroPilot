@@ -1609,7 +1609,13 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
                 decision_id=user_selection.decision_id,
                 selection_id=user_selection.selection_id,
             )
-            return DecisionAcceptanceResult(user_selection, mission)
+            return DecisionAcceptanceResult(
+                replace(
+                    user_selection,
+                    selected_imaging_field_id="sh2-129_ou4",
+                ),
+                mission,
+            )
 
     service = Service()
     client = TestClient(create_app(
@@ -1643,6 +1649,7 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
         "decision_id": "decision-123",
         "selection_id": "selection-123",
         "catalog_key": "M31",
+        "selected_imaging_field_id": "sh2-129_ou4",
         "mission": {
             "mission_id": "mission-123",
             "decision_id": "decision-123",
@@ -1661,6 +1668,7 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
     }
     assert service.selections[0][0] == "request-123"
     assert service.selections[0][1].source is UserSelectionSource.PRIMARY_RECOMMENDATION
+    assert service.selections[0][1].selected_imaging_field_id is None
 
 
 def test_selection_endpoint_rejects_client_supplied_selection_id():
@@ -1674,6 +1682,24 @@ def test_selection_endpoint_rejects_client_supplied_selection_id():
             "selection_id": "client-invented",
             "source": "primary_recommendation",
             "selected_catalog_key": "M31",
+            "selected_at": "2026-09-10T20:00:00+00:00",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_selection_endpoint_rejects_client_supplied_imaging_field_identity():
+    client = make_client(result=make_result())
+
+    response = client.post(
+        "/v1/decision-selections",
+        json={
+            "acceptance_request_id": "request-123",
+            "decision_id": "decision-123",
+            "source": "primary_recommendation",
+            "selected_catalog_key": "M31",
+            "selected_imaging_field_id": "sh2-129_ou4",
             "selected_at": "2026-09-10T20:00:00+00:00",
         },
     )
@@ -2075,6 +2101,7 @@ def test_reconstructed_decline_persists_selection_without_mission(tmp_path):
         "decision_id": "decision-lineage",
         "selection_id": "selection-lineage",
         "catalog_key": None,
+        "selected_imaging_field_id": None,
         "mission": None,
     }
     assert store.load_selection("selection-lineage").source.value == "declined"

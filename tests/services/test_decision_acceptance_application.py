@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from decision.mission.night_mission import NightMission
+from decision.models.candidate import Candidate, CandidateProvenance
 from decision.models.user_selection import UserSelection, UserSelectionSource
 from decision.services.decision_acceptance_application import (
     DecisionAcceptanceApplicationService,
@@ -87,6 +88,10 @@ def registered_service(
     evidence=DEFAULT_EVIDENCE,
     accepted_at=ACCEPTED_AT,
     window_end=None,
+    primary_imaging_field_id=None,
+    alternative_imaging_field_id=None,
+    primary_provenance=CandidateProvenance.PROJECT,
+    profile_projects=None,
 ):
     if evidence is DEFAULT_EVIDENCE:
         evidence = forecast_evidence(accepted_at - timedelta(minutes=30))
@@ -101,9 +106,35 @@ def registered_service(
         evidence_loader=lambda *, decision_id: evidence,
         clock=lambda: accepted_at,
     )
+    def candidate(catalog_key, imaging_field_id=None, provenance=CandidateProvenance.PROJECT):
+        return Candidate(
+            name=catalog_key,
+            catalog_key=catalog_key,
+            priority=1.0,
+            astro_score=80.0,
+            final_score=80.0,
+            decision_score=80.0,
+            portfolio_score=80.0,
+            global_score=80.0,
+            setup_score=80.0,
+            best_setup="setup",
+            closure_bonus=0.0,
+            provenance=provenance,
+            imaging_field_id=imaging_field_id,
+        )
+
+    primary = candidate(
+        "M31",
+        primary_imaging_field_id,
+        primary_provenance,
+    )
     recommendation = SimpleNamespace(
         opportunity=SimpleNamespace(
-            candidate=SimpleNamespace(catalog_key="M31")
+            candidate=primary,
+            shortlist_entries=(
+                primary,
+                candidate("M42", alternative_imaging_field_id),
+            ),
         )
     )
     night = {
@@ -120,7 +151,14 @@ def registered_service(
         decision_id="decision-1",
         recommendation=recommendation,
         night=night,
-        profile={"active_equipment": "setup"},
+        profile={
+            "active_equipment": "setup",
+            "projects": (
+                {key: {} for key in ("M31", "M42", "M33")}
+                if profile_projects is None
+                else profile_projects
+            ),
+        },
         availability=None,
         primary_catalog_key="M31",
         exposed_alternative_catalog_keys=("M42",),
@@ -161,6 +199,118 @@ def test_declined_selection_resolves_exact_decision_and_creates_no_mission():
 
     assert service.accept(selection(UserSelectionSource.DECLINED, None)) is None
     assert len(composer.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("source", "target", "service_kwargs"),
+    [
+        (
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            {
+                "primary_imaging_field_id": "sh2-129_ou4",
+                "profile_projects": {
+                    "M31": {"imaging_field_id": "sh2-129_ou4"}
+                },
+            },
+        ),
+        (
+            UserSelectionSource.ALTERNATIVE,
+            "M42",
+            {
+                "alternative_imaging_field_id": "sh2-129_ou4",
+                "profile_projects": {
+                    "M42": {"imaging_field_id": "sh2-129_ou4"}
+                },
+            },
+        ),
+        (
+            UserSelectionSource.OTHER_EVALUATED_TARGET,
+            "M33",
+            {
+                "profile_projects": {
+                    "M33": {"imaging_field_id": "sh2-129_ou4"}
+                },
+            },
+        ),
+    ],
+)
+def test_acceptance_persists_canonical_selected_imaging_field(
+    source,
+    target,
+    service_kwargs,
+):
+    service, composer, store, _ = registered_service(**service_kwargs)
+
+    service.accept(selection(source, target))
+    stored = store.load_selection("selection-1")
+
+    assert stored.selected_imaging_field_id == "sh2-129_ou4"
+    assert composer.calls[0]["selection"] == stored
+
+
+@pytest.mark.parametrize(
+    ("source", "target", "service_kwargs"),
+    [
+        (
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            {"primary_provenance": CandidateProvenance.DISCOVERY},
+        ),
+        (UserSelectionSource.OTHER_EVALUATED_TARGET, "M33", {}),
+        (UserSelectionSource.DECLINED, None, {}),
+    ],
+)
+def test_discovery_legacy_and_declined_persist_no_imaging_field(
+    source,
+    target,
+    service_kwargs,
+):
+    service, _, store, _ = registered_service(**service_kwargs)
+
+    service.accept(selection(source, target))
+
+    assert store.load_selection("selection-1").selected_imaging_field_id is None
+
+
+def test_candidate_profile_mismatch_fails_before_allocation_or_commit():
+    service, composer, store, _ = registered_service(
+        primary_imaging_field_id="sh2-129_ou4",
+    )
+    service.mission_id_factory = lambda: pytest.fail(
+        "mismatch must stop before mission identity allocation"
+    )
+    before = store.load(decision_id="decision-1")
+
+    with pytest.raises(
+        DecisionAcceptanceError,
+        match="selected_imaging_field_mismatch",
+    ):
+        service.accept(selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"))
+
+    assert composer.calls == []
+    assert store.load(decision_id="decision-1") == before
+
+
+def test_invalid_project_imaging_field_fails_closed_before_commit():
+    service, composer, store, _ = registered_service(
+        profile_projects={"M33": {"imaging_field_id": "unknown"}},
+    )
+    service.mission_id_factory = lambda: pytest.fail(
+        "invalid reference must stop before mission identity allocation"
+    )
+
+    with pytest.raises(
+        DecisionAcceptanceError,
+        match="invalid_selected_imaging_field_reference",
+    ):
+        service.accept(
+            selection(UserSelectionSource.OTHER_EVALUATED_TARGET, "M33")
+        )
+
+    assert composer.calls == []
+    with pytest.raises(DecisionAcceptanceError, match="selection_not_found"):
+        store.load_selection("selection-1")
 
 
 def test_first_idempotent_acceptance_and_replay_return_canonical_lineage():

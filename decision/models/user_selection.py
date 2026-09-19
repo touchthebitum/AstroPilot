@@ -17,6 +17,7 @@ class UserSelection:
     selected_catalog_key: str | None
     source: UserSelectionSource
     selected_at: datetime
+    selected_imaging_field_id: str | None = None
 
     def __post_init__(self):
         for name in ("selection_id", "decision_id"):
@@ -32,7 +33,10 @@ class UserSelection:
             raise ValueError("selected_at_timezone_required")
 
         if self.source is UserSelectionSource.DECLINED:
-            if self.selected_catalog_key is not None:
+            if (
+                self.selected_catalog_key is not None
+                or self.selected_imaging_field_id is not None
+            ):
                 raise ValueError("declined_selection_requires_no_target")
             return
 
@@ -41,3 +45,8 @@ class UserSelection:
             or not self.selected_catalog_key.strip()
         ):
             raise ValueError("selected_catalog_key_required")
+        if self.selected_imaging_field_id is not None and (
+            not isinstance(self.selected_imaging_field_id, str)
+            or not self.selected_imaging_field_id.strip()
+        ):
+            raise ValueError("selected_imaging_field_id_must_be_non_empty_string")

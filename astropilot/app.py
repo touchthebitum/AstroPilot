@@ -498,6 +498,7 @@ class UserSelectionResponse(BaseModel):
     decision_id: str
     selection_id: str
     catalog_key: str | None = None
+    selected_imaging_field_id: str | None = None
     mission: AcceptedMissionResponse | None = None
 
 
@@ -2273,6 +2274,11 @@ def create_app(
             selection_id=canonical_selection.selection_id,
             catalog_key=(
                 canonical_selection.selected_catalog_key
+                if mission is not None
+                else None
+            ),
+            selected_imaging_field_id=(
+                canonical_selection.selected_imaging_field_id
                 if mission is not None
                 else None
             ),
