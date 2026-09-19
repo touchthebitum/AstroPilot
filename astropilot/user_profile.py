@@ -19,6 +19,10 @@ from decision.services.project_imaging_field_resolution import (
     ProjectImagingFieldResolutionError,
     resolve_project_imaging_field,
 )
+from decision.services.project_acquisition_intent_targets import (
+    ProjectAcquisitionIntentTargetsError,
+    resolve_project_acquisition_intent_targets,
+)
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -399,6 +403,24 @@ def validate_user_profile(profile, profile_path: Path):
                     f"Champ projects[{project_name!r}].imaging_field_id "
                     f"invalide dans {profile_path} : référence de champ "
                     "d'imagerie explicite inconnue ou invalide."
+                ) from error
+
+        if "acquisition_intent_targets" in project:
+            if imaging_field_resolver is None:
+                imaging_field_resolver = (
+                    build_production_imaging_field_resolver()
+                )
+            try:
+                resolve_project_acquisition_intent_targets(
+                    project,
+                    imaging_field_resolver,
+                )
+            except ProjectAcquisitionIntentTargetsError as error:
+                raise UserProfileError(
+                    f"Champ projects[{project_name!r}]."
+                    "acquisition_intent_targets invalide dans "
+                    f"{profile_path} : objectifs par intention "
+                    "d'acquisition invalides pour le champ d'imagerie."
                 ) from error
 
         for field_name in ("hours", "target_hours"):

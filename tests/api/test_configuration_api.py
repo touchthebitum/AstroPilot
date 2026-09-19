@@ -264,6 +264,115 @@ def test_project_imaging_field_reference_round_trips_exactly(client):
     }
 
 
+def test_project_acquisition_intent_targets_round_trip_exactly(client):
+    project = {
+        "imaging_field_id": "sh2-129_ou4",
+        "target_hours": 18,
+        "hours": 0,
+        "importance": 9,
+        "acquisition_intent_targets": [
+            {
+                "acquisition_intent_id": "sh2-129_ha",
+                "target_hours": 7.5,
+            },
+            {
+                "acquisition_intent_id": "ou4_oiii",
+                "target_hours": 10.5,
+            },
+        ],
+    }
+
+    response = client.put(
+        "/v1/configuration",
+        json=configuration_payload(projects={"Sh2-129": project}),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["projects"] == {"Sh2-129": project}
+    assert load_user_profile()["projects"] == {"Sh2-129": project}
+    assert client.get("/v1/configuration").json()["projects"] == {
+        "Sh2-129": project
+    }
+
+
+@pytest.mark.parametrize(
+    "targets",
+    [
+        [
+            {
+                "acquisition_intent_id": "unknown-intent",
+                "target_hours": 5,
+            }
+        ],
+        [
+            {
+                "acquisition_intent_id": "ou4_oiii",
+                "target_hours": 5,
+            },
+            {
+                "acquisition_intent_id": "ou4_oiii",
+                "target_hours": 6,
+            },
+        ],
+    ],
+)
+def test_invalid_project_acquisition_intent_targets_do_not_mutate_profile(
+    client,
+    targets,
+):
+    created = client.put(
+        "/v1/configuration",
+        json=configuration_payload(
+            projects={"M31": {"target_hours": 10, "hours": 1}}
+        ),
+    ).json()
+    profile_before = load_user_profile()
+
+    response = client.put(
+        "/v1/configuration",
+        json=configuration_payload(
+            revision=created["profile_revision"],
+            projects={
+                "Sh2-129": {
+                    "imaging_field_id": "sh2-129_ou4",
+                    "target_hours": 18,
+                    "hours": 0,
+                    "acquisition_intent_targets": targets,
+                }
+            },
+        ),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == (
+        "configuration_invalid_project"
+    )
+    assert load_user_profile() == profile_before
+
+
+def test_project_acquisition_intent_targets_require_imaging_field(client):
+    project = {
+        "target_hours": 18,
+        "hours": 0,
+        "acquisition_intent_targets": [
+            {
+                "acquisition_intent_id": "sh2-129_ha",
+                "target_hours": 18,
+            }
+        ],
+    }
+
+    response = client.put(
+        "/v1/configuration",
+        json=configuration_payload(projects={"Sh2-129": project}),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == (
+        "configuration_invalid_project"
+    )
+
+
 def test_unknown_project_imaging_field_fails_without_mutation(client):
     created = client.put(
         "/v1/configuration",
