@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import re
 from typing import Protocol
@@ -13,6 +13,10 @@ from decision.models.user_selection import UserSelection, UserSelectionSource
 from decision.services.user_selection_validator import (
     UserSelectionDecisionContext,
     validate_user_selection,
+)
+from decision.services.selected_imaging_field_resolution import (
+    SelectedImagingFieldResolutionError,
+    resolve_selected_imaging_field_id,
 )
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 from decision.weather.decision_forecast_evidence_persistence import (
@@ -355,6 +359,16 @@ class DecisionAcceptanceApplicationService:
             selection=selection,
             reference_time=reference_time,
         )
+        try:
+            selection = replace(
+                selection,
+                selected_imaging_field_id=resolve_selected_imaging_field_id(
+                    context,
+                    selection,
+                ),
+            )
+        except SelectedImagingFieldResolutionError as exc:
+            raise DecisionAcceptanceError(str(exc)) from exc
 
         mission_id = self.mission_id_factory()
         if not isinstance(mission_id, str) or not mission_id.strip():

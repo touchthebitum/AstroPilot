@@ -150,6 +150,27 @@ def candidate_field_documents(value):
     return found
 
 
+def user_selection_field_documents(value):
+    found = []
+
+    def visit(item):
+        if isinstance(item, dict):
+            if (
+                item.get("$type") == "dataclass"
+                and item.get("class")
+                == "decision.models.user_selection.UserSelection"
+            ):
+                found.append(item["fields"])
+            for nested in item.values():
+                visit(nested)
+        elif isinstance(item, list):
+            for nested in item:
+                visit(nested)
+
+    visit(value)
+    return found
+
+
 def decision_context():
     setup = ImagingSetup(
         mount=Mount("Sky-Watcher", "HEQ5", 14.0),
@@ -233,6 +254,7 @@ def selection(
     decision_id="decision-1",
     selected_at=START - timedelta(minutes=15),
     selected_catalog_key=None,
+    selected_imaging_field_id=None,
 ):
     targets = {
         UserSelectionSource.PRIMARY_RECOMMENDATION: "M31",
@@ -250,6 +272,7 @@ def selection(
         ),
         source=source,
         selected_at=selected_at,
+        selected_imaging_field_id=selected_imaging_field_id,
     )
 
 
@@ -331,7 +354,7 @@ def test_decision_acceptance_context_full_typed_round_trip():
     )
 
 
-def test_v3_candidate_document_contains_exact_imaging_field_key():
+def test_v4_candidate_document_contains_exact_imaging_field_key():
     document = json.loads(
         serialize_decision_acceptance_aggregate(
             DecisionAcceptanceAggregate(context=context())
@@ -339,7 +362,7 @@ def test_v3_candidate_document_contains_exact_imaging_field_key():
     )
     candidate_fields = candidate_field_documents(document)
 
-    assert document["schema_version"] == 3
+    assert document["schema_version"] == 4
     assert candidate_fields
     assert all(
         fields["imaging_field_id"] == "sh2-129_ou4"
@@ -447,6 +470,39 @@ def test_user_selection_sources_round_trip(source):
     assert type(restored.source) is UserSelectionSource
     if source is UserSelectionSource.DECLINED:
         assert restored.selected_catalog_key is None
+
+
+def test_v4_user_selection_contains_exact_imaging_field_key():
+    value = selection(selected_imaging_field_id="sh2-129_ou4")
+    document = serialize_user_selection(value)
+
+    assert set(document["fields"]) == {
+        "selection_id",
+        "decision_id",
+        "selected_catalog_key",
+        "source",
+        "selected_at",
+        "selected_imaging_field_id",
+    }
+    assert document["fields"]["selected_imaging_field_id"] == "sh2-129_ou4"
+    assert deserialize_user_selection(document) == value
+
+
+@pytest.mark.parametrize("malformation", ["missing", "extra", "empty", "typed"])
+def test_v4_user_selection_imaging_field_malformation_fails_closed(malformation):
+    document = serialize_user_selection(selection())
+    fields = document["fields"]
+    if malformation == "missing":
+        fields.pop("selected_imaging_field_id")
+    elif malformation == "extra":
+        fields["unexpected"] = None
+    elif malformation == "empty":
+        fields["selected_imaging_field_id"] = ""
+    else:
+        fields["selected_imaging_field_id"] = 42
+
+    with pytest.raises(AcceptanceLineageCorruptionError):
+        deserialize_user_selection(document)
 
 
 def test_complete_night_mission_typed_round_trip():
@@ -674,16 +730,24 @@ def test_inconsistent_acceptance_request_mapping_fails_closed(tmp_path, mutate):
         store.load_acceptance("request-1")
 
 
-def test_legacy_aggregate_loads_without_fabricated_request_mapping(tmp_path):
+@pytest.mark.parametrize("version", [1, 2, 3])
+def test_legacy_aggregate_loads_without_fabricated_imaging_field(
+    tmp_path,
+    version,
+):
     store = FileDecisionAcceptanceLineageStore(tmp_path)
     store.create_context(context())
     store.commit_selection_and_mission(selection(), mission())
     path = tmp_path / "decision-1.json"
     document = json.loads(path.read_text(encoding="utf-8"))
-    document["schema_version"] = 1
-    document.pop("acceptance_requests")
-    for fields in candidate_field_documents(document):
-        fields.pop("imaging_field_id")
+    document["schema_version"] = version
+    if version == 1:
+        document.pop("acceptance_requests")
+    if version in (1, 2):
+        for fields in candidate_field_documents(document):
+            fields.pop("imaging_field_id")
+    for fields in user_selection_field_documents(document):
+        fields.pop("selected_imaging_field_id")
     legacy = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     path.write_text(legacy, encoding="utf-8")
 
@@ -691,7 +755,9 @@ def test_legacy_aggregate_loads_without_fabricated_request_mapping(tmp_path):
 
     assert reconstructed.load_selection("selection-1") == selection()
     assert reconstructed.load_mission("mission-1") == mission()
-    assert reconstructed.load_acceptance("request-1") is None
+    assert reconstructed.load_selection(
+        "selection-1"
+    ).selected_imaging_field_id is None
     assert path.read_text(encoding="utf-8") == legacy
 
 
@@ -873,7 +939,7 @@ def test_duplicate_identity_in_another_aggregate_fails_globally(
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda document: document.update(schema_version=4),
+        lambda document: document.update(schema_version=5),
         lambda document: document.pop("schema_version"),
         lambda document: document["context"].update(
             {"$type": "unsupported.DomainType"}
@@ -974,7 +1040,7 @@ def test_concurrent_conflicting_commits_allow_exactly_one_success(tmp_path):
         outcomes = list(executor.map(commit, ("M31", "M42")))
 
     assert sorted(outcomes) == ["conflict", "saved"]
-    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 3
+    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 4
 
 
 def test_unique_temporary_files_are_cleaned(tmp_path, monkeypatch):
