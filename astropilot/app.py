@@ -243,9 +243,18 @@ class ProjectConfigurationModel(BaseModel):
     target_hours: float = Field(ge=0)
     hours: float = Field(ge=0)
     importance: float | None = Field(default=None, ge=0, le=10)
+    imaging_field_id: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def validate_progress(self):
+        if (
+            "imaging_field_id" in self.model_fields_set
+            and self.imaging_field_id is None
+        ):
+            raise ValueError("project_imaging_field_id_invalid")
         if self.hours > self.target_hours:
             raise ValueError("project_hours_exceed_target")
         return self
@@ -1327,6 +1336,11 @@ def _configuration_projection(profile: dict | None) -> ConfigurationResponse:
             target_hours=project["target_hours"],
             hours=project["hours"],
             importance=project.get("importance"),
+            **(
+                {"imaging_field_id": project["imaging_field_id"]}
+                if "imaging_field_id" in project
+                else {}
+            ),
         )
         for project_id, project in profile.get("projects", {}).items()
     }

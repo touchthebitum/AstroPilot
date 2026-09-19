@@ -233,10 +233,65 @@ def test_valid_simple_project_round_trips_without_fabricated_fields(client):
         "/v1/configuration",
         json=configuration_payload(projects={"M31": project}),
     )
+    read = client.get("/v1/configuration")
 
     assert response.status_code == 200
+    assert read.status_code == 200
     assert response.json()["projects"] == {"M31": project}
+    assert read.json()["projects"] == {"M31": project}
+    assert "imaging_field_id" not in read.json()["projects"]["M31"]
     assert load_user_profile()["projects"] == {"M31": project}
+
+
+def test_project_imaging_field_reference_round_trips_exactly(client):
+    project = {
+        "imaging_field_id": "sh2-129_ou4",
+        "target_hours": 18,
+        "hours": 0,
+        "importance": 9,
+    }
+
+    response = client.put(
+        "/v1/configuration",
+        json=configuration_payload(projects={"Sh2-129": project}),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["projects"] == {"Sh2-129": project}
+    assert load_user_profile()["projects"] == {"Sh2-129": project}
+    assert client.get("/v1/configuration").json()["projects"] == {
+        "Sh2-129": project
+    }
+
+
+def test_unknown_project_imaging_field_fails_without_mutation(client):
+    created = client.put(
+        "/v1/configuration",
+        json=configuration_payload(
+            projects={"M31": {"target_hours": 10, "hours": 1}}
+        ),
+    ).json()
+    profile_before = load_user_profile()
+
+    response = client.put(
+        "/v1/configuration",
+        json=configuration_payload(
+            revision=created["profile_revision"],
+            projects={
+                "Sh2-129": {
+                    "imaging_field_id": "unknown-field",
+                    "target_hours": 18,
+                    "hours": 0,
+                }
+            },
+        ),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == (
+        "configuration_invalid_project"
+    )
+    assert load_user_profile() == profile_before
 
 
 @pytest.mark.parametrize(

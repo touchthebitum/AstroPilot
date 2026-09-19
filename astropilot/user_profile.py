@@ -12,6 +12,13 @@ from pathlib import Path
 from astropilot.catalog import CATALOG
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 from astropilot.file_lock import exclusive_file_lock
+from decision.definitions.production_imaging_fields import (
+    build_production_imaging_field_resolver,
+)
+from decision.services.project_imaging_field_resolution import (
+    ProjectImagingFieldResolutionError,
+    resolve_project_imaging_field,
+)
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -369,12 +376,30 @@ def validate_user_profile(profile, profile_path: Path):
                 f"dans {profile_path} : chaîne non vide attendue."
             )
 
+    imaging_field_resolver = None
     for project_name, project in profile.get("projects", {}).items():
         if not isinstance(project, dict):
             raise UserProfileError(
                 f"Entrée projects[{project_name!r}] invalide dans "
                 f"{profile_path} : objet JSON attendu."
             )
+
+        if "imaging_field_id" in project:
+            if imaging_field_resolver is None:
+                imaging_field_resolver = (
+                    build_production_imaging_field_resolver()
+                )
+            try:
+                resolve_project_imaging_field(
+                    project,
+                    imaging_field_resolver,
+                )
+            except ProjectImagingFieldResolutionError as error:
+                raise UserProfileError(
+                    f"Champ projects[{project_name!r}].imaging_field_id "
+                    f"invalide dans {profile_path} : référence de champ "
+                    "d'imagerie explicite inconnue ou invalide."
+                ) from error
 
         for field_name in ("hours", "target_hours"):
             if field_name not in project:
