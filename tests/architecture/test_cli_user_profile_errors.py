@@ -701,6 +701,60 @@ def test_invalid_project_importance_exits_cleanly(
     assert profile_path.read_bytes() == original_content
 
 
+def test_unknown_project_imaging_field_reference_exits_cleanly(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "projects": {
+                    "Sh2-129": {
+                        "hours": 0,
+                        "target_hours": 18,
+                        "imaging_field_id": "unknown-field",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    original_content = profile_path.read_bytes()
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+
+    with pytest.raises(SystemExit) as exit_info:
+        astro_score.main(["--object", "M31"])
+
+    captured = capsys.readouterr()
+
+    assert exit_info.value.code == 2
+    assert captured.out == ""
+    assert "projects['Sh2-129'].imaging_field_id" in captured.err
+    assert "Traceback" not in captured.err
+    assert profile_path.read_bytes() == original_content
+
+
+def test_legacy_project_without_imaging_field_reference_is_still_valid(
+    tmp_path,
+):
+    profile_path = tmp_path / "user_profile.json"
+    profile = {
+        "active_equipment": "samyang_183",
+        "available_equipment": ["samyang_183"],
+        "projects": {
+            "Sh2-129": {
+                "hours": 0,
+                "target_hours": 18,
+            }
+        }
+    }
+
+    assert validate_user_profile(profile, profile_path) is profile
+    assert "imaging_field_id" not in profile["projects"]["Sh2-129"]
+
+
 @pytest.mark.parametrize(
     ("session", "field_name", "expected_type"),
     [
