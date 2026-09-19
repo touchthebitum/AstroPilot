@@ -226,7 +226,7 @@ def test_missing_compiler_fails_without_installing(builder, monkeypatch, tmp_pat
 
 
 @pytest.mark.parametrize("result", ("created", "missing", "failure"))
-@pytest.mark.parametrize("version", ("2.3.4b5", "1.0.0b4"))
+@pytest.mark.parametrize("version", ("2.3.4b5", "1.0.0b5"))
 def test_compiler_invocation_and_output_preserve_existing_files(builder, tmp_path, result, version):
     root = tmp_path / "Chemin avec espaces et accents é"
     source = root / "dist" / "AstroPilot"
@@ -242,7 +242,7 @@ def test_compiler_invocation_and_output_preserve_existing_files(builder, tmp_pat
     build_file = root / "build" / "keep.txt"
     build_file.parent.mkdir()
     build_file.write_bytes(b"keep")
-    if version == "1.0.0b4":
+    if version == "1.0.0b5":
         assert builder.read_version(ROOT) == version
     (root / "pyproject.toml").write_text(f'[project]\nversion = "{version}"\n', encoding="utf-8")
     script = root / "packaging" / "windows" / "AstroPilot.iss"
