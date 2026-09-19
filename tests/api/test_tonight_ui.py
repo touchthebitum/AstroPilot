@@ -93,7 +93,8 @@ def test_root_serves_tonight_classic_ui():
     assert "Fiabilité de la recommandation" in response.text
     assert 'id="alternatives-section"' in response.text
     assert 'id="alternatives-list"' in response.text
-    assert 'src="/ui/app.js"' in response.text
+    assert 'src="/ui/app.js?v=1.0.0b5-' in response.text
+    assert "__ASTROPILOT_ASSET_TOKEN__" not in response.text
 
 
 def test_tonight_ui_assets_are_served():
@@ -281,6 +282,56 @@ def test_tonight_ui_assets_are_served():
     assert "outcome" not in page.text.lower()
     assert 'source: "declined"' not in script.text
     assert "other_evaluated_target" not in script.text
+
+
+def test_ui_asset_urls_are_deterministic_per_version_and_build(monkeypatch):
+    import astropilot.app as app_module
+
+    def page_for(version: str, build: str):
+        monkeypatch.setattr(app_module, "canonical_version", lambda: version)
+        monkeypatch.setattr(app_module, "build_identifier", lambda: build)
+        return TestClient(
+            app_module.create_app(
+                service_factory=lambda: UnusedService(),
+                weather_provider=lambda lat, lon: object(),
+                profile_provider=lambda: {},
+            )
+        ).get("/")
+
+    first = page_for("1.2.3b4", "abc1234")
+    same = page_for("1.2.3b4", "abc1234")
+    new_build = page_for("1.2.3b4", "def5678")
+    new_version = page_for("1.2.3b5", "def5678")
+
+    assert 'href="/ui/styles.css?v=1.2.3b4-abc1234"' in first.text
+    assert 'src="/ui/app.js?v=1.2.3b4-abc1234"' in first.text
+    assert 'href="/ui/styles.css"' not in first.text
+    assert 'src="/ui/app.js"' not in first.text
+    assert first.text == same.text
+    assert "/ui/app.js?v=1.2.3b4-def5678" in new_build.text
+    assert "/ui/app.js?v=1.2.3b5-def5678" in new_version.text
+    assert len({first.text, new_build.text, new_version.text}) == 3
+
+
+def test_ui_cache_policy_is_explicit_and_does_not_affect_api():
+    client = make_client()
+
+    page = client.get("/")
+    stylesheet = client.get("/ui/styles.css")
+    script = client.get("/ui/app.js")
+    api = client.get("/v1/runtime-identity")
+
+    assert page.headers["cache-control"] == "no-store"
+    assert stylesheet.headers["cache-control"] == "no-cache"
+    assert script.headers["cache-control"] == "no-cache"
+    assert "cache-control" not in api.headers
+    token = page.text.split('/ui/app.js?v=', 1)[1].split('"', 1)[0]
+    versioned_script = client.get(f"/ui/app.js?v={token}")
+    versioned_stylesheet = client.get(f"/ui/styles.css?v={token}")
+    assert versioned_script.status_code == 200
+    assert versioned_stylesheet.status_code == 200
+    assert versioned_script.headers["cache-control"] == "no-cache"
+    assert versioned_stylesheet.headers["cache-control"] == "no-cache"
 
 
 def test_acceptance_attempt_generates_identity_and_timestamp_once():

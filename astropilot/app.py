@@ -14,7 +14,7 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -1424,7 +1424,8 @@ def create_app(
     clock: Callable[[], datetime] = _utc_now,
     selection_id_factory: Callable[[], str] = _generate_selection_id,
 ) -> FastAPI:
-    application = FastAPI(title="AstroPilot API", version=canonical_version())
+    application_version = canonical_version()
+    application = FastAPI(title="AstroPilot API", version=application_version)
     resolved_service = None
 
     @application.exception_handler(RequestValidationError)
@@ -1464,6 +1465,21 @@ def create_app(
         return resolved_service
 
     web_root = Path(__file__).with_name("web")
+    ui_asset_token = f"{application_version}-{build_identifier()}"
+    ui_document = (web_root / "index.html").read_text(encoding="utf-8").replace(
+        "__ASTROPILOT_ASSET_TOKEN__",
+        ui_asset_token,
+    )
+
+    @application.middleware("http")
+    async def ui_cache_policy(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path == "/":
+            response.headers["Cache-Control"] = "no-store"
+        elif request.url.path in {"/ui/app.js", "/ui/styles.css"}:
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     application.mount(
         "/ui",
         StaticFiles(directory=web_root),
@@ -1472,7 +1488,7 @@ def create_app(
 
     @application.get("/", include_in_schema=False)
     def tonight_ui():
-        return FileResponse(web_root / "index.html")
+        return HTMLResponse(ui_document)
 
     @application.get("/v1/runtime-identity", include_in_schema=False)
     def runtime_identity():
