@@ -433,7 +433,6 @@ class TonightResponse:
         result: TonightResult,
         *,
         weather_decision: WeatherTrustDecision | None = None,
-        primary_window_available: bool | None = None,
         viable_shortlist_catalog_keys: Collection[str] | None = None,
         selected_alternatives: Sequence | None = None,
         alternative_reasons: Sequence[Sequence[AlternativeReasonResponse]] | None = None,
@@ -539,17 +538,15 @@ class TonightResponse:
 
         target_decision_status = None
         if recommendation is not None:
-            window_available = (
-                primary_window_available
-                if primary_window_available is not None
-                else mission is not None
+            mission_actionable = (
+                mission is not None
                 and mission.window_start is not None
                 and mission.window_end is not None
                 and mission.window_end > mission.window_start
                 and mission.recommended_hours > 0
             )
             target_decision_status = (
-                TargetDecisionStatus.RECOMMENDED if window_available
+                TargetDecisionStatus.RECOMMENDED if mission_actionable
                 and not any(
                     entry.catalog_key == catalog_key
                     for entry in insufficient_evidence_targets
