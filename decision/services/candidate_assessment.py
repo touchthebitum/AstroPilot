@@ -7,7 +7,7 @@ from typing import Any
 from decision.mission.mission_assembler import ProductiveWindowAssessment
 from decision.models.session_availability import SessionAvailability
 from decision.services.session_availability_windowing import (
-    select_duration_availability_window,
+    select_continuous_actionable_productive_window,
 )
 from decision.validation.weather_window_coverage import (
     WeatherWindowCoverageError,
@@ -91,6 +91,7 @@ class CandidateAssessment:
 class CandidateViabilityEvaluator:
     @staticmethod
     def is_viable(assessment: CandidateAssessment | None) -> bool:
+        """Return whether a candidate has an actionable session window."""
         if assessment is None:
             return False
 
@@ -98,9 +99,11 @@ class CandidateViabilityEvaluator:
             assessment.productive_window
         )
         return (
-            DecisionConsistencyGate.has_productive_window(
-                assessment.productive_window
+            select_continuous_actionable_productive_window(
+                assessment.productive_window,
+                None,
             )
+            is not None
             and assessment.weather_decision.admissibility
             in {
                 WeatherDecisionAdmissibility.ADMISSIBLE,
@@ -136,14 +139,9 @@ def select_actionable_alternatives(
     primary_catalog_key: str | None,
 ) -> tuple[Any, ...]:
     """Expose physically viable alternatives with a usable session window."""
-    if availability is None:
-        return select_viable_alternatives(
-            shortlist_entries,
-            viable_catalog_keys,
-            primary_catalog_key=primary_catalog_key,
-        )
     if not isinstance(availability, SessionAvailability):
-        raise TypeError("Expected SessionAvailability or None")
+        if availability is not None:
+            raise TypeError("Expected SessionAvailability or None")
 
     alternatives = []
     for candidate in shortlist_entries:
@@ -154,7 +152,7 @@ def select_actionable_alternatives(
         assessment = candidate_assessments.get(candidate.catalog_key)
         if assessment is None:
             continue
-        actionable_window = select_duration_availability_window(
+        actionable_window = select_continuous_actionable_productive_window(
             assessment.productive_window,
             availability,
         )

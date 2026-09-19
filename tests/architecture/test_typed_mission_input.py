@@ -58,7 +58,18 @@ def summary():
 @pytest.fixture
 def isolate_assembler(monkeypatch):
     timeline = SimpleNamespace(slices=[])
-    productivity = SimpleNamespace(timeline=timeline)
+    productivity = SimpleNamespace(
+        astronomical_hours=2.0,
+        productive_hours=2.0,
+        confidence=1.0,
+        windows=[SimpleNamespace(
+            start_hour=0.0,
+            end_hour=2.0,
+            productivity=1.0,
+            productive=True,
+        )],
+        timeline=timeline,
+    )
     captured = {}
 
     def evaluate(context):
@@ -198,7 +209,7 @@ def test_selected_window_conditions_reach_productivity_context(
     assert context.hourly_moon_penalty == [0.2, 0.5]
 
 
-def test_recommended_hours_matches_usable_selected_window(
+def test_recommended_hours_is_the_real_continuous_selected_window(
     frozen_time,
     frozen_weather,
     mission_context,
@@ -216,7 +227,7 @@ def test_recommended_hours_matches_usable_selected_window(
         isolate_assembler,
     )
 
-    assert mission.recommended_hours == 1.25
+    assert mission.recommended_hours == 2.0
 
 
 def test_expected_gain_uses_existing_session_portfolio_gain(

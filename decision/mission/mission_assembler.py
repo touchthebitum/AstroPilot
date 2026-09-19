@@ -165,12 +165,12 @@ class ProductiveWindowAssessment:
             window_start=(
                 mission_input.window_start
                 if mission_input is not None
-                else None
+                else getattr(context_session, "start_time", None)
             ),
             window_end=(
                 mission_input.window_end
                 if mission_input is not None
-                else None
+                else getattr(context_session, "end_time", None)
             ),
             recommended_hours=round(operational_hours, 2),
             expected_gain=round(operational_gain, 2),
@@ -182,20 +182,14 @@ def _mission_timing_for_availability(
     assessment: ProductiveWindowAssessment,
     availability: SessionAvailability | None,
 ):
-    timing = (
-        assessment.window_start,
-        assessment.window_end,
-        assessment.recommended_hours,
-        assessment.expected_gain,
-    )
-    if availability is None:
-        return timing
-
     from decision.services.session_availability_windowing import (
-        select_duration_availability_window,
+        select_continuous_actionable_productive_window,
     )
 
-    constrained = select_duration_availability_window(assessment, availability)
+    constrained = select_continuous_actionable_productive_window(
+        assessment,
+        availability,
+    )
     if constrained is None:
         return None
 
@@ -203,21 +197,11 @@ def _mission_timing_for_availability(
         constrained.window_end.astimezone(timezone.utc)
         - constrained.window_start.astimezone(timezone.utc)
     ).total_seconds() / 3600
-    recommended_hours = min(assessment.recommended_hours, capacity_hours)
-    expected_gain = (
-        assessment.expected_gain
-        if recommended_hours == assessment.recommended_hours
-        else assessment.expected_gain
-        * recommended_hours
-        / assessment.recommended_hours
-        if assessment.recommended_hours > 0
-        else 0.0
-    )
     return (
         constrained.window_start,
         constrained.window_end,
-        round(recommended_hours, 2),
-        round(expected_gain, 2),
+        round(capacity_hours, 2),
+        assessment.expected_gain,
     )
 
 

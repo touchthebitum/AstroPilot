@@ -2856,3 +2856,145 @@ def test_synthetic_weather_coverage_window_cannot_make_primary_actionable(
     assert bypass_rejected.json()["detail"]["code"] == (
         "selected_target_not_explicitly_evaluated"
     )
+
+
+def test_soul_like_short_window_is_not_exposed_or_accepted_as_an_alternative(
+    monkeypatch,
+):
+    from decision.services.user_selection_validator import (
+        UserSelectionDecisionContext,
+        UserSelectionValidationError,
+        validate_user_selection,
+    )
+
+    result = make_result(decision_id="decision-soul")
+    primary = result.recommendation.opportunity.candidate
+    soul = replace(primary, name="Soul", catalog_key="Soul")
+    result = replace(
+        result,
+        recommendation=replace(
+            result.recommendation,
+            opportunity=replace(
+                result.recommendation.opportunity,
+                shortlist_entries=(soul,),
+            ),
+        ),
+        night={
+            "date": "2026-09-19",
+            "top_objects": [
+                {"catalog_key": "M31", "name": "Andromeda"},
+                {"catalog_key": "Soul", "name": "Soul"},
+            ],
+            "object_evaluations": {"M31": {}, "Soul": {}},
+        },
+    )
+    assessment = CandidateAssessment(
+        productive_window=ProductiveWindowAssessment(
+            window_start=datetime(
+                2026,
+                9,
+                20,
+                3,
+                tzinfo=timezone(timedelta(hours=2)),
+            ),
+            window_end=datetime(
+                2026,
+                9,
+                20,
+                5,
+                tzinfo=timezone(timedelta(hours=2)),
+            ),
+            recommended_hours=0.95,
+            expected_gain=0.0,
+            productivity=SimpleNamespace(
+                astronomical_hours=2.0,
+                productive_hours=0.95,
+                confidence=0.47,
+                windows=[SimpleNamespace(
+                    start_hour=0.0,
+                    end_hour=0.25,
+                    productivity=0.713,
+                    productive=True,
+                )],
+                timeline=(),
+            ),
+        ),
+        weather_decision=WeatherTrustDecision(
+            WeatherEvidenceQuality.SUFFICIENT,
+            WeatherDecisionAdmissibility.CAUTION,
+            (),
+        ),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "_assess_shortlist_candidates",
+        lambda *args, **kwargs: {"Soul": assessment},
+    )
+
+    class Service:
+        def evaluate(self, **kwargs):
+            return result
+
+        def register_decision_context(self, **kwargs):
+            self.context = UserSelectionDecisionContext(
+                decision_id=kwargs["decision_id"],
+                primary_catalog_key=kwargs["primary_catalog_key"],
+                exposed_alternative_catalog_keys=kwargs[
+                    "exposed_alternative_catalog_keys"
+                ],
+                explicitly_evaluated_catalog_keys=kwargs[
+                    "explicitly_evaluated_catalog_keys"
+                ],
+            )
+
+        def accept_idempotently(self, selection, *, acceptance_request_id):
+            validate_user_selection(selection, self.context)
+            raise UserSelectionValidationError("selected_target_not_actionable")
+
+    service = Service()
+    client = TestClient(create_app(
+        service_factory=lambda: service,
+        weather_provider=lambda latitude, longitude: DEFAULT_WEATHER,
+        profile_provider=valid_profile,
+        clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
+        selection_id_factory=lambda: "selection-soul",
+    ))
+
+    tonight = client.post(
+        "/v1/tonight",
+        json={"availability": {"mode": "all_night"}},
+    )
+    payload = tonight.json()
+    rejected = client.post(
+        "/v1/decision-selections",
+        json={
+            "acceptance_request_id": "request-soul",
+            "decision_id": "decision-soul",
+            "source": "alternative",
+            "selected_catalog_key": "Soul",
+            "selected_at": DEFAULT_WEATHER_REFERENCE_TIME.isoformat(),
+        },
+    )
+    bypass_rejected = client.post(
+        "/v1/decision-selections",
+        json={
+            "acceptance_request_id": "request-soul-bypass",
+            "decision_id": "decision-soul",
+            "source": "other_evaluated_target",
+            "selected_catalog_key": "Soul",
+            "selected_at": DEFAULT_WEATHER_REFERENCE_TIME.isoformat(),
+        },
+    )
+
+    assert tonight.status_code == 200
+    assert payload["alternatives"] == []
+    assert payload["shortlist_entries"][0]["catalog_key"] == "Soul"
+    assert payload["shortlist_entries"][0]["target_decision_status"] is None
+    assert rejected.status_code == 409
+    assert rejected.json()["detail"]["code"] == (
+        "selected_target_not_exposed_alternative"
+    )
+    assert bypass_rejected.status_code == 409
+    assert bypass_rejected.json()["detail"]["code"] == (
+        "selected_target_not_actionable"
+    )

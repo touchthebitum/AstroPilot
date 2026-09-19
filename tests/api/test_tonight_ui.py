@@ -215,7 +215,9 @@ def test_tonight_ui_assets_are_served():
     assert "ASTROPILOT_DATA_DIR" not in script.text
     assert "user_profile.json" not in script.text
     assert "weatherTrust.timezone" in script.text
-    assert "productive_hours ?? decision.recommended_hours" in script.text
+    assert "productive_hours ?? decision.recommended_hours" not in script.text
+    assert "const actionableHours = decision.recommended_hours" in script.text
+    assert '"Durée de mission exploitable"' in script.text
     assert "showModal()" in script.text
     assert 'source: "primary_recommendation"' in script.text
     assert 'source: "alternative"' in script.text

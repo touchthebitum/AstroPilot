@@ -9,6 +9,9 @@ from decision.models.session_availability import (
 )
 
 
+MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW = timedelta(hours=1)
+
+
 @dataclass(frozen=True, slots=True)
 class SessionAvailabilityWindow:
     window_start: datetime
@@ -19,6 +22,130 @@ def _elapsed_hours(start: datetime, end: datetime) -> float:
     return (
         end.astimezone(timezone.utc) - start.astimezone(timezone.utc)
     ).total_seconds() / 3600
+
+
+def _at_elapsed_hour(start: datetime, elapsed_hour: float) -> datetime:
+    return (
+        start.astimezone(timezone.utc) + timedelta(hours=elapsed_hour)
+    ).astimezone(start.tzinfo)
+
+
+def select_continuous_actionable_productive_window(
+    assessment: ProductiveWindowAssessment,
+    availability: SessionAvailability | None,
+) -> SessionAvailabilityWindow | None:
+    """Select one real productive interval meeting the V1 session minimum."""
+    if not isinstance(assessment, ProductiveWindowAssessment):
+        raise TypeError("Expected ProductiveWindowAssessment")
+    if availability is not None and not isinstance(
+        availability,
+        SessionAvailability,
+    ):
+        raise TypeError("Expected SessionAvailability or None")
+
+    analysis_start = assessment.window_start
+    analysis_end = assessment.window_end
+    if analysis_start is None and analysis_end is None:
+        return None
+    if (
+        not isinstance(analysis_start, datetime)
+        or not isinstance(analysis_end, datetime)
+        or analysis_start.tzinfo is None
+        or analysis_end.tzinfo is None
+        or analysis_start.utcoffset() is None
+        or analysis_end.utcoffset() is None
+        or analysis_end.astimezone(timezone.utc)
+        <= analysis_start.astimezone(timezone.utc)
+    ):
+        raise ValueError("productive_window_bounds_required")
+
+    lower_bound = None
+    upper_bound = None
+    duration_cap = None
+    if availability is not None:
+        if availability.mode is SessionAvailabilityMode.FIXED_WINDOW:
+            lower_bound = availability.start
+            upper_bound = availability.end
+        elif availability.mode is SessionAvailabilityMode.START_AND_DURATION:
+            lower_bound = availability.start
+            upper_bound = (
+                availability.start.astimezone(timezone.utc)
+                + availability.duration
+            ).astimezone(availability.start.tzinfo)
+        elif availability.mode is SessionAvailabilityMode.UNTIL:
+            upper_bound = availability.end
+        elif availability.mode is SessionAvailabilityMode.DURATION:
+            duration_cap = availability.duration
+        elif availability.mode is not SessionAvailabilityMode.ALL_NIGHT:
+            raise ValueError("session_availability_mode_inactive")
+
+    productive_windows = getattr(assessment.productivity, "windows", None)
+    if productive_windows is None:
+        raise ValueError("productive_window_temporal_evidence_required")
+
+    analysis_hours = _elapsed_hours(analysis_start, analysis_end)
+    candidates = []
+    for window in productive_windows:
+        values = (
+            getattr(window, "start_hour", None),
+            getattr(window, "end_hour", None),
+            getattr(window, "productivity", None),
+        )
+        if any(
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not isfinite(value)
+            for value in values
+        ):
+            raise ValueError("productive_window_temporal_evidence_required")
+        start_hour, end_hour, productivity = values
+        if (
+            start_hour < 0
+            or end_hour <= start_hour
+            or end_hour > analysis_hours + 1e-9
+            or not getattr(window, "productive", False)
+        ):
+            raise ValueError("productive_window_temporal_evidence_required")
+
+        start = _at_elapsed_hour(analysis_start, start_hour)
+        end = _at_elapsed_hour(analysis_start, end_hour)
+        if (
+            lower_bound is not None
+            and lower_bound.astimezone(timezone.utc)
+            > start.astimezone(timezone.utc)
+        ):
+            start = lower_bound
+        if (
+            upper_bound is not None
+            and upper_bound.astimezone(timezone.utc)
+            < end.astimezone(timezone.utc)
+        ):
+            end = upper_bound
+        if (
+            duration_cap is not None
+            and end.astimezone(timezone.utc) - start.astimezone(timezone.utc)
+            > duration_cap
+        ):
+            end = (
+                start.astimezone(timezone.utc) + duration_cap
+            ).astimezone(start.tzinfo)
+
+        duration = end.astimezone(timezone.utc) - start.astimezone(timezone.utc)
+        if duration < MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW:
+            continue
+        candidates.append((duration, productivity, start, end))
+
+    if not candidates:
+        return None
+    _, _, selected_start, selected_end = max(
+        candidates,
+        key=lambda candidate: (
+            candidate[0],
+            candidate[1],
+            -candidate[2].timestamp(),
+        ),
+    )
+    return SessionAvailabilityWindow(selected_start, selected_end)
 
 
 def _productivity_between(slices, start_hour: float, end_hour: float) -> float:

@@ -47,6 +47,15 @@ def context(frozen_time, buttes_site):
 def isolated_dependencies(monkeypatch):
     captured = {}
     productivity = SimpleNamespace(
+        astronomical_hours=2.0,
+        productive_hours=1.2,
+        confidence=0.6,
+        windows=[SimpleNamespace(
+            start_hour=0.0,
+            end_hour=1.5,
+            productivity=0.8,
+            productive=True,
+        )],
         timeline=SimpleNamespace(slices=["slice"]),
     )
     risk = SimpleNamespace(level="LOW")
@@ -160,9 +169,9 @@ def test_mission_preserves_reasons_and_computed_results(
     ]
     assert mission.confidence == 0.85
     assert mission.window_start == input_data.window_start
-    assert mission.window_end == input_data.window_end
+    assert mission.window_end == input_data.window_start + timedelta(hours=1.5)
     assert mission.recommended_hours == 1.5
-    assert mission.expected_gain == 4.5
+    assert mission.expected_gain == 3.6
     assert mission.selected_filter is selected_filter
     assert mission.productivity is isolated_dependencies.productivity
     assert mission.risk_report is isolated_dependencies.risk
@@ -344,14 +353,19 @@ def test_build_does_not_mutate_context(
     } == original
 
 
-def test_operational_duration_and_gain_are_limited_by_productive_capacity(
+def test_mission_duration_uses_the_real_continuous_productive_window(
     frozen_time,
     summary,
     context,
     isolated_dependencies,
 ):
     isolated_dependencies.productivity.productive_hours = 0.75
-    isolated_dependencies.productivity.windows = [object()]
+    isolated_dependencies.productivity.windows = [SimpleNamespace(
+        start_hour=0.0,
+        end_hour=1.0,
+        productivity=0.75,
+        productive=True,
+    )]
     input_data = mission_input(
         frozen_time,
         WeatherForecast(),
@@ -368,11 +382,11 @@ def test_operational_duration_and_gain_are_limited_by_productive_capacity(
         mission_input=input_data,
     )
 
-    assert result.recommended_hours == 0.75
+    assert result.recommended_hours == 1.0
     assert result.expected_gain == 3.0
 
 
-def test_no_productive_window_exposes_no_recommended_duration_or_gain(
+def test_no_productive_window_creates_no_mission(
     frozen_time,
     summary,
     context,
@@ -395,8 +409,7 @@ def test_no_productive_window_exposes_no_recommended_duration_or_gain(
         ),
     )
 
-    assert result.recommended_hours == 0.0
-    assert result.expected_gain == 0.0
+    assert result is None
 
 
 def test_productive_window_assessment_is_immutable_and_gate_compatible(
