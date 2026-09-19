@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 from datetime import datetime, timedelta, timezone
 import importlib.metadata
+import math
 import os
 from pathlib import Path
 import platform
@@ -237,6 +238,32 @@ class EquipmentConfigurationRequest(BaseModel):
         return self
 
 
+class ProjectAcquisitionIntentTargetModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    acquisition_intent_id: str
+    target_hours: float = Field(gt=0, allow_inf_nan=False)
+
+    @field_validator("acquisition_intent_id")
+    @classmethod
+    def validate_acquisition_intent_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("acquisition_intent_id_required")
+        return value
+
+    @field_validator("target_hours", mode="before")
+    @classmethod
+    def validate_target_hours(cls, value):
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise ValueError("target_hours_must_be_finite_and_positive")
+        return value
+
+
 class ProjectConfigurationModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -244,6 +271,12 @@ class ProjectConfigurationModel(BaseModel):
     hours: float = Field(ge=0)
     importance: float | None = Field(default=None, ge=0, le=10)
     imaging_field_id: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    acquisition_intent_targets: (
+        tuple[ProjectAcquisitionIntentTargetModel, ...] | None
+    ) = Field(
         default=None,
         exclude_if=lambda value: value is None,
     )
@@ -255,6 +288,11 @@ class ProjectConfigurationModel(BaseModel):
             and self.imaging_field_id is None
         ):
             raise ValueError("project_imaging_field_id_invalid")
+        if (
+            "acquisition_intent_targets" in self.model_fields_set
+            and self.acquisition_intent_targets is None
+        ):
+            raise ValueError("project_acquisition_intent_targets_invalid")
         if self.hours > self.target_hours:
             raise ValueError("project_hours_exceed_target")
         return self
@@ -1344,6 +1382,15 @@ def _configuration_projection(profile: dict | None) -> ConfigurationResponse:
                 if "imaging_field_id" in project
                 else {}
             ),
+            **(
+                {
+                    "acquisition_intent_targets": project[
+                        "acquisition_intent_targets"
+                    ]
+                }
+                if "acquisition_intent_targets" in project
+                else {}
+            ),
         )
         for project_id, project in profile.get("projects", {}).items()
     }
@@ -1394,7 +1441,10 @@ def _configuration_candidate(
     existing_projects = candidate.get("projects", {})
     projects = {}
     for project_id, project in request.projects.items():
-        persisted_project = project.model_dump(exclude_none=True)
+        persisted_project = project.model_dump(
+            mode="json",
+            exclude_none=True,
+        )
         previous = existing_projects.get(project_id, {})
         if "filter_targets" in previous:
             persisted_project["filter_targets"] = copy.deepcopy(
