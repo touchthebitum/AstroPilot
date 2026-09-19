@@ -99,7 +99,7 @@ class UserSelectionMissionService:
             build_mission_input=build_selected_mission_input,
         )
         if mission is None:
-            return None
+            raise UserSelectionValidationError("selected_target_not_actionable")
         if not isinstance(mission, NightMission):
             raise TypeError("Expected NightMission or None")
         expected_mission_targets = {

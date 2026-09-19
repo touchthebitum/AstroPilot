@@ -78,10 +78,10 @@ class DecisionConsistencyGate:
             if (
                 window_hours is not None
                 and cls._is_finite(productivity.astronomical_hours)
-                and abs(productivity.astronomical_hours - window_hours)
-                > cls.TOLERANCE
+                and window_hours
+                > productivity.astronomical_hours + cls.TOLERANCE
             ):
-                issues.append("astronomical_hours_mismatch_window")
+                issues.append("window_exceeds_astronomical_hours")
             if (
                 cls._is_finite(productivity.productive_hours)
                 and cls._is_finite(productivity.astronomical_hours)
@@ -91,11 +91,11 @@ class DecisionConsistencyGate:
                 issues.append("productive_hours_exceed_astronomical_hours")
             if (
                 cls._is_finite(mission.recommended_hours)
-                and cls._is_finite(productivity.productive_hours)
+                and window_hours is not None
                 and mission.recommended_hours
-                > productivity.productive_hours + cls.TOLERANCE
+                > window_hours + cls.TOLERANCE
             ):
-                issues.append("recommended_hours_exceed_productive_hours")
+                issues.append("recommended_hours_exceed_selected_window")
             if (
                 cls._is_finite(productivity.productive_hours)
                 and cls._is_finite(productivity.astronomical_hours)

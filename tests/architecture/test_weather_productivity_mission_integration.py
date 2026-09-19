@@ -75,7 +75,7 @@ def _build_mission(rows, frozen_time, buttes_site):
         astronomical_hours=1.0,
         weather=weather,
         moon_penalty=0.1,
-        recommended_hours=0.75,
+        recommended_hours=1.0,
         expected_gain=2.0,
     )
     context = SimpleNamespace(
@@ -123,32 +123,32 @@ def test_hourly_weather_flows_through_productivity_into_the_mission(
             "wind_speed_10m": 5.0,
             "temperature_2m": 4.0,
         }
-        for cloud_cover in (0.0, 20.0, 40.0, 60.0)
+        for cloud_cover in (0.0, 10.0, 20.0, 40.0)
     ]
 
     mission, weather = _build_mission(rows, frozen_time, buttes_site)
 
     assert mission.productivity.astronomical_hours == 1.0
-    assert mission.productivity.productive_hours == pytest.approx(0.77)
-    assert mission.productivity.confidence == pytest.approx(0.77)
+    assert mission.productivity.productive_hours == pytest.approx(0.86)
+    assert mission.productivity.confidence == pytest.approx(0.86)
     assert mission.night_slices is mission.productivity.timeline.slices
     assert [night_slice.cloud_cover for night_slice in mission.night_slices] == [
         0.0,
+        10.0,
         20.0,
         40.0,
-        60.0,
     ]
     assert [
         night_slice.productivity_score
         for night_slice in mission.night_slices
-    ] == pytest.approx([0.98, 0.84, 0.70, 0.56])
+    ] == pytest.approx([0.98, 0.91, 0.84, 0.70])
     assert len(mission.productivity.windows) == 1
     assert mission.productivity.windows[0].start_hour == 0.0
-    assert mission.productivity.windows[0].end_hour == 0.75
-    assert mission.productivity.windows[0].productivity == pytest.approx(0.84)
-    assert mission.recommended_hours == 0.75
+    assert mission.productivity.windows[0].end_hour == 1.0
+    assert mission.productivity.windows[0].productivity == pytest.approx(0.857)
+    assert mission.recommended_hours == 1.0
     assert mission.tasks[0].title == "Installer le matériel"
-    assert weather.hourly_clouds == [0.0, 20.0, 40.0, 60.0]
+    assert weather.hourly_clouds == [0.0, 10.0, 20.0, 40.0]
 
 
 def test_degraded_weather_removes_productive_windows_from_the_mission(
@@ -168,10 +168,4 @@ def test_degraded_weather_removes_productive_windows_from_the_mission(
 
     mission, _ = _build_mission(rows, frozen_time, buttes_site)
 
-    assert mission.productivity.productive_hours == 0.0
-    assert mission.productivity.confidence == 0.0
-    assert mission.productivity.windows == []
-    assert all(
-        night_slice.productivity_score == 0.0
-        for night_slice in mission.night_slices
-    )
+    assert mission is None

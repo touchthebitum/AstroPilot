@@ -551,7 +551,7 @@ function renderDecision(decision) {
   state.currentDecision = decision;
 
   const productivity = decision.productivity;
-  const productiveHours = productivity?.productive_hours ?? decision.recommended_hours;
+  const actionableHours = decision.recommended_hours;
   const firstWindow = productivity?.windows?.find((window) => window.productive)
     || productivity?.windows?.[0];
   const start = clock(decision.window_start) || firstWindow?.start_time || null;
@@ -575,8 +575,8 @@ function renderDecision(decision) {
   text("#catalog-key", decision.target_common_name || (decision.catalog_key && decision.catalog_key !== decision.target ? decision.catalog_key : ""));
   text("#window-value", start && end ? `${start} — ${end}` : "À confirmer");
   text("#window-note", firstWindow?.reason ? "Fenêtre productive principale" : "Heure locale");
-  text("#duration-value", duration(productiveHours));
-  text("#duration-note", productivity?.productive_hours ? "Temps réellement exploitable" : "Durée de mission recommandée");
+  text("#duration-value", duration(actionableHours));
+  text("#duration-note", "Durée de mission exploitable");
   text("#filter-value", filter?.name || "Aucun filtre précisé");
   text("#filter-note", filter?.filter_type ? filter.filter_type.replaceAll("_", " ") : "Selon la cible et le ciel");
   text("#quality-score", qualityScore === null ? "—" : String(qualityScore));

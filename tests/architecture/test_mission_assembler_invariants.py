@@ -11,6 +11,10 @@ from decision.mission.mission_assembler import (
 )
 from decision.mission.mission_input import MissionInput
 from decision.mission.night_mission import MissionReason
+from decision.models.session_availability import (
+    SessionAvailability,
+    SessionAvailabilityMode,
+)
 from decision.weather.weather_forecast import WeatherForecast
 from decision.validation.decision_consistency import DecisionConsistencyGate
 
@@ -47,6 +51,15 @@ def context(frozen_time, buttes_site):
 def isolated_dependencies(monkeypatch):
     captured = {}
     productivity = SimpleNamespace(
+        astronomical_hours=2.0,
+        productive_hours=1.2,
+        confidence=0.6,
+        windows=[SimpleNamespace(
+            start_hour=0.0,
+            end_hour=1.5,
+            productivity=0.8,
+            productive=True,
+        )],
         timeline=SimpleNamespace(slices=["slice"]),
     )
     risk = SimpleNamespace(level="LOW")
@@ -160,9 +173,9 @@ def test_mission_preserves_reasons_and_computed_results(
     ]
     assert mission.confidence == 0.85
     assert mission.window_start == input_data.window_start
-    assert mission.window_end == input_data.window_end
+    assert mission.window_end == input_data.window_start + timedelta(hours=1.5)
     assert mission.recommended_hours == 1.5
-    assert mission.expected_gain == 4.5
+    assert mission.expected_gain == 3.6
     assert mission.selected_filter is selected_filter
     assert mission.productivity is isolated_dependencies.productivity
     assert mission.risk_report is isolated_dependencies.risk
@@ -344,14 +357,19 @@ def test_build_does_not_mutate_context(
     } == original
 
 
-def test_operational_duration_and_gain_are_limited_by_productive_capacity(
+def test_mission_duration_uses_the_real_continuous_productive_window(
     frozen_time,
     summary,
     context,
     isolated_dependencies,
 ):
     isolated_dependencies.productivity.productive_hours = 0.75
-    isolated_dependencies.productivity.windows = [object()]
+    isolated_dependencies.productivity.windows = [SimpleNamespace(
+        start_hour=0.0,
+        end_hour=1.0,
+        productivity=0.75,
+        productive=True,
+    )]
     input_data = mission_input(
         frozen_time,
         WeatherForecast(),
@@ -368,11 +386,138 @@ def test_operational_duration_and_gain_are_limited_by_productive_capacity(
         mission_input=input_data,
     )
 
-    assert result.recommended_hours == 0.75
+    assert result.recommended_hours == 1.0
     assert result.expected_gain == 3.0
 
 
-def test_no_productive_window_exposes_no_recommended_duration_or_gain(
+def test_expected_gain_is_unchanged_for_the_full_assessment_window(
+    frozen_time,
+    summary,
+    context,
+    isolated_dependencies,
+):
+    isolated_dependencies.productivity.productive_hours = 2.0
+    isolated_dependencies.productivity.windows = [SimpleNamespace(
+        start_hour=0.0,
+        end_hour=2.0,
+        productivity=0.8,
+        productive=True,
+    )]
+
+    result = MissionAssembler.build(
+        target="M31",
+        summary=summary,
+        context=context,
+        equipment=[],
+        alternatives=[],
+        mission_input=mission_input(
+            frozen_time,
+            WeatherForecast(),
+            recommended_hours=2.0,
+            expected_gain=6.0,
+        ),
+    )
+
+    assert result.recommended_hours == 2.0
+    assert result.expected_gain == 6.0
+
+
+def test_expected_gain_is_prorated_to_the_selected_actionable_hour(
+    frozen_time,
+    summary,
+    context,
+    isolated_dependencies,
+):
+    isolated_dependencies.productivity.productive_hours = 2.0
+    isolated_dependencies.productivity.windows = [SimpleNamespace(
+        start_hour=0.0,
+        end_hour=2.0,
+        productivity=0.8,
+        productive=True,
+    )]
+    availability = SessionAvailability(
+        SessionAvailabilityMode.FIXED_WINDOW,
+        start=frozen_time,
+        end=frozen_time + timedelta(hours=1),
+    )
+
+    result = MissionAssembler.build(
+        target="M31",
+        summary=summary,
+        context=context,
+        equipment=[],
+        alternatives=[],
+        mission_input=mission_input(
+            frozen_time,
+            WeatherForecast(),
+            recommended_hours=2.0,
+            expected_gain=6.0,
+            availability=availability,
+        ),
+    )
+
+    assert result.recommended_hours == 1.0
+    assert result.expected_gain == 3.0
+    assert result.expected_gain <= 6.0
+
+
+def test_expected_gain_cannot_increase_when_selected_window_exceeds_gain_reference(
+    frozen_time,
+    summary,
+    context,
+    isolated_dependencies,
+):
+    isolated_dependencies.productivity.productive_hours = 1.0
+    isolated_dependencies.productivity.windows = [SimpleNamespace(
+        start_hour=0.0,
+        end_hour=2.0,
+        productivity=0.8,
+        productive=True,
+    )]
+
+    result = MissionAssembler.build(
+        target="M31",
+        summary=summary,
+        context=context,
+        equipment=[],
+        alternatives=[],
+        mission_input=mission_input(
+            frozen_time,
+            WeatherForecast(),
+            recommended_hours=2.0,
+            expected_gain=6.0,
+        ),
+    )
+
+    assert result.recommended_hours == 2.0
+    assert result.expected_gain == 3.0
+
+
+def test_zero_reference_duration_never_transports_expected_gain(
+    frozen_time,
+    isolated_dependencies,
+):
+    isolated_dependencies.productivity.windows = [SimpleNamespace(
+        start_hour=0.0,
+        end_hour=1.0,
+        productivity=0.8,
+        productive=True,
+    )]
+    assessment = ProductiveWindowAssessment(
+        window_start=frozen_time,
+        window_end=frozen_time + timedelta(hours=2),
+        recommended_hours=0.0,
+        expected_gain=6.0,
+        productivity=isolated_dependencies.productivity,
+    )
+
+    timing = module._mission_timing_for_availability(assessment, None)
+
+    assert timing is not None
+    assert timing[2:] == (1.0, 0.0)
+
+
+def test_no_productive_window_creates_no_mission(
     frozen_time,
     summary,
     context,
@@ -395,8 +540,7 @@ def test_no_productive_window_exposes_no_recommended_duration_or_gain(
         ),
     )
 
-    assert result.recommended_hours == 0.0
-    assert result.expected_gain == 0.0
+    assert result is None
 
 
 def test_productive_window_assessment_is_immutable_and_gate_compatible(
@@ -434,12 +578,14 @@ def test_productive_window_assessment_is_immutable_and_gate_compatible(
         "recommended_hours",
         "expected_gain",
         "productivity",
+        "maximum_mission_hours",
     ]
     assert assessment.window_start is input_data.window_start
     assert assessment.window_end is input_data.window_end
     assert assessment.recommended_hours == 0.75
     assert assessment.expected_gain == 3.0
     assert assessment.productivity is productivity
+    assert assessment.maximum_mission_hours == 1.5
     DecisionConsistencyGate.validate_mission(assessment)
     assert DecisionConsistencyGate.has_productive_window(assessment) is True
     with pytest.raises(FrozenInstanceError):

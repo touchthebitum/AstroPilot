@@ -193,6 +193,27 @@ def test_declined_selection_creates_no_mission():
     assert mission_service.calls == []
 
 
+def test_non_actionable_selection_is_rejected_instead_of_becoming_a_decline():
+    mission_service = SimpleNamespace(create=lambda **kwargs: None)
+    composer = UserSelectionMissionService(
+        tonight_mission_service=mission_service,
+        build_mission_input=lambda evaluation, *, profile: mission_input(),
+    )
+
+    with pytest.raises(
+        UserSelectionValidationError,
+        match="selected_target_not_actionable",
+    ):
+        composer.create(
+            mission_id="mission-1",
+            selection=user_selection(UserSelectionSource.ALTERNATIVE, "M42"),
+            decision_context=decision_context(),
+            recommendation=recommendation(),
+            night=night(),
+            profile={},
+        )
+
+
 def test_unbound_selection_fails_closed_without_primary_fallback():
     composer, mission_service, _ = service()
 

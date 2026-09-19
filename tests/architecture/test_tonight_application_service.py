@@ -5,7 +5,6 @@ import pytest
 
 import decision.services.tonight_application_service as tonight_service_module
 import decision.mission.mission_assembler as mission_assembler_module
-import decision.services.session_availability_windowing as availability_windowing
 
 from astropilot.user_profile import UserProfileError
 from decision.forecast.forecast_run import ForecastRun
@@ -279,6 +278,12 @@ def _productive_assessment():
         recommended_hours=3.0,
         expected_gain=1.2,
         productivity=SimpleNamespace(
+            windows=[SimpleNamespace(
+                start_hour=1.0,
+                end_hour=3.0,
+                productivity=0.9,
+                productive=True,
+            )],
             timeline=(
                 SimpleNamespace(
                     start_hour=0.0,
@@ -301,13 +306,20 @@ def _productive_assessment():
 
 
 @pytest.mark.parametrize(
-    ("availability", "expected_start", "expected_end", "expected_hours"),
+    (
+        "availability",
+        "expected_start",
+        "expected_end",
+        "expected_hours",
+        "expected_gain",
+    ),
     [
         (
             SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
-            datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
-            datetime(2026, 9, 2, 2, tzinfo=timezone.utc),
-            3.0,
+            datetime(2026, 9, 1, 23, tzinfo=timezone.utc),
+            datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
+            2.0,
+            0.8,
         ),
         (
             SessionAvailability(
@@ -317,6 +329,7 @@ def _productive_assessment():
             datetime(2026, 9, 1, 23, tzinfo=timezone.utc),
             datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
             2.0,
+            0.8,
         ),
         (
             SessionAvailability(
@@ -325,17 +338,19 @@ def _productive_assessment():
                 duration=timedelta(hours=3),
             ),
             datetime(2026, 9, 2, 0, tzinfo=timezone.utc),
-            datetime(2026, 9, 2, 2, tzinfo=timezone.utc),
-            2.0,
+            datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
+            1.0,
+            0.4,
         ),
         (
             SessionAvailability(
                 SessionAvailabilityMode.UNTIL,
                 end=datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
             ),
-            datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+            datetime(2026, 9, 1, 23, tzinfo=timezone.utc),
             datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
-            3.0,
+            2.0,
+            0.8,
         ),
         (
             SessionAvailability(
@@ -346,6 +361,7 @@ def _productive_assessment():
             datetime(2026, 9, 1, 23, 30, tzinfo=timezone.utc),
             datetime(2026, 9, 2, 0, 30, tzinfo=timezone.utc),
             1.0,
+            0.4,
         ),
     ],
 )
@@ -354,22 +370,23 @@ def test_mission_timing_uses_existing_availability_windowing(
     expected_start,
     expected_end,
     expected_hours,
+    expected_gain,
 ):
     timing = mission_assembler_module._mission_timing_for_availability(
         _productive_assessment(),
         availability,
     )
 
-    assert timing[:3] == (expected_start, expected_end, expected_hours)
-
-
-def test_mission_timing_omitted_availability_preserves_assessment(monkeypatch):
-    assessment = _productive_assessment()
-    monkeypatch.setattr(
-        availability_windowing,
-        "select_duration_availability_window",
-        lambda *args, **kwargs: pytest.fail("windowing must not be invoked"),
+    assert timing == (
+        expected_start,
+        expected_end,
+        expected_hours,
+        expected_gain,
     )
+
+
+def test_mission_timing_omitted_availability_selects_real_productive_window():
+    assessment = _productive_assessment()
 
     timing = mission_assembler_module._mission_timing_for_availability(
         assessment,
@@ -377,10 +394,10 @@ def test_mission_timing_omitted_availability_preserves_assessment(monkeypatch):
     )
 
     assert timing == (
-        assessment.window_start,
-        assessment.window_end,
-        assessment.recommended_hours,
-        assessment.expected_gain,
+        assessment.window_start + timedelta(hours=1),
+        assessment.window_start + timedelta(hours=3),
+        2.0,
+        0.8,
     )
 
 

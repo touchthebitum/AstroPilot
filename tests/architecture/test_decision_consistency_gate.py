@@ -69,11 +69,11 @@ def test_productive_hours_cannot_exceed_the_astronomical_window():
     assert "productive_hours_exceed_astronomical_hours" in caught.value.issues
 
 
-def test_recommended_hours_cannot_exceed_productive_capacity():
+def test_recommended_hours_cannot_exceed_selected_window():
     with pytest.raises(DecisionConsistencyError) as caught:
-        DecisionConsistencyGate.validate_mission(mission(recommended_hours=2.5))
+        DecisionConsistencyGate.validate_mission(mission(recommended_hours=3.5))
 
-    assert "recommended_hours_exceed_productive_hours" in caught.value.issues
+    assert "recommended_hours_exceed_selected_window" in caught.value.issues
 
 
 def test_window_must_be_productive_forward_and_inside_the_night():

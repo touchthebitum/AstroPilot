@@ -230,7 +230,7 @@ def test_viability_rejects_missing_refused_or_unproductive_assessment():
 def test_viability_preserves_consistency_failure():
     inconsistent = viability_assessment(
         WeatherDecisionAdmissibility.ADMISSIBLE,
-        recommended_hours=2.0,
+        recommended_hours=2.5,
     )
 
     with pytest.raises(DecisionConsistencyError):
@@ -371,17 +371,25 @@ def assessment_for_window(start, end):
     )
 
 
-def test_none_availability_preserves_existing_alternative_exposure():
+def test_none_availability_still_requires_retained_actionability_evidence():
     primary, first, second, third = (
         candidate("M31"), candidate("M42"), candidate("M33"), candidate("M51")
     )
     shortlist = (primary, first, second, third)
     viable = {entry.catalog_key for entry in shortlist}
 
+    assessments = {
+        entry.catalog_key: assessment_for_window(
+            START,
+            START + timedelta(hours=2),
+        )
+        for entry in shortlist
+    }
+
     assert select_actionable_alternatives(
         shortlist,
         viable,
-        {},
+        assessments,
         None,
         primary_catalog_key="M31",
     ) == select_viable_alternatives(
