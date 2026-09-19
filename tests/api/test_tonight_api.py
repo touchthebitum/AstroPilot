@@ -1575,13 +1575,7 @@ def test_target_insufficiency_api_defaults_and_openapi_contract():
 
 
 def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch):
-    base = make_result(decision_id="decision-123")
-    result = replace(base, mission=None, night={
-        **base.night,
-        "object_evaluations": {"M31": {"window": {
-            "start": base.mission.window_start, "end": base.mission.window_end,
-        }}},
-    })
+    result = make_result(decision_id="decision-123")
     monkeypatch.setattr(
         app_module,
         "validate_selected_window_weather_coverage",
@@ -1640,7 +1634,7 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
 
     assert tonight.status_code == 200
     assert tonight.json()["decision_id"] == "decision-123"
-    assert result.mission is None
+    assert result.mission is not None
     assert len(service.registered) == 1
     assert accepted.status_code == 200
     assert accepted.json() == {
@@ -2745,3 +2739,120 @@ def test_missing_primary_window_fails_closed_without_inventing_evidence(tmp_path
     ))
     assert bypass.status_code == 409, bypass.json()
     assert bypass.json()['detail']['code'] == 'selected_target_not_explicitly_evaluated'
+
+
+def test_synthetic_weather_coverage_window_cannot_make_primary_actionable(
+    tmp_path, monkeypatch,
+):
+    reference = DEFAULT_WEATHER_REFERENCE_TIME
+    base = lineage_result(reference)
+    primary = replace(
+        base.recommendation.opportunity.candidate,
+        name="IC1396",
+        catalog_key="IC1396",
+    )
+    recommendation = replace(
+        base.recommendation,
+        opportunity=replace(base.recommendation.opportunity, candidate=primary),
+        confidence=None,
+    )
+    evaluation = base.night["object_evaluations"]["M31"]
+    result = replace(
+        base,
+        recommendation=recommendation,
+        mission=None,
+        night={
+            **base.night,
+            "top_objects": [{
+                **base.night["top_objects"][0],
+                "catalog_key": "IC1396",
+                "name": "IC1396",
+            }],
+            "object_evaluations": {
+                "IC1396": {
+                    **evaluation,
+                    "window": {"start": LINEAGE_START, "end": LINEAGE_END},
+                },
+            },
+        },
+    )
+    synthetic_coverage_subject = MissionInput(
+        window_start=LINEAGE_START,
+        window_end=LINEAGE_END,
+        astronomical_hours=3.0,
+        weather=None,
+        moon_penalty=None,
+        recommended_hours=3.0,
+        expected_gain=0.0,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "_production_build_mission_input",
+        lambda evaluation, *, profile: synthetic_coverage_subject,
+    )
+    service = DurableTonightApplicationService(
+        application_service=LineageTonightApplicationService(result),
+        evidence_store=FileDecisionForecastEvidenceStore(tmp_path / "forecast"),
+        acceptance_lineage_store=FileDecisionAcceptanceLineageStore(
+            tmp_path / "lineage"
+        ),
+        decision_id_factory=lambda: "decision-lineage",
+        clock=lambda: reference,
+    )
+    client = TestClient(create_app(
+        service_factory=lambda: service,
+        weather_provider=lambda lat, lon: DEFAULT_WEATHER,
+        profile_provider=valid_profile,
+        clock=lambda: reference,
+        selection_id_factory=lambda: "selection-lineage",
+    ))
+
+    response = client.post("/v1/tonight", json={})
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["target"] == "IC1396"
+    assert payload["target_decision_status"] == "insufficient_evidence"
+    assert payload["weather_decision"]["evidence_quality"] == "insufficient"
+    assert payload["weather_decision"]["admissibility"] == "caution"
+    assert payload["weather_decision"]["reasons"] == [
+        "provider_reliability_unavailable"
+    ]
+    assert payload["window_start"] is None
+    assert payload["window_end"] is None
+    assert payload["recommended_hours"] == 0.0
+    assert payload["recommendation_confidence"] is None
+    assert payload["mission_confidence"] is None
+    assert payload["selected_filter"] is None
+    assert payload["astro_quality"] is None
+    assert payload["productivity"] is None
+    assert payload["explanation"] is None
+    assert payload["reasons"] == []
+    assert payload["tasks"] == []
+    assert payload["primary_reasons"] == []
+    assert not any(
+        entry["catalog_key"] == "IC1396"
+        and entry["target_decision_status"] == "recommended"
+        for entry in payload["target_explanations"]
+    )
+    assert payload["insufficient_evidence_targets"] == []
+
+    primary_rejected = client.post(
+        "/v1/decision-selections",
+        json=lineage_selection_payload(selected_catalog_key="IC1396"),
+    )
+    assert primary_rejected.status_code == 409
+    assert primary_rejected.json()["detail"]["code"] == (
+        "selected_target_not_primary_recommendation"
+    )
+    bypass_rejected = client.post(
+        "/v1/decision-selections",
+        json=lineage_selection_payload(
+            source="other_evaluated_target",
+            selected_catalog_key="IC1396",
+            acceptance_request_id="request-bypass",
+        ),
+    )
+    assert bypass_rejected.status_code == 409
+    assert bypass_rejected.json()["detail"]["code"] == (
+        "selected_target_not_explicitly_evaluated"
+    )

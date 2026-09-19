@@ -1117,9 +1117,60 @@ def test_explicit_primary_insufficiency_overrides_available_window():
             ('selected_window_uncovered',),
         ),
     )
+    mission = NightMission(
+        target=candidate.name,
+        confidence=0.8,
+        window_start=datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+        window_end=datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
+        recommended_hours=3.0,
+    )
     payload = TonightResponse.from_result(
-        TonightResult(None, Recommendation(Opportunity(Action.START_PROJECT, candidate), None), None),
-        primary_window_available=True, insufficient_evidence_targets=(record,),
+        TonightResult(None, Recommendation(Opportunity(Action.START_PROJECT, candidate), None), mission),
+        insufficient_evidence_targets=(record,),
     ).to_dict()
     assert payload['target_decision_status'] == 'insufficient_evidence'
     assert payload['insufficient_evidence_targets'][0]['weather_decision']['reasons'] == ['selected_window_uncovered']
+
+
+def test_external_boolean_cannot_override_primary_mission_invariant():
+    candidate = make_candidate()
+    result = TonightResult(
+        None, Recommendation(Opportunity(Action.START_PROJECT, candidate), None), None,
+    )
+    with pytest.raises(TypeError, match="primary_window_available"):
+        TonightResponse.from_result(result, primary_window_available=True)
+
+
+@pytest.mark.parametrize(
+    "mission",
+    [
+        None,
+        NightMission(target="M31", confidence=0.8),
+        NightMission(
+            target="M31", confidence=0.8,
+            window_start=datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+            window_end=datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+            recommended_hours=1.0,
+        ),
+        NightMission(
+            target="M31", confidence=0.8,
+            window_start=datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+            window_end=datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
+            recommended_hours=0.0,
+        ),
+    ],
+)
+def test_recommended_implies_real_exploitable_transported_mission(mission):
+    candidate = make_candidate()
+    payload = TonightResponse.from_result(TonightResult(
+        None, Recommendation(Opportunity(Action.START_PROJECT, candidate), None), mission,
+    )).to_dict()
+    assert payload["target_decision_status"] == "insufficient_evidence"
+    assert not (
+        payload["target_decision_status"] == "recommended"
+        and (
+            payload["window_start"] is None
+            or payload["window_end"] is None
+            or payload["recommended_hours"] <= 0
+        )
+    )

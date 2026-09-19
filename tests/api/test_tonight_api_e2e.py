@@ -337,7 +337,7 @@ def test_http_request_runs_real_application_composition_once(
     assert payload["target"] == "Andromeda"
     assert payload["catalog_key"] == "M31"
     assert payload["provenance"] == CandidateProvenance.PROJECT.value
-    assert payload["target_decision_status"] == "recommended"
+    assert payload["target_decision_status"] == "insufficient_evidence"
     assert payload["shortlist_entries"] == [
         {
             "target": "Orion",
@@ -357,7 +357,7 @@ def test_http_request_runs_real_application_composition_once(
     assert payload["postponement_risk"] is None
     assert payload["season"] is None
 
-    accepted = client.post(
+    rejected = client.post(
         "/v1/decision-selections",
         json={
             "acceptance_request_id": "c219f146-5106-48c3-b617-4b96cf6257a4",
@@ -368,52 +368,8 @@ def test_http_request_runs_real_application_composition_once(
         },
     )
 
-    assert accepted.status_code == 200, accepted.json()
-    assert accepted.json()["catalog_key"] == "M31"
-    assert accepted.json()["decision_id"] == payload["decision_id"]
-    assert accepted.json()["selection_id"]
-    assert accepted.json()["mission_id"]
-    assert accepted.json()["mission"]["mission_id"] == accepted.json()["mission_id"]
-    assert accepted.json()["mission"]["selection_id"] == accepted.json()["selection_id"]
-    assert accepted.json()["mission"]["decision_id"] == payload["decision_id"]
-    assert len(calls["mission"]) == 1
-
-    created_execution = client.post(
-        "/v1/executions",
-        json={
-            "execution_id": "execution-e2e",
-            "mission_id": accepted.json()["mission_id"],
-        },
+    assert rejected.status_code == 409, rejected.json()
+    assert rejected.json()["detail"]["code"] == (
+        "selected_target_not_primary_recommendation"
     )
-    started_execution = client.post(
-        "/v1/execution-transitions",
-        json={
-            "execution_id": "execution-e2e",
-            "mission_id": accepted.json()["mission_id"],
-            "status": "in_progress",
-            "actual_start": "2026-09-10T22:00:00+00:00",
-            "actual_end": None,
-            "actual_duration": None,
-        },
-    )
-    recorded_evidence = client.post(
-        "/v1/outcome-evidence",
-        json={
-            "evidence_id": "evidence-e2e",
-            "execution_id": "execution-e2e",
-            "category": "field",
-            "observed_at": "2026-09-10T23:00:00+00:00",
-            "source": "user",
-        },
-    )
-
-    assert created_execution.status_code == 200, created_execution.json()
-    assert created_execution.json()["status"] == "not_started"
-    assert created_execution.json()["actual_start"] is None
-    assert started_execution.status_code == 200, started_execution.json()
-    assert started_execution.json()["status"] == "in_progress"
-    assert started_execution.json()["execution_id"] == "execution-e2e"
-    assert started_execution.json()["mission_id"] == accepted.json()["mission_id"]
-    assert recorded_evidence.status_code == 200, recorded_evidence.json()
-    assert recorded_evidence.json()["evidence_id"] == "evidence-e2e"
-    assert recorded_evidence.json()["execution_id"] == "execution-e2e"
+    assert calls["mission"] == []

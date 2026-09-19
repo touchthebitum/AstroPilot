@@ -1910,13 +1910,12 @@ def create_app(
 
         weather_decision = None
         candidate_assessments = {}
-        coverage_subject = result.mission
+        weather_coverage_subject = result.mission
         if (
             result.status is TonightStatus.AVAILABLE
             and isinstance(weather, WeatherSnapshot)
         ):
-            coverage_subject = result.mission
-            if coverage_subject is None:
+            if weather_coverage_subject is None:
                 recommendation = getattr(result, "recommendation", None)
                 opportunity = (
                     recommendation.opportunity
@@ -1934,14 +1933,14 @@ def create_app(
                     isinstance(primary_evaluation, dict)
                     and "window" in primary_evaluation
                 ):
-                    coverage_subject = _production_build_mission_input(
+                    weather_coverage_subject = _production_build_mission_input(
                         primary_evaluation,
                         profile=profile,
                     )
             selected_window_covered = True
             try:
                 validate_selected_window_weather_coverage(
-                    coverage_subject,
+                    weather_coverage_subject,
                     weather,
                 )
             except WeatherWindowCoverageError as exc:
@@ -1951,7 +1950,8 @@ def create_app(
                     "window_ends_after_weather",
                 }
                 if (issues and issues <= decisional_issues) or (
-                    coverage_subject is None and issues == {"invalid_mission_window"}
+                    weather_coverage_subject is None
+                    and issues == {"invalid_mission_window"}
                 ):
                     selected_window_covered = False
                 else:
@@ -2071,16 +2071,16 @@ def create_app(
             weather_decision is not None
             and weather_decision.admissibility is WeatherDecisionAdmissibility.REFUSED
         )
-        primary_window_available = (
-            coverage_subject is not None
-            and coverage_subject.window_start is not None
-            and coverage_subject.window_end is not None
-            and coverage_subject.window_end > coverage_subject.window_start
-            and coverage_subject.recommended_hours > 0
+        primary_mission_actionable = (
+            result.mission is not None
+            and result.mission.window_start is not None
+            and result.mission.window_end is not None
+            and result.mission.window_end > result.mission.window_start
+            and result.mission.recommended_hours > 0
         )
         primary_reasons = ()
         primary_reason_entries = ()
-        if opportunity is not None and not weather_refused and primary_window_available:
+        if opportunity is not None and not weather_refused and primary_mission_actionable:
             primary_reasons = opportunity.structured_reasons
             if weather_decision is not None:
                 primary_reasons += primary_window_reasons(
@@ -2108,7 +2108,7 @@ def create_app(
             build_target_explanations(
                 primary=(
                     (opportunity.candidate.catalog_key, primary_reason_entries)
-                    if opportunity is not None and not weather_refused and primary_window_available
+                    if opportunity is not None and not weather_refused and primary_mission_actionable
                     else None
                 ),
                 alternatives=tuple(
@@ -2123,7 +2123,7 @@ def create_app(
             opportunity is not None
             and selected_alternatives
             and not weather_refused
-            and primary_window_available
+            and primary_mission_actionable
         ):
             alternative_comparisons = build_alternative_comparisons(
                 primary_catalog_key=opportunity.candidate.catalog_key,
@@ -2140,7 +2140,6 @@ def create_app(
         payload = TonightResponse.from_result(
             result,
             weather_decision=weather_decision,
-            primary_window_available=primary_window_available,
             viable_shortlist_catalog_keys=viable_shortlist_catalog_keys,
             selected_alternatives=selected_alternatives,
             alternative_reasons=alternative_reason_entries,
