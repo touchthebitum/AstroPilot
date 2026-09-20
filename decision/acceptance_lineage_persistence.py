@@ -13,6 +13,9 @@ from decision.intelligence.analysis_result import AnalysisResult
 from decision.mission.mission_input import MissionInput
 from decision.mission.night_mission import MissionReason, NightMission
 from decision.mission.night_planner import NightTask
+from decision.models.acquisition_intent_selection import (
+    AcquisitionIntentSelectionStatus,
+)
 from decision.models.candidate import Candidate, CandidateProvenance
 from decision.models.context.decision_context import DecisionContext
 from decision.models.context.equipment_context import EquipmentContext
@@ -57,7 +60,7 @@ from decision.services.user_selection_validator import (
 from decision.weather.weather_forecast import WeatherForecast
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 _IDENTITY_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _LEGACY_ROOT_FIELDS = frozenset(
     ("schema_version", "decision_id", "context", "selections", "missions")
@@ -123,6 +126,7 @@ _DATACLASS_TYPES = (
 )
 _ENUM_TYPES = (
     Action,
+    AcquisitionIntentSelectionStatus,
     CandidateProvenance,
     SessionAvailabilityMode,
     UserSelectionSource,
@@ -358,6 +362,12 @@ def _decode(value: object, *, schema_version: int = SCHEMA_VERSION) -> object:
             raise AcceptanceLineageCorruptionError("unsupported_dataclass_type")
         supplied = document["fields"]
         expected = frozenset(field.name for field in fields(dataclass_type))
+        if dataclass_type is Candidate and schema_version <= 5:
+            expected = expected - frozenset((
+                "selected_acquisition_intent_id",
+                "viable_acquisition_intent_ids",
+                "acquisition_intent_selection_status",
+            ))
         if dataclass_type is Candidate and schema_version in (1, 2):
             expected = expected - frozenset(("imaging_field_id",))
         if dataclass_type is UserSelection and schema_version in (1, 2, 3):
@@ -371,6 +381,12 @@ def _decode(value: object, *, schema_version: int = SCHEMA_VERSION) -> object:
             name: _decode(item, schema_version=schema_version)
             for name, item in supplied.items()
         }
+        if dataclass_type is Candidate and schema_version <= 5:
+            restored_fields.update(
+                selected_acquisition_intent_id=None,
+                viable_acquisition_intent_ids=(),
+                acquisition_intent_selection_status=None,
+            )
         if dataclass_type is Candidate and schema_version in (1, 2):
             restored_fields["imaging_field_id"] = None
         if dataclass_type is UserSelection and schema_version in (1, 2, 3):
@@ -609,7 +625,7 @@ def deserialize_decision_acceptance_aggregate(
     if (
         isinstance(version, bool)
         or not isinstance(version, int)
-        or version not in (1, 2, 3, 4, SCHEMA_VERSION)
+        or version not in (1, 2, 3, 4, 5, SCHEMA_VERSION)
     ):
         raise AcceptanceLineageCorruptionError("invalid_schema_version")
     root = _exact_mapping(
