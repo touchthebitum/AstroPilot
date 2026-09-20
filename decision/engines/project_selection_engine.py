@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from decision.models.acquisition_intent_selection import (
+    AcquisitionIntentSelection,
+)
 from decision.models.candidate import Candidate, CandidateProvenance
 
 
@@ -30,7 +33,19 @@ class ProjectSelectionEngine:
         acquired_hours: float | None,
         provenance: CandidateProvenance = CandidateProvenance.PROJECT,
         imaging_field_id: str | None = None,
+        acquisition_intent_selection: AcquisitionIntentSelection | None = None,
     ) -> Candidate:
+        if (
+            acquisition_intent_selection is not None
+            and not isinstance(
+                acquisition_intent_selection,
+                AcquisitionIntentSelection,
+            )
+        ):
+            raise TypeError(
+                "acquisition_intent_selection must be an "
+                "AcquisitionIntentSelection or None"
+            )
         return Candidate(
             name=name,
             catalog_key=catalog_key,
@@ -48,6 +63,21 @@ class ProjectSelectionEngine:
             acquired_hours=acquired_hours,
             provenance=provenance,
             imaging_field_id=imaging_field_id,
+            selected_acquisition_intent_id=(
+                acquisition_intent_selection.selected_acquisition_intent_id
+                if acquisition_intent_selection is not None
+                else None
+            ),
+            viable_acquisition_intent_ids=(
+                acquisition_intent_selection.viable_acquisition_intent_ids
+                if acquisition_intent_selection is not None
+                else ()
+            ),
+            acquisition_intent_selection_status=(
+                acquisition_intent_selection.status
+                if acquisition_intent_selection is not None
+                else None
+            ),
         )
 
     @staticmethod
