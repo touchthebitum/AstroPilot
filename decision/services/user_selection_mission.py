@@ -19,6 +19,19 @@ def _candidate_catalog_key(candidate) -> str | None:
     return catalog_key
 
 
+def _selected_candidate(recommendation, selected_catalog_key):
+    opportunity = recommendation.opportunity
+    primary = getattr(opportunity, "candidate", None)
+    if _candidate_catalog_key(primary) == selected_catalog_key:
+        return primary
+    matches = [
+        candidate
+        for candidate in getattr(opportunity, "shortlist_entries", ())
+        if _candidate_catalog_key(candidate) == selected_catalog_key
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 class UserSelectionMissionService:
     def __init__(self, *, tonight_mission_service, build_mission_input):
         self.tonight_mission_service = tonight_mission_service
@@ -57,6 +70,24 @@ class UserSelectionMissionService:
                 "recommendation_decision_context_mismatch"
             )
 
+        selected_candidate = _selected_candidate(
+            recommendation,
+            validated_selection.selected_catalog_key,
+        )
+        if (
+            validated_selection.selected_imaging_field_id is not None
+            and validated_selection.selected_acquisition_intent_id is None
+            and getattr(
+                selected_candidate,
+                "acquisition_intent_selection_status",
+                None,
+            )
+            is not None
+        ):
+            raise UserSelectionValidationError(
+                "acquisition_intent_required_for_mission"
+            )
+
         selected_catalog_key = validated_selection.selected_catalog_key
         object_evaluations = night.get("object_evaluations")
         if (
@@ -92,6 +123,9 @@ class UserSelectionMissionService:
                 selection_id=validated_selection.selection_id,
                 imaging_field_id=(
                     validated_selection.selected_imaging_field_id
+                ),
+                acquisition_intent_id=(
+                    validated_selection.selected_acquisition_intent_id
                 ),
             )
 
@@ -138,5 +172,12 @@ class UserSelectionMissionService:
         ):
             raise UserSelectionValidationError(
                 "mission_imaging_field_mismatch"
+            )
+        if (
+            mission.acquisition_intent_id
+            != validated_selection.selected_acquisition_intent_id
+        ):
+            raise UserSelectionValidationError(
+                "mission_acquisition_intent_mismatch"
             )
         return mission

@@ -1,4 +1,4 @@
-from dataclasses import FrozenInstanceError, fields
+from dataclasses import FrozenInstanceError, fields, replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -6,6 +6,9 @@ import pytest
 
 from decision.mission.mission_input import MissionInput
 from decision.mission.night_mission import NightMission
+from decision.models.acquisition_intent_selection import (
+    AcquisitionIntentSelectionStatus,
+)
 from decision.models.session_availability import (
     SessionAvailability,
     SessionAvailabilityMode,
@@ -48,6 +51,7 @@ class RecordingMissionService:
             decision_id=mission_input.decision_id,
             selection_id=mission_input.selection_id,
             imaging_field_id=mission_input.imaging_field_id,
+            acquisition_intent_id=mission_input.acquisition_intent_id,
             window_start=mission_input.window_start,
             window_end=mission_input.window_end,
             recommended_hours=mission_input.recommended_hours,
@@ -83,6 +87,7 @@ def user_selection(
     *,
     decision_id="decision-1",
     selected_imaging_field_id=None,
+    selected_acquisition_intent_id=None,
 ):
     return UserSelection(
         selection_id="selection-1",
@@ -91,6 +96,7 @@ def user_selection(
         source=source,
         selected_at=datetime(2026, 9, 9, 20, tzinfo=timezone.utc),
         selected_imaging_field_id=selected_imaging_field_id,
+        selected_acquisition_intent_id=selected_acquisition_intent_id,
     )
 
 
@@ -373,6 +379,95 @@ def test_selection_imaging_field_is_copied_exactly_without_resolution(
     assert selection.selected_imaging_field_id == imaging_field_id
 
 
+def test_selection_acquisition_intent_is_authoritative_for_mission():
+    composer, mission_service, _ = service(
+        base_input=replace(
+            mission_input(),
+            acquisition_intent_id="must-not-survive",
+        )
+    )
+    selection = user_selection(
+        UserSelectionSource.PRIMARY_RECOMMENDATION,
+        "M31",
+        selected_imaging_field_id="sh2-129_ou4",
+        selected_acquisition_intent_id=" intent-A ",
+    )
+
+    mission = composer.create(
+        mission_id="mission-1",
+        selection=selection,
+        decision_context=decision_context(),
+        recommendation=recommendation(),
+        night=night(),
+        profile={},
+    )
+
+    transported = mission_service.calls[0]["mission_input"]
+    assert transported.acquisition_intent_id == " intent-A "
+    assert mission.acquisition_intent_id == " intent-A "
+    assert (
+        selection.selected_acquisition_intent_id
+        == transported.acquisition_intent_id
+        == mission.acquisition_intent_id
+    )
+
+
+def test_modern_first_class_selection_without_resolved_intent_creates_no_mission():
+    composer, mission_service, _ = service()
+    modern_recommendation = Recommendation(
+        opportunity=SimpleNamespace(
+            candidate=SimpleNamespace(
+                catalog_key="M31",
+                acquisition_intent_selection_status=(
+                    AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT
+                ),
+                selected_acquisition_intent_id="candidate-fallback",
+                viable_acquisition_intent_ids=("viable-fallback",),
+            )
+        ),
+        confidence=0.9,
+    )
+
+    with pytest.raises(
+        UserSelectionValidationError,
+        match="acquisition_intent_required_for_mission",
+    ):
+        composer.create(
+            mission_id="mission-1",
+            selection=user_selection(
+                UserSelectionSource.PRIMARY_RECOMMENDATION,
+                "M31",
+                selected_imaging_field_id="sh2-129_ou4",
+            ),
+            decision_context=decision_context(),
+            recommendation=modern_recommendation,
+            night=night(),
+            profile={},
+        )
+
+    assert mission_service.calls == []
+
+
+def test_legacy_first_class_selection_without_intent_keeps_none():
+    composer, mission_service, _ = service()
+
+    mission = composer.create(
+        mission_id="mission-1",
+        selection=user_selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            selected_imaging_field_id="sh2-129_ou4",
+        ),
+        decision_context=decision_context(),
+        recommendation=recommendation(),
+        night=night(),
+        profile={},
+    )
+
+    assert mission_service.calls[0]["mission_input"].acquisition_intent_id is None
+    assert mission.acquisition_intent_id is None
+
+
 @pytest.mark.parametrize("value", ["", "   ", 42])
 def test_mission_models_reject_invalid_imaging_field_identity(value):
     with pytest.raises(
@@ -398,6 +493,29 @@ def test_mission_models_reject_invalid_imaging_field_identity(value):
             confidence="HIGH",
             imaging_field_id=value,
         )
+
+
+@pytest.mark.parametrize("model", [MissionInput, NightMission])
+@pytest.mark.parametrize("value", ["", "   ", 42])
+def test_mission_models_reject_invalid_acquisition_intent_identity(model, value):
+    values = (
+        {
+            "window_start": START,
+            "window_end": END,
+            "astronomical_hours": 4.0,
+            "weather": None,
+            "moon_penalty": None,
+            "recommended_hours": 3.0,
+            "expected_gain": 1.2,
+        }
+        if model is MissionInput
+        else {"target": "M31", "confidence": "HIGH"}
+    )
+    with pytest.raises(
+        ValueError,
+        match="acquisition_intent_id_must_be_non_empty_string",
+    ):
+        model(**values, acquisition_intent_id=value)
 
 
 def test_mission_input_rejects_partial_provenance():

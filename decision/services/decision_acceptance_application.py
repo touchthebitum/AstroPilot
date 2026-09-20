@@ -17,6 +17,7 @@ from decision.services.user_selection_validator import (
 from decision.services.selected_imaging_field_resolution import (
     SelectedAcquisitionIntentResolutionError,
     SelectedImagingFieldResolutionError,
+    acquisition_intent_provenance_expected,
     resolve_selected_acquisition_intent_id,
     resolve_selected_imaging_field_id,
 )
@@ -119,6 +120,13 @@ class InMemoryDecisionAcceptanceContextStore:
             raise DecisionAcceptanceError("selection_id_conflict")
         if mission is not None and mission.mission_id in self._missions:
             raise DecisionAcceptanceError("mission_id_conflict")
+        if mission is not None and (
+            mission.acquisition_intent_id
+            != selection.selected_acquisition_intent_id
+        ):
+            raise DecisionAcceptanceError(
+                "mission_acquisition_intent_mismatch"
+            )
         self._selections[selection.selection_id] = deepcopy(selection)
         if mission is not None:
             self._missions[mission.mission_id] = mission
@@ -431,6 +439,21 @@ class DecisionAcceptanceApplicationService:
         ) as exc:
             raise DecisionAcceptanceError(str(exc)) from exc
 
+        try:
+            intent_provenance_expected = (
+                acquisition_intent_provenance_expected(context, selection)
+            )
+        except SelectedAcquisitionIntentResolutionError as exc:
+            raise DecisionAcceptanceError(str(exc)) from exc
+        if (
+            selection.selected_imaging_field_id is not None
+            and selection.selected_acquisition_intent_id is None
+            and intent_provenance_expected
+        ):
+            raise DecisionAcceptanceError(
+                "acquisition_intent_required_for_mission"
+            )
+
         mission_id = self.mission_id_factory()
         if not isinstance(mission_id, str) or not mission_id.strip():
             raise DecisionAcceptanceError("mission_id_required")
@@ -461,6 +484,13 @@ class DecisionAcceptanceApplicationService:
             raise DecisionAcceptanceError("mission_provenance_mismatch")
         if mission.imaging_field_id != selection.selected_imaging_field_id:
             raise DecisionAcceptanceError("mission_imaging_field_mismatch")
+        if (
+            mission.acquisition_intent_id
+            != selection.selected_acquisition_intent_id
+        ):
+            raise DecisionAcceptanceError(
+                "mission_acquisition_intent_mismatch"
+            )
         return self._commit_selection_and_mission(
             selection,
             mission,

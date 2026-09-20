@@ -62,6 +62,7 @@ class NightMission:
     selection_id: str | None = None
     site_name: str | None = None
     imaging_field_id: str | None = None
+    acquisition_intent_id: str | None = None
 
     def __post_init__(self):
         if not isinstance(self.target, str) or not self.target.strip():
@@ -104,3 +105,10 @@ class NightMission:
             or not self.imaging_field_id.strip()
         ):
             raise ValueError("imaging_field_id_must_be_non_empty_string")
+        if self.acquisition_intent_id is not None and (
+            not isinstance(self.acquisition_intent_id, str)
+            or not self.acquisition_intent_id.strip()
+        ):
+            raise ValueError(
+                "acquisition_intent_id_must_be_non_empty_string"
+            )

@@ -68,6 +68,7 @@ class RecordingSelectionMissionService:
             decision_id=selection.decision_id,
             selection_id=selection.selection_id,
             imaging_field_id=selection.selected_imaging_field_id,
+            acquisition_intent_id=selection.selected_acquisition_intent_id,
         )
 
 
@@ -101,6 +102,7 @@ def registered_service(
     profile_projects=None,
     primary_intent_provenance=(None, (), None),
     alternative_intent_provenance=(None, (), None),
+    other_intent_provenance=None,
 ):
     if evidence is DEFAULT_EVIDENCE:
         evidence = forecast_evidence(accepted_at - timedelta(minutes=30))
@@ -147,17 +149,22 @@ def registered_service(
         primary_provenance,
         primary_intent_provenance,
     )
+    shortlist_entries = [
+        primary,
+        candidate(
+            "M42",
+            alternative_imaging_field_id,
+            intent_provenance=alternative_intent_provenance,
+        ),
+    ]
+    if other_intent_provenance is not None:
+        shortlist_entries.append(
+            candidate("M33", intent_provenance=other_intent_provenance)
+        )
     recommendation = SimpleNamespace(
         opportunity=SimpleNamespace(
             candidate=primary,
-            shortlist_entries=(
-                primary,
-                candidate(
-                    "M42",
-                    alternative_imaging_field_id,
-                    intent_provenance=alternative_intent_provenance,
-                ),
-            ),
+            shortlist_entries=tuple(shortlist_entries),
         )
     )
     night = {
@@ -210,6 +217,7 @@ def test_unique_candidate_intent_is_copied_when_request_omits_it():
     assert stored.selected_acquisition_intent_id == "intent-A"
     assert composer.calls[0]["selection"] is not candidate
     assert mission.selection_id == stored.selection_id == "selection-1"
+    assert mission.acquisition_intent_id == "intent-A"
     assert (candidate.final_score, candidate.decision_score, candidate.reasons) == scores_before
 
 
@@ -266,6 +274,7 @@ def test_unique_candidate_intent_idempotent_replay_accepts_omission_or_same():
 
     assert omitted == same == first
     assert first.selection.selected_acquisition_intent_id == "intent-A"
+    assert first.mission.acquisition_intent_id == "intent-A"
     assert len(composer.calls) == 1
 
 
@@ -394,19 +403,27 @@ def test_multiple_viable_intents_never_fall_back_or_normalize(intent_id, error):
     )
 
 
-def test_no_viable_intent_accepts_omission_but_rejects_provided_identity():
+def test_no_viable_intent_rejects_mission_creation_and_provided_identity():
     provenance = (
         None,
         (),
         AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT,
     )
-    accepted, _, accepted_store, _ = registered_service(
+    blocked, composer, blocked_store, _ = registered_service(
+        primary_imaging_field_id="sh2-129_ou4",
+        profile_projects={"M31": {"imaging_field_id": "sh2-129_ou4"}},
         primary_intent_provenance=provenance,
     )
-    accepted.accept(selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"))
-    assert accepted_store.load_selection(
-        "selection-1"
-    ).selected_acquisition_intent_id is None
+    with pytest.raises(
+        DecisionAcceptanceError,
+        match="acquisition_intent_required_for_mission",
+    ):
+        blocked.accept(
+            selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31")
+        )
+    assert composer.calls == []
+    with pytest.raises(DecisionAcceptanceError, match="selection_not_found"):
+        blocked_store.load_selection("selection-1")
 
     rejected, composer, _, _ = registered_service(
         primary_intent_provenance=provenance,
@@ -449,11 +466,60 @@ def test_incoherent_single_viable_without_selected_intent_fails_closed():
 def test_legacy_candidate_and_other_evaluated_target_keep_none_intent():
     service, _, store, _ = registered_service()
 
-    service.accept(selection(UserSelectionSource.OTHER_EVALUATED_TARGET, "M33"))
+    mission = service.accept(
+        selection(UserSelectionSource.OTHER_EVALUATED_TARGET, "M33")
+    )
 
     assert store.load_selection(
         "selection-1"
     ).selected_acquisition_intent_id is None
+    assert mission.acquisition_intent_id is None
+
+
+def test_modern_other_target_without_resolved_intent_rejects_before_allocation():
+    service, composer, store, _ = registered_service(
+        profile_projects={"M33": {"imaging_field_id": "sh2-129_ou4"}},
+        other_intent_provenance=(
+            None,
+            (),
+            AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT,
+        ),
+    )
+    service.mission_id_factory = lambda: pytest.fail(
+        "missing modern intent must stop before mission identity allocation"
+    )
+
+    with pytest.raises(
+        DecisionAcceptanceError,
+        match="acquisition_intent_required_for_mission",
+    ):
+        service.accept(
+            selection(UserSelectionSource.OTHER_EVALUATED_TARGET, "M33")
+        )
+
+    assert composer.calls == []
+    with pytest.raises(DecisionAcceptanceError, match="selection_not_found"):
+        store.load_selection("selection-1")
+
+
+def test_modern_other_target_propagates_resolved_intent_to_mission():
+    service, composer, store, _ = registered_service(
+        profile_projects={"M33": {"imaging_field_id": "sh2-129_ou4"}},
+        other_intent_provenance=(
+            "intent-A",
+            ("intent-A",),
+            AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
+        ),
+    )
+
+    mission = service.accept(
+        selection(UserSelectionSource.OTHER_EVALUATED_TARGET, "M33")
+    )
+
+    stored = store.load_selection("selection-1")
+    assert stored.selected_acquisition_intent_id == "intent-A"
+    assert composer.calls[0]["selection"] == stored
+    assert mission.acquisition_intent_id == "intent-A"
 
 
 @pytest.mark.parametrize(
@@ -590,6 +656,36 @@ def test_mission_imaging_field_mismatch_fails_before_commit():
         store.load_selection("selection-1")
 
 
+def test_mission_acquisition_intent_mismatch_fails_before_commit():
+    service, composer, store, _ = registered_service(
+        primary_intent_provenance=(
+            "intent-A",
+            ("intent-A",),
+            AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
+        ),
+    )
+    original_create = composer.create
+
+    def create_mismatched(**kwargs):
+        return replace(
+            original_create(**kwargs),
+            acquisition_intent_id="intent-B",
+        )
+
+    composer.create = create_mismatched
+
+    with pytest.raises(
+        DecisionAcceptanceError,
+        match="mission_acquisition_intent_mismatch",
+    ):
+        service.accept(
+            selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31")
+        )
+
+    with pytest.raises(DecisionAcceptanceError, match="selection_not_found"):
+        store.load_selection("selection-1")
+
+
 def test_candidate_profile_mismatch_fails_before_allocation_or_commit():
     service, composer, store, _ = registered_service(
         primary_imaging_field_id="sh2-129_ou4",
@@ -655,6 +751,10 @@ def test_first_idempotent_acceptance_and_replay_return_canonical_lineage():
     assert replay.mission.selection_id == replay.selection.selection_id
     assert replay.mission.imaging_field_id == replay.selection.selected_imaging_field_id
     assert replay.mission.imaging_field_id == "sh2-129_ou4"
+    assert (
+        replay.mission.acquisition_intent_id
+        == replay.selection.selected_acquisition_intent_id
+    )
     assert store.load_acceptance("request-1") == (
         replay.selection,
         replay.mission,

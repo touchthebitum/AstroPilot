@@ -216,6 +216,30 @@ def test_mission_copies_imaging_field_identity_exactly(
     )
 
 
+def test_mission_copies_acquisition_intent_identity_exactly(
+    frozen_time,
+    summary,
+    context,
+    isolated_dependencies,
+):
+    input_data = mission_input(
+        frozen_time,
+        WeatherForecast(),
+        acquisition_intent_id=" intent-A ",
+    )
+
+    mission = MissionAssembler.build(
+        target="M31",
+        summary=summary,
+        context=context,
+        equipment=["setup"],
+        alternatives=[],
+        mission_input=input_data,
+    )
+
+    assert mission.acquisition_intent_id == " intent-A "
+
+
 def test_mission_preserves_unknown_summary_confidence(
     frozen_time,
     summary,
