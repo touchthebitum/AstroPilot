@@ -5,6 +5,7 @@ from dataclasses import dataclass
 class SetupFilterCapabilities:
     equipment_id: str
     available_filter_types: tuple[str, ...]
+    available_filter_profile_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.equipment_id, str):
@@ -27,3 +28,20 @@ class SetupFilterCapabilities:
                     "available_filter_types must not contain duplicates"
                 )
             seen_filter_types.add(filter_type)
+
+        if not isinstance(self.available_filter_profile_ids, tuple):
+            raise TypeError(
+                "available_filter_profile_ids must be a tuple"
+            )
+
+        seen_filter_profile_ids: set[str] = set()
+        for filter_profile_id in self.available_filter_profile_ids:
+            if not isinstance(filter_profile_id, str):
+                raise TypeError("filter_profile_id must be a string")
+            if not filter_profile_id.strip():
+                raise ValueError("filter_profile_id must not be empty")
+            if filter_profile_id in seen_filter_profile_ids:
+                raise ValueError(
+                    "available_filter_profile_ids must not contain duplicates"
+                )
+            seen_filter_profile_ids.add(filter_profile_id)
