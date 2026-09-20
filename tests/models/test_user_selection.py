@@ -91,6 +91,18 @@ def test_declined_selection_rejects_imaging_field_identity():
         )
 
 
+def test_declined_selection_rejects_acquisition_intent_identity():
+    with pytest.raises(ValueError, match="declined_selection_requires_no_target"):
+        UserSelection(
+            selection_id="selection-1",
+            decision_id="decision-1",
+            selected_catalog_key=None,
+            source=UserSelectionSource.DECLINED,
+            selected_at=SELECTED_AT,
+            selected_acquisition_intent_id="intent-A",
+        )
+
+
 @pytest.mark.parametrize("value", ["", "   ", 42])
 def test_selection_rejects_invalid_imaging_field_identity(value):
     with pytest.raises(
@@ -105,6 +117,35 @@ def test_selection_rejects_invalid_imaging_field_identity(value):
             selected_at=SELECTED_AT,
             selected_imaging_field_id=value,
         )
+
+
+@pytest.mark.parametrize("value", ["", "   ", 42])
+def test_selection_rejects_invalid_acquisition_intent_identity(value):
+    with pytest.raises(
+        ValueError,
+        match="selected_acquisition_intent_id_must_be_non_empty_string",
+    ):
+        UserSelection(
+            selection_id="selection-1",
+            decision_id="decision-1",
+            selected_catalog_key="M31",
+            source=UserSelectionSource.PRIMARY_RECOMMENDATION,
+            selected_at=SELECTED_AT,
+            selected_acquisition_intent_id=value,
+        )
+
+
+def test_selection_preserves_acquisition_intent_identity_exactly():
+    value = UserSelection(
+        selection_id="selection-1",
+        decision_id="decision-1",
+        selected_catalog_key="M31",
+        source=UserSelectionSource.PRIMARY_RECOMMENDATION,
+        selected_at=SELECTED_AT,
+        selected_acquisition_intent_id=" intent-A ",
+    )
+
+    assert value.selected_acquisition_intent_id == " intent-A "
 
 
 def test_non_declined_selection_requires_catalog_key():

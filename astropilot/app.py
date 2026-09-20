@@ -480,6 +480,7 @@ class UserSelectionRequest(BaseModel):
     decision_id: str
     source: UserSelectionSource
     selected_catalog_key: str | None = None
+    acquisition_intent_id: str | None = None
     selected_at: datetime
 
     def to_domain(self, *, selection_id: str) -> UserSelection:
@@ -489,6 +490,7 @@ class UserSelectionRequest(BaseModel):
             selected_catalog_key=self.selected_catalog_key,
             source=self.source,
             selected_at=self.selected_at,
+            selected_acquisition_intent_id=self.acquisition_intent_id,
         )
 
     @model_validator(mode="after")
@@ -538,6 +540,7 @@ class UserSelectionResponse(BaseModel):
     selection_id: str
     catalog_key: str | None = None
     selected_imaging_field_id: str | None = None
+    selected_acquisition_intent_id: str | None = None
     mission: AcceptedMissionResponse | None = None
 
 
@@ -2331,6 +2334,11 @@ def create_app(
             ),
             selected_imaging_field_id=(
                 canonical_selection.selected_imaging_field_id
+                if mission is not None
+                else None
+            ),
+            selected_acquisition_intent_id=(
+                canonical_selection.selected_acquisition_intent_id
                 if mission is not None
                 else None
             ),

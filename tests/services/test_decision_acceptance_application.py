@@ -6,6 +6,9 @@ import pytest
 
 from decision.mission.night_mission import NightMission
 from decision.models.candidate import Candidate, CandidateProvenance
+from decision.models.acquisition_intent_selection import (
+    AcquisitionIntentSelectionStatus,
+)
 from decision.models.user_selection import UserSelection, UserSelectionSource
 from decision.services.decision_acceptance_application import (
     DecisionAcceptanceApplicationService,
@@ -75,6 +78,7 @@ def selection(
     selection_id="selection-1",
     decision_id="decision-1",
     selected_at=SELECTED_AT,
+    selected_acquisition_intent_id=None,
 ):
     return UserSelection(
         selection_id=selection_id,
@@ -82,6 +86,7 @@ def selection(
         selected_catalog_key=target,
         source=source,
         selected_at=selected_at,
+        selected_acquisition_intent_id=selected_acquisition_intent_id,
     )
 
 
@@ -94,6 +99,8 @@ def registered_service(
     alternative_imaging_field_id=None,
     primary_provenance=CandidateProvenance.PROJECT,
     profile_projects=None,
+    primary_intent_provenance=(None, (), None),
+    alternative_intent_provenance=(None, (), None),
 ):
     if evidence is DEFAULT_EVIDENCE:
         evidence = forecast_evidence(accepted_at - timedelta(minutes=30))
@@ -108,7 +115,13 @@ def registered_service(
         evidence_loader=lambda *, decision_id: evidence,
         clock=lambda: accepted_at,
     )
-    def candidate(catalog_key, imaging_field_id=None, provenance=CandidateProvenance.PROJECT):
+    def candidate(
+        catalog_key,
+        imaging_field_id=None,
+        provenance=CandidateProvenance.PROJECT,
+        intent_provenance=(None, (), None),
+    ):
+        selected_intent_id, viable_intent_ids, intent_status = intent_provenance
         return Candidate(
             name=catalog_key,
             catalog_key=catalog_key,
@@ -123,19 +136,27 @@ def registered_service(
             closure_bonus=0.0,
             provenance=provenance,
             imaging_field_id=imaging_field_id,
+            selected_acquisition_intent_id=selected_intent_id,
+            viable_acquisition_intent_ids=viable_intent_ids,
+            acquisition_intent_selection_status=intent_status,
         )
 
     primary = candidate(
         "M31",
         primary_imaging_field_id,
         primary_provenance,
+        primary_intent_provenance,
     )
     recommendation = SimpleNamespace(
         opportunity=SimpleNamespace(
             candidate=primary,
             shortlist_entries=(
                 primary,
-                candidate("M42", alternative_imaging_field_id),
+                candidate(
+                    "M42",
+                    alternative_imaging_field_id,
+                    intent_provenance=alternative_intent_provenance,
+                ),
             ),
         )
     )
@@ -167,6 +188,272 @@ def registered_service(
         explicitly_evaluated_catalog_keys=("M31", "M42", "M33"),
     )
     return service, composer, store, recommendation
+
+
+def test_unique_candidate_intent_is_copied_when_request_omits_it():
+    provenance = (
+        "intent-A",
+        ("intent-A",),
+        AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
+    )
+    service, composer, store, recommendation = registered_service(
+        primary_intent_provenance=provenance,
+    )
+    candidate = recommendation.opportunity.candidate
+    scores_before = (candidate.final_score, candidate.decision_score, candidate.reasons)
+
+    mission = service.accept(
+        selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31")
+    )
+
+    stored = store.load_selection("selection-1")
+    assert stored.selected_acquisition_intent_id == "intent-A"
+    assert composer.calls[0]["selection"] is not candidate
+    assert mission.selection_id == stored.selection_id == "selection-1"
+    assert (candidate.final_score, candidate.decision_score, candidate.reasons) == scores_before
+
+
+def test_unique_candidate_intent_accepts_exact_same_request():
+    provenance = (
+        "intent-A",
+        ("intent-A",),
+        AcquisitionIntentSelectionStatus.PREFERRED,
+    )
+    service, _, store, _ = registered_service(
+        primary_intent_provenance=provenance,
+    )
+
+    service.accept(selection(
+        UserSelectionSource.PRIMARY_RECOMMENDATION,
+        "M31",
+        selected_acquisition_intent_id="intent-A",
+    ))
+
+    assert store.load_selection(
+        "selection-1"
+    ).selected_acquisition_intent_id == "intent-A"
+
+
+def test_unique_candidate_intent_idempotent_replay_accepts_omission_or_same():
+    service, composer, _, _ = registered_service(
+        primary_intent_provenance=(
+            "intent-A",
+            ("intent-A",),
+            AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
+        ),
+    )
+    first = service.accept_idempotently(
+        selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"),
+        acceptance_request_id="request-1",
+    )
+    omitted = service.accept_idempotently(
+        selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            selection_id="selection-retry-1",
+        ),
+        acceptance_request_id="request-1",
+    )
+    same = service.accept_idempotently(
+        selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            selection_id="selection-retry-2",
+            selected_acquisition_intent_id="intent-A",
+        ),
+        acceptance_request_id="request-1",
+    )
+
+    assert omitted == same == first
+    assert first.selection.selected_acquisition_intent_id == "intent-A"
+    assert len(composer.calls) == 1
+
+
+def test_historical_none_intent_replay_keeps_canonical_lineage_unchanged():
+    service, composer, store, _ = registered_service(
+        primary_intent_provenance=(
+            "intent-A",
+            ("intent-A",),
+            AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
+        ),
+    )
+    historical_selection = selection(
+        UserSelectionSource.PRIMARY_RECOMMENDATION,
+        "M31",
+    )
+    historical_mission = composer.create(
+        mission_id="mission-historical",
+        selection=historical_selection,
+    )
+    store.commit_selection_and_mission(
+        historical_selection,
+        historical_mission,
+        acceptance_request_id="request-historical",
+    )
+    composer.calls.clear()
+
+    replay = service.accept_idempotently(
+        selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            selection_id="selection-retry",
+        ),
+        acceptance_request_id="request-historical",
+    )
+
+    assert replay.selection is not historical_selection
+    assert replay.selection == historical_selection
+    assert replay.selection.selected_acquisition_intent_id is None
+    assert replay.mission == historical_mission
+    assert composer.calls == []
+
+
+def test_unique_candidate_intent_rejects_different_request_before_mission():
+    service, composer, store, _ = registered_service(
+        primary_intent_provenance=(
+            "intent-A",
+            ("intent-A",),
+            AcquisitionIntentSelectionStatus.PREFERRED,
+        ),
+    )
+    service.mission_id_factory = lambda: pytest.fail(
+        "intent mismatch must stop before mission identity allocation"
+    )
+
+    with pytest.raises(
+        DecisionAcceptanceError,
+        match="selected_acquisition_intent_mismatch",
+    ):
+        service.accept(selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            selected_acquisition_intent_id="intent-B",
+        ))
+
+    assert composer.calls == []
+    with pytest.raises(DecisionAcceptanceError, match="selection_not_found"):
+        store.load_selection("selection-1")
+
+
+@pytest.mark.parametrize("intent_id", ["intent-A", "intent-B"])
+def test_multiple_viable_intents_accept_exact_explicit_choice(intent_id):
+    service, _, store, _ = registered_service(
+        primary_intent_provenance=(
+            None,
+            ("intent-A", "intent-B"),
+            AcquisitionIntentSelectionStatus.NO_CLEAR_PREFERENCE,
+        ),
+    )
+
+    service.accept(selection(
+        UserSelectionSource.PRIMARY_RECOMMENDATION,
+        "M31",
+        selected_acquisition_intent_id=intent_id,
+    ))
+
+    assert store.load_selection(
+        "selection-1"
+    ).selected_acquisition_intent_id == intent_id
+
+
+@pytest.mark.parametrize(
+    ("intent_id", "error"),
+    [
+        (None, "acquisition_intent_selection_required"),
+        ("intent-C", "selected_acquisition_intent_not_viable"),
+        (" intent-A ", "selected_acquisition_intent_not_viable"),
+    ],
+)
+def test_multiple_viable_intents_never_fall_back_or_normalize(intent_id, error):
+    service, composer, _, recommendation = registered_service(
+        primary_intent_provenance=(
+            None,
+            ("intent-A", "intent-B"),
+            AcquisitionIntentSelectionStatus.NO_CLEAR_PREFERENCE,
+        ),
+    )
+    candidate = recommendation.opportunity.candidate
+    identity_before = (
+        candidate.selected_acquisition_intent_id,
+        candidate.viable_acquisition_intent_ids,
+        candidate.acquisition_intent_selection_status,
+    )
+
+    with pytest.raises(DecisionAcceptanceError, match=error):
+        service.accept(selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            selected_acquisition_intent_id=intent_id,
+        ))
+
+    assert composer.calls == []
+    assert identity_before == (
+        candidate.selected_acquisition_intent_id,
+        candidate.viable_acquisition_intent_ids,
+        candidate.acquisition_intent_selection_status,
+    )
+
+
+def test_no_viable_intent_accepts_omission_but_rejects_provided_identity():
+    provenance = (
+        None,
+        (),
+        AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT,
+    )
+    accepted, _, accepted_store, _ = registered_service(
+        primary_intent_provenance=provenance,
+    )
+    accepted.accept(selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"))
+    assert accepted_store.load_selection(
+        "selection-1"
+    ).selected_acquisition_intent_id is None
+
+    rejected, composer, _, _ = registered_service(
+        primary_intent_provenance=provenance,
+    )
+    with pytest.raises(
+        DecisionAcceptanceError,
+        match="selected_acquisition_intent_not_available",
+    ):
+        rejected.accept(selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            selected_acquisition_intent_id="intent-A",
+        ))
+    assert composer.calls == []
+
+
+def test_incoherent_single_viable_without_selected_intent_fails_closed():
+    service, composer, store, _ = registered_service()
+    candidate = store._contexts[
+        "decision-1"
+    ].recommendation.opportunity.candidate
+    candidate.acquisition_intent_selection_status = (
+        AcquisitionIntentSelectionStatus.NO_CLEAR_PREFERENCE
+    )
+    candidate.viable_acquisition_intent_ids = ("intent-A",)
+
+    with pytest.raises(
+        DecisionAcceptanceError,
+        match="invalid_acquisition_intent_selection_provenance",
+    ):
+        service.accept(selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            selected_acquisition_intent_id="intent-A",
+        ))
+
+    assert composer.calls == []
+
+
+def test_legacy_candidate_and_other_evaluated_target_keep_none_intent():
+    service, _, store, _ = registered_service()
+
+    service.accept(selection(UserSelectionSource.OTHER_EVALUATED_TARGET, "M33"))
+
+    assert store.load_selection(
+        "selection-1"
+    ).selected_acquisition_intent_id is None
 
 
 @pytest.mark.parametrize(

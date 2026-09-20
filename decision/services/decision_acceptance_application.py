@@ -15,7 +15,9 @@ from decision.services.user_selection_validator import (
     validate_user_selection,
 )
 from decision.services.selected_imaging_field_resolution import (
+    SelectedAcquisitionIntentResolutionError,
     SelectedImagingFieldResolutionError,
+    resolve_selected_acquisition_intent_id,
     resolve_selected_imaging_field_id,
 )
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
@@ -162,6 +164,25 @@ _ACCEPTANCE_REQUEST_ID_PATTERN = re.compile(
 
 
 def _same_acceptance_payload(left: UserSelection, right: UserSelection) -> bool:
+    return (
+        left.decision_id,
+        left.source,
+        left.selected_catalog_key,
+        left.selected_at,
+        left.selected_acquisition_intent_id,
+    ) == (
+        right.decision_id,
+        right.source,
+        right.selected_catalog_key,
+        right.selected_at,
+        right.selected_acquisition_intent_id,
+    )
+
+
+def _same_acceptance_payload_without_intent(
+    left: UserSelection,
+    right: UserSelection,
+) -> bool:
     return (
         left.decision_id,
         left.source,
@@ -318,7 +339,38 @@ class DecisionAcceptanceApplicationService:
             raise DecisionAcceptanceError(str(exc)) from exc
         if committed is not None:
             canonical_selection, canonical_mission = committed
-            if not _same_acceptance_payload(canonical_selection, selection):
+            if not _same_acceptance_payload_without_intent(
+                canonical_selection,
+                selection,
+            ):
+                raise DecisionAcceptanceError("acceptance_request_conflict")
+            if (
+                canonical_selection.selected_acquisition_intent_id is None
+                and selection.selected_acquisition_intent_id is None
+            ):
+                return DecisionAcceptanceResult(
+                    selection=canonical_selection,
+                    mission=canonical_mission,
+                )
+            context = self.context_store.load(decision_id=selection.decision_id)
+            if not isinstance(context, DecisionAcceptanceContext):
+                raise DecisionAcceptanceError("decision_context_incomplete")
+            try:
+                proposed_selection = replace(
+                    selection,
+                    selected_acquisition_intent_id=(
+                        resolve_selected_acquisition_intent_id(
+                            context,
+                            selection,
+                        )
+                    ),
+                )
+            except SelectedAcquisitionIntentResolutionError as exc:
+                raise DecisionAcceptanceError(str(exc)) from exc
+            if not _same_acceptance_payload(
+                canonical_selection,
+                proposed_selection,
+            ):
                 raise DecisionAcceptanceError("acceptance_request_conflict")
             return DecisionAcceptanceResult(
                 selection=canonical_selection,
@@ -362,12 +414,21 @@ class DecisionAcceptanceApplicationService:
         try:
             selection = replace(
                 selection,
+                selected_acquisition_intent_id=(
+                    resolve_selected_acquisition_intent_id(
+                        context,
+                        selection,
+                    )
+                ),
                 selected_imaging_field_id=resolve_selected_imaging_field_id(
                     context,
                     selection,
                 ),
             )
-        except SelectedImagingFieldResolutionError as exc:
+        except (
+            SelectedAcquisitionIntentResolutionError,
+            SelectedImagingFieldResolutionError,
+        ) as exc:
             raise DecisionAcceptanceError(str(exc)) from exc
 
         mission_id = self.mission_id_factory()
