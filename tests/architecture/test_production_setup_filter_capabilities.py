@@ -23,6 +23,11 @@ def test_production_definitions_are_exact_and_immutable():
         "B",
     )
     assert isinstance(capabilities.available_filter_types, tuple)
+    assert capabilities.available_filter_profile_ids == (
+        "baader_ha_highspeed_6_5nm",
+        "baader_oiii_highspeed_6_5nm",
+        "baader_sii_highspeed_6_5nm",
+    )
 
 
 def test_production_resolver_resolves_exact_equipment_id():
