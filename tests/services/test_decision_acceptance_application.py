@@ -102,6 +102,7 @@ def registered_service(
     profile_projects=None,
     primary_intent_provenance=(None, (), None),
     alternative_intent_provenance=(None, (), None),
+    other_intent_provenance=None,
 ):
     if evidence is DEFAULT_EVIDENCE:
         evidence = forecast_evidence(accepted_at - timedelta(minutes=30))
@@ -148,17 +149,22 @@ def registered_service(
         primary_provenance,
         primary_intent_provenance,
     )
+    shortlist_entries = [
+        primary,
+        candidate(
+            "M42",
+            alternative_imaging_field_id,
+            intent_provenance=alternative_intent_provenance,
+        ),
+    ]
+    if other_intent_provenance is not None:
+        shortlist_entries.append(
+            candidate("M33", intent_provenance=other_intent_provenance)
+        )
     recommendation = SimpleNamespace(
         opportunity=SimpleNamespace(
             candidate=primary,
-            shortlist_entries=(
-                primary,
-                candidate(
-                    "M42",
-                    alternative_imaging_field_id,
-                    intent_provenance=alternative_intent_provenance,
-                ),
-            ),
+            shortlist_entries=tuple(shortlist_entries),
         )
     )
     night = {
@@ -460,11 +466,60 @@ def test_incoherent_single_viable_without_selected_intent_fails_closed():
 def test_legacy_candidate_and_other_evaluated_target_keep_none_intent():
     service, _, store, _ = registered_service()
 
-    service.accept(selection(UserSelectionSource.OTHER_EVALUATED_TARGET, "M33"))
+    mission = service.accept(
+        selection(UserSelectionSource.OTHER_EVALUATED_TARGET, "M33")
+    )
 
     assert store.load_selection(
         "selection-1"
     ).selected_acquisition_intent_id is None
+    assert mission.acquisition_intent_id is None
+
+
+def test_modern_other_target_without_resolved_intent_rejects_before_allocation():
+    service, composer, store, _ = registered_service(
+        profile_projects={"M33": {"imaging_field_id": "sh2-129_ou4"}},
+        other_intent_provenance=(
+            None,
+            (),
+            AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT,
+        ),
+    )
+    service.mission_id_factory = lambda: pytest.fail(
+        "missing modern intent must stop before mission identity allocation"
+    )
+
+    with pytest.raises(
+        DecisionAcceptanceError,
+        match="acquisition_intent_required_for_mission",
+    ):
+        service.accept(
+            selection(UserSelectionSource.OTHER_EVALUATED_TARGET, "M33")
+        )
+
+    assert composer.calls == []
+    with pytest.raises(DecisionAcceptanceError, match="selection_not_found"):
+        store.load_selection("selection-1")
+
+
+def test_modern_other_target_propagates_resolved_intent_to_mission():
+    service, composer, store, _ = registered_service(
+        profile_projects={"M33": {"imaging_field_id": "sh2-129_ou4"}},
+        other_intent_provenance=(
+            "intent-A",
+            ("intent-A",),
+            AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
+        ),
+    )
+
+    mission = service.accept(
+        selection(UserSelectionSource.OTHER_EVALUATED_TARGET, "M33")
+    )
+
+    stored = store.load_selection("selection-1")
+    assert stored.selected_acquisition_intent_id == "intent-A"
+    assert composer.calls[0]["selection"] == stored
+    assert mission.acquisition_intent_id == "intent-A"
 
 
 @pytest.mark.parametrize(
