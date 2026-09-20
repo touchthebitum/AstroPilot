@@ -299,11 +299,13 @@ class FileDecisionAcceptanceLineageStore:
             left.source,
             left.selected_catalog_key,
             left.selected_at,
+            left.selected_acquisition_intent_id,
         ) == (
             right.decision_id,
             right.source,
             right.selected_catalog_key,
             right.selected_at,
+            right.selected_acquisition_intent_id,
         )
 
     def load_acceptance(

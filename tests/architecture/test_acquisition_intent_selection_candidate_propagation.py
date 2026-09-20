@@ -3,6 +3,8 @@ from dataclasses import fields
 import pytest
 
 from decision.engines.project_selection_engine import ProjectSelectionEngine
+from decision.mission.mission_input import MissionInput
+from decision.mission.night_mission import NightMission
 from decision.models.acquisition_intent_selection import (
     MULTIPLE_NON_DOMINATED_INTENTS,
     NO_ELIGIBLE_INTENT,
@@ -12,6 +14,8 @@ from decision.models.acquisition_intent_selection import (
     AcquisitionIntentSelectionStatus,
 )
 from decision.models.candidate import Candidate
+from decision.models.context.session_context import SessionContext
+from decision.models.session_availability import SessionAvailability
 from decision.opportunity.opportunity_engine import OpportunityEngine
 from decision.recommendation.recommendation_engine import RecommendationEngine
 
@@ -157,3 +161,10 @@ def test_candidate_rejects_partial_or_inconsistent_selection_provenance():
 
     with pytest.raises(ValueError, match="requires a selection status"):
         Candidate(**values)
+
+
+def test_acquisition_intent_selection_does_not_expand_mission_or_session_models():
+    for model in (MissionInput, NightMission, SessionContext, SessionAvailability):
+        assert "selected_acquisition_intent_id" not in {
+            field.name for field in fields(model)
+        }

@@ -299,6 +299,7 @@ def selection(
     selected_at=START - timedelta(minutes=15),
     selected_catalog_key=None,
     selected_imaging_field_id=None,
+    selected_acquisition_intent_id=None,
 ):
     targets = {
         UserSelectionSource.PRIMARY_RECOMMENDATION: "M31",
@@ -317,6 +318,7 @@ def selection(
         source=source,
         selected_at=selected_at,
         selected_imaging_field_id=selected_imaging_field_id,
+        selected_acquisition_intent_id=selected_acquisition_intent_id,
     )
 
 
@@ -400,7 +402,7 @@ def test_decision_acceptance_context_full_typed_round_trip():
     )
 
 
-def test_v6_candidate_document_contains_exact_additive_provenance_keys():
+def test_v7_candidate_document_contains_exact_additive_provenance_keys():
     document = json.loads(
         serialize_decision_acceptance_aggregate(
             DecisionAcceptanceAggregate(context=context())
@@ -408,7 +410,7 @@ def test_v6_candidate_document_contains_exact_additive_provenance_keys():
     )
     candidate_fields = candidate_field_documents(document)
 
-    assert document["schema_version"] == 6
+    assert document["schema_version"] == 7
     assert candidate_fields
     assert all(
         fields["imaging_field_id"] == "sh2-129_ou4"
@@ -441,7 +443,7 @@ def test_v6_candidate_document_contains_exact_additive_provenance_keys():
     )
 
 
-def test_v6_recommendation_candidate_selection_provenance_round_trip():
+def test_v7_recommendation_candidate_selection_provenance_round_trip():
     result = AcquisitionIntentSelection(
         selected_acquisition_intent_id=None,
         viable_acquisition_intent_ids=("z-intent", "A_intent"),
@@ -580,8 +582,11 @@ def test_user_selection_sources_round_trip(source):
         assert restored.selected_catalog_key is None
 
 
-def test_v4_user_selection_contains_exact_imaging_field_key():
-    value = selection(selected_imaging_field_id="sh2-129_ou4")
+def test_v7_user_selection_contains_exact_additive_identity_keys():
+    value = selection(
+        selected_imaging_field_id="sh2-129_ou4",
+        selected_acquisition_intent_id="intent-A",
+    )
     document = serialize_user_selection(value)
 
     assert set(document["fields"]) == {
@@ -591,8 +596,10 @@ def test_v4_user_selection_contains_exact_imaging_field_key():
         "source",
         "selected_at",
         "selected_imaging_field_id",
+        "selected_acquisition_intent_id",
     }
     assert document["fields"]["selected_imaging_field_id"] == "sh2-129_ou4"
+    assert document["fields"]["selected_acquisition_intent_id"] == "intent-A"
     assert deserialize_user_selection(document) == value
 
 
@@ -608,6 +615,25 @@ def test_v4_user_selection_imaging_field_malformation_fails_closed(malformation)
         fields["selected_imaging_field_id"] = ""
     else:
         fields["selected_imaging_field_id"] = 42
+
+    with pytest.raises(AcceptanceLineageCorruptionError):
+        deserialize_user_selection(document)
+
+
+@pytest.mark.parametrize("malformation", ["missing", "extra", "empty", "typed"])
+def test_v7_user_selection_acquisition_intent_malformation_fails_closed(
+    malformation,
+):
+    document = serialize_user_selection(selection())
+    fields = document["fields"]
+    if malformation == "missing":
+        fields.pop("selected_acquisition_intent_id")
+    elif malformation == "extra":
+        fields["unexpected"] = None
+    elif malformation == "empty":
+        fields["selected_acquisition_intent_id"] = ""
+    else:
+        fields["selected_acquisition_intent_id"] = 42
 
     with pytest.raises(AcceptanceLineageCorruptionError):
         deserialize_user_selection(document)
@@ -921,8 +947,8 @@ def test_inconsistent_acceptance_request_mapping_fails_closed(tmp_path, mutate):
         store.load_acceptance("request-1")
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4])
-def test_legacy_aggregate_loads_without_fabricated_imaging_field(
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6])
+def test_legacy_aggregate_loads_without_fabricated_selection_identity(
     tmp_path,
     version,
 ):
@@ -937,18 +963,21 @@ def test_legacy_aggregate_loads_without_fabricated_imaging_field(
     if version in (1, 2):
         for fields in candidate_field_documents(document):
             fields.pop("imaging_field_id")
-    for fields in candidate_field_documents(document):
-        fields.pop("selected_acquisition_intent_id")
-        fields.pop("viable_acquisition_intent_ids")
-        fields.pop("acquisition_intent_selection_status")
+    if version <= 5:
+        for fields in candidate_field_documents(document):
+            fields.pop("selected_acquisition_intent_id")
+            fields.pop("viable_acquisition_intent_ids")
+            fields.pop("acquisition_intent_selection_status")
     for fields in user_selection_field_documents(document):
         if version <= 3:
             fields.pop("selected_imaging_field_id")
+        fields.pop("selected_acquisition_intent_id")
     for fields in dataclass_field_documents(
         document,
         "decision.mission.night_mission.NightMission",
     ):
-        fields.pop("imaging_field_id")
+        if version <= 4:
+            fields.pop("imaging_field_id")
     legacy = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     path.write_text(legacy, encoding="utf-8")
 
@@ -959,6 +988,9 @@ def test_legacy_aggregate_loads_without_fabricated_imaging_field(
     assert reconstructed.load_selection(
         "selection-1"
     ).selected_imaging_field_id is None
+    assert reconstructed.load_selection(
+        "selection-1"
+    ).selected_acquisition_intent_id is None
     assert reconstructed.load_mission("mission-1").imaging_field_id is None
     assert path.read_text(encoding="utf-8") == legacy
 
@@ -980,6 +1012,8 @@ def test_v4_selection_identity_loads_with_legacy_mission_none_without_rewrite(
         fields.pop("selected_acquisition_intent_id")
         fields.pop("viable_acquisition_intent_ids")
         fields.pop("acquisition_intent_selection_status")
+    for fields in user_selection_field_documents(document):
+        fields.pop("selected_acquisition_intent_id")
     for fields in dataclass_field_documents(
         document,
         "decision.mission.night_mission.NightMission",
@@ -1193,7 +1227,7 @@ def test_duplicate_identity_in_another_aggregate_fails_globally(
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda document: document.update(schema_version=7),
+        lambda document: document.update(schema_version=8),
         lambda document: document.pop("schema_version"),
         lambda document: document["context"].update(
             {"$type": "unsupported.DomainType"}
@@ -1294,7 +1328,7 @@ def test_concurrent_conflicting_commits_allow_exactly_one_success(tmp_path):
         outcomes = list(executor.map(commit, ("M31", "M42")))
 
     assert sorted(outcomes) == ["conflict", "saved"]
-    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 6
+    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 7
 
 
 def test_unique_temporary_files_are_cleaned(tmp_path, monkeypatch):

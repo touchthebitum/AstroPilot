@@ -6,6 +6,9 @@ from typing import TYPE_CHECKING
 from decision.definitions.production_imaging_fields import (
     build_production_imaging_field_resolver,
 )
+from decision.models.acquisition_intent_selection import (
+    AcquisitionIntentSelectionStatus,
+)
 from decision.models.candidate import Candidate, CandidateProvenance
 from decision.models.user_selection import UserSelection, UserSelectionSource
 from decision.services.project_imaging_field_resolution import (
@@ -20,6 +23,10 @@ if TYPE_CHECKING:
 
 
 class SelectedImagingFieldResolutionError(ValueError):
+    pass
+
+
+class SelectedAcquisitionIntentResolutionError(ValueError):
     pass
 
 
@@ -84,6 +91,89 @@ def _candidate_for_selection(
             "selected_candidate_not_found"
         )
     return matches[0]
+
+
+def resolve_selected_acquisition_intent_id(
+    context: DecisionAcceptanceContext,
+    selection: UserSelection,
+) -> str | None:
+    requested = selection.selected_acquisition_intent_id
+    if selection.source is UserSelectionSource.DECLINED:
+        return None
+
+    try:
+        candidate = _candidate_for_selection(context, selection)
+    except SelectedImagingFieldResolutionError as exc:
+        # Explicitly evaluated legacy targets need not have been exposed as
+        # recommendation candidates. They retain the pre-intent behavior.
+        if (
+            selection.source is UserSelectionSource.OTHER_EVALUATED_TARGET
+            and requested is None
+        ):
+            return None
+        raise SelectedAcquisitionIntentResolutionError(
+            "selected_acquisition_intent_not_available"
+        ) from exc
+
+    status = candidate.acquisition_intent_selection_status
+    selected = candidate.selected_acquisition_intent_id
+    viable = candidate.viable_acquisition_intent_ids
+
+    if status is None:
+        if selected is not None or viable:
+            raise SelectedAcquisitionIntentResolutionError(
+                "invalid_acquisition_intent_selection_provenance"
+            )
+        if requested is not None:
+            raise SelectedAcquisitionIntentResolutionError(
+                "selected_acquisition_intent_not_available"
+            )
+        return None
+
+    if selected is not None:
+        if (
+            status not in (
+                AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
+                AcquisitionIntentSelectionStatus.PREFERRED,
+            )
+            or viable != (selected,)
+        ):
+            raise SelectedAcquisitionIntentResolutionError(
+                "invalid_acquisition_intent_selection_provenance"
+            )
+        if requested is None or requested == selected:
+            return selected
+        raise SelectedAcquisitionIntentResolutionError(
+            "selected_acquisition_intent_mismatch"
+        )
+
+    if not viable:
+        if status is not AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT:
+            raise SelectedAcquisitionIntentResolutionError(
+                "invalid_acquisition_intent_selection_provenance"
+            )
+        if requested is not None:
+            raise SelectedAcquisitionIntentResolutionError(
+                "selected_acquisition_intent_not_available"
+            )
+        return None
+
+    if (
+        len(viable) == 1
+        or status is not AcquisitionIntentSelectionStatus.NO_CLEAR_PREFERENCE
+    ):
+        raise SelectedAcquisitionIntentResolutionError(
+            "invalid_acquisition_intent_selection_provenance"
+        )
+    if requested is None:
+        raise SelectedAcquisitionIntentResolutionError(
+            "acquisition_intent_selection_required"
+        )
+    if requested not in viable:
+        raise SelectedAcquisitionIntentResolutionError(
+            "selected_acquisition_intent_not_viable"
+        )
+    return requested
 
 
 def resolve_selected_imaging_field_id(

@@ -18,6 +18,7 @@ class UserSelection:
     source: UserSelectionSource
     selected_at: datetime
     selected_imaging_field_id: str | None = None
+    selected_acquisition_intent_id: str | None = None
 
     def __post_init__(self):
         for name in ("selection_id", "decision_id"):
@@ -36,6 +37,7 @@ class UserSelection:
             if (
                 self.selected_catalog_key is not None
                 or self.selected_imaging_field_id is not None
+                or self.selected_acquisition_intent_id is not None
             ):
                 raise ValueError("declined_selection_requires_no_target")
             return
@@ -50,3 +52,10 @@ class UserSelection:
             or not self.selected_imaging_field_id.strip()
         ):
             raise ValueError("selected_imaging_field_id_must_be_non_empty_string")
+        if self.selected_acquisition_intent_id is not None and (
+            not isinstance(self.selected_acquisition_intent_id, str)
+            or not self.selected_acquisition_intent_id.strip()
+        ):
+            raise ValueError(
+                "selected_acquisition_intent_id_must_be_non_empty_string"
+            )

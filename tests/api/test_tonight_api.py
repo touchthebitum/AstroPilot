@@ -1614,6 +1614,7 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
                 replace(
                     user_selection,
                     selected_imaging_field_id="sh2-129_ou4",
+                    selected_acquisition_intent_id="intent-A",
                 ),
                 mission,
             )
@@ -1635,6 +1636,7 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
             "decision_id": "decision-123",
             "source": "primary_recommendation",
             "selected_catalog_key": "M31",
+            "acquisition_intent_id": "intent-A",
             "selected_at": "2026-09-10T20:00:00+00:00",
         },
     )
@@ -1651,6 +1653,7 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
         "selection_id": "selection-123",
         "catalog_key": "M31",
         "selected_imaging_field_id": "sh2-129_ou4",
+        "selected_acquisition_intent_id": "intent-A",
         "mission": {
             "mission_id": "mission-123",
             "decision_id": "decision-123",
@@ -1671,6 +1674,10 @@ def test_gp01_tonight_then_explicit_selection_creates_bound_mission(monkeypatch)
     assert service.selections[0][0] == "request-123"
     assert service.selections[0][1].source is UserSelectionSource.PRIMARY_RECOMMENDATION
     assert service.selections[0][1].selected_imaging_field_id is None
+    assert (
+        service.selections[0][1].selected_acquisition_intent_id
+        == "intent-A"
+    )
 
 
 def test_selection_endpoint_rejects_client_supplied_selection_id():
@@ -2105,6 +2112,7 @@ def test_reconstructed_decline_persists_selection_without_mission(tmp_path):
         "selection_id": "selection-lineage",
         "catalog_key": None,
         "selected_imaging_field_id": None,
+        "selected_acquisition_intent_id": None,
         "mission": None,
     }
     assert store.load_selection("selection-lineage").source.value == "declined"
