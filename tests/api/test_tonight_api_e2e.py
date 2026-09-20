@@ -329,7 +329,15 @@ def test_http_request_runs_real_application_composition_once(
         )
     ]
     assert calls["recommendation"] == [[candidate]]
-    assert calls["mission"] == []
+    assert len(calls["mission"]) == 1
+    preview_call = calls["mission"][0]
+    assert preview_call["recommended_key"] == "M31"
+    preview_input = preview_call["build_mission_input"](
+        selected_night["object_evaluations"]["M31"]
+    )
+    assert preview_input.mission_id is None
+    assert preview_input.decision_id is None
+    assert preview_input.selection_id is None
     payload = response.json()
     assert payload["status"] == "available"
     assert isinstance(payload["decision_id"], str)
@@ -337,7 +345,7 @@ def test_http_request_runs_real_application_composition_once(
     assert payload["target"] == "Andromeda"
     assert payload["catalog_key"] == "M31"
     assert payload["provenance"] == CandidateProvenance.PROJECT.value
-    assert payload["target_decision_status"] == "insufficient_evidence"
+    assert payload["target_decision_status"] == "recommended"
     assert payload["shortlist_entries"] == [
         {
             "target": "Orion",
@@ -350,26 +358,46 @@ def test_http_request_runs_real_application_composition_once(
     ]
     assert payload["alternatives"] == []
     assert payload["target_common_name"] == "Galaxie d’Andromède"
-    assert payload["mission_confidence"] is None
-    assert payload["astro_quality"] is None
-    assert payload["productivity"] is None
-    assert payload["dew_risk"] is None
-    assert payload["postponement_risk"] is None
-    assert payload["season"] is None
+    assert payload["mission_confidence"] == 0.87
+    assert payload["recommended_hours"] == 3.5
+    assert payload["window_start"] == "2026-09-01T22:00:00+00:00"
+    assert payload["window_end"] == "2026-09-02T04:00:00+00:00"
+    assert payload["astro_quality"] is not None
+    assert payload["productivity"] is not None
+    assert payload["dew_risk"] is not None
+    assert payload["postponement_risk"] is not None
+    assert payload["season"] is not None
 
-    rejected = client.post(
+    selection_payload = {
+        "acceptance_request_id": "c219f146-5106-48c3-b617-4b96cf6257a4",
+        "decision_id": payload["decision_id"],
+        "source": "primary_recommendation",
+        "selected_catalog_key": "M31",
+        "selected_at": "2026-09-10T20:00:00+00:00",
+    }
+    accepted = client.post(
         "/v1/decision-selections",
-        json={
-            "acceptance_request_id": "c219f146-5106-48c3-b617-4b96cf6257a4",
-            "decision_id": payload["decision_id"],
-            "source": "primary_recommendation",
-            "selected_catalog_key": "M31",
-            "selected_at": "2026-09-10T20:00:00+00:00",
-        },
+        json=selection_payload,
     )
 
-    assert rejected.status_code == 409, rejected.json()
-    assert rejected.json()["detail"]["code"] == (
-        "selected_target_not_primary_recommendation"
+    assert accepted.status_code == 200, accepted.json()
+    accepted_payload = accepted.json()
+    assert accepted_payload["status"] == "accepted"
+    assert accepted_payload["catalog_key"] == "M31"
+    assert accepted_payload["mission"]["target"] == "Andromeda"
+    assert accepted_payload["mission"]["mission_id"]
+    assert accepted_payload["mission"]["decision_id"] == payload["decision_id"]
+    assert accepted_payload["mission"]["selection_id"]
+    assert len(calls["mission"]) == 2
+    acceptance_input = calls["mission"][1]["build_mission_input"](
+        selected_night["object_evaluations"]["M31"]
     )
-    assert calls["mission"] == []
+    assert acceptance_input.mission_id == accepted_payload["mission"]["mission_id"]
+    assert acceptance_input.decision_id == payload["decision_id"]
+    assert acceptance_input.selection_id == accepted_payload["mission"]["selection_id"]
+
+    replayed = client.post("/v1/decision-selections", json=selection_payload)
+
+    assert replayed.status_code == 200, replayed.json()
+    assert replayed.json() == accepted_payload
+    assert len(calls["mission"]) == 2

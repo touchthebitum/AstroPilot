@@ -146,6 +146,39 @@ def make_recommendation(candidate):
     )
 
 
+def make_actionable_mission():
+    return NightMission(
+        target="Andromeda",
+        confidence=0.9,
+        window_start=datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
+        window_end=datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
+        recommended_hours=3.0,
+        expected_gain=1.0,
+        productivity=NightProductivityResult(
+            astronomical_hours=3.0,
+            productive_hours=3.0,
+            confidence=1.0,
+            cloud_loss=0.0,
+            moon_loss=0.0,
+            altitude_loss=0.0,
+            weather_loss=0.0,
+            windows=[
+                NightWindow(
+                    start_hour=0.0,
+                    end_hour=3.0,
+                    productivity=0.9,
+                    altitude=60.0,
+                    cloud_cover=10.0,
+                    moon_penalty=0.1,
+                    seeing=1.5,
+                    productive=True,
+                    reason="stable_conditions",
+                )
+            ],
+        ),
+    )
+
+
 def make_service(
     *,
     forecast_nights,
@@ -230,7 +263,7 @@ def test_evaluate_carries_typed_availability_to_composition_boundary(monkeypatch
     assert resolved_availability[0] is availability
 
 
-def test_evaluate_defers_availability_bound_mission_until_selection():
+def test_evaluate_builds_real_availability_bound_actionability_mission():
     availability = SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)
     mission_input = MissionInput(
         window_start=datetime(2026, 9, 1, 22, tzinfo=timezone.utc),
@@ -254,7 +287,7 @@ def test_evaluate_defers_availability_bound_mission_until_selection():
         ),
         build_candidates=lambda *args, **kwargs: [candidate],
         recommendation=make_recommendation(candidate),
-        mission=object(),
+        mission=make_actionable_mission(),
         build_mission_input=lambda evaluation, *, profile: mission_input,
     )
     result = service.evaluate(
@@ -266,9 +299,18 @@ def test_evaluate_defers_availability_bound_mission_until_selection():
     )
 
     assert result.recommendation.opportunity.candidate is candidate
-    assert result.mission is None
+    assert result.mission is not None
     assert result.status is TonightStatus.AVAILABLE
-    assert mission_service.calls == []
+    assert len(mission_service.calls) == 1
+    call = mission_service.calls[0]
+    assert call["winner"]["date"] == date(2026, 9, 1)
+    assert call["objects"] == [{"catalog_key": "M31"}]
+    assert call["recommended_key"] == "M31"
+    bound_input = call["build_mission_input"](object())
+    assert bound_input.availability is availability
+    assert bound_input.mission_id is None
+    assert bound_input.decision_id is None
+    assert bound_input.selection_id is None
 
 
 def _productive_assessment():
@@ -417,7 +459,7 @@ def test_mission_timing_empty_intersection_returns_none():
     )
 
 
-def test_empty_availability_is_resolved_only_after_user_selection():
+def test_empty_availability_fails_closed_during_primary_actionability():
     candidate = make_candidate()
     service, _, mission_service = make_service(
         forecast_nights=lambda *args, **kwargs: forecast_run(
@@ -447,8 +489,8 @@ def test_empty_availability_is_resolved_only_after_user_selection():
     )
 
     assert result.mission is None
-    assert result.status is TonightStatus.AVAILABLE
-    assert mission_service.calls == []
+    assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW
+    assert len(mission_service.calls) == 1
 
 
 def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
@@ -572,13 +614,16 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
     assert forecast_profile["location"] == profile["location"]
     assert forecast_profile["location"] is not profile["location"]
     assert recommendation_service.calls == [candidates]
-    assert mission_service.calls == []
+    assert len(mission_service.calls) == 1
+    assert mission_service.calls[0]["winner"] is selected
+    assert mission_service.calls[0]["objects"] is selected_objects
+    assert mission_service.calls[0]["recommended_key"] == "M31"
     assert profile["active_equipment"] == "samyang_183"
     assert profile["available_equipment"] is original_available
     assert profile["available_equipment"] == ["samyang_183", "fra400_2600"]
     assert result.night is selected
     assert result.recommendation is recommendation
-    assert result.mission is None
+    assert result.mission is mission
     assert result.forecast_evidence is FORECAST_EVIDENCE
     assert selected["top_objects"] is selected_objects
     assert selected_objects[0]["global_score"] == 91.0
@@ -767,7 +812,7 @@ def test_no_recommendation_preserves_night_and_skips_mission():
     assert mission_service.calls == []
 
 
-def test_recommendation_result_defers_mission_creation():
+def test_recommendation_without_creatable_mission_fails_closed():
     night = {"date": "2026-09-01", "top_objects": []}
     candidate = make_candidate()
     candidates = [candidate]
@@ -789,19 +834,16 @@ def test_recommendation_result_defers_mission_creation():
     assert result.night is night
     assert result.recommendation is recommendation
     assert result.mission is None
-    assert result.status is TonightStatus.AVAILABLE
+    assert result.status is TonightStatus.NO_MISSION
     assert result.forecast_evidence is FORECAST_EVIDENCE
-    assert mission_service.calls == []
+    assert len(mission_service.calls) == 1
 
 
-def test_recommendation_does_not_create_a_mission_before_user_selection():
+def test_actionability_mission_has_no_fabricated_selection_provenance():
     night = {"date": "2026-09-01", "top_objects": []}
     candidate = make_candidate()
     recommendation = make_recommendation(candidate)
-    provenance_free_mission = NightMission(
-        target="M31",
-        confidence=0.9,
-    )
+    provenance_free_mission = make_actionable_mission()
     service, _, mission_service = make_service(
         forecast_nights=lambda *args, **kwargs: forecast_run([night]),
         build_candidates=lambda *args, **kwargs: [candidate],
@@ -818,11 +860,14 @@ def test_recommendation_does_not_create_a_mission_before_user_selection():
 
     assert result.status is TonightStatus.AVAILABLE
     assert result.recommendation is recommendation
-    assert result.mission is None
-    assert mission_service.calls == []
+    assert result.mission is provenance_free_mission
+    assert result.mission.mission_id is None
+    assert result.mission.decision_id is None
+    assert result.mission.selection_id is None
+    assert len(mission_service.calls) == 1
 
 
-def test_productivity_mission_status_is_deferred_until_selection():
+def test_non_productive_actionability_mission_fails_closed():
     night = {"date": "2026-09-01", "top_objects": []}
     candidate = make_candidate()
     recommendation = make_recommendation(candidate)
@@ -857,10 +902,10 @@ def test_productivity_mission_status_is_deferred_until_selection():
         bortle=3,
     )
 
-    assert result.status is TonightStatus.AVAILABLE
-    assert result.mission is None
+    assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW
+    assert result.mission is mission
     assert result.forecast_evidence is FORECAST_EVIDENCE
-    assert mission_service.calls == []
+    assert len(mission_service.calls) == 1
 
 
 @pytest.mark.parametrize(
