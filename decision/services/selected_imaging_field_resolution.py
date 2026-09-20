@@ -30,6 +30,24 @@ class SelectedAcquisitionIntentResolutionError(ValueError):
     pass
 
 
+def acquisition_intent_provenance_expected(
+    context: DecisionAcceptanceContext,
+    selection: UserSelection,
+) -> bool:
+    if selection.source in (
+        UserSelectionSource.DECLINED,
+        UserSelectionSource.OTHER_EVALUATED_TARGET,
+    ):
+        return False
+    try:
+        candidate = _candidate_for_selection(context, selection)
+    except SelectedImagingFieldResolutionError as exc:
+        raise SelectedAcquisitionIntentResolutionError(
+            "selected_acquisition_intent_not_available"
+        ) from exc
+    return candidate.acquisition_intent_selection_status is not None
+
+
 def _resolved_project_imaging_field_id(
     context: DecisionAcceptanceContext,
     catalog_key: str,

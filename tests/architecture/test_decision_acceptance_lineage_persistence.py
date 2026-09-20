@@ -335,6 +335,7 @@ def mission(
     decision_id="decision-1",
     selection_id="selection-1",
     imaging_field_id=None,
+    acquisition_intent_id=None,
 ):
     slice_value = night_slice()
     return NightMission(
@@ -366,6 +367,7 @@ def mission(
         selection_id=selection_id,
         site_name="Mont Sujet",
         imaging_field_id=imaging_field_id,
+        acquisition_intent_id=acquisition_intent_id,
     )
 
 
@@ -410,7 +412,7 @@ def test_v7_candidate_document_contains_exact_additive_provenance_keys():
     )
     candidate_fields = candidate_field_documents(document)
 
-    assert document["schema_version"] == 7
+    assert document["schema_version"] == 8
     assert candidate_fields
     assert all(
         fields["imaging_field_id"] == "sh2-129_ou4"
@@ -682,6 +684,80 @@ def test_v5_mission_input_contains_exact_imaging_field_key():
     assert _decode(document) == value
 
 
+def test_v8_mission_acquisition_intent_round_trip_is_exact():
+    mission_input = MissionInput(
+        window_start=START,
+        window_end=END,
+        astronomical_hours=4.0,
+        weather=None,
+        moon_penalty=None,
+        recommended_hours=3.5,
+        expected_gain=1.25,
+        acquisition_intent_id=" intent-A ",
+    )
+    night_mission = mission(acquisition_intent_id=" intent-A ")
+
+    assert _decode(_encode(mission_input)) == mission_input
+    assert deserialize_night_mission(
+        serialize_night_mission(night_mission)
+    ) == night_mission
+
+
+def test_v8_aggregate_preserves_matching_mission_acquisition_intent():
+    aggregate = DecisionAcceptanceAggregate(
+        context=context(),
+        selections=(selection(selected_acquisition_intent_id="intent-A"),),
+        missions=(mission(acquisition_intent_id="intent-A"),),
+    )
+
+    restored = deserialize_decision_acceptance_aggregate(
+        serialize_decision_acceptance_aggregate(aggregate)
+    )
+
+    assert restored.selections[0].selected_acquisition_intent_id == "intent-A"
+    assert restored.missions[0].acquisition_intent_id == "intent-A"
+
+
+def test_v8_aggregate_rejects_mission_acquisition_intent_mismatch():
+    aggregate = DecisionAcceptanceAggregate(
+        context=context(),
+        selections=(selection(selected_acquisition_intent_id="intent-A"),),
+        missions=(mission(acquisition_intent_id="intent-B"),),
+    )
+
+    with pytest.raises(
+        AcceptanceLineageCorruptionError,
+        match="mission_acquisition_intent_mismatch",
+    ):
+        serialize_decision_acceptance_aggregate(aggregate)
+
+
+@pytest.mark.parametrize("version", range(1, 8))
+@pytest.mark.parametrize("model", [MissionInput, NightMission])
+def test_v1_to_v7_mission_without_acquisition_intent_loads_none(version, model):
+    value = (
+        MissionInput(
+            window_start=START,
+            window_end=END,
+            astronomical_hours=4.0,
+            weather=None,
+            moon_penalty=None,
+            recommended_hours=3.5,
+            expected_gain=1.25,
+        )
+        if model is MissionInput
+        else mission()
+    )
+    document = _encode(value)
+    document["fields"].pop("acquisition_intent_id")
+    if version <= 4:
+        document["fields"].pop("imaging_field_id")
+
+    restored = _decode(document, schema_version=version)
+
+    assert restored.acquisition_intent_id is None
+
+
 @pytest.mark.parametrize("version", [1, 2, 3, 4])
 def test_legacy_mission_input_without_imaging_field_loads_as_none(version):
     document = _encode(MissionInput(
@@ -694,6 +770,7 @@ def test_legacy_mission_input_without_imaging_field_loads_as_none(version):
         expected_gain=1.25,
     ))
     document["fields"].pop("imaging_field_id")
+    document["fields"].pop("acquisition_intent_id")
 
     assert _decode(document, schema_version=version).imaging_field_id is None
 
@@ -947,7 +1024,7 @@ def test_inconsistent_acceptance_request_mapping_fails_closed(tmp_path, mutate):
         store.load_acceptance("request-1")
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, 7])
 def test_legacy_aggregate_loads_without_fabricated_selection_identity(
     tmp_path,
     version,
@@ -971,13 +1048,15 @@ def test_legacy_aggregate_loads_without_fabricated_selection_identity(
     for fields in user_selection_field_documents(document):
         if version <= 3:
             fields.pop("selected_imaging_field_id")
-        fields.pop("selected_acquisition_intent_id")
+        if version <= 6:
+            fields.pop("selected_acquisition_intent_id")
     for fields in dataclass_field_documents(
         document,
         "decision.mission.night_mission.NightMission",
     ):
         if version <= 4:
             fields.pop("imaging_field_id")
+        fields.pop("acquisition_intent_id")
     legacy = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     path.write_text(legacy, encoding="utf-8")
 
@@ -992,6 +1071,7 @@ def test_legacy_aggregate_loads_without_fabricated_selection_identity(
         "selection-1"
     ).selected_acquisition_intent_id is None
     assert reconstructed.load_mission("mission-1").imaging_field_id is None
+    assert reconstructed.load_mission("mission-1").acquisition_intent_id is None
     assert path.read_text(encoding="utf-8") == legacy
 
 
@@ -1019,6 +1099,7 @@ def test_v4_selection_identity_loads_with_legacy_mission_none_without_rewrite(
         "decision.mission.night_mission.NightMission",
     ):
         fields.pop("imaging_field_id")
+        fields.pop("acquisition_intent_id")
     legacy = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     path.write_text(legacy, encoding="utf-8")
 
@@ -1029,6 +1110,7 @@ def test_v4_selection_identity_loads_with_legacy_mission_none_without_rewrite(
         == "sh2-129_ou4"
     )
     assert reconstructed.load_mission("mission-1").imaging_field_id is None
+    assert reconstructed.load_mission("mission-1").acquisition_intent_id is None
     assert path.read_text(encoding="utf-8") == legacy
 
 
@@ -1227,7 +1309,7 @@ def test_duplicate_identity_in_another_aggregate_fails_globally(
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda document: document.update(schema_version=8),
+        lambda document: document.update(schema_version=9),
         lambda document: document.pop("schema_version"),
         lambda document: document["context"].update(
             {"$type": "unsupported.DomainType"}
@@ -1328,7 +1410,7 @@ def test_concurrent_conflicting_commits_allow_exactly_one_success(tmp_path):
         outcomes = list(executor.map(commit, ("M31", "M42")))
 
     assert sorted(outcomes) == ["conflict", "saved"]
-    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 7
+    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 8
 
 
 def test_unique_temporary_files_are_cleaned(tmp_path, monkeypatch):

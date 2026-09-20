@@ -60,7 +60,7 @@ from decision.services.user_selection_validator import (
 from decision.weather.weather_forecast import WeatherForecast
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 _IDENTITY_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _LEGACY_ROOT_FIELDS = frozenset(
     ("schema_version", "decision_id", "context", "selections", "missions")
@@ -378,6 +378,8 @@ def _decode(value: object, *, schema_version: int = SCHEMA_VERSION) -> object:
             ))
         if dataclass_type in (MissionInput, NightMission) and schema_version <= 4:
             expected = expected - frozenset(("imaging_field_id",))
+        if dataclass_type in (MissionInput, NightMission) and schema_version <= 7:
+            expected = expected - frozenset(("acquisition_intent_id",))
         supplied = _exact_mapping(
             supplied, expected, "invalid_dataclass_fields"
         )
@@ -399,6 +401,8 @@ def _decode(value: object, *, schema_version: int = SCHEMA_VERSION) -> object:
             restored_fields["selected_acquisition_intent_id"] = None
         if dataclass_type in (MissionInput, NightMission) and schema_version <= 4:
             restored_fields["imaging_field_id"] = None
+        if dataclass_type in (MissionInput, NightMission) and schema_version <= 7:
+            restored_fields["acquisition_intent_id"] = None
         try:
             return dataclass_type(**restored_fields)
         except AcceptanceLineagePersistenceError:
@@ -493,6 +497,7 @@ def _validate_aggregate(
     aggregate: DecisionAcceptanceAggregate,
     *,
     enforce_imaging_field_consistency: bool = True,
+    enforce_acquisition_intent_consistency: bool = True,
 ) -> None:
     decision_id = validate_lineage_identity(
         aggregate.decision_id, field="decision_id"
@@ -527,6 +532,15 @@ def _validate_aggregate(
         ):
             raise AcceptanceLineageCorruptionError(
                 "mission_imaging_field_mismatch"
+            )
+        if enforce_acquisition_intent_consistency and (
+            mission.acquisition_intent_id
+            != selection_by_id[
+                mission.selection_id
+            ].selected_acquisition_intent_id
+        ):
+            raise AcceptanceLineageCorruptionError(
+                "mission_acquisition_intent_mismatch"
             )
         if mission_id in mission_by_id:
             raise AcceptanceLineageCorruptionError("duplicate_mission_id")
@@ -631,7 +645,7 @@ def deserialize_decision_acceptance_aggregate(
     if (
         isinstance(version, bool)
         or not isinstance(version, int)
-        or version not in (1, 2, 3, 4, 5, 6, SCHEMA_VERSION)
+        or version not in (1, 2, 3, 4, 5, 6, 7, SCHEMA_VERSION)
     ):
         raise AcceptanceLineageCorruptionError("invalid_schema_version")
     root = _exact_mapping(
@@ -707,5 +721,6 @@ def deserialize_decision_acceptance_aggregate(
     _validate_aggregate(
         aggregate,
         enforce_imaging_field_consistency=version >= 5,
+        enforce_acquisition_intent_consistency=version >= 8,
     )
     return aggregate

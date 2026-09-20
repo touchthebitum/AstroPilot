@@ -68,6 +68,7 @@ class RecordingSelectionMissionService:
             decision_id=selection.decision_id,
             selection_id=selection.selection_id,
             imaging_field_id=selection.selected_imaging_field_id,
+            acquisition_intent_id=selection.selected_acquisition_intent_id,
         )
 
 
@@ -210,6 +211,7 @@ def test_unique_candidate_intent_is_copied_when_request_omits_it():
     assert stored.selected_acquisition_intent_id == "intent-A"
     assert composer.calls[0]["selection"] is not candidate
     assert mission.selection_id == stored.selection_id == "selection-1"
+    assert mission.acquisition_intent_id == "intent-A"
     assert (candidate.final_score, candidate.decision_score, candidate.reasons) == scores_before
 
 
@@ -266,6 +268,7 @@ def test_unique_candidate_intent_idempotent_replay_accepts_omission_or_same():
 
     assert omitted == same == first
     assert first.selection.selected_acquisition_intent_id == "intent-A"
+    assert first.mission.acquisition_intent_id == "intent-A"
     assert len(composer.calls) == 1
 
 
@@ -394,19 +397,27 @@ def test_multiple_viable_intents_never_fall_back_or_normalize(intent_id, error):
     )
 
 
-def test_no_viable_intent_accepts_omission_but_rejects_provided_identity():
+def test_no_viable_intent_rejects_mission_creation_and_provided_identity():
     provenance = (
         None,
         (),
         AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT,
     )
-    accepted, _, accepted_store, _ = registered_service(
+    blocked, composer, blocked_store, _ = registered_service(
+        primary_imaging_field_id="sh2-129_ou4",
+        profile_projects={"M31": {"imaging_field_id": "sh2-129_ou4"}},
         primary_intent_provenance=provenance,
     )
-    accepted.accept(selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"))
-    assert accepted_store.load_selection(
-        "selection-1"
-    ).selected_acquisition_intent_id is None
+    with pytest.raises(
+        DecisionAcceptanceError,
+        match="acquisition_intent_required_for_mission",
+    ):
+        blocked.accept(
+            selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31")
+        )
+    assert composer.calls == []
+    with pytest.raises(DecisionAcceptanceError, match="selection_not_found"):
+        blocked_store.load_selection("selection-1")
 
     rejected, composer, _, _ = registered_service(
         primary_intent_provenance=provenance,
@@ -590,6 +601,36 @@ def test_mission_imaging_field_mismatch_fails_before_commit():
         store.load_selection("selection-1")
 
 
+def test_mission_acquisition_intent_mismatch_fails_before_commit():
+    service, composer, store, _ = registered_service(
+        primary_intent_provenance=(
+            "intent-A",
+            ("intent-A",),
+            AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
+        ),
+    )
+    original_create = composer.create
+
+    def create_mismatched(**kwargs):
+        return replace(
+            original_create(**kwargs),
+            acquisition_intent_id="intent-B",
+        )
+
+    composer.create = create_mismatched
+
+    with pytest.raises(
+        DecisionAcceptanceError,
+        match="mission_acquisition_intent_mismatch",
+    ):
+        service.accept(
+            selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31")
+        )
+
+    with pytest.raises(DecisionAcceptanceError, match="selection_not_found"):
+        store.load_selection("selection-1")
+
+
 def test_candidate_profile_mismatch_fails_before_allocation_or_commit():
     service, composer, store, _ = registered_service(
         primary_imaging_field_id="sh2-129_ou4",
@@ -655,6 +696,10 @@ def test_first_idempotent_acceptance_and_replay_return_canonical_lineage():
     assert replay.mission.selection_id == replay.selection.selection_id
     assert replay.mission.imaging_field_id == replay.selection.selected_imaging_field_id
     assert replay.mission.imaging_field_id == "sh2-129_ou4"
+    assert (
+        replay.mission.acquisition_intent_id
+        == replay.selection.selected_acquisition_intent_id
+    )
     assert store.load_acceptance("request-1") == (
         replay.selection,
         replay.mission,

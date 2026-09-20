@@ -153,6 +153,13 @@ class FileDecisionAcceptanceLineageStore:
             or mission.selection_id != selection.selection_id
         ):
             raise AcceptanceLineageConflictError("mission_provenance_mismatch")
+        if mission is not None and (
+            mission.acquisition_intent_id
+            != selection.selected_acquisition_intent_id
+        ):
+            raise AcceptanceLineageConflictError(
+                "mission_acquisition_intent_mismatch"
+            )
         request_id = None
         if acceptance_request_id is not None:
             request_id = validate_lineage_identity(

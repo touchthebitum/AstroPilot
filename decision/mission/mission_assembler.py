@@ -426,6 +426,11 @@ class MissionAssembler:
                 if mission_input is not None
                 else None
             ),
+            acquisition_intent_id=(
+                mission_input.acquisition_intent_id
+                if mission_input is not None
+                else None
+            ),
             reasons=reasons,
             equipment=equipment,
             window_start=mission_window_start,
