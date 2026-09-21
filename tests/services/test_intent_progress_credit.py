@@ -51,9 +51,9 @@ def context(tmp_path):
             profile["profile_revision"] += 1
             return profile
 
-    def apply(*, ids=("evidence-1",), confirm=False, revision=None):
+    def apply(*, ids=("evidence-1",), confirm=False, revision=None, execution_id="execution-1"):
         return apply_execution_credit(
-            profile=deepcopy(profile), execution_id="execution-1", evidence_ids=ids,
+            profile=deepcopy(profile), execution_id=execution_id, evidence_ids=ids,
             expected_revision=profile["profile_revision"] if revision is None else revision,
             confirm_historical_baseline=confirm,
             load_execution=store.load_execution, load_mission=lambda _: mission,
@@ -166,6 +166,41 @@ def test_baseline_confirmation_and_immutable_base(context, base):
     changed["projects"]["Sh2-129"]["imaging_field_id"] = "unknown"
     with pytest.raises(IntentProgressCreditError, match="ledger_invalid"):
         validate_credit_authority(changed, context.profile)
+
+
+@pytest.mark.parametrize("repeat_confirmation", [False, True])
+def test_confirmed_baseline_is_reused_for_distinct_execution_credits(context, repeat_confirmation):
+    context.profile["projects"]["Sh2-129"]["acquisition_intent_progress"] = [
+        {"acquisition_intent_id": INTENT, "acquired_duration_manual": 3600}]
+    context.close()
+    context.evidence()
+    first = context.apply(confirm=True)[1]
+    marker = deepcopy(context.profile["intent_progress_baselines"]["Sh2-129"][INTENT])
+
+    source = Execution("execution-2", "mission-1", ExecutionStatus.NOT_STARTED, None, None, None)
+    context.store.create_execution(source)
+    context.store.replace_execution(Execution("execution-2", "mission-1", ExecutionStatus.COMPLETED,
+        START, START + timedelta(hours=3), timedelta(hours=3)), expected_execution=source)
+    context.evidence("evidence-2", timedelta(minutes=15), execution_id="execution-2")
+    second = context.apply(ids=("evidence-2",), execution_id="execution-2",
+                           confirm=repeat_confirmation)
+    assert second[0] == "applied" and second[1]["execution_id"] == "execution-2"
+    assert context.profile["intent_progress_baselines"]["Sh2-129"][INTENT] == marker
+    assert context.apply(ids=("evidence-2",), execution_id="execution-2", confirm=True)[0] == "already_applied"
+    assert context.apply()[0] == "already_applied"
+    assert context.profile["intent_progress_baselines"]["Sh2-129"][INTENT] == marker
+    assert len(context.profile["intent_progress_credits"]) == 2
+    assert credit_totals(context.profile, "Sh2-129")[INTENT] == first["total_duration_us"] + second[1]["total_duration_us"]
+    field = build_production_imaging_field_resolver().resolve(FIELD)
+    derived = derive_acquisition_intent_remaining_progress(field,
+        (ProjectAcquisitionIntentTarget(INTENT, 2),),
+        tuple(context.profile["projects"]["Sh2-129"]["acquisition_intent_progress"]),
+        credit_totals(context.profile, "Sh2-129"))
+    progress = next(item for item in derived if item.acquisition_intent_id == INTENT)
+    assert progress.acquired_seconds == 6300.000037
+    assert progress.remaining_hours == pytest.approx(0.24999998972222226)
+    assert context.profile["projects"]["Sh2-129"]["hours"] == 2
+    assert context.profile["projects"]["Sh2-129"]["target_hours"] == 20
 
 
 def test_stale_revision_and_corrupt_or_replaced_ledger(context):

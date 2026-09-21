@@ -1802,6 +1802,14 @@ def create_app(
         except (ExecutionOutcomeApplicationError, DecisionAcceptanceError) as exc:
             raise HTTPException(status_code=422, detail={"code": str(exc)}) from exc
         except UserProfileError as exc:
+            code = str(exc)
+            if code.startswith("intent_progress_"):
+                try:
+                    load_user_profile()
+                except UserProfileError:
+                    pass
+                else:
+                    raise HTTPException(status_code=409, detail={"code": code}) from exc
             raise HTTPException(status_code=503, detail={"code": "configuration_corrupt"}) from exc
 
     @application.get(

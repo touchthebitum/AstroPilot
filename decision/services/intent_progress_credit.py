@@ -195,11 +195,13 @@ def apply_execution_credit(*, profile, execution_id, evidence_ids, expected_revi
     entries = {e["acquisition_intent_id"]: e for e in resolve_project_acquisition_intent_progress(project, build_production_imaging_field_resolver())}
     base = entries.get(mission.acquisition_intent_id)
     if base_seconds(base) is not None and base_seconds(base) > 0:
-        if not confirm_historical_baseline:
-            raise IntentProgressCreditError("intent_progress_baseline_confirmation_required")
-        profile.setdefault("intent_progress_baselines", {}).setdefault(project_id, {})[mission.acquisition_intent_id] = {
-            "confirmed_at": datetime.now(timezone.utc).isoformat(), "base_progress": dict(base),
-        }
+        markers = profile.get("intent_progress_baselines", {}).get(project_id, {})
+        if mission.acquisition_intent_id not in markers:
+            if not confirm_historical_baseline:
+                raise IntentProgressCreditError("intent_progress_baseline_confirmation_required")
+            profile.setdefault("intent_progress_baselines", {}).setdefault(project_id, {})[mission.acquisition_intent_id] = {
+                "confirmed_at": datetime.now(timezone.utc).isoformat(), "base_progress": dict(base),
+            }
     entry = {**content, "applied_at": datetime.now(timezone.utc).isoformat()}
     profile.setdefault("intent_progress_credits", {})[execution_id] = entry
     saved = save_profile(profile, expected_revision=expected_revision)
