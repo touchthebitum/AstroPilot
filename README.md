@@ -2,11 +2,13 @@
 
 AI-powered astrophotography planning platform.
 
-Development candidate: **1.0.0-beta.5** (canonical version `1.0.0b5`), integrating
-hotfix PR #230: an actionable primary recommendation requires a real, exploitable
-Mission. Its macOS and Windows artifacts have not been rebuilt; both must
-subsequently be built from the same Git commit. No beta.5 tag or GitHub Release
-has been created.
+Local release candidate: **1.0.0-beta.6** (canonical version `1.0.0b6`).
+Versioning is under local review: no beta.6 build, tag, or GitHub Release has
+been created. After the versioning commit, macOS and Windows must both be built
+from that same commit. The future tag is `v1.0.0-beta.6`.
+
+The historical `v1.0.0-beta.5` tag already exists. See the
+[beta.6 candidate notes and remaining gates](docs/release_checklist.md).
 
 Published historical baseline: **v1.0.0-beta.4** (canonical version `1.0.0b4`).
 
@@ -22,8 +24,8 @@ stapling, Gatekeeper, and ZIP extraction checks are validated. Windows native
 installation, launch, update, uninstall, reinstall, and data preservation are
 validated. The beta.3 clean-machine test on the Mac mini, native Windows user
 path with spaces/accented characters, and Windows Start Menu launch have passed.
-Full suites are validated on macOS and Windows. All beta.3 validation gates
-are closed. Tag creation and GitHub Release remain pending.
+Full suites were validated on macOS and Windows for beta.3. This is a historical
+validation record, not a validation of beta.6.
 
 See [closed-beta status and artifact SHA-256 values](docs/closed_beta.md),
 [release gates](docs/release_checklist.md), and
@@ -62,9 +64,9 @@ synchronization step has already completed.
 
 ## User data (source checkout and installed wheel)
 
-AstroPilot requires an existing directory containing a valid
-`user_profile.json`. Automatic onboarding and profile creation are not yet
-provided. Point AstroPilot to that directory before launching it:
+For the web UI, point AstroPilot to a writable user-data directory. It can
+create `user_profile.json` during initial configuration; command-line decision
+usage still requires a valid profile. Set the directory before launching it:
 
 ```bash
 export ASTROPILOT_DATA_DIR=/path/to/astropilot-data

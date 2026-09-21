@@ -1,10 +1,10 @@
-# Closed beta: 1.0.0-beta.3
+# Historical closed beta record: 1.0.0-beta.3
 
 Canonical version: `1.0.0b3`. Tester label: `1.0.0-beta.3`.
-The current multi-platform candidate replaces beta.2. All beta.3 validation
-gates are closed. Tag creation and GitHub Release remain pending.
-No final tag or GitHub Release is recorded as created/published, and no download
-URL is available in this record.
+This document preserves the beta.3 artifact and validation record; the current
+local versioning candidate is beta.6 (see [release checklist](release_checklist.md)).
+Beta.3 replaced beta.2. The historical text below describes what was recorded
+at that time, not the present publication status.
 
 ## Candidate artifacts
 
@@ -70,10 +70,10 @@ Reported after the beta.3 version bump (not rerun by this documentation update):
 Retained evidence confirms clean working trees, `main == origin/main`, and HEAD
 at `c8566443c1caf612d122a8d217fe05884ac6aace` before both final builds (Windows
 installer and signed/notarized macOS release). Final docs/release review is
-complete; all [beta.3 validation gates](release_checklist.md) are closed.
+complete; the beta.3 validation gates were closed in the historical record.
 
-Only tag creation and GitHub Release remain pending. Neither is recorded as
-created/published; final review was completed before these publication steps.
+At the time of this beta.3 record, tag creation and GitHub Release were still
+listed as pending. This is not a statement about the current beta.6 candidate.
 
 ## Outside beta.3 scope
 

@@ -93,8 +93,17 @@ def test_root_serves_tonight_classic_ui():
     assert "Fiabilité de la recommandation" in response.text
     assert 'id="alternatives-section"' in response.text
     assert 'id="alternatives-list"' in response.text
-    assert 'src="/ui/app.js?v=1.0.0b5-' in response.text
+    assert 'src="/ui/app.js?v=1.0.0b6-' in response.text
     assert "__ASTROPILOT_ASSET_TOKEN__" not in response.text
+
+
+def test_configuration_heading_distinguishes_existing_and_legacy_profiles():
+    script = make_client().get("/ui/app.js").text
+    initialization = script.split("function initializeConfiguration(payload)", 1)[1].split(
+        "async function restoreSavedMission", 1
+    )[0]
+    assert 'payload.needs_configuration_confirmation ? "Profil historique"' in initialization
+    assert 'payload.configured ? "Modifier la configuration" : "Première configuration"' in initialization
 
 
 def test_tonight_ui_assets_are_served():

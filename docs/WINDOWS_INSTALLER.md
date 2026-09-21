@@ -5,7 +5,9 @@ not rebuild the application, change product versioning, or introduce signing.
 
 ## Recorded beta.3 status
 
-The current multi-platform candidate is `1.0.0-beta.3` (canonical `1.0.0b3`),
+This is a historical beta.3 validation record (the current local versioning
+candidate is beta.6; see [release checklist](release_checklist.md)). Beta.3 was
+`1.0.0-beta.3` (canonical `1.0.0b3`),
 from source commit `c8566443c1caf612d122a8d217fe05884ac6aace`.
 
 - Artifact: `AstroPilot-1.0.0b3-windows-x86_64-setup.exe`
@@ -22,12 +24,12 @@ from source commit `c8566443c1caf612d122a8d217fe05884ac6aace`.
   returned to "Préparer ma nuit" with data preserved.
 - Full suite Windows beta.3: 2641 passed, 0 failed, 1 skipped (recorded result;
   not rerun during this documentation update).
-- Authenticode remains outside beta.3 scope. The final tag and GitHub Release
-  remain pending; see [the shared release gates](release_checklist.md).
+- Authenticode was outside beta.3 scope. At the time of this record, tag and
+  GitHub Release were listed as pending; this is not beta.6 status.
 
 The checklist below is a reusable procedure, not an assertion that every
 individual observation (for example optional shortcuts or automatic restart)
-has been recorded for beta.3. The validated summary above is the current record.
+was recorded for beta.3. The validated summary above is historical.
 
 ## Prerequisites and build order
 
