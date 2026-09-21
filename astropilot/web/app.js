@@ -365,6 +365,7 @@ function renderIntentChoice(container, subject, selectId) {
     select.append(new Option(option.label, option.acquisition_intent_id));
   }
   select.addEventListener("change", () => {
+    if (state.acceptedMission) return;
     showAcceptanceStatus("");
     restoreAcceptanceControls();
   });
@@ -461,6 +462,18 @@ function disableAcceptanceControls(disabled) {
   for (const button of acceptanceControls()) button.disabled = disabled;
 }
 
+function showAcceptedIntent(subject, container, intentId) {
+  if (intentMode(subject) === "legacy") return intentId === null;
+  const option = subject.acquisition_intent_options?.find(
+    (item) => item.acquisition_intent_id === intentId
+  );
+  if (!option) return false;
+  container.replaceChildren();
+  container.hidden = false;
+  container.textContent = `Acquisition choisie : ${option.label}`;
+  return true;
+}
+
 function restoreAcceptanceControls() {
   disableAcceptanceControls(Boolean(state.acceptanceBlocked || state.acceptedMission));
   if (!state.acceptanceBlocked && !state.acceptedMission) {
@@ -482,7 +495,10 @@ function restoreAcceptanceControls() {
       button.dataset.acceptanceSource === state.acceptedMission.source
       && button.dataset.catalogKey === state.acceptedMission.selectedCatalogKey
     ));
-    if (selected) selected.disabled = false;
+    if (selected) {
+      selected.disabled = false;
+      selected.textContent = "Ouvrir la mission";
+    }
   }
 }
 
@@ -1490,11 +1506,24 @@ async function acceptRecommendation({
       && payload.catalog_key === selectedCatalogKey
       && payload.mission_id === mission.mission_id
       && payload.selection_id === mission.selection_id
-      && payload.decision_id === mission.decision_id
-      && payload.selected_acquisition_intent_id === attempt.acquisition_intent_id;
+      && payload.decision_id === mission.decision_id;
     if (!validAcceptedMission) {
       showUnresolvedAcceptance();
       return;
+    }
+    if (decision?.decision_id === expectedDecisionId) {
+      const acceptedSubject = source === "primary_recommendation" ? decision
+        : (decision.alternatives || []).find((item) => item.catalog_key === selectedCatalogKey);
+      const acceptedButton = acceptanceControls().find((button) => (
+        button.dataset.acceptanceSource === source && button.dataset.catalogKey === selectedCatalogKey
+      ));
+      const acceptedContainer = source === "primary_recommendation" ? ui.primaryIntentChoice
+        : acceptedButton?.closest(".alternative-card")?.querySelector(".intent-choice");
+      if (!acceptedSubject || (intentMode(acceptedSubject) !== "legacy" && !acceptedContainer)
+          || !showAcceptedIntent(acceptedSubject, acceptedContainer, payload.selected_acquisition_intent_id)) {
+        showUnresolvedAcceptance();
+        return;
+      }
     }
     clearPendingAcceptanceAttempt();
     state.acceptedMission = {
@@ -1502,6 +1531,7 @@ async function acceptRecommendation({
       selection_id: payload.selection_id,
       mission_id: payload.mission_id,
       selectedCatalogKey: payload.catalog_key,
+      acquisitionIntentId: payload.selected_acquisition_intent_id,
       source,
       mission,
     };

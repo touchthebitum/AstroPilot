@@ -92,8 +92,14 @@ const decision = {decision_id: 'decision-1', catalog_key: 'M31',
   target_decision_status: 'recommended', alternatives: []};
 const state = {currentDecision: decision, acceptingRecommendation: false,
   acceptedMission: null, acceptanceBlocked: false};
-const ui = {openMission: {}, primaryIntentChoice: {}, mission: {showModal() {}}};
+const ui = {openMission: {dataset: {acceptanceSource: 'primary_recommendation', catalogKey: 'M31'}},
+  primaryIntentChoice: {}, mission: {showModal() {}}};
 function chosenIntent() { return chosen; }
+function intentMode() { return 'multiple'; }
+function acceptanceControls() { return [ui.openMission, {dataset: {
+  acceptanceSource: 'alternative', catalogKey: 'M33'},
+  closest: () => ({querySelector: () => ({})})}]; }
+function showAcceptedIntent() { return true; }
 function showAcceptanceStatus(message) { globalThis.lastStatus = message; }
 function restoreAcceptanceControls() {}
 function disableAcceptanceControls() {}
@@ -228,4 +234,142 @@ const choice = card.children[0].children.find(child => child.className === 'inte
 assert.deepEqual(choice.querySelector('select').children.map(option => option.value),
   ['', 'ou4_oiii', 'sh2-129_ha']);
 assert.equal(card.children[1].hidden, false);
+""")
+
+
+def test_accepted_intent_locks_primary_and_alternative_and_uses_canonical_replay():
+    choice = _javascript_between("function intentMode(subject) {", "function renderAlternatives(decision) {")
+    controls = _javascript_between("function acceptanceControls() {", "function sameAcceptanceIntent(attempt, intent) {")
+    accept = _javascript_between("async function acceptRecommendation({", "async function loadTonight(availability) {")
+    _run_javascript("""
+const assert = require('node:assert/strict');
+class Element {
+  constructor(tagName = '') {
+    this.tagName = tagName; this.children = []; this.dataset = {}; this.hidden = false;
+    this.value = ''; this.listeners = {}; this.disabled = false; this.textContent = '';
+  }
+  replaceChildren() { this.children = []; this.textContent = ''; }
+  append(...items) { this.children.push(...items); }
+  querySelector(tag) { return this.children.find(item => item.tagName === tag); }
+  querySelectorAll(tag) { return this.children.filter(item => item.tagName === tag); }
+  addEventListener(name, callback) { this.listeners[name] = callback; }
+  setAttribute() {}
+  removeAttribute() {}
+  closest() { return this.card || null; }
+}
+const document = {createElement: tag => new Element(tag)};
+function Option(label, value) { this.label = label; this.value = value; }
+const options = [
+  {acquisition_intent_id: 'A', label: 'Hα · Champ'},
+  {acquisition_intent_id: 'B', label: 'OIII · Champ'},
+];
+const multi = {acquisition_intent_selection_status: 'no_clear_preference',
+  selected_acquisition_intent_id: null, viable_acquisition_intent_ids: ['A', 'B'],
+  acquisition_intent_options: options};
+const ui = {openMission: new Element('button'), primaryIntentChoice: new Element(),
+  alternativesList: new Element(), mission: {showModal() { opened++; }}};
+const state = {currentDecision: null, acceptedMission: null, acceptingRecommendation: false,
+  acceptanceBlocked: false, pendingAcceptanceAttempt: null};
+let sent = [], canonical = 'A', opened = 0, status = '';
+function showAcceptanceStatus(message) { status = message; }
+function acceptanceAttempt(intent) { return {...intent, acceptance_request_id: 'request-1'}; }
+function clearPendingAcceptanceAttempt() {}
+function renderMission() {}
+function show() {}
+function showMessage() {}
+function hasUnresolvedAcceptance() { return false; }
+function showUnresolvedAcceptance() { throw new Error('unexpected unresolved acceptance'); }
+function acceptanceError() { return ['Erreur', true]; }
+async function fetch(_url, options) {
+  const request = JSON.parse(options.body); sent.push(request);
+  return {ok: true, json: async () => ({status: 'accepted', decision_id: request.decision_id,
+    catalog_key: request.selected_catalog_key, selected_acquisition_intent_id: canonical,
+    selection_id: 'selection-1', mission_id: 'mission-1',
+    mission: {decision_id: request.decision_id, selection_id: 'selection-1', mission_id: 'mission-1'}})};
+}
+""" + choice + controls + accept + """
+async function exercise(source, localChoice, serverChoice) {
+  state.currentDecision = {decision_id: 'decision-1', catalog_key: 'M31', target: 'Cible',
+    target_decision_status: 'recommended', ...multi, alternatives: [
+      {catalog_key: 'M33', target_decision_status: 'viable', ...multi}]};
+  state.acceptedMission = null;
+  ui.openMission.dataset = {acceptanceSource: 'primary_recommendation', catalogKey: 'M31',
+    decisionId: 'decision-1'};
+  ui.openMission.textContent = 'Photographier cette cible';
+  ui.alternativesList.replaceChildren();
+  const card = new Element('article');
+  const alternativeChoice = new Element();
+  card.querySelector = tag => tag === '.intent-choice' ? alternativeChoice : null;
+  const alternativeButton = new Element('button');
+  alternativeButton.card = card;
+  alternativeButton.dataset = {acceptanceSource: 'alternative', catalogKey: 'M33',
+    decisionId: 'decision-1'};
+  card.append(alternativeButton);
+  ui.alternativesList.append(alternativeButton);
+  renderIntentChoice(ui.primaryIntentChoice, state.currentDecision, 'primary-intent');
+  renderIntentChoice(alternativeChoice, state.currentDecision.alternatives[0], 'alternative-intent');
+  const container = source === 'alternative' ? alternativeChoice : ui.primaryIntentChoice;
+  const select = container.querySelector('select');
+  assert.equal(chosenIntent(source === 'alternative' ? state.currentDecision.alternatives[0]
+    : state.currentDecision, container), undefined);
+  select.value = 'B'; select.listeners.change();
+  assert.equal(ui.openMission.disabled, source === 'alternative');
+  select.value = localChoice; select.listeners.change();
+  canonical = serverChoice;
+  const button = source === 'alternative' ? alternativeButton : ui.openMission;
+  const args = {source, selectedCatalogKey: source === 'alternative' ? 'M33' : 'M31',
+    expectedDecisionId: 'decision-1', triggerButton: button, selectedTarget: 'Cible'};
+  const before = sent.length;
+  await acceptRecommendation(args);
+  assert.equal(sent.length, before + 1);
+  assert.equal(sent.at(-1).acquisition_intent_id, localChoice);
+  assert.equal(state.acceptedMission.acquisitionIntentId, serverChoice);
+  assert.equal(container.querySelector('select'), undefined);
+  assert.match(container.textContent, new RegExp(serverChoice === 'A' ? 'Hα' : 'OIII'));
+  assert.equal(button.textContent, 'Ouvrir la mission');
+  assert.equal(button.disabled, false);
+  select.value = serverChoice === 'A' ? 'B' : 'A'; select.listeners.change();
+  assert.equal(button.disabled, false);
+  assert.equal(container.querySelector('select'), undefined);
+  await acceptRecommendation(args);
+  assert.equal(sent.length, before + 1);
+  assert.equal(opened > 1, true);
+}
+async function exerciseUniqueAndLegacy() {
+  const unique = {acquisition_intent_selection_status: 'single_eligible_intent',
+    selected_acquisition_intent_id: 'A', viable_acquisition_intent_ids: ['A'],
+    acquisition_intent_options: [options[0]]};
+  state.acceptedMission = null;
+  state.currentDecision = {decision_id: 'decision-1', catalog_key: 'M31',
+    target_decision_status: 'recommended', ...unique, alternatives: []};
+  renderIntentChoice(ui.primaryIntentChoice, state.currentDecision, 'primary-intent');
+  assert.equal(ui.primaryIntentChoice.querySelector('select'), undefined);
+  canonical = 'A';
+  await acceptRecommendation({source: 'primary_recommendation', selectedCatalogKey: 'M31',
+    expectedDecisionId: 'decision-1', triggerButton: ui.openMission, selectedTarget: 'Cible'});
+  assert.equal(state.acceptedMission.acquisitionIntentId, 'A');
+  assert.match(ui.primaryIntentChoice.textContent, /Hα/);
+
+  state.acceptedMission = null;
+  state.currentDecision = {decision_id: 'decision-1', catalog_key: 'M31',
+    target_decision_status: 'recommended', alternatives: [
+      {catalog_key: 'M33', target_decision_status: 'viable'}]};
+  ui.alternativesList.replaceChildren();
+  const button = new Element('button');
+  button.dataset = {acceptanceSource: 'alternative', catalogKey: 'M33', decisionId: 'decision-1'};
+  button.card = {querySelector: () => null};
+  ui.alternativesList.append(button);
+  canonical = null;
+  await acceptRecommendation({source: 'alternative', selectedCatalogKey: 'M33',
+    expectedDecisionId: 'decision-1', triggerButton: button, selectedTarget: 'Cible'});
+  assert.equal(state.acceptedMission.acquisitionIntentId, null);
+  assert.equal(button.textContent, 'Ouvrir la mission');
+}
+(async () => {
+  await exercise('primary_recommendation', 'A', 'A');
+  await exercise('alternative', 'A', 'A');
+  await exercise('primary_recommendation', 'B', 'A');
+  await exercise('alternative', 'B', 'A');
+  await exerciseUniqueAndLegacy();
+})().catch(error => { console.error(error); process.exitCode = 1; });
 """)
