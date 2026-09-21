@@ -8,6 +8,8 @@ import pytest
 
 
 SCRIPT = Path(__file__).resolve().parents[2] / "astropilot/web/app.js"
+PAGE = SCRIPT.with_name("index.html")
+STYLES = SCRIPT.with_name("styles.css")
 
 
 def _javascript_between(start: str, end: str) -> str:
@@ -23,6 +25,176 @@ def _run_javascript(source: str) -> None:
         [node, "-e", source], capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_decision_hierarchy_and_visible_copy():
+    page = PAGE.read_text()
+    styles = STYLES.read_text()
+    assert page.index('id="target-name"') < page.index('id="primary-intent-choice"')
+    assert page.index('id="primary-intent-choice"') < page.index('id="decision-essential"')
+    assert page.index('id="decision-essential"') < page.index('id="open-mission"')
+    assert page.index('id="open-mission"') < page.index('class="decision-grid"')
+    assert "Retour à Classic" not in page
+    assert "Retour à la recommandation" in page
+    assert 'id="open-saved-mission"' in page
+    assert "white-space: nowrap" in styles
+    assert "flex-direction: column; min-width: 0" in styles
+    assert "justify-content: center; text-align: center" in styles
+
+
+def test_saved_mission_restores_only_from_server_without_acceptance():
+    helpers = _javascript_between("async function restoreSavedMission() {", "function invalidateAvailabilityForSiteChange(")
+    _run_javascript("""
+const assert = require('node:assert/strict');
+const state = {acceptedMission: null};
+const entry = {hidden: true};
+const ui = {savedMissionEntry: entry, savedMissionTarget: {textContent: ''}};
+let calls = [];
+let changeConfiguration = false;
+let payload = {status: 'accepted', mission_id: 'mission-1', selection_id: 'selection-1',
+  decision_id: 'decision-1', catalog_key: 'M31', mission: {
+    mission_id: 'mission-1', selection_id: 'selection-1', decision_id: 'decision-1', target: 'M31'}};
+async function fetch(url, options) {
+  calls.push([url, options]);
+  if (changeConfiguration) state.configuration = {profile_revision: 2};
+  return {ok: true, json: async () => payload};
+}
+""" + helpers + """
+(async () => {
+  await restoreSavedMission();
+  assert.equal(entry.hidden, false);
+  assert.equal(state.acceptedMission.mission, payload.mission);
+  assert.deepEqual(calls, [['/v1/accepted-mission/current', undefined]]);
+  payload = {...payload, selection_id: 'wrong'};
+  await restoreSavedMission();
+  assert.equal(entry.hidden, true);
+  assert.equal(state.acceptedMission, null);
+  payload = {...payload, selection_id: 'selection-1'};
+  state.configuration = {profile_revision: 1};
+  changeConfiguration = true;
+  await restoreSavedMission();
+  assert.equal(entry.hidden, true);
+  assert.equal(state.acceptedMission, null);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+
+
+def test_configuration_changes_invalidate_restored_mission():
+    initialize = _javascript_between("function initializeConfiguration(payload) {", "async function restoreSavedMission() {")
+    save = _javascript_between("async function saveConfiguration() {", "const availabilityFieldsByMode")
+    _run_javascript("""
+const assert = require('node:assert/strict');
+const entry = {hidden: false};
+const button = {disabled: false};
+const ui = {savedMissionEntry: entry, configurationRecover: {hidden: true}};
+const document = {querySelector: () => button};
+const baseline = {configured: true, profile_revision: 1,
+  site: {latitude: 1, longitude: 2, timezone: 'UTC'},
+  equipment: {optics: 'A'}};
+const state = {configuration: baseline, configurationDraft: {}, acceptedMission: {source: 'persisted'},
+  savingConfiguration: false};
+let next;
+let invalidations = 0;
+function clearAcceptedMission() { invalidations++; state.acceptedMission = null; entry.hidden = true; }
+function invalidateAvailabilityForSiteChange() {}
+function draftFromConfiguration(value) { return value; }
+function hideRecoveryConfirmation() {}
+function prefillConfiguration() {}
+function renderAvailabilityTimezone() {}
+function showFormError() {}
+function setView(view) { state.view = view; }
+function configurationPayload() { return {}; }
+async function fetch() { return {ok: true, json: async () => next}; }
+""" + initialize + save + """
+(async () => {
+  for (const changed of [
+    {...baseline, site: {...baseline.site, latitude: 3}},
+    {...baseline, equipment: {optics: 'B'}},
+    {...baseline, profile_revision: 2},
+  ]) {
+    state.configuration = baseline;
+    state.acceptedMission = {source: 'persisted'};
+    entry.hidden = false;
+    next = changed;
+    await saveConfiguration();
+    assert.equal(state.view, 'availability');
+    assert.equal(state.acceptedMission, null);
+    assert.equal(entry.hidden, true);
+  }
+  assert.equal(invalidations, 3);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+
+
+def test_failed_recommendation_retains_restored_mission_until_success():
+    load = _javascript_between("async function loadTonight(availability) {", 'document.querySelector("#site-next")')
+    _run_javascript("""
+const assert = require('node:assert/strict');
+const entry = {hidden: false};
+const ui = {savedMissionEntry: entry, recommendationSubmit: {disabled: false}, refresh: {disabled: false}};
+const saved = {source: 'persisted', mission: {target: 'M31'}};
+const state = {acceptedMission: saved, requestingRecommendation: false, currentDecision: null};
+let response;
+let invalidations = 0;
+function guardUnresolvedAcceptance() { return false; }
+function showAvailabilityError() {}
+function setView(view) { state.view = view; }
+function show(view) { state.view = view; }
+function clearAcceptedMission() { invalidations++; state.acceptedMission = null; entry.hidden = true; }
+function normalizeError() { return ['Erreur', 'Réessayez.']; }
+function renderDecision(decision) { clearAcceptedMission(); state.currentDecision = decision; state.view = 'decision'; }
+async function fetch() { return response; }
+""" + load + """
+(async () => {
+  response = {ok: false, status: 503, json: async () => ({})};
+  await loadTonight({mode: 'all_night'});
+  assert.equal(state.view, 'availability');
+  assert.equal(state.acceptedMission, saved);
+  assert.equal(entry.hidden, false);
+  assert.equal(invalidations, 0);
+  response = {ok: true, json: async () => ({status: 'available', decision_id: 'new'})};
+  await loadTonight({mode: 'all_night'});
+  assert.equal(state.view, 'decision');
+  assert.equal(state.currentDecision.decision_id, 'new');
+  assert.equal(state.acceptedMission, null);
+  assert.equal(entry.hidden, true);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+
+
+def test_reopening_saved_mission_does_not_post_acceptance():
+    listener = _javascript_between('ui.openSavedMission.addEventListener("click", () => {', 'ui.closeMission.addEventListener(')
+    _run_javascript("""
+const assert = require('node:assert/strict');
+let openSavedMission;
+let shown = 0;
+const saved = {source: 'persisted', mission: {target: 'M31'}};
+const state = {acceptedMission: saved};
+const ui = {openSavedMission: {addEventListener(event, callback) { openSavedMission = callback; }},
+  mission: {showModal() { shown++; }}};
+function renderMission(mission) { assert.equal(mission, saved.mission); }
+function fetch() { throw new Error('reopening must not make a request'); }
+""" + listener + """
+openSavedMission();
+assert.equal(shown, 1);
+state.acceptedMission = null;
+openSavedMission();
+assert.equal(shown, 1);
+""")
+
+
+def test_alternative_empty_reason_and_risk_levels_are_presentation_only():
+    helper = _javascript_between("function alternativeReasonText(reason) {", "function intentMode(subject) {")
+    _run_javascript("""
+const assert = require('node:assert/strict');
+""" + helper + """
+assert.equal(alternativeReasonText({message: ' . '}), null);
+assert.equal(alternativeReasonText({message: '  '}), null);
+assert.equal(alternativeReasonText({message: 'Fiabilité météo limitée.'}), 'Fiabilité météo limitée.');
+""")
+    script = SCRIPT.read_text()
+    assert 'low: "faible", medium: "modéré", high: "élevé"' in script
+    assert 'labels.riskLevels[level]' in script
 
 
 def test_intent_choice_unique_multiple_none_and_legacy():

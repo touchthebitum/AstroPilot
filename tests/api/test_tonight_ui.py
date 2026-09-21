@@ -112,7 +112,7 @@ def test_tonight_ui_assets_are_served():
     assert "fetch(\"/v1/tonight\"" in script.text
     assert 'fetch("/v1/decision-selections"' in script.text
     assert 'fetch("/v1/configuration/recover"' in script.text
-    assert script.text.count("fetch(") == 5
+    assert script.text.count("fetch(") == 6
     assert script.text.rstrip().endswith("loadConfiguration();")
     assert "body: JSON.stringify({})," not in script.text
     assert "collectAvailabilityPayload" in script.text
@@ -617,7 +617,9 @@ def test_site_change_invalidates_only_stale_site_time_assumptions():
     assert 'document.querySelector("#availability-end").value = ""' in invalidation
     assert "state.availability = null" in invalidation
     assert "if (sameSite) return" in invalidation
-    assert script.count("invalidateAvailabilityForSiteChange(") >= 3
+    assert script.count("invalidateAvailabilityForSiteChange(") >= 2
+    save = script.split("async function saveConfiguration()", 1)[1].split("const availabilityFieldsByMode", 1)[0]
+    assert "initializeConfiguration(payload)" in save
 
 
 def test_site_timezone_and_dst_errors_have_controlled_french_messages():

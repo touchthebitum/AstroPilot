@@ -113,6 +113,12 @@ class DurableTonightApplicationService:
     def load_mission(self, mission_id: str):
         return self._decision_acceptance_service().load_mission(mission_id)
 
+    def latest_accepted_mission(self, *, profile, now):
+        store = self._decision_acceptance_service().context_store
+        if not hasattr(store, "latest_accepted_mission"):
+            return None
+        return store.latest_accepted_mission(profile=profile, now=now)
+
     def _execution_outcome_application_service(
         self,
     ) -> ExecutionOutcomeApplicationService:

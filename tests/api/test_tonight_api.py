@@ -2005,6 +2005,50 @@ def test_durable_acceptance_lineage_survives_two_api_reconstructions(
     ) == ("decision-lineage", "selection-lineage")
 
 
+def test_current_accepted_mission_is_read_only_and_context_scoped(tmp_path):
+    reference = DEFAULT_WEATHER_REFERENCE_TIME
+    first = lineage_client(tmp_path, reference)
+    assert first.get("/v1/accepted-mission/current").json() is None
+    assert first.post("/v1/tonight", json={}).status_code == 200
+    accepted = first.post(
+        "/v1/decision-selections", json=lineage_selection_payload(),
+    )
+    assert accepted.status_code == 200
+
+    reloaded = lineage_client(tmp_path, reference)
+    response = reloaded.get("/v1/accepted-mission/current")
+    assert response.status_code == 200
+    assert response.json() == accepted.json()
+    assert reloaded.get("/v1/accepted-mission/current").json() == accepted.json()
+
+    different_site = TestClient(create_app(
+        service_factory=lambda: lineage_service(tmp_path, reference),
+        profile_provider=lambda: {
+            **valid_profile(), "location": {**valid_profile()["location"], "name": "Autre site"},
+        },
+        clock=lambda: reference,
+    ))
+    assert different_site.get("/v1/accepted-mission/current").json() is None
+    different_equipment = TestClient(create_app(
+        service_factory=lambda: lineage_service(tmp_path, reference),
+        profile_provider=lambda: {**valid_profile(), "active_equipment": "other"},
+        clock=lambda: reference,
+    ))
+    assert different_equipment.get("/v1/accepted-mission/current").json() is None
+    different_revision = TestClient(create_app(
+        service_factory=lambda: lineage_service(tmp_path, reference),
+        profile_provider=lambda: {**valid_profile(), "profile_revision": 2},
+        clock=lambda: reference,
+    ))
+    assert different_revision.get("/v1/accepted-mission/current").json() is None
+    expired = TestClient(create_app(
+        service_factory=lambda: lineage_service(tmp_path, reference),
+        profile_provider=valid_profile,
+        clock=lambda: LINEAGE_END + timedelta(days=1),
+    ))
+    assert expired.get("/v1/accepted-mission/current").json() is None
+
+
 def test_public_api_replays_canonical_acceptance_after_staleness(
     tmp_path,
     monkeypatch,

@@ -2440,6 +2440,37 @@ def create_app(
             ),
         )
 
+    @application.get(
+        "/v1/accepted-mission/current",
+        response_model=UserSelectionResponse | None,
+        summary="Read the current persisted accepted mission",
+    )
+    def current_accepted_mission():
+        try:
+            profile = profile_provider()
+            if not isinstance(profile, dict):
+                return None
+            latest = application_service().latest_accepted_mission(
+                profile=profile, now=clock(),
+            )
+        except (OSError, ValueError, UserProfileError) as exc:
+            raise HTTPException(
+                status_code=503, detail={"code": "acceptance_lineage_unavailable"},
+            ) from exc
+        if latest is None:
+            return None
+        selection, mission = latest
+        return UserSelectionResponse(
+            status="accepted",
+            mission_id=mission.mission_id,
+            decision_id=selection.decision_id,
+            selection_id=selection.selection_id,
+            catalog_key=selection.selected_catalog_key,
+            selected_imaging_field_id=selection.selected_imaging_field_id,
+            selected_acquisition_intent_id=selection.selected_acquisition_intent_id,
+            mission=_accepted_mission_response(mission),
+        )
+
     def execution_response(execution: Execution) -> ExecutionResponse:
         return ExecutionResponse(
             execution_id=execution.execution_id,
