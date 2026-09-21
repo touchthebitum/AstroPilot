@@ -1710,7 +1710,10 @@ def create_app(
         try:
             if not (get_user_data_dir() / "user_profile.json").exists():
                 raise HTTPException(status_code=404, detail={"code": "project_not_found"})
-            profile = load_user_profile()
+            try:
+                profile = load_user_profile()
+            except UserProfileError as exc:
+                raise HTTPException(status_code=503, detail={"code": "configuration_corrupt"}) from exc
             if project_id not in profile.get("projects", {}):
                 raise HTTPException(status_code=404, detail={"code": "project_not_found"})
             if request.expected_revision != profile.get("profile_revision", 0):

@@ -118,6 +118,19 @@ def test_missing_project_and_missing_revision(client):
     assert client.put(path(), json={"acquisition_intent_progress": []}).status_code == 422
 
 
+def test_corrupt_profile_put_matches_get_and_does_not_write(client, tmp_path):
+    profile_path = tmp_path / "user_profile.json"
+    profile_path.write_text("{invalid json", encoding="utf-8")
+    before = profile_path.read_bytes()
+    expected = {"detail": {"code": "configuration_corrupt"}}
+    assert client.get(path()).status_code == 503
+    response = client.put(path(), json={"expected_revision": 1,
+                                       "acquisition_intent_progress": []})
+    assert response.status_code == 503
+    assert response.json() == expected
+    assert profile_path.read_bytes() == before
+
+
 def test_configuration_round_trip_preserves_progress(client):
     progress = [detailed(HA, 159), {"acquisition_intent_id": OIII,
                                     "acquired_duration_manual": 12900}]

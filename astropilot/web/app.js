@@ -61,6 +61,7 @@ const state = {
   configurationErrorCode: null,
   recoveringConfiguration: false,
   progressEditor: null,
+  progressEditorBaseline: null,
 };
 
 const PENDING_ACCEPTANCE_STORAGE_KEY = "astropilot.pendingAcceptance";
@@ -830,9 +831,28 @@ function toggleEquipmentKind() {
   document.querySelector("#custom-equipment").hidden = kind !== "custom";
 }
 
+function progressEditorSnapshot(fieldOverride = null) {
+  const editor = document.querySelector("#project-progress-editor");
+  if (!state.progressEditor || editor.hidden || !editor.querySelector("#project-imaging-field")) return null;
+  return JSON.stringify({
+    field: fieldOverride ?? editor.querySelector("#project-imaging-field").value,
+    intents: [...editor.querySelectorAll("fieldset[data-intent-id]")].map((section) => [
+      section.dataset.intentId,
+      ...[...section.querySelectorAll("input, select")].map((input) => input.value),
+    ]),
+  });
+}
+
+function confirmDiscardProjectProgress() {
+  return progressEditorSnapshot() === state.progressEditorBaseline
+    || window.confirm("Des modifications de l’avancement ne sont pas enregistrées. Les abandonner ?");
+}
+
 function renderProjects() {
+  if (!confirmDiscardProjectProgress()) return false;
   document.querySelector("#project-progress-editor").hidden = true;
   state.progressEditor = null;
+  state.progressEditorBaseline = null;
   const projects = state.configurationDraft.projects || {};
   const entries = Object.entries(projects);
   const summary = document.querySelector("#existing-projects");
@@ -866,6 +886,7 @@ function renderProjects() {
     zeroProjects.checked = true;
     zeroProjects.disabled = true;
   }
+  return true;
 }
 
 function progressDuration(seconds) {
@@ -888,10 +909,13 @@ function progressInput(label, value, field, type = "number") {
   return wrapper;
 }
 
-async function openProjectProgress(projectId) {
+async function openProjectProgress(projectId, { discardConfirmed = false } = {}) {
+  if (!discardConfirmed && !confirmDiscardProjectProgress()) return;
   const editor = document.querySelector("#project-progress-editor");
   editor.hidden = false;
   editor.textContent = "Chargement du projet…";
+  state.progressEditor = null;
+  state.progressEditorBaseline = null;
   try {
     const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/progress`);
     if (!response.ok) throw new Error("load failed");
@@ -977,7 +1001,25 @@ function renderProjectProgressEditor(message = "") {
       update();
     }
   };
-  fieldSelect.addEventListener("change", renderIntents);
+  let displayedField = fieldSelect.value;
+  fieldSelect.addEventListener("change", () => {
+    const selected = data.imaging_fields.find((item) => item.imaging_field_id === fieldSelect.value);
+    const validIds = new Set(selected?.acquisition_intents.map((intent) => intent.acquisition_intent_id) || []);
+    const removed = [...(data.acquisition_intent_progress || []), ...(data.acquisition_intent_targets || [])]
+      .filter((item) => !validIds.has(item.acquisition_intent_id))
+      .map((item) => item.acquisition_intent_id);
+    const edited = progressEditorSnapshot(displayedField) !== state.progressEditorBaseline;
+    if ((edited || removed.length) && !window.confirm(
+      `${edited ? "Les modifications non enregistrées seront abandonnées. " : ""}`
+      + `${removed.length ? `Changer de champ supprimera l’avancement et les objectifs des intentions incompatibles (${[...new Set(removed)].join(", ")}) à l’enregistrement. ` : ""}`
+      + "Continuer ?",
+    )) {
+      fieldSelect.value = displayedField;
+      return;
+    }
+    displayedField = fieldSelect.value;
+    renderIntents();
+  });
   const save = document.createElement("button");
   save.type = "button";
   save.className = "primary-button";
@@ -985,6 +1027,7 @@ function renderProjectProgressEditor(message = "") {
   save.addEventListener("click", saveProjectProgress);
   editor.append(heading, feedback, fieldLabel, intents, save);
   renderIntents();
+  state.progressEditorBaseline = progressEditorSnapshot();
 }
 
 async function saveProjectProgress() {
@@ -1035,7 +1078,11 @@ async function saveProjectProgress() {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     if (response.status === 409) {
-      await openProjectProgress(data.project_id);
+      if (!confirmDiscardProjectProgress()) {
+        feedback.textContent = "Le projet a changé. Votre saisie est conservée ; rechargez le projet avant de réessayer.";
+        return;
+      }
+      await openProjectProgress(data.project_id, { discardConfirmed: true });
       state.progressEditor && (document.querySelector(".project-progress-feedback").textContent =
         "Le projet a changé. Les dernières valeurs ont été rechargées ; vérifiez-les avant de réenregistrer.");
       return;
@@ -1914,11 +1961,11 @@ document.querySelector("#equipment-next").addEventListener("click", () => {
   }
   state.configurationDraft.equipment = equipment;
   showFormError("");
-  renderProjects();
-  setView("projects");
+  if (renderProjects()) setView("projects");
 });
 
 document.querySelector("#projects-next").addEventListener("click", () => {
+  if (!confirmDiscardProjectProgress()) return;
   showFormError("");
   renderReview();
   setView("review");
@@ -1926,6 +1973,7 @@ document.querySelector("#projects-next").addEventListener("click", () => {
 
 for (const button of document.querySelectorAll("[data-back]")) {
   button.addEventListener("click", () => {
+    if (state.view === "projects" && button.dataset.back !== "projects" && !confirmDiscardProjectProgress()) return;
     showFormError("");
     setView(button.dataset.back);
   });
