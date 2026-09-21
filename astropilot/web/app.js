@@ -996,6 +996,11 @@ function showConfigurationError(message, { code = null } = {}) {
 }
 
 function initializeConfiguration(payload) {
+  if (state.configuration && (
+    state.configuration.profile_revision !== payload.profile_revision
+    || JSON.stringify(state.configuration.site) !== JSON.stringify(payload.site)
+    || JSON.stringify(state.configuration.equipment) !== JSON.stringify(payload.equipment)
+  )) clearAcceptedMission();
   invalidateAvailabilityForSiteChange(state.configuration?.site, payload.site);
   state.configuration = payload;
   state.configurationDraft = draftFromConfiguration(payload);
@@ -1007,6 +1012,7 @@ function initializeConfiguration(payload) {
 }
 
 async function restoreSavedMission() {
+  const configuration = state.configuration;
   state.acceptedMission = null;
   ui.savedMissionEntry.hidden = true;
   try {
@@ -1014,7 +1020,7 @@ async function restoreSavedMission() {
     if (!response.ok) return;
     const payload = await response.json();
     const mission = payload?.mission;
-    if (payload?.status !== "accepted" || !mission
+    if (state.configuration !== configuration || payload?.status !== "accepted" || !mission
         || payload.mission_id !== mission.mission_id
         || payload.selection_id !== mission.selection_id
         || payload.decision_id !== mission.decision_id) return;
@@ -1150,11 +1156,7 @@ async function saveConfiguration() {
       setView("review");
       return;
     }
-    invalidateAvailabilityForSiteChange(state.configuration?.site, payload.site);
-    state.configuration = payload;
-    state.configurationDraft = draftFromConfiguration(payload);
-    prefillConfiguration();
-    renderAvailabilityTimezone();
+    initializeConfiguration(payload);
     setView("availability");
   } catch (_error) {
     showFormError("Connexion impossible pendant l’enregistrement. Vérifiez vos informations puis réessayez.");
@@ -1619,7 +1621,6 @@ async function loadTonight(availability) {
   showAvailabilityError("");
   show("loading");
   ui.refresh.disabled = true;
-  clearAcceptedMission();
   state.currentDecision = null;
 
   try {
@@ -1661,6 +1662,7 @@ async function loadTonight(availability) {
       return;
     }
 
+    clearAcceptedMission();
     if (payload.status === "weather_refused") {
       showMessage(
         payload.weather_decision.presentation.label,

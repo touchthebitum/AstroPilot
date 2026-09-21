@@ -50,11 +50,13 @@ const state = {acceptedMission: null};
 const entry = {hidden: true};
 const ui = {savedMissionEntry: entry, savedMissionTarget: {textContent: ''}};
 let calls = [];
+let changeConfiguration = false;
 let payload = {status: 'accepted', mission_id: 'mission-1', selection_id: 'selection-1',
   decision_id: 'decision-1', catalog_key: 'M31', mission: {
     mission_id: 'mission-1', selection_id: 'selection-1', decision_id: 'decision-1', target: 'M31'}};
 async function fetch(url, options) {
   calls.push([url, options]);
+  if (changeConfiguration) state.configuration = {profile_revision: 2};
   return {ok: true, json: async () => payload};
 }
 """ + helpers + """
@@ -67,7 +69,117 @@ async function fetch(url, options) {
   await restoreSavedMission();
   assert.equal(entry.hidden, true);
   assert.equal(state.acceptedMission, null);
+  payload = {...payload, selection_id: 'selection-1'};
+  state.configuration = {profile_revision: 1};
+  changeConfiguration = true;
+  await restoreSavedMission();
+  assert.equal(entry.hidden, true);
+  assert.equal(state.acceptedMission, null);
 })().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+
+
+def test_configuration_changes_invalidate_restored_mission():
+    initialize = _javascript_between("function initializeConfiguration(payload) {", "async function restoreSavedMission() {")
+    save = _javascript_between("async function saveConfiguration() {", "const availabilityFieldsByMode")
+    _run_javascript("""
+const assert = require('node:assert/strict');
+const entry = {hidden: false};
+const button = {disabled: false};
+const ui = {savedMissionEntry: entry, configurationRecover: {hidden: true}};
+const document = {querySelector: () => button};
+const baseline = {configured: true, profile_revision: 1,
+  site: {latitude: 1, longitude: 2, timezone: 'UTC'},
+  equipment: {optics: 'A'}};
+const state = {configuration: baseline, configurationDraft: {}, acceptedMission: {source: 'persisted'},
+  savingConfiguration: false};
+let next;
+let invalidations = 0;
+function clearAcceptedMission() { invalidations++; state.acceptedMission = null; entry.hidden = true; }
+function invalidateAvailabilityForSiteChange() {}
+function draftFromConfiguration(value) { return value; }
+function hideRecoveryConfirmation() {}
+function prefillConfiguration() {}
+function renderAvailabilityTimezone() {}
+function showFormError() {}
+function setView(view) { state.view = view; }
+function configurationPayload() { return {}; }
+async function fetch() { return {ok: true, json: async () => next}; }
+""" + initialize + save + """
+(async () => {
+  for (const changed of [
+    {...baseline, site: {...baseline.site, latitude: 3}},
+    {...baseline, equipment: {optics: 'B'}},
+    {...baseline, profile_revision: 2},
+  ]) {
+    state.configuration = baseline;
+    state.acceptedMission = {source: 'persisted'};
+    entry.hidden = false;
+    next = changed;
+    await saveConfiguration();
+    assert.equal(state.view, 'availability');
+    assert.equal(state.acceptedMission, null);
+    assert.equal(entry.hidden, true);
+  }
+  assert.equal(invalidations, 3);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+
+
+def test_failed_recommendation_retains_restored_mission_until_success():
+    load = _javascript_between("async function loadTonight(availability) {", 'document.querySelector("#site-next")')
+    _run_javascript("""
+const assert = require('node:assert/strict');
+const entry = {hidden: false};
+const ui = {savedMissionEntry: entry, recommendationSubmit: {disabled: false}, refresh: {disabled: false}};
+const saved = {source: 'persisted', mission: {target: 'M31'}};
+const state = {acceptedMission: saved, requestingRecommendation: false, currentDecision: null};
+let response;
+let invalidations = 0;
+function guardUnresolvedAcceptance() { return false; }
+function showAvailabilityError() {}
+function setView(view) { state.view = view; }
+function show(view) { state.view = view; }
+function clearAcceptedMission() { invalidations++; state.acceptedMission = null; entry.hidden = true; }
+function normalizeError() { return ['Erreur', 'Réessayez.']; }
+function renderDecision(decision) { clearAcceptedMission(); state.currentDecision = decision; state.view = 'decision'; }
+async function fetch() { return response; }
+""" + load + """
+(async () => {
+  response = {ok: false, status: 503, json: async () => ({})};
+  await loadTonight({mode: 'all_night'});
+  assert.equal(state.view, 'availability');
+  assert.equal(state.acceptedMission, saved);
+  assert.equal(entry.hidden, false);
+  assert.equal(invalidations, 0);
+  response = {ok: true, json: async () => ({status: 'available', decision_id: 'new'})};
+  await loadTonight({mode: 'all_night'});
+  assert.equal(state.view, 'decision');
+  assert.equal(state.currentDecision.decision_id, 'new');
+  assert.equal(state.acceptedMission, null);
+  assert.equal(entry.hidden, true);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+
+
+def test_reopening_saved_mission_does_not_post_acceptance():
+    listener = _javascript_between('ui.openSavedMission.addEventListener("click", () => {', 'ui.closeMission.addEventListener(')
+    _run_javascript("""
+const assert = require('node:assert/strict');
+let openSavedMission;
+let shown = 0;
+const saved = {source: 'persisted', mission: {target: 'M31'}};
+const state = {acceptedMission: saved};
+const ui = {openSavedMission: {addEventListener(event, callback) { openSavedMission = callback; }},
+  mission: {showModal() { shown++; }}};
+function renderMission(mission) { assert.equal(mission, saved.mission); }
+function fetch() { throw new Error('reopening must not make a request'); }
+""" + listener + """
+openSavedMission();
+assert.equal(shown, 1);
+state.acceptedMission = null;
+openSavedMission();
+assert.equal(shown, 1);
 """)
 
 
