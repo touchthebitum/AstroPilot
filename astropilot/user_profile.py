@@ -27,6 +27,9 @@ from decision.services.project_acquisition_intent_progress import (
     ProjectAcquisitionIntentProgressError,
     resolve_project_acquisition_intent_progress,
 )
+from decision.services.intent_progress_credit import (
+    IntentProgressCreditError, validate_credit_authority,
+)
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -58,6 +61,8 @@ def _profile_revision(profile, profile_path: Path) -> int:
 
 
 PROFILE_CONTAINER_TYPES = {
+    "intent_progress_credits": (dict, "objet JSON"),
+    "intent_progress_baselines": (dict, "objet JSON"),
     "available_equipment": (list, "liste"),
     "equipment_definitions": (dict, "objet JSON"),
     "preferences": (dict, "objet JSON"),
@@ -605,6 +610,10 @@ def validate_user_profile(profile, profile_path: Path):
                 f"({equipment_name!r})."
             )
 
+    try:
+        validate_credit_authority(profile)
+    except IntentProgressCreditError as error:
+        raise UserProfileError(str(error)) from error
     return profile
 
 
@@ -726,7 +735,7 @@ def load_user_profile():
 
     try:
         with profile_path.open("r", encoding="utf-8") as handle:
-            profile = json.load(handle)
+            profile = json.load(handle, object_pairs_hook=_unique_json_object)
     except FileNotFoundError as exc:
         raise UserProfileError(
             f"Profil utilisateur introuvable : {profile_path}. "
@@ -759,10 +768,19 @@ def _profile_write_lock(data_dir: Path):
     return exclusive_file_lock(data_dir / ".user_profile.lock")
 
 
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise UserProfileError(f"duplicate_json_key: {key}")
+        result[key] = value
+    return result
+
+
 def _load_current_profile(path: Path) -> dict | None:
     try:
         with path.open("r", encoding="utf-8") as handle:
-            profile = json.load(handle)
+            profile = json.load(handle, object_pairs_hook=_unique_json_object)
     except FileNotFoundError:
         return None
     except json.JSONDecodeError as exc:
@@ -824,6 +842,11 @@ def save_user_profile(profile, *, expected_revision: int | None = None):
 
     with _profile_write_lock(data_dir):
         current = _load_current_profile(path)
+        if current is not None:
+            try:
+                validate_credit_authority(current)
+            except IntentProgressCreditError as error:
+                raise UserProfileError(str(error)) from error
         current_revision = (
             _profile_revision(current, path) if current is not None else 0
         )
@@ -838,6 +861,11 @@ def save_user_profile(profile, *, expected_revision: int | None = None):
 
         candidate["profile_revision"] = expected_revision + 1
         validate_user_profile(candidate, path)
+        if current is not None:
+            try:
+                validate_credit_authority(candidate, current)
+            except IntentProgressCreditError as error:
+                raise UserProfileError(str(error)) from error
         try:
             document = json.dumps(
                 candidate,

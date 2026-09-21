@@ -19,6 +19,7 @@ from decision.services.execution_outcome_application import (
 from decision.services.durable_portfolio_credit_application import (
     DurablePortfolioCreditApplicationService,
 )
+from decision.services.intent_progress_credit import apply_execution_credit
 from decision.services.user_selection_mission import UserSelectionMissionService
 from decision.weather.decision_forecast_evidence_persistence import (
     DecisionForecastEvidenceStore,
@@ -175,4 +176,21 @@ class DurableTonightApplicationService:
         return self._durable_portfolio_credit_application_service().apply(
             application,
             credit,
+        )
+
+    def apply_intent_progress_credit(self, *, execution_id, evidence_ids,
+                                     expected_revision, confirm_historical_baseline):
+        if self.profile_loader is None or self.profile_saver is None:
+            raise RuntimeError("intent_progress_persistence_unavailable")
+        execution_service = self._execution_outcome_application_service()
+        acceptance = self._decision_acceptance_service()
+        return apply_execution_credit(
+            profile=self.profile_loader(), execution_id=execution_id,
+            evidence_ids=evidence_ids, expected_revision=expected_revision,
+            confirm_historical_baseline=confirm_historical_baseline,
+            load_execution=execution_service.load_execution,
+            load_mission=acceptance.load_mission,
+            load_selection=acceptance.load_selection,
+            load_evidence=execution_service.load_outcome_evidence,
+            save_profile=self.profile_saver,
         )

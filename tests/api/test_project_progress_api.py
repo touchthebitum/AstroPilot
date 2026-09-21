@@ -1,13 +1,18 @@
 import json
 import math
 import shutil
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 from astropilot.app import create_app
-from astropilot.user_profile import load_user_profile
+from astropilot.user_profile import get_user_data_dir, load_user_profile, save_user_profile
+from decision.models.execution import Execution, ExecutionStatus
+from decision.models.outcome_evidence import AcquisitionOutcomeEvidence, OutcomeEvidenceCategory, OutcomeEvidenceSource
+from decision.services.intent_progress_credit import apply_execution_credit
 
 
 PROJECT = {"hours": 2, "target_hours": 20, "importance": 9}
@@ -41,6 +46,67 @@ def put(client, **fields):
 def detailed(intent, frames, seconds=300):
     return {"acquisition_intent_id": intent, "acquired_frames": frames,
             "exposure_seconds": seconds}
+
+
+def test_execution_credit_endpoint_projection_baseline_and_editor_guard(client):
+    put(client, imaging_field_id=FIELD,
+        acquisition_intent_progress=[{"acquisition_intent_id": OIII, "acquired_duration_manual": 3600}],
+        acquisition_intent_targets=[{"acquisition_intent_id": OIII, "target_hours": 2}])
+    start = datetime(2026, 9, 21, 20, tzinfo=timezone.utc)
+    mission = SimpleNamespace(mission_id="mission-1", decision_id="decision-1",
+                              selection_id="selection-1", imaging_field_id=FIELD,
+                              acquisition_intent_id=OIII, target="Sh2-129")
+    selection = SimpleNamespace(selection_id="selection-1", decision_id="decision-1",
+                                selected_catalog_key="Sh2-129", selected_imaging_field_id=FIELD,
+                                selected_acquisition_intent_id=OIII)
+    execution = Execution("execution-1", "mission-1", ExecutionStatus.COMPLETED,
+                          start, start + timedelta(hours=3), timedelta(hours=3))
+    evidence = AcquisitionOutcomeEvidence("evidence-1", "execution-1",
+        OutcomeEvidenceCategory.ACQUISITION, start, OutcomeEvidenceSource.USER,
+        actual_capture_duration=timedelta(hours=3),
+        usable_integration_duration=timedelta(minutes=30))
+
+    def apply(**kwargs):
+        return apply_execution_credit(profile=load_user_profile(),
+            load_execution=lambda _: execution, load_mission=lambda _: mission,
+            load_selection=lambda _: selection, load_evidence=lambda _: evidence,
+            save_profile=save_user_profile, **kwargs)
+
+    api = TestClient(create_app(service_factory=lambda: SimpleNamespace(apply_intent_progress_credit=apply)))
+    url = "/v1/executions/execution-1/intent-progress-credit"
+    revision = load_user_profile()["profile_revision"]
+    body = {"expected_revision": revision, "evidence_ids": ["evidence-1"]}
+    refused = api.post(url, json=body)
+    assert refused.status_code == 409 and refused.json()["detail"]["code"] == "intent_progress_baseline_confirmation_required"
+    assert load_user_profile()["profile_revision"] == revision
+    applied = api.post(url, json={**body, "confirm_historical_baseline": True})
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["status"] == "applied" and applied.json()["total_duration_us"] == 1_800_000_000
+    replay = api.post(url, json={**body, "expected_revision": revision + 1})
+    assert replay.status_code == 200 and replay.json()["status"] == "already_applied"
+    stale = api.post(url, json=body)
+    assert stale.status_code == 409 and stale.json()["detail"]["code"] == "profile_revision_conflict"
+    projection = api.get(path()).json()
+    breakdown = next(item for item in projection["intent_progress_breakdown"] if item["acquisition_intent_id"] == OIII)
+    assert breakdown == {"acquisition_intent_id": OIII, "base_seconds": 3600,
+                         "credits_us": 1_800_000_000, "effective_total_seconds": 5400,
+                         "remaining_hours": 0.5}
+    assert api.put(path(), json={"expected_revision": revision + 1,
+        "acquisition_intent_progress": []}).json()["detail"]["code"] == "intent_progress_baseline_invalid"
+    changed = api.put(path(), json={"expected_revision": revision + 1,
+        "imaging_field_id": "ic1396"})
+    assert changed.status_code == 409
+    assert load_user_profile()["projects"]["Sh2-129"]["hours"] == 2
+
+
+def test_duplicate_credit_json_key_fails_closed(client):
+    put(client, imaging_field_id=FIELD)
+    profile_path = get_user_data_dir() / "user_profile.json"
+    document = profile_path.read_text()
+    # Duplicate JSON object keys cannot be collapsed into a single credit.
+    document = document.replace('"profile_revision": 2', '"profile_revision": 2, "profile_revision": 2')
+    profile_path.write_text(document)
+    assert client.get(path()).status_code == 503
 
 
 def test_derived_read_only_projection_after_save(client):

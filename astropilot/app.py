@@ -43,6 +43,9 @@ from decision.models.candidate_rejection import CandidateRejectionBasis
 from decision.services.acquisition_intent_remaining_progress import (
     derive_acquisition_intent_remaining_progress, remaining_progress_projection,
 )
+from decision.services.intent_progress_credit import (
+    IntentProgressCreditError, base_seconds, credit_totals, load_credits,
+)
 from decision.models.project_acquisition_intent_target import ProjectAcquisitionIntentTarget
 from decision.models.session_availability import (
     SessionAvailability,
@@ -345,6 +348,21 @@ class ProjectProgressWriteRequest(BaseModel):
             if name in self.model_fields_set and getattr(self, name) is None:
                 raise ValueError(f"{name} cannot be null")
         return self
+
+
+class IntentProgressCreditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    expected_revision: int = Field(ge=0, strict=True)
+    evidence_ids: tuple[str, ...] = Field(min_length=1)
+    confirm_historical_baseline: bool = False
+
+    @field_validator("evidence_ids")
+    @classmethod
+    def validate_evidence_ids(cls, ids):
+        if any(not value.strip() for value in ids) or len(set(ids)) != len(ids):
+            raise ValueError("evidence_ids_invalid")
+        return ids
 
 
 class ConfigurationRecoveryRequest(BaseModel):
@@ -1578,6 +1596,8 @@ def _configuration_candidate(
 
 def _configuration_validation_code(exc: UserProfileError) -> str:
     message = str(exc).lower()
+    if message.startswith("intent_progress_"):
+        return message
     if "json invalide" in message or "structure invalide" in message:
         return "configuration_corrupt"
     if "project" in message or "projet" in message:
@@ -1678,6 +1698,14 @@ def create_app(
             (item for item in IMAGING_FIELD_DEFINITIONS if item.imaging_field_id == field_id),
             None,
         )
+        credits = credit_totals(profile, project_id)
+        progress = tuple(project.get("acquisition_intent_progress", ()))
+        derived = (derive_acquisition_intent_remaining_progress(
+            field,
+            tuple(ProjectAcquisitionIntentTarget(**item) for item in project.get("acquisition_intent_targets", ())),
+            progress, credits,
+        ) if field else ())
+        by_base = {item["acquisition_intent_id"]: item for item in progress}
         return {
             "project_id": project_id,
             "profile_revision": profile.get("profile_revision", 0),
@@ -1698,13 +1726,15 @@ def create_app(
             ] if field else [],
             "acquisition_intent_progress": project.get("acquisition_intent_progress", []),
             "acquisition_intent_targets": project.get("acquisition_intent_targets", []),
-            "acquisition_intent_remaining_progress": remaining_progress_projection(
-                derive_acquisition_intent_remaining_progress(
-                    field,
-                    tuple(ProjectAcquisitionIntentTarget(**item) for item in project.get("acquisition_intent_targets", ())),
-                    tuple(project.get("acquisition_intent_progress", ())),
-                )
-            ) if field else [],
+            "acquisition_intent_remaining_progress": remaining_progress_projection(derived),
+            "intent_progress_breakdown": [
+                {"acquisition_intent_id": item.acquisition_intent_id,
+                 "base_seconds": base_seconds(by_base.get(item.acquisition_intent_id)),
+                 "credits_us": credits.get(item.acquisition_intent_id, 0),
+                 "effective_total_seconds": item.acquired_seconds,
+                 "remaining_hours": item.remaining_hours}
+                for item in derived
+            ],
         }
 
     @application.get("/v1/projects/{project_id}/progress")
@@ -1730,6 +1760,10 @@ def create_app(
             if request.expected_revision != profile.get("profile_revision", 0):
                 raise ProfileRevisionConflictError("profile_revision_conflict")
             project = profile["projects"][project_id]
+            if ("imaging_field_id" in request.model_fields_set
+                and request.imaging_field_id != project.get("imaging_field_id")
+                and any(entry["project_id"] == project_id for entry in load_credits(profile).values())):
+                raise HTTPException(status_code=409, detail={"code": "intent_progress_field_locked"})
             for name in (
                 "imaging_field_id", "acquisition_intent_progress",
                 "acquisition_intent_targets",
@@ -1746,7 +1780,29 @@ def create_app(
         except ProfileRevisionConflictError as exc:
             raise HTTPException(status_code=409, detail={"code": "project_revision_conflict"}) from exc
         except UserProfileError as exc:
-            raise HTTPException(status_code=422, detail={"code": "project_progress_invalid"}) from exc
+            code = str(exc) if str(exc).startswith("intent_progress_") else "project_progress_invalid"
+            raise HTTPException(status_code=409 if code != "project_progress_invalid" else 422,
+                                detail={"code": code}) from exc
+
+    @application.post("/v1/executions/{execution_id}/intent-progress-credit")
+    def post_intent_progress_credit(execution_id: str, request: IntentProgressCreditRequest):
+        try:
+            status, credit, revision = application_service().apply_intent_progress_credit(
+                execution_id=execution_id, evidence_ids=request.evidence_ids,
+                expected_revision=request.expected_revision,
+                confirm_historical_baseline=request.confirm_historical_baseline,
+            )
+            return {"status": status, "profile_revision": revision, **credit}
+        except ProfileRevisionConflictError as exc:
+            raise HTTPException(status_code=409, detail={"code": "profile_revision_conflict"}) from exc
+        except IntentProgressCreditError as exc:
+            code = str(exc)
+            raise HTTPException(status_code=409 if code.endswith("conflict") or "baseline" in code else 422,
+                                detail={"code": code}) from exc
+        except (ExecutionOutcomeApplicationError, DecisionAcceptanceError) as exc:
+            raise HTTPException(status_code=422, detail={"code": str(exc)}) from exc
+        except UserProfileError as exc:
+            raise HTTPException(status_code=503, detail={"code": "configuration_corrupt"}) from exc
 
     @application.get(
         "/v1/configuration",
@@ -1869,7 +1925,7 @@ def create_app(
             ) from exc
         except UserProfileError as exc:
             code = _configuration_validation_code(exc)
-            status_code = 503 if code == "configuration_corrupt" else 422
+            status_code = 503 if code == "configuration_corrupt" else (409 if code.startswith("intent_progress_") else 422)
             message = (
                 "The saved configuration is invalid."
                 if code == "configuration_corrupt"

@@ -131,6 +131,31 @@ def test_candidate_only_rejected_when_every_target_is_conclusively_complete(monk
     assert completed.rejections[0].basis is CandidateRejectionBasis.INTENT_TARGETS_COMPLETED
 
 
+def test_execution_credit_completes_intent_without_changing_legacy_ranking(monkeypatch):
+    monkeypatch.setattr(astro_score.future_engine, "estimate", lambda *args, **kwargs: SimpleNamespace(risk="FAIBLE", opportunity_ratio=1))
+    project = {"hours": 2, "target_hours": 20, "importance": 5,
+               "imaging_field_id": FIELD.imaging_field_id,
+               "acquisition_intent_targets": [
+                   {"acquisition_intent_id": "ou4_oiii", "target_hours": 1}],
+               "acquisition_intent_progress": []}
+    objects = [{"name": "Sh2-129", "catalog_key": "Sh2-129", "global_score": 75}]
+    profile = {"projects": {"Sh2-129": project}}
+    before = astro_score.recommend_project_for_night(objects, profile=profile)
+    assert len(before) == 1
+    profile["intent_progress_credits"] = {"execution-1": {
+        "execution_id": "execution-1", "mission_id": "mission-1",
+        "decision_id": "decision-1", "selection_id": "selection-1",
+        "project_id": "Sh2-129", "imaging_field_id": FIELD.imaging_field_id,
+        "acquisition_intent_id": "ou4_oiii", "evidence_ids": ["evidence-1"],
+        "usable_durations_us": [3_600_000_000], "total_duration_us": 3_600_000_000,
+        "applied_at": "2026-09-21T20:00:00+00:00",
+    }}
+    after = astro_score.recommend_project_for_night(objects, profile=profile)
+    assert not after
+    assert after.rejections[0].basis is CandidateRejectionBasis.INTENT_TARGETS_COMPLETED
+    assert project["hours"] == 2 and project["target_hours"] == 20
+
+
 @pytest.mark.parametrize("targeted", [False, True])
 def test_legacy_opportunity_recommendation_and_tonight_baselines(monkeypatch, targeted):
     monkeypatch.setattr(astro_score.future_engine, "estimate", lambda *args, **kwargs: SimpleNamespace(risk="FAIBLE", opportunity_ratio=1))
