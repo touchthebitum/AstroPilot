@@ -1,8 +1,18 @@
 import pytest
+import json
 from fastapi.testclient import TestClient
 
 import astropilot.app as app_module
 from astropilot.app import create_app, runtime_identity_payload
+
+
+def test_launcher_identity_cli_exits_before_starting_ui(monkeypatch, capsys):
+    import astropilot.launcher as launcher
+    monkeypatch.setattr(launcher.sys, "argv", ["AstroPilot.exe", "--runtime-identity"])
+    monkeypatch.setattr(launcher, "run", lambda: pytest.fail("UI launcher must not run"))
+    launcher.main()
+    identity = json.loads(capsys.readouterr().out)
+    assert identity == runtime_identity_payload()
 
 
 def test_runtime_identity_is_exact_and_non_sensitive(tmp_path, monkeypatch):

@@ -1,7 +1,7 @@
 # Win-4: Windows per-user installer
 
-Win-4 wraps the existing PyInstaller onedir build with Inno Setup. It does
-not rebuild the application, change product versioning, or introduce signing.
+Win-4 wraps a verified PyInstaller onedir build with Inno Setup. The release
+procedure rebuilds the application from the release checkout before packaging.
 
 ## Recorded beta.3 status
 
@@ -33,9 +33,8 @@ was recorded for beta.3. The validated summary above is historical.
 
 ## Prerequisites and build order
 
-- Windows 11 x86_64 and a prepared project environment (Python 3.11–3.13).
-- An existing complete `dist/AstroPilot` build, including `AstroPilot.exe`
-  and its `_internal` tree. Keep the whole directory together.
+- Windows 11 x86_64, Python 3.11–3.13, and `uv` available on PATH.
+- A clean, committed release-candidate checkout and a current `uv.lock`.
 - Inno Setup 7 installed manually, including its preprocessor and `ISCC.exe`.
   Inno Setup 6.3+ remains supported as a fallback.
   The build tool never downloads or installs it.
@@ -43,20 +42,25 @@ was recorded for beta.3. The validated summary above is historical.
 Run from the repository root in PowerShell:
 
 ```powershell
-# Step 1: application build, only when a new application build is needed.
-uv run --locked --no-sync python scripts/build_windows.py
+# Step 1: mandatory application rebuild. The script synchronizes the packaging
+# environment against the lock, clears old build output, and injects HEAD SHA.
+python scripts/build_windows.py
 
-# Step 2: installer build, consumes the existing application build unchanged.
-uv run --locked --no-sync python scripts/build_windows_installer.py
+# Step 2: verify executable runtime version and build SHA, then compile setup.
+python scripts/build_windows_installer.py
 ```
 
-Step 1 retains its existing cleanup behavior for `build` and `dist`; Step 2
-never cleans either directory and never calls Step 1.
+Both steps require a clean committed checkout. Step 1 clears `build` and `dist`;
+Step 2 never cleans either directory. Run both steps for every release candidate.
+Step 2 executes `AstroPilot.exe --runtime-identity` without starting the UI and
+requires its version, seven-character build SHA, and x86_64 architecture to
+match the project and current checkout. Missing or invalid identity stops before
+Inno Setup runs.
 
 If automatic compiler discovery fails:
 
 ```powershell
-uv run --locked --no-sync python scripts/build_windows_installer.py --iscc "C:\Program Files\Inno Setup 7\ISCC.exe"
+python scripts/build_windows_installer.py --iscc "C:\Program Files\Inno Setup 7\ISCC.exe"
 ```
 
 Alternatively set `$env:ISCC_PATH` to the full `ISCC.exe` path. CLI takes
@@ -71,8 +75,9 @@ The build tool prints its absolute path after successful compilation.
 
 ## Version and installation contract
 
-The only version source is `project.version` in `pyproject.toml`. The tool
-passes it unchanged as `/DAppVersion` for `AppVersion` and the output filename.
+The expected version comes from `project.version` in `pyproject.toml`. Only
+after executable identity validation does the tool pass it unchanged as
+`/DAppVersion` for `AppVersion` and the output filename.
 No numeric conversion or `VersionInfoVersion` override is introduced.
 
 Immutable product AppId: `A3B620CB-8E79-4B91-8DAB-4CF1BEE63985`.
@@ -139,7 +144,7 @@ and the new build, then validate launch, data preservation, uninstall, and reins
 ## Automatic contract validation
 
 ```powershell
-uv run --locked --no-sync python -m pytest -q tests/architecture/test_windows_installer_contract.py
+uv run --locked --extra test python -m pytest -q tests/architecture/test_windows_installer_contract.py
 ```
 
 These tests use a stub compiler runner and require no Inno Setup installation.

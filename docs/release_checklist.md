@@ -12,7 +12,7 @@ validation remain in the [historical closed-beta record](closed_beta.md).
 - [x] Review version bump, UI label, notes, and local checks in this run:
   `uv lock --check`, 140 targeted tests, 3332 full-suite tests (44 warnings),
   JavaScript syntax, Python compilation, and `git diff --check` passed.
-- [ ] Commit the reviewed versioning change; record its final SHA after commit.
+- [x] Commit the reviewed versioning change: `b642342abb080aa412f3cb12058e7b9fda75fc00`.
 - [ ] Confirm a clean tree, `main == origin/main`, and the same final release
   commit on both build hosts before either build.
 - [ ] Build the macOS arm64 ZIP from that commit, then sign, notarize, staple,

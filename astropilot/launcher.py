@@ -26,6 +26,7 @@ from astropilot.app import (
     build_identifier,
     canonical_version,
     runtime_architecture,
+    runtime_identity_payload,
 )
 from astropilot.user_profile import get_user_data_dir
 
@@ -360,6 +361,9 @@ def run(
 
 
 def main() -> None:
+    if sys.argv[1:] == ["--runtime-identity"]:
+        print(json.dumps(runtime_identity_payload(), sort_keys=True))
+        return
     run()
 
 
