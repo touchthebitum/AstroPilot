@@ -40,6 +40,10 @@ from decision.models.acquisition_intent_selection import (
     AcquisitionIntentSelectionStatus,
 )
 from decision.models.candidate_rejection import CandidateRejectionBasis
+from decision.services.acquisition_intent_remaining_progress import (
+    derive_acquisition_intent_remaining_progress, remaining_progress_projection,
+)
+from decision.models.project_acquisition_intent_target import ProjectAcquisitionIntentTarget
 from decision.models.session_availability import (
     SessionAvailability,
     SessionAvailabilityMode,
@@ -1694,6 +1698,13 @@ def create_app(
             ] if field else [],
             "acquisition_intent_progress": project.get("acquisition_intent_progress", []),
             "acquisition_intent_targets": project.get("acquisition_intent_targets", []),
+            "acquisition_intent_remaining_progress": remaining_progress_projection(
+                derive_acquisition_intent_remaining_progress(
+                    field,
+                    tuple(ProjectAcquisitionIntentTarget(**item) for item in project.get("acquisition_intent_targets", ())),
+                    tuple(project.get("acquisition_intent_progress", ())),
+                )
+            ) if field else [],
         }
 
     @application.get("/v1/projects/{project_id}/progress")

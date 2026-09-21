@@ -214,6 +214,10 @@ def _encode(value: object) -> object:
             "fields": {
                 field.name: _encode(getattr(value, field.name))
                 for field in fields(value)
+                if not (
+                    type(value) is Candidate
+                    and field.name == "acquisition_intent_remaining_progress"
+                )
             },
         }
     if isinstance(value, tuple):
@@ -362,6 +366,8 @@ def _decode(value: object, *, schema_version: int = SCHEMA_VERSION) -> object:
             raise AcceptanceLineageCorruptionError("unsupported_dataclass_type")
         supplied = document["fields"]
         expected = frozenset(field.name for field in fields(dataclass_type))
+        if dataclass_type is Candidate:
+            expected -= frozenset(("acquisition_intent_remaining_progress",))
         if dataclass_type is Candidate and schema_version <= 5:
             expected = expected - frozenset((
                 "selected_acquisition_intent_id",

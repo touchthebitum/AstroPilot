@@ -4,6 +4,7 @@ from enum import Enum
 from decision.models.acquisition_intent_selection import (
     AcquisitionIntentSelectionStatus,
 )
+from decision.models.acquisition_intent_remaining_progress import AcquisitionIntentRemainingProgress
 
 
 class CandidateProvenance(str, Enum):
@@ -30,6 +31,7 @@ class Candidate:
     closure_bonus: float | None
 
     acquired_hours: float | None = 0.0
+    acquisition_intent_remaining_progress: tuple[AcquisitionIntentRemainingProgress, ...] = ()
     provenance: CandidateProvenance = CandidateProvenance.PROJECT
     imaging_field_id: str | None = None
     selected_acquisition_intent_id: str | None = None

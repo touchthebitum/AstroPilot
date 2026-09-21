@@ -4,6 +4,7 @@ from decision.models.acquisition_intent_selection import (
     AcquisitionIntentSelection,
 )
 from decision.models.candidate import Candidate, CandidateProvenance
+from decision.models.acquisition_intent_remaining_progress import AcquisitionIntentRemainingProgress
 
 
 class ProjectSelectionEngine:
@@ -34,6 +35,7 @@ class ProjectSelectionEngine:
         provenance: CandidateProvenance = CandidateProvenance.PROJECT,
         imaging_field_id: str | None = None,
         acquisition_intent_selection: AcquisitionIntentSelection | None = None,
+        acquisition_intent_remaining_progress: tuple[AcquisitionIntentRemainingProgress, ...] = (),
     ) -> Candidate:
         if (
             acquisition_intent_selection is not None
@@ -61,6 +63,7 @@ class ProjectSelectionEngine:
             reasons=reasons,
             strategy_scores=strategy_scores,
             acquired_hours=acquired_hours,
+            acquisition_intent_remaining_progress=acquisition_intent_remaining_progress,
             provenance=provenance,
             imaging_field_id=imaging_field_id,
             selected_acquisition_intent_id=(

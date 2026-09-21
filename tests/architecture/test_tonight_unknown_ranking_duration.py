@@ -441,7 +441,7 @@ def test_non_positive_project_and_discovery_scores_preserve_rejections():
 
 def test_candidate_rejection_contract_is_exact_and_immutable():
     assert {basis.value for basis in CandidateRejectionBasis} == {
-        "non_positive_evaluation_score"
+        "non_positive_evaluation_score", "intent_targets_completed"
     }
     rejection = CandidateRejection(
         target="Orion",

@@ -22,6 +22,7 @@ from decision.models.imaging_field import ImagingFieldDefinition
 from decision.models.project_acquisition_intent_target import (
     ProjectAcquisitionIntentTarget,
 )
+from decision.models.acquisition_intent_remaining_progress import AcquisitionIntentRemainingProgress
 from decision.models.session_availability import SessionAvailability
 from decision.services.acquisition_intent_eligibility import (
     evaluate_acquisition_intent_eligibility,
@@ -73,6 +74,7 @@ def compose_acquisition_intent_selection(
     *,
     imaging_field: ImagingFieldDefinition,
     project_targets: tuple[ProjectAcquisitionIntentTarget, ...],
+    remaining_progress: tuple[AcquisitionIntentRemainingProgress, ...] = (),
     setup_filter_capabilities: SetupFilterCapabilities | None,
     productive_window: ProductiveWindowAssessment | None,
     session_availability: SessionAvailability | None,
@@ -93,6 +95,7 @@ def compose_acquisition_intent_selection(
             acquisition_intent=intent,
             imaging_field=imaging_field,
             project_targets=project_targets,
+            remaining_progress=next((item for item in remaining_progress if item.acquisition_intent_id == intent.acquisition_intent_id), None),
             setup_filter_capabilities=setup_filter_capabilities,
             productive_window=productive_window,
             session_availability=session_availability,

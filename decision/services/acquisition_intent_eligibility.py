@@ -17,6 +17,7 @@ from decision.models.imaging_field import (
 from decision.models.project_acquisition_intent_target import (
     ProjectAcquisitionIntentTarget,
 )
+from decision.models.acquisition_intent_remaining_progress import AcquisitionIntentRemainingProgress
 from decision.models.session_availability import SessionAvailability
 from decision.services.session_availability_windowing import (
     select_continuous_actionable_productive_window,
@@ -45,6 +46,7 @@ def evaluate_acquisition_intent_eligibility(
     acquisition_intent: AcquisitionIntent,
     imaging_field: ImagingFieldDefinition,
     project_targets: tuple[ProjectAcquisitionIntentTarget, ...],
+    remaining_progress: AcquisitionIntentRemainingProgress | None = None,
     setup_filter_capabilities: SetupFilterCapabilities | None,
     productive_window: ProductiveWindowAssessment | None,
     session_availability: SessionAvailability | None,
@@ -108,6 +110,13 @@ def evaluate_acquisition_intent_eligibility(
         return _not_eligible(
             intent_id,
             AcquisitionIntentEligibilityReason.INTENT_NOT_TARGETED_BY_PROJECT,
+        )
+
+    if remaining_progress is not None and remaining_progress.acquisition_intent_id != intent_id:
+        raise ValueError("remaining_progress_intent_mismatch")
+    if remaining_progress is not None and remaining_progress.completed:
+        return _not_eligible(
+            intent_id, AcquisitionIntentEligibilityReason.INTENT_TARGET_COMPLETED,
         )
 
     evidence_gaps: list[AcquisitionIntentEvidenceGap] = []
