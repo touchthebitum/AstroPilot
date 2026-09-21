@@ -1004,6 +1004,12 @@ function initializeConfiguration(payload) {
   invalidateAvailabilityForSiteChange(state.configuration?.site, payload.site);
   state.configuration = payload;
   state.configurationDraft = draftFromConfiguration(payload);
+  document.querySelector("#legacy-bortle-note").hidden = !payload.needs_configuration_confirmation;
+  text("#onboarding-title", payload.needs_configuration_confirmation
+    ? "Confirmez votre profil AstroPilot."
+    : "Préparons AstroPilot.");
+  ui.onboarding.querySelector(".wizard-heading .state-kicker").textContent =
+    payload.needs_configuration_confirmation ? "Profil historique" : "Première configuration";
   state.configurationErrorCode = null;
   hideRecoveryConfirmation();
   ui.configurationRecover.hidden = true;
@@ -1069,6 +1075,9 @@ async function loadConfiguration({ afterConflict = false } = {}) {
       showFormError("La configuration a changé. Vérifiez les dernières valeurs avant de l’enregistrer à nouveau.");
       renderReview();
       setView("review");
+    } else if (payload.needs_configuration_confirmation) {
+      showFormError("Votre profil historique est conservé. Confirmez la qualité du ciel (Bortle) pour activer les recommandations ; aucune réinitialisation n’est nécessaire.");
+      setView("site");
     } else if (payload.configured) {
       showFormError("");
       setView("availability");

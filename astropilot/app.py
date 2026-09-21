@@ -336,12 +336,13 @@ class ConfigurationSiteModel(BaseModel):
     name: str
     latitude: float
     longitude: float
-    bortle: int
+    bortle: int | None
     timezone: str
 
 
 class ConfigurationResponse(BaseModel):
     configured: bool
+    needs_configuration_confirmation: bool | None = None
     profile_revision: int | None
     site: ConfigurationSiteModel | None
     active_equipment_id: str | None
@@ -1430,8 +1431,8 @@ def _configuration_projection(profile: dict | None) -> ConfigurationResponse:
     if not isinstance(location, dict) or not isinstance(preferences, dict):
         raise UserProfileError("configuration site is incomplete")
     bortle = preferences.get("bortle")
-    if bortle is None:
-        raise UserProfileError("configuration bortle is incomplete")
+    # Historical profiles may predate Bortle. Never infer sky quality from
+    # coordinates: expose the site for explicit confirmation instead.
 
     projects = {
         project_id: ProjectConfigurationModel(
@@ -1462,7 +1463,8 @@ def _configuration_projection(profile: dict | None) -> ConfigurationResponse:
     ).timezone_name
     return ConfigurationResponse(
         configured=True,
-        profile_revision=profile["profile_revision"],
+        **({"needs_configuration_confirmation": True} if bortle is None else {}),
+        profile_revision=profile.get("profile_revision", 0),
         site=ConfigurationSiteModel(
             name=location["name"],
             latitude=location["latitude"],
@@ -1507,10 +1509,9 @@ def _configuration_candidate(
             exclude_none=True,
         )
         previous = existing_projects.get(project_id, {})
-        if "filter_targets" in previous:
-            persisted_project["filter_targets"] = copy.deepcopy(
-                previous["filter_targets"]
-            )
+        # Keep fields that the configuration UI cannot edit (including
+        # historical project metadata), while applying the explicit UI fields.
+        persisted_project = {**copy.deepcopy(previous), **persisted_project}
         projects[project_id] = persisted_project
 
     candidate.update(
@@ -1521,7 +1522,13 @@ def _configuration_candidate(
                 "longitude": request.site.longitude,
             },
             "preferences": preferences,
-            "available_equipment": [equipment_id],
+            "available_equipment": (
+                list(dict.fromkeys(
+                    [equipment_id, *candidate.get("available_equipment", [])]
+                ))
+                if existing_profile and "setups" in existing_profile
+                else [equipment_id]
+            ),
             "active_equipment": equipment_id,
             "projects": projects,
         }
@@ -1625,6 +1632,7 @@ def create_app(
     @application.get(
         "/v1/configuration",
         response_model=ConfigurationResponse,
+        response_model_exclude_unset=True,
         summary="Read the first-run user configuration",
     )
     def get_configuration():
@@ -1661,6 +1669,7 @@ def create_app(
     @application.post(
         "/v1/configuration/recover",
         response_model=ConfigurationResponse,
+        response_model_exclude_unset=True,
         summary="Recover from an unreadable saved configuration",
     )
     def recover_configuration(
@@ -1692,6 +1701,7 @@ def create_app(
     @application.put(
         "/v1/configuration",
         response_model=ConfigurationResponse,
+        response_model_exclude_unset=True,
         summary="Create or replace the first-run user configuration",
     )
     def put_configuration(request: ConfigurationWriteRequest):
@@ -1717,6 +1727,7 @@ def create_app(
                     existing_profile=existing_profile,
                 ),
                 expected_revision=request.expected_revision,
+                preserve_legacy_setups="setups" in (existing_profile or {}),
             )
             return _configuration_projection(profile)
         except ProfileRevisionConflictError as exc:

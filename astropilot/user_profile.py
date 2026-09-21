@@ -595,6 +595,7 @@ def create_or_replace_user_configuration(
     candidate: Mapping[str, object],
     *,
     expected_revision: int | None = None,
+    preserve_legacy_setups: bool = False,
 ) -> dict:
     if not isinstance(candidate, Mapping):
         raise UserProfileError(
@@ -609,7 +610,7 @@ def create_or_replace_user_configuration(
             "le candidat ne peut pas être copié et normalisé."
         ) from error
 
-    if "setups" in normalized:
+    if "setups" in normalized and not preserve_legacy_setups:
         raise UserProfileError(
             "Configuration utilisateur V1 invalide : "
             "le champ legacy 'setups' n'est pas accepté."

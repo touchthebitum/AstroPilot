@@ -1,4 +1,6 @@
 import json
+import shutil
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -64,6 +66,93 @@ def test_missing_profile_reports_first_run_without_filesystem_details(client):
     assert all(choice["name"] for choice in payload["preset_equipment"])
     assert "ASTROPILOT_DATA_DIR" not in response.text
     assert "user_profile.json" not in response.text
+
+
+def test_tracked_historical_profile_requires_confirmation_without_mutation(
+    client, tmp_path,
+):
+    source = Path(__file__).resolve().parents[2] / "data/user_profile.json"
+    destination = tmp_path / "user_profile.json"
+    shutil.copyfile(source, destination)
+    original = destination.read_bytes()
+
+    response = client.get("/v1/configuration")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["configured"] is True
+    assert payload["needs_configuration_confirmation"] is True
+    assert payload["profile_revision"] == 0
+    assert payload["site"]["name"] == "Buttes"
+    assert payload["site"]["bortle"] is None
+    assert payload["active_equipment_id"] == "samyang_183"
+    assert set(payload["projects"]) == {"M31", "Rosette", "IC1396", "Sh2-129"}
+    assert destination.read_bytes() == original
+    assert client.post("/v1/configuration/recover").status_code == 409
+    assert destination.read_bytes() == original
+
+    update = configuration_payload(
+        projects=payload["projects"], revision=payload["profile_revision"],
+    )
+    update["site"] = {
+        "name": payload["site"]["name"],
+        "latitude": payload["site"]["latitude"],
+        "longitude": payload["site"]["longitude"],
+        "bortle": 6,  # Explicit user confirmation; never inferred.
+    }
+    incomplete = json.loads(json.dumps(update))
+    incomplete["site"].pop("bortle")
+    assert client.put("/v1/configuration", json=incomplete).status_code == 422
+    assert destination.read_bytes() == original
+    saved = client.put("/v1/configuration", json=update)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["profile_revision"] == 1
+    assert "needs_configuration_confirmation" not in client.get("/v1/configuration").json()
+    persisted = json.loads(destination.read_text(encoding="utf-8"))
+    historical = json.loads(original)
+    assert persisted["preferences"] == {**historical["preferences"], "bortle": 6}
+    assert persisted["setups"] == historical["setups"]
+    assert persisted["sessions"] == historical["sessions"]
+    assert persisted["decision_weights"] == historical["decision_weights"]
+    assert persisted["projects"] == historical["projects"]
+    assert persisted["available_equipment"] == historical["available_equipment"]
+
+
+def test_historical_missing_bortle_is_not_an_invalid_bortle(client, tmp_path):
+    profile = json.loads((Path(__file__).resolve().parents[2] / "data/user_profile.json").read_text())
+    for invalid in (None, True, "4", 10):
+        profile["preferences"]["bortle"] = invalid
+        (tmp_path / "user_profile.json").write_text(json.dumps(profile))
+        response = client.get("/v1/configuration")
+        assert response.status_code == 503
+        assert response.json()["detail"]["code"] == "configuration_corrupt"
+
+
+def test_legacy_custom_setup_and_unknown_fields_survive_confirmation(client, tmp_path):
+    source = Path(__file__).resolve().parents[2] / "data/user_profile.json"
+    profile = json.loads(source.read_text(encoding="utf-8"))
+    profile["equipment_definitions"] = {"custom": custom_equipment_payload()}
+    profile["available_equipment"].append("custom")
+    profile["projects"]["M31"]["legacy_note"] = "keep me"
+    profile["legacy_extension"] = {"original": True}
+    path = tmp_path / "user_profile.json"
+    path.write_text(json.dumps(profile), encoding="utf-8")
+    loaded = client.get("/v1/configuration").json()
+    assert loaded["needs_configuration_confirmation"] is True
+    update = configuration_payload(
+        projects=loaded["projects"], revision=loaded["profile_revision"],
+    )
+    update["site"].update(
+        name=loaded["site"]["name"],
+        latitude=loaded["site"]["latitude"],
+        longitude=loaded["site"]["longitude"],
+    )
+    assert client.put("/v1/configuration", json=update).status_code == 200
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["equipment_definitions"] == profile["equipment_definitions"]
+    assert saved["available_equipment"] == profile["available_equipment"]
+    assert saved["projects"]["M31"]["legacy_note"] == "keep me"
+    assert saved["legacy_extension"] == profile["legacy_extension"]
 
 
 def test_get_projects_safe_preset_profile_and_omits_internal_state(
