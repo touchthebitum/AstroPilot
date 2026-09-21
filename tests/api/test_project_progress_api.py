@@ -115,6 +115,28 @@ def test_execution_credit_endpoint_projection_baseline_and_editor_guard(client):
     assert load_user_profile()["projects"]["Sh2-129"]["target_hours"] == 20
     assert load_user_profile()["intent_progress_baselines"]["Sh2-129"][OIII] == marker
 
+    configuration = api.get("/v1/configuration").json()
+    config_update = {
+        "site": {key: configuration["site"][key]
+                 for key in ("name", "latitude", "longitude", "bortle")},
+        "equipment": {"preset_id": "samyang_183"},
+        "projects": configuration["projects"],
+        "expected_revision": configuration["profile_revision"],
+    }
+    before = load_user_profile()
+    conflicting = json.loads(json.dumps(config_update))
+    conflicting["projects"]["Sh2-129"]["acquisition_intent_progress"] = []
+    conflict = api.put("/v1/configuration", json=conflicting)
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "intent_progress_baseline_invalid"
+    assert load_user_profile() == before
+
+    valid = api.put("/v1/configuration", json=config_update)
+    assert valid.status_code == 200, valid.text
+    assert load_user_profile()["intent_progress_credits"] == before["intent_progress_credits"]
+    assert load_user_profile()["intent_progress_baselines"] == before["intent_progress_baselines"]
+    assert api.get(path()).json()["intent_progress_breakdown"] == projection["intent_progress_breakdown"]
+
 
 def test_duplicate_credit_json_key_fails_closed(client):
     put(client, imaging_field_id=FIELD)

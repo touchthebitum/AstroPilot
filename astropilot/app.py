@@ -25,6 +25,7 @@ from decision.definitions.production_imaging_fields import (
     build_production_imaging_field_resolver,
 )
 from astropilot.user_profile import (
+    PersistedProfileCorruptError,
     ProfileRecoveryConflictError,
     ProfileRevisionConflictError,
     UserProfileError,
@@ -1598,8 +1599,6 @@ def _configuration_validation_code(exc: UserProfileError) -> str:
     message = str(exc).lower()
     if message.startswith("intent_progress_"):
         return message
-    if "json invalide" in message or "structure invalide" in message:
-        return "configuration_corrupt"
     if "project" in message or "projet" in message:
         return "configuration_invalid_project"
     if "custom" in message or "equipment_definitions" in message:
@@ -1890,9 +1889,18 @@ def create_app(
     def put_configuration(request: ConfigurationWriteRequest):
         try:
             profile_path = get_user_data_dir() / "user_profile.json"
-            existing_profile = (
-                load_user_profile() if profile_path.exists() else None
-            )
+            try:
+                existing_profile = (
+                    load_user_profile() if profile_path.exists() else None
+                )
+            except UserProfileError as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "code": "configuration_corrupt",
+                        "message": "The saved configuration is invalid.",
+                    },
+                ) from exc
             if (
                 existing_profile is not None
                 and request.expected_revision is None
@@ -1931,17 +1939,20 @@ def create_app(
                     "message": "The site timezone could not be resolved.",
                 },
             ) from exc
+        except PersistedProfileCorruptError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "configuration_corrupt",
+                    "message": "The saved configuration is invalid.",
+                },
+            ) from exc
         except UserProfileError as exc:
             code = _configuration_validation_code(exc)
-            status_code = 503 if code == "configuration_corrupt" else (409 if code.startswith("intent_progress_") else 422)
-            message = (
-                "The saved configuration is invalid."
-                if code == "configuration_corrupt"
-                else "The configuration request is invalid."
-            )
+            status_code = 409 if code.startswith("intent_progress_") else 422
             raise HTTPException(
                 status_code=status_code,
-                detail={"code": code, "message": message},
+                detail={"code": code, "message": "The configuration request is invalid."},
             ) from exc
         except OSError as exc:
             raise HTTPException(

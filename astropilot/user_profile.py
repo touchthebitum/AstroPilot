@@ -38,6 +38,10 @@ class UserProfileError(Exception):
     pass
 
 
+class PersistedProfileCorruptError(UserProfileError):
+    """The saved profile failed validation while acquiring the write lock."""
+
+
 class ProfileRevisionConflictError(UserProfileError):
     pass
 
@@ -841,12 +845,10 @@ def save_user_profile(profile, *, expected_revision: int | None = None):
         raise UserProfileError("expected_revision must be a non-negative integer")
 
     with _profile_write_lock(data_dir):
-        current = _load_current_profile(path)
-        if current is not None:
-            try:
-                validate_credit_authority(current)
-            except IntentProgressCreditError as error:
-                raise UserProfileError(str(error)) from error
+        try:
+            current = _load_current_profile(path)
+        except UserProfileError as error:
+            raise PersistedProfileCorruptError(str(error)) from error
         current_revision = (
             _profile_revision(current, path) if current is not None else 0
         )
