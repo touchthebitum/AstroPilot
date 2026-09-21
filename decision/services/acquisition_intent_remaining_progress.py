@@ -6,6 +6,7 @@ import math
 from decision.models.acquisition_intent_remaining_progress import AcquisitionIntentRemainingProgress
 from decision.models.imaging_field import ImagingFieldDefinition
 from decision.models.project_acquisition_intent_target import ProjectAcquisitionIntentTarget
+from decision.services.project_acquisition_intent_progress import calculated_duration_seconds
 
 
 def derive_acquisition_intent_remaining_progress(
@@ -22,12 +23,12 @@ def derive_acquisition_intent_remaining_progress(
         seconds = None
         if entry is not None:
             if "acquired_duration_manual" in entry:
-                seconds = float(entry["acquired_duration_manual"])
-            else:
                 try:
-                    seconds = float(entry["acquired_frames"] * entry["exposure_seconds"])
+                    seconds = float(entry["acquired_duration_manual"])
                 except OverflowError as exc:
-                    raise ValueError("calculated duration must be finite") from exc
+                    raise ValueError("manual duration must be finite") from exc
+            else:
+                seconds = calculated_duration_seconds(entry["acquired_frames"], entry["exposure_seconds"])
             if not math.isfinite(seconds):
                 raise ValueError("calculated duration must be finite")
         hours = seconds / 3600 if seconds is not None else None

@@ -1,11 +1,14 @@
 import sys
 from dataclasses import FrozenInstanceError
+from math import isclose
 
 import pytest
 from types import SimpleNamespace
 import astro_score
 
-from decision.definitions.production_imaging_fields import IMAGING_FIELD_DEFINITIONS
+from decision.definitions.production_imaging_fields import (
+    IMAGING_FIELD_DEFINITIONS, build_production_imaging_field_resolver,
+)
 from decision.models.acquisition_intent_eligibility import (
     AcquisitionIntentEligibilityAssessment, AcquisitionIntentEligibilityReason,
     AcquisitionIntentEligibilityStatus,
@@ -15,6 +18,15 @@ from decision.models.project_acquisition_intent_target import ProjectAcquisition
 from decision.services.acquisition_intent_eligibility import evaluate_acquisition_intent_eligibility
 from decision.services.acquisition_intent_remaining_progress import derive_acquisition_intent_remaining_progress
 from decision.models.candidate_rejection import CandidateRejectionBasis
+from decision.models.acquisition_intent_selection import AcquisitionIntentSelectionStatus
+from decision.opportunity.action import Action
+from decision.opportunity.opportunity_engine import OpportunityEngine
+from decision.recommendation.recommendation_engine import RecommendationEngine
+from decision.runners.tonight_runner import TonightRunner
+from decision.services.opportunity_recommendation_service import OpportunityRecommendationService
+from decision.services.project_acquisition_intent_progress import (
+    ProjectAcquisitionIntentProgressError, resolve_project_acquisition_intent_progress,
+)
 
 
 FIELD = IMAGING_FIELD_DEFINITIONS[0]
@@ -46,6 +58,34 @@ def test_large_finite_values_do_not_overflow_target_conversion():
     target = (ProjectAcquisitionIntentTarget("sh2-129_ha", sys.float_info.max),)
     item, _ = derive(({"acquisition_intent_id": "sh2-129_ha", "acquired_duration_manual": sys.float_info.max},), target)
     assert item.remaining_hours > 0
+
+
+def test_extreme_frames_times_tiny_exposure_remains_finite():
+    entry = {"acquisition_intent_id": "sh2-129_ha", "acquired_frames": 10**309,
+             "exposure_seconds": 1e-310}
+    project = {"imaging_field_id": FIELD.imaging_field_id,
+               "acquisition_intent_progress": [entry]}
+    validated = resolve_project_acquisition_intent_progress(
+        project, build_production_imaging_field_resolver())
+    item, _ = derive(validated)
+    assert isclose(item.acquired_seconds, 0.1, rel_tol=1e-12)
+    assert item.acquired_hours == item.acquired_seconds / 3600
+    assert item.remaining_hours == 2 - item.acquired_hours
+
+
+@pytest.mark.parametrize("entry", [
+    {"acquisition_intent_id": "sh2-129_ha", "acquired_duration_manual": 10**400},
+    {"acquisition_intent_id": "sh2-129_ha", "acquired_frames": 10**400,
+     "exposure_seconds": 1.0},
+])
+def test_unrepresentable_seconds_fail_closed_in_validation_and_derivation(entry):
+    project = {"imaging_field_id": FIELD.imaging_field_id,
+               "acquisition_intent_progress": [entry]}
+    with pytest.raises(ProjectAcquisitionIntentProgressError, match="duration must be finite"):
+        resolve_project_acquisition_intent_progress(
+            project, build_production_imaging_field_resolver())
+    with pytest.raises(ValueError, match="duration must be finite"):
+        derive((entry,))
 
 
 def test_completion_precedes_missing_weather_and_equipment_only_when_known():
@@ -91,16 +131,62 @@ def test_candidate_only_rejected_when_every_target_is_conclusively_complete(monk
     assert completed.rejections[0].basis is CandidateRejectionBasis.INTENT_TARGETS_COMPLETED
 
 
-def test_legacy_candidate_scores_and_order_are_unchanged(monkeypatch):
+@pytest.mark.parametrize("targeted", [False, True])
+def test_legacy_opportunity_recommendation_and_tonight_baselines(monkeypatch, targeted):
     monkeypatch.setattr(astro_score.future_engine, "estimate", lambda *args, **kwargs: SimpleNamespace(risk="FAIBLE", opportunity_ratio=1))
     objects = [{"name": key, "catalog_key": key, "global_score": score}
                for key, score in (("M31", 75), ("M42", 65))]
     projects = {key: {"hours": 2, "target_hours": 20, "importance": 5} for key in ("M31", "M42")}
-    baseline = astro_score.recommend_project_for_night(objects, profile={"projects": projects})
-    assert [candidate.catalog_key for candidate in baseline] == ["M31", "M42"]
-    assert all(candidate.acquisition_intent_remaining_progress == () for candidate in baseline)
-    repeated = astro_score.recommend_project_for_night(objects, profile={"projects": projects})
-    assert [(candidate.catalog_key, candidate.final_score, candidate.decision_score, candidate.acquired_hours)
-            for candidate in baseline] == [
-                (candidate.catalog_key, candidate.final_score, candidate.decision_score, candidate.acquired_hours)
-                for candidate in repeated]
+    if targeted:
+        projects["M31"].update(imaging_field_id=FIELD.imaging_field_id,
+                               acquisition_intent_targets=[
+                                   {"acquisition_intent_id": "sh2-129_ha", "target_hours": 2}])
+    profile = {"projects": projects}
+    candidates = astro_score.recommend_project_for_night(objects, profile=profile)
+    # Historical scoring/ranking constants, not a second invocation of the new path.
+    assert candidates.rejections == ()
+    assert [(item.catalog_key, item.final_score, item.decision_score, item.acquired_hours)
+            for item in candidates] == [
+                ("M31", 77.80000000000001, 77.80000000000001, 2.0),
+                ("M42", 70.80000000000001, 70.80000000000001, 2.0),
+            ]
+    if targeted:
+        assert candidates[0].acquisition_intent_selection_status is AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT
+        assert candidates[0].acquisition_intent_remaining_progress[0].remaining_hours is None
+        assert candidates[0].acquisition_intent_remaining_progress[0].acquired_hours is None
+    else:
+        assert all(item.acquisition_intent_selection_status is None for item in candidates)
+        assert all(item.acquisition_intent_remaining_progress == () for item in candidates)
+    service = OpportunityRecommendationService(
+        opportunity_engine=OpportunityEngine(),
+        recommendation_engine=RecommendationEngine())
+    opportunity = OpportunityEngine().evaluate(candidates=list(candidates))
+    assert opportunity.action is Action.CONTINUE_PROJECT
+    assert opportunity.candidate.catalog_key == "M31"
+    assert [item.catalog_key for item in opportunity.shortlist_entries] == ["M42"]
+    recommendation = service.build(candidates=list(candidates))
+    assert recommendation.opportunity.candidate.catalog_key == "M31"
+    assert recommendation.opportunity.action is Action.CONTINUE_PROJECT
+    assert recommendation.confidence is None
+
+    class Report:
+        def __init__(self):
+            self.calls = []
+        def run_tonight(self, **kwargs):
+            self.calls.append(kwargs)
+        def show_portfolio_completion_forecast(self, roadmap, **kwargs):
+            self.roadmap = roadmap
+
+    report = Report()
+    runner = TonightRunner(report_runner=report,
+                           portfolio_forecast_engine=SimpleNamespace(
+                               simulate_dynamic_portfolio_roadmap=lambda **kwargs: []),
+                           build_mission_input=lambda *args, **kwargs: None,
+                           recommend_project_for_night=astro_score.recommend_project_for_night,
+                           opportunity_recommendation_service=service)
+    runner.run(top_nights=[{"duration": 3, "top_objects": objects}],
+               night_capacities=[], profile=profile)
+    assert len(report.calls) == 1
+    assert report.calls[0]["recommendation"].opportunity.candidate.catalog_key == "M31"
+    assert report.calls[0]["recommendation"].opportunity.action is Action.CONTINUE_PROJECT
+    assert report.roadmap == []
