@@ -8,6 +8,8 @@ import pytest
 
 
 SCRIPT = Path(__file__).resolve().parents[2] / "astropilot/web/app.js"
+PAGE = SCRIPT.with_name("index.html")
+STYLES = SCRIPT.with_name("styles.css")
 
 
 def _javascript_between(start: str, end: str) -> str:
@@ -23,6 +25,64 @@ def _run_javascript(source: str) -> None:
         [node, "-e", source], capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_decision_hierarchy_and_visible_copy():
+    page = PAGE.read_text()
+    styles = STYLES.read_text()
+    assert page.index('id="target-name"') < page.index('id="primary-intent-choice"')
+    assert page.index('id="primary-intent-choice"') < page.index('id="decision-essential"')
+    assert page.index('id="decision-essential"') < page.index('id="open-mission"')
+    assert page.index('id="open-mission"') < page.index('class="decision-grid"')
+    assert "Retour à Classic" not in page
+    assert "Retour à la recommandation" in page
+    assert 'id="open-saved-mission"' in page
+    assert "white-space: nowrap" in styles
+    assert "flex-direction: column; min-width: 0" in styles
+    assert "justify-content: center; text-align: center" in styles
+
+
+def test_saved_mission_restores_only_from_server_without_acceptance():
+    helpers = _javascript_between("async function restoreSavedMission() {", "function invalidateAvailabilityForSiteChange(")
+    _run_javascript("""
+const assert = require('node:assert/strict');
+const state = {acceptedMission: null};
+const entry = {hidden: true};
+const ui = {savedMissionEntry: entry, savedMissionTarget: {textContent: ''}};
+let calls = [];
+let payload = {status: 'accepted', mission_id: 'mission-1', selection_id: 'selection-1',
+  decision_id: 'decision-1', catalog_key: 'M31', mission: {
+    mission_id: 'mission-1', selection_id: 'selection-1', decision_id: 'decision-1', target: 'M31'}};
+async function fetch(url, options) {
+  calls.push([url, options]);
+  return {ok: true, json: async () => payload};
+}
+""" + helpers + """
+(async () => {
+  await restoreSavedMission();
+  assert.equal(entry.hidden, false);
+  assert.equal(state.acceptedMission.mission, payload.mission);
+  assert.deepEqual(calls, [['/v1/accepted-mission/current', undefined]]);
+  payload = {...payload, selection_id: 'wrong'};
+  await restoreSavedMission();
+  assert.equal(entry.hidden, true);
+  assert.equal(state.acceptedMission, null);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+
+
+def test_alternative_empty_reason_and_risk_levels_are_presentation_only():
+    helper = _javascript_between("function alternativeReasonText(reason) {", "function intentMode(subject) {")
+    _run_javascript("""
+const assert = require('node:assert/strict');
+""" + helper + """
+assert.equal(alternativeReasonText({message: ' . '}), null);
+assert.equal(alternativeReasonText({message: '  '}), null);
+assert.equal(alternativeReasonText({message: 'Fiabilité météo limitée.'}), 'Fiabilité météo limitée.');
+""")
+    script = SCRIPT.read_text()
+    assert 'low: "faible", medium: "modéré", high: "élevé"' in script
+    assert 'labels.riskLevels[level]' in script
 
 
 def test_intent_choice_unique_multiple_none_and_legacy():

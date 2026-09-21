@@ -212,6 +212,10 @@
           <p id="availability-timezone-warning" class="form-error" role="alert" hidden>Le fuseau horaire du site ne peut pas être déterminé. Vérifiez les coordonnées du site avant de choisir une heure précise.</p>
         </div>
         <form id="availability-form" novalidate>
+          <div id="saved-mission-entry" class="saved-mission-entry" hidden>
+            <div><strong>Mission enregistrée pour cette nuit</strong><p id="saved-mission-target"></p></div>
+            <button class="mission-button" id="open-saved-mission" type="button">Ouvrir la mission</button>
+          </div>
           <fieldset class="availability-modes">
             <legend>Ma disponibilité</legend>
             <label><input type="radio" name="availability-mode" value="all_night"><span><strong>Toute la nuit</strong><small>Je peux observer pendant toute la nuit astronomique.</small></span></label>
@@ -294,6 +298,18 @@
             <strong id="recommendation-confidence-value">Non disponible</strong>
           </div>
         </div>
+
+        <footer class="decision-footer">
+          <div>
+            <div id="primary-intent-choice" class="intent-choice" hidden></div>
+            <p id="decision-essential">Décision calculée pour votre configuration actuelle.</p>
+            <p id="acceptance-status" class="acceptance-status" role="status" hidden></p>
+          </div>
+          <button class="mission-button" id="open-mission" type="button">
+            Photographier cette cible
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </footer>
 
         <div class="decision-grid">
           <section class="metric-card window-card" aria-labelledby="window-title">
@@ -394,17 +410,6 @@
           <p class="weather-trust-note" id="classic-weather-timezone">Fuseau du site non disponible.</p>
         </section>
 
-        <footer class="decision-footer">
-          <div>
-            <p id="decision-footnote">Décision calculée pour votre configuration actuelle.</p>
-            <div id="primary-intent-choice" class="intent-choice" hidden></div>
-            <p id="acceptance-status" class="acceptance-status" role="status" hidden></p>
-          </div>
-          <button class="mission-button" id="open-mission" type="button">
-            Photographier cette cible
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-          </button>
-        </footer>
       </article>
 
       <dialog class="mission-dialog" id="mission-dialog" aria-labelledby="mission-title">
@@ -459,7 +464,7 @@
 
           <footer class="mission-footer">
             <p>Mission créée après votre choix explicite et enregistrée par AstroPilot.</p>
-            <button class="secondary-button" id="mission-back" type="button">Retour à Classic</button>
+            <button class="secondary-button" id="mission-back" type="button">Retour à la recommandation</button>
           </footer>
         </div>
       </dialog>

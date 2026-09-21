@@ -13,6 +13,9 @@ const ui = Object.freeze({
   formError: document.querySelector("#configuration-form-error"),
   availability: document.querySelector("#availability-step"),
   availabilityForm: document.querySelector("#availability-form"),
+  savedMissionEntry: document.querySelector("#saved-mission-entry"),
+  savedMissionTarget: document.querySelector("#saved-mission-target"),
+  openSavedMission: document.querySelector("#open-saved-mission"),
   availabilityError: document.querySelector("#availability-error"),
   availabilitySiteTimezone: document.querySelector("#availability-site-timezone"),
   availabilityTimezoneWarning: document.querySelector("#availability-timezone-warning"),
@@ -120,6 +123,7 @@ const labels = Object.freeze({
     dew: "Risque de rosée",
     setup: "Configuration matérielle",
   },
+  riskLevels: { low: "faible", medium: "modéré", high: "élevé" },
 });
 
 function text(selector, value) {
@@ -320,7 +324,9 @@ function clearAlternatives() {
 }
 
 function alternativeReasonText(reason) {
-  return reason?.rendered?.classic_text || reason?.message || null;
+  const value = reason?.rendered?.classic_text || reason?.message;
+  return typeof value === "string" && value.trim() && value.trim() !== "."
+    ? value.trim() : null;
 }
 
 function intentMode(subject) {
@@ -410,6 +416,9 @@ function renderAlternatives(decision) {
       .map(alternativeReasonText)
       .filter(Boolean)
       .slice(0, 2);
+    if (!reasonTexts.length && decision.weather_decision?.admissibility === "caution") {
+      reasonTexts.push("Autre cible exploitable, sous réserve des conditions météo.");
+    }
     for (const reasonText of reasonTexts) {
       const item = document.createElement("li");
       item.textContent = reasonText;
@@ -642,6 +651,7 @@ function resetMissionPresentation() {
 
 function clearAcceptedMission() {
   state.acceptedMission = null;
+  ui.savedMissionEntry.hidden = true;
   state.acceptingRecommendation = false;
   state.acceptanceBlocked = false;
   showAcceptanceStatus("");
@@ -707,7 +717,8 @@ function renderDecision(decision) {
   const warnings = (decision.explanation?.warnings || []).map(reasonText);
   const risks = [...warnings];
   if (decision.dew_risk && String(decision.dew_risk.level).toLowerCase() !== "low") {
-    risks.push(`Rosée : risque ${String(decision.dew_risk.level).toLowerCase()}`);
+    const level = String(decision.dew_risk.level).toLowerCase();
+    risks.push(`Rosée : risque ${labels.riskLevels[level] || level}`);
   }
   if (decision.postponement_risk) {
     risks.push(...(decision.postponement_risk.explanations || []));
@@ -717,6 +728,8 @@ function renderDecision(decision) {
     ? "AstroPilot ne dispose pas d’assez d’éléments fiables pour recommander cette cible pour cette session."
     : null;
   setList("#insights-list", [...(evidenceMessage ? [evidenceMessage] : []), ...positives, ...information], "Aucune explication supplémentaire disponible.");
+  text("#decision-essential", evidenceMessage || positives.find(Boolean) || information.find(Boolean)
+    || "Décision calculée pour votre configuration actuelle.");
   setList("#risks-list", risks, "Aucun risque essentiel signalé.");
   renderIntentChoice(ui.primaryIntentChoice, decision, "primary-intent");
   const actionablePrimary = Boolean(
@@ -993,6 +1006,33 @@ function initializeConfiguration(payload) {
   renderAvailabilityTimezone();
 }
 
+async function restoreSavedMission() {
+  state.acceptedMission = null;
+  ui.savedMissionEntry.hidden = true;
+  try {
+    const response = await fetch("/v1/accepted-mission/current");
+    if (!response.ok) return;
+    const payload = await response.json();
+    const mission = payload?.mission;
+    if (payload?.status !== "accepted" || !mission
+        || payload.mission_id !== mission.mission_id
+        || payload.selection_id !== mission.selection_id
+        || payload.decision_id !== mission.decision_id) return;
+    state.acceptedMission = {
+      decision_id: payload.decision_id,
+      selection_id: payload.selection_id,
+      mission_id: payload.mission_id,
+      selectedCatalogKey: payload.catalog_key,
+      source: "persisted",
+      mission,
+    };
+    ui.savedMissionTarget.textContent = mission.target;
+    ui.savedMissionEntry.hidden = false;
+  } catch (_error) {
+    // Availability remains usable if the persisted lineage is unavailable.
+  }
+}
+
 function invalidateAvailabilityForSiteChange(previousSite, nextSite) {
   if (!previousSite || !nextSite) return;
   const sameSite = previousSite.latitude === nextSite.latitude
@@ -1026,6 +1066,7 @@ async function loadConfiguration({ afterConflict = false } = {}) {
     } else if (payload.configured) {
       showFormError("");
       setView("availability");
+      await restoreSavedMission();
     } else {
       showFormError("");
       setView("site");
@@ -1764,6 +1805,11 @@ ui.openMission.addEventListener("click", () => acceptRecommendation({
   triggerButton: ui.openMission,
   selectedTarget: state.currentDecision?.target,
 }));
+ui.openSavedMission.addEventListener("click", () => {
+  if (!state.acceptedMission?.mission || state.acceptedMission.source !== "persisted") return;
+  renderMission(state.acceptedMission.mission);
+  ui.mission.showModal();
+});
 ui.closeMission.addEventListener("click", () => ui.mission.close());
 ui.missionBack.addEventListener("click", () => ui.mission.close());
 ui.mission.addEventListener("click", (event) => {

@@ -112,7 +112,7 @@ def test_tonight_ui_assets_are_served():
     assert "fetch(\"/v1/tonight\"" in script.text
     assert 'fetch("/v1/decision-selections"' in script.text
     assert 'fetch("/v1/configuration/recover"' in script.text
-    assert script.text.count("fetch(") == 5
+    assert script.text.count("fetch(") == 6
     assert script.text.rstrip().endswith("loadConfiguration();")
     assert "body: JSON.stringify({})," not in script.text
     assert "collectAvailabilityPayload" in script.text

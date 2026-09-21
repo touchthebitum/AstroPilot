@@ -352,6 +352,22 @@ class FileDecisionAcceptanceLineageStore:
         )
         return canonical_selection, canonical_mission
 
+    def latest_accepted_mission(self, *, profile: dict, now):
+        """Read a current, committed mission for the active site and equipment."""
+        matches = [
+            (selection, mission)
+            for aggregate in self._load_all()
+            if aggregate.context.profile.get("location") == profile.get("location")
+            and aggregate.context.profile.get("active_equipment") == profile.get("active_equipment")
+            and aggregate.context.profile.get("profile_revision") == profile.get("profile_revision")
+            for mission in aggregate.missions
+            for selection in aggregate.selections
+            if selection.selection_id == mission.selection_id
+            and mission.window_end is not None
+            and mission.window_end > now
+        ]
+        return max(matches, key=lambda pair: pair[0].selected_at, default=None)
+
     def load_selection(self, selection_id: str) -> UserSelection:
         identity = validate_lineage_identity(selection_id, field="selection_id")
         matches = [
