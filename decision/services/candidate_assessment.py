@@ -48,10 +48,32 @@ class CandidateAssessment:
         decision_location: WeatherLocation,
         build_mission_input: Callable[..., Any],
     ) -> CandidateAssessment:
-        evaluation = object_evaluations[candidate.catalog_key]
+        return cls.build_for_catalog_key(
+            catalog_key=candidate.catalog_key,
+            object_evaluations=object_evaluations,
+            profile=profile,
+            weather_snapshot=weather_snapshot,
+            weather_freshness=weather_freshness,
+            decision_location=decision_location,
+            build_mission_input=build_mission_input,
+        )
+
+    @classmethod
+    def build_for_catalog_key(
+        cls,
+        *,
+        catalog_key: str,
+        object_evaluations: Mapping[str, Mapping[str, Any]],
+        profile: Mapping[str, Any],
+        weather_snapshot: WeatherSnapshot,
+        weather_freshness: WeatherFreshness | None,
+        decision_location: WeatherLocation,
+        build_mission_input: Callable[..., Any],
+    ) -> CandidateAssessment:
+        evaluation = object_evaluations[catalog_key]
         mission_input = build_mission_input(evaluation, profile=profile)
         productive_window = ProductiveWindowAssessment.build(
-            target=candidate.catalog_key,
+            target=catalog_key,
             context=evaluation["decision_context"],
             mission_input=mission_input,
         )

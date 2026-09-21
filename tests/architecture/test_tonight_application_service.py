@@ -566,7 +566,13 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
         forecast_calls.append((args, kwargs))
         return forecast_run([later, selected])
 
-    def build_candidates(objects, available_hours=3.0, *, profile):
+    def build_candidates(
+        objects,
+        available_hours=3.0,
+        *,
+        profile,
+        **composition_context,
+    ):
         candidate_calls.append((objects, available_hours, profile))
         return candidates
 
@@ -643,7 +649,7 @@ def test_missing_night_duration_stays_unknown_for_candidate_ranking():
     }
     service, _, _ = make_service(
         forecast_nights=lambda *args, **kwargs: forecast_run([night]),
-        build_candidates=lambda objects, available_hours, *, profile: (
+        build_candidates=lambda objects, available_hours, *, profile, **kwargs: (
             calls.append((objects, available_hours)) or []
         ),
     )

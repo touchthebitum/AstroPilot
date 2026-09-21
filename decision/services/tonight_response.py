@@ -8,6 +8,9 @@ from enum import Enum
 from astropilot.catalog import CATALOG
 from decision.advisor.night_advisor import NightAdvisor
 from decision.models.candidate import CandidateProvenance
+from decision.models.acquisition_intent_selection import (
+    AcquisitionIntentSelectionStatus,
+)
 from decision.models.candidate_rejection import CandidateRejectionBasis
 from decision.models.recommendation_reason import (
     RecommendationReasonCategory,
@@ -376,6 +379,12 @@ class TonightResponse:
     target_common_name: str | None = None
     action: str | None = None
     provenance: str | None = None
+    imaging_field_id: str | None = None
+    selected_acquisition_intent_id: str | None = None
+    viable_acquisition_intent_ids: tuple[str, ...] = ()
+    acquisition_intent_selection_status: (
+        AcquisitionIntentSelectionStatus | None
+    ) = None
     target_decision_status: TargetDecisionStatus | None = None
     shortlist_entries: list[TonightShortlistEntryResponse] = field(
         default_factory=list
@@ -752,6 +761,26 @@ class TonightResponse:
             ),
             provenance=(
                 candidate.provenance.value
+                if candidate is not None
+                else None
+            ),
+            imaging_field_id=(
+                candidate.imaging_field_id
+                if candidate is not None
+                else None
+            ),
+            selected_acquisition_intent_id=(
+                candidate.selected_acquisition_intent_id
+                if candidate is not None
+                else None
+            ),
+            viable_acquisition_intent_ids=(
+                candidate.viable_acquisition_intent_ids
+                if candidate is not None
+                else ()
+            ),
+            acquisition_intent_selection_status=(
+                candidate.acquisition_intent_selection_status
                 if candidate is not None
                 else None
             ),

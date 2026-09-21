@@ -14,6 +14,7 @@ from decision.intelligence.analysis_result import AnalysisResult
 from decision.mission.night_mission import NightMission
 from decision.mission.mission_input import MissionInput
 from decision.models.candidate import Candidate, CandidateProvenance
+from decision.models.context.site_context import SiteContext
 from decision.night_productivity.night_productivity_result import (
     NightProductivityResult,
 )
@@ -29,6 +30,7 @@ from decision.weather.decision_forecast_evidence import (
     build_decision_forecast_evidence,
 )
 from decision.weather.weather_ingress import WeatherSnapshot
+from decision.services.tonight_application_service import TonightApplicationService
 
 
 def test_http_request_runs_real_application_composition_once(
@@ -205,7 +207,13 @@ def test_http_request_runs_real_application_composition_once(
             ),
         )
 
-    def build_candidates(objects, available_hours, *, profile):
+    def build_candidates(
+        objects,
+        available_hours,
+        *,
+        profile,
+        **composition_context,
+    ):
         calls["candidates"].append((objects, available_hours, profile))
         return [candidate]
 
@@ -401,3 +409,165 @@ def test_http_request_runs_real_application_composition_once(
     assert replayed.status_code == 200, replayed.json()
     assert replayed.json() == accepted_payload
     assert len(calls["mission"]) == 2
+
+
+def test_tonight_exposes_modern_ou4_acquisition_intent_candidate(
+    monkeypatch,
+):
+    reference_time = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
+    window_start = datetime(2026, 9, 1, 22, tzinfo=timezone.utc)
+    window_end = datetime(2026, 9, 2, 2, tzinfo=timezone.utc)
+    weather = WeatherSnapshot(
+        payload={"hourly": {}},
+        provider="Open-Meteo",
+        retrieved_at_utc=reference_time - timedelta(minutes=5),
+        requested_latitude=47.12,
+        requested_longitude=7.04,
+        grid_latitude=47.12,
+        grid_longitude=7.04,
+        grid_distance_km=0.0,
+        elevation_m=1000.0,
+        timezone="Europe/Zurich",
+        timezone_source="coordinates_local",
+        utc_offset_seconds=7200,
+        valid_from=datetime(2026, 9, 1, 18, tzinfo=timezone.utc),
+        valid_until=datetime(2026, 9, 2, 6, tzinfo=timezone.utc),
+        hour_count=24,
+        completeness=1.0,
+    )
+    evaluation = {
+        "name": "Sh2-129",
+        "catalog_key": "Sh2-129",
+        "window": {"start": window_start, "end": window_end},
+        "remaining_hours": 4.0,
+        "decision_context": SimpleNamespace(
+            site=SiteContext("Mont Sujet", 47.12, 7.04, 1000.0, 4),
+            session=SimpleNamespace(
+                start_time=window_start,
+                end_time=window_end,
+            ),
+            weather=SimpleNamespace(
+                cloud_cover=20.0,
+                humidity=60.0,
+                wind_speed_kmh=5.0,
+                seeing_arcsec=1.5,
+                temperature_c=8.0,
+            ),
+        ),
+    }
+    night = {
+        "date": date(2026, 9, 1),
+        "duration": 4.0,
+        "top_objects": [{
+            "name": "Sh2-129",
+            "catalog_key": "Sh2-129",
+            "global_score": 80.0,
+            "setup_score": 5.0,
+            "best_setup": "samyang_183",
+            "confidence": "HIGH",
+        }],
+        "object_evaluations": {"Sh2-129": evaluation},
+    }
+    profile = {
+        "location": {
+            "name": "Mont Sujet",
+            "latitude": 47.12,
+            "longitude": 7.04,
+        },
+        "active_equipment": "samyang_183",
+        "available_equipment": ["samyang_183"],
+        "preferences": {"bortle": 4},
+        "projects": {
+            "Sh2-129": {
+                "hours": 1.0,
+                "target_hours": 5.0,
+                "imaging_field_id": "sh2-129_ou4",
+                "acquisition_intent_targets": [
+                    {
+                        "acquisition_intent_id": "sh2-129_ha",
+                        "target_hours": 2.0,
+                    },
+                    {
+                        "acquisition_intent_id": "ou4_oiii",
+                        "target_hours": 3.0,
+                    },
+                ],
+            }
+        },
+    }
+
+    monkeypatch.setattr(
+        astro_score.future_engine,
+        "estimate",
+        lambda *args, **kwargs: SimpleNamespace(
+            risk="LOW",
+            opportunity_ratio=1.0,
+        ),
+    )
+
+    class MissionService:
+        def create(self, **kwargs):
+            return NightMission(
+                target="Sh2-129",
+                confidence=0.8,
+                window_start=window_start,
+                window_end=window_end,
+                recommended_hours=4.0,
+                expected_gain=1.0,
+                productivity=NightProductivityResult(
+                    astronomical_hours=4.0,
+                    productive_hours=4.0,
+                    confidence=1.0,
+                    cloud_loss=0.0,
+                    moon_loss=0.0,
+                    altitude_loss=0.0,
+                    weather_loss=0.0,
+                    windows=[NightWindow(
+                        start_hour=0.0,
+                        end_hour=4.0,
+                        productivity=0.9,
+                        altitude=60.0,
+                        cloud_cover=20.0,
+                        moon_penalty=0.1,
+                        seeing=1.5,
+                        productive=True,
+                        reason="stable_conditions",
+                    )],
+                ),
+            )
+
+    service = TonightApplicationService(
+        forecast_nights=lambda *args, **kwargs: ForecastRun(
+            nights=(night,),
+            evidence=build_decision_forecast_evidence(
+                weather,
+                [{
+                    "time": window_start,
+                    "temperature_2m": 8.0,
+                    "relative_humidity_2m": 60.0,
+                    "wind_speed_10m": 5.0,
+                    "cloud_cover": 20.0,
+                }],
+            ),
+        ),
+        build_candidates=astro_score.recommend_project_for_night,
+        opportunity_recommendation_service=(
+            astro_score.opportunity_recommendation_service
+        ),
+        tonight_mission_service=MissionService(),
+        build_mission_input=astro_score.build_mission_input,
+    )
+    response = TestClient(create_app(
+        service_factory=lambda: service,
+        weather_provider=lambda *args: weather,
+        profile_provider=lambda: profile,
+        clock=lambda: reference_time,
+    )).post("/v1/tonight", json={"bortle": 4})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["catalog_key"] == "Sh2-129"
+    assert payload["imaging_field_id"] == "sh2-129_ou4"
+    assert payload["selected_acquisition_intent_id"] is None
+    assert payload["viable_acquisition_intent_ids"] == []
+    assert payload["acquisition_intent_selection_status"] == "no_eligible_intent"

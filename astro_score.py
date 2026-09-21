@@ -78,6 +78,34 @@ from decision.definitions.production_imaging_fields import (
 from decision.services.project_imaging_field_resolution import (
     resolve_project_imaging_field,
 )
+from decision.services.project_acquisition_intent_targets import (
+    resolve_project_acquisition_intent_targets,
+)
+from decision.definitions.production_setup_filter_capabilities import (
+    build_production_setup_filter_capabilities_resolver,
+)
+from decision.definitions.production_filter_optical_profiles import (
+    build_production_filter_optical_profile_resolver,
+)
+from decision.definitions.production_imaging_field_geometry import (
+    build_production_imaging_field_geometry_resolver,
+)
+from decision.services.setup_filter_capabilities_resolver import (
+    SetupFilterCapabilitiesResolutionError,
+)
+from decision.services.acquisition_intent_composition import (
+    compose_acquisition_intent_selection,
+)
+from decision.services.intent_night_evidence_builder import (
+    IntentNightEvidenceBuilder,
+)
+from decision.services.lunar_contamination_estimator import (
+    LunarContaminationEstimator,
+)
+from decision.services.lunar_geometry_service import LunarGeometryService
+from decision.services.candidate_assessment import CandidateAssessment
+from decision.weather.provider_reliability import WeatherLocation
+from decision.weather.weather_ingress import WeatherFreshness, WeatherSnapshot
 from decision.models.candidate_rejection import (
     CandidateBuildResult,
     CandidateRejection,
@@ -687,6 +715,18 @@ def strategy_weights(mode="balanced"):
 
 project_selection_engine = ProjectSelectionEngine()
 
+setup_filter_capabilities_resolver = (
+    build_production_setup_filter_capabilities_resolver()
+)
+filter_optical_profile_resolver = (
+    build_production_filter_optical_profile_resolver()
+)
+intent_night_evidence_builder = IntentNightEvidenceBuilder(
+    geometry_resolver=build_production_imaging_field_geometry_resolver(),
+    lunar_geometry_service=LunarGeometryService(),
+)
+lunar_contamination_estimator = LunarContaminationEstimator()
+
 night_strategy_engine = NightStrategyEngine(
     strategy_weights
 )
@@ -697,6 +737,11 @@ def recommend_project_for_night(
     available_hours=None,
     *,
     profile,
+    object_evaluations=None,
+    session_availability=None,
+    weather_snapshot: WeatherSnapshot | None = None,
+    weather_freshness: WeatherFreshness | None = None,
+    decision_location: WeatherLocation | None = None,
 ):
     prefs = profile.get("preferences", {})
 
@@ -757,6 +802,68 @@ def recommend_project_for_night(
             projects[catalog_key],
             imaging_field_resolver,
         )
+        acquisition_intent_selection = None
+        project = projects[catalog_key]
+        project_targets = resolve_project_acquisition_intent_targets(
+            project,
+            imaging_field_resolver,
+        )
+        if imaging_field is not None and project_targets:
+            setup_filter_capabilities = None
+            try:
+                setup_filter_capabilities = (
+                    setup_filter_capabilities_resolver.resolve(
+                        profile.get("active_equipment")
+                    )
+                )
+            except SetupFilterCapabilitiesResolutionError:
+                pass
+
+            assessment = None
+            evaluation = None
+            if isinstance(object_evaluations, dict):
+                evaluation = object_evaluations.get(catalog_key)
+            if (
+                evaluation is not None
+                and weather_snapshot is not None
+                and decision_location is not None
+            ):
+                assessment = CandidateAssessment.build_for_catalog_key(
+                    catalog_key=catalog_key,
+                    object_evaluations=object_evaluations,
+                    profile=profile,
+                    weather_snapshot=weather_snapshot,
+                    weather_freshness=weather_freshness,
+                    decision_location=decision_location,
+                    build_mission_input=build_mission_input,
+                )
+            acquisition_intent_selection = (
+                compose_acquisition_intent_selection(
+                    imaging_field=imaging_field,
+                    project_targets=project_targets,
+                    setup_filter_capabilities=setup_filter_capabilities,
+                    productive_window=(
+                        assessment.productive_window
+                        if assessment is not None
+                        else None
+                    ),
+                    session_availability=session_availability,
+                    weather_trust_decision=(
+                        assessment.weather_decision
+                        if assessment is not None
+                        else None
+                    ),
+                    site=(
+                        evaluation["decision_context"].site
+                        if evaluation is not None
+                        and "decision_context" in evaluation
+                        else None
+                    ),
+                    filter_profile_resolver=filter_optical_profile_resolver,
+                    evidence_builder=intent_night_evidence_builder,
+                    contamination_estimator=lunar_contamination_estimator,
+                )
+            )
 
         priority = project_priority(catalog_key, projects)
         roi = (
@@ -905,6 +1012,7 @@ def recommend_project_for_night(
                     if imaging_field is not None
                     else None
                 ),
+                acquisition_intent_selection=acquisition_intent_selection,
             )
         )
 
