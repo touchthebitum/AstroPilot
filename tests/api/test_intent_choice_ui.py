@@ -13,7 +13,7 @@ STYLES = SCRIPT.with_name("styles.css")
 
 
 def _javascript_between(start: str, end: str) -> str:
-    source = SCRIPT.read_text()
+    source = SCRIPT.read_text(encoding="utf-8")
     return source[source.index(start):source.index(end)]
 
 
@@ -28,8 +28,8 @@ def _run_javascript(source: str) -> None:
 
 
 def test_decision_hierarchy_and_visible_copy():
-    page = PAGE.read_text()
-    styles = STYLES.read_text()
+    page = PAGE.read_text(encoding="utf-8")
+    styles = STYLES.read_text(encoding="utf-8")
     assert page.index('id="target-name"') < page.index('id="primary-intent-choice"')
     assert page.index('id="primary-intent-choice"') < page.index('id="decision-essential"')
     assert page.index('id="decision-essential"') < page.index('id="open-mission"')
@@ -195,7 +195,7 @@ assert.equal(alternativeReasonText({message: ' . '}), null);
 assert.equal(alternativeReasonText({message: '  '}), null);
 assert.equal(alternativeReasonText({message: 'Fiabilité météo limitée.'}), 'Fiabilité météo limitée.');
 """)
-    script = SCRIPT.read_text()
+    script = SCRIPT.read_text(encoding="utf-8")
     assert 'low: "faible", medium: "modéré", high: "élevé"' in script
     assert 'labels.riskLevels[level]' in script
 
