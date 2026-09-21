@@ -10,6 +10,7 @@ from decision.models.candidate import Candidate, CandidateProvenance
 
 class CandidateRejectionBasis(str, Enum):
     NON_POSITIVE_EVALUATION_SCORE = "non_positive_evaluation_score"
+    INTENT_TARGETS_COMPLETED = "intent_targets_completed"
 
 
 @dataclass(frozen=True)

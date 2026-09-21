@@ -13,6 +13,7 @@ class AcquisitionIntentEligibilityStatus(str, Enum):
 class AcquisitionIntentEligibilityReason(str, Enum):
     INTENT_NOT_IN_IMAGING_FIELD = "intent_not_in_imaging_field"
     INTENT_NOT_TARGETED_BY_PROJECT = "intent_not_targeted_by_project"
+    INTENT_TARGET_COMPLETED = "intent_target_completed"
     REQUIRED_FILTER_UNAVAILABLE = "required_filter_unavailable"
     INSUFFICIENT_ACTIONABLE_PRODUCTIVE_WINDOW = (
         "insufficient_actionable_productive_window"

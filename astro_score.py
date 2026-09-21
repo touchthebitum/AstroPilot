@@ -81,6 +81,8 @@ from decision.services.project_imaging_field_resolution import (
 from decision.services.project_acquisition_intent_targets import (
     resolve_project_acquisition_intent_targets,
 )
+from decision.services.project_acquisition_intent_progress import resolve_project_acquisition_intent_progress
+from decision.services.acquisition_intent_remaining_progress import derive_acquisition_intent_remaining_progress
 from decision.definitions.production_setup_filter_capabilities import (
     build_production_setup_filter_capabilities_resolver,
 )
@@ -808,6 +810,24 @@ def recommend_project_for_night(
             project,
             imaging_field_resolver,
         )
+        intent_remaining_progress = (
+            derive_acquisition_intent_remaining_progress(
+                imaging_field, project_targets,
+                resolve_project_acquisition_intent_progress(project, imaging_field_resolver),
+            ) if imaging_field is not None else ()
+        )
+        if project_targets and all(
+            next(item for item in intent_remaining_progress
+                 if item.acquisition_intent_id == target.acquisition_intent_id).completed
+            for target in project_targets
+        ):
+            rejections.append(CandidateRejection(
+                target=obj["name"], catalog_key=catalog_key,
+                provenance=CandidateProvenance.PROJECT,
+                basis=CandidateRejectionBasis.INTENT_TARGETS_COMPLETED,
+                evaluation_score=astro_score,
+            ))
+            continue
         if imaging_field is not None and project_targets:
             setup_filter_capabilities = None
             try:
@@ -841,6 +861,7 @@ def recommend_project_for_night(
                 compose_acquisition_intent_selection(
                     imaging_field=imaging_field,
                     project_targets=project_targets,
+                    remaining_progress=intent_remaining_progress,
                     setup_filter_capabilities=setup_filter_capabilities,
                     productive_window=(
                         assessment.productive_window
@@ -1013,6 +1034,7 @@ def recommend_project_for_night(
                     else None
                 ),
                 acquisition_intent_selection=acquisition_intent_selection,
+                acquisition_intent_remaining_progress=intent_remaining_progress,
             )
         )
 

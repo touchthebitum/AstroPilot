@@ -1,4 +1,5 @@
 import json
+import math
 import shutil
 from pathlib import Path
 
@@ -42,6 +43,19 @@ def detailed(intent, frames, seconds=300):
             "exposure_seconds": seconds}
 
 
+def test_derived_read_only_projection_after_save(client):
+    targets = [{"acquisition_intent_id": HA, "target_hours": 2}]
+    saved = put(client, imaging_field_id=FIELD, acquisition_intent_targets=targets,
+                acquisition_intent_progress=[detailed(HA, 24)])
+    assert saved.status_code == 200, saved.text
+    item, unknown = saved.json()["acquisition_intent_remaining_progress"]
+    assert item == {"acquisition_intent_id": HA, "acquired_seconds": 7200,
+                    "acquired_hours": 2, "target_hours": 2, "remaining_hours": 0}
+    assert unknown["acquired_hours"] is None and unknown["remaining_hours"] is None
+    assert client.get(path()).json()["acquisition_intent_remaining_progress"] == [item, unknown]
+    assert "acquisition_intent_remaining_progress" not in load_user_profile()["projects"]["Sh2-129"]
+
+
 def test_detailed_round_trip_and_legacy_hours_unchanged(client):
     entries = [detailed(HA, 159), detailed(OIII, 43)]
     saved = put(client, imaging_field_id=FIELD, acquisition_intent_progress=entries)
@@ -52,6 +66,20 @@ def test_detailed_round_trip_and_legacy_hours_unchanged(client):
     assert client.get(path()).json()["acquisition_intent_progress"] == entries
     assert load_user_profile()["projects"]["Sh2-129"]["hours"] == 2
     assert load_user_profile()["projects"]["Sh2-129"]["target_hours"] == 20
+
+
+def test_extreme_finite_product_is_projected_without_persisting_derivation(client):
+    entry = detailed(HA, 10**309, 1e-310)
+    saved = put(client, imaging_field_id=FIELD, acquisition_intent_progress=[entry],
+                acquisition_intent_targets=[{"acquisition_intent_id": HA, "target_hours": 2}])
+    assert saved.status_code == 200, saved.text
+    projected = saved.json()["acquisition_intent_remaining_progress"][0]
+    assert math.isclose(projected["acquired_seconds"], 0.1, rel_tol=1e-12)
+    assert projected["remaining_hours"] == 2 - projected["acquired_hours"]
+    assert client.get(path()).json()["acquisition_intent_remaining_progress"][0] == projected
+    persisted = load_user_profile()["projects"]["Sh2-129"]
+    assert persisted["acquisition_intent_progress"] == [entry]
+    assert "acquisition_intent_remaining_progress" not in persisted
 
 
 def test_manual_unknown_zero_clear_and_optional_target(client):
@@ -81,6 +109,8 @@ def test_manual_unknown_zero_clear_and_optional_target(client):
     [detailed(HA, 1, -1)],
     [detailed(HA, 1, float("inf"))],
     [detailed(HA, 10**10, 1e308)],
+    [detailed(HA, 10**400, 1.0)],
+    [{"acquisition_intent_id": HA, "acquired_duration_manual": 10**400}],
     [{"acquisition_intent_id": HA, "acquired_duration_manual": -1}],
     [{"acquisition_intent_id": HA, "acquired_duration_manual": float("nan")}],
     [detailed(HA, 1), detailed(HA, 2)],
