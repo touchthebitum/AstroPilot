@@ -262,6 +262,7 @@ button { color: inherit; }
 .alternatives-panel h3 { margin: 0; font-size: 17px; font-weight: 600; }
 .alternatives-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
 .alternative-card { display: flex; gap: 18px; align-items: center; justify-content: space-between; min-width: 0; padding: 17px 18px; background: rgba(255,255,255,.025); border: 1px solid var(--line); border-radius: 12px; }
+.alternative-card.has-intent { align-items: stretch; flex-direction: column; }
 .alternative-copy { min-width: 0; }
 .alternative-copy h4 { margin: 0; font-family: Georgia, serif; font-size: 19px; font-weight: 400; }
 .alternative-reasons { display: grid; gap: 4px; margin: 8px 0 0; padding: 0; color: var(--muted); font-size: 11px; list-style: none; }
@@ -273,6 +274,10 @@ button { color: inherit; }
 .decision-footer > div { flex: 1; }
 .acceptance-status { margin-top: 7px !important; color: var(--cyan) !important; }
 .acceptance-status.error { color: #ffd0cc !important; }
+.intent-choice { margin-top: 10px; color: var(--muted); font-size: 12px; }
+.intent-choice label { display: block; margin-bottom: 6px; color: var(--ink); }
+.intent-choice select { max-width: 100%; padding: 8px 10px; color: var(--ink); background: var(--surface, #102033); border: 1px solid var(--line); border-radius: 8px; }
+.intent-choice .intent-warning { color: #ffd0cc; }
 .mission-button { display: inline-flex; gap: 8px; align-items: center; padding: 10px 14px; color: #95a3b5; background: rgba(255,255,255,.025); border: 1px solid var(--line); border-radius: 10px; }
 .mission-button svg { width: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; }
 .mission-button { cursor: pointer; }

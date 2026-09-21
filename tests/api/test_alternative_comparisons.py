@@ -217,6 +217,9 @@ def test_api_comparisons_default_to_empty_and_have_exact_public_schema():
     assert set(alternative["properties"]) == {
         "target", "catalog_key", "provenance", "decision_score", "final_score",
         "target_decision_status", "reasons",
+        "imaging_field_id", "selected_acquisition_intent_id",
+        "viable_acquisition_intent_ids", "acquisition_intent_selection_status",
+        "acquisition_intent_options",
     }
     alternative_reason = schemas[
         alternative["properties"]["reasons"]["items"]["$ref"].split("/")[-1]

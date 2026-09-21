@@ -21,6 +21,7 @@ from decision.mission.mission_input import MissionInput
 from decision.mission.night_mission import NightMission
 from decision.mission.mission_assembler import ProductiveWindowAssessment
 from decision.models.candidate import Candidate, CandidateProvenance
+from decision.models.acquisition_intent_selection import AcquisitionIntentSelectionStatus
 from decision.models.candidate_rejection import (
     CandidateRejection,
     CandidateRejectionBasis,
@@ -132,6 +133,40 @@ def make_result(*, decision_id=None):
         ),
         decision_id=decision_id,
     )
+
+
+@pytest.mark.parametrize(
+    ("selected", "viable", "status", "labels"),
+    [
+        ("sh2-129_ha", ("sh2-129_ha",), AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT, ["Hα · Sh2-129"]),
+        (None, ("sh2-129_ha", "ou4_oiii"), AcquisitionIntentSelectionStatus.NO_CLEAR_PREFERENCE, ["Hα · Sh2-129", "OIII · Ou4"]),
+        (None, (), AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT, []),
+    ],
+)
+def test_tonight_intent_options_follow_first_class_frontier(selected, viable, status, labels):
+    result = make_result(decision_id="decision-intent")
+    opportunity = result.recommendation.opportunity
+    candidate = replace(
+        opportunity.candidate,
+        imaging_field_id="sh2-129_ou4",
+        selected_acquisition_intent_id=selected,
+        viable_acquisition_intent_ids=viable,
+        acquisition_intent_selection_status=status,
+    )
+    result = replace(result, recommendation=replace(
+        result.recommendation,
+        opportunity=replace(opportunity, candidate=candidate),
+    ))
+
+    response = make_client(result=result).post("/v1/tonight", json={})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["selected_acquisition_intent_id"] == selected
+    assert payload["viable_acquisition_intent_ids"] == list(viable)
+    assert payload["acquisition_intent_selection_status"] == status.value
+    assert [option["label"] for option in payload["acquisition_intent_options"]] == labels
+    assert [option["acquisition_intent_id"] for option in payload["acquisition_intent_options"]] == list(viable)
 
 
 @pytest.mark.parametrize(
@@ -504,6 +539,9 @@ def test_gp04_api_exposes_only_physically_viable_actionable_alternatives(monkeyp
         catalog_key="M33",
         decision_score=72.0,
         final_score=73.0,
+        imaging_field_id="sh2-129_ou4",
+        viable_acquisition_intent_ids=("sh2-129_ha", "ou4_oiii"),
+        acquisition_intent_selection_status=AcquisitionIntentSelectionStatus.NO_CLEAR_PREFERENCE,
     )
     recommendation = Recommendation(
         opportunity=Opportunity(
@@ -589,6 +627,8 @@ def test_gp04_api_exposes_only_physically_viable_actionable_alternatives(monkeyp
     assert CandidateViabilityEvaluator.is_viable(assessments["M42"]) is True
     assert CandidateViabilityEvaluator.is_viable(assessments["M33"]) is True
     assert [entry["catalog_key"] for entry in payload["alternatives"]] == ["M33"]
+    assert payload["alternatives"][0]["viable_acquisition_intent_ids"] == ["sh2-129_ha", "ou4_oiii"]
+    assert [option["label"] for option in payload["alternatives"][0]["acquisition_intent_options"]] == ["Hα · Sh2-129", "OIII · Ou4"]
     physical_shortlist = {
         entry["catalog_key"]: entry for entry in payload["shortlist_entries"]
     }

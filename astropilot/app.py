@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
+from decision.definitions.production_imaging_fields import build_production_imaging_field_resolver
 from astropilot.user_profile import (
     ProfileRecoveryConflictError,
     ProfileRevisionConflictError,
@@ -901,6 +902,14 @@ class AlternativeReasonResponseModel(BaseModel):
     rendered: RecommendationReasonRenderingResponseModel | None = None
 
 
+class TonightAcquisitionIntentOptionModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    acquisition_intent_id: str
+    filter_type: str
+    label: str
+
+
 class TonightAlternativeModel(BaseModel):
     target: str
     catalog_key: str
@@ -909,6 +918,11 @@ class TonightAlternativeModel(BaseModel):
     final_score: float
     target_decision_status: TargetDecisionStatus | None = None
     reasons: tuple[AlternativeReasonResponseModel, ...] = ()
+    imaging_field_id: str | None = None
+    selected_acquisition_intent_id: str | None = None
+    viable_acquisition_intent_ids: tuple[str, ...] = ()
+    acquisition_intent_selection_status: AcquisitionIntentSelectionStatus | None = None
+    acquisition_intent_options: list[TonightAcquisitionIntentOptionModel] = Field(default_factory=list)
 
 
 class TonightRejectedTargetModel(BaseModel):
@@ -1169,6 +1183,7 @@ class TonightResponseModel(BaseModel):
     imaging_field_id: str | None = None
     selected_acquisition_intent_id: str | None = None
     viable_acquisition_intent_ids: tuple[str, ...] = ()
+    acquisition_intent_options: list[TonightAcquisitionIntentOptionModel] = Field(default_factory=list)
     acquisition_intent_selection_status: (
         AcquisitionIntentSelectionStatus | None
     ) = None
@@ -1213,6 +1228,40 @@ class TonightResponseModel(BaseModel):
     target_explanations: list[TargetExplanationResponseModel] = Field(
         default_factory=list
     )
+
+
+def _intent_options(candidate) -> list[dict[str, str]]:
+    """Present only viable intents from their first-class field definitions."""
+    field_id = getattr(candidate, "imaging_field_id", None)
+    viable_ids = getattr(candidate, "viable_acquisition_intent_ids", ())
+    if not field_id or not viable_ids:
+        return []
+    try:
+        resolver = build_production_imaging_field_resolver()
+        field = resolver.resolve(field_id)
+    except ValueError:
+        return []
+    definitions = {
+        intent.acquisition_intent_id: intent
+        for intent in field.acquisition_intents
+    }
+    if any(intent_id not in definitions for intent_id in viable_ids):
+        return []
+    filter_labels = {"Ha": "Hα", "OIII": "OIII", "SII": "SII"}
+    options = []
+    for intent_id in viable_ids:
+        intent = definitions[intent_id]
+        objects = " + ".join(
+            resolver.resolve_object(component_id).canonical_name
+            for component_id in intent.primary_component_ids
+        )
+        filter_label = filter_labels.get(intent.filter_type, intent.filter_type)
+        options.append({
+            "acquisition_intent_id": intent_id,
+            "filter_type": intent.filter_type,
+            "label": f"{filter_label} · {objects}",
+        })
+    return options
 
 
 def _production_service_factory():
@@ -2263,6 +2312,22 @@ def create_app(
             primary_reasons=primary_reason_entries,
             target_explanations=target_explanations,
         ).to_dict()
+        if opportunity is not None:
+            payload["acquisition_intent_options"] = _intent_options(
+                opportunity.candidate
+            )
+        for alternative_payload, candidate in zip(
+            payload["alternatives"], selected_alternatives
+        ):
+            alternative_payload.update({
+                "imaging_field_id": candidate.imaging_field_id,
+                "selected_acquisition_intent_id": candidate.selected_acquisition_intent_id,
+                "viable_acquisition_intent_ids": candidate.viable_acquisition_intent_ids,
+                "acquisition_intent_selection_status": (
+                    candidate.acquisition_intent_selection_status
+                ),
+                "acquisition_intent_options": _intent_options(candidate),
+            })
         register_decision_context = getattr(
             application_service(),
             "register_decision_context",
