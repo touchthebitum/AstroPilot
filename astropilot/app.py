@@ -1610,6 +1610,16 @@ def _configuration_validation_code(exc: UserProfileError) -> str:
     return "configuration_invalid_site"
 
 
+_CONFIGURATION_INTENT_PROGRESS_CONFLICT_CODES = frozenset({
+    "intent_progress_baseline_invalid",
+    "intent_progress_baseline_required",
+    "intent_progress_baseline_immutable",
+    "intent_progress_credits_immutable",
+    "intent_progress_field_locked",
+    "intent_progress_base_locked",
+})
+
+
 def create_app(
     *,
     service_factory: Callable = _production_service_factory,
@@ -1949,7 +1959,7 @@ def create_app(
             ) from exc
         except UserProfileError as exc:
             code = _configuration_validation_code(exc)
-            status_code = 409 if code.startswith("intent_progress_") else 422
+            status_code = 409 if code in _CONFIGURATION_INTENT_PROGRESS_CONFLICT_CODES else 422
             raise HTTPException(
                 status_code=status_code,
                 detail={"code": code, "message": "The configuration request is invalid."},

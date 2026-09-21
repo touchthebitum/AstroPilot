@@ -595,10 +595,11 @@ def test_persisted_corrupt_credit_ledger_is_503_on_configuration_and_progress(
 
 
 @pytest.mark.parametrize("ledger, expected_status, expected_code", [
-    ({"execution-1": {"total_duration_us": 42}}, 409, "intent_progress_ledger_invalid"),
+    ({"execution-1": {"total_duration_us": 42}}, 422, "intent_progress_ledger_invalid"),
+    ({"execution-1": {}}, 422, "intent_progress_ledger_invalid"),
     (["not a ledger"], 422, "configuration_invalid_site"),
 ])
-def test_invalid_candidate_ledger_keeps_business_status_without_writing(
+def test_invalid_candidate_ledger_is_422_without_writing(
     client, tmp_path, monkeypatch, ledger, expected_status, expected_code,
 ):
     created = client.put("/v1/configuration", json=configuration_payload())

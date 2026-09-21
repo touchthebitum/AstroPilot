@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+import astro_score
 from astropilot.app import create_app
 from astropilot.user_profile import UserProfileError, get_user_data_dir, load_user_profile, save_user_profile
 from decision.models.execution import Execution, ExecutionStatus
@@ -48,7 +49,7 @@ def detailed(intent, frames, seconds=300):
             "exposure_seconds": seconds}
 
 
-def test_execution_credit_endpoint_projection_baseline_and_editor_guard(client):
+def test_execution_credit_endpoint_projection_baseline_and_editor_guard(client, monkeypatch):
     put(client, imaging_field_id=FIELD,
         acquisition_intent_progress=[{"acquisition_intent_id": OIII, "acquired_duration_manual": 3600}],
         acquisition_intent_targets=[{"acquisition_intent_id": OIII, "target_hours": 2}])
@@ -96,6 +97,10 @@ def test_execution_credit_endpoint_projection_baseline_and_editor_guard(client):
         "confirm_historical_baseline": True}).json()["status"] == "already_applied"
     replay = api.post(url, json={**body, "expected_revision": revision + 2})
     assert replay.status_code == 200 and replay.json()["status"] == "already_applied"
+    divergent = api.post(url, json={**body, "expected_revision": revision + 2,
+                                    "evidence_ids": ["evidence-2"]})
+    assert divergent.status_code == 409
+    assert divergent.json()["detail"]["code"] == "execution_credit_conflict"
     stale = api.post(url, json=body)
     assert stale.status_code == 409 and stale.json()["detail"]["code"] == "profile_revision_conflict"
     projection = api.get(path()).json()
@@ -106,6 +111,18 @@ def test_execution_credit_endpoint_projection_baseline_and_editor_guard(client):
     derived = next(item for item in projection["acquisition_intent_remaining_progress"]
                    if item["acquisition_intent_id"] == OIII)
     assert derived["acquired_seconds"] == 6300 and derived["remaining_hours"] == 0.25
+    monkeypatch.setattr(astro_score.future_engine, "estimate", lambda *args, **kwargs:
+                        SimpleNamespace(risk="FAIBLE", opportunity_ratio=1))
+    candidates = astro_score.recommend_project_for_night(
+        [{"name": "Sh2-129", "catalog_key": "Sh2-129", "global_score": 75}],
+        profile=load_user_profile(),
+    )
+    decision_progress = next(item for item in candidates[0].acquisition_intent_remaining_progress
+                             if item.acquisition_intent_id == OIII)
+    assert decision_progress.acquired_seconds == breakdown["effective_total_seconds"]
+    assert decision_progress.acquired_seconds == derived["acquired_seconds"]
+    assert decision_progress.remaining_hours == breakdown["remaining_hours"]
+    assert decision_progress.remaining_hours == derived["remaining_hours"]
     assert api.put(path(), json={"expected_revision": revision + 2,
         "acquisition_intent_progress": []}).json()["detail"]["code"] == "intent_progress_baseline_invalid"
     changed = api.put(path(), json={"expected_revision": revision + 2,
