@@ -31,6 +31,9 @@ from astropilot.user_profile import (
     resolve_equipment_definition,
 )
 from decision.models.candidate import CandidateProvenance
+from decision.models.acquisition_intent_selection import (
+    AcquisitionIntentSelectionStatus,
+)
 from decision.models.candidate_rejection import CandidateRejectionBasis
 from decision.models.session_availability import (
     SessionAvailability,
@@ -1163,6 +1166,12 @@ class TonightResponseModel(BaseModel):
     target_common_name: str | None = None
     action: str | None = None
     provenance: Literal["project", "discovery"] | None = None
+    imaging_field_id: str | None = None
+    selected_acquisition_intent_id: str | None = None
+    viable_acquisition_intent_ids: tuple[str, ...] = ()
+    acquisition_intent_selection_status: (
+        AcquisitionIntentSelectionStatus | None
+    ) = None
     target_decision_status: TargetDecisionStatus | None = None
     shortlist_entries: list[TonightShortlistEntryModel] = Field(
         default_factory=list
@@ -1973,6 +1982,23 @@ def create_app(
                 detail={
                     "code": exc.code,
                     "message": "The decision failed consistency validation.",
+                },
+            ) from exc
+        except WeatherWindowCoverageError as exc:
+            weather_invalid = "invalid_weather_coverage" in exc.issues
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": (
+                        "weather_invalid"
+                        if weather_invalid
+                        else "decision_invalid"
+                    ),
+                    "message": (
+                        "Weather data failed validation."
+                        if weather_invalid
+                        else "The decision failed consistency validation."
+                    ),
                 },
             ) from exc
         except (DecisionForecastEvidencePersistenceError, OSError) as exc:

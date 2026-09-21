@@ -19,6 +19,11 @@ from decision.models.session_availability import SessionAvailability
 from decision.recommendation.recommendation import Recommendation
 from decision.validation.decision_consistency import DecisionConsistencyGate
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
+from decision.weather.provider_reliability import WeatherLocation
+from decision.weather.weather_ingress import (
+    WeatherSnapshot,
+    validate_weather_freshness,
+)
 
 
 class TonightStatus(str, Enum):
@@ -199,10 +204,33 @@ class TonightApplicationService:
 
         night = sorted(nights, key=lambda item: item["date"])[0]
         top_objects = night.get("top_objects") or []
+        weather_snapshot = (
+            weather if isinstance(weather, WeatherSnapshot) else None
+        )
+        weather_freshness = (
+            validate_weather_freshness(
+                weather_snapshot,
+                reference_time_utc=reference_time_utc,
+            )
+            if weather_snapshot is not None
+            else None
+        )
         candidate_build = self.build_candidates(
             top_objects,
             available_hours=night.get("duration"),
             profile=effective_profile,
+            object_evaluations=night.get("object_evaluations", {}),
+            session_availability=inputs.availability,
+            weather_snapshot=weather_snapshot,
+            weather_freshness=weather_freshness,
+            decision_location=(
+                WeatherLocation(
+                    latitude=location["latitude"],
+                    longitude=location["longitude"],
+                )
+                if weather_snapshot is not None
+                else None
+            ),
         )
         if isinstance(candidate_build, CandidateBuildResult):
             candidates = list(candidate_build.candidates)

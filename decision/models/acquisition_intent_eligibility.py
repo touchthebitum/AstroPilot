@@ -25,6 +25,10 @@ class AcquisitionIntentEvidenceGap(str, Enum):
         "productive_window_evidence_missing"
     )
     WEATHER_EVIDENCE_INSUFFICIENT = "weather_evidence_insufficient"
+    FILTER_PROFILE_EVIDENCE_INSUFFICIENT = (
+        "filter_profile_evidence_insufficient"
+    )
+    LUNAR_EVIDENCE_INSUFFICIENT = "lunar_evidence_insufficient"
 
 
 @dataclass(frozen=True, slots=True)
