@@ -13,6 +13,7 @@ def derive_acquisition_intent_remaining_progress(
     imaging_field: ImagingFieldDefinition,
     targets: tuple[ProjectAcquisitionIntentTarget, ...],
     progress: tuple[dict, ...],
+    credits_us: dict[str, int] | None = None,
 ) -> tuple[AcquisitionIntentRemainingProgress, ...]:
     by_target = {item.acquisition_intent_id: item.target_hours for item in targets}
     by_progress = {item["acquisition_intent_id"]: item for item in progress}
@@ -31,6 +32,9 @@ def derive_acquisition_intent_remaining_progress(
                 seconds = calculated_duration_seconds(entry["acquired_frames"], entry["exposure_seconds"])
             if not math.isfinite(seconds):
                 raise ValueError("calculated duration must be finite")
+        credited = (credits_us or {}).get(intent_id, 0)
+        if credited:
+            seconds = (seconds or 0) + credited / 1_000_000
         hours = seconds / 3600 if seconds is not None else None
         target = by_target.get(intent_id)
         remaining = max(target - hours, 0.0) if target is not None and hours is not None else None

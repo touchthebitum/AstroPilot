@@ -950,6 +950,14 @@ function renderProjectProgressEditor(message = "") {
     fieldSelect.append(option);
   }
   fieldSelect.value = data.imaging_field_id || "";
+  const credited = new Set((data.intent_progress_breakdown || [])
+    .filter((item) => item.credits_us > 0).map((item) => item.acquisition_intent_id));
+  if (credited.size) {
+    fieldSelect.disabled = true;
+    const note = document.createElement("p");
+    note.textContent = "Ce champ contient des crédits d’exécution : le champ et leurs bases historiques sont verrouillés.";
+    fieldLabel.append(note);
+  }
   fieldLabel.append(fieldSelect);
   const intents = document.createElement("div");
   intents.id = "project-intents";
@@ -997,6 +1005,13 @@ function renderProjectProgressEditor(message = "") {
       mode.addEventListener("change", update);
       for (const input of [frames, exposure, manual]) input.querySelector("input").addEventListener("input", update);
       section.append(legend, mode, frames, exposure, manual, hours, computed);
+      if (credited.has(id)) {
+        mode.disabled = true;
+        for (const input of [frames, exposure, manual]) input.querySelector("input").disabled = true;
+        const note = document.createElement("p");
+        note.textContent = "Base verrouillée après crédit d’exécution ; l’objectif reste modifiable.";
+        section.append(note);
+      }
       intents.append(section);
       update();
     }
@@ -1078,6 +1093,11 @@ async function saveProjectProgress() {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     if (response.status === 409) {
+      const detail = (await response.json()).detail || {};
+      if (String(detail.code || "").startsWith("intent_progress_")) {
+        feedback.textContent = "Crédit d’exécution présent : cette base ou ce champ ne peut plus être modifié. Rechargez le projet pour voir les dernières valeurs.";
+        return;
+      }
       if (!confirmDiscardProjectProgress()) {
         feedback.textContent = "Le projet a changé. Votre saisie est conservée ; rechargez le projet avant de réessayer.";
         return;

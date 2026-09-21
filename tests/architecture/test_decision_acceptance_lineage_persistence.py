@@ -11,6 +11,10 @@ import astropilot.decision_acceptance_lineage_store as store_module
 from astropilot.decision_acceptance_lineage_store import (
     FileDecisionAcceptanceLineageStore,
 )
+from astropilot.execution_lineage_store import FileExecutionLineageStore
+from decision.models.execution import Execution, ExecutionStatus
+from decision.models.outcome_evidence import AcquisitionOutcomeEvidence, OutcomeEvidenceCategory, OutcomeEvidenceSource
+from decision.services.intent_progress_credit import apply_execution_credit, validate_credit_authority
 from decision.acceptance_lineage_persistence import (
     AcceptanceLineageConflictError,
     AcceptanceLineageCorruptionError,
@@ -990,6 +994,45 @@ def test_acceptance_request_replay_survives_store_reconstruction(tmp_path):
         selection(),
         mission(),
     )
+
+
+def test_credit_uses_reloaded_selection_mission_execution_and_evidence(tmp_path):
+    (tmp_path / "accepted").mkdir()
+    accepted = FileDecisionAcceptanceLineageStore(tmp_path / "accepted")
+    accepted.create_context(context())
+    accepted.commit_selection_and_mission(
+        selection(selected_imaging_field_id="sh2-129_ou4", selected_acquisition_intent_id="ou4_oiii"),
+        mission(imaging_field_id="sh2-129_ou4", acquisition_intent_id="ou4_oiii"),
+    )
+    (tmp_path / "executions").mkdir()
+    executions = FileExecutionLineageStore(tmp_path / "executions")
+    initial = Execution("execution-1", "mission-1", ExecutionStatus.NOT_STARTED, None, None, None)
+    executions.create_execution(initial)
+    executions.replace_execution(Execution("execution-1", "mission-1", ExecutionStatus.COMPLETED,
+        START, END, END - START), expected_execution=initial)
+    executions.append_evidence(AcquisitionOutcomeEvidence(
+        "evidence-1", "execution-1", OutcomeEvidenceCategory.ACQUISITION,
+        END, OutcomeEvidenceSource.USER, actual_capture_duration=END - START,
+        usable_integration_duration=timedelta(minutes=40, microseconds=11),
+    ))
+    profile = {"profile_revision": 0, "projects": {"M31": {
+        "hours": 2, "target_hours": 20, "imaging_field_id": "sh2-129_ou4"}}}
+    def save(candidate, *, expected_revision):
+        assert expected_revision == 0
+        validate_credit_authority(candidate, profile)
+        return {**candidate, "profile_revision": 1}
+    status, entry, revision = apply_execution_credit(
+        profile=deepcopy(profile), execution_id="execution-1", evidence_ids=("evidence-1",),
+        expected_revision=0, confirm_historical_baseline=False,
+        load_execution=FileExecutionLineageStore(tmp_path / "executions").load_execution,
+        load_evidence=FileExecutionLineageStore(tmp_path / "executions").load_evidence,
+        load_mission=FileDecisionAcceptanceLineageStore(tmp_path / "accepted").load_mission,
+        load_selection=FileDecisionAcceptanceLineageStore(tmp_path / "accepted").load_selection,
+        save_profile=save,
+    )
+    assert (status, revision, entry["total_duration_us"]) == ("applied", 1, 2_400_000_011)
+    assert (entry["decision_id"], entry["selection_id"], entry["mission_id"]) == (
+        "decision-1", "selection-1", "mission-1")
 
 
 @pytest.mark.parametrize(

@@ -1,13 +1,19 @@
 import json
 import math
 import shutil
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
+import astro_score
 from astropilot.app import create_app
-from astropilot.user_profile import load_user_profile
+from astropilot.user_profile import UserProfileError, get_user_data_dir, load_user_profile, save_user_profile
+from decision.models.execution import Execution, ExecutionStatus
+from decision.models.outcome_evidence import AcquisitionOutcomeEvidence, OutcomeEvidenceCategory, OutcomeEvidenceSource
+from decision.services.intent_progress_credit import apply_execution_credit
 
 
 PROJECT = {"hours": 2, "target_hours": 20, "importance": 9}
@@ -41,6 +47,141 @@ def put(client, **fields):
 def detailed(intent, frames, seconds=300):
     return {"acquisition_intent_id": intent, "acquired_frames": frames,
             "exposure_seconds": seconds}
+
+
+def test_execution_credit_endpoint_projection_baseline_and_editor_guard(client, monkeypatch):
+    put(client, imaging_field_id=FIELD,
+        acquisition_intent_progress=[{"acquisition_intent_id": OIII, "acquired_duration_manual": 3600}],
+        acquisition_intent_targets=[{"acquisition_intent_id": OIII, "target_hours": 2}])
+    start = datetime(2026, 9, 21, 20, tzinfo=timezone.utc)
+    mission = SimpleNamespace(mission_id="mission-1", decision_id="decision-1",
+                              selection_id="selection-1", imaging_field_id=FIELD,
+                              acquisition_intent_id=OIII, target="Sh2-129")
+    selection = SimpleNamespace(selection_id="selection-1", decision_id="decision-1",
+                                selected_catalog_key="Sh2-129", selected_imaging_field_id=FIELD,
+                                selected_acquisition_intent_id=OIII)
+    executions = {key: Execution(key, "mission-1", ExecutionStatus.COMPLETED,
+        start, start + timedelta(hours=3), timedelta(hours=3))
+        for key in ("execution-1", "execution-2")}
+    evidence = {key: AcquisitionOutcomeEvidence(key, execution_id,
+        OutcomeEvidenceCategory.ACQUISITION, start, OutcomeEvidenceSource.USER,
+        actual_capture_duration=timedelta(hours=3), usable_integration_duration=duration)
+        for key, execution_id, duration in (
+            ("evidence-1", "execution-1", timedelta(minutes=30)),
+            ("evidence-2", "execution-2", timedelta(minutes=15)))}
+
+    def apply(**kwargs):
+        return apply_execution_credit(profile=load_user_profile(),
+            load_execution=executions.get, load_mission=lambda _: mission,
+            load_selection=lambda _: selection, load_evidence=evidence.get,
+            save_profile=save_user_profile, **kwargs)
+
+    api = TestClient(create_app(service_factory=lambda: SimpleNamespace(apply_intent_progress_credit=apply)))
+    url = "/v1/executions/execution-1/intent-progress-credit"
+    revision = load_user_profile()["profile_revision"]
+    body = {"expected_revision": revision, "evidence_ids": ["evidence-1"]}
+    refused = api.post(url, json=body)
+    assert refused.status_code == 409 and refused.json()["detail"]["code"] == "intent_progress_baseline_confirmation_required"
+    assert load_user_profile()["profile_revision"] == revision
+    applied = api.post(url, json={**body, "confirm_historical_baseline": True})
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["status"] == "applied" and applied.json()["total_duration_us"] == 1_800_000_000
+    marker = json.loads(json.dumps(load_user_profile()["intent_progress_baselines"]["Sh2-129"][OIII]))
+    second_url = "/v1/executions/execution-2/intent-progress-credit"
+    second_body = {"expected_revision": revision + 1, "evidence_ids": ["evidence-2"]}
+    second = api.post(second_url, json=second_body)
+    assert second.status_code == 200, second.text
+    assert second.json()["status"] == "applied" and second.json()["total_duration_us"] == 900_000_000
+    assert load_user_profile()["intent_progress_baselines"]["Sh2-129"][OIII] == marker
+    assert api.post(second_url, json={**second_body, "expected_revision": revision + 2,
+        "confirm_historical_baseline": True}).json()["status"] == "already_applied"
+    replay = api.post(url, json={**body, "expected_revision": revision + 2})
+    assert replay.status_code == 200 and replay.json()["status"] == "already_applied"
+    divergent = api.post(url, json={**body, "expected_revision": revision + 2,
+                                    "evidence_ids": ["evidence-2"]})
+    assert divergent.status_code == 409
+    assert divergent.json()["detail"]["code"] == "execution_credit_conflict"
+    stale = api.post(url, json=body)
+    assert stale.status_code == 409 and stale.json()["detail"]["code"] == "profile_revision_conflict"
+    projection = api.get(path()).json()
+    breakdown = next(item for item in projection["intent_progress_breakdown"] if item["acquisition_intent_id"] == OIII)
+    assert breakdown == {"acquisition_intent_id": OIII, "base_seconds": 3600,
+                         "credits_us": 2_700_000_000, "effective_total_seconds": 6300,
+                         "remaining_hours": 0.25}
+    derived = next(item for item in projection["acquisition_intent_remaining_progress"]
+                   if item["acquisition_intent_id"] == OIII)
+    assert derived["acquired_seconds"] == 6300 and derived["remaining_hours"] == 0.25
+    monkeypatch.setattr(astro_score.future_engine, "estimate", lambda *args, **kwargs:
+                        SimpleNamespace(risk="FAIBLE", opportunity_ratio=1))
+    candidates = astro_score.recommend_project_for_night(
+        [{"name": "Sh2-129", "catalog_key": "Sh2-129", "global_score": 75}],
+        profile=load_user_profile(),
+    )
+    decision_progress = next(item for item in candidates[0].acquisition_intent_remaining_progress
+                             if item.acquisition_intent_id == OIII)
+    assert decision_progress.acquired_seconds == breakdown["effective_total_seconds"]
+    assert decision_progress.acquired_seconds == derived["acquired_seconds"]
+    assert decision_progress.remaining_hours == breakdown["remaining_hours"]
+    assert decision_progress.remaining_hours == derived["remaining_hours"]
+    assert api.put(path(), json={"expected_revision": revision + 2,
+        "acquisition_intent_progress": []}).json()["detail"]["code"] == "intent_progress_baseline_invalid"
+    changed = api.put(path(), json={"expected_revision": revision + 2,
+        "imaging_field_id": "ic1396"})
+    assert changed.status_code == 409
+    assert load_user_profile()["projects"]["Sh2-129"]["hours"] == 2
+    assert load_user_profile()["projects"]["Sh2-129"]["target_hours"] == 20
+    assert load_user_profile()["intent_progress_baselines"]["Sh2-129"][OIII] == marker
+
+    configuration = api.get("/v1/configuration").json()
+    config_update = {
+        "site": {key: configuration["site"][key]
+                 for key in ("name", "latitude", "longitude", "bortle")},
+        "equipment": {"preset_id": "samyang_183"},
+        "projects": configuration["projects"],
+        "expected_revision": configuration["profile_revision"],
+    }
+    before = load_user_profile()
+    conflicting = json.loads(json.dumps(config_update))
+    conflicting["projects"]["Sh2-129"]["acquisition_intent_progress"] = []
+    conflict = api.put("/v1/configuration", json=conflicting)
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "intent_progress_baseline_invalid"
+    assert load_user_profile() == before
+
+    valid = api.put("/v1/configuration", json=config_update)
+    assert valid.status_code == 200, valid.text
+    assert load_user_profile()["intent_progress_credits"] == before["intent_progress_credits"]
+    assert load_user_profile()["intent_progress_baselines"] == before["intent_progress_baselines"]
+    assert api.get(path()).json()["intent_progress_breakdown"] == projection["intent_progress_breakdown"]
+
+
+def test_duplicate_credit_json_key_fails_closed(client):
+    put(client, imaging_field_id=FIELD)
+    profile_path = get_user_data_dir() / "user_profile.json"
+    document = profile_path.read_text()
+    # Duplicate JSON object keys cannot be collapsed into a single credit.
+    document = document.replace('"profile_revision": 2', '"profile_revision": 2, "profile_revision": 2')
+    profile_path.write_text(document)
+    assert client.get(path()).status_code == 503
+
+
+def test_credit_api_distinguishes_candidate_conflict_from_corrupt_configuration(client):
+    def reject_credit(**kwargs):
+        raise UserProfileError("intent_progress_baseline_immutable")
+
+    api = TestClient(create_app(service_factory=lambda: SimpleNamespace(
+        apply_intent_progress_credit=reject_credit)))
+    url = "/v1/executions/execution-2/intent-progress-credit"
+    body = {"expected_revision": load_user_profile()["profile_revision"],
+            "evidence_ids": ["evidence-2"]}
+    conflict = api.post(url, json=body)
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "intent_progress_baseline_immutable"
+
+    (get_user_data_dir() / "user_profile.json").write_text("{invalid json")
+    corrupt = api.post(url, json=body)
+    assert corrupt.status_code == 503
+    assert corrupt.json()["detail"]["code"] == "configuration_corrupt"
 
 
 def test_derived_read_only_projection_after_save(client):

@@ -563,6 +563,89 @@ def test_corrupt_profile_fails_closed_without_path_disclosure(client, tmp_path):
     assert str(tmp_path) not in response.text
 
 
+@pytest.mark.parametrize("ledger", [
+    {"execution-1": {"total_duration_us": 42}},
+    ["not a ledger"],
+])
+def test_persisted_corrupt_credit_ledger_is_503_on_configuration_and_progress(
+    client, tmp_path, ledger,
+):
+    created = client.put("/v1/configuration", json=configuration_payload(
+        projects={"Sh2-129": {"hours": 2, "target_hours": 20}},
+    ))
+    assert created.status_code == 200
+    path = tmp_path / "user_profile.json"
+    profile = json.loads(path.read_text(encoding="utf-8"))
+    profile["intent_progress_credits"] = ledger
+    path.write_text(json.dumps(profile), encoding="utf-8")
+    before = path.read_bytes()
+
+    request = configuration_payload(
+        projects={"Sh2-129": {"hours": 2, "target_hours": 20}},
+        revision=profile["profile_revision"],
+    )
+    for response in (
+        client.get("/v1/configuration"),
+        client.get("/v1/projects/Sh2-129/progress"),
+        client.put("/v1/configuration", json=request),
+    ):
+        assert response.status_code == 503, response.text
+        assert response.json()["detail"]["code"] == "configuration_corrupt"
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("ledger, expected_status, expected_code", [
+    ({"execution-1": {"total_duration_us": 42}}, 422, "intent_progress_ledger_invalid"),
+    ({"execution-1": {}}, 422, "intent_progress_ledger_invalid"),
+    (["not a ledger"], 422, "configuration_invalid_site"),
+])
+def test_invalid_candidate_ledger_is_422_without_writing(
+    client, tmp_path, monkeypatch, ledger, expected_status, expected_code,
+):
+    created = client.put("/v1/configuration", json=configuration_payload())
+    assert created.status_code == 200
+    path = tmp_path / "user_profile.json"
+    before = path.read_bytes()
+    original = app_module._configuration_candidate
+
+    def invalid_candidate(*args, **kwargs):
+        candidate = original(*args, **kwargs)
+        candidate["intent_progress_credits"] = ledger
+        return candidate
+
+    monkeypatch.setattr(app_module, "_configuration_candidate", invalid_candidate)
+    response = client.put("/v1/configuration", json=configuration_payload(
+        revision=created.json()["profile_revision"],
+    ))
+    assert response.status_code == expected_status, response.text
+    assert response.json()["detail"]["code"] == expected_code
+    assert path.read_bytes() == before
+
+
+def test_ledger_corrupted_between_configuration_read_and_save_is_503(
+    client, tmp_path, monkeypatch,
+):
+    created = client.put("/v1/configuration", json=configuration_payload())
+    path = tmp_path / "user_profile.json"
+    original = app_module.create_or_replace_user_configuration
+    corrupted = []
+
+    def corrupt_before_save(*args, **kwargs):
+        profile = json.loads(path.read_text(encoding="utf-8"))
+        profile["intent_progress_credits"] = {"execution-1": {}}
+        path.write_text(json.dumps(profile), encoding="utf-8")
+        corrupted.append(path.read_bytes())
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(app_module, "create_or_replace_user_configuration", corrupt_before_save)
+    response = client.put("/v1/configuration", json=configuration_payload(
+        revision=created.json()["profile_revision"],
+    ))
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "configuration_corrupt"
+    assert path.read_bytes() == corrupted[0]
+
+
 def test_explicit_recovery_quarantines_invalid_json_and_restores_first_run(
     client,
     tmp_path,

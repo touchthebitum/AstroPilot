@@ -83,6 +83,7 @@ from decision.services.project_acquisition_intent_targets import (
 )
 from decision.services.project_acquisition_intent_progress import resolve_project_acquisition_intent_progress
 from decision.services.acquisition_intent_remaining_progress import derive_acquisition_intent_remaining_progress
+from decision.services.intent_progress_credit import credit_totals
 from decision.definitions.production_setup_filter_capabilities import (
     build_production_setup_filter_capabilities_resolver,
 )
@@ -814,6 +815,7 @@ def recommend_project_for_night(
             derive_acquisition_intent_remaining_progress(
                 imaging_field, project_targets,
                 resolve_project_acquisition_intent_progress(project, imaging_field_resolver),
+                credit_totals(profile, catalog_key),
             ) if imaging_field is not None else ()
         )
         if project_targets and all(
