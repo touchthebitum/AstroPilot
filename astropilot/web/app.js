@@ -60,6 +60,8 @@ const state = {
   requestingRecommendation: false,
   configurationErrorCode: null,
   recoveringConfiguration: false,
+  progressEditor: null,
+  progressEditorBaseline: null,
 };
 
 const PENDING_ACCEPTANCE_STORAGE_KEY = "astropilot.pendingAcceptance";
@@ -829,7 +831,28 @@ function toggleEquipmentKind() {
   document.querySelector("#custom-equipment").hidden = kind !== "custom";
 }
 
+function progressEditorSnapshot(fieldOverride = null) {
+  const editor = document.querySelector("#project-progress-editor");
+  if (!state.progressEditor || editor.hidden || !editor.querySelector("#project-imaging-field")) return null;
+  return JSON.stringify({
+    field: fieldOverride ?? editor.querySelector("#project-imaging-field").value,
+    intents: [...editor.querySelectorAll("fieldset[data-intent-id]")].map((section) => [
+      section.dataset.intentId,
+      ...[...section.querySelectorAll("input, select")].map((input) => input.value),
+    ]),
+  });
+}
+
+function confirmDiscardProjectProgress() {
+  return progressEditorSnapshot() === state.progressEditorBaseline
+    || window.confirm("Des modifications de l’avancement ne sont pas enregistrées. Les abandonner ?");
+}
+
 function renderProjects() {
+  if (!confirmDiscardProjectProgress()) return false;
+  document.querySelector("#project-progress-editor").hidden = true;
+  state.progressEditor = null;
+  state.progressEditorBaseline = null;
   const projects = state.configurationDraft.projects || {};
   const entries = Object.entries(projects);
   const summary = document.querySelector("#existing-projects");
@@ -842,11 +865,18 @@ function renderProjects() {
     const heading = document.createElement("p");
     heading.textContent = "Projets actuellement conservés";
     const explanation = document.createElement("p");
-    explanation.textContent = "Vos projets existants sont conservés. Leur création et leur modification seront disponibles dans une prochaine version bêta. Changer votre site ou votre matériel ne les supprimera pas.";
+    explanation.textContent = "Vos projets existants sont conservés. Ouvrez un projet pour renseigner son avancement par intention d’acquisition. Changer votre site ou votre matériel ne les supprimera pas.";
     const list = document.createElement("ul");
     for (const [catalogKey, project] of entries) {
       const item = document.createElement("li");
-      item.textContent = `${catalogKey} · ${project.hours} h sur ${project.target_hours} h`;
+      const label = document.createElement("span");
+      label.textContent = `${catalogKey} · ${project.hours} h sur ${project.target_hours} h (historique) `;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button";
+      button.textContent = "Ouvrir";
+      button.addEventListener("click", () => openProjectProgress(catalogKey));
+      item.append(label, button);
       list.append(item);
     }
     summary.append(heading, explanation, list);
@@ -855,6 +885,219 @@ function renderProjects() {
   } else {
     zeroProjects.checked = true;
     zeroProjects.disabled = true;
+  }
+  return true;
+}
+
+function progressDuration(seconds) {
+  if (seconds === null) return "non renseigné";
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${hours} h ${String(minutes).padStart(2, "0")}`;
+}
+
+function progressInput(label, value, field, type = "number") {
+  const wrapper = document.createElement("label");
+  wrapper.textContent = label;
+  const input = document.createElement("input");
+  input.type = type;
+  input.min = field === "exposure_seconds" || field === "target_hours" ? "0.000001" : "0";
+  input.step = field === "acquired_frames" ? "1" : "any";
+  input.value = value ?? "";
+  input.dataset.field = field;
+  wrapper.append(input);
+  return wrapper;
+}
+
+async function openProjectProgress(projectId, { discardConfirmed = false } = {}) {
+  if (!discardConfirmed && !confirmDiscardProjectProgress()) return;
+  const editor = document.querySelector("#project-progress-editor");
+  editor.hidden = false;
+  editor.textContent = "Chargement du projet…";
+  state.progressEditor = null;
+  state.progressEditorBaseline = null;
+  try {
+    const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/progress`);
+    if (!response.ok) throw new Error("load failed");
+    state.progressEditor = await response.json();
+    renderProjectProgressEditor();
+  } catch (_error) {
+    editor.textContent = "Le projet ne peut pas être ouvert. Réessayez.";
+  }
+}
+
+function renderProjectProgressEditor(message = "") {
+  const data = state.progressEditor;
+  const editor = document.querySelector("#project-progress-editor");
+  editor.replaceChildren();
+  const heading = document.createElement("h3");
+  heading.textContent = data.project_id;
+  const feedback = document.createElement("p");
+  feedback.className = "project-progress-feedback";
+  feedback.textContent = message;
+  const fieldLabel = document.createElement("label");
+  fieldLabel.textContent = "Champ d’imagerie ";
+  const fieldSelect = document.createElement("select");
+  fieldSelect.id = "project-imaging-field";
+  const unknown = document.createElement("option");
+  unknown.value = "";
+  unknown.textContent = "Choisir explicitement un champ";
+  fieldSelect.append(unknown);
+  for (const field of data.imaging_fields) {
+    const option = document.createElement("option");
+    option.value = field.imaging_field_id;
+    option.textContent = field.display_name;
+    fieldSelect.append(option);
+  }
+  fieldSelect.value = data.imaging_field_id || "";
+  fieldLabel.append(fieldSelect);
+  const intents = document.createElement("div");
+  intents.id = "project-intents";
+  const renderIntents = () => {
+    intents.replaceChildren();
+    const selected = data.imaging_fields.find((field) => field.imaging_field_id === fieldSelect.value);
+    if (!selected) {
+      intents.textContent = "Choisissez un champ pour voir ses intentions d’acquisition.";
+      return;
+    }
+    for (const intent of selected.acquisition_intents) {
+      const id = intent.acquisition_intent_id;
+      const progress = (data.acquisition_intent_progress || []).find((item) => item.acquisition_intent_id === id);
+      const target = (data.acquisition_intent_targets || []).find((item) => item.acquisition_intent_id === id);
+      const section = document.createElement("fieldset");
+      section.dataset.intentId = id;
+      const legend = document.createElement("legend");
+      legend.textContent = `${id} · ${intent.filter_type}`;
+      const mode = document.createElement("select");
+      mode.dataset.field = "mode";
+      for (const [value, label] of [["unknown", "non renseigné"], ["detailed", "Poses × secondes"], ["manual", "Durée manuelle (secondes)"]]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        mode.append(option);
+      }
+      mode.value = progress?.acquired_frames !== undefined ? "detailed"
+        : progress?.acquired_duration_manual !== undefined ? "manual" : "unknown";
+      const frames = progressInput("Poses acquises ", progress?.acquired_frames, "acquired_frames");
+      const exposure = progressInput("Secondes par pose ", progress?.exposure_seconds, "exposure_seconds");
+      const manual = progressInput("Durée acquise (secondes) ", progress?.acquired_duration_manual, "acquired_duration_manual");
+      const hours = progressInput("Objectif (heures, facultatif) ", target?.target_hours, "target_hours");
+      const computed = document.createElement("output");
+      const update = () => {
+        frames.hidden = exposure.hidden = mode.value !== "detailed";
+        manual.hidden = mode.value !== "manual";
+        const count = Number(frames.querySelector("input").value);
+        const seconds = Number(exposure.querySelector("input").value);
+        const duration = Number(manual.querySelector("input").value);
+        const known = mode.value === "detailed"
+          ? frames.querySelector("input").value !== "" && exposure.querySelector("input").value !== "" && Number.isFinite(count * seconds)
+          : mode.value === "manual" && manual.querySelector("input").value !== "" && Number.isFinite(duration);
+        computed.textContent = `Durée calculée : ${progressDuration(known ? mode.value === "detailed" ? count * seconds : duration : null)}`;
+      };
+      mode.addEventListener("change", update);
+      for (const input of [frames, exposure, manual]) input.querySelector("input").addEventListener("input", update);
+      section.append(legend, mode, frames, exposure, manual, hours, computed);
+      intents.append(section);
+      update();
+    }
+  };
+  let displayedField = fieldSelect.value;
+  fieldSelect.addEventListener("change", () => {
+    const selected = data.imaging_fields.find((item) => item.imaging_field_id === fieldSelect.value);
+    const validIds = new Set(selected?.acquisition_intents.map((intent) => intent.acquisition_intent_id) || []);
+    const removed = [...(data.acquisition_intent_progress || []), ...(data.acquisition_intent_targets || [])]
+      .filter((item) => !validIds.has(item.acquisition_intent_id))
+      .map((item) => item.acquisition_intent_id);
+    const edited = progressEditorSnapshot(displayedField) !== state.progressEditorBaseline;
+    if ((edited || removed.length) && !window.confirm(
+      `${edited ? "Les modifications non enregistrées seront abandonnées. " : ""}`
+      + `${removed.length ? `Changer de champ supprimera l’avancement et les objectifs des intentions incompatibles (${[...new Set(removed)].join(", ")}) à l’enregistrement. ` : ""}`
+      + "Continuer ?",
+    )) {
+      fieldSelect.value = displayedField;
+      return;
+    }
+    displayedField = fieldSelect.value;
+    renderIntents();
+  });
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "primary-button";
+  save.textContent = "Enregistrer l’avancement";
+  save.addEventListener("click", saveProjectProgress);
+  editor.append(heading, feedback, fieldLabel, intents, save);
+  renderIntents();
+  state.progressEditorBaseline = progressEditorSnapshot();
+}
+
+async function saveProjectProgress() {
+  const data = state.progressEditor;
+  const editor = document.querySelector("#project-progress-editor");
+  const feedback = editor.querySelector(".project-progress-feedback");
+  const field = editor.querySelector("#project-imaging-field").value;
+  if (!field) {
+    feedback.textContent = "Choisissez un champ d’imagerie.";
+    return;
+  }
+  const progress = [];
+  const targets = [];
+  for (const section of editor.querySelectorAll("fieldset[data-intent-id]")) {
+    const id = section.dataset.intentId;
+    const value = (name) => section.querySelector(`[data-field="${name}"]`).value;
+    const mode = value("mode");
+    if (mode === "detailed") {
+      const frames = Number(value("acquired_frames"));
+      const seconds = Number(value("exposure_seconds"));
+      if (value("acquired_frames") === "" || !Number.isInteger(frames) || frames < 0
+          || value("exposure_seconds") === "" || !Number.isFinite(seconds) || seconds <= 0) {
+        feedback.textContent = `Corrigez les poses et la durée de ${id}.`;
+        return;
+      }
+      progress.push({ acquisition_intent_id: id, acquired_frames: frames, exposure_seconds: seconds });
+    } else if (mode === "manual") {
+      const duration = Number(value("acquired_duration_manual"));
+      if (value("acquired_duration_manual") === "" || !Number.isFinite(duration) || duration < 0) {
+        feedback.textContent = `Corrigez la durée de ${id}.`;
+        return;
+      }
+      progress.push({ acquisition_intent_id: id, acquired_duration_manual: duration });
+    }
+    if (value("target_hours") !== "") {
+      const targetHours = Number(value("target_hours"));
+      if (!Number.isFinite(targetHours) || targetHours <= 0) {
+        feedback.textContent = `Corrigez l’objectif de ${id}.`;
+        return;
+      }
+      targets.push({ acquisition_intent_id: id, target_hours: targetHours });
+    }
+  }
+  const body = { expected_revision: data.profile_revision, imaging_field_id: field,
+    acquisition_intent_progress: progress, acquisition_intent_targets: targets };
+  try {
+    const response = await fetch(`/v1/projects/${encodeURIComponent(data.project_id)}/progress`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    if (response.status === 409) {
+      if (!confirmDiscardProjectProgress()) {
+        feedback.textContent = "Le projet a changé. Votre saisie est conservée ; rechargez le projet avant de réessayer.";
+        return;
+      }
+      await openProjectProgress(data.project_id, { discardConfirmed: true });
+      state.progressEditor && (document.querySelector(".project-progress-feedback").textContent =
+        "Le projet a changé. Les dernières valeurs ont été rechargées ; vérifiez-les avant de réenregistrer.");
+      return;
+    }
+    if (!response.ok) throw new Error("save failed");
+    state.progressEditor = await response.json();
+    state.configuration.profile_revision = state.progressEditor.profile_revision;
+    const project = state.configuration.projects[data.project_id];
+    project.imaging_field_id = field;
+    project.acquisition_intent_progress = progress;
+    project.acquisition_intent_targets = targets;
+    state.configurationDraft.projects[data.project_id] = structuredClone(project);
+    renderProjectProgressEditor("Avancement enregistré.");
+  } catch (_error) {
+    feedback.textContent = "L’avancement n’a pas pu être enregistré. Vérifiez les valeurs et réessayez.";
   }
 }
 
@@ -1718,11 +1961,11 @@ document.querySelector("#equipment-next").addEventListener("click", () => {
   }
   state.configurationDraft.equipment = equipment;
   showFormError("");
-  renderProjects();
-  setView("projects");
+  if (renderProjects()) setView("projects");
 });
 
 document.querySelector("#projects-next").addEventListener("click", () => {
+  if (!confirmDiscardProjectProgress()) return;
   showFormError("");
   renderReview();
   setView("review");
@@ -1730,6 +1973,7 @@ document.querySelector("#projects-next").addEventListener("click", () => {
 
 for (const button of document.querySelectorAll("[data-back]")) {
   button.addEventListener("click", () => {
+    if (state.view === "projects" && button.dataset.back !== "projects" && !confirmDiscardProjectProgress()) return;
     showFormError("");
     setView(button.dataset.back);
   });

@@ -20,7 +20,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
-from decision.definitions.production_imaging_fields import build_production_imaging_field_resolver
+from decision.definitions.production_imaging_fields import (
+    IMAGING_FIELD_DEFINITIONS,
+    build_production_imaging_field_resolver,
+)
 from astropilot.user_profile import (
     ProfileRecoveryConflictError,
     ProfileRevisionConflictError,
@@ -30,6 +33,7 @@ from astropilot.user_profile import (
     load_user_profile,
     quarantine_corrupt_user_profile,
     resolve_equipment_definition,
+    save_user_profile,
 )
 from decision.models.candidate import CandidateProvenance
 from decision.models.acquisition_intent_selection import (
@@ -284,6 +288,10 @@ class ProjectConfigurationModel(BaseModel):
         default=None,
         exclude_if=lambda value: value is None,
     )
+    acquisition_intent_progress: tuple[dict[str, Any], ...] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def validate_progress(self):
@@ -297,6 +305,11 @@ class ProjectConfigurationModel(BaseModel):
             and self.acquisition_intent_targets is None
         ):
             raise ValueError("project_acquisition_intent_targets_invalid")
+        if (
+            "acquisition_intent_progress" in self.model_fields_set
+            and self.acquisition_intent_progress is None
+        ):
+            raise ValueError("project_acquisition_intent_progress_invalid")
         if self.hours > self.target_hours:
             raise ValueError("project_hours_exceed_target")
         return self
@@ -309,6 +322,25 @@ class ConfigurationWriteRequest(BaseModel):
     equipment: EquipmentConfigurationRequest
     projects: dict[str, ProjectConfigurationModel]
     expected_revision: int | None = Field(default=None, ge=0)
+
+
+class ProjectProgressWriteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=0, strict=True)
+    imaging_field_id: str | None = None
+    acquisition_intent_progress: tuple[dict[str, Any], ...] | None = None
+    acquisition_intent_targets: tuple[ProjectAcquisitionIntentTargetModel, ...] | None = None
+
+    @model_validator(mode="after")
+    def reject_null_replacements(self):
+        for name in (
+            "imaging_field_id", "acquisition_intent_progress",
+            "acquisition_intent_targets",
+        ):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
 
 
 class ConfigurationRecoveryRequest(BaseModel):
@@ -1453,6 +1485,10 @@ def _configuration_projection(profile: dict | None) -> ConfigurationResponse:
                 if "acquisition_intent_targets" in project
                 else {}
             ),
+            **(
+                {"acquisition_intent_progress": project["acquisition_intent_progress"]}
+                if "acquisition_intent_progress" in project else {}
+            ),
         )
         for project_id, project in profile.get("projects", {}).items()
     }
@@ -1628,6 +1664,78 @@ def create_app(
     @application.get("/v1/runtime-identity", include_in_schema=False)
     def runtime_identity():
         return runtime_identity_payload()
+
+    def project_progress_projection(profile: dict, project_id: str) -> dict:
+        project = profile.get("projects", {}).get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail={"code": "project_not_found"})
+        field_id = project.get("imaging_field_id")
+        field = next(
+            (item for item in IMAGING_FIELD_DEFINITIONS if item.imaging_field_id == field_id),
+            None,
+        )
+        return {
+            "project_id": project_id,
+            "profile_revision": profile.get("profile_revision", 0),
+            "imaging_field_id": field_id,
+            "imaging_fields": [
+                {"imaging_field_id": item.imaging_field_id, "display_name": item.display_name,
+                 "acquisition_intents": [
+                     {"acquisition_intent_id": intent.acquisition_intent_id,
+                      "filter_type": intent.filter_type}
+                     for intent in item.acquisition_intents
+                 ]}
+                for item in IMAGING_FIELD_DEFINITIONS
+            ],
+            "acquisition_intents": [
+                {"acquisition_intent_id": intent.acquisition_intent_id,
+                 "filter_type": intent.filter_type}
+                for intent in field.acquisition_intents
+            ] if field else [],
+            "acquisition_intent_progress": project.get("acquisition_intent_progress", []),
+            "acquisition_intent_targets": project.get("acquisition_intent_targets", []),
+        }
+
+    @application.get("/v1/projects/{project_id}/progress")
+    def get_project_progress(project_id: str):
+        try:
+            if not (get_user_data_dir() / "user_profile.json").exists():
+                raise HTTPException(status_code=404, detail={"code": "project_not_found"})
+            return project_progress_projection(load_user_profile(), project_id)
+        except UserProfileError as exc:
+            raise HTTPException(status_code=503, detail={"code": "configuration_corrupt"}) from exc
+
+    @application.put("/v1/projects/{project_id}/progress")
+    def put_project_progress(project_id: str, request: ProjectProgressWriteRequest):
+        try:
+            if not (get_user_data_dir() / "user_profile.json").exists():
+                raise HTTPException(status_code=404, detail={"code": "project_not_found"})
+            try:
+                profile = load_user_profile()
+            except UserProfileError as exc:
+                raise HTTPException(status_code=503, detail={"code": "configuration_corrupt"}) from exc
+            if project_id not in profile.get("projects", {}):
+                raise HTTPException(status_code=404, detail={"code": "project_not_found"})
+            if request.expected_revision != profile.get("profile_revision", 0):
+                raise ProfileRevisionConflictError("profile_revision_conflict")
+            project = profile["projects"][project_id]
+            for name in (
+                "imaging_field_id", "acquisition_intent_progress",
+                "acquisition_intent_targets",
+            ):
+                if name in request.model_fields_set:
+                    project[name] = getattr(request, name)
+                    if name != "imaging_field_id":
+                        project[name] = [
+                            item.model_dump() if isinstance(item, BaseModel) else item
+                            for item in project[name]
+                        ]
+            saved = save_user_profile(profile, expected_revision=request.expected_revision)
+            return project_progress_projection(saved, project_id)
+        except ProfileRevisionConflictError as exc:
+            raise HTTPException(status_code=409, detail={"code": "project_revision_conflict"}) from exc
+        except UserProfileError as exc:
+            raise HTTPException(status_code=422, detail={"code": "project_progress_invalid"}) from exc
 
     @application.get(
         "/v1/configuration",
