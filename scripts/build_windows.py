@@ -1,4 +1,4 @@
-"""Build AstroPilot from an already prepared Windows packaging environment."""
+"""Synchronize the Windows packaging environment and build AstroPilot."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import platform
 import re
 import shutil
 import subprocess
-import sys
 from typing import Callable, Sequence
 
 
@@ -71,12 +70,18 @@ def build(
 ) -> Path:
     validate_target()
     root = Path(root).resolve()
-    clean_outputs(root)
     build_commit = resolve_build_commit(root, runner=runner)
+    status = runner(
+        ["git", "status", "--porcelain", "--untracked-files=normal"],
+        cwd=root, check=True, capture_output=True, text=True,
+    )
+    if str(getattr(status, "stdout", "")).strip():
+        raise RuntimeError("Release build requires a clean committed checkout.")
+    runner(["uv", "sync", "--locked", "--extra", "packaging"], cwd=root, check=True)
+    clean_outputs(root)
     environment = build_environment(build_commit)
     command: Sequence[str] = (
-        sys.executable,
-        "-m",
+        "uv", "run", "--locked", "--extra", "packaging", "python", "-m",
         "PyInstaller",
         "--noconfirm",
         "--clean",

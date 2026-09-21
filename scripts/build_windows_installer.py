@@ -1,8 +1,9 @@
-"""Compile a per-user installer from an existing Windows onedir build."""
+"""Compile an installer only from a verified Windows onedir build."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import platform
@@ -29,6 +30,33 @@ def read_version(root: Path) -> str:
     if not isinstance(version, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+_-]*", version):
         raise RuntimeError("project.version must be nonempty and safe for an installer filename.")
     return version
+
+
+def expected_commit(root: Path, runner: Callable[..., object]) -> str:
+    result = runner(
+        ["git", "rev-parse", "--short=7", "HEAD"], cwd=root,
+        check=True, capture_output=True, text=True,
+    )
+    commit = str(getattr(result, "stdout", "")).strip()
+    if not re.fullmatch(r"[0-9a-f]{7}", commit):
+        raise RuntimeError("Cannot verify the release checkout commit.")
+    return commit
+
+
+def verify_executable(executable: Path, version: str, commit: str,
+                      runner: Callable[..., object]) -> None:
+    try:
+        result = runner(
+            [str(executable), "--runtime-identity"], cwd=executable.parent,
+            check=True, capture_output=True, text=True, timeout=60,
+        )
+        identity = json.loads(str(getattr(result, "stdout", "")))
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError) as exc:
+        raise RuntimeError("Executable runtime identity is unavailable or invalid.") from exc
+    expected = {"application": "astropilot", "version": version,
+                "build": commit, "architecture": "x86_64"}
+    if not isinstance(identity, dict) or any(identity.get(key) != value for key, value in expected.items()):
+        raise RuntimeError(f"Executable runtime identity mismatch: expected {expected}, got {identity}")
 
 
 def find_iscc(explicit: str | Path | None = None) -> Path:
@@ -76,6 +104,14 @@ def build(
     if not (source / "AstroPilot.exe").is_file():
         raise RuntimeError("Existing executable required: dist/AstroPilot/AstroPilot.exe")
     version = read_version(root)
+    commit = expected_commit(root, runner)
+    status = runner(
+        ["git", "status", "--porcelain", "--untracked-files=normal"],
+        cwd=root, check=True, capture_output=True, text=True,
+    )
+    if str(getattr(status, "stdout", "")).strip():
+        raise RuntimeError("Installer requires a clean committed checkout.")
+    verify_executable(source / "AstroPilot.exe", version, commit, runner)
     compiler = find_iscc(iscc)
     script = root / "packaging" / "windows" / "AstroPilot.iss"
     if not script.is_file():

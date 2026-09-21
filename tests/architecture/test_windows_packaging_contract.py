@@ -1,6 +1,5 @@
 from pathlib import Path
 import importlib.util
-import sys
 from unittest.mock import ANY
 
 import pytest
@@ -142,6 +141,8 @@ def test_build_invokes_pyinstaller_from_repo_and_returns_deterministic_directory
         calls.append((command, cwd, check, options))
         if command[:2] == ["git", "rev-parse"]:
             return type("Result", (), {"stdout": "f5479d9\n"})()
+        if command[:2] == ["git", "status"]:
+            return type("Result", (), {"stdout": ""})()
         (tmp_path / "dist" / "AstroPilot").mkdir(parents=True)
 
     output = build.build(root=tmp_path, runner=runner)
@@ -154,9 +155,16 @@ def test_build_invokes_pyinstaller_from_repo_and_returns_deterministic_directory
             {"capture_output": True, "text": True},
         ),
         (
+            ["git", "status", "--porcelain", "--untracked-files=normal"],
+            tmp_path, True, {"capture_output": True, "text": True},
+        ),
+        (
+            ["uv", "sync", "--locked", "--extra", "packaging"],
+            tmp_path, True, {},
+        ),
+        (
             [
-                sys.executable,
-                "-m",
+                "uv", "run", "--locked", "--extra", "packaging", "python", "-m",
                 "PyInstaller",
                 "--noconfirm",
                 "--clean",
@@ -167,7 +175,7 @@ def test_build_invokes_pyinstaller_from_repo_and_returns_deterministic_directory
             {"env": ANY},
         ),
     ]
-    assert calls[1][3]["env"]["ASTROPILOT_BUILD_COMMIT"] == "f5479d9"
+    assert calls[3][3]["env"]["ASTROPILOT_BUILD_COMMIT"] == "f5479d9"
     assert output == tmp_path / "dist" / "AstroPilot"
 
 
@@ -183,6 +191,8 @@ def test_build_fails_if_deterministic_output_directory_is_missing(
         del options
         if command[:2] == ["git", "rev-parse"]:
             return type("Result", (), {"stdout": "f5479d9\n"})()
+        if command[:2] == ["git", "status"]:
+            return type("Result", (), {"stdout": ""})()
 
     with pytest.raises(RuntimeError, match=r"dist[/\\]AstroPilot"):
         build.build(root=tmp_path, runner=runner)

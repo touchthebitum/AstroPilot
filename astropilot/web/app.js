@@ -1009,7 +1009,8 @@ function initializeConfiguration(payload) {
     ? "Confirmez votre profil AstroPilot."
     : "Préparons AstroPilot.");
   ui.onboarding.querySelector(".wizard-heading .state-kicker").textContent =
-    payload.needs_configuration_confirmation ? "Profil historique" : "Première configuration";
+    payload.needs_configuration_confirmation ? "Profil historique"
+      : payload.configured ? "Modifier la configuration" : "Première configuration";
   state.configurationErrorCode = null;
   hideRecoveryConfirmation();
   ui.configurationRecover.hidden = true;

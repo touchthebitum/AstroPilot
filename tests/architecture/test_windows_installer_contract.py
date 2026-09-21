@@ -1,6 +1,7 @@
 from pathlib import Path
 import ast
 import importlib.util
+import json
 import subprocess
 import tomllib
 import uuid
@@ -12,6 +13,15 @@ ROOT = Path(__file__).resolve().parents[2]
 ISS = ROOT / "packaging" / "windows" / "AstroPilot.iss"
 SCRIPT = ROOT / "scripts" / "build_windows_installer.py"
 APP_ID = "A3B620CB-8E79-4B91-8DAB-4CF1BEE63985"
+
+
+def test_release_procedure_requires_rebuild_and_identity_verification():
+    documentation = (ROOT / "docs" / "WINDOWS_INSTALLER.md").read_text(encoding="utf-8")
+    assert "python scripts/build_windows.py" in documentation
+    assert "python scripts/build_windows_installer.py" in documentation
+    assert "Run both steps for every release candidate" in documentation
+    assert "only when a new application build is needed" not in documentation
+    assert "--runtime-identity" in documentation
 
 
 def test_script_exists_and_requires_compiler_defines():
@@ -86,7 +96,7 @@ def test_builder_has_no_rebuild_cleanup_download_or_signing():
     tree = ast.parse(source)
     calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
     runners = [node for node in calls if isinstance(node.func, ast.Name) and node.func.id == "runner"]
-    assert len(runners) == 1
+    assert len(runners) == 4
     assert not any(isinstance(node.func, ast.Attribute) and node.func.attr in {
         "system", "popen", "run", "Popen", "remove", "rmdir", "unlink", "rmtree"
     } for node in calls if not (isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id == "platform"))
@@ -126,6 +136,39 @@ def test_existing_onedir_and_executable_required(builder, tmp_path, state):
         (source / "support.dll").write_bytes(b"support")
     with pytest.raises(RuntimeError, match="dist/AstroPilot"):
         builder.build(root=tmp_path, runner=lambda *args, **kwargs: pytest.fail("runner must not be called"))
+
+
+@pytest.mark.parametrize("identity", (
+    None,
+    {"application": "astropilot", "version": "1.0.0b5", "build": "f5479d9", "architecture": "x86_64"},
+    {"application": "astropilot", "version": "1.0.0b6", "build": "abcdef0", "architecture": "x86_64"},
+    {"application": "astropilot", "version": "1.0.0b6", "architecture": "x86_64"},
+))
+def test_unverified_executable_never_reaches_compiler(builder, tmp_path, identity):
+    root = tmp_path
+    source = root / "dist" / "AstroPilot"
+    source.mkdir(parents=True)
+    executable = source / "AstroPilot.exe"
+    executable.write_bytes(b"stub")
+    (root / "pyproject.toml").write_text('[project]\nversion = "1.0.0b6"\n')
+    compiler = root / "ISCC.exe"
+    compiler.write_bytes(b"stub")
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append(command)
+        if command[:2] == ["git", "rev-parse"]:
+            return type("Result", (), {"stdout": "f5479d9\n"})()
+        if command[:2] == ["git", "status"]:
+            return type("Result", (), {"stdout": ""})()
+        if command == [str(executable), "--runtime-identity"]:
+            return type("Result", (), {"stdout": "not json" if identity is None else json.dumps(identity)})()
+        pytest.fail("compiler ran before identity validation")
+
+    with pytest.raises(RuntimeError, match="identity"):
+        builder.build(root=root, iscc=compiler, runner=runner)
+    assert not (root / "dist" / "installer").exists()
+    assert calls[-1] == [str(executable), "--runtime-identity"]
 
 
 def test_version_comes_unchanged_from_project_metadata(builder):
@@ -226,7 +269,7 @@ def test_missing_compiler_fails_without_installing(builder, monkeypatch, tmp_pat
 
 
 @pytest.mark.parametrize("result", ("created", "missing", "failure"))
-@pytest.mark.parametrize("version", ("2.3.4b5", "1.0.0b5"))
+@pytest.mark.parametrize("version", ("2.3.4b5", "1.0.0b6"))
 def test_compiler_invocation_and_output_preserve_existing_files(builder, tmp_path, result, version):
     root = tmp_path / "Chemin avec espaces et accents é"
     source = root / "dist" / "AstroPilot"
@@ -242,7 +285,7 @@ def test_compiler_invocation_and_output_preserve_existing_files(builder, tmp_pat
     build_file = root / "build" / "keep.txt"
     build_file.parent.mkdir()
     build_file.write_bytes(b"keep")
-    if version == "1.0.0b5":
+    if version == "1.0.0b6":
         assert builder.read_version(ROOT) == version
     (root / "pyproject.toml").write_text(f'[project]\nversion = "{version}"\n', encoding="utf-8")
     script = root / "packaging" / "windows" / "AstroPilot.iss"
@@ -254,8 +297,17 @@ def test_compiler_invocation_and_output_preserve_existing_files(builder, tmp_pat
     output = output_dir / f"AstroPilot-{version}-windows-x86_64-setup.exe"
     calls = []
 
-    def runner(command, *, cwd, check):
+    def runner(command, *, cwd, check, **options):
         calls.append((command, cwd, check))
+        if command[:2] == ["git", "rev-parse"]:
+            return type("Result", (), {"stdout": "f5479d9\n"})()
+        if command[:2] == ["git", "status"]:
+            return type("Result", (), {"stdout": ""})()
+        if command == [str(executable), "--runtime-identity"]:
+            return type("Result", (), {"stdout": json.dumps({
+                "application": "astropilot", "version": version,
+                "build": "f5479d9", "architecture": "x86_64",
+            })})()
         if result == "failure":
             raise subprocess.CalledProcessError(2, command)
         if result == "created":
@@ -268,7 +320,7 @@ def test_compiler_invocation_and_output_preserve_existing_files(builder, tmp_pat
         error = subprocess.CalledProcessError if result == "failure" else RuntimeError
         with pytest.raises(error):
             builder.build(root=root, iscc=compiler, runner=runner)
-    assert calls == [([
+    assert calls[-1:] == [([
         str(compiler.resolve()), f"/DAppVersion={version}",
         f"/DSourceDir={source}", f"/DInstallerOutputDir={output_dir}", str(script),
     ], root, True)]

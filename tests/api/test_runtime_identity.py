@@ -1,8 +1,18 @@
 import pytest
+import json
 from fastapi.testclient import TestClient
 
 import astropilot.app as app_module
 from astropilot.app import create_app, runtime_identity_payload
+
+
+def test_launcher_identity_cli_exits_before_starting_ui(monkeypatch, capsys):
+    import astropilot.launcher as launcher
+    monkeypatch.setattr(launcher.sys, "argv", ["AstroPilot.exe", "--runtime-identity"])
+    monkeypatch.setattr(launcher, "run", lambda: pytest.fail("UI launcher must not run"))
+    launcher.main()
+    identity = json.loads(capsys.readouterr().out)
+    assert identity == runtime_identity_payload()
 
 
 def test_runtime_identity_is_exact_and_non_sensitive(tmp_path, monkeypatch):
@@ -13,7 +23,7 @@ def test_runtime_identity_is_exact_and_non_sensitive(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.json() == {
         "application": "astropilot",
-        "version": "1.0.0b5",
+        "version": "1.0.0b6",
         "build": "8541acc",
         "architecture": response.json()["architecture"],
     }
@@ -37,7 +47,7 @@ def test_runtime_identity_does_not_resolve_application_state():
     identity = client.get("/v1/runtime-identity").json()
 
     assert identity["application"] == "astropilot"
-    assert identity["version"] == "1.0.0b5"
+    assert identity["version"] == "1.0.0b6"
     assert identity["build"]
     assert identity["architecture"]
 
@@ -47,7 +57,7 @@ def test_runtime_identity_has_controlled_development_build_fallback(monkeypatch)
 
     identity = TestClient(create_app()).get("/v1/runtime-identity").json()
 
-    assert identity["version"] == "1.0.0b5"
+    assert identity["version"] == "1.0.0b6"
     assert identity["build"] == "development"
 
 
