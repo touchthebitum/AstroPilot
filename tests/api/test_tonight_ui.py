@@ -733,6 +733,19 @@ def test_corrupt_configuration_alone_exposes_explicit_recovery():
     assert "configuration_persistence_error" not in error_renderer
 
 
+def test_historical_profile_confirmation_opens_site_without_reset():
+    script = make_client().get("/ui/app.js").text
+    loader = script.split(
+        "async function loadConfiguration({ afterConflict = false } = {})", 1,
+    )[1].split("async function recoverConfiguration()", 1)[0]
+    assert "payload.needs_configuration_confirmation" in loader
+    confirmation = loader.split("payload.needs_configuration_confirmation", 1)[1]
+    assert 'setView("site")' in confirmation.split("else if (payload.configured)", 1)[0]
+    assert "aucune réinitialisation n’est nécessaire" in confirmation
+    assert "recoverConfiguration()" not in confirmation
+    assert 'document.querySelector("#site-bortle").value = site.bortle ?? ""' in script
+
+
 def test_configuration_retry_remains_non_destructive():
     script = make_client().get("/ui/app.js").text
 

@@ -86,8 +86,10 @@ def test_configuration_changes_invalidate_restored_mission():
 const assert = require('node:assert/strict');
 const entry = {hidden: false};
 const button = {disabled: false};
-const ui = {savedMissionEntry: entry, configurationRecover: {hidden: true}};
-const document = {querySelector: () => button};
+const ui = {savedMissionEntry: entry, configurationRecover: {hidden: true},
+  onboarding: {querySelector: () => ({textContent: ''})}};
+const document = {querySelector: selector => selector === '#save-configuration'
+  ? button : {hidden: false}};
 const baseline = {configured: true, profile_revision: 1,
   site: {latitude: 1, longitude: 2, timezone: 'UTC'},
   equipment: {optics: 'A'}};
@@ -101,6 +103,7 @@ function draftFromConfiguration(value) { return value; }
 function hideRecoveryConfirmation() {}
 function prefillConfiguration() {}
 function renderAvailabilityTimezone() {}
+function text() {}
 function showFormError() {}
 function setView(view) { state.view = view; }
 function configurationPayload() { return {}; }
