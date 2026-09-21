@@ -35,6 +35,7 @@ const ui = Object.freeze({
   recommendationConfidence: document.querySelector("#recommendation-confidence-value"),
   alternatives: document.querySelector("#alternatives-section"),
   alternativesList: document.querySelector("#alternatives-list"),
+  primaryIntentChoice: document.querySelector("#primary-intent-choice"),
 });
 
 const state = {
@@ -59,7 +60,7 @@ const state = {
 };
 
 const PENDING_ACCEPTANCE_STORAGE_KEY = "astropilot.pendingAcceptance";
-const PENDING_ACCEPTANCE_STORAGE_VERSION = 1;
+const PENDING_ACCEPTANCE_STORAGE_VERSION = 2;
 
 const wizardStates = Object.freeze(["site", "equipment", "projects", "review"]);
 
@@ -322,6 +323,63 @@ function alternativeReasonText(reason) {
   return reason?.rendered?.classic_text || reason?.message || null;
 }
 
+function intentMode(subject) {
+  if (!subject?.acquisition_intent_selection_status) return "legacy";
+  if (subject.acquisition_intent_selection_status === "no_eligible_intent") return "none";
+  const frontier = subject.viable_acquisition_intent_ids || [];
+  const options = subject.acquisition_intent_options || [];
+  if (!Array.isArray(frontier) || !Array.isArray(options)
+      || options.length !== frontier.length
+      || options.some((option, index) => option.acquisition_intent_id !== frontier[index]
+        || !option.label)) return "unavailable";
+  if (frontier.length === 1 && subject.selected_acquisition_intent_id === frontier[0]) return "unique";
+  if (frontier.length > 1 && subject.selected_acquisition_intent_id === null) return "multiple";
+  return "unavailable";
+}
+
+function renderIntentChoice(container, subject, selectId) {
+  container.replaceChildren();
+  const mode = intentMode(subject);
+  container.hidden = mode === "legacy";
+  if (mode === "legacy") return;
+  if (mode === "unique") {
+    container.textContent = `Acquisition prévue : ${subject.acquisition_intent_options[0].label}`;
+    return;
+  }
+  if (mode === "none" || mode === "unavailable") {
+    const warning = document.createElement("span");
+    warning.className = "intent-warning";
+    warning.textContent = mode === "none"
+      ? "Aucune acquisition recommandée pour cette nuit. Aucune prise de vue de ce champ ne répond aux critères de sélection."
+      : "Le choix de prise de vue est indisponible. Actualisez la recommandation.";
+    container.append(warning);
+    return;
+  }
+  const label = document.createElement("label");
+  label.htmlFor = selectId;
+  label.textContent = "Choisissez votre prise de vue pour créer la mission";
+  const select = document.createElement("select");
+  select.id = selectId;
+  select.append(new Option("Choisir une prise de vue", ""));
+  for (const option of subject.acquisition_intent_options) {
+    select.append(new Option(option.label, option.acquisition_intent_id));
+  }
+  select.addEventListener("change", () => {
+    showAcceptanceStatus("");
+    restoreAcceptanceControls();
+  });
+  container.append(label, select);
+}
+
+function chosenIntent(subject, container) {
+  const mode = intentMode(subject);
+  if (mode === "legacy") return null;
+  if (mode === "unique") return subject.selected_acquisition_intent_id;
+  if (mode !== "multiple") return undefined;
+  const value = container?.querySelector("select")?.value;
+  return subject.viable_acquisition_intent_ids.includes(value) ? value : undefined;
+}
+
 function renderAlternatives(decision) {
   clearAlternatives();
   const alternatives = (Array.isArray(decision.alternatives) ? decision.alternatives : [])
@@ -329,6 +387,7 @@ function renderAlternatives(decision) {
       typeof alternative?.catalog_key === "string"
       && alternative.catalog_key.trim()
       && alternative.target_decision_status === "viable"
+      && !["none", "unavailable"].includes(intentMode(alternative))
     ))
     .slice(0, 2);
   if (!alternatives.length || !decision.decision_id) return;
@@ -339,8 +398,10 @@ function renderAlternatives(decision) {
     const copy = document.createElement("div");
     const name = document.createElement("h4");
     const reasons = document.createElement("ul");
+    const intentChoice = document.createElement("div");
     const button = document.createElement("button");
     card.className = "alternative-card";
+    if (alternative.acquisition_intent_selection_status) card.classList.add("has-intent");
     copy.className = "alternative-copy";
     name.textContent = displayTarget;
     reasons.className = "alternative-reasons";
@@ -355,6 +416,9 @@ function renderAlternatives(decision) {
     }
     copy.append(name);
     if (reasonTexts.length) copy.append(reasons);
+    intentChoice.className = "intent-choice";
+    renderIntentChoice(intentChoice, alternative, `alternative-intent-${alternative.catalog_key}`);
+    if (!intentChoice.hidden) copy.append(intentChoice);
 
     button.type = "button";
     button.className = "mission-button alternative-button";
@@ -362,6 +426,7 @@ function renderAlternatives(decision) {
     button.dataset.acceptanceSource = "alternative";
     button.dataset.catalogKey = alternative.catalog_key;
     button.dataset.decisionId = decision.decision_id;
+    button.hidden = ["none", "unavailable"].includes(intentMode(alternative));
     button.addEventListener("click", () => acceptRecommendation({
       source: "alternative",
       selectedCatalogKey: alternative.catalog_key,
@@ -379,12 +444,28 @@ function acceptanceControls() {
   return [ui.openMission, ...ui.alternativesList.querySelectorAll("button")];
 }
 
+function intentReady(button) {
+  const decision = state.currentDecision;
+  if (!decision) return false;
+  if (button === ui.openMission && (decision.target_decision_status !== "recommended"
+      || !decision.decision_id || !decision.catalog_key)) return false;
+  const subject = button === ui.openMission ? decision
+    : (decision.alternatives || []).find((item) => item.catalog_key === button.dataset.catalogKey);
+  if (!subject || (button !== ui.openMission && subject.target_decision_status !== "viable")) return false;
+  const container = button === ui.openMission ? ui.primaryIntentChoice
+    : button.closest(".alternative-card")?.querySelector(".intent-choice");
+  return chosenIntent(subject, container) !== undefined;
+}
+
 function disableAcceptanceControls(disabled) {
   for (const button of acceptanceControls()) button.disabled = disabled;
 }
 
 function restoreAcceptanceControls() {
   disableAcceptanceControls(Boolean(state.acceptanceBlocked || state.acceptedMission));
+  if (!state.acceptanceBlocked && !state.acceptedMission) {
+    for (const button of acceptanceControls()) button.disabled = !intentReady(button);
+  }
   if (state.pendingAcceptanceAttempt) {
     disableAcceptanceControls(true);
     const pending = state.pendingAcceptanceAttempt;
@@ -393,7 +474,7 @@ function restoreAcceptanceControls() {
       && button.dataset.catalogKey === pending.selected_catalog_key
       && button.dataset.decisionId === pending.decision_id
     ));
-    if (selected) selected.disabled = false;
+    if (selected) selected.disabled = !intentReady(selected);
     return;
   }
   if (state.acceptedMission) {
@@ -408,7 +489,8 @@ function restoreAcceptanceControls() {
 function sameAcceptanceIntent(attempt, intent) {
   return attempt.decision_id === intent.decision_id
     && attempt.source === intent.source
-    && attempt.selected_catalog_key === intent.selected_catalog_key;
+    && attempt.selected_catalog_key === intent.selected_catalog_key
+    && attempt.acquisition_intent_id === intent.acquisition_intent_id;
 }
 
 function parsePendingAcceptance(raw) {
@@ -422,7 +504,7 @@ function parsePendingAcceptance(raw) {
   const storedKeys = Object.keys(stored).sort();
   if (storedKeys.join(",") !== "request,state,version") return null;
   if (
-    stored.version !== PENDING_ACCEPTANCE_STORAGE_VERSION
+    ![1, PENDING_ACCEPTANCE_STORAGE_VERSION].includes(stored.version)
     || stored.state !== "unresolved"
     || !stored.request
     || typeof stored.request !== "object"
@@ -431,7 +513,9 @@ function parsePendingAcceptance(raw) {
   const request = stored.request;
   const requestKeys = Object.keys(request).sort();
   if (
-    requestKeys.join(",") !== "acceptance_request_id,decision_id,selected_at,selected_catalog_key,source"
+    requestKeys.join(",") !== (stored.version === 1
+      ? "acceptance_request_id,decision_id,selected_at,selected_catalog_key,source"
+      : "acceptance_request_id,acquisition_intent_id,decision_id,selected_at,selected_catalog_key,source")
   ) return null;
   const identityPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
   const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -441,6 +525,8 @@ function parsePendingAcceptance(raw) {
     || !["primary_recommendation", "alternative"].includes(request.source)
     || typeof request.selected_catalog_key !== "string"
     || !request.selected_catalog_key.trim()
+    || (stored.version === 2 && request.acquisition_intent_id !== null
+      && (typeof request.acquisition_intent_id !== "string" || !request.acquisition_intent_id.trim()))
     || !timestampPattern.test(request.selected_at)
     || !Number.isFinite(Date.parse(request.selected_at))
     || new Date(request.selected_at).toISOString() !== request.selected_at
@@ -450,6 +536,7 @@ function parsePendingAcceptance(raw) {
     decision_id: request.decision_id,
     source: request.source,
     selected_catalog_key: request.selected_catalog_key,
+    acquisition_intent_id: request.acquisition_intent_id ?? null,
     selected_at: request.selected_at,
   });
 }
@@ -511,6 +598,7 @@ function acceptanceAttempt(intent) {
     decision_id: intent.decision_id,
     source: intent.source,
     selected_catalog_key: intent.selected_catalog_key,
+    acquisition_intent_id: intent.acquisition_intent_id,
     selected_at: new Date().toISOString(),
   });
   persistPendingAcceptanceAttempt(attempt);
@@ -567,8 +655,13 @@ function renderDecision(decision) {
   text("#night-date", dateLabel(decision.night_date));
   const recommended = decision.target_decision_status === "recommended";
   const insufficient = decision.target_decision_status === "insufficient_evidence";
-  text("#target-label", recommended ? "Cible prioritaire" : "Cible évaluée");
-  text("#recommendation", recommended
+  const noAcquisition = intentMode(decision) === "none";
+  const intentUnavailable = intentMode(decision) === "unavailable";
+  text("#target-label", recommended && !noAcquisition && !intentUnavailable ? "Cible prioritaire" : "Cible évaluée");
+  text("#recommendation", noAcquisition
+    ? "Aucune acquisition recommandée cette nuit"
+    : intentUnavailable ? "Prise de vue à confirmer"
+    : recommended
     ? (labels.actions[decision.action] || "Session recommandée")
     : insufficient ? "Preuves insuffisantes" : "Cible non recommandée");
   text("#target-name", decision.target || "Cible à confirmer");
@@ -609,17 +702,19 @@ function renderDecision(decision) {
     : null;
   setList("#insights-list", [...(evidenceMessage ? [evidenceMessage] : []), ...positives, ...information], "Aucune explication supplémentaire disponible.");
   setList("#risks-list", risks, "Aucun risque essentiel signalé.");
+  renderIntentChoice(ui.primaryIntentChoice, decision, "primary-intent");
   const actionablePrimary = Boolean(
     decision.decision_id
     && decision.catalog_key
     && decision.target_decision_status === "recommended"
   );
-  ui.openMission.hidden = !actionablePrimary;
-  ui.openMission.disabled = !actionablePrimary;
+  ui.openMission.hidden = !actionablePrimary || ["none", "unavailable"].includes(intentMode(decision));
+  ui.openMission.disabled = !actionablePrimary || !intentReady(ui.openMission);
   ui.openMission.dataset.acceptanceSource = "primary_recommendation";
   ui.openMission.dataset.catalogKey = decision.catalog_key || "";
   ui.openMission.dataset.decisionId = decision.decision_id || "";
   renderAlternatives(decision);
+  restoreAcceptanceControls();
   show("decision");
 }
 
@@ -1233,6 +1328,12 @@ function normalizeError(response, payload) {
 }
 
 function acceptanceError(code, status) {
+  if (["acquisition_intent_selection_required", "selected_acquisition_intent_not_viable", "selected_acquisition_intent_mismatch", "acquisition_intent_required_for_mission"].includes(code)) {
+    return ["Cette prise de vue n’est plus disponible pour la cible. Actualisez la recommandation et choisissez à nouveau.", true];
+  }
+  if (code === "no_eligible_acquisition_intent") {
+    return ["Aucune acquisition n’est recommandée pour cette cible cette nuit. Actualisez la recommandation.", true];
+  }
   if (code === "decision_context_stale") {
     return ["Cette recommandation a expiré. Actualisez-la avant de choisir votre cible.", true];
   }
@@ -1275,6 +1376,7 @@ async function retryPendingAcceptance() {
     expectedDecisionId: attempt.decision_id,
     triggerButton: ui.retryPendingAcceptance,
     selectedTarget: attempt.selected_catalog_key,
+    acquisitionIntentId: attempt.acquisition_intent_id,
     attemptOverride: attempt,
   });
 }
@@ -1285,6 +1387,7 @@ async function acceptRecommendation({
   expectedDecisionId,
   triggerButton,
   selectedTarget,
+  acquisitionIntentId,
   attemptOverride = null,
 }) {
   if (state.acceptingRecommendation) return;
@@ -1319,6 +1422,17 @@ async function acceptRecommendation({
       disableAcceptanceControls(true);
       return;
     }
+    const subject = validPrimary ? decision : (decision.alternatives || []).find(
+      (alternative) => alternative.catalog_key === selectedCatalogKey
+    );
+    const container = validPrimary ? ui.primaryIntentChoice
+      : triggerButton?.closest(".alternative-card")?.querySelector(".intent-choice");
+    acquisitionIntentId = chosenIntent(subject, container);
+    if (acquisitionIntentId === undefined) {
+      showAcceptanceStatus("Choisissez d’abord une prise de vue disponible pour créer la mission.", { error: true });
+      restoreAcceptanceControls();
+      return;
+    }
   }
   let attempt;
   try {
@@ -1326,6 +1440,7 @@ async function acceptRecommendation({
       decision_id: expectedDecisionId,
       source,
       selected_catalog_key: selectedCatalogKey,
+      acquisition_intent_id: acquisitionIntentId,
     });
   } catch (_storageError) {
     showAcceptanceStatus(
@@ -1375,7 +1490,8 @@ async function acceptRecommendation({
       && payload.catalog_key === selectedCatalogKey
       && payload.mission_id === mission.mission_id
       && payload.selection_id === mission.selection_id
-      && payload.decision_id === mission.decision_id;
+      && payload.decision_id === mission.decision_id
+      && payload.selected_acquisition_intent_id === attempt.acquisition_intent_id;
     if (!validAcceptedMission) {
       showUnresolvedAcceptance();
       return;

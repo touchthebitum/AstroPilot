@@ -846,7 +846,7 @@ def test_primary_status_controls_title_and_preserves_missing_values():
     render = script.split('function renderDecision(decision) {', 1)[1].split('const customEquipmentFields', 1)[0]
     assert 'decision.target_decision_status === "recommended"' in render
     assert 'decision.target_decision_status === "insufficient_evidence"' in render
-    assert 'recommended ? "Cible prioritaire" : "Cible évaluée"' in render
+    assert 'recommended && !noAcquisition && !intentUnavailable ? "Cible prioritaire" : "Cible évaluée"' in render
     assert '"Preuves insuffisantes"' in render
     assert 'AstroPilot ne dispose pas d’assez d’éléments fiables' in render
     assert 'ui.openMission.hidden = !actionablePrimary' in render
@@ -871,7 +871,7 @@ def test_primary_status_render_executes_without_fabricating_missing_values(tmp_p
     harness = '''
 const values = {};
 const state = {};
-const ui = {openMission: {dataset: {}}, recommendationConfidence: {}};
+const ui = {openMission: {dataset: {}}, recommendationConfidence: {}, primaryIntentChoice: {}};
 const document = {querySelector: () => ({style: {}})};
 const labels = {actions: {start_project: "Commencer ce projet"}, quality: {}, factors: {}};
 function clearAcceptedMission() {}
@@ -883,6 +883,10 @@ function setList(key, values, fallback) {text(key, values.length ? values : fall
 function reasonText(value) {return value;}
 function renderWeatherTrust() {}
 function renderAlternatives() {}
+function renderIntentChoice() {}
+function intentMode() {return "legacy";}
+function intentReady() {return true;}
+function restoreAcceptanceControls() {}
 function show() {}
 '''
     harness += render + confidence + '''
