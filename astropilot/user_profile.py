@@ -23,6 +23,10 @@ from decision.services.project_acquisition_intent_targets import (
     ProjectAcquisitionIntentTargetsError,
     resolve_project_acquisition_intent_targets,
 )
+from decision.services.project_acquisition_intent_progress import (
+    ProjectAcquisitionIntentProgressError,
+    resolve_project_acquisition_intent_progress,
+)
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -421,6 +425,19 @@ def validate_user_profile(profile, profile_path: Path):
                     "acquisition_intent_targets invalide dans "
                     f"{profile_path} : objectifs par intention "
                     "d'acquisition invalides pour le champ d'imagerie."
+                ) from error
+
+        if "acquisition_intent_progress" in project:
+            if imaging_field_resolver is None:
+                imaging_field_resolver = build_production_imaging_field_resolver()
+            try:
+                resolve_project_acquisition_intent_progress(
+                    project, imaging_field_resolver,
+                )
+            except ProjectAcquisitionIntentProgressError as error:
+                raise UserProfileError(
+                    f"Champ projects[{project_name!r}].acquisition_intent_progress "
+                    f"invalide dans {profile_path} : {error}."
                 ) from error
 
         for field_name in ("hours", "target_hours"):

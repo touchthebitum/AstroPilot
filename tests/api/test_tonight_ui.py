@@ -121,7 +121,7 @@ def test_tonight_ui_assets_are_served():
     assert "fetch(\"/v1/tonight\"" in script.text
     assert 'fetch("/v1/decision-selections"' in script.text
     assert 'fetch("/v1/configuration/recover"' in script.text
-    assert script.text.count("fetch(") == 6
+    assert script.text.count("fetch(") == 8
     assert script.text.rstrip().endswith("loadConfiguration();")
     assert "body: JSON.stringify({})," not in script.text
     assert "collectAvailabilityPayload" in script.text
@@ -661,10 +661,12 @@ def test_existing_projects_are_preserved_by_the_configuration_wizard():
     render_projects = script.split(
         "function renderProjects()",
         1,
-    )[1].split("function prefillConfiguration()", 1)[0]
+    )[1].split("function progressDuration(", 1)[0]
     assert "Projets actuellement conservés" in render_projects
     assert "Vos projets existants sont conservés." in render_projects
-    assert "Leur création et leur modification seront disponibles dans une prochaine version bêta." in render_projects
+    assert "Ouvrez un projet pour renseigner son avancement" in render_projects
+    assert 'id="project-progress-editor"' in page
+    assert "/v1/projects/" in script
     assert "Changer votre site ou votre matériel ne les supprimera pas." in render_projects
     assert "zeroProjectsControl.hidden = Boolean(entries.length)" in render_projects
     assert "project.id" not in render_projects

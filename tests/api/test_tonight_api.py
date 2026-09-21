@@ -282,6 +282,40 @@ def test_tonight_endpoint_delegates_inputs_and_returns_json_contract():
     assert payload["recommended_hours"] == 3.5
 
 
+def test_legacy_project_tonight_response_unchanged_by_progress_read(tmp_path, monkeypatch):
+    from astropilot.user_profile import load_user_profile, save_user_profile
+
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
+    profile = {**valid_profile(), "projects": {
+        "Sh2-129": {"hours": 2, "target_hours": 20, "importance": 9},
+    }, "sessions": []}
+    save_user_profile(profile, expected_revision=0)
+    reference_time = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
+    weather = make_weather_snapshot(reference_time - timedelta(minutes=5),
+                                    latitude=46.7508, longitude=6.5495)
+
+    class Service:
+        def evaluate(self, **kwargs):
+            assert "acquisition_intent_progress" not in kwargs["profile"]["projects"]["Sh2-129"]
+            return make_result(decision_id="legacy-decision")
+
+    client = TestClient(create_app(
+        service_factory=lambda: Service(),
+        weather_provider=lambda lat, lon: weather,
+        profile_provider=load_user_profile,
+        clock=lambda: reference_time,
+        selection_id_factory=lambda: "legacy-selection",
+    ))
+    before = client.post("/v1/tonight", json={})
+    assert before.status_code == 200, before.text
+    progress = client.get("/v1/projects/Sh2-129/progress")
+    assert progress.status_code == 200
+    assert progress.json()["acquisition_intent_progress"] == []
+    after = client.post("/v1/tonight", json={})
+    assert after.status_code == 200, after.text
+    assert after.json() == before.json()
+
+
 @pytest.mark.parametrize(
     ("payload", "expected"),
     [
