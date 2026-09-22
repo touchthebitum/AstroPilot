@@ -2779,6 +2779,16 @@ def create_app(
         baseline = breakdown["base_seconds"]
         if total is not None and total < session_seconds:
             raise HTTPException(status_code=503, detail={"code": "session_credit_inconsistent"})
+        # applied_at is immutable on replay. Break timestamp ties by execution ID,
+        # never by ledger insertion order (or the order of files on disk).
+        before = total
+        if credit is not None:
+            selected_key = (datetime.fromisoformat(credit["applied_at"]), execution.execution_id)
+            prior_us = sum(entry["total_duration_us"] for entry_id, entry in credits.items()
+                           if (entry["project_id"], entry["acquisition_intent_id"]) == (project_id, intent_id)
+                           and (datetime.fromisoformat(entry["applied_at"]), entry_id) < selected_key)
+            before = (baseline or 0) + prior_us / 1_000_000
+        after = before + session_seconds if before is not None else None
         return {
             "execution": execution_response(execution).model_dump(mode="json"),
             "mission": _accepted_mission_response(mission).model_dump(mode="json"),
@@ -2802,9 +2812,10 @@ def create_app(
             "credit": credit,
             "historical_baseline_seconds": baseline,
             "historical_baseline_confirmed": intent_id in profile.get("intent_progress_baselines", {}).get(project_id, {}),
-            "acquired_before_seconds": total - session_seconds if total is not None else None,
+            "acquired_before_seconds": before,
             "session_credit_seconds": session_seconds,
-            "acquired_after_seconds": total,
+            "acquired_after_seconds": after,
+            "current_acquired_seconds": total,
             "target_hours": derived["target_hours"],
             "remaining_hours": derived["remaining_hours"],
         }

@@ -126,9 +126,12 @@ function renderSession() {
   }
   document.querySelector("#session-progress").hidden = !session;
   if (session) {
+    text("#session-before-label", session.credit ? "Acquis avant ce crédit" : "Acquis actuel (avant crédit)");
+    text("#session-after-label", session.credit ? "Acquis après ce crédit" : "Acquis projeté sans crédit");
     text("#session-before", sessionHours(session.acquired_before_seconds));
     text("#session-added", sessionHours(session.session_credit_seconds));
     text("#session-after", sessionHours(session.acquired_after_seconds));
+    text("#session-current", sessionHours(session.current_acquired_seconds));
     text("#session-remaining", session.target_hours == null ? "objectif non défini" : sessionHours(session.remaining_hours * 3600));
     sessionMessage(status === "unconfirmed" ? "Session non confirmée : aucune action disponible."
       : status === "interrupted" ? "Session interrompue : aucun crédit."

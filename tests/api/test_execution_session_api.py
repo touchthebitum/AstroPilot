@@ -14,6 +14,7 @@ from astropilot.execution_lineage_store import FileExecutionLineageStore
 from astropilot.user_profile import load_user_profile, save_user_profile
 from decision.mission.night_mission import NightMission
 from decision.services.durable_tonight_application_service import DurableTonightApplicationService
+import decision.services.intent_progress_credit as intent_credit_module
 
 
 FIELD = "sh2-129_ou4"
@@ -143,6 +144,18 @@ def test_resume_each_stage_and_lost_responses(tmp_path, monkeypatch):
     assert second["acquired_before_seconds"] == 5400
     assert second["session_credit_seconds"] == 900
     assert second["acquired_after_seconds"] == 6300
+    first_again = fresh().get("/v1/executions/execution-1/session").json()
+    assert (first_again["acquired_before_seconds"], first_again["session_credit_seconds"],
+            first_again["acquired_after_seconds"]) == (3600, 1800, 5400)
+    assert first_again["current_acquired_seconds"] == 6300
+    assert first_again["remaining_hours"] == .25  # Current, not historical.
+    assert second["current_acquired_seconds"] == 6300
+    assert fresh().get("/v1/projects/Sh2-129/progress").json()["intent_progress_breakdown"][0]["effective_total_seconds"] == 6300
+    applied_at = first_again["credit"]["applied_at"]
+    assert credit(fresh(), "execution-1", "evidence-1").json()["status"] == "already_applied"
+    replayed = fresh().get("/v1/executions/execution-1/session").json()
+    assert replayed["credit"]["applied_at"] == applied_at
+    assert (replayed["acquired_before_seconds"], replayed["acquired_after_seconds"]) == (3600, 5400)
     changed = api.post("/v1/outcome-evidence", json={
         "evidence_id": "evidence-1", "execution_id": "execution-1", "category": "acquisition",
         "observed_at": (START + timedelta(hours=1)).isoformat(), "source": "user",
@@ -150,6 +163,59 @@ def test_resume_each_stage_and_lost_responses(tmp_path, monkeypatch):
     })
     assert changed.status_code == 409
     assert fresh().get("/v1/executions/execution-1/session").json()["credit"] == after["credit"]
+
+
+def test_other_intent_credit_does_not_change_historical_session(tmp_path, monkeypatch):
+    fresh = setup(tmp_path, monkeypatch)
+    api = fresh()
+    create_completed(api, "execution-1", evidence_id="evidence-1")
+    assert credit(api, "execution-1", "evidence-1", confirm=True).status_code == 200
+    create_completed(api, "execution-oiii", mission_id="mission-oiii", evidence_id="evidence-oiii")
+    assert credit(api, "execution-oiii", "evidence-oiii").status_code == 200
+    first = fresh().get("/v1/executions/execution-1/session").json()
+    assert (first["acquired_before_seconds"], first["acquired_after_seconds"],
+            first["current_acquired_seconds"]) == (3600, 5400, 5400)
+
+
+def test_equal_applied_at_orders_credits_by_execution_id_not_ledger_order(tmp_path, monkeypatch):
+    fresh = setup(tmp_path, monkeypatch)
+    api = fresh()
+    # Credit the lexically later ID first, then set both timestamps equal.
+    create_completed(api, "execution-z", evidence_id="evidence-z")
+    assert credit(api, "execution-z", "evidence-z", confirm=True).status_code == 200
+    create_completed(api, "execution-a", evidence_id="evidence-a", minutes=15)
+    assert credit(api, "execution-a", "evidence-a").status_code == 200
+    path = tmp_path / "user_profile.json"
+    profile = json.loads(path.read_text())
+    ledger = profile["intent_progress_credits"]
+    ledger["execution-a"]["applied_at"] = ledger["execution-z"]["applied_at"]
+    path.write_text(json.dumps(profile))
+    first = fresh().get("/v1/executions/execution-a/session").json()
+    second = fresh().get("/v1/executions/execution-z/session").json()
+    assert (first["acquired_before_seconds"], first["acquired_after_seconds"]) == (3600, 4500)
+    assert (second["acquired_before_seconds"], second["acquired_after_seconds"]) == (4500, 6300)
+    assert first["current_acquired_seconds"] == second["current_acquired_seconds"] == 6300
+
+
+def test_new_credit_keeps_append_chronology_when_clock_is_frozen(tmp_path, monkeypatch):
+    fresh = setup(tmp_path, monkeypatch)
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return START.astimezone(tz)
+
+    monkeypatch.setattr(intent_credit_module, "datetime", FrozenDatetime)
+    api = fresh()
+    create_completed(api, "execution-z", evidence_id="evidence-z")
+    assert credit(api, "execution-z", "evidence-z", confirm=True).status_code == 200
+    first = fresh().get("/v1/executions/execution-z/session").json()
+    create_completed(api, "execution-a", evidence_id="evidence-a", minutes=15)
+    assert credit(api, "execution-a", "evidence-a").status_code == 200
+    second = fresh().get("/v1/executions/execution-a/session").json()
+    reopened = fresh().get("/v1/executions/execution-z/session").json()
+    assert datetime.fromisoformat(second["credit"]["applied_at"]) > datetime.fromisoformat(first["credit"]["applied_at"])
+    assert (reopened["acquired_before_seconds"], reopened["acquired_after_seconds"]) == (3600, 5400)
+    assert (second["acquired_before_seconds"], second["acquired_after_seconds"]) == (5400, 6300)
 
 
 def test_second_execution_zero_baseline_missing_evidence_and_interruption(tmp_path, monkeypatch):

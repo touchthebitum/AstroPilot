@@ -42,7 +42,7 @@ let canonical = {execution: {execution_id: 'execution-1', mission_id: 'mission-1
   evidence: [{evidence_id: 'evidence-1', category: 'acquisition', usable_integration_duration: 1800}],
   credit: null, historical_baseline_seconds: 3600, historical_baseline_confirmed: false,
   acquired_before_seconds: 3600, session_credit_seconds: 0, acquired_after_seconds: 3600,
-  target_hours: 2, remaining_hours: 1, profile_revision: 7};
+  current_acquired_seconds: 3600, target_hours: 2, remaining_hours: 1, profile_revision: 7};
 let posts = 0;
 async function fetch(url, options) {
   if (!options) return {ok: true, json: async () => [structuredClone(canonical)]};
@@ -54,7 +54,8 @@ async function fetch(url, options) {
   assert.equal(body.confirm_historical_baseline, true);
   canonical = {...canonical, credit: {execution_id: 'execution-1', total_duration_us: 1800000000},
     historical_baseline_confirmed: true, session_credit_seconds: 1800,
-    acquired_after_seconds: 5400, remaining_hours: .5, profile_revision: 8};
+    acquired_after_seconds: 5400, current_acquired_seconds: 5400,
+    remaining_hours: .5, profile_revision: 8};
   throw new Error('response lost after commit');
 }
 '''
@@ -72,6 +73,14 @@ async function fetch(url, options) {
   assert.equal(document.querySelector('#session-before').textContent, '1 h 00');
   assert.equal(document.querySelector('#session-added').textContent, '0 h 30');
   assert.equal(document.querySelector('#session-after').textContent, '1 h 30');
+  assert.equal(document.querySelector('#session-after-label').textContent, 'Acquis après ce crédit');
+  canonical.current_acquired_seconds = 6300;
+  canonical.remaining_hours = .25;
+  await reloadSessions();
+  assert.equal(document.querySelector('#session-before').textContent, '1 h 00');
+  assert.equal(document.querySelector('#session-after').textContent, '1 h 30');
+  assert.equal(document.querySelector('#session-current').textContent, '1 h 45');
+  assert.equal(document.querySelector('#session-remaining').textContent, '0 h 15');
   await sessionCommand(creditSession);
   assert.equal(posts, 1, 'reopen must not submit a second credit');
 })().catch(error => { console.error(error); process.exitCode = 1; });
@@ -110,7 +119,7 @@ let canonical = {execution: {execution_id: 'execution-1', mission_id: 'mission-1
   actual_start: null}, acquisition_intent_id: 'ha', evidence: [], credit: null,
   historical_baseline_seconds: 0, historical_baseline_confirmed: false,
   acquired_before_seconds: 0, session_credit_seconds: 0, acquired_after_seconds: 0,
-  target_hours: null, remaining_hours: null, profile_revision: 7};
+  current_acquired_seconds: 0, target_hours: null, remaining_hours: null, profile_revision: 7};
 async function fetch(url, options) {
   if (!options) return {ok: true, status: 200, json: async () => [structuredClone(canonical)]};
   writes++;
