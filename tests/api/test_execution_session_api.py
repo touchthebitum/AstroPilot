@@ -292,6 +292,25 @@ def test_session_read_validates_only_contributing_credits(tmp_path, monkeypatch,
         assert fresh().get("/v1/executions/execution-2/session").status_code == 503
 
 
+def test_session_read_normalizes_corrupt_contributing_execution(tmp_path, monkeypatch):
+    fresh = setup(tmp_path, monkeypatch, baseline=0)
+    api = fresh()
+    create_completed(api, "execution-1", evidence_id="evidence-1")
+    assert credit(api, "execution-1", "evidence-1").status_code == 200
+    create_completed(api, "execution-2", evidence_id="evidence-2")
+    assert credit(api, "execution-2", "evidence-2").status_code == 200
+
+    (tmp_path / "execution_lineage" / "execution-2.json").write_text("invalid json")
+
+    response = fresh().get("/v1/executions/execution-1/session")
+    assert response.status_code == 503
+    assert response.json() == {"detail": {"code": "session_credit_inconsistent"}}
+
+    direct = fresh().get("/v1/executions/execution-2/session")
+    assert direct.status_code == 503
+    assert direct.json() == {"detail": {"code": "invalid_json_document"}}
+
+
 def test_session_discovery_orders_missions_by_persisted_chronology(tmp_path, monkeypatch):
     fresh = setup(tmp_path, monkeypatch, baseline=0)
     api = fresh()

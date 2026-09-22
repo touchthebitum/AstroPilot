@@ -2706,11 +2706,14 @@ def create_app(
                     if (entry["project_id"], entry["acquisition_intent_id"]) == (project_id, intent_id)
                     or execution_id == current_aggregate.execution.execution_id}
         for execution_id, credit in relevant.items():
-            aggregate = (current_aggregate if execution_id == current_aggregate.execution.execution_id
-                         else service.load_session(execution_id))
-            execution = aggregate.execution if aggregate is not None else None
-            mission = service.load_mission(execution.mission_id) if execution is not None else None
-            selection = service.load_selection(mission.selection_id) if mission is not None else None
+            try:
+                aggregate = (current_aggregate if execution_id == current_aggregate.execution.execution_id
+                             else service.load_session(execution_id))
+                execution = aggregate.execution if aggregate is not None else None
+                mission = service.load_mission(execution.mission_id) if execution is not None else None
+                selection = service.load_selection(mission.selection_id) if mission is not None else None
+            except (ExecutionOutcomeApplicationError, DecisionAcceptanceError, OSError) as exc:
+                raise HTTPException(status_code=503, detail={"code": "session_credit_inconsistent"}) from exc
             if (execution is None or execution.execution_id != execution_id
                 or execution.status is not ExecutionStatus.COMPLETED
                 or mission is None or mission.mission_id != execution.mission_id
