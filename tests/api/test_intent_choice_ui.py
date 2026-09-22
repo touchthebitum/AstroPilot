@@ -48,7 +48,10 @@ def test_saved_mission_restores_only_from_server_without_acceptance():
 const assert = require('node:assert/strict');
 const state = {acceptedMission: null};
 const entry = {hidden: true};
-const ui = {savedMissionEntry: entry, savedMissionTarget: {textContent: ''}};
+const choice = {value: '', children: [], replaceChildren() { this.children = []; },
+  append(item) { this.children.push(item); }};
+const ui = {savedMissionEntry: entry, savedMissionTarget: {textContent: ''}, savedMissionChoice: choice};
+const document = {createElement() { return {value: '', textContent: ''}; }};
 let calls = [];
 let changeConfiguration = false;
 let payload = {status: 'accepted', mission_id: 'mission-1', selection_id: 'selection-1',
@@ -173,15 +176,16 @@ const assert = require('node:assert/strict');
 let openSavedMission;
 let shown = 0;
 const saved = {source: 'persisted', mission: {target: 'M31'}};
-const state = {acceptedMission: saved};
+const state = {acceptedMission: saved, savedMissions: [saved]};
 const ui = {openSavedMission: {addEventListener(event, callback) { openSavedMission = callback; }},
-  mission: {showModal() { shown++; }}};
+  savedMissionChoice: {value: ''}, mission: {showModal() { shown++; }}};
 function renderMission(mission) { assert.equal(mission, saved.mission); }
 function fetch() { throw new Error('reopening must not make a request'); }
 """ + listener + """
 openSavedMission();
 assert.equal(shown, 1);
 state.acceptedMission = null;
+state.savedMissions = [];
 openSavedMission();
 assert.equal(shown, 1);
 """)

@@ -15,6 +15,7 @@ const ui = Object.freeze({
   availabilityForm: document.querySelector("#availability-form"),
   savedMissionEntry: document.querySelector("#saved-mission-entry"),
   savedMissionTarget: document.querySelector("#saved-mission-target"),
+  savedMissionChoice: document.querySelector("#saved-mission-choice"),
   openSavedMission: document.querySelector("#open-saved-mission"),
   availabilityError: document.querySelector("#availability-error"),
   availabilitySiteTimezone: document.querySelector("#availability-site-timezone"),
@@ -52,6 +53,7 @@ const state = {
   availability: null,
   currentDecision: null,
   acceptedMission: null,
+  savedMissions: [],
   pendingAcceptanceAttempt: null,
   pendingAcceptanceStorageInvalid: false,
   acceptingRecommendation: false,
@@ -88,6 +90,10 @@ function usableEvidence(session) {
     && Number(item.usable_integration_duration) > 0);
 }
 
+function sessionStatus(status) {
+  return status === "unconfirmed" ? "Session non confirmée" : status;
+}
+
 function renderSession() {
   const session = currentSession();
   const status = session?.execution.status;
@@ -96,20 +102,20 @@ function renderSession() {
   for (const item of state.sessions) {
     const option = document.createElement("option");
     option.value = item.execution.execution_id;
-    option.textContent = `${item.execution.actual_start ? new Date(item.execution.actual_start).toLocaleString("fr-CH") : "À démarrer"} · ${item.execution.status}`;
+    option.textContent = `${item.execution.actual_start ? new Date(item.execution.actual_start).toLocaleString("fr-CH") : "À démarrer"} · ${sessionStatus(item.execution.status)}`;
     choice.append(option);
   }
   choice.hidden = !state.sessions.length;
   if (session) choice.value = session.execution.execution_id;
   const intentId = session?.acquisition_intent_id || state.acceptedMission?.acquisitionIntentId;
   text("#session-intent", `Intent de la mission : ${intentId || "non défini"}`);
-  document.querySelector("#session-start").hidden = status === "in_progress";
+  document.querySelector("#session-start").hidden = status === "in_progress" || status === "unconfirmed";
   document.querySelector("#session-start").textContent = status === "not_started"
     ? "Démarrer cette session" : "Créer et démarrer une nouvelle session";
   document.querySelector("#session-close-actions").hidden = status !== "in_progress";
   document.querySelector("#session-evidence").hidden = status !== "completed" || Boolean(usableEvidence(session));
   const evidence = usableEvidence(session);
-  document.querySelector("#session-credit").hidden = !evidence || Boolean(session.credit);
+  document.querySelector("#session-credit").hidden = status === "unconfirmed" || !evidence || Boolean(session.credit);
   if (evidence && !session.credit) {
     text("#session-credit-preview", `Intent ${session.acquisition_intent_id} · base historique : ${sessionHours(session.historical_baseline_seconds)} · crédit proposé : ${sessionHours(Number(evidence.usable_integration_duration))}`);
     const mustConfirm = Number(session.historical_baseline_seconds) > 0 && !session.historical_baseline_confirmed;
@@ -122,7 +128,8 @@ function renderSession() {
     text("#session-added", sessionHours(session.session_credit_seconds));
     text("#session-after", sessionHours(session.acquired_after_seconds));
     text("#session-remaining", session.target_hours == null ? "objectif non défini" : sessionHours(session.remaining_hours * 3600));
-    sessionMessage(status === "interrupted" ? "Session interrompue : aucun crédit."
+    sessionMessage(status === "unconfirmed" ? "Session non confirmée : aucune action disponible."
+      : status === "interrupted" ? "Session interrompue : aucun crédit."
       : session.credit ? "Crédit enregistré." : status === "completed" ? "Session terminée."
       : status === "in_progress" ? "Session en cours." : "Session prête à démarrer.");
   } else sessionMessage("Aucune session enregistrée pour cette mission.");
@@ -140,7 +147,7 @@ async function reloadSessions({ selectId = null } = {}) {
   const candidate = selectId || (pending?.mission_id === missionId ? pending.execution_id : null);
   state.activeSessionId = sessions.some((item) => item.execution.execution_id === candidate)
     ? candidate : sessions.some((item) => item.execution.execution_id === state.activeSessionId)
-      ? state.activeSessionId : sessions.at(-1)?.execution.execution_id || null;
+      ? state.activeSessionId : sessions[0]?.execution.execution_id || null;
   if (pending?.mission_id === missionId && sessions.some((item) => item.execution.execution_id === pending.execution_id)) {
     localStorage.removeItem(SESSION_PENDING_KEY);
   }
@@ -157,12 +164,14 @@ async function sessionCommand(command) {
     await reloadSessions();
     await command(missionId, baselineConfirmed);
     await reloadSessions();
-  } catch (_error) {
+  } catch (error) {
     try {
       await reloadSessions();
-      sessionMessage("État relu après une réponse incertaine. Vérifiez la session avant de poursuivre.");
+      sessionMessage(error?.status ? sessionRefusalMessage(error) :
+        "État relu après une réponse incertaine. Vérifiez la session avant de poursuivre.");
     } catch (_readError) {
-      sessionMessage("Lecture impossible. Rechargez la page avant une nouvelle action.");
+      sessionMessage(error?.status ? `${sessionRefusalMessage(error)} Lecture impossible ; rechargez la page.`
+        : "Lecture impossible. Rechargez la page avant une nouvelle action.");
     }
   } finally {
     state.sessionBusy = false;
@@ -172,8 +181,22 @@ async function sessionCommand(command) {
 
 async function postSession(url, body) {
   const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!response.ok) throw new Error("session_command_failed");
+  if (!response.ok) throw await sessionHttpError(response);
   return response.json();
+}
+
+async function sessionHttpError(response) {
+  const error = new Error("session_command_refused");
+  error.status = response.status;
+  try { error.code = (await response.json()).detail?.code; } catch (_ignored) { /* status remains authoritative */ }
+  return error;
+}
+
+function sessionRefusalMessage(error) {
+  if (error.status === 409) return "Action refusée : la session ou le profil a changé. État actuel relu ; vérifiez avant de poursuivre.";
+  if (error.status === 422) return "Action refusée : transition ou données invalides. Corrigez la saisie avant de poursuivre.";
+  if (error.status === 503) return "Action impossible : données enregistrées incohérentes ou service indisponible. Rechargez la page.";
+  return `Action refusée par le serveur (${error.status}). État actuel relu.`;
 }
 
 async function startSession(missionId) {
@@ -184,7 +207,7 @@ async function startSession(missionId) {
     localStorage.setItem(SESSION_PENDING_KEY, JSON.stringify({ mission_id: missionId, execution_id: executionId }));
     const lookup = await fetch(`/v1/executions/${encodeURIComponent(executionId)}/session`);
     if (lookup.status === 404) await postSession("/v1/executions", { execution_id: executionId, mission_id: missionId });
-    else if (!lookup.ok) throw new Error("session_read_unavailable");
+    else if (!lookup.ok) throw await sessionHttpError(lookup);
     await reloadSessions({ selectId: executionId });
     session = currentSession();
   }
@@ -222,7 +245,7 @@ async function recordSessionEvidence() {
   const evidenceId = saved?.evidence_id || crypto.randomUUID();
   localStorage.setItem(key, JSON.stringify({ evidence_id: evidenceId, minutes: hours * 60 + minutes }));
   const lookup = await fetch(`/v1/executions/${encodeURIComponent(session.execution.execution_id)}/session`);
-  if (!lookup.ok) throw new Error("session_read_unavailable");
+  if (!lookup.ok) throw await sessionHttpError(lookup);
   const canonical = await lookup.json();
   if (canonical.evidence.some((item) => item.evidence_id === evidenceId || Number(item.usable_integration_duration) > 0)) return;
   await postSession("/v1/outcome-evidence", {
@@ -1469,7 +1492,9 @@ function initializeConfiguration(payload) {
 async function restoreSavedMission() {
   const configuration = state.configuration;
   state.acceptedMission = null;
+  state.savedMissions = [];
   ui.savedMissionEntry.hidden = true;
+  let current = null;
   try {
     const response = await fetch("/v1/accepted-mission/current");
     if (!response.ok) throw new Error("mission_read_unavailable");
@@ -1479,7 +1504,7 @@ async function restoreSavedMission() {
         && payload.mission_id === mission.mission_id
         && payload.selection_id === mission.selection_id
         && payload.decision_id === mission.decision_id) {
-      state.acceptedMission = {
+      current = {
         decision_id: payload.decision_id,
         selection_id: payload.selection_id,
         mission_id: payload.mission_id,
@@ -1496,20 +1521,34 @@ async function restoreSavedMission() {
     const response = await fetch("/v1/execution-sessions");
     if (response.ok && state.configuration === configuration) {
       const sessions = await response.json();
-      if (!state.acceptedMission && sessions.length) {
-        const latest = sessions.at(-1);
-        state.acceptedMission = {
-          decision_id: latest.mission.decision_id, selection_id: latest.mission.selection_id,
-          mission_id: latest.mission.mission_id, selectedCatalogKey: latest.project_id,
-          acquisitionIntentId: latest.acquisition_intent_id, source: "persisted",
-          mission: latest.mission,
-        };
+      const seen = new Set();
+      for (const item of sessions) {
+        if (seen.has(item.mission_id)) continue;
+        seen.add(item.mission_id);
+        state.savedMissions.push({
+          decision_id: item.mission.decision_id, selection_id: item.mission.selection_id,
+          mission_id: item.mission_id, selectedCatalogKey: item.project_id,
+          acquisitionIntentId: item.acquisition_intent_id, source: "persisted",
+          mission: item.mission,
+        });
       }
     }
   } catch (_error) {
     // The current mission can still be opened if session discovery is unavailable.
   }
+  if (current && !state.savedMissions.some((item) => item.mission_id === current.mission_id)) {
+    state.savedMissions.unshift(current);
+  }
+  state.acceptedMission = current || state.savedMissions[0] || null;
+  ui.savedMissionChoice.replaceChildren();
+  for (const item of state.savedMissions) {
+    const option = document.createElement("option");
+    option.value = item.mission_id;
+    option.textContent = `${item.mission.target} · ${new Date(item.mission.window_start).toLocaleString("fr-CH")}`;
+    ui.savedMissionChoice.append(option);
+  }
   if (state.acceptedMission) {
+    ui.savedMissionChoice.value = state.acceptedMission.mission_id;
     ui.savedMissionTarget.textContent = state.acceptedMission.mission.target;
     ui.savedMissionEntry.hidden = false;
   }
@@ -2288,6 +2327,8 @@ ui.openMission.addEventListener("click", () => acceptRecommendation({
   selectedTarget: state.currentDecision?.target,
 }));
 ui.openSavedMission.addEventListener("click", () => {
+  const selected = state.savedMissions.find((item) => item.mission_id === ui.savedMissionChoice.value);
+  if (selected) state.acceptedMission = selected;
   if (!state.acceptedMission?.mission || state.acceptedMission.source !== "persisted") return;
   renderMission(state.acceptedMission.mission);
   ui.mission.showModal();

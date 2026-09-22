@@ -3,9 +3,11 @@
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+import json
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+import pytest
 
 from astropilot.app import create_app
 from astropilot.execution_lineage_store import FileExecutionLineageStore
@@ -30,6 +32,8 @@ class Acceptance:
             imaging_field_id=FIELD, acquisition_intent_id=HA,
         )
         self.missions = {"mission-ha": mission,
+                         "mission-ha-other": replace(mission, mission_id="mission-ha-other",
+                             decision_id="decision-ha-other", selection_id="selection-ha-other"),
                          "mission-oiii": replace(mission, mission_id="mission-oiii",
                              decision_id="decision-oiii", selection_id="selection-oiii",
                              acquisition_intent_id=OIII)}
@@ -168,6 +172,15 @@ def test_second_execution_zero_baseline_missing_evidence_and_interruption(tmp_pa
     })
     assert zero.status_code == 200
     assert credit(api, "execution-3", "evidence-zero").status_code == 422
+    absent = api.post("/v1/outcome-evidence", json={
+        "evidence_id": "evidence-null", "execution_id": "execution-3", "category": "acquisition",
+        "observed_at": START.isoformat(), "source": "user", "usable_integration_duration": None,
+    })
+    assert absent.status_code == 200
+    assert credit(api, "execution-3", "evidence-null").status_code == 422
+    read = fresh().get("/v1/executions/execution-3/session")
+    assert read.status_code == 200
+    assert read.json()["session_credit_seconds"] == 0
     assert api.post("/v1/executions", json={"execution_id": "interrupted", "mission_id": "mission-ha"}).status_code == 200
     assert api.post("/v1/execution-transitions", json={"execution_id": "interrupted", "mission_id": "mission-ha",
         "status": "in_progress", "actual_start": START.isoformat(), "actual_end": None, "actual_duration": None}).status_code == 200
@@ -224,3 +237,46 @@ def test_read_after_each_write_and_concurrent_commands(tmp_path, monkeypatch):
     state = fresh().get("/v1/executions/concurrent/session").json()
     assert state["session_credit_seconds"] == 1800
     assert state["acquired_after_seconds"] == 1800
+
+
+@pytest.mark.parametrize("change", ["intent", "mission_selection", "evidence", "duration"])
+def test_session_read_rejects_structurally_valid_wrong_credit(tmp_path, monkeypatch, change):
+    fresh = setup(tmp_path, monkeypatch, baseline=0)
+    api = fresh()
+    create_completed(api, "execution-1", evidence_id="evidence-1")
+    assert credit(api, "execution-1", "evidence-1").status_code == 200
+    path = tmp_path / "user_profile.json"
+    profile = json.loads(path.read_text())
+    entry = profile["intent_progress_credits"]["execution-1"]
+    if change == "intent":
+        entry["acquisition_intent_id"] = OIII
+    elif change == "mission_selection":
+        entry["mission_id"] = "mission-ha-other"
+        entry["selection_id"] = "selection-ha-other"
+        entry["decision_id"] = "decision-ha-other"
+    elif change == "evidence":
+        entry["evidence_ids"] = ["other-evidence"]
+    else:
+        entry["usable_durations_us"] = [900_000_000]
+        entry["total_duration_us"] = 900_000_000
+    path.write_text(json.dumps(profile))
+    response = fresh().get("/v1/executions/execution-1/session")
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "session_credit_inconsistent"
+
+
+def test_session_discovery_orders_missions_by_persisted_chronology(tmp_path, monkeypatch):
+    fresh = setup(tmp_path, monkeypatch, baseline=0)
+    api = fresh()
+    assert api.post("/v1/executions", json={"execution_id": "z-old", "mission_id": "mission-ha"}).status_code == 200
+    assert api.post("/v1/executions", json={"execution_id": "a-new", "mission_id": "mission-oiii"}).status_code == 200
+    assert api.post("/v1/execution-transitions", json={
+        "execution_id": "a-new", "mission_id": "mission-oiii", "status": "in_progress",
+        "actual_start": (START + timedelta(days=1)).isoformat(),
+        "actual_end": None, "actual_duration": None,
+    }).status_code == 200
+    sessions = fresh().get("/v1/execution-sessions").json()
+    assert {item["mission_id"] for item in sessions} == {"mission-ha", "mission-oiii"}
+    assert [item["execution"]["execution_id"] for item in sessions] == ["a-new", "z-old"]
+    assert sessions[0]["chronology_at"] == (START + timedelta(days=1)).isoformat()
+    assert all(item["mission"]["target"] == "Sh2-129" for item in sessions)

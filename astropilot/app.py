@@ -45,7 +45,7 @@ from decision.services.acquisition_intent_remaining_progress import (
     derive_acquisition_intent_remaining_progress, remaining_progress_projection,
 )
 from decision.services.intent_progress_credit import (
-    IntentProgressCreditError, base_seconds, credit_totals, load_credits,
+    IntentProgressCreditError, base_seconds, credit_totals, duration_us, load_credits,
 )
 from decision.models.project_acquisition_intent_target import ProjectAcquisitionIntentTarget
 from decision.models.session_availability import (
@@ -2701,17 +2701,17 @@ def create_app(
         service = application_service()
         mission = service.load_mission(execution.mission_id)
         if mission is None or mission.mission_id != execution.mission_id:
-            raise HTTPException(status_code=409, detail={"code": "mission_provenance_invalid"})
+            raise HTTPException(status_code=503, detail={"code": "mission_provenance_invalid"})
         selection = service.load_selection(mission.selection_id)
         if (selection is None or selection.selection_id != mission.selection_id
             or selection.decision_id != mission.decision_id
             or selection.selected_imaging_field_id != mission.imaging_field_id
             or selection.selected_acquisition_intent_id != mission.acquisition_intent_id):
-            raise HTTPException(status_code=409, detail={"code": "mission_provenance_invalid"})
+            raise HTTPException(status_code=503, detail={"code": "mission_provenance_invalid"})
         project_id = selection.selected_catalog_key
         project = profile.get("projects", {}).get(project_id)
         if project is None or project.get("imaging_field_id") != mission.imaging_field_id:
-            raise HTTPException(status_code=409, detail={"code": "project_field_mismatch"})
+            raise HTTPException(status_code=503, detail={"code": "project_field_mismatch"})
         progress = project_progress_projection(profile, project_id)
         intent_id = mission.acquisition_intent_id
         breakdown = next((item for item in progress["intent_progress_breakdown"]
@@ -2719,14 +2719,50 @@ def create_app(
         derived = next((item for item in progress["acquisition_intent_remaining_progress"]
                         if item["acquisition_intent_id"] == intent_id), None)
         if breakdown is None or derived is None:
-            raise HTTPException(status_code=409, detail={"code": "intent_unknown"})
-        credit = load_credits(profile).get(execution.execution_id)
+            raise HTTPException(status_code=503, detail={"code": "intent_unknown"})
+        try:
+            credit = load_credits(profile).get(execution.execution_id)
+        except IntentProgressCreditError as exc:
+            raise HTTPException(status_code=503, detail={"code": "session_credit_inconsistent"}) from exc
+        if credit is not None:
+            provenance = {
+                "execution_id": execution.execution_id,
+                "mission_id": mission.mission_id,
+                "selection_id": selection.selection_id,
+                "decision_id": selection.decision_id,
+                "project_id": project_id,
+                "imaging_field_id": mission.imaging_field_id,
+                "acquisition_intent_id": intent_id,
+            }
+            evidence_by_id = {item.evidence_id: item for item in aggregate.evidence}
+            credited_ids = credit["evidence_ids"]
+            durations = []
+            for evidence_id in credited_ids:
+                evidence = evidence_by_id.get(evidence_id)
+                if (not isinstance(evidence, AcquisitionOutcomeEvidence)
+                    or evidence.execution_id != execution.execution_id
+                    or evidence.usable_integration_duration is None):
+                    raise HTTPException(status_code=503, detail={"code": "session_credit_inconsistent"})
+                value = duration_us(evidence.usable_integration_duration)
+                if value <= 0:
+                    raise HTTPException(status_code=503, detail={"code": "session_credit_inconsistent"})
+                durations.append(value)
+            if (execution.status is not ExecutionStatus.COMPLETED
+                or any(credit.get(key) != value for key, value in provenance.items())
+                or len(evidence_by_id) != len(aggregate.evidence)
+                or durations != credit["usable_durations_us"]
+                or sum(durations) != credit["total_duration_us"]):
+                raise HTTPException(status_code=503, detail={"code": "session_credit_inconsistent"})
         session_seconds = credit["total_duration_us"] / 1_000_000 if credit else 0
         total = breakdown["effective_total_seconds"]
         baseline = breakdown["base_seconds"]
+        if total is not None and total < session_seconds:
+            raise HTTPException(status_code=503, detail={"code": "session_credit_inconsistent"})
         return {
             "execution": execution_response(execution).model_dump(mode="json"),
             "mission": _accepted_mission_response(mission).model_dump(mode="json"),
+            "mission_id": mission.mission_id,
+            "chronology_at": (execution.actual_start or mission.window_start).isoformat(),
             "project_id": project_id,
             "acquisition_intent_id": intent_id,
             "profile_revision": profile.get("profile_revision", 0),
@@ -2767,7 +2803,10 @@ def create_app(
             if not aggregates:
                 return []
             profile = load_user_profile()
-            return [session_projection(item, profile) for item in aggregates]
+            projections = [session_projection(item, profile) for item in aggregates]
+            return sorted(projections, key=lambda item: (
+                datetime.fromisoformat(item["chronology_at"]).timestamp(),
+                item["execution"]["execution_id"]), reverse=True)
         except ExecutionOutcomeApplicationError as exc:
             raise HTTPException(status_code=503, detail={"code": str(exc)}) from exc
         except UserProfileError as exc:

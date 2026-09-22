@@ -78,3 +78,136 @@ async function fetch(url, options) {
 '''
     result = subprocess.run([node, "-e", harness + helpers + checks], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_session_actions_distinguish_lost_response_from_server_refusals():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for the dynamic UI test")
+    source = SCRIPT.read_text(encoding="utf-8")
+    helpers = source[source.index('const SESSION_PENDING_KEY ='):source.index('const PENDING_ACCEPTANCE_STORAGE_KEY =')]
+    harness = r'''
+const assert = require('node:assert/strict');
+class Element {
+  constructor() { this.hidden = false; this.disabled = false; this.checked = false;
+    this.textContent = ''; this.value = ''; this.children = []; }
+  replaceChildren() { this.children = []; }
+  append(child) { this.children.push(child); }
+}
+const elements = new Map();
+const document = {querySelector(selector) { if (!elements.has(selector)) elements.set(selector, new Element());
+  return elements.get(selector); }, querySelectorAll() { return [document.querySelector('#session-start')]; },
+  createElement() { return new Element(); }};
+function text(selector, value) { document.querySelector(selector).textContent = value; }
+const storage = new Map();
+const localStorage = {getItem: key => storage.get(key) || null,
+  setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key)};
+const crypto = {randomUUID: () => 'new-id'};
+const state = {acceptedMission: {mission_id: 'mission-1', acquisitionIntentId: 'ha'},
+  sessions: [], activeSessionId: null, sessionBusy: false};
+let status = 409, lost = false, writes = 0;
+let canonical = {execution: {execution_id: 'execution-1', mission_id: 'mission-1', status: 'not_started',
+  actual_start: null}, acquisition_intent_id: 'ha', evidence: [], credit: null,
+  historical_baseline_seconds: 0, historical_baseline_confirmed: false,
+  acquired_before_seconds: 0, session_credit_seconds: 0, acquired_after_seconds: 0,
+  target_hours: null, remaining_hours: null, profile_revision: 7};
+async function fetch(url, options) {
+  if (!options) return {ok: true, status: 200, json: async () => [structuredClone(canonical)]};
+  writes++;
+  if (lost) throw new Error('transport lost');
+  return {ok: false, status, json: async () => ({detail: {code: 'refused'}})};
+}
+'''
+    checks = r'''
+(async () => {
+  const actions = [
+    {name: 'start', command: startSession, sessionStatus: 'not_started'},
+    {name: 'complete', command: (id) => closeSession(id, 'completed'), sessionStatus: 'in_progress'},
+    {name: 'interrupt', command: (id) => closeSession(id, 'interrupted'), sessionStatus: 'in_progress'},
+    {name: 'credit', command: creditSession, sessionStatus: 'completed', evidence: true},
+  ];
+  for (const action of actions) {
+    for (const failure of [409, 422, 503, 'lost']) {
+      canonical.execution.status = action.sessionStatus;
+      canonical.execution.actual_start = action.sessionStatus === 'not_started' ? null : '2026-09-21T20:00:00Z';
+      canonical.evidence = action.evidence ? [{evidence_id: 'evidence-1', category: 'acquisition', usable_integration_duration: 1800}] : [];
+      state.activeSessionId = null;
+      status = failure; lost = failure === 'lost'; writes = 0;
+      await sessionCommand(action.command);
+      assert.equal(writes, 1, `${action.name}/${failure}`);
+      const message = document.querySelector('#session-status').textContent;
+      if (failure === 'lost') assert.match(message, /réponse incertaine/, action.name);
+      else {
+        assert.match(message, /refusée|impossible/, `${action.name}/${failure}`);
+        assert.doesNotMatch(message, /réponse incertaine/, `${action.name}/${failure}`);
+      }
+    }
+  }
+  canonical.execution.status = 'unconfirmed';
+  canonical.evidence = [{evidence_id: 'evidence-1', category: 'acquisition', usable_integration_duration: 1800}];
+  await reloadSessions();
+  assert.equal(document.querySelector('#session-start').hidden, true);
+  assert.equal(document.querySelector('#session-credit').hidden, true);
+  assert.match(document.querySelector('#session-status').textContent, /Session non confirmée/);
+  assert.match(document.querySelector('#session-choice').children[0].textContent, /Session non confirmée/);
+  canonical.execution.status = 'completed';
+  for (const value of [null, 0]) {
+    canonical.evidence[0].usable_integration_duration = value;
+    await reloadSessions();
+    assert.equal(document.querySelector('#session-credit').hidden, true);
+    assert.equal(document.querySelector('#session-evidence').hidden, false);
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''
+    result = subprocess.run([node, "-e", harness + helpers + checks], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_saved_missions_include_expired_sessions_and_open_selected_mission():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for the dynamic UI test")
+    source = SCRIPT.read_text(encoding="utf-8")
+    restore = source[source.index('async function restoreSavedMission()'):source.index('function invalidateAvailabilityForSiteChange')]
+    open_handler = source[source.index('ui.openSavedMission.addEventListener'):source.index('document.querySelector("#session-choice").addEventListener')]
+    harness = r'''
+const assert = require('node:assert/strict');
+class Element {
+  constructor() { this.hidden = false; this.value = ''; this.textContent = ''; this.children = []; }
+  replaceChildren() { this.children = []; }
+  append(item) { this.children.push(item); }
+  addEventListener(_name, handler) { this.handler = handler; }
+}
+const ui = {savedMissionEntry: new Element(), savedMissionChoice: new Element(),
+  savedMissionTarget: new Element(), openSavedMission: new Element(), mission: {showModal() { opened = true; }}};
+const document = {createElement() { return new Element(); }};
+const state = {configuration: {}, acceptedMission: null, savedMissions: []};
+let opened = false, rendered = null;
+function renderMission(mission) { rendered = mission; }
+const mission = (id, target, window_start) => ({mission_id: id, selection_id: `s-${id}`,
+  decision_id: `d-${id}`, target, window_start});
+const old = mission('old', 'Ancienne mission', '2026-08-01T20:00:00Z');
+const recent = mission('recent', 'Mission récente', '2026-09-21T20:00:00Z');
+async function fetch(url) {
+  if (url === '/v1/accepted-mission/current') return {ok: true, json: async () => ({status: 'accepted',
+    mission_id: recent.mission_id, selection_id: recent.selection_id, decision_id: recent.decision_id,
+    catalog_key: 'Sh2-129', selected_acquisition_intent_id: 'ha', mission: recent})};
+  return {ok: true, json: async () => [recent, old].map((item) => ({mission_id: item.mission_id,
+    mission: item, project_id: 'Sh2-129', acquisition_intent_id: 'ha'}))};
+}
+'''
+    checks = r'''
+(async () => {
+  await restoreSavedMission();
+  assert.equal(state.savedMissions.length, 2);
+  assert.equal(ui.savedMissionChoice.children[0].value, 'recent');
+  assert.equal(ui.savedMissionChoice.children[1].value, 'old');
+  ui.savedMissionChoice.value = 'old';
+  ui.openSavedMission.handler();
+  assert.equal(state.acceptedMission.mission_id, 'old');
+  assert.equal(rendered.target, 'Ancienne mission');
+  assert.equal(opened, true);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''
+    result = subprocess.run([node, "-e", harness + restore + open_handler + checks], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
