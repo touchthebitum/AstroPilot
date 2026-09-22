@@ -152,6 +152,12 @@ class DurableTonightApplicationService:
             execution_id
         )
 
+    def load_session(self, execution_id: str):
+        return self._execution_outcome_application_service().load_session(execution_id)
+
+    def list_sessions(self, mission_id: str | None = None):
+        return self._execution_outcome_application_service().list_sessions(mission_id)
+
     def load_outcome_evidence(self, evidence_id: str):
         return self._execution_outcome_application_service().load_outcome_evidence(
             evidence_id

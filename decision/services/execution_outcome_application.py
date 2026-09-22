@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from decision.execution_lineage_persistence import (
+    ExecutionLineageAggregate,
     ExecutionLineageConflictError,
     ExecutionLineageNotFoundError,
     ExecutionLineagePersistenceError,
@@ -131,6 +132,26 @@ class ExecutionOutcomeApplicationService:
             return self.lineage_store.load_evidence(evidence_id)
         except ExecutionLineageNotFoundError:
             return None
+        except ExecutionLineagePersistenceError as error:
+            self._persistence_error(error)
+
+    def load_session(self, execution_id: str) -> ExecutionLineageAggregate | None:
+        try:
+            if hasattr(self.lineage_store, "load_session"):
+                return self.lineage_store.load_session(execution_id)
+            return ExecutionLineageAggregate(self.lineage_store.load_execution(execution_id),
+                tuple(record for record in self._evidence.values() if record.execution_id == execution_id))
+        except ExecutionLineageNotFoundError:
+            return None
+        except ExecutionLineagePersistenceError as error:
+            self._persistence_error(error)
+
+    def list_sessions(self, mission_id: str | None = None) -> list[ExecutionLineageAggregate]:
+        try:
+            if hasattr(self.lineage_store, "list_sessions"):
+                return self.lineage_store.list_sessions(mission_id)
+            return [self.load_session(execution_id) for execution_id, execution in self._executions.items()
+                    if mission_id is None or execution.mission_id == mission_id]
         except ExecutionLineagePersistenceError as error:
             self._persistence_error(error)
 

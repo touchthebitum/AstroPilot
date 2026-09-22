@@ -2696,6 +2696,95 @@ def create_app(
             actual_duration=execution.actual_duration,
         )
 
+    def session_projection(aggregate, profile: dict) -> dict:
+        execution = aggregate.execution
+        service = application_service()
+        mission = service.load_mission(execution.mission_id)
+        if mission is None or mission.mission_id != execution.mission_id:
+            raise HTTPException(status_code=409, detail={"code": "mission_provenance_invalid"})
+        selection = service.load_selection(mission.selection_id)
+        if (selection is None or selection.selection_id != mission.selection_id
+            or selection.decision_id != mission.decision_id
+            or selection.selected_imaging_field_id != mission.imaging_field_id
+            or selection.selected_acquisition_intent_id != mission.acquisition_intent_id):
+            raise HTTPException(status_code=409, detail={"code": "mission_provenance_invalid"})
+        project_id = selection.selected_catalog_key
+        project = profile.get("projects", {}).get(project_id)
+        if project is None or project.get("imaging_field_id") != mission.imaging_field_id:
+            raise HTTPException(status_code=409, detail={"code": "project_field_mismatch"})
+        progress = project_progress_projection(profile, project_id)
+        intent_id = mission.acquisition_intent_id
+        breakdown = next((item for item in progress["intent_progress_breakdown"]
+                          if item["acquisition_intent_id"] == intent_id), None)
+        derived = next((item for item in progress["acquisition_intent_remaining_progress"]
+                        if item["acquisition_intent_id"] == intent_id), None)
+        if breakdown is None or derived is None:
+            raise HTTPException(status_code=409, detail={"code": "intent_unknown"})
+        credit = load_credits(profile).get(execution.execution_id)
+        session_seconds = credit["total_duration_us"] / 1_000_000 if credit else 0
+        total = breakdown["effective_total_seconds"]
+        baseline = breakdown["base_seconds"]
+        return {
+            "execution": execution_response(execution).model_dump(mode="json"),
+            "mission": _accepted_mission_response(mission).model_dump(mode="json"),
+            "project_id": project_id,
+            "acquisition_intent_id": intent_id,
+            "profile_revision": profile.get("profile_revision", 0),
+            "evidence": [OutcomeEvidenceResponse(
+                evidence_id=item.evidence_id, execution_id=item.execution_id,
+                category=item.category, observed_at=item.observed_at, source=item.source,
+                actual_capture_duration=getattr(item, "actual_capture_duration", None),
+                usable_integration_duration=getattr(item, "usable_integration_duration", None),
+            ).model_dump(mode="json") | {
+                "usable_integration_duration": (
+                    item.usable_integration_duration.total_seconds()
+                    if isinstance(item, AcquisitionOutcomeEvidence)
+                    and item.usable_integration_duration is not None else None
+                ),
+            } for item in aggregate.evidence],
+            "credit": credit,
+            "historical_baseline_seconds": baseline,
+            "historical_baseline_confirmed": intent_id in profile.get("intent_progress_baselines", {}).get(project_id, {}),
+            "acquired_before_seconds": total - session_seconds if total is not None else None,
+            "session_credit_seconds": session_seconds,
+            "acquired_after_seconds": total,
+            "target_hours": derived["target_hours"],
+            "remaining_hours": derived["remaining_hours"],
+        }
+
+    def read_sessions(mission_id: str | None = None, execution_id: str | None = None):
+        try:
+            service = application_service()
+            if execution_id is not None:
+                aggregate = service.load_session(execution_id)
+                if aggregate is None:
+                    raise HTTPException(status_code=404, detail={"code": "execution_not_found"})
+                aggregates = [aggregate]
+            else:
+                if mission_id is not None and service.load_mission(mission_id) is None:
+                    raise HTTPException(status_code=404, detail={"code": "mission_not_found"})
+                aggregates = service.list_sessions(mission_id)
+            if not aggregates:
+                return []
+            profile = load_user_profile()
+            return [session_projection(item, profile) for item in aggregates]
+        except ExecutionOutcomeApplicationError as exc:
+            raise HTTPException(status_code=503, detail={"code": str(exc)}) from exc
+        except UserProfileError as exc:
+            raise HTTPException(status_code=503, detail={"code": "configuration_corrupt"}) from exc
+
+    @application.get("/v1/execution-sessions")
+    def list_execution_sessions():
+        return read_sessions()
+
+    @application.get("/v1/missions/{mission_id}/executions")
+    def list_mission_executions(mission_id: str):
+        return read_sessions(mission_id=mission_id)
+
+    @application.get("/v1/executions/{execution_id}/session")
+    def get_execution_session(execution_id: str):
+        return read_sessions(execution_id=execution_id)[0]
+
     def execution_command(name: str):
         command = getattr(application_service(), name, None)
         if command is None:

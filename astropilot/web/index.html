@@ -464,6 +464,36 @@
             </section>
           </div>
 
+          <section class="mission-section session-panel" aria-labelledby="session-title">
+            <h3 id="session-title">Session d’imagerie</h3>
+            <p id="session-intent">Intent : —</p>
+            <label for="session-choice">Sessions de cette mission</label>
+            <select id="session-choice"></select>
+            <p id="session-status" role="status"></p>
+            <button class="primary-button" id="session-start" type="button">Créer et démarrer une session</button>
+            <div id="session-close-actions" hidden>
+              <button class="primary-button" id="session-complete" type="button">Session terminée</button>
+              <button class="secondary-button" id="session-interrupt" type="button">Session interrompue</button>
+            </div>
+            <div id="session-evidence" hidden>
+              <p>Indiquez uniquement la durée d’intégration réellement utilisable.</p>
+              <label>Heures <input id="session-hours" type="number" min="0" step="1" value="0"></label>
+              <label>Minutes <input id="session-minutes" type="number" min="0" max="59" step="1" value="0"></label>
+              <button class="primary-button" id="session-record-evidence" type="button">Enregistrer la durée utilisable</button>
+            </div>
+            <div id="session-credit" hidden>
+              <p id="session-credit-preview"></p>
+              <label id="session-baseline-confirm-wrap" hidden><input id="session-baseline-confirm" type="checkbox"> Je confirme la valeur historique affichée</label>
+              <button class="primary-button" id="session-apply-credit" type="button">Créditer cet intent</button>
+            </div>
+            <dl id="session-progress" hidden>
+              <div><dt>Acquis avant cette session</dt><dd id="session-before">—</dd></div>
+              <div><dt>Crédit de cette session</dt><dd id="session-added">—</dd></div>
+              <div><dt>Acquis après</dt><dd id="session-after">—</dd></div>
+              <div><dt>Restant jusqu’à l’objectif</dt><dd id="session-remaining">—</dd></div>
+            </dl>
+          </section>
+
           <footer class="mission-footer">
             <p>Mission créée après votre choix explicite et enregistrée par AstroPilot.</p>
             <button class="secondary-button" id="mission-back" type="button">Retour à la recommandation</button>

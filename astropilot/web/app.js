@@ -62,7 +62,190 @@ const state = {
   recoveringConfiguration: false,
   progressEditor: null,
   progressEditorBaseline: null,
+  sessions: [],
+  activeSessionId: null,
+  sessionBusy: false,
 };
+
+const SESSION_PENDING_KEY = "astropilot.pendingSession";
+
+function sessionMessage(message) {
+  text("#session-status", message);
+}
+
+function sessionHours(seconds) {
+  if (seconds == null) return "inconnu";
+  const minutes = Math.round(Number(seconds) / 60);
+  return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function currentSession() {
+  return state.sessions.find((item) => item.execution.execution_id === state.activeSessionId) || null;
+}
+
+function usableEvidence(session) {
+  return (session?.evidence || []).find((item) => item.category === "acquisition"
+    && Number(item.usable_integration_duration) > 0);
+}
+
+function renderSession() {
+  const session = currentSession();
+  const status = session?.execution.status;
+  const choice = document.querySelector("#session-choice");
+  choice.replaceChildren();
+  for (const item of state.sessions) {
+    const option = document.createElement("option");
+    option.value = item.execution.execution_id;
+    option.textContent = `${item.execution.actual_start ? new Date(item.execution.actual_start).toLocaleString("fr-CH") : "À démarrer"} · ${item.execution.status}`;
+    choice.append(option);
+  }
+  choice.hidden = !state.sessions.length;
+  if (session) choice.value = session.execution.execution_id;
+  const intentId = session?.acquisition_intent_id || state.acceptedMission?.acquisitionIntentId;
+  text("#session-intent", `Intent de la mission : ${intentId || "non défini"}`);
+  document.querySelector("#session-start").hidden = status === "in_progress";
+  document.querySelector("#session-start").textContent = status === "not_started"
+    ? "Démarrer cette session" : "Créer et démarrer une nouvelle session";
+  document.querySelector("#session-close-actions").hidden = status !== "in_progress";
+  document.querySelector("#session-evidence").hidden = status !== "completed" || Boolean(usableEvidence(session));
+  const evidence = usableEvidence(session);
+  document.querySelector("#session-credit").hidden = !evidence || Boolean(session.credit);
+  if (evidence && !session.credit) {
+    text("#session-credit-preview", `Intent ${session.acquisition_intent_id} · base historique : ${sessionHours(session.historical_baseline_seconds)} · crédit proposé : ${sessionHours(Number(evidence.usable_integration_duration))}`);
+    const mustConfirm = Number(session.historical_baseline_seconds) > 0 && !session.historical_baseline_confirmed;
+    document.querySelector("#session-baseline-confirm-wrap").hidden = !mustConfirm;
+    document.querySelector("#session-baseline-confirm").checked = false;
+  }
+  document.querySelector("#session-progress").hidden = !session;
+  if (session) {
+    text("#session-before", sessionHours(session.acquired_before_seconds));
+    text("#session-added", sessionHours(session.session_credit_seconds));
+    text("#session-after", sessionHours(session.acquired_after_seconds));
+    text("#session-remaining", session.target_hours == null ? "objectif non défini" : sessionHours(session.remaining_hours * 3600));
+    sessionMessage(status === "interrupted" ? "Session interrompue : aucun crédit."
+      : session.credit ? "Crédit enregistré." : status === "completed" ? "Session terminée."
+      : status === "in_progress" ? "Session en cours." : "Session prête à démarrer.");
+  } else sessionMessage("Aucune session enregistrée pour cette mission.");
+}
+
+async function reloadSessions({ selectId = null } = {}) {
+  const missionId = state.acceptedMission?.mission_id;
+  if (!missionId) return;
+  const response = await fetch(`/v1/missions/${encodeURIComponent(missionId)}/executions`);
+  if (!response.ok) throw new Error("session_read_unavailable");
+  const sessions = await response.json();
+  if (state.acceptedMission?.mission_id !== missionId) return;
+  state.sessions = sessions;
+  const pending = JSON.parse(localStorage.getItem(SESSION_PENDING_KEY) || "null");
+  const candidate = selectId || (pending?.mission_id === missionId ? pending.execution_id : null);
+  state.activeSessionId = sessions.some((item) => item.execution.execution_id === candidate)
+    ? candidate : sessions.some((item) => item.execution.execution_id === state.activeSessionId)
+      ? state.activeSessionId : sessions.at(-1)?.execution.execution_id || null;
+  if (pending?.mission_id === missionId && sessions.some((item) => item.execution.execution_id === pending.execution_id)) {
+    localStorage.removeItem(SESSION_PENDING_KEY);
+  }
+  renderSession();
+}
+
+async function sessionCommand(command) {
+  if (state.sessionBusy || !state.acceptedMission?.mission_id) return;
+  const baselineConfirmed = document.querySelector("#session-baseline-confirm").checked;
+  state.sessionBusy = true;
+  document.querySelectorAll(".session-panel button").forEach((button) => { button.disabled = true; });
+  const missionId = state.acceptedMission.mission_id;
+  try {
+    await reloadSessions();
+    await command(missionId, baselineConfirmed);
+    await reloadSessions();
+  } catch (_error) {
+    try {
+      await reloadSessions();
+      sessionMessage("État relu après une réponse incertaine. Vérifiez la session avant de poursuivre.");
+    } catch (_readError) {
+      sessionMessage("Lecture impossible. Rechargez la page avant une nouvelle action.");
+    }
+  } finally {
+    state.sessionBusy = false;
+    document.querySelectorAll(".session-panel button").forEach((button) => { button.disabled = false; });
+  }
+}
+
+async function postSession(url, body) {
+  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!response.ok) throw new Error("session_command_failed");
+  return response.json();
+}
+
+async function startSession(missionId) {
+  let session = currentSession();
+  if (session?.execution.status !== "not_started") {
+    const pending = JSON.parse(localStorage.getItem(SESSION_PENDING_KEY) || "null");
+    const executionId = pending?.mission_id === missionId ? pending.execution_id : crypto.randomUUID();
+    localStorage.setItem(SESSION_PENDING_KEY, JSON.stringify({ mission_id: missionId, execution_id: executionId }));
+    const lookup = await fetch(`/v1/executions/${encodeURIComponent(executionId)}/session`);
+    if (lookup.status === 404) await postSession("/v1/executions", { execution_id: executionId, mission_id: missionId });
+    else if (!lookup.ok) throw new Error("session_read_unavailable");
+    await reloadSessions({ selectId: executionId });
+    session = currentSession();
+  }
+  if (session?.execution.status === "not_started") {
+    await postSession("/v1/execution-transitions", {
+      execution_id: session.execution.execution_id, mission_id: missionId,
+      status: "in_progress", actual_start: new Date().toISOString(), actual_end: null, actual_duration: null,
+    });
+  }
+}
+
+async function closeSession(missionId, status) {
+  const session = currentSession();
+  if (session?.execution.status !== "in_progress") return;
+  const end = new Date();
+  const start = new Date(session.execution.actual_start);
+  await postSession("/v1/execution-transitions", {
+    execution_id: session.execution.execution_id, mission_id: missionId, status,
+    actual_start: session.execution.actual_start, actual_end: end.toISOString(),
+    actual_duration: Math.max(0, (end.getTime() - start.getTime()) / 1000),
+  });
+}
+
+async function recordSessionEvidence() {
+  const session = currentSession();
+  if (session?.execution.status !== "completed" || usableEvidence(session)) return;
+  const hours = Number(document.querySelector("#session-hours").value);
+  const minutes = Number(document.querySelector("#session-minutes").value);
+  if (!Number.isInteger(hours) || hours < 0 || !Number.isInteger(minutes) || minutes < 0 || minutes > 59 || hours * 60 + minutes <= 0) {
+    sessionMessage("Saisissez une durée utilisable positive en heures et minutes.");
+    return;
+  }
+  const key = `astropilot.pendingEvidence.${session.execution.execution_id}`;
+  const saved = JSON.parse(localStorage.getItem(key) || "null");
+  const evidenceId = saved?.evidence_id || crypto.randomUUID();
+  localStorage.setItem(key, JSON.stringify({ evidence_id: evidenceId, minutes: hours * 60 + minutes }));
+  const lookup = await fetch(`/v1/executions/${encodeURIComponent(session.execution.execution_id)}/session`);
+  if (!lookup.ok) throw new Error("session_read_unavailable");
+  const canonical = await lookup.json();
+  if (canonical.evidence.some((item) => item.evidence_id === evidenceId || Number(item.usable_integration_duration) > 0)) return;
+  await postSession("/v1/outcome-evidence", {
+    evidence_id: evidenceId, execution_id: session.execution.execution_id,
+    category: "acquisition", observed_at: new Date().toISOString(), source: "user",
+    usable_integration_duration: (hours * 60 + minutes) * 60,
+  });
+}
+
+async function creditSession(_missionId, confirmed) {
+  const session = currentSession();
+  const evidence = usableEvidence(session);
+  if (!evidence || session.credit) return;
+  const mustConfirm = Number(session.historical_baseline_seconds) > 0 && !session.historical_baseline_confirmed;
+  if (mustConfirm && !confirmed) {
+    sessionMessage("Confirmez la valeur historique affichée avant de créditer.");
+    return;
+  }
+  await postSession(`/v1/executions/${encodeURIComponent(session.execution.execution_id)}/intent-progress-credit`, {
+    expected_revision: session.profile_revision, evidence_ids: [evidence.evidence_id],
+    confirm_historical_baseline: mustConfirm && confirmed,
+  });
+}
 
 const PENDING_ACCEPTANCE_STORAGE_KEY = "astropilot.pendingAcceptance";
 const PENDING_ACCEPTANCE_STORAGE_VERSION = 2;
@@ -302,6 +485,8 @@ function renderMission(mission) {
     item.textContent = "Plan opérationnel non disponible.";
     tasks.append(item);
   }
+
+  reloadSessions().catch(() => sessionMessage("Sessions momentanément indisponibles. Rechargez avant une action."));
 
 }
 
@@ -1287,25 +1472,46 @@ async function restoreSavedMission() {
   ui.savedMissionEntry.hidden = true;
   try {
     const response = await fetch("/v1/accepted-mission/current");
-    if (!response.ok) return;
+    if (!response.ok) throw new Error("mission_read_unavailable");
     const payload = await response.json();
     const mission = payload?.mission;
-    if (state.configuration !== configuration || payload?.status !== "accepted" || !mission
-        || payload.mission_id !== mission.mission_id
-        || payload.selection_id !== mission.selection_id
-        || payload.decision_id !== mission.decision_id) return;
-    state.acceptedMission = {
-      decision_id: payload.decision_id,
-      selection_id: payload.selection_id,
-      mission_id: payload.mission_id,
-      selectedCatalogKey: payload.catalog_key,
-      source: "persisted",
-      mission,
-    };
-    ui.savedMissionTarget.textContent = mission.target;
-    ui.savedMissionEntry.hidden = false;
+    if (state.configuration === configuration && payload?.status === "accepted" && mission
+        && payload.mission_id === mission.mission_id
+        && payload.selection_id === mission.selection_id
+        && payload.decision_id === mission.decision_id) {
+      state.acceptedMission = {
+        decision_id: payload.decision_id,
+        selection_id: payload.selection_id,
+        mission_id: payload.mission_id,
+        selectedCatalogKey: payload.catalog_key,
+        acquisitionIntentId: payload.selected_acquisition_intent_id,
+        source: "persisted",
+        mission,
+      };
+    }
   } catch (_error) {
     // Availability remains usable if the persisted lineage is unavailable.
+  }
+  try {
+    const response = await fetch("/v1/execution-sessions");
+    if (response.ok && state.configuration === configuration) {
+      const sessions = await response.json();
+      if (!state.acceptedMission && sessions.length) {
+        const latest = sessions.at(-1);
+        state.acceptedMission = {
+          decision_id: latest.mission.decision_id, selection_id: latest.mission.selection_id,
+          mission_id: latest.mission.mission_id, selectedCatalogKey: latest.project_id,
+          acquisitionIntentId: latest.acquisition_intent_id, source: "persisted",
+          mission: latest.mission,
+        };
+      }
+    }
+  } catch (_error) {
+    // The current mission can still be opened if session discovery is unavailable.
+  }
+  if (state.acceptedMission) {
+    ui.savedMissionTarget.textContent = state.acceptedMission.mission.target;
+    ui.savedMissionEntry.hidden = false;
   }
 }
 
@@ -2086,6 +2292,15 @@ ui.openSavedMission.addEventListener("click", () => {
   renderMission(state.acceptedMission.mission);
   ui.mission.showModal();
 });
+document.querySelector("#session-choice").addEventListener("change", (event) => {
+  state.activeSessionId = event.target.value;
+  renderSession();
+});
+document.querySelector("#session-start").addEventListener("click", () => sessionCommand(startSession));
+document.querySelector("#session-complete").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "completed")));
+document.querySelector("#session-interrupt").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "interrupted")));
+document.querySelector("#session-record-evidence").addEventListener("click", () => sessionCommand(recordSessionEvidence));
+document.querySelector("#session-apply-credit").addEventListener("click", () => sessionCommand(creditSession));
 ui.closeMission.addEventListener("click", () => ui.mission.close());
 ui.missionBack.addEventListener("click", () => ui.mission.close());
 ui.mission.addEventListener("click", (event) => {

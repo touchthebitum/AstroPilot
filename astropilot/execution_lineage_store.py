@@ -121,6 +121,18 @@ class FileExecutionLineageStore:
                 raise ExecutionLineageNotFoundError("execution_not_found")
             return self._load_path(path).execution
 
+    def load_session(self, execution_id: str) -> ExecutionLineageAggregate:
+        path = self._path(execution_id)
+        with self._locked():
+            return self._load_path(path)
+
+    def list_sessions(self, mission_id: str | None = None) -> list[ExecutionLineageAggregate]:
+        if mission_id is not None:
+            validate_lineage_identity(mission_id, field="mission_id")
+        with self._locked():
+            return [aggregate for aggregate in self._load_all()
+                    if mission_id is None or aggregate.mission_id == mission_id]
+
     def replace_execution(
         self,
         execution: Execution,

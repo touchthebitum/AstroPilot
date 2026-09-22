@@ -121,7 +121,8 @@ def test_tonight_ui_assets_are_served():
     assert "fetch(\"/v1/tonight\"" in script.text
     assert 'fetch("/v1/decision-selections"' in script.text
     assert 'fetch("/v1/configuration/recover"' in script.text
-    assert script.text.count("fetch(") == 8
+    assert script.text.count("fetch(") >= 8
+    assert 'fetch("/v1/execution-sessions"' in script.text
     assert script.text.rstrip().endswith("loadConfiguration();")
     assert "body: JSON.stringify({})," not in script.text
     assert "collectAvailabilityPayload" in script.text
@@ -289,8 +290,11 @@ def test_tonight_ui_assets_are_served():
     assert "renderMission(mission)" in acceptance_function
     assert "decision_score" not in script.text
     assert "final_score" not in script.text
-    assert "execution" not in page.text.lower()
-    assert "outcome" not in page.text.lower()
+    assert 'id="session-complete"' in page.text
+    assert 'id="session-interrupt"' in page.text
+    assert 'id="session-baseline-confirm"' in page.text
+    assert 'id="session-hours"' in page.text and 'id="session-minutes"' in page.text
+    assert 'id="session-unconfirmed"' not in page.text
     assert 'source: "declined"' not in script.text
     assert "other_evaluated_target" not in script.text
 

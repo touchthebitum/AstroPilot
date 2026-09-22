@@ -57,14 +57,15 @@ let payload = {status: 'accepted', mission_id: 'mission-1', selection_id: 'selec
 async function fetch(url, options) {
   calls.push([url, options]);
   if (changeConfiguration) state.configuration = {profile_revision: 2};
-  return {ok: true, json: async () => payload};
+  return {ok: true, json: async () => url === '/v1/execution-sessions' ? [] : payload};
 }
 """ + helpers + """
 (async () => {
   await restoreSavedMission();
   assert.equal(entry.hidden, false);
   assert.equal(state.acceptedMission.mission, payload.mission);
-  assert.deepEqual(calls, [['/v1/accepted-mission/current', undefined]]);
+  assert.deepEqual(calls, [['/v1/accepted-mission/current', undefined],
+    ['/v1/execution-sessions', undefined]]);
   payload = {...payload, selection_id: 'wrong'};
   await restoreSavedMission();
   assert.equal(entry.hidden, true);
@@ -166,7 +167,7 @@ async function fetch() { return response; }
 
 
 def test_reopening_saved_mission_does_not_post_acceptance():
-    listener = _javascript_between('ui.openSavedMission.addEventListener("click", () => {', 'ui.closeMission.addEventListener(')
+    listener = _javascript_between('ui.openSavedMission.addEventListener("click", () => {', 'document.querySelector("#session-choice").addEventListener(')
     _run_javascript("""
 const assert = require('node:assert/strict');
 let openSavedMission;
