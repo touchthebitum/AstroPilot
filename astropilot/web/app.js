@@ -67,6 +67,8 @@ const state = {
   sessions: [],
   activeSessionId: null,
   sessionBusy: false,
+  sessionWriteAttempted: false,
+  sessionWriteUncertain: false,
 };
 
 const SESSION_PENDING_KEY = "astropilot.pendingSession";
@@ -158,6 +160,8 @@ async function sessionCommand(command) {
   if (state.sessionBusy || !state.acceptedMission?.mission_id) return;
   const baselineConfirmed = document.querySelector("#session-baseline-confirm").checked;
   state.sessionBusy = true;
+  state.sessionWriteAttempted = false;
+  state.sessionWriteUncertain = false;
   document.querySelectorAll(".session-panel button").forEach((button) => { button.disabled = true; });
   const missionId = state.acceptedMission.mission_id;
   try {
@@ -167,20 +171,29 @@ async function sessionCommand(command) {
   } catch (error) {
     try {
       await reloadSessions();
-      sessionMessage(error?.status ? sessionRefusalMessage(error) :
-        "État relu après une réponse incertaine. Vérifiez la session avant de poursuivre.");
+      sessionMessage(state.sessionWriteUncertain
+        ? "État relu après une réponse incertaine. Vérifiez la session avant de poursuivre."
+        : state.sessionWriteAttempted && error?.status ? sessionRefusalMessage(error)
+        : "Lecture ou reprise échouée. État actuel relu ; vérifiez avant de poursuivre.");
     } catch (_readError) {
-      sessionMessage(error?.status ? `${sessionRefusalMessage(error)} Lecture impossible ; rechargez la page.`
+      sessionMessage(state.sessionWriteAttempted && error?.status
+        ? `${sessionRefusalMessage(error)} Lecture impossible ; rechargez la page.`
         : "Lecture impossible. Rechargez la page avant une nouvelle action.");
     }
   } finally {
     state.sessionBusy = false;
+    state.sessionWriteAttempted = false;
+    state.sessionWriteUncertain = false;
     document.querySelectorAll(".session-panel button").forEach((button) => { button.disabled = false; });
   }
 }
 
 async function postSession(url, body) {
-  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const payload = JSON.stringify(body);
+  state.sessionWriteAttempted = true;
+  state.sessionWriteUncertain = true;
+  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload });
+  state.sessionWriteUncertain = false;
   if (!response.ok) throw await sessionHttpError(response);
   return response.json();
 }

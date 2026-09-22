@@ -265,6 +265,33 @@ def test_session_read_rejects_structurally_valid_wrong_credit(tmp_path, monkeypa
     assert response.json()["detail"]["code"] == "session_credit_inconsistent"
 
 
+@pytest.mark.parametrize("same_intent", [True, False])
+def test_session_read_validates_only_contributing_credits(tmp_path, monkeypatch, same_intent):
+    fresh = setup(tmp_path, monkeypatch, baseline=0)
+    api = fresh()
+    create_completed(api, "execution-1", evidence_id="evidence-1")
+    assert credit(api, "execution-1", "evidence-1").status_code == 200
+    mission_id = "mission-ha" if same_intent else "mission-oiii"
+    create_completed(api, "execution-2", mission_id=mission_id, evidence_id="evidence-2")
+    assert credit(api, "execution-2", "evidence-2").status_code == 200
+
+    path = tmp_path / "user_profile.json"
+    profile = json.loads(path.read_text())
+    entry = profile["intent_progress_credits"]["execution-2"]
+    entry.update(mission_id="mission-ha-other", selection_id="selection-ha-other",
+                 decision_id="decision-ha-other")
+    path.write_text(json.dumps(profile))
+
+    response = fresh().get("/v1/executions/execution-1/session")
+    if same_intent:
+        assert response.status_code == 503
+        assert response.json()["detail"]["code"] == "session_credit_inconsistent"
+    else:
+        assert response.status_code == 200
+        assert response.json()["acquired_before_seconds"] == 0
+        assert fresh().get("/v1/executions/execution-2/session").status_code == 503
+
+
 def test_session_discovery_orders_missions_by_persisted_chronology(tmp_path, monkeypatch):
     fresh = setup(tmp_path, monkeypatch, baseline=0)
     api = fresh()

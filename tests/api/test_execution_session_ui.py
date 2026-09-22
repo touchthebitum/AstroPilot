@@ -163,6 +163,50 @@ async function fetch(url, options) {
     assert result.returncode == 0, result.stderr
 
 
+def test_failed_initial_read_never_reports_uncertain_command():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for the dynamic UI test")
+    source = SCRIPT.read_text(encoding="utf-8")
+    helpers = source[source.index('const SESSION_PENDING_KEY ='):source.index('const PENDING_ACCEPTANCE_STORAGE_KEY =')]
+    harness = r'''
+const assert = require('node:assert/strict');
+class Element {
+  constructor() { this.hidden = false; this.disabled = false; this.checked = false;
+    this.textContent = ''; this.value = ''; this.children = []; }
+  replaceChildren() { this.children = []; }
+  append(item) { this.children.push(item); }
+}
+const elements = new Map();
+const document = {querySelector(selector) { if (!elements.has(selector)) elements.set(selector, new Element());
+  return elements.get(selector); }, querySelectorAll() { return []; },
+  createElement() { return new Element(); }};
+function text(selector, value) { document.querySelector(selector).textContent = value; }
+const localStorage = {getItem() { return null; }, removeItem() {}};
+const state = {acceptedMission: {mission_id: 'mission-1', acquisitionIntentId: 'ha'},
+  sessions: [], activeSessionId: null, sessionBusy: false};
+let reads = 0, writes = 0;
+async function fetch(_url, options) {
+  if (options) { writes++; throw new Error('unexpected write'); }
+  reads++;
+  if (reads === 1) throw new Error('initial read failed');
+  return {ok: true, json: async () => []};
+}
+'''
+    checks = r'''
+(async () => {
+  await sessionCommand(() => { throw new Error('command must not run'); });
+  assert.equal(reads, 2);
+  assert.equal(writes, 0);
+  const message = document.querySelector('#session-status').textContent;
+  assert.match(message, /Lecture ou reprise échouée/);
+  assert.doesNotMatch(message, /réponse incertaine/);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''
+    result = subprocess.run([node, "-e", harness + helpers + checks], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
 def test_saved_missions_include_expired_sessions_and_open_selected_mission():
     node = shutil.which("node")
     if node is None:
