@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 import astropilot.app as app_module
 import astropilot.user_profile as user_profile
@@ -908,6 +909,44 @@ def test_tonight_api_serializes_actionability_refusal_without_recalculation():
     assert payload["target_decision_status"] == "not_recommended"
 
 
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {
+            "conclusion": "no_productive_window",
+            "status": "constraints_refusal",
+            "cause_code": "insufficient_actionable_productive_window",
+            "best_productive_window_minutes": None,
+            "required_continuous_minutes": 60,
+        },
+        {
+            "conclusion": "no_productive_window",
+            "status": "insufficient_evidence",
+            "cause_code": "productive_window_evidence_missing",
+            "best_productive_window_minutes": 0,
+            "required_continuous_minutes": 60,
+        },
+        {
+            "conclusion": "no_productive_window",
+            "status": "insufficient_evidence",
+            "cause_code": "productive_window_evidence_missing",
+            "best_productive_window_minutes": None,
+            "required_continuous_minutes": 0,
+        },
+        {
+            "conclusion": "no_productive_window",
+            "status": "insufficient_evidence",
+            "cause_code": "productive_window_evidence_missing",
+            "best_productive_window_minutes": None,
+            "required_continuous_minutes": 60.5,
+        },
+    ),
+)
+def test_actionability_refusal_public_model_rejects_contradictions(payload):
+    with pytest.raises(ValidationError):
+        app_module.ActionabilityRefusalModel.model_validate(payload)
+
+
 def test_weather_unavailable_is_a_service_error_before_evaluation():
     class Service:
         def evaluate(self, **kwargs):
@@ -1425,11 +1464,17 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
     assert tonight_response["actionability_refusal"]["anyOf"][0][
         "$ref"
     ].endswith("ActionabilityRefusalModel")
-    refusal = schemas["ActionabilityRefusalModel"]["properties"]
-    assert refusal["best_productive_window_minutes"]["anyOf"][0][
-        "minimum"
-    ] == 0.0
-    assert refusal["required_continuous_minutes"]["minimum"] == 0.0
+    refusal = schemas["ActionabilityRefusalModel"]
+    assert refusal["discriminator"]["propertyName"] == "status"
+    assert len(refusal["oneOf"]) == 2
+    constraint = schemas["ConstraintsActionabilityRefusalModel"]["properties"]
+    insufficient = schemas[
+        "InsufficientEvidenceActionabilityRefusalModel"
+    ]["properties"]
+    assert constraint["best_productive_window_minutes"]["minimum"] == 0.0
+    assert insufficient["best_productive_window_minutes"]["type"] == "null"
+    assert constraint["required_continuous_minutes"]["type"] == "integer"
+    assert constraint["required_continuous_minutes"]["exclusiveMinimum"] == 0
     weather_decision = schemas["TonightWeatherDecisionModel"]["properties"]
     assert weather_decision["evidence_quality"]["$ref"].endswith(
         "WeatherEvidenceQuality"

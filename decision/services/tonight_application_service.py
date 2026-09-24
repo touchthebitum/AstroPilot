@@ -312,7 +312,6 @@ class TonightApplicationService:
                 status=(
                     TonightStatus.NO_PRODUCTIVE_WINDOW
                     if actionability_refusal is not None
-                    or inputs.availability is not None
                     else TonightStatus.NO_MISSION
                 ),
                 forecast_evidence=forecast_evidence,

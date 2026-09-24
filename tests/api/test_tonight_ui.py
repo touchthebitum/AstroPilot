@@ -900,6 +900,53 @@ def test_primary_status_controls_title_and_preserves_missing_values():
     assert 'formatRecommendationConfidence(' in render
 
 
+def test_actionability_refusal_renderer_floors_found_and_ceils_required_minutes(
+    tmp_path,
+):
+    import json
+    import shutil
+    import subprocess
+    import pytest
+
+    engine = shutil.which('node') or shutil.which('osascript')
+    if engine is None:
+        pytest.skip('A JavaScript runtime is required for the render execution test')
+    script = make_client().get('/ui/app.js').text
+    renderer = script.split('const partialMessages =', 1)[1].split(
+        'function showMessage',
+        1,
+    )[0]
+    harness = 'const partialMessages =' + renderer + '''
+const rendered = actionabilityRefusalMessage({
+  conclusion: "no_productive_window",
+  status: "constraints_refusal",
+  cause_code: "insufficient_actionable_productive_window",
+  best_productive_window_minutes: 59.983333333333334,
+  required_continuous_minutes: 60.00000000000001,
+});
+'''
+    if Path(engine).name == 'node':
+        harness += '\nconsole.log(JSON.stringify(rendered));\n'
+        command = [engine]
+    else:
+        harness += '\nJSON.stringify(rendered);\n'
+        command = [engine, '-l', 'JavaScript']
+    path = tmp_path / 'actionability-render.js'
+    path.write_text(harness)
+
+    completed = subprocess.run(
+        [*command, str(path)],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    rendered = json.loads(completed.stdout)
+
+    assert "Meilleure fenêtre trouvée : 59 min" in rendered[1]
+    assert "Meilleure fenêtre trouvée : 60 min" not in rendered[1]
+    assert "Seuil requis : 61 min" in rendered[1]
+
+
 def test_primary_status_render_executes_without_fabricating_missing_values(tmp_path):
     import json
     import shutil

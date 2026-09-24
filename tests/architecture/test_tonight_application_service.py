@@ -473,7 +473,7 @@ def test_mission_timing_empty_intersection_returns_none():
     )
 
 
-def test_empty_availability_fails_closed_during_primary_actionability():
+def test_empty_availability_without_diagnostic_does_not_fabricate_refusal():
     candidate = make_candidate()
     service, _, mission_service = make_service(
         forecast_nights=lambda *args, **kwargs: forecast_run(
@@ -503,7 +503,8 @@ def test_empty_availability_fails_closed_during_primary_actionability():
     )
 
     assert result.mission is None
-    assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW
+    assert result.status is TonightStatus.NO_MISSION
+    assert result.actionability_refusal is None
     assert len(mission_service.calls) == 1
 
 
@@ -857,6 +858,32 @@ def test_recommendation_without_creatable_mission_fails_closed():
     assert result.status is TonightStatus.NO_MISSION
     assert result.forecast_evidence is FORECAST_EVIDENCE
     assert len(mission_service.calls) == 1
+
+
+def test_availability_does_not_synthesize_productive_window_refusal():
+    night = {"date": "2026-09-01", "top_objects": []}
+    candidate = make_candidate()
+    recommendation = make_recommendation(candidate)
+    service, _, _ = make_service(
+        forecast_nights=lambda *args, **kwargs: forecast_run([night]),
+        build_candidates=lambda *args, **kwargs: [candidate],
+        recommendation=recommendation,
+        mission=None,
+        actionability_refusal=None,
+    )
+
+    result = service.evaluate(
+        profile=make_profile(),
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=3,
+        availability=SessionAvailability(
+            SessionAvailabilityMode.ALL_NIGHT,
+        ),
+    )
+
+    assert result.status is TonightStatus.NO_MISSION
+    assert result.actionability_refusal is None
 
 
 def test_known_window_constraint_is_preserved_in_tonight_result():

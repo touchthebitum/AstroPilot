@@ -20,7 +20,8 @@ from decision.models.project_acquisition_intent_target import (
 from decision.models.acquisition_intent_remaining_progress import AcquisitionIntentRemainingProgress
 from decision.models.session_availability import SessionAvailability
 from decision.services.session_availability_windowing import (
-    select_continuous_actionable_productive_window,
+    ActionabilityRefusalStatus,
+    evaluate_continuous_actionable_productive_window,
 )
 from decision.weather.weather_trust_decision import (
     WeatherDecisionAdmissibility,
@@ -137,17 +138,28 @@ def evaluate_acquisition_intent_eligibility(
         evidence_gaps.append(
             AcquisitionIntentEvidenceGap.PRODUCTIVE_WINDOW_EVIDENCE_MISSING
         )
-    elif (
-        select_continuous_actionable_productive_window(
+    else:
+        window_selection = evaluate_continuous_actionable_productive_window(
             productive_window,
             session_availability,
         )
-        is None
-    ):
-        return _not_eligible(
-            intent_id,
-            AcquisitionIntentEligibilityReason.INSUFFICIENT_ACTIONABLE_PRODUCTIVE_WINDOW,
-        )
+        if window_selection.refusal is not None:
+            if (
+                window_selection.refusal.status
+                is ActionabilityRefusalStatus.INSUFFICIENT_EVIDENCE
+            ):
+                evidence_gaps.append(
+                    AcquisitionIntentEvidenceGap(
+                        window_selection.refusal.cause_code
+                    )
+                )
+            else:
+                return _not_eligible(
+                    intent_id,
+                    AcquisitionIntentEligibilityReason(
+                        window_selection.refusal.cause_code
+                    ),
+                )
 
     if (
         weather_trust_decision is None

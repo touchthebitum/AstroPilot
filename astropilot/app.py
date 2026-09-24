@@ -9,7 +9,7 @@ from pathlib import Path
 import platform
 import re
 import tomllib
-from typing import Any, Callable, Literal
+from typing import Annotated, Any, Callable, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
@@ -17,7 +17,14 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    field_validator,
+    model_validator,
+)
 
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 from decision.definitions.production_imaging_fields import (
@@ -1057,15 +1064,37 @@ class RecommendationComparisonResponseModel(BaseModel):
     shared_reasons: tuple[RecommendationReasonResponseModel, ...] = ()
 
 
-class ActionabilityRefusalModel(BaseModel):
+class ActionabilityRefusalBaseModel(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     conclusion: Literal["no_productive_window"]
-    status: Literal["constraints_refusal", "insufficient_evidence"]
     cause_code: str | None = None
-    best_productive_window_minutes: float | None = Field(default=None, ge=0)
-    required_continuous_minutes: float = Field(ge=0)
+    required_continuous_minutes: int = Field(gt=0)
     limiting_factors: list[dict[str, str]] = Field(default_factory=list)
+
+
+class ConstraintsActionabilityRefusalModel(ActionabilityRefusalBaseModel):
+    status: Literal["constraints_refusal"]
+    best_productive_window_minutes: float = Field(ge=0)
+
+
+class InsufficientEvidenceActionabilityRefusalModel(
+    ActionabilityRefusalBaseModel
+):
+    status: Literal["insufficient_evidence"]
+    best_productive_window_minutes: None = None
+
+
+class ActionabilityRefusalModel(
+    RootModel[
+        Annotated[
+            ConstraintsActionabilityRefusalModel
+            | InsufficientEvidenceActionabilityRefusalModel,
+            Field(discriminator="status"),
+        ]
+    ]
+):
+    model_config = ConfigDict(frozen=True)
 
 
 class TonightResponseModel(BaseModel):
