@@ -1,4 +1,8 @@
 from decision.night_productivity.night_window import NightWindow
+from decision.night_productivity.productivity_diagnostics import (
+    PRODUCTIVE_SLICE_THRESHOLD,
+)
+
 
 class NightWindowBuilder:
 
@@ -15,14 +19,15 @@ class NightWindowBuilder:
                     cloud_cover=round(slice.cloud_cover, 1),
                     moon_penalty=round(getattr(slice, "moon_penalty", 0.0), 2),
                     seeing=slice.seeing,
-                    productive=slice.productivity_score >= 0.7,
+                    productive=(
+                        slice.productivity_score >= PRODUCTIVE_SLICE_THRESHOLD
+                    ),
                     reason=(
                         "Créneau exploitable"
-                        if slice.productivity_score >= 0.7
+                        if slice.productivity_score >= PRODUCTIVE_SLICE_THRESHOLD
                         else "Créneau dégradé"
                     ),
                 )
             )
-            
 
         return windows

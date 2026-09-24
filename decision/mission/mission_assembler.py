@@ -10,6 +10,9 @@ from decision.risk.project_risk_context_builder import ProjectRiskContextBuilder
 from decision.night_productivity.night_productivity_engine import NightProductivityEngine
 from decision.night_productivity.night_productivity_context import NightProductivityContext
 from decision.night_productivity.night_productivity_result import NightProductivityResult
+from decision.night_productivity.productivity_diagnostics import (
+    ProductivityBreakdown,
+)
 from decision.mission.night_planner import NightPlanner
 from decision.intelligence.season_analysis import SeasonAnalysis
 from decision.intelligence.analysis_context import AnalysisContext
@@ -42,6 +45,7 @@ class ProductiveWindowAssessment:
     expected_gain: float
     productivity: NightProductivityResult
     maximum_mission_hours: float | None = None
+    productivity_breakdown: ProductivityBreakdown | None = None
 
     @classmethod
     def build(
@@ -120,7 +124,7 @@ class ProductiveWindowAssessment:
             else 22
         )
 
-        productivity = NightProductivityEngine.evaluate(
+        productivity_evaluation = NightProductivityEngine.evaluate_with_breakdown(
             NightProductivityContext(
                 astronomical_hours=astronomical_hours,
                 cloud_cover=20 if cloud_cover is None else cloud_cover,
@@ -147,6 +151,7 @@ class ProductiveWindowAssessment:
             )
         )
 
+        productivity = productivity_evaluation.result
         requested_hours = (
             mission_input.recommended_hours if mission_input is not None else 0
         )
@@ -189,6 +194,7 @@ class ProductiveWindowAssessment:
                 if mission_input is not None
                 else None
             ),
+            productivity_breakdown=productivity_evaluation.breakdown,
         )
 
 

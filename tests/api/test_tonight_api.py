@@ -50,6 +50,10 @@ from decision.models.user_selection import UserSelectionSource
 from decision.opportunity.action import Action
 from decision.opportunity.opportunity import Opportunity
 from decision.recommendation.recommendation import Recommendation
+from decision.night_productivity.productivity_diagnostics import (
+    ProductivityBreakdown,
+    ProductivityLosses,
+)
 from decision.services.tonight_application_service import (
     TonightResult,
     TonightStatus,
@@ -984,8 +988,140 @@ def test_tonight_api_serializes_actionability_refusal_without_recalculation():
         "best_productive_window_minutes": 59.983333333333334,
         "required_continuous_minutes": 60,
         "limiting_factors": [],
+        "refusal_stage": None,
+        "productivity_breakdown": None,
     }
     assert payload["target_decision_status"] == "not_recommended"
+
+
+def test_tonight_api_transports_productivity_breakdown_without_recalculation():
+    start = datetime(2026, 9, 24, 22, 15, tzinfo=timezone(timedelta(hours=2)))
+    breakdown = ProductivityBreakdown(
+        evaluated_slice_count=8,
+        productive_slice_count=0,
+        best_slice_start=start,
+        best_slice_end=start + timedelta(minutes=15),
+        best_slice_score=0.394,
+        best_slice_tie_count=7,
+        productive_slice_threshold=0.70,
+        losses=ProductivityLosses(
+            cloud=0.497,
+            moon=0.109,
+            altitude=0.0,
+            humidity=0.0,
+            wind=0.0,
+        ),
+    )
+    refusal = availability_windowing.ActionabilityRefusal(
+        conclusion=(
+            availability_windowing.ActionabilityRefusalConclusion
+            .NO_PRODUCTIVE_WINDOW
+        ),
+        status=(
+            availability_windowing.ActionabilityRefusalStatus
+            .CONSTRAINTS_REFUSAL
+        ),
+        cause_code="insufficient_actionable_productive_window",
+        best_productive_window_minutes=0.0,
+        required_continuous_minutes=60,
+        refusal_stage=(
+            availability_windowing.ProductivityRefusalStage
+            .NO_PRODUCTIVE_SLICE
+        ),
+        productivity_breakdown=breakdown,
+    )
+    result = replace(
+        make_result(),
+        mission=None,
+        status=TonightStatus.NO_PRODUCTIVE_WINDOW,
+        actionability_refusal=refusal,
+    )
+
+    response = make_client(result=result).post("/v1/tonight", json={})
+
+    assert response.status_code == 200
+    payload = response.json()["actionability_refusal"]
+    assert payload["refusal_stage"] == "no_productive_slice"
+    assert payload["limiting_factors"] == []
+    assert payload["productivity_breakdown"] == {
+        "evaluated_slice_count": 8,
+        "productive_slice_count": 0,
+        "best_slice_start": "2026-09-24T22:15:00+02:00",
+        "best_slice_end": "2026-09-24T22:30:00+02:00",
+        "best_slice_score": 0.394,
+        "best_slice_tie_count": 7,
+        "productive_slice_threshold": 0.7,
+        "losses": {
+            "cloud": 0.497,
+            "moon": 0.109,
+            "altitude": 0.0,
+            "humidity": 0.0,
+            "wind": 0.0,
+        },
+    }
+
+
+def _valid_productivity_breakdown_payload():
+    return {
+        "evaluated_slice_count": 8,
+        "productive_slice_count": 0,
+        "best_slice_start": "2026-09-24T22:15:00+02:00",
+        "best_slice_end": "2026-09-24T22:30:00+02:00",
+        "best_slice_score": 0.394,
+        "best_slice_tie_count": 7,
+        "productive_slice_threshold": 0.7,
+        "losses": {
+            "cloud": 0.497,
+            "moon": 0.109,
+            "altitude": 0.0,
+            "humidity": 0.0,
+            "wind": 0.0,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("evaluated_slice_count", True),
+        ("productive_slice_count", -1),
+        ("best_slice_start", "2026-09-24T22:15:00"),
+        ("best_slice_score", 1.01),
+        ("best_slice_tie_count", 0),
+        ("productive_slice_threshold", 0.0),
+    ),
+)
+def test_productivity_breakdown_public_model_rejects_invalid_fields(field, value):
+    payload = _valid_productivity_breakdown_payload()
+    payload[field] = value
+
+    with pytest.raises(ValidationError):
+        app_module.ProductivityBreakdownModel.model_validate(payload)
+
+
+def test_productivity_breakdown_public_model_rejects_counts_and_negative_losses():
+    too_many_productive = _valid_productivity_breakdown_payload()
+    too_many_productive["productive_slice_count"] = 9
+    negative_loss = _valid_productivity_breakdown_payload()
+    negative_loss["losses"] = {**negative_loss["losses"], "cloud": -0.1}
+
+    with pytest.raises(ValidationError):
+        app_module.ProductivityBreakdownModel.model_validate(too_many_productive)
+    with pytest.raises(ValidationError):
+        app_module.ProductivityBreakdownModel.model_validate(negative_loss)
+
+
+def test_insufficient_evidence_public_model_rejects_causal_breakdown():
+    with pytest.raises(ValidationError):
+        app_module.ActionabilityRefusalModel.model_validate({
+            "conclusion": "no_productive_window",
+            "status": "insufficient_evidence",
+            "cause_code": "productive_window_evidence_missing",
+            "best_productive_window_minutes": None,
+            "required_continuous_minutes": 60,
+            "refusal_stage": "no_productive_slice",
+            "productivity_breakdown": _valid_productivity_breakdown_payload(),
+        })
 
 
 @pytest.mark.parametrize(
@@ -1624,6 +1760,19 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
     assert insufficient["best_productive_window_minutes"]["type"] == "null"
     assert constraint["required_continuous_minutes"]["type"] == "integer"
     assert constraint["required_continuous_minutes"]["exclusiveMinimum"] == 0
+    assert "productivity_breakdown" in constraint
+    breakdown = schemas["ProductivityBreakdownModel"]["properties"]
+    assert breakdown["evaluated_slice_count"]["minimum"] == 0
+    assert breakdown["productive_slice_count"]["minimum"] == 0
+    assert breakdown["best_slice_start"]["format"] == "date-time"
+    assert breakdown["best_slice_end"]["format"] == "date-time"
+    assert breakdown["best_slice_score"]["minimum"] == 0.0
+    assert breakdown["best_slice_score"]["maximum"] == 1.0
+    assert breakdown["best_slice_tie_count"]["minimum"] == 1
+    assert breakdown["productive_slice_threshold"]["exclusiveMinimum"] == 0.0
+    assert breakdown["productive_slice_threshold"]["maximum"] == 1.0
+    losses = schemas["ProductivityLossesModel"]["properties"]
+    assert all(field["minimum"] == 0.0 for field in losses.values())
     assert "best_productive_window_minutes" in schemas[
         "ConstraintsActionabilityRefusalModel"
     ]["required"]

@@ -1,8 +1,11 @@
 from decision.night_productivity.night_window import NightWindow
+from decision.night_productivity.productivity_diagnostics import (
+    PRODUCTIVE_SLICE_THRESHOLD,
+)
 
 
 class NightWindowMerger:
-    DEFAULT_THRESHOLD = 0.70
+    DEFAULT_THRESHOLD = PRODUCTIVE_SLICE_THRESHOLD
 
     @staticmethod
     def merge(timeline, threshold: float = DEFAULT_THRESHOLD) -> list[NightWindow]:

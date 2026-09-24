@@ -232,6 +232,9 @@ def test_tonight_ui_assets_are_served():
     assert "cloud_loss" not in refusal_renderer
     assert "moon_loss" not in refusal_renderer
     assert "altitude_loss" not in refusal_renderer
+    assert "weather_loss" not in refusal_renderer
+    assert "seeing" not in refusal_renderer.lower()
+    assert "aqi" not in refusal_renderer.lower()
     assert "limiting_factors" not in refusal_renderer
     assert 'detail?.code === "decision_invalid"' in script.text
     assert 'detail?.code === "location_timezone_unresolved"' in script.text
@@ -945,6 +948,94 @@ const rendered = actionabilityRefusalMessage({
     assert "Meilleure fenêtre trouvée : 59 min" in rendered[1]
     assert "Meilleure fenêtre trouvée : 60 min" not in rendered[1]
     assert "Seuil requis : 61 min" in rendered[1]
+
+
+def _execute_actionability_renderer(tmp_path, refusal):
+    import json
+    import shutil
+    import subprocess
+    import pytest
+
+    engine = shutil.which('node') or shutil.which('osascript')
+    if engine is None:
+        pytest.skip('A JavaScript runtime is required for the render execution test')
+    script = make_client().get('/ui/app.js').text
+    renderer = script.split('const partialMessages =', 1)[1].split(
+        'function showMessage', 1,
+    )[0]
+    harness = (
+        'const partialMessages =' + renderer
+        + '\nconst rendered = actionabilityRefusalMessage('
+        + json.dumps(refusal)
+        + ');\n'
+    )
+    if Path(engine).name == 'node':
+        harness += '\nconsole.log(JSON.stringify(rendered));\n'
+        command = [engine]
+    else:
+        harness += '\nJSON.stringify(rendered);\n'
+        command = [engine, '-l', 'JavaScript']
+    path = tmp_path / 'productivity-breakdown-render.js'
+    path.write_text(harness)
+    completed = subprocess.run(
+        [*command, str(path)], text=True, capture_output=True, check=True,
+    )
+    return json.loads(completed.stdout)
+
+
+def test_zero_productive_slice_renderer_rounds_losses_and_plural_ties(tmp_path):
+    rendered = _execute_actionability_renderer(tmp_path, {
+        "conclusion": "no_productive_window",
+        "status": "constraints_refusal",
+        "refusal_stage": "no_productive_slice",
+        "best_productive_window_minutes": 0,
+        "required_continuous_minutes": 60,
+        "productivity_breakdown": {
+            "evaluated_slice_count": 8,
+            "productive_slice_count": 0,
+            "best_slice_score": 0.394,
+            "best_slice_tie_count": 7,
+            "productive_slice_threshold": 0.7,
+            "losses": {
+                "cloud": 0.497,
+                "moon": 0.109,
+                "altitude": 0,
+                "humidity": 0,
+                "wind": 0,
+            },
+        },
+    })
+
+    assert rendered[0] == "Aucune tranche productive"
+    assert "Une des 7 meilleures tranches : 39 %" in rendered[1]
+    assert "seuil requis : 70 %" in rendered[1]
+    assert "Nuages : −50 points · Lune : −11 points" in rendered[1]
+    assert "Aucune des 8 tranches de 15 min n’atteint le seuil" in rendered[1]
+    assert "facteur principal" not in rendered[1].lower()
+
+
+def test_continuous_window_renderer_never_presents_losses_as_causal(tmp_path):
+    rendered = _execute_actionability_renderer(tmp_path, {
+        "conclusion": "no_productive_window",
+        "status": "constraints_refusal",
+        "refusal_stage": "continuous_window_too_short",
+        "best_productive_window_minutes": 45,
+        "required_continuous_minutes": 60,
+        "productivity_breakdown": {
+            "evaluated_slice_count": 8,
+            "productive_slice_count": 4,
+            "best_slice_score": 0.8,
+            "best_slice_tie_count": 1,
+            "productive_slice_threshold": 0.7,
+            "losses": {"cloud": 0.1, "moon": 0.1},
+        },
+    })
+
+    assert rendered[0] == "Fenêtre productive trop courte"
+    assert "après vos contraintes dure 45 min" in rendered[1]
+    assert "Seuil requis : 60 min" in rendered[1]
+    assert "Nuages" not in rendered[1]
+    assert "Lune" not in rendered[1]
 
 
 def test_primary_status_render_executes_without_fabricating_missing_values(tmp_path):

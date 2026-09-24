@@ -18,6 +18,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import (
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
@@ -1112,9 +1113,58 @@ class ActionabilityRefusalBaseModel(BaseModel):
     limiting_factors: list[dict[str, str]] = Field(default_factory=list)
 
 
+class ProductivityLossesModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    cloud: float = Field(ge=0, strict=True)
+    moon: float = Field(ge=0, strict=True)
+    altitude: float = Field(ge=0, strict=True)
+    humidity: float = Field(ge=0, strict=True)
+    wind: float = Field(ge=0, strict=True)
+
+
+class ProductivityBreakdownModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    evaluated_slice_count: int = Field(ge=0, strict=True)
+    productive_slice_count: int = Field(ge=0, strict=True)
+    best_slice_start: AwareDatetime
+    best_slice_end: AwareDatetime
+    best_slice_score: float = Field(ge=0, le=1, strict=True)
+    best_slice_tie_count: int = Field(ge=1, strict=True)
+    productive_slice_threshold: float = Field(gt=0, le=1, strict=True)
+    losses: ProductivityLossesModel
+
+    @model_validator(mode="after")
+    def validate_breakdown(self):
+        if self.productive_slice_count > self.evaluated_slice_count:
+            raise ValueError("productive_slice_count_exceeds_evaluated")
+        if self.best_slice_end <= self.best_slice_start:
+            raise ValueError("best_slice_end_must_follow_start")
+        return self
+
+
 class ConstraintsActionabilityRefusalModel(ActionabilityRefusalBaseModel):
     status: Literal["constraints_refusal"]
     best_productive_window_minutes: float = Field(ge=0)
+    refusal_stage: Literal[
+        "no_productive_slice",
+        "continuous_window_too_short",
+    ] | None = None
+    productivity_breakdown: ProductivityBreakdownModel | None = None
+
+    @model_validator(mode="after")
+    def validate_breakdown_stage(self):
+        if self.productivity_breakdown is None:
+            return self
+        expected_stage = (
+            "no_productive_slice"
+            if self.productivity_breakdown.productive_slice_count == 0
+            else "continuous_window_too_short"
+        )
+        if self.refusal_stage != expected_stage:
+            raise ValueError("productivity_breakdown_stage_mismatch")
+        return self
 
 
 class InsufficientEvidenceActionabilityRefusalModel(
@@ -1122,6 +1172,8 @@ class InsufficientEvidenceActionabilityRefusalModel(
 ):
     status: Literal["insufficient_evidence"]
     best_productive_window_minutes: None
+    refusal_stage: None = None
+    productivity_breakdown: None = None
 
 
 class ActionabilityRefusalModel(

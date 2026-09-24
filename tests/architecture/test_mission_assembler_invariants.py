@@ -629,6 +629,7 @@ def test_productive_window_assessment_is_immutable_and_gate_compatible(
         "expected_gain",
         "productivity",
         "maximum_mission_hours",
+        "productivity_breakdown",
     ]
     assert assessment.window_start is input_data.window_start
     assert assessment.window_end is input_data.window_end

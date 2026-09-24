@@ -20,6 +20,7 @@ from decision.services.candidate_assessment import (
 from decision.services.session_availability_windowing import (
     ActionabilityRefusalStatus,
     MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW,
+    ProductivityRefusalStage,
     evaluate_continuous_actionable_productive_window,
     select_continuous_actionable_productive_window,
 )
@@ -194,6 +195,10 @@ def test_refusal_duration_is_computed_after_every_availability_intersection(
     ).refusal
 
     assert refusal.best_productive_window_minutes == 45
+    assert (
+        refusal.refusal_stage
+        is ProductivityRefusalStage.CONTINUOUS_WINDOW_TOO_SHORT
+    )
 
 
 def test_no_productive_slice_is_known_zero_minutes():
@@ -203,6 +208,7 @@ def test_no_productive_slice_is_known_zero_minutes():
 
     assert refusal.status is ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL
     assert refusal.best_productive_window_minutes == 0
+    assert refusal.refusal_stage is ProductivityRefusalStage.NO_PRODUCTIVE_SLICE
 
 
 def test_missing_temporal_evidence_is_not_reclassified_as_a_constraint():

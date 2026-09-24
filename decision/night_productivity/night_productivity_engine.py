@@ -1,3 +1,6 @@
+from dataclasses import dataclass
+from datetime import timedelta
+
 from decision.night_productivity.night_productivity_context import (
     NightProductivityContext,
 )
@@ -9,6 +12,17 @@ from decision.night_productivity.night_productivity_result import (
 from decision.night_productivity.night_window_merger import NightWindowMerger
 
 from decision.night_productivity.night_timeline_builder import NightTimelineBuilder
+from decision.night_productivity.productivity_diagnostics import (
+    PRODUCTIVE_SLICE_THRESHOLD,
+    ProductivityBreakdown,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class NightProductivityEvaluation:
+    result: NightProductivityResult
+    breakdown: ProductivityBreakdown | None
+
 
 class NightProductivityEngine:
 
@@ -16,7 +30,27 @@ class NightProductivityEngine:
     def evaluate(
         context: NightProductivityContext,
     ):
-        timeline = NightTimelineBuilder.build(context)
+        return NightProductivityEngine._evaluate_with_breakdown(context).result
+
+    @staticmethod
+    def evaluate_with_breakdown(
+        context: NightProductivityContext,
+    ) -> NightProductivityEvaluation:
+        evaluator = NightProductivityEngine.evaluate
+        if not getattr(evaluator, "_provides_productivity_breakdown", False):
+            return NightProductivityEvaluation(
+                result=evaluator(context),
+                breakdown=None,
+            )
+        return NightProductivityEngine._evaluate_with_breakdown(context)
+
+    @staticmethod
+    def _evaluate_with_breakdown(
+        context: NightProductivityContext,
+    ) -> NightProductivityEvaluation:
+        timeline, slice_evaluations = (
+            NightTimelineBuilder.build_with_evaluations(context)
+        )
         cloud_loss = context.astronomical_hours * (context.cloud_cover / 100) * 0.7
         moon_loss = context.astronomical_hours * context.moon_penalty * 0.3
 
@@ -45,7 +79,7 @@ class NightProductivityEngine:
             else 0
         )
 
-        return NightProductivityResult(
+        result = NightProductivityResult(
             astronomical_hours=context.astronomical_hours,
             productive_hours=round(productive_hours, 2),
             confidence=round(confidence, 2),
@@ -57,4 +91,43 @@ class NightProductivityEngine:
             display_start_hour=getattr(context, "display_start_hour", 22),
             timeline=timeline,
         )
+        observation_time = getattr(context, "observation_time", None)
+        breakdown = None
+        if (
+            slice_evaluations
+            and observation_time is not None
+            and observation_time.tzinfo is not None
+            and observation_time.utcoffset() is not None
+        ):
+            best_score = max(item.score for item in slice_evaluations)
+            best_index = next(
+                index
+                for index, item in enumerate(slice_evaluations)
+                if item.score == best_score
+            )
+            best_slice = timeline.slices[best_index]
+            breakdown = ProductivityBreakdown(
+                evaluated_slice_count=len(slice_evaluations),
+                productive_slice_count=sum(
+                    item.score >= PRODUCTIVE_SLICE_THRESHOLD
+                    for item in slice_evaluations
+                ),
+                best_slice_start=(
+                    observation_time
+                    + timedelta(hours=best_slice.start_hour)
+                ),
+                best_slice_end=(
+                    observation_time
+                    + timedelta(hours=best_slice.end_hour)
+                ),
+                best_slice_score=best_score,
+                best_slice_tie_count=sum(
+                    item.score == best_score for item in slice_evaluations
+                ),
+                productive_slice_threshold=PRODUCTIVE_SLICE_THRESHOLD,
+                losses=slice_evaluations[best_index].losses,
+            )
+        return NightProductivityEvaluation(result=result, breakdown=breakdown)
 
+
+NightProductivityEngine.evaluate._provides_productivity_breakdown = True
