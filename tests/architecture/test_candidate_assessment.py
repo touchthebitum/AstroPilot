@@ -213,6 +213,20 @@ def test_viability_requires_consistency_productivity_and_usable_weather(
     ) is True
 
 
+def test_viability_preserves_provider_reliability_only_global_caution():
+    assessment = viability_assessment(WeatherDecisionAdmissibility.CAUTION)
+    assessment = CandidateAssessment(
+        productive_window=assessment.productive_window,
+        weather_decision=WeatherTrustDecision(
+            evidence_quality=WeatherEvidenceQuality.INSUFFICIENT,
+            admissibility=WeatherDecisionAdmissibility.CAUTION,
+            reasons=("provider_reliability_unavailable",),
+        ),
+    )
+
+    assert CandidateViabilityEvaluator.is_viable(assessment) is True
+
+
 def test_viability_rejects_missing_refused_or_unproductive_assessment():
     assert CandidateViabilityEvaluator.is_viable(None) is False
     assert CandidateViabilityEvaluator.is_viable(
