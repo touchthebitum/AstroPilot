@@ -1244,6 +1244,8 @@ def test_known_constraint_refusal_is_not_presented_as_insufficient_evidence():
         "best_productive_window_minutes": 59.0,
         "required_continuous_minutes": 60,
         "limiting_factors": [],
+        "refusal_stage": None,
+        "productivity_breakdown": None,
     }
 
 

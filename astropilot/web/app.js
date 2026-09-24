@@ -1978,6 +1978,48 @@ function actionabilityRefusalMessage(refusal) {
   }
   const cause = actionabilityCauseLabels[refusal.cause_code]
     || (refusal.cause_code ? `cause moteur : ${refusal.cause_code}` : null);
+  const breakdown = refusal.productivity_breakdown;
+  if (
+    refusal.status === "constraints_refusal"
+    && refusal.refusal_stage === "no_productive_slice"
+    && breakdown
+  ) {
+    const score = Math.round(breakdown.best_slice_score * 100);
+    const threshold = Math.round(breakdown.productive_slice_threshold * 100);
+    const tieCount = breakdown.best_slice_tie_count;
+    const bestLabel = tieCount > 1
+      ? `Une des ${tieCount} meilleures tranches`
+      : "Meilleure tranche";
+    const lossLabels = Object.freeze({
+      cloud: "Nuages",
+      moon: "Lune",
+      altitude: "Altitude",
+      humidity: "Humidité",
+      wind: "Vent",
+    });
+    const losses = Object.entries(breakdown.losses || {})
+      .filter(([name, value]) => lossLabels[name] && Number.isFinite(value) && value > 0)
+      .sort((left, right) => right[1] - left[1])
+      .map(([name, value]) => `${lossLabels[name]} : −${Math.round(value * 100)} points`);
+    const lossText = losses.length ? ` ${losses.join(" · ")}.` : "";
+    return [
+      "Aucune tranche productive",
+      `${bestLabel} : ${score} % — seuil requis : ${threshold} %.${lossText} Aucune des ${breakdown.evaluated_slice_count} tranches de 15 min n’atteint le seuil.`,
+    ];
+  }
+  if (
+    refusal.status === "constraints_refusal"
+    && refusal.refusal_stage === "continuous_window_too_short"
+    && Number.isFinite(refusal.best_productive_window_minutes)
+    && Number.isFinite(refusal.required_continuous_minutes)
+  ) {
+    const foundMinutes = Math.max(0, Math.floor(refusal.best_productive_window_minutes));
+    const requiredMinutes = Math.max(0, Math.ceil(refusal.required_continuous_minutes));
+    return [
+      "Fenêtre productive trop courte",
+      `Des tranches productives existent, mais la meilleure fenêtre continue après vos contraintes dure ${foundMinutes} min. Seuil requis : ${requiredMinutes} min.`,
+    ];
+  }
   if (
     refusal.status === "constraints_refusal"
     && Number.isFinite(refusal.best_productive_window_minutes)
