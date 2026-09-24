@@ -42,6 +42,23 @@ def _not_eligible(
     )
 
 
+def _weather_allows_intent_eligibility(
+    decision: WeatherTrustDecision | None,
+) -> bool:
+    if decision is None:
+        return False
+    if (
+        decision.evidence_quality is WeatherEvidenceQuality.SUFFICIENT
+        and decision.admissibility is WeatherDecisionAdmissibility.ADMISSIBLE
+    ):
+        return True
+    return (
+        decision.evidence_quality is WeatherEvidenceQuality.INSUFFICIENT
+        and decision.admissibility is WeatherDecisionAdmissibility.CAUTION
+        and decision.reasons == ("provider_reliability_unavailable",)
+    )
+
+
 def evaluate_acquisition_intent_eligibility(
     *,
     acquisition_intent: AcquisitionIntent,
@@ -162,13 +179,7 @@ def evaluate_acquisition_intent_eligibility(
                     ),
                 )
 
-    if (
-        weather_trust_decision is None
-        or weather_trust_decision.evidence_quality
-        is not WeatherEvidenceQuality.SUFFICIENT
-        or weather_trust_decision.admissibility
-        is not WeatherDecisionAdmissibility.ADMISSIBLE
-    ):
+    if not _weather_allows_intent_eligibility(weather_trust_decision):
         evidence_gaps.append(
             AcquisitionIntentEvidenceGap.WEATHER_EVIDENCE_INSUFFICIENT
         )

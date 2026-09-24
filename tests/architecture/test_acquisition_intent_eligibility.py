@@ -232,6 +232,117 @@ def test_weather_trust_shortfall_is_only_an_evidence_gap(
     )
 
 
+def test_provider_reliability_only_caution_continues_through_other_gates():
+    assessment = evaluate(
+        weather=WeatherTrustDecision(
+            WeatherEvidenceQuality.INSUFFICIENT,
+            WeatherDecisionAdmissibility.CAUTION,
+            ("provider_reliability_unavailable",),
+        ),
+    )
+
+    assert assessment.status is AcquisitionIntentEligibilityStatus.ELIGIBLE
+    assert assessment.blocking_reasons == ()
+    assert assessment.evidence_gaps == ()
+
+
+@pytest.mark.parametrize(
+    ("quality", "admissibility"),
+    (
+        (WeatherEvidenceQuality.SUFFICIENT, WeatherDecisionAdmissibility.CAUTION),
+        (WeatherEvidenceQuality.INSUFFICIENT, WeatherDecisionAdmissibility.ADMISSIBLE),
+        (WeatherEvidenceQuality.INSUFFICIENT, WeatherDecisionAdmissibility.REFUSED),
+        (WeatherEvidenceQuality.INVALID, WeatherDecisionAdmissibility.REFUSED),
+    ),
+)
+def test_provider_reliability_reason_with_any_other_structured_state_is_blocking(
+    quality,
+    admissibility,
+):
+    assert_insufficient(
+        evaluate(
+            weather=WeatherTrustDecision(
+                quality,
+                admissibility,
+                ("provider_reliability_unavailable",),
+            ),
+        ),
+        AcquisitionIntentEvidenceGap.WEATHER_EVIDENCE_INSUFFICIENT,
+    )
+
+
+@pytest.mark.parametrize(
+    "reasons",
+    (
+        ("provider_reliability_unavailable", "weather_freshness_missing"),
+        ("provider_report_scope_mismatch",),
+        ("provider_context_not_evaluated",),
+        ("provider_evidence_missing:cloud_cover",),
+        ("provider_evidence_insufficient:cloud_cover",),
+    ),
+)
+def test_other_or_additional_caution_reasons_remain_weather_evidence_gaps(
+    reasons,
+):
+    assessment = evaluate(
+        weather=WeatherTrustDecision(
+            WeatherEvidenceQuality.INSUFFICIENT,
+            WeatherDecisionAdmissibility.CAUTION,
+            reasons,
+        ),
+    )
+
+    assert_insufficient(
+        assessment,
+        AcquisitionIntentEvidenceGap.WEATHER_EVIDENCE_INSUFFICIENT,
+    )
+
+
+@pytest.mark.parametrize(
+    "weather",
+    (
+        None,
+        WeatherTrustDecision(
+            WeatherEvidenceQuality.INVALID,
+            WeatherDecisionAdmissibility.REFUSED,
+            ("invalid_weather_units",),
+        ),
+        WeatherTrustDecision(
+            WeatherEvidenceQuality.INSUFFICIENT,
+            WeatherDecisionAdmissibility.REFUSED,
+            ("weather_snapshot_missing",),
+        ),
+        WeatherTrustDecision(
+            WeatherEvidenceQuality.INSUFFICIENT,
+            WeatherDecisionAdmissibility.REFUSED,
+            ("weather_freshness_missing",),
+        ),
+        WeatherTrustDecision(
+            WeatherEvidenceQuality.INSUFFICIENT,
+            WeatherDecisionAdmissibility.REFUSED,
+            ("weather_not_fresh",),
+        ),
+        WeatherTrustDecision(
+            WeatherEvidenceQuality.INSUFFICIENT,
+            WeatherDecisionAdmissibility.REFUSED,
+            ("selected_window_uncovered",),
+        ),
+        WeatherTrustDecision(
+            WeatherEvidenceQuality.INSUFFICIENT,
+            WeatherDecisionAdmissibility.REFUSED,
+            ("selected_window_coverage_unknown",),
+        ),
+    ),
+)
+def test_missing_invalid_stale_or_uncovered_current_weather_remains_blocking(
+    weather,
+):
+    assert_insufficient(
+        evaluate(weather=weather),
+        AcquisitionIntentEvidenceGap.WEATHER_EVIDENCE_INSUFFICIENT,
+    )
+
+
 def test_certain_failure_discards_earlier_and_later_evidence_gaps():
     assessment = evaluate_acquisition_intent_eligibility(
         acquisition_intent=HA_INTENT,

@@ -568,23 +568,39 @@ def test_tonight_exposes_modern_ou4_acquisition_intent_candidate(
     payload = response.json()
     assert payload["catalog_key"] == "Sh2-129"
     assert payload["imaging_field_id"] == "sh2-129_ou4"
-    assert payload["selected_acquisition_intent_id"] is None
-    assert payload["viable_acquisition_intent_ids"] == []
-    assert payload["acquisition_intent_selection_status"] == "no_eligible_intent"
-    assert payload["acquisition_intent_options"] == []
+    assert payload["selected_acquisition_intent_id"] == "sh2-129_ha"
+    assert payload["viable_acquisition_intent_ids"] == ["sh2-129_ha"]
+    assert payload["acquisition_intent_selection_status"] == "preferred"
+    assert payload["acquisition_intent_options"] == [{
+        "acquisition_intent_id": "sh2-129_ha",
+        "filter_type": "Ha",
+        "label": "Hα · Sh2-129",
+    }]
     assert payload["acquisition_intent_assessments"] == [
         {
             "acquisition_intent_id": "sh2-129_ha",
             "filter_type": "Ha",
             "label": "Hα · Sh2-129",
-            "status": "insufficient_evidence",
-            "reason_codes": ["weather_evidence_insufficient"],
+            "status": "eligible",
+            "reason_codes": [],
         },
         {
             "acquisition_intent_id": "ou4_oiii",
             "filter_type": "OIII",
             "label": "OIII · Ou4",
-            "status": "insufficient_evidence",
-            "reason_codes": ["weather_evidence_insufficient"],
+            "status": "eligible",
+            "reason_codes": [],
         },
     ]
+    assert payload["weather_decision"] == {
+        "evidence_quality": "insufficient",
+        "admissibility": "caution",
+        "reasons": ["provider_reliability_unavailable"],
+        "presentation": {
+            "label": "Validation météo partielle",
+            "summary": (
+                "Certaines preuves historiques de fiabilité ne sont pas encore "
+                "disponibles ; cela ne signifie pas que la météo est mauvaise."
+            ),
+        },
+    }

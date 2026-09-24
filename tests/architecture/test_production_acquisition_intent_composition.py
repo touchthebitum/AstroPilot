@@ -200,7 +200,6 @@ def test_incomparable_lunar_evidence_keeps_complete_frontier():
     [
         {"capabilities": None},
         {"productive_window": _productive_window(hours=0.5)},
-        {"weather": _weather(sufficient=False)},
     ],
 )
 def test_missing_critical_evidence_fails_closed(overrides):
@@ -213,10 +212,12 @@ def test_missing_critical_evidence_fails_closed(overrides):
     assert selection.selected_acquisition_intent_id is None
 
 
-def test_sh2_129_current_weather_gap_preserves_both_exact_assessments():
+def test_sh2_129_provider_reliability_caution_reaches_lunar_selection():
     selection = _compose(weather=_weather(sufficient=False))
 
-    assert selection.viable_acquisition_intent_ids == ()
+    assert selection.status is AcquisitionIntentSelectionStatus.PREFERRED
+    assert selection.selected_acquisition_intent_id == "sh2-129_ha"
+    assert selection.viable_acquisition_intent_ids == ("sh2-129_ha",)
     assert [
         {
             "acquisition_intent_id": item.acquisition_intent_id,
@@ -231,15 +232,15 @@ def test_sh2_129_current_weather_gap_preserves_both_exact_assessments():
             "acquisition_intent_id": "sh2-129_ha",
             "filter_type": "Ha",
             "label": "Hα · Sh2-129",
-            "status": "insufficient_evidence",
-            "reason_codes": ["weather_evidence_insufficient"],
+            "status": "eligible",
+            "reason_codes": [],
         },
         {
             "acquisition_intent_id": "ou4_oiii",
             "filter_type": "OIII",
             "label": "OIII · Ou4",
-            "status": "insufficient_evidence",
-            "reason_codes": ["weather_evidence_insufficient"],
+            "status": "eligible",
+            "reason_codes": [],
         },
     ]
 
