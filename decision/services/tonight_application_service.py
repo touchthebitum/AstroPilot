@@ -321,15 +321,31 @@ class TonightApplicationService:
 
         DecisionConsistencyGate.validate_mission(mission)
 
+        if not DecisionConsistencyGate.has_productive_window(mission):
+            if actionability_refusal is None:
+                return TonightResult(
+                    night,
+                    recommendation,
+                    None,
+                    status=TonightStatus.NO_MISSION,
+                    forecast_evidence=forecast_evidence,
+                    candidate_rejections=candidate_rejections,
+                )
+            return TonightResult(
+                night,
+                recommendation,
+                mission,
+                status=TonightStatus.NO_PRODUCTIVE_WINDOW,
+                forecast_evidence=forecast_evidence,
+                candidate_rejections=candidate_rejections,
+                actionability_refusal=actionability_refusal,
+            )
+
         return TonightResult(
             night,
             recommendation,
             mission,
-            status=(
-                TonightStatus.AVAILABLE
-                if DecisionConsistencyGate.has_productive_window(mission)
-                else TonightStatus.NO_PRODUCTIVE_WINDOW
-            ),
+            status=TonightStatus.AVAILABLE,
             forecast_evidence=forecast_evidence,
             candidate_rejections=candidate_rejections,
         )

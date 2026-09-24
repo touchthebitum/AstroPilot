@@ -1069,7 +1069,7 @@ class ActionabilityRefusalBaseModel(BaseModel):
 
     conclusion: Literal["no_productive_window"]
     cause_code: str | None = None
-    required_continuous_minutes: int = Field(gt=0)
+    required_continuous_minutes: int = Field(gt=0, strict=True)
     limiting_factors: list[dict[str, str]] = Field(default_factory=list)
 
 
@@ -1082,7 +1082,7 @@ class InsufficientEvidenceActionabilityRefusalModel(
     ActionabilityRefusalBaseModel
 ):
     status: Literal["insufficient_evidence"]
-    best_productive_window_minutes: None = None
+    best_productive_window_minutes: None
 
 
 class ActionabilityRefusalModel(

@@ -446,6 +446,11 @@ class TonightResponse:
         ):
             raise ValueError("actionability_refusal_transport_status_mismatch")
         if (
+            self.status == "no_productive_window"
+            and self.actionability_refusal is None
+        ):
+            raise ValueError("no_productive_window_requires_actionability_refusal")
+        if (
             self.actionability_refusal is not None
             and self.actionability_refusal.status
             is ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL

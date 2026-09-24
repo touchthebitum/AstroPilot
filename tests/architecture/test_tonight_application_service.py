@@ -945,7 +945,7 @@ def test_actionability_mission_has_no_fabricated_selection_provenance():
     assert len(mission_service.calls) == 1
 
 
-def test_non_productive_actionability_mission_fails_closed():
+def test_non_productive_mission_without_diagnostic_fails_closed_as_no_mission():
     night = {"date": "2026-09-01", "top_objects": []}
     candidate = make_candidate()
     recommendation = make_recommendation(candidate)
@@ -980,10 +980,40 @@ def test_non_productive_actionability_mission_fails_closed():
         bortle=3,
     )
 
-    assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW
-    assert result.mission is mission
+    assert result.status is TonightStatus.NO_MISSION
+    assert result.mission is None
+    assert result.actionability_refusal is None
     assert result.forecast_evidence is FORECAST_EVIDENCE
     assert len(mission_service.calls) == 1
+
+
+def test_every_no_productive_window_result_has_authoritative_diagnostic():
+    night = {"date": "2026-09-01", "top_objects": []}
+    candidate = make_candidate()
+    refusal = ActionabilityRefusal(
+        conclusion=ActionabilityRefusalConclusion.NO_PRODUCTIVE_WINDOW,
+        status=ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL,
+        cause_code="insufficient_actionable_productive_window",
+        best_productive_window_minutes=59.0,
+        required_continuous_minutes=60,
+    )
+    service, _, _ = make_service(
+        forecast_nights=lambda *args, **kwargs: forecast_run([night]),
+        build_candidates=lambda *args, **kwargs: [candidate],
+        recommendation=make_recommendation(candidate),
+        mission=None,
+        actionability_refusal=refusal,
+    )
+
+    result = service.evaluate(
+        profile=make_profile(),
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=3,
+    )
+
+    assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW
+    assert result.actionability_refusal is not None
 
 
 @pytest.mark.parametrize(

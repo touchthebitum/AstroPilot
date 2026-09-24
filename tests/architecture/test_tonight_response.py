@@ -939,6 +939,15 @@ def test_rejections_are_serialized_without_changing_existing_decisions(status, r
         mission=None,
         status=status,
         candidate_rejections=(make_rejection(),),
+        actionability_refusal=(
+            _actionability_refusal(
+                ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL,
+                59.0,
+                "insufficient_actionable_productive_window",
+            )
+            if status is TonightStatus.NO_PRODUCTIVE_WINDOW
+            else None
+        ),
     )
     weather = WeatherTrustDecision(
         evidence_quality=WeatherEvidenceQuality.INSUFFICIENT,
@@ -1285,3 +1294,11 @@ def test_weather_refusal_does_not_leak_an_actionability_constraint():
     assert payload["status"] == "weather_refused"
     assert payload["target_decision_status"] == "insufficient_evidence"
     assert payload["actionability_refusal"] is None
+
+
+def test_no_productive_window_response_requires_actionability_diagnostic():
+    with pytest.raises(
+        ValueError,
+        match="no_productive_window_requires_actionability_refusal",
+    ):
+        TonightResponse(status="no_productive_window")
