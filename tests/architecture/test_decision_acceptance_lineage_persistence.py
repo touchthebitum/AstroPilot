@@ -41,6 +41,12 @@ from decision.models.acquisition_intent_selection import (
     AcquisitionIntentSelection,
     AcquisitionIntentSelectionStatus,
 )
+from decision.models.acquisition_intent_assessment import (
+    AcquisitionIntentAssessment,
+)
+from decision.models.acquisition_intent_eligibility import (
+    AcquisitionIntentEligibilityStatus,
+)
 from decision.models.candidate import Candidate, CandidateProvenance
 from decision.models.context.decision_context import DecisionContext
 from decision.models.context.equipment_context import EquipmentContext
@@ -122,6 +128,7 @@ def candidate(
     catalog_key="M31",
     imaging_field_id="sh2-129_ou4",
     acquisition_intent_selection=None,
+    acquisition_intent_assessments=(),
 ):
     return Candidate(
         name="Andromeda Galaxy",
@@ -153,6 +160,7 @@ def candidate(
             if acquisition_intent_selection is not None
             else None
         ),
+        acquisition_intent_assessments=acquisition_intent_assessments,
         reasons=["high_altitude"],
         strategy_scores={"completion": 0.8},
     )
@@ -244,9 +252,14 @@ def decision_context():
     )
 
 
-def context(decision_id="decision-1", acquisition_intent_selection=None):
+def context(
+    decision_id="decision-1",
+    acquisition_intent_selection=None,
+    acquisition_intent_assessments=(),
+):
     source = candidate(
         acquisition_intent_selection=acquisition_intent_selection,
+        acquisition_intent_assessments=acquisition_intent_assessments,
     )
     typed_context = decision_context()
     return DecisionAcceptanceContext(
@@ -534,6 +547,66 @@ def test_v8_candidate_without_assessments_loads_empty_without_rewrite(tmp_path):
         == ()
     )
     assert path.read_text(encoding="utf-8") == legacy
+
+
+def test_v9_candidate_with_eligible_assessment_and_no_eligible_selection_fails():
+    document = serialize_decision_acceptance_context(context())
+    eligible = AcquisitionIntentAssessment(
+        acquisition_intent_id="sh2-129_ha",
+        filter_type="Ha",
+        label="Hα · Sh2-129",
+        status=AcquisitionIntentEligibilityStatus.ELIGIBLE,
+        reason_codes=(),
+    )
+    for fields in candidate_field_documents(document):
+        fields["acquisition_intent_selection_status"] = _encode(
+            AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT
+        )
+        fields["acquisition_intent_assessments"] = _encode((eligible,))
+
+    with pytest.raises(
+        AcceptanceLineageCorruptionError,
+        match="invalid_dataclass_value",
+    ):
+        deserialize_decision_acceptance_context(document, schema_version=9)
+
+
+def test_v9_coherent_candidate_assessments_round_trip_strictly():
+    eligible = AcquisitionIntentAssessment(
+        acquisition_intent_id="sh2-129_ha",
+        filter_type="Ha",
+        label="Hα · Sh2-129",
+        status=AcquisitionIntentEligibilityStatus.ELIGIBLE,
+        reason_codes=(),
+    )
+    refused = AcquisitionIntentAssessment(
+        acquisition_intent_id="ou4_oiii",
+        filter_type="OIII",
+        label="OIII · Ou4",
+        status=AcquisitionIntentEligibilityStatus.NOT_ELIGIBLE,
+        reason_codes=("required_filter_unavailable",),
+    )
+    selection = AcquisitionIntentSelection(
+        selected_acquisition_intent_id="sh2-129_ha",
+        viable_acquisition_intent_ids=("sh2-129_ha",),
+        status=AcquisitionIntentSelectionStatus.PREFERRED,
+        reason_codes=("UNIQUE_NON_DOMINATED_INTENT",),
+    )
+    source = context(
+        acquisition_intent_selection=selection,
+        acquisition_intent_assessments=(eligible, refused),
+    )
+    document = serialize_decision_acceptance_context(source)
+
+    restored = deserialize_decision_acceptance_context(
+        document,
+        schema_version=9,
+    )
+
+    assert restored.recommendation.opportunity.candidate == (
+        source.recommendation.opportunity.candidate
+    )
+    assert serialize_decision_acceptance_context(restored) == document
 
 
 @pytest.mark.parametrize("version", [1, 2])
