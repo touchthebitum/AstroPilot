@@ -34,11 +34,13 @@ IMAGING_FIELD_DEFINITIONS: tuple[ImagingFieldDefinition, ...] = (
                 acquisition_intent_id="sh2-129_ha",
                 filter_type="Ha",
                 primary_component_ids=("sh2-129",),
+                label="Hα · Sh2-129",
             ),
             AcquisitionIntent(
                 acquisition_intent_id="ou4_oiii",
                 filter_type="OIII",
                 primary_component_ids=("ou4",),
+                label="OIII · Ou4",
             ),
         ),
     ),

@@ -571,3 +571,20 @@ def test_tonight_exposes_modern_ou4_acquisition_intent_candidate(
     assert payload["selected_acquisition_intent_id"] is None
     assert payload["viable_acquisition_intent_ids"] == []
     assert payload["acquisition_intent_selection_status"] == "no_eligible_intent"
+    assert payload["acquisition_intent_options"] == []
+    assert payload["acquisition_intent_assessments"] == [
+        {
+            "acquisition_intent_id": "sh2-129_ha",
+            "filter_type": "Ha",
+            "label": "Hα · Sh2-129",
+            "status": "insufficient_evidence",
+            "reason_codes": ["weather_evidence_insufficient"],
+        },
+        {
+            "acquisition_intent_id": "ou4_oiii",
+            "filter_type": "OIII",
+            "label": "OIII · Ou4",
+            "status": "insufficient_evidence",
+            "reason_codes": ["weather_evidence_insufficient"],
+        },
+    ]

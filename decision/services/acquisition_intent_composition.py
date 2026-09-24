@@ -8,6 +8,9 @@ from decision.models.acquisition_intent_eligibility import (
     AcquisitionIntentEligibilityStatus,
     AcquisitionIntentEvidenceGap,
 )
+from decision.models.acquisition_intent_assessment import (
+    AcquisitionIntentAssessment,
+)
 from decision.models.acquisition_intent_filter_profile_resolution import (
     AcquisitionIntentFilterProfileResolutionStatus,
 )
@@ -70,6 +73,40 @@ def _insufficient(
     )
 
 
+def _select(
+    imaging_field: ImagingFieldDefinition,
+    assessments: tuple[AcquisitionIntentEligibilityAssessment, ...],
+    preferences,
+) -> AcquisitionIntentSelection:
+    definitions = {
+        intent.acquisition_intent_id: intent
+        for intent in imaging_field.acquisition_intents
+    }
+    transported = tuple(
+        AcquisitionIntentAssessment(
+            acquisition_intent_id=assessment.acquisition_intent_id,
+            filter_type=definitions[assessment.acquisition_intent_id].filter_type,
+            label=definitions[assessment.acquisition_intent_id].label,
+            status=assessment.status,
+            reason_codes=(
+                tuple(reason.value for reason in assessment.blocking_reasons)
+                if assessment.status
+                is AcquisitionIntentEligibilityStatus.NOT_ELIGIBLE
+                else tuple(gap.value for gap in assessment.evidence_gaps)
+                if assessment.status
+                is AcquisitionIntentEligibilityStatus.INSUFFICIENT_EVIDENCE
+                else ()
+            ),
+        )
+        for assessment in assessments
+    )
+    return select_acquisition_intent(
+        assessments,
+        preferences,
+        acquisition_intent_assessments=transported,
+    )
+
+
 def compose_acquisition_intent_selection(
     *,
     imaging_field: ImagingFieldDefinition,
@@ -107,7 +144,7 @@ def compose_acquisition_intent_selection(
         assessment.status is AcquisitionIntentEligibilityStatus.ELIGIBLE
         for assessment in assessments
     ):
-        return select_acquisition_intent(assessments, ())
+        return _select(imaging_field, assessments, ())
 
     intents_by_id = {
         intent.acquisition_intent_id: intent
@@ -152,9 +189,9 @@ def compose_acquisition_intent_selection(
         if assessment.status is AcquisitionIntentEligibilityStatus.ELIGIBLE
     )
     if not eligible_ids:
-        return select_acquisition_intent(assessments, ())
+        return _select(imaging_field, assessments, ())
     if len(eligible_ids) == 1:
-        return select_acquisition_intent(assessments, ())
+        return _select(imaging_field, assessments, ())
 
     actionable_window = (
         select_continuous_actionable_productive_window(
@@ -174,7 +211,7 @@ def compose_acquisition_intent_selection(
             else assessment
             for assessment in assessments
         )
-        return select_acquisition_intent(assessments, ())
+        return _select(imaging_field, assessments, ())
 
     try:
         evidence = evidence_builder.build(
@@ -206,7 +243,7 @@ def compose_acquisition_intent_selection(
             else assessment
             for assessment in assessments
         )
-        return select_acquisition_intent(assessments, ())
+        return _select(imaging_field, assessments, ())
 
     preferences = tuple(
         determine_acquisition_intent_preference(
@@ -219,4 +256,4 @@ def compose_acquisition_intent_selection(
         )
         for left_id, right_id in combinations(sorted(eligible_ids), 2)
     )
-    return select_acquisition_intent(assessments, preferences)
+    return _select(imaging_field, assessments, preferences)

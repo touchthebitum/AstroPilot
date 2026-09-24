@@ -4,6 +4,9 @@ from decision.models.acquisition_intent_eligibility import (
     AcquisitionIntentEligibilityAssessment,
     AcquisitionIntentEligibilityStatus,
 )
+from decision.models.acquisition_intent_assessment import (
+    AcquisitionIntentAssessment,
+)
 from decision.models.acquisition_intent_preference import (
     AcquisitionIntentPreference,
     AcquisitionIntentPreferenceStatus,
@@ -27,6 +30,10 @@ def select_acquisition_intent(
         AcquisitionIntentEligibilityAssessment, ...
     ],
     pairwise_preferences: tuple[AcquisitionIntentPreference, ...],
+    *,
+    acquisition_intent_assessments: tuple[
+        AcquisitionIntentAssessment, ...
+    ] = (),
 ) -> AcquisitionIntentSelection:
     """Select the Pareto frontier from authoritative precomputed inputs.
 
@@ -44,6 +51,59 @@ def select_acquisition_intent(
     if len(set(assessment_ids)) != len(assessment_ids):
         raise AcquisitionIntentSelectionError(
             "duplicate acquisition-intent eligibility assessment"
+        )
+
+    if not isinstance(acquisition_intent_assessments, tuple) or not all(
+        isinstance(item, AcquisitionIntentAssessment)
+        for item in acquisition_intent_assessments
+    ):
+        raise TypeError(
+            "acquisition_intent_assessments must contain intent assessments"
+        )
+    transported_ids = tuple(
+        item.acquisition_intent_id
+        for item in acquisition_intent_assessments
+    )
+    if acquisition_intent_assessments and transported_ids != tuple(
+        assessment_ids
+    ):
+        raise AcquisitionIntentSelectionError(
+            "transport assessments must match eligibility assessment order"
+        )
+    for eligibility, transported in zip(
+        eligibility_assessments,
+        acquisition_intent_assessments,
+    ):
+        expected_codes = (
+            tuple(reason.value for reason in eligibility.blocking_reasons)
+            if eligibility.status
+            is AcquisitionIntentEligibilityStatus.NOT_ELIGIBLE
+            else tuple(gap.value for gap in eligibility.evidence_gaps)
+            if eligibility.status
+            is AcquisitionIntentEligibilityStatus.INSUFFICIENT_EVIDENCE
+            else ()
+        )
+        if (
+            transported.status is not eligibility.status
+            or transported.reason_codes != expected_codes
+        ):
+            raise AcquisitionIntentSelectionError(
+                "transport assessment must preserve eligibility status and reasons"
+            )
+
+    def selection(
+        selected_acquisition_intent_id,
+        viable_acquisition_intent_ids,
+        status,
+        reason_code,
+    ):
+        return AcquisitionIntentSelection(
+            selected_acquisition_intent_id=selected_acquisition_intent_id,
+            viable_acquisition_intent_ids=viable_acquisition_intent_ids,
+            status=status,
+            reason_codes=(reason_code,),
+            eligibility_assessments=eligibility_assessments,
+            acquisition_intent_assessments=acquisition_intent_assessments,
         )
 
     eligible_ids = {
@@ -106,19 +166,19 @@ def select_acquisition_intent(
         )
 
     if not eligible_ids:
-        return AcquisitionIntentSelection(
-            selected_acquisition_intent_id=None,
-            viable_acquisition_intent_ids=(),
-            status=AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT,
-            reason_codes=(NO_ELIGIBLE_INTENT,),
+        return selection(
+            None,
+            (),
+            AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT,
+            NO_ELIGIBLE_INTENT,
         )
     if len(eligible_ids) == 1:
         selected_id = ordered_eligible_ids[0]
-        return AcquisitionIntentSelection(
-            selected_acquisition_intent_id=selected_id,
-            viable_acquisition_intent_ids=(selected_id,),
-            status=AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
-            reason_codes=(ONLY_ELIGIBLE_INTENT,),
+        return selection(
+            selected_id,
+            (selected_id,),
+            AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
+            ONLY_ELIGIBLE_INTENT,
         )
 
     non_dominated_ids = tuple(sorted(eligible_ids - dominated_ids))
@@ -128,17 +188,17 @@ def select_acquisition_intent(
         )
     if len(non_dominated_ids) == 1:
         selected_id = non_dominated_ids[0]
-        return AcquisitionIntentSelection(
-            selected_acquisition_intent_id=selected_id,
-            viable_acquisition_intent_ids=(selected_id,),
-            status=AcquisitionIntentSelectionStatus.PREFERRED,
-            reason_codes=(UNIQUE_NON_DOMINATED_INTENT,),
+        return selection(
+            selected_id,
+            (selected_id,),
+            AcquisitionIntentSelectionStatus.PREFERRED,
+            UNIQUE_NON_DOMINATED_INTENT,
         )
-    return AcquisitionIntentSelection(
-        selected_acquisition_intent_id=None,
-        viable_acquisition_intent_ids=non_dominated_ids,
-        status=AcquisitionIntentSelectionStatus.NO_CLEAR_PREFERENCE,
-        reason_codes=(MULTIPLE_NON_DOMINATED_INTENTS,),
+    return selection(
+        None,
+        non_dominated_ids,
+        AcquisitionIntentSelectionStatus.NO_CLEAR_PREFERENCE,
+        MULTIPLE_NON_DOMINATED_INTENTS,
     )
 
 

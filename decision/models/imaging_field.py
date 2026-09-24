@@ -40,6 +40,7 @@ class AcquisitionIntent:
     acquisition_intent_id: str
     filter_type: str
     primary_component_ids: tuple[str, ...]
+    label: str
 
     def __post_init__(self) -> None:
         _validate_non_empty(
@@ -47,6 +48,7 @@ class AcquisitionIntent:
             "acquisition_intent_id",
         )
         _validate_non_empty(self.filter_type, "filter_type")
+        _validate_non_empty(self.label, "label")
         if not isinstance(self.primary_component_ids, tuple):
             raise TypeError("primary_component_ids must be a tuple")
         if not self.primary_component_ids:

@@ -103,6 +103,7 @@ def test_partial_results_produce_stable_transport_status(status):
         "selected_acquisition_intent_id": None,
         "viable_acquisition_intent_ids": [],
         "acquisition_intent_selection_status": None,
+        "acquisition_intent_assessments": [],
         "target_decision_status": None,
         "actionability_refusal": None,
         "shortlist_entries": [],
@@ -519,6 +520,11 @@ def test_alternatives_serialize_only_preselected_candidates():
                 "final_score": first.final_score,
                 "target_decision_status": "viable",
                 "reasons": [],
+                "imaging_field_id": None,
+                "selected_acquisition_intent_id": None,
+                "viable_acquisition_intent_ids": [],
+                "acquisition_intent_selection_status": None,
+                "acquisition_intent_assessments": [],
             }
         ]
 
@@ -689,6 +695,7 @@ def test_refused_weather_decision_redacts_active_transport_only():
         "selected_acquisition_intent_id": None,
         "viable_acquisition_intent_ids": [],
         "acquisition_intent_selection_status": None,
+        "acquisition_intent_assessments": [],
         "target_decision_status": "insufficient_evidence",
         "actionability_refusal": None,
         "shortlist_entries": [],

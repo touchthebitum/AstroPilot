@@ -408,7 +408,7 @@ def test_decision_acceptance_context_full_typed_round_trip():
     )
 
 
-def test_v7_candidate_document_contains_exact_additive_provenance_keys():
+def test_v9_candidate_document_contains_exact_additive_provenance_keys():
     document = json.loads(
         serialize_decision_acceptance_aggregate(
             DecisionAcceptanceAggregate(context=context())
@@ -416,7 +416,7 @@ def test_v7_candidate_document_contains_exact_additive_provenance_keys():
     )
     candidate_fields = candidate_field_documents(document)
 
-    assert document["schema_version"] == 8
+    assert document["schema_version"] == 9
     assert candidate_fields
     assert all(
         fields["imaging_field_id"] == "sh2-129_ou4"
@@ -442,6 +442,7 @@ def test_v7_candidate_document_contains_exact_additive_provenance_keys():
             "selected_acquisition_intent_id",
             "viable_acquisition_intent_ids",
             "acquisition_intent_selection_status",
+            "acquisition_intent_assessments",
             "reasons",
             "strategy_scores",
         }
@@ -483,6 +484,7 @@ def test_v5_candidate_without_selection_provenance_loads_legacy_defaults(
     document = json.loads(path.read_text(encoding="utf-8"))
     document["schema_version"] = 5
     for candidate_fields in candidate_field_documents(document):
+        candidate_fields.pop("acquisition_intent_assessments")
         candidate_fields.pop("selected_acquisition_intent_id")
         candidate_fields.pop("viable_acquisition_intent_ids")
         candidate_fields.pop("acquisition_intent_selection_status")
@@ -502,6 +504,35 @@ def test_v5_candidate_without_selection_provenance_loads_legacy_defaults(
     assert restored_candidate.selected_acquisition_intent_id is None
     assert restored_candidate.viable_acquisition_intent_ids == ()
     assert restored_candidate.acquisition_intent_selection_status is None
+    assert restored_candidate.acquisition_intent_assessments == ()
+    assert path.read_text(encoding="utf-8") == legacy
+
+
+def test_v8_candidate_without_assessments_loads_empty_without_rewrite(tmp_path):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    store.create_context(context())
+    path = tmp_path / "decision-1.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["schema_version"] = 8
+    for candidate_fields in candidate_field_documents(document):
+        candidate_fields.pop("acquisition_intent_assessments")
+    legacy = json.dumps(
+        document,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+    path.write_text(legacy, encoding="utf-8")
+
+    restored = FileDecisionAcceptanceLineageStore(tmp_path).load_context(
+        "decision-1"
+    )
+
+    assert (
+        restored.recommendation.opportunity.candidate
+        .acquisition_intent_assessments
+        == ()
+    )
     assert path.read_text(encoding="utf-8") == legacy
 
 
@@ -518,6 +549,7 @@ def test_legacy_candidate_without_imaging_field_loads_as_none_without_rewrite(
     if version == 1:
         document.pop("acceptance_requests")
     for fields in candidate_field_documents(document):
+        fields.pop("acquisition_intent_assessments")
         fields.pop("imaging_field_id")
         fields.pop("selected_acquisition_intent_id")
         fields.pop("viable_acquisition_intent_ids")
@@ -1078,6 +1110,8 @@ def test_legacy_aggregate_loads_without_fabricated_selection_identity(
     path = tmp_path / "decision-1.json"
     document = json.loads(path.read_text(encoding="utf-8"))
     document["schema_version"] = version
+    for fields in candidate_field_documents(document):
+        fields.pop("acquisition_intent_assessments")
     if version == 1:
         document.pop("acceptance_requests")
     if version in (1, 2):
@@ -1132,6 +1166,7 @@ def test_v4_selection_identity_loads_with_legacy_mission_none_without_rewrite(
     document = json.loads(path.read_text(encoding="utf-8"))
     document["schema_version"] = 4
     for fields in candidate_field_documents(document):
+        fields.pop("acquisition_intent_assessments")
         fields.pop("selected_acquisition_intent_id")
         fields.pop("viable_acquisition_intent_ids")
         fields.pop("acquisition_intent_selection_status")
@@ -1352,7 +1387,7 @@ def test_duplicate_identity_in_another_aggregate_fails_globally(
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda document: document.update(schema_version=9),
+        lambda document: document.update(schema_version=10),
         lambda document: document.pop("schema_version"),
         lambda document: document["context"].update(
             {"$type": "unsupported.DomainType"}
@@ -1453,7 +1488,7 @@ def test_concurrent_conflicting_commits_allow_exactly_one_success(tmp_path):
         outcomes = list(executor.map(commit, ("M31", "M42")))
 
     assert sorted(outcomes) == ["conflict", "saved"]
-    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 8
+    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 9
 
 
 def test_unique_temporary_files_are_cleaned(tmp_path, monkeypatch):

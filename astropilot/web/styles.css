@@ -298,6 +298,9 @@ button { color: inherit; }
 .intent-choice label { display: block; margin-bottom: 6px; color: var(--ink); }
 .intent-choice select { max-width: 100%; padding: 8px 10px; color: var(--ink); background: var(--surface, #102033); border: 1px solid var(--line); border-radius: 8px; }
 .intent-choice .intent-warning { color: #ffd0cc; }
+.intent-assessments { margin: 10px 0 0; padding-left: 18px; color: var(--ink); }
+.intent-assessments > li + li { margin-top: 8px; }
+.intent-assessments ul { margin-top: 4px; padding-left: 18px; color: var(--muted); }
 .mission-button { display: inline-flex; gap: 8px; align-items: center; padding: 10px 14px; color: #95a3b5; background: rgba(255,255,255,.025); border: 1px solid var(--line); border-radius: 10px; }
 .mission-button svg { width: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; }
 .mission-button { cursor: pointer; }

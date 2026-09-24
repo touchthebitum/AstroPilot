@@ -587,6 +587,64 @@ function intentMode(subject) {
   return "unavailable";
 }
 
+const intentStatusLabels = Object.freeze({
+  eligible: "Éligible",
+  not_eligible: "Non éligible",
+  insufficient_evidence: "Preuves insuffisantes",
+});
+
+const intentReasonLabels = Object.freeze({
+  intent_not_in_imaging_field: "Cette prise de vue ne fait pas partie du champ défini.",
+  intent_not_targeted_by_project: "Cette prise de vue n’est pas ciblée par le projet.",
+  intent_target_completed: "L’objectif de cette prise de vue est déjà atteint.",
+  required_filter_unavailable: "Le filtre requis n’est pas disponible dans cette configuration.",
+  insufficient_actionable_productive_window: "La fenêtre productive continue est trop courte.",
+  setup_capabilities_missing: "Les capacités de la configuration ne sont pas suffisamment documentées.",
+  productive_window_evidence_missing: "La preuve de fenêtre productive est insuffisante.",
+  weather_evidence_insufficient: "Les preuves météo sont insuffisantes pour confirmer cette prise de vue.",
+  filter_profile_evidence_insufficient: "Le profil optique du filtre n’est pas suffisamment établi.",
+  lunar_evidence_insufficient: "Les preuves lunaires sont insuffisantes pour comparer cette prise de vue.",
+});
+
+function intentReasonText(code) {
+  return intentReasonLabels[code] || `Raison non traduite : ${code}`;
+}
+
+function renderIntentAssessments(container, assessments) {
+  if (!Array.isArray(assessments) || !assessments.length) return;
+  const list = document.createElement("ul");
+  list.className = "intent-assessments";
+  for (const assessment of assessments) {
+    const item = document.createElement("li");
+    const heading = document.createElement("strong");
+    const status = intentStatusLabels[assessment?.status] || "Statut indisponible";
+    heading.textContent = `${assessment?.label || assessment?.acquisition_intent_id || "Prise de vue"} — ${status}`;
+    item.append(heading);
+    const reasonCodes = Array.isArray(assessment?.reason_codes)
+      ? assessment.reason_codes : [];
+    if (reasonCodes.length) {
+      const reasons = document.createElement("ul");
+      for (const code of reasonCodes) {
+        const reason = document.createElement("li");
+        reason.textContent = intentReasonText(code);
+        reason.dataset.reasonCode = code;
+        reasons.append(reason);
+      }
+      item.append(reasons);
+    }
+    list.append(item);
+  }
+  container.append(list);
+}
+
+function joinedIntentLabels(assessments) {
+  const labels = (Array.isArray(assessments) ? assessments : [])
+    .map((assessment) => assessment?.label)
+    .filter(Boolean);
+  if (labels.length < 2) return labels[0] || "Prises de vue";
+  return `${labels.slice(0, -1).join(", ")} et ${labels.at(-1)}`;
+}
+
 function renderIntentChoice(container, subject, selectId) {
   container.replaceChildren();
   const mode = intentMode(subject);
@@ -603,6 +661,12 @@ function renderIntentChoice(container, subject, selectId) {
       ? "Aucune acquisition recommandée pour cette nuit. Aucune prise de vue de ce champ ne répond aux critères de sélection."
       : "Le choix de prise de vue est indisponible. Actualisez la recommandation.";
     container.append(warning);
+    if (mode === "none") {
+      renderIntentAssessments(
+        container,
+        subject.acquisition_intent_assessments,
+      );
+    }
     return;
   }
   const label = document.createElement("label");
@@ -940,8 +1004,15 @@ function renderDecision(decision) {
   text("#window-note", firstWindow?.reason ? "Fenêtre productive principale" : "Heure locale");
   text("#duration-value", duration(actionableHours));
   text("#duration-note", "Durée de mission exploitable");
-  text("#filter-value", filter?.name || "Aucun filtre précisé");
-  text("#filter-note", filter?.filter_type ? filter.filter_type.replaceAll("_", " ") : "Selon la cible et le ciel");
+  const assessments = Array.isArray(decision.acquisition_intent_assessments)
+    ? decision.acquisition_intent_assessments : [];
+  text("#filter-value", filter?.name || (assessments.length
+    ? "Aucun filtre sélectionné" : "Aucun filtre précisé"));
+  text("#filter-note", filter?.filter_type
+    ? filter.filter_type.replaceAll("_", " ")
+    : assessments.length
+      ? `${joinedIntentLabels(assessments)} évalués ci-dessous`
+      : "Selon la cible et le ciel");
   text("#quality-score", qualityScore === null ? "—" : String(qualityScore));
   text("#quality-title", qualityCopy[0]);
   text("#quality-summary", qualityCopy[1]);

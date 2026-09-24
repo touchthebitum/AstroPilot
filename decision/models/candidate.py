@@ -4,6 +4,9 @@ from enum import Enum
 from decision.models.acquisition_intent_selection import (
     AcquisitionIntentSelectionStatus,
 )
+from decision.models.acquisition_intent_assessment import (
+    AcquisitionIntentAssessment,
+)
 from decision.models.acquisition_intent_remaining_progress import AcquisitionIntentRemainingProgress
 
 
@@ -39,6 +42,9 @@ class Candidate:
     acquisition_intent_selection_status: (
         AcquisitionIntentSelectionStatus | None
     ) = None
+    acquisition_intent_assessments: tuple[
+        AcquisitionIntentAssessment, ...
+    ] = ()
     reasons: list[str] = field(default_factory=list)
     strategy_scores: dict = field(default_factory=dict)
 
@@ -88,6 +94,19 @@ class Candidate:
                 "acquisition_intent_selection_status must be an "
                 "AcquisitionIntentSelectionStatus or None"
             )
+        if not isinstance(self.acquisition_intent_assessments, tuple) or not all(
+            isinstance(item, AcquisitionIntentAssessment)
+            for item in self.acquisition_intent_assessments
+        ):
+            raise TypeError(
+                "acquisition_intent_assessments must contain intent assessments"
+            )
+        assessment_ids = tuple(
+            item.acquisition_intent_id
+            for item in self.acquisition_intent_assessments
+        )
+        if len(set(assessment_ids)) != len(assessment_ids):
+            raise ValueError("duplicate_acquisition_intent_assessment")
         self._validate_acquisition_intent_selection_provenance()
 
     def _validate_acquisition_intent_selection_provenance(self) -> None:
@@ -95,7 +114,7 @@ class Candidate:
         viable = self.viable_acquisition_intent_ids
         status = self.acquisition_intent_selection_status
         if status is None:
-            if selected is not None or viable:
+            if selected is not None or viable or self.acquisition_intent_assessments:
                 raise ValueError(
                     "acquisition intent provenance requires a selection status"
                 )

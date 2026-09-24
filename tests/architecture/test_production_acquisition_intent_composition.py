@@ -17,6 +17,18 @@ from decision.models.acquisition_intent_selection import (
     AcquisitionIntentSelection,
     AcquisitionIntentSelectionStatus,
 )
+from decision.models.acquisition_intent_eligibility import (
+    AcquisitionIntentEligibilityAssessment,
+    AcquisitionIntentEligibilityReason,
+    AcquisitionIntentEligibilityStatus,
+    AcquisitionIntentEvidenceGap,
+)
+from decision.models.acquisition_intent_assessment import (
+    AcquisitionIntentAssessment,
+)
+from decision.models.acquisition_intent_remaining_progress import (
+    AcquisitionIntentRemainingProgress,
+)
 from decision.models.context.site_context import SiteContext
 from decision.models.equipment.filter_optical_profile import FilterOpticalProfile
 from decision.models.equipment.setup_filter_capabilities import (
@@ -131,16 +143,19 @@ def _compose(
     weather=None,
     profile_resolver=None,
     estimator=None,
+    remaining_progress=(),
+    site=SITE,
 ):
     field = build_production_imaging_field_resolver().resolve("sh2-129_ou4")
     return compose_acquisition_intent_selection(
         imaging_field=field,
         project_targets=_targets(*targets),
+        remaining_progress=remaining_progress,
         setup_filter_capabilities=capabilities,
         productive_window=productive_window or _productive_window(),
         session_availability=None,
         weather_trust_decision=weather or _weather(),
-        site=SITE,
+        site=site,
         filter_profile_resolver=(
             profile_resolver or build_production_filter_optical_profile_resolver()
         ),
@@ -196,6 +211,94 @@ def test_missing_critical_evidence_fails_closed(overrides):
         is AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT
     )
     assert selection.selected_acquisition_intent_id is None
+
+
+def test_sh2_129_current_weather_gap_preserves_both_exact_assessments():
+    selection = _compose(weather=_weather(sufficient=False))
+
+    assert selection.viable_acquisition_intent_ids == ()
+    assert [
+        {
+            "acquisition_intent_id": item.acquisition_intent_id,
+            "filter_type": item.filter_type,
+            "label": item.label,
+            "status": item.status.value,
+            "reason_codes": list(item.reason_codes),
+        }
+        for item in selection.acquisition_intent_assessments
+    ] == [
+        {
+            "acquisition_intent_id": "sh2-129_ha",
+            "filter_type": "Ha",
+            "label": "Hα · Sh2-129",
+            "status": "insufficient_evidence",
+            "reason_codes": ["weather_evidence_insufficient"],
+        },
+        {
+            "acquisition_intent_id": "ou4_oiii",
+            "filter_type": "OIII",
+            "label": "OIII · Ou4",
+            "status": "insufficient_evidence",
+            "reason_codes": ["weather_evidence_insufficient"],
+        },
+    ]
+
+
+def test_revised_assessments_preserve_optical_and_lunar_evidence_gaps():
+    optical = _compose(
+        targets=("sh2-129_ha",),
+        capabilities=SetupFilterCapabilities(
+            "ambiguous",
+            ("Ha",),
+            ("ha-a", "ha-b"),
+        ),
+        profile_resolver=FilterOpticalProfileResolver((
+            FilterOpticalProfile("ha-a", "Ha", 656.3, 6.5, True),
+            FilterOpticalProfile("ha-b", "Ha", 656.3, 7.0, True),
+        )),
+    )
+    lunar = _compose(site=None)
+
+    assert optical.acquisition_intent_assessments[0].reason_codes == (
+        AcquisitionIntentEvidenceGap.FILTER_PROFILE_EVIDENCE_INSUFFICIENT.value,
+    )
+    assert all(
+        item.reason_codes
+        == (AcquisitionIntentEvidenceGap.LUNAR_EVIDENCE_INSUFFICIENT.value,)
+        for item in lunar.acquisition_intent_assessments
+    )
+
+
+def test_blocking_assessments_preserve_filter_unavailable_and_completion():
+    capabilities = SetupFilterCapabilities(
+        "ha-only",
+        ("Ha",),
+        ("baader_ha_highspeed_6_5nm",),
+    )
+    completed = AcquisitionIntentRemainingProgress(
+        "sh2-129_ha", 7200.0, 2.0, 2.0, 0.0,
+    )
+    unknown = AcquisitionIntentRemainingProgress(
+        "ou4_oiii", None, None, 2.0, None,
+    )
+    selection = _compose(
+        capabilities=capabilities,
+        remaining_progress=(completed, unknown),
+    )
+    assessments = {
+        item.acquisition_intent_id: item
+        for item in selection.acquisition_intent_assessments
+    }
+
+    assert assessments["sh2-129_ha"].status is (
+        AcquisitionIntentEligibilityStatus.NOT_ELIGIBLE
+    )
+    assert assessments["sh2-129_ha"].reason_codes == (
+        AcquisitionIntentEligibilityReason.INTENT_TARGET_COMPLETED.value,
+    )
+    assert assessments["ou4_oiii"].reason_codes == (
+        AcquisitionIntentEligibilityReason.REQUIRED_FILTER_UNAVAILABLE.value,
+    )
 
 
 def test_ambiguous_filter_profile_is_never_chosen_arbitrarily():
@@ -275,11 +378,26 @@ def test_legacy_project_keeps_absent_intent_provenance(
 def test_modern_project_passes_exact_selection_without_changing_score(
     monkeypatch,
 ):
+    eligibility = AcquisitionIntentEligibilityAssessment(
+        "sh2-129_ha",
+        AcquisitionIntentEligibilityStatus.ELIGIBLE,
+        (),
+        (),
+    )
+    assessment = AcquisitionIntentAssessment(
+        "sh2-129_ha",
+        "Ha",
+        "Hα · Sh2-129",
+        AcquisitionIntentEligibilityStatus.ELIGIBLE,
+        (),
+    )
     expected = AcquisitionIntentSelection(
         selected_acquisition_intent_id="sh2-129_ha",
         viable_acquisition_intent_ids=("sh2-129_ha",),
         status=AcquisitionIntentSelectionStatus.PREFERRED,
         reason_codes=("UNIQUE_NON_DOMINATED_INTENT",),
+        eligibility_assessments=(eligibility,),
+        acquisition_intent_assessments=(assessment,),
     )
     captured = []
     original_build = astro_score.project_selection_engine.build_candidate
@@ -321,4 +439,7 @@ def test_modern_project_passes_exact_selection_without_changing_score(
 
     assert captured[0]["acquisition_intent_selection"] is expected
     assert candidate.selected_acquisition_intent_id == "sh2-129_ha"
+    assert candidate.acquisition_intent_assessments is (
+        expected.acquisition_intent_assessments
+    )
     assert candidate.decision_score == captured[0]["decision_score"]

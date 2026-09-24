@@ -127,7 +127,7 @@ def test_all_v1_gates_pass_at_exactly_sixty_continuous_minutes():
 
 
 def test_intent_outside_field_is_not_eligible_with_exact_reason():
-    other = AcquisitionIntent("other_ha", "Ha", ("sh2-129",))
+    other = AcquisitionIntent("other_ha", "Ha", ("sh2-129",), "Hα · Other")
 
     assert_not_eligible(
         evaluate(other),

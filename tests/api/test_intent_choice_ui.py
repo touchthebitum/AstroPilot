@@ -42,6 +42,52 @@ def test_decision_hierarchy_and_visible_copy():
     assert "justify-content: center; text-align: center" in styles
 
 
+def test_no_eligible_intent_renders_every_status_and_reason_code():
+    helpers = _javascript_between("function intentMode(subject) {", "function chosenIntent(")
+    _run_javascript(r"""
+const assert = require('node:assert/strict');
+class Element {
+  constructor(tag) { this.tag = tag; this.children = []; this.hidden = false; this.dataset = {}; this._text = ''; }
+  append(...items) { this.children.push(...items); }
+  replaceChildren(...items) { this.children = [...items]; this._text = ''; }
+  set textContent(value) { this._text = value; this.children = []; }
+  get textContent() { return this._text + this.children.map(child => child.textContent || '').join(''); }
+}
+const document = {createElement: tag => new Element(tag)};
+class Option {}
+""" + helpers + r"""
+const container = new Element('div');
+renderIntentChoice(container, {
+  acquisition_intent_selection_status: 'no_eligible_intent',
+  viable_acquisition_intent_ids: [],
+  acquisition_intent_options: [],
+  acquisition_intent_assessments: [
+    {acquisition_intent_id: 'ha', label: 'Hα · Sh2-129', status: 'not_eligible',
+      reason_codes: ['required_filter_unavailable', 'intent_target_completed']},
+    {acquisition_intent_id: 'oiii', label: 'OIII · Ou4', status: 'insufficient_evidence',
+      reason_codes: ['weather_evidence_insufficient']},
+  ],
+}, 'intent');
+assert.equal(container.hidden, false);
+assert.match(container.textContent, /Hα · Sh2-129 — Non éligible/);
+assert.match(container.textContent, /OIII · Ou4 — Preuves insuffisantes/);
+assert.match(container.textContent, /filtre requis n’est pas disponible/);
+assert.match(container.textContent, /objectif de cette prise de vue est déjà atteint/);
+assert.match(container.textContent, /preuves météo sont insuffisantes/);
+const reasonItems = container.children[1].children.flatMap(item => item.children[1]?.children || []);
+assert.deepEqual(reasonItems.map(item => item.dataset.reasonCode), [
+  'required_filter_unavailable', 'intent_target_completed', 'weather_evidence_insufficient']);
+""")
+
+
+def test_filter_copy_keeps_concrete_filter_and_relabels_known_unselected_intents():
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert 'filter?.name || (assessments.length' in source
+    assert '"Aucun filtre sélectionné" : "Aucun filtre précisé"' in source
+    assert '${joinedIntentLabels(assessments)} évalués ci-dessous' in source
+    assert '? filter.filter_type.replaceAll("_", " ")' in source
+
+
 def test_saved_mission_restores_only_from_server_without_acceptance():
     helpers = _javascript_between("async function restoreSavedMission() {", "function invalidateAvailabilityForSiteChange(")
     _run_javascript("""

@@ -88,10 +88,12 @@ def test_candidate_exposes_additive_selection_contract_with_legacy_defaults():
         "selected_acquisition_intent_id",
         "viable_acquisition_intent_ids",
         "acquisition_intent_selection_status",
+        "acquisition_intent_assessments",
     }
     assert value.selected_acquisition_intent_id is None
     assert value.viable_acquisition_intent_ids == ()
     assert value.acquisition_intent_selection_status is None
+    assert value.acquisition_intent_assessments == ()
 
 
 @pytest.mark.parametrize("status", tuple(AcquisitionIntentSelectionStatus))
@@ -109,6 +111,9 @@ def test_candidate_copies_authoritative_selection_result_exactly(status):
         is result.viable_acquisition_intent_ids
     )
     assert value.acquisition_intent_selection_status is result.status
+    assert value.acquisition_intent_assessments is (
+        result.acquisition_intent_assessments
+    )
 
 
 def test_no_clear_preference_preserves_order_and_selects_no_fallback():

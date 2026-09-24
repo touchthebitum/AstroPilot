@@ -117,7 +117,8 @@ def evaluate_acquisition_intent_eligibility(
         raise ValueError("remaining_progress_intent_mismatch")
     if remaining_progress is not None and remaining_progress.completed:
         return _not_eligible(
-            intent_id, AcquisitionIntentEligibilityReason.INTENT_TARGET_COMPLETED,
+            intent_id,
+            AcquisitionIntentEligibilityReason.INTENT_TARGET_COMPLETED,
         )
 
     evidence_gaps: list[AcquisitionIntentEvidenceGap] = []

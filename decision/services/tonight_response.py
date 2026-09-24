@@ -11,6 +11,9 @@ from decision.models.candidate import CandidateProvenance
 from decision.models.acquisition_intent_selection import (
     AcquisitionIntentSelectionStatus,
 )
+from decision.models.acquisition_intent_assessment import (
+    AcquisitionIntentAssessment,
+)
 from decision.models.candidate_rejection import CandidateRejectionBasis
 from decision.models.recommendation_reason import (
     RecommendationReasonCategory,
@@ -314,6 +317,15 @@ class TonightAlternativeResponse:
     final_score: float
     target_decision_status: TargetDecisionStatus | None = None
     reasons: tuple[AlternativeReasonResponse, ...] = ()
+    imaging_field_id: str | None = None
+    selected_acquisition_intent_id: str | None = None
+    viable_acquisition_intent_ids: tuple[str, ...] = ()
+    acquisition_intent_selection_status: (
+        AcquisitionIntentSelectionStatus | None
+    ) = None
+    acquisition_intent_assessments: tuple[
+        AcquisitionIntentAssessment, ...
+    ] = ()
 
     def __post_init__(self):
         object.__setattr__(self, "reasons", tuple(self.reasons))
@@ -389,6 +401,9 @@ class TonightResponse:
     acquisition_intent_selection_status: (
         AcquisitionIntentSelectionStatus | None
     ) = None
+    acquisition_intent_assessments: tuple[
+        AcquisitionIntentAssessment, ...
+    ] = ()
     target_decision_status: TargetDecisionStatus | None = None
     actionability_refusal: ActionabilityRefusal | None = None
     shortlist_entries: list[TonightShortlistEntryResponse] = field(
@@ -570,6 +585,19 @@ class TonightResponse:
                         alternative_reasons[index]
                         if alternative_reasons is not None
                         else ()
+                    ),
+                    imaging_field_id=entry.imaging_field_id,
+                    selected_acquisition_intent_id=(
+                        entry.selected_acquisition_intent_id
+                    ),
+                    viable_acquisition_intent_ids=(
+                        entry.viable_acquisition_intent_ids
+                    ),
+                    acquisition_intent_selection_status=(
+                        entry.acquisition_intent_selection_status
+                    ),
+                    acquisition_intent_assessments=(
+                        entry.acquisition_intent_assessments
                     ),
                 )
                 for index, entry in enumerate(selected_alternatives)
@@ -824,6 +852,11 @@ class TonightResponse:
                 candidate.acquisition_intent_selection_status
                 if candidate is not None
                 else None
+            ),
+            acquisition_intent_assessments=(
+                candidate.acquisition_intent_assessments
+                if candidate is not None
+                else ()
             ),
             target_decision_status=target_decision_status,
             actionability_refusal=actionability_refusal,
