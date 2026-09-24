@@ -219,6 +219,20 @@ def test_tonight_ui_assets_are_served():
     assert "Date.now(" not in script.text
     assert "Récupérées il y a" in script.text
     assert "no_productive_window" in script.text
+    assert "actionabilityRefusalMessage(payload.actionability_refusal)" in script.text
+    assert "Meilleure fenêtre trouvée : ${foundMinutes} min" in script.text
+    assert "Seuil requis : ${requiredMinutes} min" in script.text
+    assert "La cause précise n’est pas établie" in script.text
+    assert "insufficient_actionable_productive_window" in script.text
+    assert "productive_window_evidence_missing" in script.text
+    refusal_renderer = script.text.split(
+        "function actionabilityRefusalMessage(refusal)",
+        1,
+    )[1].split("function showMessage", 1)[0]
+    assert "cloud_loss" not in refusal_renderer
+    assert "moon_loss" not in refusal_renderer
+    assert "altitude_loss" not in refusal_renderer
+    assert "limiting_factors" not in refusal_renderer
     assert 'detail?.code === "decision_invalid"' in script.text
     assert 'detail?.code === "location_timezone_unresolved"' in script.text
     assert 'payload?.error === "user_profile_unavailable"' in script.text
@@ -884,6 +898,53 @@ def test_primary_status_controls_title_and_preserves_missing_values():
     assert '"À confirmer"' in render
     assert '"Non évaluée"' in render
     assert 'formatRecommendationConfidence(' in render
+
+
+def test_actionability_refusal_renderer_floors_found_and_ceils_required_minutes(
+    tmp_path,
+):
+    import json
+    import shutil
+    import subprocess
+    import pytest
+
+    engine = shutil.which('node') or shutil.which('osascript')
+    if engine is None:
+        pytest.skip('A JavaScript runtime is required for the render execution test')
+    script = make_client().get('/ui/app.js').text
+    renderer = script.split('const partialMessages =', 1)[1].split(
+        'function showMessage',
+        1,
+    )[0]
+    harness = 'const partialMessages =' + renderer + '''
+const rendered = actionabilityRefusalMessage({
+  conclusion: "no_productive_window",
+  status: "constraints_refusal",
+  cause_code: "insufficient_actionable_productive_window",
+  best_productive_window_minutes: 59.983333333333334,
+  required_continuous_minutes: 60.00000000000001,
+});
+'''
+    if Path(engine).name == 'node':
+        harness += '\nconsole.log(JSON.stringify(rendered));\n'
+        command = [engine]
+    else:
+        harness += '\nJSON.stringify(rendered);\n'
+        command = [engine, '-l', 'JavaScript']
+    path = tmp_path / 'actionability-render.js'
+    path.write_text(harness)
+
+    completed = subprocess.run(
+        [*command, str(path)],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    rendered = json.loads(completed.stdout)
+
+    assert "Meilleure fenêtre trouvée : 59 min" in rendered[1]
+    assert "Meilleure fenêtre trouvée : 60 min" not in rendered[1]
+    assert "Seuil requis : 61 min" in rendered[1]
 
 
 def test_primary_status_render_executes_without_fabricating_missing_values(tmp_path):

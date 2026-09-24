@@ -175,6 +175,34 @@ def test_missing_productive_window_is_insufficient_evidence():
     )
 
 
+@pytest.mark.parametrize(
+    ("window_start", "window_end"),
+    (
+        (None, None),
+        (START, None),
+        (START + timedelta(hours=1), START),
+    ),
+)
+def test_missing_or_invalid_temporal_bounds_remain_insufficient_evidence(
+    window_start,
+    window_end,
+):
+    source = ProductiveWindowAssessment(
+        window_start=window_start,
+        window_end=window_end,
+        recommended_hours=0,
+        expected_gain=0,
+        productivity=SimpleNamespace(windows=None),
+    )
+
+    assessment = evaluate(window=source)
+
+    assert_insufficient(
+        assessment,
+        AcquisitionIntentEvidenceGap.PRODUCTIVE_WINDOW_EVIDENCE_MISSING,
+    )
+
+
 def test_known_productive_window_below_sixty_minutes_is_not_eligible():
     assert_not_eligible(
         evaluate(window=productive_window(59)),

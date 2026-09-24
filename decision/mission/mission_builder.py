@@ -27,3 +27,23 @@ class NightMissionBuilder:
             weather=weather,
             mission_input=mission_input,
         )
+
+    @staticmethod
+    def build_with_actionability_diagnostic(
+        target,
+        summary,
+        context,
+        weather: WeatherForecast | None = None,
+        mission_input: MissionInput | None = None,
+    ):
+        equipment = EquipmentBuilder.build(context)
+        return MissionAssembler.build(
+            target=target,
+            summary=summary,
+            context=context,
+            equipment=equipment,
+            alternatives=[],
+            weather=weather,
+            mission_input=mission_input,
+            _include_actionability_diagnostic=True,
+        )

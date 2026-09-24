@@ -1,6 +1,12 @@
 from types import SimpleNamespace
 
 from decision.services.tonight_mission_service import TonightMissionService
+from decision.mission.mission_assembler import MissionAssemblyResult
+from decision.services.session_availability_windowing import (
+    ActionabilityRefusal,
+    ActionabilityRefusalConclusion,
+    ActionabilityRefusalStatus,
+)
 
 
 class RecordingMissionBuilder:
@@ -123,3 +129,33 @@ def test_matching_uses_catalog_key_before_display_name():
     )
 
     assert mission.target == "Andromeda"
+
+
+def test_diagnostic_builder_preserves_authoritative_refusal():
+    source = make_object()
+    evaluation = SimpleNamespace(score=95)
+    refusal = ActionabilityRefusal(
+        conclusion=ActionabilityRefusalConclusion.NO_PRODUCTIVE_WINDOW,
+        status=ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL,
+        cause_code="insufficient_actionable_productive_window",
+        best_productive_window_minutes=59.0,
+        required_continuous_minutes=60,
+    )
+
+    def diagnostic_builder(**kwargs):
+        return MissionAssemblyResult(None, refusal)
+
+    service = TonightMissionService(
+        build_mission=lambda **kwargs: None,
+        build_mission_with_actionability_diagnostic=diagnostic_builder,
+    )
+
+    result = service.create_with_actionability_diagnostic(
+        winner={"object_evaluations": {"M31": evaluation}},
+        objects=[source],
+        recommended_key="M31",
+        build_mission_input=lambda value: value,
+    )
+
+    assert result.mission is None
+    assert result.actionability_refusal is refusal

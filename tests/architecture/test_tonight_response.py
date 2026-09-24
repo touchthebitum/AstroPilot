@@ -31,6 +31,11 @@ from decision.services.tonight_response import (
     TargetDecisionStatus,
     TonightResponse,
 )
+from decision.services.session_availability_windowing import (
+    ActionabilityRefusal,
+    ActionabilityRefusalConclusion,
+    ActionabilityRefusalStatus,
+)
 from decision.weather.weather_trust_decision import (
     WeatherDecisionAdmissibility,
     WeatherEvidenceQuality,
@@ -99,6 +104,7 @@ def test_partial_results_produce_stable_transport_status(status):
         "viable_acquisition_intent_ids": [],
         "acquisition_intent_selection_status": None,
         "target_decision_status": None,
+        "actionability_refusal": None,
         "shortlist_entries": [],
         "alternatives": [],
         "rejected_targets": [],
@@ -684,6 +690,7 @@ def test_refused_weather_decision_redacts_active_transport_only():
         "viable_acquisition_intent_ids": [],
         "acquisition_intent_selection_status": None,
         "target_decision_status": "insufficient_evidence",
+        "actionability_refusal": None,
         "shortlist_entries": [],
         "alternatives": [],
         "rejected_targets": [],
@@ -932,6 +939,15 @@ def test_rejections_are_serialized_without_changing_existing_decisions(status, r
         mission=None,
         status=status,
         candidate_rejections=(make_rejection(),),
+        actionability_refusal=(
+            _actionability_refusal(
+                ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL,
+                59.0,
+                "insufficient_actionable_productive_window",
+            )
+            if status is TonightStatus.NO_PRODUCTIVE_WINDOW
+            else None
+        ),
     )
     weather = WeatherTrustDecision(
         evidence_quality=WeatherEvidenceQuality.INSUFFICIENT,
@@ -1182,3 +1198,107 @@ def test_recommended_implies_real_exploitable_transported_mission(mission):
             or payload["recommended_hours"] <= 0
         )
     )
+
+
+def _actionability_refusal(status, best_minutes, cause_code):
+    return ActionabilityRefusal(
+        conclusion=ActionabilityRefusalConclusion.NO_PRODUCTIVE_WINDOW,
+        status=status,
+        cause_code=cause_code,
+        best_productive_window_minutes=best_minutes,
+        required_continuous_minutes=60,
+    )
+
+
+def test_known_constraint_refusal_is_not_presented_as_insufficient_evidence():
+    candidate = make_candidate()
+    result = TonightResult(
+        night={"date": date(2026, 9, 1)},
+        recommendation=Recommendation(
+            Opportunity(Action.START_PROJECT, candidate),
+            None,
+        ),
+        mission=None,
+        status=TonightStatus.NO_PRODUCTIVE_WINDOW,
+        actionability_refusal=_actionability_refusal(
+            ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL,
+            59.0,
+            "insufficient_actionable_productive_window",
+        ),
+    )
+
+    payload = TonightResponse.from_result(result).to_dict()
+
+    assert payload["target_decision_status"] == "not_recommended"
+    assert payload["actionability_refusal"] == {
+        "conclusion": "no_productive_window",
+        "status": "constraints_refusal",
+        "cause_code": "insufficient_actionable_productive_window",
+        "best_productive_window_minutes": 59.0,
+        "required_continuous_minutes": 60,
+        "limiting_factors": [],
+    }
+
+
+def test_missing_evidence_refusal_preserves_insufficient_evidence_status():
+    candidate = make_candidate()
+    result = TonightResult(
+        night={"date": date(2026, 9, 1)},
+        recommendation=Recommendation(
+            Opportunity(Action.START_PROJECT, candidate),
+            None,
+        ),
+        mission=None,
+        status=TonightStatus.NO_PRODUCTIVE_WINDOW,
+        actionability_refusal=_actionability_refusal(
+            ActionabilityRefusalStatus.INSUFFICIENT_EVIDENCE,
+            None,
+            "productive_window_evidence_missing",
+        ),
+    )
+
+    payload = TonightResponse.from_result(result).to_dict()
+
+    assert payload["target_decision_status"] == "insufficient_evidence"
+    assert payload["actionability_refusal"]["status"] == "insufficient_evidence"
+    assert payload["actionability_refusal"]["best_productive_window_minutes"] is None
+
+
+def test_weather_refusal_does_not_leak_an_actionability_constraint():
+    candidate = make_candidate()
+    result = TonightResult(
+        night={"date": date(2026, 9, 1)},
+        recommendation=Recommendation(
+            Opportunity(Action.START_PROJECT, candidate),
+            None,
+        ),
+        mission=None,
+        status=TonightStatus.NO_PRODUCTIVE_WINDOW,
+        actionability_refusal=_actionability_refusal(
+            ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL,
+            59.0,
+            "insufficient_actionable_productive_window",
+        ),
+    )
+    weather = WeatherTrustDecision(
+        evidence_quality=WeatherEvidenceQuality.INSUFFICIENT,
+        admissibility=WeatherDecisionAdmissibility.REFUSED,
+        reasons=("selected_window_uncovered",),
+    )
+
+    payload = TonightResponse.from_result(
+        result,
+        weather_decision=weather,
+    ).to_dict()
+
+    assert payload["status"] == "weather_refused"
+    assert payload["target_decision_status"] == "insufficient_evidence"
+    assert payload["actionability_refusal"] is None
+
+
+def test_no_productive_window_response_requires_actionability_diagnostic():
+    with pytest.raises(
+        ValueError,
+        match="no_productive_window_requires_actionability_refusal",
+    ):
+        TonightResponse(status="no_productive_window")

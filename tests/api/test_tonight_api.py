@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 import astropilot.app as app_module
 import astropilot.user_profile as user_profile
@@ -872,6 +873,135 @@ def make_client(*, result, weather=DEFAULT_WEATHER):
     )
 
 
+def test_tonight_api_serializes_actionability_refusal_without_recalculation():
+    refusal = availability_windowing.ActionabilityRefusal(
+        conclusion=(
+            availability_windowing.ActionabilityRefusalConclusion
+            .NO_PRODUCTIVE_WINDOW
+        ),
+        status=(
+            availability_windowing.ActionabilityRefusalStatus
+            .CONSTRAINTS_REFUSAL
+        ),
+        cause_code="insufficient_actionable_productive_window",
+        best_productive_window_minutes=59.983333333333334,
+        required_continuous_minutes=60,
+    )
+    result = replace(
+        make_result(),
+        mission=None,
+        status=TonightStatus.NO_PRODUCTIVE_WINDOW,
+        actionability_refusal=refusal,
+    )
+
+    response = make_client(result=result).post("/v1/tonight", json={})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["actionability_refusal"] == {
+        "conclusion": "no_productive_window",
+        "status": "constraints_refusal",
+        "cause_code": "insufficient_actionable_productive_window",
+        "best_productive_window_minutes": 59.983333333333334,
+        "required_continuous_minutes": 60,
+        "limiting_factors": [],
+    }
+    assert payload["target_decision_status"] == "not_recommended"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {
+            "conclusion": "no_productive_window",
+            "status": "constraints_refusal",
+            "cause_code": "insufficient_actionable_productive_window",
+            "best_productive_window_minutes": None,
+            "required_continuous_minutes": 60,
+        },
+        {
+            "conclusion": "no_productive_window",
+            "status": "insufficient_evidence",
+            "cause_code": "productive_window_evidence_missing",
+            "best_productive_window_minutes": 0,
+            "required_continuous_minutes": 60,
+        },
+        {
+            "conclusion": "no_productive_window",
+            "status": "insufficient_evidence",
+            "cause_code": "productive_window_evidence_missing",
+            "best_productive_window_minutes": None,
+            "required_continuous_minutes": 0,
+        },
+        {
+            "conclusion": "no_productive_window",
+            "status": "insufficient_evidence",
+            "cause_code": "productive_window_evidence_missing",
+            "best_productive_window_minutes": None,
+            "required_continuous_minutes": 60.5,
+        },
+        {
+            "conclusion": "no_productive_window",
+            "status": "insufficient_evidence",
+            "cause_code": "productive_window_evidence_missing",
+            "best_productive_window_minutes": None,
+            "required_continuous_minutes": 60.0,
+        },
+        {
+            "conclusion": "no_productive_window",
+            "status": "insufficient_evidence",
+            "cause_code": "productive_window_evidence_missing",
+            "best_productive_window_minutes": None,
+            "required_continuous_minutes": "60",
+        },
+        {
+            "conclusion": "no_productive_window",
+            "status": "insufficient_evidence",
+            "cause_code": "productive_window_evidence_missing",
+            "best_productive_window_minutes": None,
+            "required_continuous_minutes": True,
+        },
+        {
+            "conclusion": "no_productive_window",
+            "status": "insufficient_evidence",
+            "cause_code": "productive_window_evidence_missing",
+            "required_continuous_minutes": 60,
+        },
+        {
+            "conclusion": "no_productive_window",
+            "status": "constraints_refusal",
+            "cause_code": "insufficient_actionable_productive_window",
+            "required_continuous_minutes": 60,
+        },
+    ),
+)
+def test_actionability_refusal_public_model_rejects_contradictions(payload):
+    with pytest.raises(ValidationError):
+        app_module.ActionabilityRefusalModel.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("status", "best_minutes"),
+    (("insufficient_evidence", None), ("constraints_refusal", 0)),
+)
+def test_actionability_refusal_public_model_accepts_required_strict_fields(
+    status,
+    best_minutes,
+):
+    refusal = app_module.ActionabilityRefusalModel.model_validate(
+        {
+            "conclusion": "no_productive_window",
+            "status": status,
+            "cause_code": "test",
+            "best_productive_window_minutes": best_minutes,
+            "required_continuous_minutes": 60,
+        }
+    )
+
+    assert refusal.root.required_continuous_minutes == 60
+    assert refusal.root.best_productive_window_minutes == best_minutes
+
+
 def test_weather_unavailable_is_a_service_error_before_evaluation():
     class Service:
         def evaluate(self, **kwargs):
@@ -1244,7 +1374,6 @@ def test_forecast_unavailable_is_a_service_error():
         TonightStatus.NO_CANDIDATE,
         TonightStatus.NO_RECOMMENDATION,
         TonightStatus.NO_MISSION,
-        TonightStatus.NO_PRODUCTIVE_WINDOW,
     ],
 )
 def test_empty_product_results_remain_successful_business_responses(status):
@@ -1361,6 +1490,7 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
         "TonightWeatherDecisionModel",
         "WeatherEvidenceQuality",
         "WeatherDecisionAdmissibility",
+        "ActionabilityRefusalModel",
     }.issubset(schemas)
 
     tonight_response = schemas["TonightResponseModel"]["properties"]
@@ -1385,6 +1515,26 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
     assert tonight_response["weather_decision"]["anyOf"][0]["$ref"].endswith(
         "TonightWeatherDecisionModel"
     )
+    assert tonight_response["actionability_refusal"]["anyOf"][0][
+        "$ref"
+    ].endswith("ActionabilityRefusalModel")
+    refusal = schemas["ActionabilityRefusalModel"]
+    assert refusal["discriminator"]["propertyName"] == "status"
+    assert len(refusal["oneOf"]) == 2
+    constraint = schemas["ConstraintsActionabilityRefusalModel"]["properties"]
+    insufficient = schemas[
+        "InsufficientEvidenceActionabilityRefusalModel"
+    ]["properties"]
+    assert constraint["best_productive_window_minutes"]["minimum"] == 0.0
+    assert insufficient["best_productive_window_minutes"]["type"] == "null"
+    assert constraint["required_continuous_minutes"]["type"] == "integer"
+    assert constraint["required_continuous_minutes"]["exclusiveMinimum"] == 0
+    assert "best_productive_window_minutes" in schemas[
+        "ConstraintsActionabilityRefusalModel"
+    ]["required"]
+    assert "best_productive_window_minutes" in schemas[
+        "InsufficientEvidenceActionabilityRefusalModel"
+    ]["required"]
     weather_decision = schemas["TonightWeatherDecisionModel"]["properties"]
     assert weather_decision["evidence_quality"]["$ref"].endswith(
         "WeatherEvidenceQuality"
