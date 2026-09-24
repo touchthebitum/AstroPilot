@@ -197,6 +197,11 @@ button { color: inherit; }
 .project-progress-editor input, .project-progress-editor select { max-width: 360px; padding: 8px; color: var(--ink); background: var(--panel-strong); border: 1px solid var(--line-bright); border-radius: 6px; }
 .project-progress-editor output { color: var(--cyan); }
 .project-progress-feedback { color: var(--gold); }
+.session-panel { margin: 20px 0; padding: 18px; border: 1px solid var(--line-bright); border-radius: 12px; display: grid; gap: 10px; }
+.session-panel[hidden], .session-panel [hidden] { display: none; }
+.session-panel input, .session-panel select { padding: 8px; color: var(--ink); background: var(--panel-strong); border: 1px solid var(--line-bright); border-radius: 6px; }
+.session-panel dl { display: grid; gap: 8px; }
+.session-panel dl div { display: flex; justify-content: space-between; gap: 12px; }
 .review-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 24px 0 0; }
 .review-grid div { padding: 15px; background: rgba(255,255,255,.025); border: 1px solid var(--line); border-radius: 11px; }
 .review-grid dt { color: var(--subtle); font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
@@ -220,6 +225,7 @@ button { color: inherit; }
 .saved-mission-entry[hidden] { display: none; }
 .saved-mission-entry strong { color: var(--ink); font-size: 14px; }
 .saved-mission-entry p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.saved-mission-entry select { display: block; margin-top: 8px; padding: 8px; max-width: 100%; color: var(--ink); background: var(--panel-strong); border: 1px solid var(--line-bright); border-radius: 6px; }
 
 .decision-head { display: flex; justify-content: space-between; align-items: flex-start; padding: 39px 42px 31px; border-bottom: 1px solid var(--line); }
 .recommendation-line { display: flex; gap: 9px; align-items: center; margin-bottom: 24px; color: var(--cyan); font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }

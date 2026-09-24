@@ -48,7 +48,10 @@ def test_saved_mission_restores_only_from_server_without_acceptance():
 const assert = require('node:assert/strict');
 const state = {acceptedMission: null};
 const entry = {hidden: true};
-const ui = {savedMissionEntry: entry, savedMissionTarget: {textContent: ''}};
+const choice = {value: '', children: [], replaceChildren() { this.children = []; },
+  append(item) { this.children.push(item); }};
+const ui = {savedMissionEntry: entry, savedMissionTarget: {textContent: ''}, savedMissionChoice: choice};
+const document = {createElement() { return {value: '', textContent: ''}; }};
 let calls = [];
 let changeConfiguration = false;
 let payload = {status: 'accepted', mission_id: 'mission-1', selection_id: 'selection-1',
@@ -57,14 +60,15 @@ let payload = {status: 'accepted', mission_id: 'mission-1', selection_id: 'selec
 async function fetch(url, options) {
   calls.push([url, options]);
   if (changeConfiguration) state.configuration = {profile_revision: 2};
-  return {ok: true, json: async () => payload};
+  return {ok: true, json: async () => url === '/v1/execution-sessions' ? [] : payload};
 }
 """ + helpers + """
 (async () => {
   await restoreSavedMission();
   assert.equal(entry.hidden, false);
   assert.equal(state.acceptedMission.mission, payload.mission);
-  assert.deepEqual(calls, [['/v1/accepted-mission/current', undefined]]);
+  assert.deepEqual(calls, [['/v1/accepted-mission/current', undefined],
+    ['/v1/execution-sessions', undefined]]);
   payload = {...payload, selection_id: 'wrong'};
   await restoreSavedMission();
   assert.equal(entry.hidden, true);
@@ -166,21 +170,22 @@ async function fetch() { return response; }
 
 
 def test_reopening_saved_mission_does_not_post_acceptance():
-    listener = _javascript_between('ui.openSavedMission.addEventListener("click", () => {', 'ui.closeMission.addEventListener(')
+    listener = _javascript_between('ui.openSavedMission.addEventListener("click", () => {', 'document.querySelector("#session-choice").addEventListener(')
     _run_javascript("""
 const assert = require('node:assert/strict');
 let openSavedMission;
 let shown = 0;
 const saved = {source: 'persisted', mission: {target: 'M31'}};
-const state = {acceptedMission: saved};
+const state = {acceptedMission: saved, savedMissions: [saved]};
 const ui = {openSavedMission: {addEventListener(event, callback) { openSavedMission = callback; }},
-  mission: {showModal() { shown++; }}};
+  savedMissionChoice: {value: ''}, mission: {showModal() { shown++; }}};
 function renderMission(mission) { assert.equal(mission, saved.mission); }
 function fetch() { throw new Error('reopening must not make a request'); }
 """ + listener + """
 openSavedMission();
 assert.equal(shown, 1);
 state.acceptedMission = null;
+state.savedMissions = [];
 openSavedMission();
 assert.equal(shown, 1);
 """)

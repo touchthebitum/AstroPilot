@@ -15,6 +15,7 @@ const ui = Object.freeze({
   availabilityForm: document.querySelector("#availability-form"),
   savedMissionEntry: document.querySelector("#saved-mission-entry"),
   savedMissionTarget: document.querySelector("#saved-mission-target"),
+  savedMissionChoice: document.querySelector("#saved-mission-choice"),
   openSavedMission: document.querySelector("#open-saved-mission"),
   availabilityError: document.querySelector("#availability-error"),
   availabilitySiteTimezone: document.querySelector("#availability-site-timezone"),
@@ -52,6 +53,7 @@ const state = {
   availability: null,
   currentDecision: null,
   acceptedMission: null,
+  savedMissions: [],
   pendingAcceptanceAttempt: null,
   pendingAcceptanceStorageInvalid: false,
   acceptingRecommendation: false,
@@ -62,7 +64,245 @@ const state = {
   recoveringConfiguration: false,
   progressEditor: null,
   progressEditorBaseline: null,
+  sessions: [],
+  activeSessionId: null,
+  sessionEvidenceInputExecutionId: null,
+  sessionBusy: false,
+  sessionWriteAttempted: false,
+  sessionWriteUncertain: false,
 };
+
+const SESSION_PENDING_KEY = "astropilot.pendingSession";
+
+function sessionMessage(message) {
+  text("#session-status", message);
+}
+
+function sessionHours(seconds) {
+  if (seconds == null) return "inconnu";
+  const minutes = Math.round(Number(seconds) / 60);
+  return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function currentSession() {
+  return state.sessions.find((item) => item.execution.execution_id === state.activeSessionId) || null;
+}
+
+function usableEvidence(session) {
+  return (session?.evidence || []).find((item) => item.category === "acquisition"
+    && Number(item.usable_integration_duration) > 0);
+}
+
+function sessionStatus(status) {
+  return status === "unconfirmed" ? "Session non confirmée" : status;
+}
+
+function restoreSessionEvidenceInputs(session) {
+  const executionId = session?.execution.execution_id || null;
+  if (executionId === state.sessionEvidenceInputExecutionId) return;
+  state.sessionEvidenceInputExecutionId = executionId;
+  let minutes = 0;
+  const evidence = usableEvidence(session);
+  if (evidence) {
+    minutes = Math.round(Number(evidence.usable_integration_duration) / 60);
+  } else if (executionId) {
+    const saved = JSON.parse(localStorage.getItem(`astropilot.pendingEvidence.${executionId}`) || "null");
+    if (Number.isInteger(saved?.minutes) && saved.minutes > 0) minutes = saved.minutes;
+  }
+  document.querySelector("#session-hours").value = String(Math.floor(minutes / 60));
+  document.querySelector("#session-minutes").value = String(minutes % 60);
+}
+
+function renderSession() {
+  const session = currentSession();
+  restoreSessionEvidenceInputs(session);
+  const status = session?.execution.status;
+  const choice = document.querySelector("#session-choice");
+  choice.replaceChildren();
+  for (const item of state.sessions) {
+    const option = document.createElement("option");
+    option.value = item.execution.execution_id;
+    option.textContent = `${item.execution.actual_start ? new Date(item.execution.actual_start).toLocaleString("fr-CH") : "À démarrer"} · ${sessionStatus(item.execution.status)}`;
+    choice.append(option);
+  }
+  choice.hidden = !state.sessions.length;
+  if (session) choice.value = session.execution.execution_id;
+  const intentId = session?.acquisition_intent_id || state.acceptedMission?.acquisitionIntentId;
+  text("#session-intent", `Intent de la mission : ${intentId || "non défini"}`);
+  document.querySelector("#session-start").hidden = status === "in_progress" || status === "unconfirmed";
+  document.querySelector("#session-start").textContent = status === "not_started"
+    ? "Démarrer cette session" : "Créer et démarrer une nouvelle session";
+  document.querySelector("#session-close-actions").hidden = status !== "in_progress";
+  document.querySelector("#session-evidence").hidden = status !== "completed" || Boolean(usableEvidence(session));
+  const evidence = usableEvidence(session);
+  document.querySelector("#session-credit").hidden = status === "unconfirmed" || !evidence || Boolean(session.credit);
+  if (evidence && !session.credit) {
+    text("#session-credit-preview", `Intent ${session.acquisition_intent_id} · base historique : ${sessionHours(session.historical_baseline_seconds)} · crédit proposé : ${sessionHours(Number(evidence.usable_integration_duration))}`);
+    const mustConfirm = Number(session.historical_baseline_seconds) > 0 && !session.historical_baseline_confirmed;
+    document.querySelector("#session-baseline-confirm-wrap").hidden = !mustConfirm;
+    document.querySelector("#session-baseline-confirm").checked = false;
+  }
+  document.querySelector("#session-progress").hidden = !session;
+  if (session) {
+    text("#session-before-label", session.credit ? "Acquis avant ce crédit" : "Acquis actuel (avant crédit)");
+    text("#session-after-label", session.credit ? "Acquis après ce crédit" : "Acquis projeté sans crédit");
+    text("#session-before", sessionHours(session.acquired_before_seconds));
+    text("#session-added", sessionHours(session.session_credit_seconds));
+    text("#session-after", sessionHours(session.acquired_after_seconds));
+    text("#session-current", sessionHours(session.current_acquired_seconds));
+    text("#session-remaining", session.target_hours == null ? "objectif non défini" : sessionHours(session.remaining_hours * 3600));
+    sessionMessage(status === "unconfirmed" ? "Session non confirmée : aucune action disponible."
+      : status === "interrupted" ? "Session interrompue : aucun crédit."
+      : session.credit ? "Crédit enregistré." : status === "completed" ? "Session terminée."
+      : status === "in_progress" ? "Session en cours." : "Session prête à démarrer.");
+  } else sessionMessage("Aucune session enregistrée pour cette mission.");
+}
+
+async function reloadSessions({ selectId = null } = {}) {
+  const missionId = state.acceptedMission?.mission_id;
+  if (!missionId) return;
+  const response = await fetch(`/v1/missions/${encodeURIComponent(missionId)}/executions`);
+  if (!response.ok) throw new Error("session_read_unavailable");
+  const sessions = await response.json();
+  if (state.acceptedMission?.mission_id !== missionId) return;
+  state.sessions = sessions;
+  const pending = JSON.parse(localStorage.getItem(SESSION_PENDING_KEY) || "null");
+  const candidate = selectId || (pending?.mission_id === missionId ? pending.execution_id : null);
+  state.activeSessionId = sessions.some((item) => item.execution.execution_id === candidate)
+    ? candidate : sessions.some((item) => item.execution.execution_id === state.activeSessionId)
+      ? state.activeSessionId : sessions[0]?.execution.execution_id || null;
+  if (pending?.mission_id === missionId && sessions.some((item) => item.execution.execution_id === pending.execution_id)) {
+    localStorage.removeItem(SESSION_PENDING_KEY);
+  }
+  renderSession();
+}
+
+async function sessionCommand(command) {
+  if (state.sessionBusy || !state.acceptedMission?.mission_id) return;
+  const baselineConfirmed = document.querySelector("#session-baseline-confirm").checked;
+  state.sessionBusy = true;
+  state.sessionWriteAttempted = false;
+  state.sessionWriteUncertain = false;
+  document.querySelectorAll(".session-panel button").forEach((button) => { button.disabled = true; });
+  const missionId = state.acceptedMission.mission_id;
+  try {
+    await reloadSessions();
+    await command(missionId, baselineConfirmed);
+    await reloadSessions();
+  } catch (error) {
+    try {
+      await reloadSessions();
+      sessionMessage(state.sessionWriteUncertain
+        ? "État relu après une réponse incertaine. Vérifiez la session avant de poursuivre."
+        : state.sessionWriteAttempted && error?.status ? sessionRefusalMessage(error)
+        : "Lecture ou reprise échouée. État actuel relu ; vérifiez avant de poursuivre.");
+    } catch (_readError) {
+      sessionMessage(state.sessionWriteAttempted && error?.status
+        ? `${sessionRefusalMessage(error)} Lecture impossible ; rechargez la page.`
+        : "Lecture impossible. Rechargez la page avant une nouvelle action.");
+    }
+  } finally {
+    state.sessionBusy = false;
+    state.sessionWriteAttempted = false;
+    state.sessionWriteUncertain = false;
+    document.querySelectorAll(".session-panel button").forEach((button) => { button.disabled = false; });
+  }
+}
+
+async function postSession(url, body) {
+  const payload = JSON.stringify(body);
+  state.sessionWriteAttempted = true;
+  state.sessionWriteUncertain = true;
+  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload });
+  state.sessionWriteUncertain = false;
+  if (!response.ok) throw await sessionHttpError(response);
+  return response.json();
+}
+
+async function sessionHttpError(response) {
+  const error = new Error("session_command_refused");
+  error.status = response.status;
+  try { error.code = (await response.json()).detail?.code; } catch (_ignored) { /* status remains authoritative */ }
+  return error;
+}
+
+function sessionRefusalMessage(error) {
+  if (error.status === 409) return "Action refusée : la session ou le profil a changé. État actuel relu ; vérifiez avant de poursuivre.";
+  if (error.status === 422) return "Action refusée : transition ou données invalides. Corrigez la saisie avant de poursuivre.";
+  if (error.status === 503) return "Action impossible : données enregistrées incohérentes ou service indisponible. Rechargez la page.";
+  return `Action refusée par le serveur (${error.status}). État actuel relu.`;
+}
+
+async function startSession(missionId) {
+  let session = currentSession();
+  if (session?.execution.status !== "not_started") {
+    const pending = JSON.parse(localStorage.getItem(SESSION_PENDING_KEY) || "null");
+    const executionId = pending?.mission_id === missionId ? pending.execution_id : crypto.randomUUID();
+    localStorage.setItem(SESSION_PENDING_KEY, JSON.stringify({ mission_id: missionId, execution_id: executionId }));
+    const lookup = await fetch(`/v1/executions/${encodeURIComponent(executionId)}/session`);
+    if (lookup.status === 404) await postSession("/v1/executions", { execution_id: executionId, mission_id: missionId });
+    else if (!lookup.ok) throw await sessionHttpError(lookup);
+    await reloadSessions({ selectId: executionId });
+    session = currentSession();
+  }
+  if (session?.execution.status === "not_started") {
+    await postSession("/v1/execution-transitions", {
+      execution_id: session.execution.execution_id, mission_id: missionId,
+      status: "in_progress", actual_start: new Date().toISOString(), actual_end: null, actual_duration: null,
+    });
+  }
+}
+
+async function closeSession(missionId, status) {
+  const session = currentSession();
+  if (session?.execution.status !== "in_progress") return;
+  const end = new Date();
+  const start = new Date(session.execution.actual_start);
+  await postSession("/v1/execution-transitions", {
+    execution_id: session.execution.execution_id, mission_id: missionId, status,
+    actual_start: session.execution.actual_start, actual_end: end.toISOString(),
+    actual_duration: Math.max(0, (end.getTime() - start.getTime()) / 1000),
+  });
+}
+
+async function recordSessionEvidence() {
+  const session = currentSession();
+  if (session?.execution.status !== "completed" || usableEvidence(session)) return;
+  const hours = Number(document.querySelector("#session-hours").value);
+  const minutes = Number(document.querySelector("#session-minutes").value);
+  if (!Number.isInteger(hours) || hours < 0 || !Number.isInteger(minutes) || minutes < 0 || minutes > 59 || hours * 60 + minutes <= 0) {
+    sessionMessage("Saisissez une durée utilisable positive en heures et minutes.");
+    return;
+  }
+  const key = `astropilot.pendingEvidence.${session.execution.execution_id}`;
+  const saved = JSON.parse(localStorage.getItem(key) || "null");
+  const evidenceId = saved?.evidence_id || crypto.randomUUID();
+  localStorage.setItem(key, JSON.stringify({ evidence_id: evidenceId, minutes: hours * 60 + minutes }));
+  const lookup = await fetch(`/v1/executions/${encodeURIComponent(session.execution.execution_id)}/session`);
+  if (!lookup.ok) throw await sessionHttpError(lookup);
+  const canonical = await lookup.json();
+  if (canonical.evidence.some((item) => item.evidence_id === evidenceId || Number(item.usable_integration_duration) > 0)) return;
+  await postSession("/v1/outcome-evidence", {
+    evidence_id: evidenceId, execution_id: session.execution.execution_id,
+    category: "acquisition", observed_at: new Date().toISOString(), source: "user",
+    usable_integration_duration: (hours * 60 + minutes) * 60,
+  });
+}
+
+async function creditSession(_missionId, confirmed) {
+  const session = currentSession();
+  const evidence = usableEvidence(session);
+  if (!evidence || session.credit) return;
+  const mustConfirm = Number(session.historical_baseline_seconds) > 0 && !session.historical_baseline_confirmed;
+  if (mustConfirm && !confirmed) {
+    sessionMessage("Confirmez la valeur historique affichée avant de créditer.");
+    return;
+  }
+  await postSession(`/v1/executions/${encodeURIComponent(session.execution.execution_id)}/intent-progress-credit`, {
+    expected_revision: session.profile_revision, evidence_ids: [evidence.evidence_id],
+    confirm_historical_baseline: mustConfirm && confirmed,
+  });
+}
 
 const PENDING_ACCEPTANCE_STORAGE_KEY = "astropilot.pendingAcceptance";
 const PENDING_ACCEPTANCE_STORAGE_VERSION = 2;
@@ -302,6 +542,8 @@ function renderMission(mission) {
     item.textContent = "Plan opérationnel non disponible.";
     tasks.append(item);
   }
+
+  reloadSessions().catch(() => sessionMessage("Sessions momentanément indisponibles. Rechargez avant une action."));
 
 }
 
@@ -1284,28 +1526,65 @@ function initializeConfiguration(payload) {
 async function restoreSavedMission() {
   const configuration = state.configuration;
   state.acceptedMission = null;
+  state.savedMissions = [];
   ui.savedMissionEntry.hidden = true;
+  let current = null;
   try {
     const response = await fetch("/v1/accepted-mission/current");
-    if (!response.ok) return;
+    if (!response.ok) throw new Error("mission_read_unavailable");
     const payload = await response.json();
     const mission = payload?.mission;
-    if (state.configuration !== configuration || payload?.status !== "accepted" || !mission
-        || payload.mission_id !== mission.mission_id
-        || payload.selection_id !== mission.selection_id
-        || payload.decision_id !== mission.decision_id) return;
-    state.acceptedMission = {
-      decision_id: payload.decision_id,
-      selection_id: payload.selection_id,
-      mission_id: payload.mission_id,
-      selectedCatalogKey: payload.catalog_key,
-      source: "persisted",
-      mission,
-    };
-    ui.savedMissionTarget.textContent = mission.target;
-    ui.savedMissionEntry.hidden = false;
+    if (state.configuration === configuration && payload?.status === "accepted" && mission
+        && payload.mission_id === mission.mission_id
+        && payload.selection_id === mission.selection_id
+        && payload.decision_id === mission.decision_id) {
+      current = {
+        decision_id: payload.decision_id,
+        selection_id: payload.selection_id,
+        mission_id: payload.mission_id,
+        selectedCatalogKey: payload.catalog_key,
+        acquisitionIntentId: payload.selected_acquisition_intent_id,
+        source: "persisted",
+        mission,
+      };
+    }
   } catch (_error) {
     // Availability remains usable if the persisted lineage is unavailable.
+  }
+  try {
+    const response = await fetch("/v1/execution-sessions");
+    if (response.ok && state.configuration === configuration) {
+      const sessions = await response.json();
+      const seen = new Set();
+      for (const item of sessions) {
+        if (seen.has(item.mission_id)) continue;
+        seen.add(item.mission_id);
+        state.savedMissions.push({
+          decision_id: item.mission.decision_id, selection_id: item.mission.selection_id,
+          mission_id: item.mission_id, selectedCatalogKey: item.project_id,
+          acquisitionIntentId: item.acquisition_intent_id, source: "persisted",
+          mission: item.mission,
+        });
+      }
+    }
+  } catch (_error) {
+    // The current mission can still be opened if session discovery is unavailable.
+  }
+  if (current && !state.savedMissions.some((item) => item.mission_id === current.mission_id)) {
+    state.savedMissions.unshift(current);
+  }
+  state.acceptedMission = current || state.savedMissions[0] || null;
+  ui.savedMissionChoice.replaceChildren();
+  for (const item of state.savedMissions) {
+    const option = document.createElement("option");
+    option.value = item.mission_id;
+    option.textContent = `${item.mission.target} · ${new Date(item.mission.window_start).toLocaleString("fr-CH")}`;
+    ui.savedMissionChoice.append(option);
+  }
+  if (state.acceptedMission) {
+    ui.savedMissionChoice.value = state.acceptedMission.mission_id;
+    ui.savedMissionTarget.textContent = state.acceptedMission.mission.target;
+    ui.savedMissionEntry.hidden = false;
   }
 }
 
@@ -2082,10 +2361,21 @@ ui.openMission.addEventListener("click", () => acceptRecommendation({
   selectedTarget: state.currentDecision?.target,
 }));
 ui.openSavedMission.addEventListener("click", () => {
+  const selected = state.savedMissions.find((item) => item.mission_id === ui.savedMissionChoice.value);
+  if (selected) state.acceptedMission = selected;
   if (!state.acceptedMission?.mission || state.acceptedMission.source !== "persisted") return;
   renderMission(state.acceptedMission.mission);
   ui.mission.showModal();
 });
+document.querySelector("#session-choice").addEventListener("change", (event) => {
+  state.activeSessionId = event.target.value;
+  renderSession();
+});
+document.querySelector("#session-start").addEventListener("click", () => sessionCommand(startSession));
+document.querySelector("#session-complete").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "completed")));
+document.querySelector("#session-interrupt").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "interrupted")));
+document.querySelector("#session-record-evidence").addEventListener("click", () => sessionCommand(recordSessionEvidence));
+document.querySelector("#session-apply-credit").addEventListener("click", () => sessionCommand(creditSession));
 ui.closeMission.addEventListener("click", () => ui.mission.close());
 ui.missionBack.addEventListener("click", () => ui.mission.close());
 ui.mission.addEventListener("click", (event) => {

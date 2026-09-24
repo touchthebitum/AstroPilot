@@ -202,7 +202,16 @@ def apply_execution_credit(*, profile, execution_id, evidence_ids, expected_revi
             profile.setdefault("intent_progress_baselines", {}).setdefault(project_id, {})[mission.acquisition_intent_id] = {
                 "confirmed_at": datetime.now(timezone.utc).isoformat(), "base_progress": dict(base),
             }
-    entry = {**content, "applied_at": datetime.now(timezone.utc).isoformat()}
+    applied_at = datetime.now(timezone.utc)
+    # Preserve append chronology even when the clock stalls or moves backwards.
+    # Existing ledger entries remain immutable, including their applied_at on replay.
+    previous_times = (datetime.fromisoformat(item["applied_at"]) for item in ledger.values()
+                      if (item["project_id"], item["acquisition_intent_id"]) ==
+                      (project_id, mission.acquisition_intent_id))
+    latest = max(previous_times, default=None)
+    if latest is not None and applied_at <= latest:
+        applied_at = latest + timedelta(microseconds=1)
+    entry = {**content, "applied_at": applied_at.isoformat()}
     profile.setdefault("intent_progress_credits", {})[execution_id] = entry
     saved = save_profile(profile, expected_revision=expected_revision)
     return "applied", entry, saved["profile_revision"]
