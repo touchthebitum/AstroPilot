@@ -12,6 +12,7 @@ from decision.models.session_availability import (
     SessionAvailabilityMode,
 )
 from decision.services.session_availability_windowing import (
+    evaluate_continuous_actionable_productive_window,
     select_continuous_actionable_productive_window,
 )
 
@@ -83,6 +84,8 @@ def test_project_need_below_minimum_is_not_artificially_extended():
 
     assert select_continuous_actionable_productive_window(source, None) is None
     assert _mission_timing_for_availability(source, None) is None
+    refusal = evaluate_continuous_actionable_productive_window(source, None).refusal
+    assert refusal.best_productive_window_minutes == 45
 
 
 def test_availability_and_project_cap_apply_the_strictest_duration():

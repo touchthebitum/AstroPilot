@@ -219,6 +219,20 @@ def test_tonight_ui_assets_are_served():
     assert "Date.now(" not in script.text
     assert "Récupérées il y a" in script.text
     assert "no_productive_window" in script.text
+    assert "actionabilityRefusalMessage(payload.actionability_refusal)" in script.text
+    assert "Meilleure fenêtre trouvée : ${foundMinutes} min" in script.text
+    assert "Seuil requis : ${requiredMinutes} min" in script.text
+    assert "La cause précise n’est pas établie" in script.text
+    assert "insufficient_actionable_productive_window" in script.text
+    assert "productive_window_evidence_missing" in script.text
+    refusal_renderer = script.text.split(
+        "function actionabilityRefusalMessage(refusal)",
+        1,
+    )[1].split("function showMessage", 1)[0]
+    assert "cloud_loss" not in refusal_renderer
+    assert "moon_loss" not in refusal_renderer
+    assert "altitude_loss" not in refusal_renderer
+    assert "limiting_factors" not in refusal_renderer
     assert 'detail?.code === "decision_invalid"' in script.text
     assert 'detail?.code === "location_timezone_unresolved"' in script.text
     assert 'payload?.error === "user_profile_unavailable"' in script.text

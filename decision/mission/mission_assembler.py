@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from decision.mission.night_mission import NightMission, MissionReason
 from decision.risk.risk_engine import RiskEngine
@@ -18,6 +21,11 @@ from decision.engines.image_quality_engine import ImageQualityEngine
 from decision.quality.astro_quality_context import AstroQualityContext
 from decision.quality.astro_quality_engine import AstroQualityEngine
 from decision.quality.dew_risk_engine import DewRiskEngine
+
+if TYPE_CHECKING:
+    from decision.services.session_availability_windowing import (
+        ActionabilityRefusal,
+    )
 
 
 def _average(values, fallback):
@@ -184,20 +192,35 @@ class ProductiveWindowAssessment:
         )
 
 
+@dataclass(frozen=True)
+class MissionAssemblyResult:
+    mission: NightMission | None
+    actionability_refusal: ActionabilityRefusal | None = None
+
+
 def _mission_timing_for_availability(
     assessment: ProductiveWindowAssessment,
     availability: SessionAvailability | None,
 ):
+    timing, _ = _mission_timing_assessment(assessment, availability)
+    return timing
+
+
+def _mission_timing_assessment(
+    assessment: ProductiveWindowAssessment,
+    availability: SessionAvailability | None,
+):
     from decision.services.session_availability_windowing import (
-        select_continuous_actionable_productive_window,
+        evaluate_continuous_actionable_productive_window,
     )
 
-    constrained = select_continuous_actionable_productive_window(
+    selection = evaluate_continuous_actionable_productive_window(
         assessment,
         availability,
     )
+    constrained = selection.window
     if constrained is None:
-        return None
+        return None, selection.refusal
 
     capacity_hours = (
         constrained.window_end.astimezone(timezone.utc)
@@ -213,10 +236,13 @@ def _mission_timing_for_availability(
             2,
         )
     return (
-        constrained.window_start,
-        constrained.window_end,
-        round(capacity_hours, 2),
-        expected_gain,
+        (
+            constrained.window_start,
+            constrained.window_end,
+            round(capacity_hours, 2),
+            expected_gain,
+        ),
+        None,
     )
 
 
@@ -231,6 +257,7 @@ class MissionAssembler:
         alternatives,
         weather=None,
         mission_input: MissionInput | None = None,
+        _include_actionability_diagnostic: bool = False,
     ):
 
         reasons = []
@@ -299,11 +326,16 @@ class MissionAssembler:
             weather=weather,
             mission_input=mission_input,
         )
-        mission_timing = _mission_timing_for_availability(
+        mission_timing, actionability_refusal = _mission_timing_assessment(
             assessment,
             mission_input.availability if mission_input is not None else None,
         )
         if mission_timing is None:
+            if _include_actionability_diagnostic:
+                return MissionAssemblyResult(
+                    mission=None,
+                    actionability_refusal=actionability_refusal,
+                )
             return None
         (
             mission_window_start,
@@ -402,7 +434,7 @@ class MissionAssembler:
             ),
         )
 
-        return NightMission(
+        mission = NightMission(
             target=target,
             confidence=summary.confidence,
             site_name=context.site.name,
@@ -450,3 +482,6 @@ class MissionAssembler:
             astro_quality=astro_quality,
             dew_risk=dew_risk,
         )
+        if _include_actionability_diagnostic:
+            return MissionAssemblyResult(mission=mission)
+        return mission

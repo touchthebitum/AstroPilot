@@ -18,7 +18,9 @@ from decision.services.candidate_assessment import (
     select_actionable_alternatives,
 )
 from decision.services.session_availability_windowing import (
+    ActionabilityRefusalStatus,
     MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW,
+    evaluate_continuous_actionable_productive_window,
     select_continuous_actionable_productive_window,
 )
 from decision.weather.weather_trust_decision import (
@@ -123,6 +125,28 @@ def test_continuous_minimum_is_inclusive_at_exactly_sixty_minutes(
     assert CandidateViabilityEvaluator.is_viable(candidate(source)) is expected_actionable
 
 
+def test_fifty_nine_minutes_fifty_nine_seconds_preserves_exact_refusal_duration():
+    source = assessment([0.8], slice_duration=timedelta(seconds=3599))
+
+    selection = evaluate_continuous_actionable_productive_window(source, None)
+
+    assert selection.window is None
+    assert selection.refusal.status is ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL
+    assert selection.refusal.cause_code == "insufficient_actionable_productive_window"
+    assert selection.refusal.best_productive_window_minutes == pytest.approx(3599 / 60)
+    assert selection.refusal.required_continuous_minutes == 60
+    assert selection.refusal.limiting_factors == ()
+
+
+def test_exactly_sixty_minutes_has_no_actionability_refusal():
+    source = assessment([0.8], slice_duration=timedelta(minutes=60))
+
+    selection = evaluate_continuous_actionable_productive_window(source, None)
+
+    assert selection.window is not None
+    assert selection.refusal is None
+
+
 def test_separated_productive_windows_are_never_summed_to_reach_minimum():
     source = assessment([1.0, 1.0, 0.2, 1.0, 1.0])
 
@@ -132,6 +156,69 @@ def test_separated_productive_windows_are_never_summed_to_reach_minimum():
         for window in source.productivity.windows
     ] == [0.5, 0.5]
     assert select_continuous_actionable_productive_window(source, None) is None
+    refusal = evaluate_continuous_actionable_productive_window(source, None).refusal
+    assert refusal.best_productive_window_minutes == 30
+
+
+@pytest.mark.parametrize(
+    "availability",
+    (
+        SessionAvailability(
+            SessionAvailabilityMode.FIXED_WINDOW,
+            start=START,
+            end=START + timedelta(minutes=45),
+        ),
+        SessionAvailability(
+            SessionAvailabilityMode.UNTIL,
+            end=START + timedelta(minutes=45),
+        ),
+        SessionAvailability(
+            SessionAvailabilityMode.START_AND_DURATION,
+            start=START + timedelta(minutes=15),
+            duration=timedelta(minutes=45),
+        ),
+        SessionAvailability(
+            SessionAvailabilityMode.DURATION,
+            duration=timedelta(minutes=45),
+        ),
+    ),
+)
+def test_refusal_duration_is_computed_after_every_availability_intersection(
+    availability,
+):
+    source = assessment([0.8] * 8)
+
+    refusal = evaluate_continuous_actionable_productive_window(
+        source,
+        availability,
+    ).refusal
+
+    assert refusal.best_productive_window_minutes == 45
+
+
+def test_no_productive_slice_is_known_zero_minutes():
+    source = assessment([0.2] * 4)
+
+    refusal = evaluate_continuous_actionable_productive_window(source, None).refusal
+
+    assert refusal.status is ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL
+    assert refusal.best_productive_window_minutes == 0
+
+
+def test_missing_temporal_evidence_is_not_reclassified_as_a_constraint():
+    source = ProductiveWindowAssessment(
+        window_start=None,
+        window_end=None,
+        recommended_hours=0,
+        expected_gain=0,
+        productivity=SimpleNamespace(windows=None),
+    )
+
+    refusal = evaluate_continuous_actionable_productive_window(source, None).refusal
+
+    assert refusal.status is ActionabilityRefusalStatus.INSUFFICIENT_EVIDENCE
+    assert refusal.cause_code == "productive_window_evidence_missing"
+    assert refusal.best_productive_window_minutes is None
 
 
 def test_fixed_availability_applies_minimum_after_intersection():

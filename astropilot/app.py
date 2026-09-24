@@ -1057,6 +1057,17 @@ class RecommendationComparisonResponseModel(BaseModel):
     shared_reasons: tuple[RecommendationReasonResponseModel, ...] = ()
 
 
+class ActionabilityRefusalModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    conclusion: Literal["no_productive_window"]
+    status: Literal["constraints_refusal", "insufficient_evidence"]
+    cause_code: str | None = None
+    best_productive_window_minutes: float | None = Field(default=None, ge=0)
+    required_continuous_minutes: float = Field(ge=0)
+    limiting_factors: list[dict[str, str]] = Field(default_factory=list)
+
+
 class TonightResponseModel(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -1244,6 +1255,7 @@ class TonightResponseModel(BaseModel):
         AcquisitionIntentSelectionStatus | None
     ) = None
     target_decision_status: TargetDecisionStatus | None = None
+    actionability_refusal: ActionabilityRefusalModel | None = None
     shortlist_entries: list[TonightShortlistEntryModel] = Field(
         default_factory=list
     )

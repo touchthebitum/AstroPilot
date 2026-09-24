@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from math import isfinite
 
 from decision.mission.mission_assembler import ProductiveWindowAssessment
@@ -7,9 +8,78 @@ from decision.models.session_availability import (
     SessionAvailability,
     SessionAvailabilityMode,
 )
+from decision.models.acquisition_intent_eligibility import (
+    AcquisitionIntentEligibilityReason,
+    AcquisitionIntentEvidenceGap,
+)
 
 
 MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW = timedelta(hours=1)
+
+
+class ActionabilityRefusalConclusion(str, Enum):
+    NO_PRODUCTIVE_WINDOW = "no_productive_window"
+
+
+class ActionabilityRefusalStatus(str, Enum):
+    CONSTRAINTS_REFUSAL = "constraints_refusal"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+
+@dataclass(frozen=True, slots=True)
+class ActionabilityRefusal:
+    conclusion: ActionabilityRefusalConclusion
+    status: ActionabilityRefusalStatus
+    cause_code: str | None
+    best_productive_window_minutes: float | None
+    required_continuous_minutes: int
+    limiting_factors: tuple[dict[str, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.conclusion, ActionabilityRefusalConclusion):
+            raise TypeError("Expected ActionabilityRefusalConclusion")
+        if not isinstance(self.status, ActionabilityRefusalStatus):
+            raise TypeError("Expected ActionabilityRefusalStatus")
+        if self.cause_code is not None and not isinstance(self.cause_code, str):
+            raise TypeError("actionability_refusal_cause_code_must_be_string")
+        if (
+            self.best_productive_window_minutes is not None
+            and (
+                not isinstance(self.best_productive_window_minutes, (int, float))
+                or isinstance(self.best_productive_window_minutes, bool)
+                or not isfinite(self.best_productive_window_minutes)
+                or self.best_productive_window_minutes < 0
+            )
+        ):
+            raise ValueError("best_productive_window_minutes_invalid")
+        if (
+            not isinstance(self.required_continuous_minutes, int)
+            or isinstance(self.required_continuous_minutes, bool)
+            or self.required_continuous_minutes <= 0
+        ):
+            raise ValueError("required_continuous_minutes_invalid")
+        if not isinstance(self.limiting_factors, tuple):
+            raise TypeError("limiting_factors_must_be_tuple")
+        if (
+            self.status is ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL
+            and self.best_productive_window_minutes is None
+        ):
+            raise ValueError("constraint_refusal_requires_known_duration")
+        if (
+            self.status is ActionabilityRefusalStatus.INSUFFICIENT_EVIDENCE
+            and self.best_productive_window_minutes is not None
+        ):
+            raise ValueError("insufficient_evidence_requires_unknown_duration")
+
+
+@dataclass(frozen=True, slots=True)
+class ActionableProductiveWindowSelection:
+    window: "SessionAvailabilityWindow | None"
+    refusal: ActionabilityRefusal | None
+
+    def __post_init__(self) -> None:
+        if (self.window is None) == (self.refusal is None):
+            raise ValueError("actionability_selection_requires_one_outcome")
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +105,49 @@ def select_continuous_actionable_productive_window(
     availability: SessionAvailability | None,
 ) -> SessionAvailabilityWindow | None:
     """Select one real productive interval meeting the V1 session minimum."""
+    return evaluate_continuous_actionable_productive_window(
+        assessment,
+        availability,
+    ).window
+
+
+def _required_continuous_minutes() -> int:
+    return int(MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW.total_seconds() / 60)
+
+
+def _refusal(
+    *,
+    status: ActionabilityRefusalStatus,
+    cause_code: str | None,
+    best_minutes: float | None,
+) -> ActionableProductiveWindowSelection:
+    return ActionableProductiveWindowSelection(
+        window=None,
+        refusal=ActionabilityRefusal(
+            conclusion=ActionabilityRefusalConclusion.NO_PRODUCTIVE_WINDOW,
+            status=status,
+            cause_code=cause_code,
+            best_productive_window_minutes=best_minutes,
+            required_continuous_minutes=_required_continuous_minutes(),
+        ),
+    )
+
+
+def _missing_evidence_refusal() -> ActionableProductiveWindowSelection:
+    return _refusal(
+        status=ActionabilityRefusalStatus.INSUFFICIENT_EVIDENCE,
+        cause_code=(
+            AcquisitionIntentEvidenceGap.PRODUCTIVE_WINDOW_EVIDENCE_MISSING.value
+        ),
+        best_minutes=None,
+    )
+
+
+def evaluate_continuous_actionable_productive_window(
+    assessment: ProductiveWindowAssessment,
+    availability: SessionAvailability | None,
+) -> ActionableProductiveWindowSelection:
+    """Select a window and preserve the authoritative refusal diagnostic."""
     if not isinstance(assessment, ProductiveWindowAssessment):
         raise TypeError("Expected ProductiveWindowAssessment")
     if availability is not None and not isinstance(
@@ -46,7 +159,7 @@ def select_continuous_actionable_productive_window(
     analysis_start = assessment.window_start
     analysis_end = assessment.window_end
     if analysis_start is None and analysis_end is None:
-        return None
+        return _missing_evidence_refusal()
     if (
         not isinstance(analysis_start, datetime)
         or not isinstance(analysis_end, datetime)
@@ -57,7 +170,7 @@ def select_continuous_actionable_productive_window(
         or analysis_end.astimezone(timezone.utc)
         <= analysis_start.astimezone(timezone.utc)
     ):
-        raise ValueError("productive_window_bounds_required")
+        return _missing_evidence_refusal()
 
     lower_bound = None
     upper_bound = None
@@ -90,18 +203,13 @@ def select_continuous_actionable_productive_window(
             raise ValueError("session_availability_mode_inactive")
 
     duration_cap = min(duration_caps) if duration_caps else None
-    if (
-        duration_cap is not None
-        and duration_cap < MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW
-    ):
-        return None
-
     productive_windows = getattr(assessment.productivity, "windows", None)
     if productive_windows is None:
-        raise ValueError("productive_window_temporal_evidence_required")
+        return _missing_evidence_refusal()
 
     analysis_hours = _elapsed_hours(analysis_start, analysis_end)
     candidates = []
+    best_rejected_duration = timedelta(0)
     for window in productive_windows:
         values = (
             getattr(window, "start_hour", None),
@@ -114,7 +222,7 @@ def select_continuous_actionable_productive_window(
             or not isfinite(value)
             for value in values
         ):
-            raise ValueError("productive_window_temporal_evidence_required")
+            return _missing_evidence_refusal()
         start_hour, end_hour, productivity = values
         if (
             start_hour < 0
@@ -122,7 +230,7 @@ def select_continuous_actionable_productive_window(
             or end_hour > analysis_hours + 1e-9
             or not getattr(window, "productive", False)
         ):
-            raise ValueError("productive_window_temporal_evidence_required")
+            return _missing_evidence_refusal()
 
         start = _at_elapsed_hour(analysis_start, start_hour)
         end = _at_elapsed_hour(analysis_start, end_hour)
@@ -141,11 +249,13 @@ def select_continuous_actionable_productive_window(
         available_duration = (
             end.astimezone(timezone.utc) - start.astimezone(timezone.utc)
         )
-        duration = (
+        duration = max(
+            timedelta(0),
             min(available_duration, duration_cap)
             if duration_cap is not None
-            else available_duration
+            else available_duration,
         )
+        best_rejected_duration = max(best_rejected_duration, duration)
         if duration < MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW:
             continue
         candidate_productivity = productivity
@@ -178,7 +288,14 @@ def select_continuous_actionable_productive_window(
         candidates.append((duration, candidate_productivity, start, end))
 
     if not candidates:
-        return None
+        return _refusal(
+            status=ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL,
+            cause_code=(
+                AcquisitionIntentEligibilityReason
+                .INSUFFICIENT_ACTIONABLE_PRODUCTIVE_WINDOW.value
+            ),
+            best_minutes=best_rejected_duration.total_seconds() / 60,
+        )
     if (
         availability is not None
         and availability.mode is SessionAvailabilityMode.DURATION
@@ -198,7 +315,10 @@ def select_continuous_actionable_productive_window(
         if len(best_candidates) != 1:
             raise ValueError("ambiguous_best_duration_window")
         _, _, selected_start, selected_end = best_candidates[0]
-        return SessionAvailabilityWindow(selected_start, selected_end)
+        return ActionableProductiveWindowSelection(
+            window=SessionAvailabilityWindow(selected_start, selected_end),
+            refusal=None,
+        )
     _, _, selected_start, selected_end = max(
         candidates,
         key=lambda candidate: (
@@ -207,7 +327,10 @@ def select_continuous_actionable_productive_window(
             -candidate[2].timestamp(),
         ),
     )
-    return SessionAvailabilityWindow(selected_start, selected_end)
+    return ActionableProductiveWindowSelection(
+        window=SessionAvailabilityWindow(selected_start, selected_end),
+        refusal=None,
+    )
 
 
 def _productivity_between(slices, start_hour: float, end_hour: float) -> float:

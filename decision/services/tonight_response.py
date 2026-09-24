@@ -17,6 +17,10 @@ from decision.models.recommendation_reason import (
     RecommendationReasonScope,
 )
 from decision.services.tonight_application_service import TonightResult
+from decision.services.session_availability_windowing import (
+    ActionabilityRefusal,
+    ActionabilityRefusalStatus,
+)
 from decision.weather.weather_trust_decision import (
     WeatherDecisionAdmissibility,
     WeatherEvidenceQuality,
@@ -386,6 +390,7 @@ class TonightResponse:
         AcquisitionIntentSelectionStatus | None
     ) = None
     target_decision_status: TargetDecisionStatus | None = None
+    actionability_refusal: ActionabilityRefusal | None = None
     shortlist_entries: list[TonightShortlistEntryResponse] = field(
         default_factory=list
     )
@@ -435,6 +440,27 @@ class TonightResponse:
         )
         if refused != (self.status == "weather_refused"):
             raise ValueError("weather_refusal_transport_status_mismatch")
+        if (
+            self.actionability_refusal is not None
+            and self.status != "no_productive_window"
+        ):
+            raise ValueError("actionability_refusal_transport_status_mismatch")
+        if (
+            self.actionability_refusal is not None
+            and self.actionability_refusal.status
+            is ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL
+            and self.target_decision_status
+            is not TargetDecisionStatus.NOT_RECOMMENDED
+        ):
+            raise ValueError("constraint_refusal_target_status_mismatch")
+        if (
+            self.actionability_refusal is not None
+            and self.actionability_refusal.status
+            is ActionabilityRefusalStatus.INSUFFICIENT_EVIDENCE
+            and self.target_decision_status
+            is not TargetDecisionStatus.INSUFFICIENT_EVIDENCE
+        ):
+            raise ValueError("evidence_refusal_target_status_mismatch")
 
     @classmethod
     def from_result(
@@ -460,6 +486,9 @@ class TonightResponse:
         )
         recommendation = None if refused else result.recommendation
         mission = None if refused else result.mission
+        actionability_refusal = (
+            None if refused else result.actionability_refusal
+        )
         candidate = (
             recommendation.opportunity.candidate
             if recommendation is not None
@@ -554,14 +583,21 @@ class TonightResponse:
                 and mission.window_end > mission.window_start
                 and mission.recommended_hours > 0
             )
-            target_decision_status = (
-                TargetDecisionStatus.RECOMMENDED if mission_actionable
-                and not any(
-                    entry.catalog_key == catalog_key
-                    for entry in insufficient_evidence_targets
+            if (
+                actionability_refusal is not None
+                and actionability_refusal.status
+                is ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL
+            ):
+                target_decision_status = TargetDecisionStatus.NOT_RECOMMENDED
+            else:
+                target_decision_status = (
+                    TargetDecisionStatus.RECOMMENDED if mission_actionable
+                    and not any(
+                        entry.catalog_key == catalog_key
+                        for entry in insufficient_evidence_targets
+                    )
+                    else TargetDecisionStatus.INSUFFICIENT_EVIDENCE
                 )
-                else TargetDecisionStatus.INSUFFICIENT_EVIDENCE
-            )
         elif (
             weather_decision is not None
             and weather_decision.evidence_quality
@@ -785,6 +821,7 @@ class TonightResponse:
                 else None
             ),
             target_decision_status=target_decision_status,
+            actionability_refusal=actionability_refusal,
             shortlist_entries=shortlist_entries,
             alternatives=alternatives,
             rejected_targets=list(rejected_targets),

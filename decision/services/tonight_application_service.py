@@ -17,6 +17,7 @@ from decision.models.candidate_rejection import (
 )
 from decision.models.session_availability import SessionAvailability
 from decision.recommendation.recommendation import Recommendation
+from decision.services.session_availability_windowing import ActionabilityRefusal
 from decision.validation.decision_consistency import DecisionConsistencyGate
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 from decision.weather.provider_reliability import WeatherLocation
@@ -121,6 +122,7 @@ class TonightResult:
     forecast_evidence: DecisionForecastEvidence | None = None
     decision_id: str | None = None
     candidate_rejections: tuple[CandidateRejection, ...] = ()
+    actionability_refusal: ActionabilityRefusal | None = None
 
     @property
     def forecast_available(self) -> bool:
@@ -280,12 +282,28 @@ class TonightApplicationService:
                 availability=inputs.availability,
             )
 
-        mission = self.tonight_mission_service.create(
-            winner=night,
-            objects=top_objects,
-            recommended_key=recommended_key,
-            build_mission_input=build_actionability_mission_input,
+        create_with_diagnostic = getattr(
+            self.tonight_mission_service,
+            "create_with_actionability_diagnostic",
+            None,
         )
+        actionability_refusal = None
+        if create_with_diagnostic is not None:
+            assembly = create_with_diagnostic(
+                winner=night,
+                objects=top_objects,
+                recommended_key=recommended_key,
+                build_mission_input=build_actionability_mission_input,
+            )
+            mission = assembly.mission
+            actionability_refusal = assembly.actionability_refusal
+        else:
+            mission = self.tonight_mission_service.create(
+                winner=night,
+                objects=top_objects,
+                recommended_key=recommended_key,
+                build_mission_input=build_actionability_mission_input,
+            )
         if mission is None:
             return TonightResult(
                 night,
@@ -293,11 +311,13 @@ class TonightApplicationService:
                 None,
                 status=(
                     TonightStatus.NO_PRODUCTIVE_WINDOW
-                    if inputs.availability is not None
+                    if actionability_refusal is not None
+                    or inputs.availability is not None
                     else TonightStatus.NO_MISSION
                 ),
                 forecast_evidence=forecast_evidence,
                 candidate_rejections=candidate_rejections,
+                actionability_refusal=actionability_refusal,
             )
 
         DecisionConsistencyGate.validate_mission(mission)

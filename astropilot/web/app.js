@@ -1895,6 +1895,38 @@ const partialMessages = Object.freeze({
   no_productive_window: ["Aucun créneau suffisamment productif", "Une nuit astronomique existe, mais aucune fenêtre n’atteint le seuil opérationnel requis par AstroPilot."],
 });
 
+const actionabilityCauseLabels = Object.freeze({
+  insufficient_actionable_productive_window: "aucune fenêtre productive continue n’atteint le seuil requis",
+  productive_window_evidence_missing: "les preuves temporelles de fenêtre productive sont manquantes ou invalides",
+});
+
+function actionabilityRefusalMessage(refusal) {
+  const title = "Aucun créneau suffisamment productif";
+  if (!refusal || refusal.conclusion !== "no_productive_window") {
+    return [title, partialMessages.no_productive_window[1]];
+  }
+  const cause = actionabilityCauseLabels[refusal.cause_code]
+    || (refusal.cause_code ? `cause moteur : ${refusal.cause_code}` : null);
+  if (
+    refusal.status === "constraints_refusal"
+    && Number.isFinite(refusal.best_productive_window_minutes)
+    && Number.isFinite(refusal.required_continuous_minutes)
+  ) {
+    const foundMinutes = Math.max(0, Math.floor(refusal.best_productive_window_minutes));
+    const requiredMinutes = Math.max(0, Math.ceil(refusal.required_continuous_minutes));
+    const causeText = cause ? ` Cause : ${cause}.` : "";
+    return [
+      title,
+      `Meilleure fenêtre trouvée : ${foundMinutes} min. Seuil requis : ${requiredMinutes} min.${causeText}`,
+    ];
+  }
+  const causeText = cause ? ` Indication du moteur : ${cause}.` : "";
+  return [
+    title,
+    `La cause précise n’est pas établie : les preuves disponibles sont insuffisantes.${causeText}`,
+  ];
+}
+
 function showMessage(title, body, { kicker = "Décision indisponible", retry = true } = {}) {
   text("#message-kicker", kicker);
   text("#message-title", title);
@@ -2225,7 +2257,9 @@ async function loadTonight(availability) {
     }
 
     if (payload.status !== "available") {
-      const [title, body] = partialMessages[payload.status] || ["Décision indisponible", "AstroPilot ne dispose pas encore d’une recommandation exploitable."];
+      const [title, body] = payload.status === "no_productive_window"
+        ? actionabilityRefusalMessage(payload.actionability_refusal)
+        : partialMessages[payload.status] || ["Décision indisponible", "AstroPilot ne dispose pas encore d’une recommandation exploitable."];
       showMessage(title, body, { kicker: "Analyse terminée" });
       return;
     }

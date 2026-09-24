@@ -872,6 +872,42 @@ def make_client(*, result, weather=DEFAULT_WEATHER):
     )
 
 
+def test_tonight_api_serializes_actionability_refusal_without_recalculation():
+    refusal = availability_windowing.ActionabilityRefusal(
+        conclusion=(
+            availability_windowing.ActionabilityRefusalConclusion
+            .NO_PRODUCTIVE_WINDOW
+        ),
+        status=(
+            availability_windowing.ActionabilityRefusalStatus
+            .CONSTRAINTS_REFUSAL
+        ),
+        cause_code="insufficient_actionable_productive_window",
+        best_productive_window_minutes=59.983333333333334,
+        required_continuous_minutes=60,
+    )
+    result = replace(
+        make_result(),
+        mission=None,
+        status=TonightStatus.NO_PRODUCTIVE_WINDOW,
+        actionability_refusal=refusal,
+    )
+
+    response = make_client(result=result).post("/v1/tonight", json={})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["actionability_refusal"] == {
+        "conclusion": "no_productive_window",
+        "status": "constraints_refusal",
+        "cause_code": "insufficient_actionable_productive_window",
+        "best_productive_window_minutes": 59.983333333333334,
+        "required_continuous_minutes": 60,
+        "limiting_factors": [],
+    }
+    assert payload["target_decision_status"] == "not_recommended"
+
+
 def test_weather_unavailable_is_a_service_error_before_evaluation():
     class Service:
         def evaluate(self, **kwargs):
@@ -1361,6 +1397,7 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
         "TonightWeatherDecisionModel",
         "WeatherEvidenceQuality",
         "WeatherDecisionAdmissibility",
+        "ActionabilityRefusalModel",
     }.issubset(schemas)
 
     tonight_response = schemas["TonightResponseModel"]["properties"]
@@ -1385,6 +1422,14 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
     assert tonight_response["weather_decision"]["anyOf"][0]["$ref"].endswith(
         "TonightWeatherDecisionModel"
     )
+    assert tonight_response["actionability_refusal"]["anyOf"][0][
+        "$ref"
+    ].endswith("ActionabilityRefusalModel")
+    refusal = schemas["ActionabilityRefusalModel"]["properties"]
+    assert refusal["best_productive_window_minutes"]["anyOf"][0][
+        "minimum"
+    ] == 0.0
+    assert refusal["required_continuous_minutes"]["minimum"] == 0.0
     weather_decision = schemas["TonightWeatherDecisionModel"]["properties"]
     assert weather_decision["evidence_quality"]["$ref"].endswith(
         "WeatherEvidenceQuality"

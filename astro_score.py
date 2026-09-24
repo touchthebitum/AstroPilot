@@ -2119,6 +2119,9 @@ portfolio_forecast_engine = PortfolioForecastEngine(
 )
 tonight_mission_service = TonightMissionService(
     build_mission=NightMissionBuilder.build,
+    build_mission_with_actionability_diagnostic=(
+        NightMissionBuilder.build_with_actionability_diagnostic
+    ),
 )
 
 forecast_engine = ForecastEngine(

@@ -9,7 +9,10 @@ import decision.mission.mission_assembler as mission_assembler_module
 from astropilot.user_profile import UserProfileError
 from decision.forecast.forecast_run import ForecastRun
 from decision.mission.night_mission import NightMission
-from decision.mission.mission_assembler import ProductiveWindowAssessment
+from decision.mission.mission_assembler import (
+    MissionAssemblyResult,
+    ProductiveWindowAssessment,
+)
 from decision.mission.mission_input import MissionInput
 from decision.night_productivity.night_productivity_result import NightProductivityResult
 from decision.night_productivity.night_window import NightWindow
@@ -23,6 +26,11 @@ from decision.services.tonight_application_service import (
     TonightStatus,
     resolve_tonight_equipment,
     resolve_tonight_inputs,
+)
+from decision.services.session_availability_windowing import (
+    ActionabilityRefusal,
+    ActionabilityRefusalConclusion,
+    ActionabilityRefusalStatus,
 )
 from decision.models.candidate_rejection import (
     CandidateBuildResult,
@@ -104,8 +112,9 @@ class RecordingRecommendationService:
 
 
 class RecordingMissionService:
-    def __init__(self, mission=None):
+    def __init__(self, mission=None, actionability_refusal=None):
         self.mission = mission
+        self.actionability_refusal = actionability_refusal
         self.calls = []
 
     def create(self, winner, objects, recommended_key, build_mission_input):
@@ -118,6 +127,10 @@ class RecordingMissionService:
             }
         )
         return self.mission
+
+    def create_with_actionability_diagnostic(self, **kwargs):
+        mission = self.create(**kwargs)
+        return MissionAssemblyResult(mission, self.actionability_refusal)
 
 
 def make_candidate(catalog_key="M31"):
@@ -185,10 +198,11 @@ def make_service(
     build_candidates,
     recommendation=None,
     mission=None,
+    actionability_refusal=None,
     build_mission_input=lambda evaluation, *, profile: (evaluation, profile),
 ):
     recommendation_service = RecordingRecommendationService(recommendation)
-    mission_service = RecordingMissionService(mission)
+    mission_service = RecordingMissionService(mission, actionability_refusal)
     service = TonightApplicationService(
         forecast_nights=forecast_nights,
         build_candidates=build_candidates,
@@ -843,6 +857,37 @@ def test_recommendation_without_creatable_mission_fails_closed():
     assert result.status is TonightStatus.NO_MISSION
     assert result.forecast_evidence is FORECAST_EVIDENCE
     assert len(mission_service.calls) == 1
+
+
+def test_known_window_constraint_is_preserved_in_tonight_result():
+    night = {"date": "2026-09-01", "top_objects": []}
+    candidate = make_candidate()
+    recommendation = make_recommendation(candidate)
+    refusal = ActionabilityRefusal(
+        conclusion=ActionabilityRefusalConclusion.NO_PRODUCTIVE_WINDOW,
+        status=ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL,
+        cause_code="insufficient_actionable_productive_window",
+        best_productive_window_minutes=59.0,
+        required_continuous_minutes=60,
+    )
+    service, _, _ = make_service(
+        forecast_nights=lambda *args, **kwargs: forecast_run([night]),
+        build_candidates=lambda *args, **kwargs: [candidate],
+        recommendation=recommendation,
+        mission=None,
+        actionability_refusal=refusal,
+    )
+
+    result = service.evaluate(
+        profile=make_profile(),
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=3,
+    )
+
+    assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW
+    assert result.actionability_refusal is refusal
+    assert result.recommendation is recommendation
 
 
 def test_actionability_mission_has_no_fabricated_selection_provenance():
