@@ -69,8 +69,8 @@ def test_resolves_composite_field_with_two_components_and_intents():
     field = _field(
         component_ids=("first-object", "second-object"),
         acquisition_intents=(
-            AcquisitionIntent("first-ha", "Ha", ("first-object",)),
-            AcquisitionIntent("second-oiii", "OIII", ("second-object",)),
+            AcquisitionIntent("first-ha", "Ha", ("first-object",), "Hα · First"),
+            AcquisitionIntent("second-oiii", "OIII", ("second-object",), "OIII · Second"),
         ),
     )
     resolver = ImagingFieldResolver(

@@ -23,6 +23,8 @@ from decision.mission.night_mission import NightMission
 from decision.mission.mission_assembler import ProductiveWindowAssessment
 from decision.models.candidate import Candidate, CandidateProvenance
 from decision.models.acquisition_intent_selection import AcquisitionIntentSelectionStatus
+from decision.models.acquisition_intent_assessment import AcquisitionIntentAssessment
+from decision.models.acquisition_intent_eligibility import AcquisitionIntentEligibilityStatus
 from decision.models.candidate_rejection import (
     CandidateRejection,
     CandidateRejectionBasis,
@@ -168,6 +170,69 @@ def test_tonight_intent_options_follow_first_class_frontier(selected, viable, st
     assert payload["acquisition_intent_selection_status"] == status.value
     assert [option["label"] for option in payload["acquisition_intent_options"]] == labels
     assert [option["acquisition_intent_id"] for option in payload["acquisition_intent_options"]] == list(viable)
+
+
+def test_tonight_exposes_sh2_129_refusals_when_viable_options_are_empty():
+    result = make_result(decision_id="decision-intent-refusal")
+    opportunity = result.recommendation.opportunity
+    assessments = tuple(
+        AcquisitionIntentAssessment(
+            intent_id,
+            filter_type,
+            label,
+            AcquisitionIntentEligibilityStatus.INSUFFICIENT_EVIDENCE,
+            ("weather_evidence_insufficient",),
+        )
+        for intent_id, filter_type, label in (
+            ("sh2-129_ha", "Ha", "Hα · Sh2-129"),
+            ("ou4_oiii", "OIII", "OIII · Ou4"),
+        )
+    )
+    candidate = replace(
+        opportunity.candidate,
+        imaging_field_id="sh2-129_ou4",
+        acquisition_intent_selection_status=(
+            AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT
+        ),
+        acquisition_intent_assessments=assessments,
+    )
+    result = replace(result, recommendation=replace(
+        result.recommendation,
+        opportunity=replace(opportunity, candidate=candidate),
+    ))
+
+    response = make_client(result=result).post("/v1/tonight", json={})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["acquisition_intent_options"] == []
+    assert payload["acquisition_intent_assessments"] == [
+        {
+            "acquisition_intent_id": "sh2-129_ha",
+            "filter_type": "Ha",
+            "label": "Hα · Sh2-129",
+            "status": "insufficient_evidence",
+            "reason_codes": ["weather_evidence_insufficient"],
+        },
+        {
+            "acquisition_intent_id": "ou4_oiii",
+            "filter_type": "OIII",
+            "label": "OIII · Ou4",
+            "status": "insufficient_evidence",
+            "reason_codes": ["weather_evidence_insufficient"],
+        },
+    ]
+
+
+def test_api_assessment_rejects_reason_codes_from_the_wrong_status_family():
+    with pytest.raises(ValidationError):
+        app_module.TonightAcquisitionIntentAssessmentModel(
+            acquisition_intent_id="sh2-129_ha",
+            filter_type="Ha",
+            label="Hα · Sh2-129",
+            status="not_eligible",
+            reason_codes=("weather_evidence_insufficient",),
+        )
 
 
 @pytest.mark.parametrize(
@@ -577,6 +642,16 @@ def test_gp04_api_exposes_only_physically_viable_actionable_alternatives(monkeyp
         imaging_field_id="sh2-129_ou4",
         viable_acquisition_intent_ids=("sh2-129_ha", "ou4_oiii"),
         acquisition_intent_selection_status=AcquisitionIntentSelectionStatus.NO_CLEAR_PREFERENCE,
+        acquisition_intent_assessments=(
+            AcquisitionIntentAssessment(
+                "sh2-129_ha", "Ha", "Hα · Sh2-129",
+                AcquisitionIntentEligibilityStatus.ELIGIBLE, (),
+            ),
+            AcquisitionIntentAssessment(
+                "ou4_oiii", "OIII", "OIII · Ou4",
+                AcquisitionIntentEligibilityStatus.ELIGIBLE, (),
+            ),
+        ),
     )
     recommendation = Recommendation(
         opportunity=Opportunity(
@@ -664,6 +739,10 @@ def test_gp04_api_exposes_only_physically_viable_actionable_alternatives(monkeyp
     assert [entry["catalog_key"] for entry in payload["alternatives"]] == ["M33"]
     assert payload["alternatives"][0]["viable_acquisition_intent_ids"] == ["sh2-129_ha", "ou4_oiii"]
     assert [option["label"] for option in payload["alternatives"][0]["acquisition_intent_options"]] == ["Hα · Sh2-129", "OIII · Ou4"]
+    assert [
+        item["label"]
+        for item in payload["alternatives"][0]["acquisition_intent_assessments"]
+    ] == ["Hα · Sh2-129", "OIII · Ou4"]
     physical_shortlist = {
         entry["catalog_key"]: entry for entry in payload["shortlist_entries"]
     }
@@ -1491,9 +1570,25 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
         "WeatherEvidenceQuality",
         "WeatherDecisionAdmissibility",
         "ActionabilityRefusalModel",
+        "TonightAcquisitionIntentAssessmentModel",
     }.issubset(schemas)
 
     tonight_response = schemas["TonightResponseModel"]["properties"]
+    assessment_field = tonight_response["acquisition_intent_assessments"]
+    assessment_schema = schemas[
+        assessment_field["items"]["$ref"].split("/")[-1]
+    ]
+    assert set(assessment_schema["properties"]) == {
+        "acquisition_intent_id",
+        "filter_type",
+        "label",
+        "status",
+        "reason_codes",
+    }
+    assert assessment_schema["properties"]["status"]["$ref"].endswith(
+        "AcquisitionIntentEligibilityStatus"
+    )
+    assert assessment_schema["properties"]["reason_codes"]["type"] == "array"
     assert tonight_response["astro_quality"]["anyOf"][0]["$ref"].endswith(
         "TonightAstroQualityModel"
     )

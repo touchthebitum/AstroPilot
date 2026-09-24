@@ -47,6 +47,11 @@ from decision.models.candidate import CandidateProvenance
 from decision.models.acquisition_intent_selection import (
     AcquisitionIntentSelectionStatus,
 )
+from decision.models.acquisition_intent_eligibility import (
+    AcquisitionIntentEligibilityReason,
+    AcquisitionIntentEligibilityStatus,
+    AcquisitionIntentEvidenceGap,
+)
 from decision.models.candidate_rejection import CandidateRejectionBasis
 from decision.services.acquisition_intent_remaining_progress import (
     derive_acquisition_intent_remaining_progress, remaining_progress_projection,
@@ -973,6 +978,37 @@ class TonightAcquisitionIntentOptionModel(BaseModel):
     label: str
 
 
+class TonightAcquisitionIntentAssessmentModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    acquisition_intent_id: str
+    filter_type: str
+    label: str
+    status: AcquisitionIntentEligibilityStatus
+    reason_codes: tuple[
+        AcquisitionIntentEligibilityReason | AcquisitionIntentEvidenceGap,
+        ...,
+    ]
+
+    @model_validator(mode="after")
+    def validate_status_reasons(self):
+        if self.status is AcquisitionIntentEligibilityStatus.ELIGIBLE:
+            if self.reason_codes:
+                raise ValueError("eligible_must_not_have_reason_codes")
+        elif self.status is AcquisitionIntentEligibilityStatus.NOT_ELIGIBLE:
+            if not self.reason_codes or not all(
+                isinstance(code, AcquisitionIntentEligibilityReason)
+                for code in self.reason_codes
+            ):
+                raise ValueError("not_eligible_requires_blocking_reasons")
+        elif not self.reason_codes or not all(
+            isinstance(code, AcquisitionIntentEvidenceGap)
+            for code in self.reason_codes
+        ):
+            raise ValueError("insufficient_evidence_requires_evidence_gaps")
+        return self
+
+
 class TonightAlternativeModel(BaseModel):
     target: str
     catalog_key: str
@@ -986,6 +1022,9 @@ class TonightAlternativeModel(BaseModel):
     viable_acquisition_intent_ids: tuple[str, ...] = ()
     acquisition_intent_selection_status: AcquisitionIntentSelectionStatus | None = None
     acquisition_intent_options: list[TonightAcquisitionIntentOptionModel] = Field(default_factory=list)
+    acquisition_intent_assessments: list[
+        TonightAcquisitionIntentAssessmentModel
+    ] = Field(default_factory=list)
 
 
 class TonightRejectedTargetModel(BaseModel):
@@ -1280,6 +1319,9 @@ class TonightResponseModel(BaseModel):
     selected_acquisition_intent_id: str | None = None
     viable_acquisition_intent_ids: tuple[str, ...] = ()
     acquisition_intent_options: list[TonightAcquisitionIntentOptionModel] = Field(default_factory=list)
+    acquisition_intent_assessments: list[
+        TonightAcquisitionIntentAssessmentModel
+    ] = Field(default_factory=list)
     acquisition_intent_selection_status: (
         AcquisitionIntentSelectionStatus | None
     ) = None

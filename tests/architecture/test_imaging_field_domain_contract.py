@@ -25,6 +25,7 @@ def _intent(
         acquisition_intent_id=intent_id,
         filter_type="Ha",
         primary_component_ids=component_ids,
+        label=f"Hα · {intent_id}",
     )
 
 
@@ -64,6 +65,7 @@ def test_composite_imaging_field_is_valid():
                 acquisition_intent_id="synthetic-remnant_oiii",
                 filter_type="OIII",
                 primary_component_ids=("synthetic-remnant",),
+                label="OIII · Synthetic remnant",
             ),
         ),
     )
@@ -109,7 +111,7 @@ def test_intent_with_missing_component_reference_is_rejected():
     [
         lambda: CelestialObjectDefinition("", "Object", "nebula"),
         lambda: ImagingFieldComponent("  "),
-        lambda: AcquisitionIntent("", "Ha", ("component",)),
+        lambda: AcquisitionIntent("", "Ha", ("component",), "Intent"),
         lambda: ImagingFieldDefinition("", "Field", (_component(),), ()),
     ],
 )
@@ -120,12 +122,12 @@ def test_empty_identifiers_are_rejected(factory):
 
 def test_empty_filter_type_is_rejected():
     with pytest.raises(ValueError, match="filter_type must not be empty"):
-        AcquisitionIntent("intent", "  ", ("component",))
+        AcquisitionIntent("intent", "  ", ("component",), "Intent")
 
 
 def test_intent_without_primary_components_is_rejected():
     with pytest.raises(ValueError, match="primary_component_ids must not be empty"):
-        AcquisitionIntent("intent", "Ha", ())
+        AcquisitionIntent("intent", "Ha", (), "Intent")
 
 
 def test_intent_with_duplicate_primary_component_is_rejected():
@@ -134,13 +136,14 @@ def test_intent_with_duplicate_primary_component_is_rejected():
             "intent",
             "Ha",
             ("component", "component"),
+            "Intent",
         )
 
 
 @pytest.mark.parametrize(
     "factory",
     [
-        lambda: AcquisitionIntent("intent", "Ha", ["component"]),
+        lambda: AcquisitionIntent("intent", "Ha", ["component"], "Intent"),
         lambda: ImagingFieldDefinition(
             "field",
             "Field",

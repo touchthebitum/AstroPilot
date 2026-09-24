@@ -347,7 +347,7 @@ def test_field_change_rejects_incoherent_retained_intents(client, monkeypatch):
     from decision.services.imaging_field_resolver import ImagingFieldResolver
     from decision.definitions.production_imaging_fields import CELESTIAL_OBJECT_DEFINITIONS, IMAGING_FIELD_DEFINITIONS
     other = ImagingFieldDefinition("other_field", "Other", (ImagingFieldComponent("ou4"),),
-                                   (AcquisitionIntent("other_intent", "Ha", ("ou4",)),))
+                                   (AcquisitionIntent("other_intent", "Ha", ("ou4",), "Hα · Ou4"),))
     monkeypatch.setattr(app_module, "IMAGING_FIELD_DEFINITIONS", (*IMAGING_FIELD_DEFINITIONS, other))
     monkeypatch.setattr(profile_module, "build_production_imaging_field_resolver",
                         lambda: ImagingFieldResolver((*IMAGING_FIELD_DEFINITIONS, other), CELESTIAL_OBJECT_DEFINITIONS))

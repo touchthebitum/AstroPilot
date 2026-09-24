@@ -3,6 +3,13 @@
 from dataclasses import dataclass
 from enum import Enum
 
+from decision.models.acquisition_intent_assessment import (
+    AcquisitionIntentAssessment,
+)
+from decision.models.acquisition_intent_eligibility import (
+    AcquisitionIntentEligibilityAssessment,
+)
+
 
 class AcquisitionIntentSelectionStatus(str, Enum):
     NO_ELIGIBLE_INTENT = "no_eligible_intent"
@@ -41,6 +48,12 @@ class AcquisitionIntentSelection:
     viable_acquisition_intent_ids: tuple[str, ...]
     status: AcquisitionIntentSelectionStatus
     reason_codes: tuple[str, ...]
+    eligibility_assessments: tuple[
+        AcquisitionIntentEligibilityAssessment, ...
+    ] = ()
+    acquisition_intent_assessments: tuple[
+        AcquisitionIntentAssessment, ...
+    ] = ()
 
     def __post_init__(self) -> None:
         selected = self.selected_acquisition_intent_id
@@ -67,6 +80,29 @@ class AcquisitionIntentSelection:
             raise TypeError("reason_codes must contain strings")
         if self.reason_codes != (_EXPECTED_REASON_CODE[self.status],):
             raise ValueError("reason_codes are inconsistent with selection status")
+        if not isinstance(self.eligibility_assessments, tuple) or not all(
+            isinstance(item, AcquisitionIntentEligibilityAssessment)
+            for item in self.eligibility_assessments
+        ):
+            raise TypeError(
+                "eligibility_assessments must contain eligibility assessments"
+            )
+        if not isinstance(self.acquisition_intent_assessments, tuple) or not all(
+            isinstance(item, AcquisitionIntentAssessment)
+            for item in self.acquisition_intent_assessments
+        ):
+            raise TypeError(
+                "acquisition_intent_assessments must contain intent assessments"
+            )
+        eligibility_ids = tuple(
+            item.acquisition_intent_id for item in self.eligibility_assessments
+        )
+        assessment_ids = tuple(
+            item.acquisition_intent_id
+            for item in self.acquisition_intent_assessments
+        )
+        if assessment_ids and eligibility_ids != assessment_ids:
+            raise ValueError("assessment_transport_must_match_eligibility_order")
 
         viable = self.viable_acquisition_intent_ids
         if self.status is AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT:

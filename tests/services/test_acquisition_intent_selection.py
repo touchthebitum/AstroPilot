@@ -8,6 +8,10 @@ from decision.models.acquisition_intent_eligibility import (
     AcquisitionIntentEligibilityAssessment,
     AcquisitionIntentEligibilityReason,
     AcquisitionIntentEligibilityStatus,
+    AcquisitionIntentEvidenceGap,
+)
+from decision.models.acquisition_intent_assessment import (
+    AcquisitionIntentAssessment,
 )
 from decision.models.acquisition_intent_preference import (
     LUNAR_CONTAMINATION_EQUIVALENT,
@@ -84,25 +88,25 @@ def test_selection_model_is_validated_and_immutable():
 
 
 def test_no_eligible_intent():
-    result = _select((_not_eligible("A"),))
+    assessment = _not_eligible("A")
+    result = _select((assessment,))
 
-    assert result == AcquisitionIntentSelection(
-        None,
-        (),
-        AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT,
-        (NO_ELIGIBLE_INTENT,),
-    )
+    assert result.selected_acquisition_intent_id is None
+    assert result.viable_acquisition_intent_ids == ()
+    assert result.status is AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT
+    assert result.reason_codes == (NO_ELIGIBLE_INTENT,)
+    assert result.eligibility_assessments == (assessment,)
 
 
 def test_only_eligible_intent_is_selected():
-    result = _select((_eligible("A"),))
+    assessment = _eligible("A")
+    result = _select((assessment,))
 
-    assert result == AcquisitionIntentSelection(
-        "A",
-        ("A",),
-        AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
-        (ONLY_ELIGIBLE_INTENT,),
-    )
+    assert result.selected_acquisition_intent_id == "A"
+    assert result.viable_acquisition_intent_ids == ("A",)
+    assert result.status is AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT
+    assert result.reason_codes == (ONLY_ELIGIBLE_INTENT,)
+    assert result.eligibility_assessments == (assessment,)
 
 
 @pytest.mark.parametrize(
@@ -141,6 +145,80 @@ def test_two_intents_without_clear_preference_remain_viable():
     assert result.selected_acquisition_intent_id is None
     assert result.viable_acquisition_intent_ids == ("A", "B")
     assert result.reason_codes == (MULTIPLE_NON_DOMINATED_INTENTS,)
+
+
+@pytest.mark.parametrize(
+    "status",
+    tuple(AcquisitionIntentSelectionStatus),
+)
+def test_selection_preserves_every_exact_input_assessment(status):
+    eligible_a = _eligible("A")
+    eligible_b = _eligible("B")
+    refused = _not_eligible("C")
+    if status is AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT:
+        assessments = (refused,)
+        preferences = ()
+    elif status is AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT:
+        assessments = (eligible_a, refused)
+        preferences = ()
+    else:
+        assessments = (eligible_a, eligible_b, refused)
+        preference_status = (
+            AcquisitionIntentPreferenceStatus.LEFT_PREFERRED
+            if status is AcquisitionIntentSelectionStatus.PREFERRED
+            else AcquisitionIntentPreferenceStatus.NO_CLEAR_PREFERENCE
+        )
+        preferences = (_preference("A", "B", preference_status),)
+
+    transported = tuple(
+        AcquisitionIntentAssessment(
+            item.acquisition_intent_id,
+            "Ha",
+            f"Hα · {item.acquisition_intent_id}",
+            item.status,
+            tuple(reason.value for reason in item.blocking_reasons),
+        )
+        for item in assessments
+    )
+    result = select_acquisition_intent(
+        assessments,
+        preferences,
+        acquisition_intent_assessments=transported,
+    )
+
+    assert result.eligibility_assessments is assessments
+    assert result.acquisition_intent_assessments is transported
+
+
+def test_multiple_evidence_gaps_keep_domain_order_without_primary_reason():
+    eligibility = AcquisitionIntentEligibilityAssessment(
+        "A",
+        AcquisitionIntentEligibilityStatus.INSUFFICIENT_EVIDENCE,
+        (),
+        (
+            AcquisitionIntentEvidenceGap.SETUP_CAPABILITIES_MISSING,
+            AcquisitionIntentEvidenceGap.WEATHER_EVIDENCE_INSUFFICIENT,
+        ),
+    )
+    transported = AcquisitionIntentAssessment(
+        "A",
+        "Ha",
+        "Hα · A",
+        AcquisitionIntentEligibilityStatus.INSUFFICIENT_EVIDENCE,
+        (
+            "setup_capabilities_missing",
+            "weather_evidence_insufficient",
+        ),
+    )
+
+    result = select_acquisition_intent(
+        (eligibility,),
+        (),
+        acquisition_intent_assessments=(transported,),
+    )
+
+    assert result.acquisition_intent_assessments == (transported,)
+    assert not hasattr(transported, "primary_reason_code")
 
 
 def test_three_intents_leave_a_and_c_non_dominated():
@@ -309,7 +387,16 @@ def test_output_is_deterministic_across_input_orders_and_pair_orientations():
         ),
     )
 
-    assert first == second
+    assert first.selected_acquisition_intent_id == second.selected_acquisition_intent_id
+    assert first.viable_acquisition_intent_ids == second.viable_acquisition_intent_ids
+    assert first.status is second.status
+    assert first.reason_codes == second.reason_codes
+    assert tuple(item.acquisition_intent_id for item in first.eligibility_assessments) == (
+        "C", "A", "B",
+    )
+    assert tuple(item.acquisition_intent_id for item in second.eligibility_assessments) == (
+        "B", "C", "A",
+    )
     assert first.viable_acquisition_intent_ids == ("A", "C")
 
 
@@ -329,6 +416,7 @@ def test_service_uses_only_precomputed_domain_results():
     }
 
     assert imported_modules == {
+        "decision.models.acquisition_intent_assessment",
         "decision.models.acquisition_intent_eligibility",
         "decision.models.acquisition_intent_preference",
         "decision.models.acquisition_intent_selection",

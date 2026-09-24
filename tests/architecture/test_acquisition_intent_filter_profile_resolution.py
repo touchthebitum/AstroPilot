@@ -34,7 +34,7 @@ from decision.services.filter_optical_profile_resolver import (
 
 
 def _intent(filter_type: str = "Ha") -> AcquisitionIntent:
-    return AcquisitionIntent("intent", filter_type, ("component",))
+    return AcquisitionIntent("intent", filter_type, ("component",), "Intent")
 
 
 def _profile(
