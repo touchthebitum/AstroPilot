@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 from decision.night_productivity.night_productivity_context import (
     NightProductivityContext,
@@ -106,6 +106,7 @@ class NightProductivityEngine:
                 if item.score == best_score
             )
             best_slice = timeline.slices[best_index]
+            observation_time_utc = observation_time.astimezone(timezone.utc)
             breakdown = ProductivityBreakdown(
                 evaluated_slice_count=len(slice_evaluations),
                 productive_slice_count=sum(
@@ -113,13 +114,13 @@ class NightProductivityEngine:
                     for item in slice_evaluations
                 ),
                 best_slice_start=(
-                    observation_time
+                    observation_time_utc
                     + timedelta(hours=best_slice.start_hour)
-                ),
+                ).astimezone(observation_time.tzinfo),
                 best_slice_end=(
-                    observation_time
+                    observation_time_utc
                     + timedelta(hours=best_slice.end_hour)
-                ),
+                ).astimezone(observation_time.tzinfo),
                 best_slice_score=best_score,
                 best_slice_tie_count=sum(
                     item.score == best_score for item in slice_evaluations

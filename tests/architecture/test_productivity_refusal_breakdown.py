@@ -2,6 +2,7 @@ from dataclasses import fields
 from datetime import datetime, timedelta, timezone
 from inspect import signature
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -207,6 +208,73 @@ def test_reference_case_selects_first_of_seven_exact_ties_without_ranking_effect
     assert [item.productivity_score for item in evaluation.result.timeline.slices] == [
         item.productivity_score for item in ordinary_result.timeline.slices
     ]
+
+
+@pytest.mark.parametrize(
+    ("observation_time", "expected_start", "expected_end"),
+    (
+        (
+            datetime(2026, 10, 24, 22, tzinfo=ZoneInfo("Europe/Zurich")),
+            datetime(2026, 10, 25, 3, 15, tzinfo=ZoneInfo("Europe/Zurich")),
+            datetime(2026, 10, 25, 3, 30, tzinfo=ZoneInfo("Europe/Zurich")),
+        ),
+        (
+            datetime(2026, 3, 28, 22, tzinfo=ZoneInfo("Europe/Zurich")),
+            datetime(2026, 3, 29, 5, 15, tzinfo=ZoneInfo("Europe/Zurich")),
+            datetime(2026, 3, 29, 5, 30, tzinfo=ZoneInfo("Europe/Zurich")),
+        ),
+        (
+            datetime(2026, 9, 24, 22, tzinfo=ZoneInfo("Europe/Zurich")),
+            datetime(2026, 9, 25, 4, 15, tzinfo=ZoneInfo("Europe/Zurich")),
+            datetime(2026, 9, 25, 4, 30, tzinfo=ZoneInfo("Europe/Zurich")),
+        ),
+    ),
+)
+def test_best_slice_timestamps_use_elapsed_time_across_dst(
+    monkeypatch,
+    observation_time,
+    expected_start,
+    expected_end,
+):
+    monkeypatch.setattr(
+        "decision.night_productivity.night_timeline_builder."
+        "NightConditionsProvider.cloud",
+        lambda current, _context: 0.0 if current == 6.25 else 100.0,
+    )
+    for provider, value in (
+        ("humidity", 50.0),
+        ("wind", 5.0),
+        ("seeing", 1.5),
+        ("altitude", 70.0),
+        ("moon_penalty", 0.0),
+    ):
+        monkeypatch.setattr(
+            "decision.night_productivity.night_timeline_builder."
+            f"NightConditionsProvider.{provider}",
+            lambda *_args, value=value: value,
+        )
+    context = NightProductivityContext(
+        astronomical_hours=6.5,
+        cloud_cover=100.0,
+        moon_penalty=0.0,
+        altitude_score=8.0,
+        humidity=50.0,
+        wind=5.0,
+        seeing=1.5,
+        observation_time=observation_time,
+    )
+
+    breakdown = NightProductivityEngine.evaluate_with_breakdown(context).breakdown
+
+    assert breakdown is not None
+    assert breakdown.best_slice_start == expected_start
+    assert breakdown.best_slice_end == expected_end
+    assert breakdown.best_slice_start.utcoffset() is not None
+    assert breakdown.best_slice_end.utcoffset() is not None
+    assert (
+        breakdown.best_slice_end.astimezone(timezone.utc)
+        - breakdown.best_slice_start.astimezone(timezone.utc)
+    ) == timedelta(minutes=15)
 
 
 def test_refusal_stage_and_breakdown_are_attached_after_constraints():

@@ -1,6 +1,7 @@
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -1086,6 +1087,7 @@ def _valid_productivity_breakdown_payload():
         ("evaluated_slice_count", True),
         ("productive_slice_count", -1),
         ("best_slice_start", "2026-09-24T22:15:00"),
+        ("best_slice_end", "2026-09-24T22:30:00"),
         ("best_slice_score", 1.01),
         ("best_slice_tie_count", 0),
         ("productive_slice_threshold", 0.0),
@@ -1109,6 +1111,122 @@ def test_productivity_breakdown_public_model_rejects_counts_and_negative_losses(
         app_module.ProductivityBreakdownModel.model_validate(too_many_productive)
     with pytest.raises(ValidationError):
         app_module.ProductivityBreakdownModel.model_validate(negative_loss)
+
+
+@pytest.mark.parametrize(
+    "mutations",
+    (
+        {"productive_slice_threshold": 0.8},
+        {"evaluated_slice_count": 0},
+        {"best_slice_tie_count": 9},
+        {"best_slice_end": "2026-09-24T22:15:00+02:00"},
+        {"best_slice_end": "2026-09-24T22:00:00+02:00"},
+    ),
+)
+def test_productivity_breakdown_public_model_rejects_semantic_contradictions(
+    mutations,
+):
+    payload = {**_valid_productivity_breakdown_payload(), **mutations}
+
+    with pytest.raises(ValidationError):
+        app_module.ProductivityBreakdownModel.model_validate(payload)
+
+
+def test_empty_productivity_breakdown_requires_null_best_slice_diagnostics():
+    payload = {
+        **_valid_productivity_breakdown_payload(),
+        "evaluated_slice_count": 0,
+        "best_slice_start": None,
+        "best_slice_end": None,
+        "best_slice_score": None,
+        "best_slice_tie_count": None,
+        "losses": None,
+    }
+
+    model = app_module.ProductivityBreakdownModel.model_validate(payload)
+
+    assert model.evaluated_slice_count == 0
+    assert model.best_slice_start is None
+    assert model.losses is None
+
+
+def test_productivity_breakdown_orders_dst_fold_by_elapsed_time():
+    payload = {
+        **_valid_productivity_breakdown_payload(),
+        "best_slice_start": datetime(
+            2026,
+            10,
+            25,
+            2,
+            45,
+            tzinfo=ZoneInfo("Europe/Zurich"),
+            fold=0,
+        ),
+        "best_slice_end": datetime(
+            2026,
+            10,
+            25,
+            2,
+            0,
+            tzinfo=ZoneInfo("Europe/Zurich"),
+            fold=1,
+        ),
+    }
+
+    model = app_module.ProductivityBreakdownModel.model_validate(payload)
+
+    assert (
+        model.best_slice_end.astimezone(timezone.utc)
+        - model.best_slice_start.astimezone(timezone.utc)
+    ) == timedelta(minutes=15)
+
+
+def _constraints_refusal_payload(*, stage, breakdown):
+    return {
+        "conclusion": "no_productive_window",
+        "status": "constraints_refusal",
+        "cause_code": "insufficient_actionable_productive_window",
+        "best_productive_window_minutes": 0,
+        "required_continuous_minutes": 60,
+        "refusal_stage": stage,
+        "productivity_breakdown": breakdown,
+    }
+
+
+def test_no_productive_slice_public_model_rejects_score_at_threshold():
+    breakdown = {
+        **_valid_productivity_breakdown_payload(),
+        "best_slice_score": 0.7,
+    }
+
+    with pytest.raises(ValidationError):
+        app_module.ActionabilityRefusalModel.model_validate(
+            _constraints_refusal_payload(
+                stage="no_productive_slice",
+                breakdown=breakdown,
+            )
+        )
+
+
+def test_continuous_window_public_model_requires_productive_slice():
+    with pytest.raises(ValidationError):
+        app_module.ActionabilityRefusalModel.model_validate(
+            _constraints_refusal_payload(
+                stage="continuous_window_too_short",
+                breakdown=_valid_productivity_breakdown_payload(),
+            )
+        )
+
+
+def test_reference_productivity_breakdown_is_valid_public_contract():
+    model = app_module.ActionabilityRefusalModel.model_validate(
+        _constraints_refusal_payload(
+            stage="no_productive_slice",
+            breakdown=_valid_productivity_breakdown_payload(),
+        )
+    )
+
+    assert model.root.productivity_breakdown.best_slice_score == 0.394
 
 
 def test_insufficient_evidence_public_model_rejects_causal_breakdown():
@@ -1764,13 +1882,12 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
     breakdown = schemas["ProductivityBreakdownModel"]["properties"]
     assert breakdown["evaluated_slice_count"]["minimum"] == 0
     assert breakdown["productive_slice_count"]["minimum"] == 0
-    assert breakdown["best_slice_start"]["format"] == "date-time"
-    assert breakdown["best_slice_end"]["format"] == "date-time"
-    assert breakdown["best_slice_score"]["minimum"] == 0.0
-    assert breakdown["best_slice_score"]["maximum"] == 1.0
-    assert breakdown["best_slice_tie_count"]["minimum"] == 1
-    assert breakdown["productive_slice_threshold"]["exclusiveMinimum"] == 0.0
-    assert breakdown["productive_slice_threshold"]["maximum"] == 1.0
+    assert breakdown["best_slice_start"]["anyOf"][0]["format"] == "date-time"
+    assert breakdown["best_slice_end"]["anyOf"][0]["format"] == "date-time"
+    assert breakdown["best_slice_score"]["anyOf"][0]["minimum"] == 0.0
+    assert breakdown["best_slice_score"]["anyOf"][0]["maximum"] == 1.0
+    assert breakdown["best_slice_tie_count"]["anyOf"][0]["minimum"] == 1
+    assert breakdown["productive_slice_threshold"]["const"] == 0.7
     losses = schemas["ProductivityLossesModel"]["properties"]
     assert all(field["minimum"] == 0.0 for field in losses.values())
     assert "best_productive_window_minutes" in schemas[
