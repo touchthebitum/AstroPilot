@@ -10,6 +10,61 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[2] / "astropilot/web/app.js"
 
 
+def test_usable_duration_inputs_are_scoped_to_execution():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for the dynamic UI test")
+    source = SCRIPT.read_text(encoding="utf-8")
+    helpers = source[source.index('const SESSION_PENDING_KEY ='):source.index('async function reloadSessions')]
+    harness = r'''
+const assert = require('node:assert/strict');
+class Element {
+  constructor() { this.hidden = false; this.checked = false; this.textContent = '';
+    this.value = ''; this.children = []; }
+  replaceChildren() { this.children = []; }
+  append(child) { this.children.push(child); }
+}
+const elements = new Map();
+const document = {
+  querySelector(selector) { if (!elements.has(selector)) elements.set(selector, new Element());
+    return elements.get(selector); },
+  createElement() { return new Element(); },
+};
+function text(selector, value) { document.querySelector(selector).textContent = value; }
+const storage = new Map();
+const localStorage = {getItem: key => storage.get(key) || null,
+  setItem: (key, value) => storage.set(key, value)};
+const session = (id) => ({execution: {execution_id: id, status: 'completed', actual_start: null},
+  acquisition_intent_id: 'ha', evidence: [], credit: null, historical_baseline_seconds: 0,
+  historical_baseline_confirmed: false, acquired_before_seconds: 0, session_credit_seconds: 0,
+  acquired_after_seconds: 0, current_acquired_seconds: 0, target_hours: null, remaining_hours: null});
+const state = {acceptedMission: {mission_id: 'mission-1', acquisitionIntentId: 'ha'},
+  sessions: [session('execution-1'), session('execution-2')], activeSessionId: 'execution-1',
+  sessionEvidenceInputExecutionId: null};
+'''
+    checks = r'''
+document.querySelector('#session-hours').value = '0';
+document.querySelector('#session-minutes').value = '30';
+localStorage.setItem('astropilot.pendingEvidence.execution-1', JSON.stringify({
+  evidence_id: 'evidence-1', minutes: 30,
+}));
+renderSession();
+assert.equal(document.querySelector('#session-minutes').value, '30');
+
+state.activeSessionId = 'execution-2';
+renderSession();
+assert.equal(document.querySelector('#session-hours').value, '0');
+assert.equal(document.querySelector('#session-minutes').value, '0');
+
+state.activeSessionId = 'execution-1';
+renderSession();
+assert.equal(document.querySelector('#session-hours').value, '0');
+assert.equal(document.querySelector('#session-minutes').value, '30');
+'''
+    result = subprocess.run([node, "-e", harness + helpers + checks], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
 def test_credit_confirmation_lost_response_and_reopen():
     node = shutil.which("node")
     if node is None:

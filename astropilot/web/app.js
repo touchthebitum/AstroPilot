@@ -66,6 +66,7 @@ const state = {
   progressEditorBaseline: null,
   sessions: [],
   activeSessionId: null,
+  sessionEvidenceInputExecutionId: null,
   sessionBusy: false,
   sessionWriteAttempted: false,
   sessionWriteUncertain: false,
@@ -96,8 +97,25 @@ function sessionStatus(status) {
   return status === "unconfirmed" ? "Session non confirmée" : status;
 }
 
+function restoreSessionEvidenceInputs(session) {
+  const executionId = session?.execution.execution_id || null;
+  if (executionId === state.sessionEvidenceInputExecutionId) return;
+  state.sessionEvidenceInputExecutionId = executionId;
+  let minutes = 0;
+  const evidence = usableEvidence(session);
+  if (evidence) {
+    minutes = Math.round(Number(evidence.usable_integration_duration) / 60);
+  } else if (executionId) {
+    const saved = JSON.parse(localStorage.getItem(`astropilot.pendingEvidence.${executionId}`) || "null");
+    if (Number.isInteger(saved?.minutes) && saved.minutes > 0) minutes = saved.minutes;
+  }
+  document.querySelector("#session-hours").value = String(Math.floor(minutes / 60));
+  document.querySelector("#session-minutes").value = String(minutes % 60);
+}
+
 function renderSession() {
   const session = currentSession();
+  restoreSessionEvidenceInputs(session);
   const status = session?.execution.status;
   const choice = document.querySelector("#session-choice");
   choice.replaceChildren();
