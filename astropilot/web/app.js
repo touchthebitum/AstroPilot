@@ -657,6 +657,54 @@ function joinedIntentLabels(assessments) {
   return `${labels.slice(0, -1).join(", ")} et ${labels.at(-1)}`;
 }
 
+function intentFilterType(intent) {
+  const labelType = intent?.label?.split(" · ")[0]?.trim();
+  return labelType || intent?.filter_type?.replaceAll("_", " ") || "non précisé";
+}
+
+function filterCardCopy(decision) {
+  const assessments = Array.isArray(decision.acquisition_intent_assessments)
+    ? decision.acquisition_intent_assessments : [];
+  const filter = decision.selected_filter;
+  const selectedIntentId = decision.selected_acquisition_intent_id;
+  const selectedIntent = assessments.find(
+    (assessment) => assessment?.acquisition_intent_id === selectedIntentId,
+  ) || (Array.isArray(decision.acquisition_intent_options)
+    ? decision.acquisition_intent_options.find(
+      (option) => option?.acquisition_intent_id === selectedIntentId,
+    ) : null);
+
+  if (selectedIntent) {
+    const otherAssessments = assessments.filter(
+      (assessment) => assessment?.acquisition_intent_id !== selectedIntentId,
+    );
+    const detail = `${selectedIntent.label || selectedIntentId} recommandé${otherAssessments.length
+      ? ` ; ${joinedIntentLabels(otherAssessments)} également évalué${otherAssessments.length > 1 ? "s" : ""}`
+      : ""}`;
+    return {
+      value: `Type requis : ${intentFilterType(selectedIntent)}`,
+      note: filter?.name
+        ? `Filtre matériel : ${filter.name}`
+        : "Filtre matériel non renseigné",
+      detail,
+    };
+  }
+
+  if (assessments.length) {
+    return {
+      value: "Aucun type de filtre retenu",
+      note: filter?.name ? `Filtre matériel : ${filter.name}` : "Filtre matériel non renseigné",
+      detail: `${joinedIntentLabels(assessments)} évalués`,
+    };
+  }
+
+  return {
+    value: filter?.name ? `Filtre matériel : ${filter.name}` : "Filtre non précisé",
+    note: filter?.filter_type ? filter.filter_type.replaceAll("_", " ") : "",
+    detail: "",
+  };
+}
+
 function renderIntentChoice(container, subject, selectId) {
   container.replaceChildren();
   const mode = intentMode(subject);
@@ -990,7 +1038,6 @@ function renderDecision(decision) {
     || productivity?.windows?.[0];
   const start = clock(decision.window_start) || firstWindow?.start_time || null;
   const end = clock(decision.window_end) || firstWindow?.end_time || null;
-  const filter = decision.selected_filter;
   const quality = decision.astro_quality;
   const qualityScore = quality ? Math.round(Number(quality.score)) : null;
   const qualityCopy = labels.quality[quality?.label] || ["Non évaluée", "L’indice de qualité n’est pas disponible pour cette décision."];
@@ -1016,15 +1063,10 @@ function renderDecision(decision) {
   text("#window-note", firstWindow?.reason ? "Fenêtre productive principale" : "Heure locale");
   text("#duration-value", duration(actionableHours));
   text("#duration-note", "Durée de mission exploitable");
-  const assessments = Array.isArray(decision.acquisition_intent_assessments)
-    ? decision.acquisition_intent_assessments : [];
-  text("#filter-value", filter?.name || (assessments.length
-    ? "Aucun filtre sélectionné" : "Aucun filtre précisé"));
-  text("#filter-note", filter?.filter_type
-    ? filter.filter_type.replaceAll("_", " ")
-    : assessments.length
-      ? `${joinedIntentLabels(assessments)} évalués ci-dessous`
-      : "Selon la cible et le ciel");
+  const filterCopy = filterCardCopy(decision);
+  text("#filter-value", filterCopy.value);
+  text("#filter-note", filterCopy.note);
+  text("#filter-detail", filterCopy.detail);
   text("#quality-score", qualityScore === null ? "—" : String(qualityScore));
   text("#quality-title", qualityCopy[0]);
   text("#quality-summary", qualityCopy[1]);
