@@ -406,7 +406,7 @@ function renderIntentChoice() {}
 function renderAlternatives() {}
 function restoreAcceptanceControls() {}
 function show() {}
-function formatRecommendationConfidence() { return 'Non disponible'; }
+function renderRecommendationConfidence() {}
 function intentReady() { return true; }
 """ + mode + render + """
 const base = {decision_id: 'decision-1', catalog_key: 'M31',
