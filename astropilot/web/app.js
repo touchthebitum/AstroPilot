@@ -36,6 +36,7 @@ const ui = Object.freeze({
   closeMission: document.querySelector("#close-mission"),
   missionBack: document.querySelector("#mission-back"),
   acceptanceStatus: document.querySelector("#acceptance-status"),
+  recommendationConfidencePanel: document.querySelector("#recommendation-confidence"),
   recommendationConfidence: document.querySelector("#recommendation-confidence-value"),
   alternatives: document.querySelector("#alternatives-section"),
   alternativesList: document.querySelector("#alternatives-list"),
@@ -451,8 +452,12 @@ function renderWeatherTrust(weatherTrust, weatherDecision, prefix) {
   const zone = weatherTrust.timezone;
   const age = Number(weatherTrust.snapshot_age_minutes);
   const maximumAge = Number(weatherTrust.maximum_age_minutes);
-  text(`#${prefix}-weather-status`, weatherDecision?.presentation?.label);
-  text(`#${prefix}-weather-title`, weatherDecision?.presentation?.summary);
+  const presentation = weatherDecision?.presentation;
+  text(`#${prefix}-weather-status`, presentation?.label || "Validation météo non renseignée");
+  text(
+    `#${prefix}-weather-title`,
+    presentation?.summary || "Le statut de validation météo n’est pas renseigné dans cette réponse.",
+  );
   text(`#${prefix}-weather-provider`, weatherTrust.provider);
   text(
     `#${prefix}-weather-age`,
@@ -555,11 +560,17 @@ function showAcceptanceStatus(message, { error = false } = {}) {
 
 function formatRecommendationConfidence(confidence) {
   if (typeof confidence !== "number" || !Number.isFinite(confidence)) {
-    return "Non disponible";
+    return null;
   }
   const value = confidence;
-  if (value < 0 || value > 1) return "Non disponible";
+  if (value < 0 || value > 1) return null;
   return `${Math.round(value * 100)} %`;
+}
+
+function renderRecommendationConfidence(confidence) {
+  const formatted = formatRecommendationConfidence(confidence);
+  ui.recommendationConfidence.textContent = formatted || "";
+  ui.recommendationConfidencePanel.hidden = formatted === null;
 }
 
 function clearAlternatives() {
@@ -1017,9 +1028,7 @@ function renderDecision(decision) {
   text("#quality-title", qualityCopy[0]);
   text("#quality-summary", qualityCopy[1]);
   text("#limiting-factor", limiting ? (labels.factors[limiting] || limiting.replaceAll("_", " ")) : "Aucun identifié");
-  ui.recommendationConfidence.textContent = formatRecommendationConfidence(
-    decision.recommendation_confidence,
-  );
+  renderRecommendationConfidence(decision.recommendation_confidence);
   renderWeatherTrust(weatherTrust, weatherDecision, "classic");
 
   const circumference = 2 * Math.PI * 48;

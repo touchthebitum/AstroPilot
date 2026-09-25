@@ -21,6 +21,42 @@ def make_client():
     )
 
 
+def _execute_reliability_renderers(tmp_path, checks):
+    import json
+    import shutil
+    import subprocess
+
+    import pytest
+
+    engine = shutil.which("node") or shutil.which("osascript")
+    if engine is None:
+        pytest.skip("A JavaScript runtime is required for the reliability rendering tests")
+    script = make_client().get("/ui/app.js").text
+    weather_renderer = "function renderWeatherTrust(weatherTrust, weatherDecision, prefix) {" + script.split(
+        "function renderWeatherTrust(weatherTrust, weatherDecision, prefix) {", 1
+    )[1].split("function reasonText", 1)[0]
+    confidence_renderers = "function formatRecommendationConfidence(confidence) {" + script.split(
+        "function formatRecommendationConfidence(confidence) {", 1
+    )[1].split("function clearAlternatives", 1)[0]
+    harness = '''
+const values = {};
+const ui = {
+  recommendationConfidencePanel: {hidden: true},
+  recommendationConfidence: {textContent: ""},
+};
+function text(key, value) { values[key] = value; }
+function siteDateTime(value) { return value || "Non précisée"; }
+'''
+    path = tmp_path / "reliability-render.js"
+    output = "\nconsole.log(JSON.stringify(output));\n" if Path(engine).name == "node" else "\nJSON.stringify(output);\n"
+    path.write_text(harness + weather_renderer + confidence_renderers + checks + output)
+    command = [engine] if Path(engine).name == "node" else [engine, "-l", "JavaScript"]
+    completed = subprocess.run(
+        [*command, str(path)], text=True, capture_output=True, check=True,
+    )
+    return json.loads(completed.stdout)
+
+
 def test_root_serves_tonight_classic_ui():
     response = make_client().get("/")
 
@@ -89,7 +125,8 @@ def test_root_serves_tonight_classic_ui():
         "custom-monochrome",
     ):
         assert f'id="{field_id}"' in response.text
-    assert 'id="recommendation-confidence-value"' in response.text
+    assert '<div id="recommendation-confidence" class="recommendation-reliability" hidden' in response.text
+    assert 'id="recommendation-confidence-value"></strong>' in response.text
     assert "Fiabilité de la recommandation" in response.text
     assert 'id="alternatives-section"' in response.text
     assert 'id="alternatives-list"' in response.text
@@ -205,8 +242,10 @@ def test_tonight_ui_assets_are_served():
     assert "weatherTrust.retrieved_at_utc" in script.text
     assert 'renderWeatherTrust(weatherTrust, weatherDecision, "classic")' in script.text
     assert 'renderWeatherTrust(weatherTrust, weatherDecision, "mission")' not in script.text
-    assert "weatherDecision?.presentation?.label" in script.text
-    assert "weatherDecision?.presentation?.summary" in script.text
+    assert "const presentation = weatherDecision?.presentation" in script.text
+    assert "presentation?.label" in script.text
+    assert "presentation?.summary" in script.text
+    assert "Validation météo non renseignée" in script.text
     assert 'payload.status === "weather_refused"' in script.text
     assert "Validation météo partielle" not in script.text
     assert "Météo validée pour cette décision" not in script.text
@@ -303,7 +342,9 @@ def test_tonight_ui_assets_are_served():
     assert "Number.isFinite" in script.text
     assert "Math.round(value * 100)" in script.text
     assert "value < 0 || value > 1" in script.text
-    assert 'return "Non disponible"' in script.text
+    assert "ui.recommendationConfidencePanel.hidden = formatted === null" in script.text
+    assert 'ui.recommendationConfidence.textContent = formatted || ""' in script.text
+    assert 'return "Non disponible"' not in script.text
     assert "renderMission(mission)" in acceptance_function
     assert "decision_score" not in script.text
     assert "final_score" not in script.text
@@ -900,7 +941,99 @@ def test_primary_status_controls_title_and_preserves_missing_values():
     assert 'ui.openMission.disabled = !actionablePrimary' in render
     assert '"À confirmer"' in render
     assert '"Non évaluée"' in render
-    assert 'formatRecommendationConfidence(' in render
+    assert 'renderRecommendationConfidence(decision.recommendation_confidence)' in render
+
+
+def test_recommendation_confidence_cartouche_only_renders_valid_numbers(tmp_path):
+    results = _execute_reliability_renderers(tmp_path, '''
+const results = [];
+for (const confidence of [0.846, 0, 1, null, undefined, "0.5", NaN, -0.01, 1.01]) {
+  renderRecommendationConfidence(confidence);
+  results.push({
+    text: ui.recommendationConfidence.textContent,
+    hidden: ui.recommendationConfidencePanel.hidden,
+  });
+}
+const output = results;
+''')
+
+    assert results[:3] == [
+        {"text": "85 %", "hidden": False},
+        {"text": "0 %", "hidden": False},
+        {"text": "100 %", "hidden": False},
+    ]
+    assert results[3:] == [{"text": "", "hidden": True}] * 6
+
+
+def test_weather_block_uses_presentation_and_neutral_legacy_fallback(tmp_path):
+    results = _execute_reliability_renderers(tmp_path, '''
+const trust = {
+  validation_status: "validated",
+  freshness_status: "fresh",
+  provider: "Open-Meteo",
+  timezone: "Europe/Zurich",
+  snapshot_age_minutes: 8,
+  maximum_age_minutes: 60,
+  retrieved_at_utc: "retrieved",
+  valid_from: "from",
+  valid_until: "until",
+};
+function snapshot() { return JSON.parse(JSON.stringify(values)); }
+renderRecommendationConfidence(null);
+renderWeatherTrust(trust, {
+  admissibility: "caution",
+  reasons: ["provider_reliability_unavailable"],
+  presentation: {
+    label: "Validation météo partielle",
+    summary: "Les données sont utilisables, sans historique fournisseur.",
+  },
+}, "classic");
+const caution = snapshot();
+renderWeatherTrust(trust, {
+  admissibility: "admissible",
+  presentation: {
+    label: "Météo validée pour cette décision",
+    summary: "Les conditions sont suffisamment documentées.",
+  },
+}, "classic");
+const admissible = snapshot();
+renderWeatherTrust(trust, undefined, "classic");
+const legacy = snapshot();
+const output = {
+  caution,
+  admissible,
+  legacy,
+  confidence: {
+    text: ui.recommendationConfidence.textContent,
+    hidden: ui.recommendationConfidencePanel.hidden,
+  },
+};
+''')
+
+    assert results["caution"]["#classic-weather-status"] == "Validation météo partielle"
+    assert results["admissible"]["#classic-weather-status"] == "Météo validée pour cette décision"
+    assert results["legacy"]["#classic-weather-status"] == "Validation météo non renseignée"
+    assert results["legacy"]["#classic-weather-title"] == (
+        "Le statut de validation météo n’est pas renseigné dans cette réponse."
+    )
+    assert results["confidence"] == {"text": "", "hidden": True}
+
+
+def test_weather_refusal_keeps_global_confidence_cartouche_off_blocked_screen():
+    page = make_client().get("/").text
+    script = make_client().get("/ui/app.js").text
+    load_tonight = script.split("async function loadTonight(availability) {", 1)[1].split(
+        "ui.recommendationSubmit.addEventListener", 1
+    )[0]
+    refusal = load_tonight.split('if (payload.status === "weather_refused") {', 1)[1].split(
+        'if (payload.status !== "available")', 1
+    )[0]
+
+    assert '<div id="recommendation-confidence" class="recommendation-reliability" hidden' in page
+    assert "payload.weather_decision.presentation.label" in refusal
+    assert "payload.weather_decision.presentation.summary" in refusal
+    assert "return;" in refusal
+    assert "renderDecision(payload)" not in refusal
 
 
 def test_actionability_refusal_renderer_floors_found_and_ceils_required_minutes(
@@ -1053,7 +1186,7 @@ def test_primary_status_render_executes_without_fabricating_missing_values(tmp_p
     harness = '''
 const values = {};
 const state = {};
-const ui = {openMission: {dataset: {}}, recommendationConfidence: {}, primaryIntentChoice: {}};
+const ui = {openMission: {dataset: {}}, recommendationConfidencePanel: {hidden: true}, recommendationConfidence: {}, primaryIntentChoice: {}};
 const document = {querySelector: () => ({style: {}})};
 const labels = {actions: {
   start_project: "Commencer ce projet",
@@ -1082,7 +1215,8 @@ function run() {
       action: "start_project", target_decision_status: status});
     results[status] = {values: JSON.parse(JSON.stringify(values)),
       hidden: ui.openMission.hidden, disabled: ui.openMission.disabled,
-      confidence: ui.recommendationConfidence.textContent};
+      confidence: ui.recommendationConfidence.textContent,
+      confidenceHidden: ui.recommendationConfidencePanel.hidden};
   }
   renderDecision({target: "IC1396", catalog_key: "IC1396", decision_id: "continue-decision",
     action: "continue_project", target_decision_status: "recommended"});
@@ -1107,7 +1241,8 @@ function run() {
     insufficient = results['insufficient_evidence']
     assert insufficient['values']['#recommendation'] == 'Preuves insuffisantes'
     assert 'assez d’éléments fiables' in insufficient['values']['#insights-list'][0]
-    assert insufficient['confidence'] == 'Non disponible'
+    assert insufficient['confidence'] == ''
+    assert insufficient['confidenceHidden']
     assert insufficient['values']['#quality-title'] == 'Non évaluée'
     assert insufficient['values']['#window-value'] == 'À confirmer'
     assert insufficient['values']['#duration-value'] == 'Non précisée'
