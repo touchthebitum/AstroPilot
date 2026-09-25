@@ -1288,6 +1288,7 @@ function reasonText(value) {return value;}
 function renderWeatherTrust() {}
 function renderAlternatives() {}
 function renderIntentChoice() {}
+function filterCardCopy() {return {value: "Filtre non précisé", note: "", detail: ""};}
 function intentMode() {return "legacy";}
 function intentReady() {return true;}
 function restoreAcceptanceControls() {}

@@ -80,12 +80,72 @@ assert.deepEqual(reasonItems.map(item => item.dataset.reasonCode), [
 """)
 
 
-def test_filter_copy_keeps_concrete_filter_and_relabels_known_unselected_intents():
+def test_filter_copy_uses_distinct_intent_and_hardware_wording():
+    page = PAGE.read_text(encoding="utf-8")
     source = SCRIPT.read_text(encoding="utf-8")
-    assert 'filter?.name || (assessments.length' in source
-    assert '"Aucun filtre sélectionné" : "Aucun filtre précisé"' in source
-    assert '${joinedIntentLabels(assessments)} évalués ci-dessous' in source
-    assert '? filter.filter_type.replaceAll("_", " ")' in source
+    assert 'id="filter-title">Filtre<' in page
+    assert 'id="filter-detail"' in page
+    assert 'value: "Aucun type de filtre retenu"' in source
+    assert '"Filtre matériel non renseigné"' in source
+    assert '"Filtre non précisé"' in source
+
+
+def test_selected_ha_without_hardware_filter_renders_contextual_copy():
+    helpers = _javascript_between(
+        "function joinedIntentLabels(assessments) {", "function renderIntentChoice(",
+    )
+    _run_javascript(r"""
+const assert = require('node:assert/strict');
+""" + helpers + r"""
+const copy = filterCardCopy({
+  selected_acquisition_intent_id: 'sh2-129_ha',
+  selected_filter: null,
+  acquisition_intent_assessments: [
+    {acquisition_intent_id: 'sh2-129_ha', filter_type: 'Ha', label: 'Hα · Sh2-129'},
+    {acquisition_intent_id: 'ou4_oiii', filter_type: 'OIII', label: 'OIII · Ou4'},
+  ],
+});
+assert.deepEqual(copy, {
+  value: 'Type requis : Hα',
+  note: 'Filtre matériel non renseigné',
+  detail: 'Hα · Sh2-129 recommandé ; OIII · Ou4 également évalué',
+});
+""")
+
+
+def test_filter_card_copy_covers_hardware_unselected_and_legacy_states():
+    helpers = _javascript_between(
+        "function joinedIntentLabels(assessments) {", "function renderIntentChoice(",
+    )
+    _run_javascript(r"""
+const assert = require('node:assert/strict');
+""" + helpers + r"""
+const assessments = [
+  {acquisition_intent_id: 'sh2-129_ha', filter_type: 'Ha', label: 'Hα · Sh2-129'},
+  {acquisition_intent_id: 'ou4_oiii', filter_type: 'OIII', label: 'OIII · Ou4'},
+];
+assert.deepEqual(filterCardCopy({
+  selected_acquisition_intent_id: 'sh2-129_ha',
+  selected_filter: {name: 'Baader Hα 6.5 nm', filter_type: 'Ha'},
+  acquisition_intent_assessments: assessments,
+}), {
+  value: 'Type requis : Hα',
+  note: 'Filtre matériel : Baader Hα 6.5 nm',
+  detail: 'Hα · Sh2-129 recommandé ; OIII · Ou4 également évalué',
+});
+assert.deepEqual(filterCardCopy({
+  selected_acquisition_intent_id: null,
+  selected_filter: null,
+  acquisition_intent_assessments: assessments,
+}), {
+  value: 'Aucun type de filtre retenu',
+  note: 'Filtre matériel non renseigné',
+  detail: 'Hα · Sh2-129 et OIII · Ou4 évalués',
+});
+assert.deepEqual(filterCardCopy({selected_filter: null}), {
+  value: 'Filtre non précisé', note: '', detail: '',
+});
+""")
 
 
 def test_saved_mission_restores_only_from_server_without_acceptance():
