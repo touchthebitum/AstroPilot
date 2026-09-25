@@ -1055,7 +1055,10 @@ const values = {};
 const state = {};
 const ui = {openMission: {dataset: {}}, recommendationConfidence: {}, primaryIntentChoice: {}};
 const document = {querySelector: () => ({style: {}})};
-const labels = {actions: {start_project: "Commencer ce projet"}, quality: {}, factors: {}};
+const labels = {actions: {
+  start_project: "Commencer ce projet",
+  continue_project: "Continuer ce projet",
+}, quality: {}, factors: {}};
 function clearAcceptedMission() {}
 function clock(value) {return value || null;}
 function duration(value) {return value ? String(value) : "Non précisée";}
@@ -1081,6 +1084,9 @@ function run() {
       hidden: ui.openMission.hidden, disabled: ui.openMission.disabled,
       confidence: ui.recommendationConfidence.textContent};
   }
+  renderDecision({target: "IC1396", catalog_key: "IC1396", decision_id: "continue-decision",
+    action: "continue_project", target_decision_status: "recommended"});
+  results.continue_project = {values: JSON.parse(JSON.stringify(values))};
   return JSON.stringify(results);
 }
 '''
@@ -1106,5 +1112,6 @@ function run() {
     assert insufficient['values']['#window-value'] == 'À confirmer'
     assert insufficient['values']['#duration-value'] == 'Non précisée'
     assert results['recommended']['values']['#recommendation'] == 'Commencer ce projet'
+    assert results['continue_project']['values']['#recommendation'] == 'Continuer ce projet'
     assert results['recommended']['values']['#target-label'] == 'Cible prioritaire'
     assert not results['recommended']['disabled']
