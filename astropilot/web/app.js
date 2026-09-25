@@ -914,8 +914,8 @@ function restorePendingAcceptanceAttempt() {
 
 function showUnresolvedAcceptance({ malformed = state.pendingAcceptanceStorageInvalid } = {}) {
   ui.pendingAcceptanceMessage.textContent = malformed
-    ? "La sélection en attente ne peut pas être relue de façon sûre. AstroPilot bloque toute nouvelle sélection pour éviter un doublon."
-    : "Le résultat de votre sélection n’a pas pu être confirmé. AstroPilot doit vérifier cette sélection avant de poursuivre.";
+    ? "La sélection en attente ne peut pas être relue de façon sûre. NightMerit bloque toute nouvelle sélection pour éviter un doublon."
+    : "Le résultat de votre sélection n’a pas pu être confirmé. NightMerit doit vérifier cette sélection avant de poursuivre.";
   ui.retryPendingAcceptance.disabled = malformed || state.acceptingRecommendation;
   setView("unresolved_acceptance");
 }
@@ -1050,7 +1050,7 @@ function renderDecision(decision) {
   }
 
   const evidenceMessage = insufficient
-    ? "AstroPilot ne dispose pas d’assez d’éléments fiables pour recommander cette cible pour cette session."
+    ? "NightMerit ne dispose pas d’assez d’éléments fiables pour recommander cette cible pour cette session."
     : null;
   setList("#insights-list", [...(evidenceMessage ? [evidenceMessage] : []), ...positives, ...information], "Aucune explication supplémentaire disponible.");
   text("#decision-essential", evidenceMessage || positives.find(Boolean) || information.find(Boolean)
@@ -1592,8 +1592,8 @@ function initializeConfiguration(payload) {
   state.configurationDraft = draftFromConfiguration(payload);
   document.querySelector("#legacy-bortle-note").hidden = !payload.needs_configuration_confirmation;
   text("#onboarding-title", payload.needs_configuration_confirmation
-    ? "Confirmez votre profil AstroPilot."
-    : "Préparons AstroPilot.");
+    ? "Confirmez votre profil NightMerit."
+    : "Préparons NightMerit.");
   ui.onboarding.querySelector(".wizard-heading .state-kicker").textContent =
     payload.needs_configuration_confirmation ? "Profil historique"
       : payload.configured ? "Modifier la configuration" : "Première configuration";
@@ -1711,7 +1711,7 @@ async function loadConfiguration({ afterConflict = false } = {}) {
       setView("site");
     }
   } catch (_error) {
-    showConfigurationError("AstroPilot ne parvient pas à charger la configuration. La saisie pourra reprendre après reconnexion.");
+    showConfigurationError("NightMerit ne parvient pas à charger la configuration. La saisie pourra reprendre après reconnexion.");
   }
 }
 
@@ -2015,10 +2015,10 @@ function backendAvailabilityMessage(detail) {
 
 const partialMessages = Object.freeze({
   no_night: ["Aucune nuit exploitable", "Les prévisions ne montrent pas encore de fenêtre adaptée. Revenez lorsque les conditions évoluent."],
-  no_candidate: ["Aucune cible adaptée", "AstroPilot n’a trouvé aucune cible compatible avec cette nuit et votre configuration."],
+  no_candidate: ["Aucune cible adaptée", "NightMerit n’a trouvé aucune cible compatible avec cette nuit et votre configuration."],
   no_recommendation: ["Décision encore incertaine", "Les données disponibles ne permettent pas d’établir une recommandation suffisamment fiable."],
   no_mission: ["Mission incomplète", "Une cible a été identifiée, mais la mission opérationnelle n’a pas pu être assemblée."],
-  no_productive_window: ["Aucun créneau suffisamment productif", "Une nuit astronomique existe, mais aucune fenêtre n’atteint le seuil opérationnel requis par AstroPilot."],
+  no_productive_window: ["Aucun créneau suffisamment productif", "Une nuit astronomique existe, mais aucune fenêtre n’atteint le seuil opérationnel requis par NightMerit."],
 });
 
 const actionabilityCauseLabels = Object.freeze({
@@ -2106,26 +2106,26 @@ function showMessage(title, body, { kicker = "Décision indisponible", retry = t
 function normalizeError(response, payload) {
   const detail = payload?.detail;
   if (payload?.error === "user_profile_unavailable") {
-    return ["Configuration requise", "AstroPilot doit relire votre configuration avant de préparer la nuit."];
+    return ["Configuration requise", "NightMerit doit relire votre configuration avant de préparer la nuit."];
   }
   if (response.status === 503) {
     if (detail?.code === "weather_unavailable") {
-      return ["Météo temporairement indisponible", "AstroPilot ne peut pas encore lire les conditions de votre site. Réessayez dans un instant."];
+      return ["Météo temporairement indisponible", "NightMerit ne peut pas encore lire les conditions de votre site. Réessayez dans un instant."];
     }
     if (detail?.code === "weather_invalid") {
-      return ["Données météo rejetées", "AstroPilot a reçu une réponse météo, mais ses contrôles de cohérence ont échoué. Aucune décision n’est calculée."];
+      return ["Données météo rejetées", "NightMerit a reçu une réponse météo, mais ses contrôles de cohérence ont échoué. Aucune décision n’est calculée."];
     }
     if (detail?.code === "weather_insufficient") {
       return ["Prévisions météo insuffisantes", "La couverture reçue ne permet pas de préparer la nuit avec assez de données. Aucune décision n’est calculée."];
     }
     if (detail?.code === "weather_stale") {
-      return ["Données météo trop anciennes", "Les données météo reçues dépassent la limite de fraîcheur de 90 minutes. AstroPilot refuse de calculer une décision potentiellement trompeuse."];
+      return ["Données météo trop anciennes", "Les données météo reçues dépassent la limite de fraîcheur de 90 minutes. NightMerit refuse de calculer une décision potentiellement trompeuse."];
     }
     if (detail?.code === "decision_invalid") {
-      return ["Décision rejetée par sécurité", "AstroPilot a détecté une contradiction interne et refuse d’afficher une recommandation potentiellement trompeuse."];
+      return ["Décision rejetée par sécurité", "NightMerit a détecté une contradiction interne et refuse d’afficher une recommandation potentiellement trompeuse."];
     }
     if (detail?.code === "location_timezone_unresolved") {
-      return ["Fuseau horaire introuvable", "AstroPilot ne peut pas relier ce site à un fuseau horaire fiable et refuse de calculer une nuit locale."];
+      return ["Fuseau horaire introuvable", "NightMerit ne peut pas relier ce site à un fuseau horaire fiable et refuse de calculer une nuit locale."];
     }
     return ["Prévisions temporairement indisponibles", "La prévision de cette nuit n’est pas accessible pour le moment. Réessayez dans un instant."];
   }
@@ -2135,7 +2135,7 @@ function normalizeError(response, payload) {
       : detail?.message;
     return ["Informations à vérifier", validationMessage || "Certaines informations nécessaires à la décision ne sont pas valides."];
   }
-  return ["AstroPilot n’a pas pu répondre", "Une erreur inattendue empêche la préparation de votre nuit."];
+  return ["NightMerit n’a pas pu répondre", "Une erreur inattendue empêche la préparation de votre nuit."];
 }
 
 function acceptanceError(code, status) {
@@ -2161,7 +2161,7 @@ function acceptanceError(code, status) {
     return ["Cette tentative d’acceptation ne correspond plus au choix initial. Actualisez la recommandation.", true];
   }
   if (["selection_id_conflict", "mission_id_conflict", "acceptance_lineage_conflict"].includes(code)) {
-    return ["AstroPilot ne peut pas confirmer cette acceptation. Aucune mission n’est affichée.", true];
+    return ["NightMerit ne peut pas confirmer cette acceptation. Aucune mission n’est affichée.", true];
   }
   if (code === "decision_lineage_persistence_error") {
     return ["La mission n’a pas pu être enregistrée. Réessayez lorsque le stockage est disponible.", false];
@@ -2334,7 +2334,7 @@ async function acceptRecommendation({
       show("decision");
       showAcceptanceStatus(
         source === "alternative"
-          ? `AstroPilot recommandait ${decision.target || decision.catalog_key}. Vous avez choisi ${selectedTarget}.`
+          ? `NightMerit recommandait ${decision.target || decision.catalog_key}. Vous avez choisi ${selectedTarget}.`
           : "Mission enregistrée.",
       );
     } else {
@@ -2427,7 +2427,7 @@ async function loadTonight(availability) {
     if (payload.status !== "available") {
       const [title, body] = payload.status === "no_productive_window"
         ? actionabilityRefusalMessage(payload.actionability_refusal)
-        : partialMessages[payload.status] || ["Décision indisponible", "AstroPilot ne dispose pas encore d’une recommandation exploitable."];
+        : partialMessages[payload.status] || ["Décision indisponible", "NightMerit ne dispose pas encore d’une recommandation exploitable."];
       showMessage(title, body, { kicker: "Analyse terminée" });
       return;
     }

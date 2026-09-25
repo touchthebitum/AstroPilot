@@ -6,20 +6,20 @@
     <meta name="theme-color" content="#08111f">
     <meta
       name="description"
-      content="La recommandation AstroPilot pour votre prochaine nuit d'astrophotographie."
+      content="La recommandation NightMerit pour votre prochaine nuit d'astrophotographie."
     >
-    <title>Ce soir — AstroPilot</title>
+    <title>Ce soir — NightMerit</title>
     <link rel="stylesheet" href="/ui/styles.css?v=__ASTROPILOT_ASSET_TOKEN__">
     <script src="/ui/app.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
   </head>
   <body>
     <div class="sky-glow" aria-hidden="true"></div>
     <header class="topbar">
-      <a class="brand" href="/" aria-label="AstroPilot — Ce soir">
+      <a class="brand" href="/" aria-label="NightMerit — Ce soir">
         <span class="brand-mark" aria-hidden="true">
           <span></span>
         </span>
-        <span>AstroPilot</span>
+        <span>NightMerit</span>
       </a>
       <div class="night-context">
         <span class="context-label">Ce soir</span>
@@ -53,7 +53,7 @@
         <div>
           <p class="state-kicker">Préparation</p>
           <h2>Chargement de votre configuration…</h2>
-          <p>AstroPilot vérifie votre site et votre matériel.</p>
+          <p>NightMerit vérifie votre site et votre matériel.</p>
         </div>
       </section>
 
@@ -78,7 +78,7 @@
           >
             <h3 id="configuration-recovery-title">Confirmer la réinitialisation</h3>
             <p id="configuration-recovery-warning">
-              AstroPilot ne peut pas lire la configuration enregistrée. La réinitialisation retirera cette
+              NightMerit ne peut pas lire la configuration enregistrée. La réinitialisation retirera cette
               configuration active et vous devrez saisir à nouveau votre site, votre matériel et vos projets.
               Une copie locale des données illisibles sera conservée.
             </p>
@@ -96,7 +96,7 @@
         <div class="wizard-heading">
           <div>
             <p class="state-kicker">Première configuration</p>
-            <h2 id="onboarding-title">Préparons AstroPilot.</h2>
+            <h2 id="onboarding-title">Préparons NightMerit.</h2>
           </div>
           <ol class="wizard-progress" aria-label="Progression">
             <li data-progress="site">Site</li>
@@ -180,7 +180,7 @@
           <div id="project-progress-editor" class="project-progress-editor" hidden></div>
           <label id="zero-projects-wrap" class="project-none" for="zero-projects">
             <input id="zero-projects" type="checkbox" checked>
-            <span><strong>Aucun projet pour l’instant</strong><small>AstroPilot peut déjà découvrir une cible adaptée sans projet.</small></span>
+            <span><strong>Aucun projet pour l’instant</strong><small>NightMerit peut déjà découvrir une cible adaptée sans projet.</small></span>
           </label>
           <div class="wizard-actions">
             <button class="secondary-button" data-back="equipment" type="button">Retour</button>
@@ -209,7 +209,7 @@
         <div class="availability-heading">
           <p class="state-kicker">Configuration prête</p>
           <h2 id="availability-title" tabindex="-1">Quand êtes-vous disponible ce soir&nbsp;?</h2>
-          <p>Configuration enregistrée. AstroPilot utilisera uniquement la plage que vous indiquez pour cette recommandation.</p>
+          <p>Configuration enregistrée. NightMerit utilisera uniquement la plage que vous indiquez pour cette recommandation.</p>
           <p id="availability-site-timezone" class="field-note" hidden></p>
           <p id="availability-timezone-warning" class="form-error" role="alert" hidden>Le fuseau horaire du site ne peut pas être déterminé. Vérifiez les coordonnées du site avant de choisir une heure précise.</p>
         </div>
@@ -223,7 +223,7 @@
           <fieldset class="availability-modes">
             <legend>Ma disponibilité</legend>
             <label><input type="radio" name="availability-mode" value="all_night"><span><strong>Toute la nuit</strong><small>Je peux observer pendant toute la nuit astronomique.</small></span></label>
-            <label><input type="radio" name="availability-mode" value="duration"><span><strong>Pendant environ X heures</strong><small>AstroPilot place cette durée dans la meilleure fenêtre.</small></span></label>
+            <label><input type="radio" name="availability-mode" value="duration"><span><strong>Pendant environ X heures</strong><small>NightMerit place cette durée dans la meilleure fenêtre.</small></span></label>
             <label><input type="radio" name="availability-mode" value="start_and_duration"><span><strong>À partir de HH:MM pendant X heures</strong><small>Je connais mon heure de début.</small></span></label>
             <label><input type="radio" name="availability-mode" value="until"><span><strong>Jusqu’à HH:MM</strong><small>Je dois avoir terminé avant cette heure.</small></span></label>
             <label><input type="radio" name="availability-mode" value="fixed_window"><span><strong>Entre HH:MM et HH:MM</strong><small>Je dispose d’une plage précise.</small></span></label>
@@ -258,7 +258,7 @@
         <div class="orbit" aria-hidden="true"><span></span></div>
         <div>
           <p class="state-kicker">Analyse en cours</p>
-          <h2>AstroPilot observe votre nuit…</h2>
+          <h2>NightMerit observe votre nuit…</h2>
           <p>Météo, cible, fenêtre et qualité du ciel.</p>
         </div>
       </section>
@@ -279,7 +279,7 @@
           <p class="state-kicker">Sélection à vérifier</p>
           <h2>Le résultat de votre sélection reste incertain.</h2>
           <p id="pending-acceptance-message">
-            Le résultat de votre sélection n’a pas pu être confirmé. AstroPilot doit vérifier cette sélection avant de poursuivre.
+            Le résultat de votre sélection n’a pas pu être confirmé. NightMerit doit vérifier cette sélection avant de poursuivre.
           </p>
         </div>
         <button class="primary-button" id="retry-pending-acceptance" type="button">
@@ -499,7 +499,7 @@
           </section>
 
           <footer class="mission-footer">
-            <p>Mission créée après votre choix explicite et enregistrée par AstroPilot.</p>
+            <p>Mission créée après votre choix explicite et enregistrée par NightMerit.</p>
             <button class="secondary-button" id="mission-back" type="button">Retour à la recommandation</button>
           </footer>
         </div>
@@ -507,7 +507,7 @@
     </main>
 
     <footer class="page-footer">
-      <span>AstroPilot</span>
+      <span>NightMerit</span>
       <span aria-hidden="true">·</span>
       <span>Une décision. Une nuit.</span>
       <span aria-hidden="true">·</span>

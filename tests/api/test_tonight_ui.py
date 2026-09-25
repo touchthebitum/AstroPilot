@@ -62,7 +62,7 @@ def test_root_serves_tonight_classic_ui():
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
-    assert "Ce soir — AstroPilot" in response.text
+    assert "Ce soir — NightMerit" in response.text
     assert "Photographier cette cible" in response.text
     assert "Données météo par Open-Meteo.com" in response.text
     assert 'id="weather-trust"' in response.text
@@ -337,7 +337,7 @@ def test_tonight_ui_assets_are_served():
     assert "state.currentDecision?.decision_id !== expectedDecisionId" in acceptance_function
     assert "payload.catalog_key === selectedCatalogKey" in acceptance_function
     assert 'source === "alternative"' in acceptance_function
-    assert "AstroPilot recommandait ${decision.target || decision.catalog_key}. Vous avez choisi ${selectedTarget}." in acceptance_function
+    assert "NightMerit recommandait ${decision.target || decision.catalog_key}. Vous avez choisi ${selectedTarget}." in acceptance_function
     assert 'text("#target-name"' not in acceptance_function
     assert 'text("#recommendation"' not in acceptance_function
     assert "recommendation_confidence" in script.text
@@ -886,7 +886,7 @@ def test_corrupt_configuration_alone_exposes_explicit_recovery():
     )[1].split("async function recoverConfiguration()", 1)[0]
     assert 'code === "configuration_corrupt"' in loader
     assert 'showConfigurationError(message, { code })' in loader
-    assert 'showConfigurationError("AstroPilot ne parvient pas à charger la configuration.' in loader
+    assert 'showConfigurationError("NightMerit ne parvient pas à charger la configuration.' in loader
     assert "configuration_corrupt" in loader
     assert "location_timezone_unresolved" not in error_renderer
     assert "configuration_persistence_error" not in error_renderer
@@ -1022,7 +1022,7 @@ def test_primary_status_controls_title_and_preserves_missing_values():
     assert 'decision.target_decision_status === "insufficient_evidence"' in render
     assert 'recommended && !noAcquisition && !intentUnavailable ? "Cible prioritaire" : "Cible évaluée"' in render
     assert '"Preuves insuffisantes"' in render
-    assert 'AstroPilot ne dispose pas d’assez d’éléments fiables' in render
+    assert 'NightMerit ne dispose pas d’assez d’éléments fiables' in render
     assert 'ui.openMission.hidden = !actionablePrimary' in render
     assert 'ui.openMission.disabled = !actionablePrimary' in render
     assert '"À confirmer"' in render
