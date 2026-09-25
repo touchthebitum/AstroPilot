@@ -25,18 +25,14 @@ class NightConditionsProvider:
         return values[index]
 
     @staticmethod
-    def cloud(current, context):
+    def cloud(hour, context):
+        if context.weather and context.weather.hourly_clouds:
+            return NightConditionsProvider._value(
+                hour,
+                context.weather.hourly_clouds,
+                context.cloud_cover,
+            )
 
-        if (
-            context.weather
-            and context.weather.hourly_clouds
-            and 
-    len(context.weather.hourly_clouds) > 0
-        ):
-            index = min(int(current * 4), 
-    len(context.weather.hourly_clouds) - 1)
-
-            return context.weather.hourly_clouds[index]
         return context.cloud_cover
 
     @staticmethod
@@ -88,4 +84,3 @@ class NightConditionsProvider:
             longitude=context.longitude,
             obs_time=obs_time,
         )
-
