@@ -76,6 +76,26 @@ def test_target_decision_status_has_exact_transport_values():
     }
 
 
+def test_continue_project_action_is_preserved_in_transport():
+    recommendation = Recommendation(
+        opportunity=Opportunity(
+            action=Action.CONTINUE_PROJECT,
+            candidate=make_candidate(),
+        ),
+        confidence=None,
+    )
+
+    response = TonightResponse.from_result(
+        TonightResult(
+            night={"date": date(2026, 9, 1)},
+            recommendation=recommendation,
+            mission=None,
+        )
+    )
+
+    assert response.action == "continue_project"
+
+
 @pytest.mark.parametrize(
     "status",
     [
