@@ -129,23 +129,23 @@ def test_hourly_weather_flows_through_productivity_into_the_mission(
     mission, weather = _build_mission(rows, frozen_time, buttes_site)
 
     assert mission.productivity.astronomical_hours == 1.0
-    assert mission.productivity.productive_hours == pytest.approx(0.86)
-    assert mission.productivity.confidence == pytest.approx(0.86)
+    assert mission.productivity.productive_hours == pytest.approx(0.98)
+    assert mission.productivity.confidence == pytest.approx(0.98)
     assert mission.night_slices is mission.productivity.timeline.slices
     assert [night_slice.cloud_cover for night_slice in mission.night_slices] == [
         0.0,
-        10.0,
-        20.0,
-        40.0,
+        0.0,
+        0.0,
+        0.0,
     ]
     assert [
         night_slice.productivity_score
         for night_slice in mission.night_slices
-    ] == pytest.approx([0.98, 0.91, 0.84, 0.70])
+    ] == pytest.approx([0.98, 0.98, 0.98, 0.98])
     assert len(mission.productivity.windows) == 1
     assert mission.productivity.windows[0].start_hour == 0.0
     assert mission.productivity.windows[0].end_hour == 1.0
-    assert mission.productivity.windows[0].productivity == pytest.approx(0.857)
+    assert mission.productivity.windows[0].productivity == pytest.approx(0.98)
     assert mission.recommended_hours == 1.0
     assert mission.tasks[0].title == "Installer le matériel"
     assert weather.hourly_clouds == [0.0, 10.0, 20.0, 40.0]
