@@ -11,6 +11,7 @@ from decision.mission.mission_assembler import (
 )
 from decision.mission.mission_input import MissionInput
 from decision.mission.night_mission import MissionReason
+from decision.filtering.selected_filter import SelectedFilter
 from decision.models.session_availability import (
     SessionAvailability,
     SessionAvailabilityMode,
@@ -178,6 +179,57 @@ def test_mission_preserves_reasons_and_computed_results(
     assert mission.expected_gain == 3.6
     assert mission.selected_filter is selected_filter
     assert mission.productivity is isolated_dependencies.productivity
+
+
+def test_mission_rejects_filter_diverging_from_selected_intent(
+    frozen_time,
+    summary,
+    context,
+):
+    input_data = mission_input(
+        frozen_time,
+        WeatherForecast(),
+        imaging_field_id="sh2-129_ou4",
+        acquisition_intent_id="sh2-129_ha",
+        selected_filter=SelectedFilter("OIII", "OIII"),
+    )
+
+    with pytest.raises(ValueError, match="selected_filter_intent_mismatch"):
+        MissionAssembler.build(
+            target="M31",
+            summary=summary,
+            context=context,
+            equipment=["setup"],
+            alternatives=[],
+            mission_input=input_data,
+        )
+
+
+def test_eligible_intent_without_legacy_filter_remains_actionable(
+    frozen_time,
+    summary,
+    context,
+    isolated_dependencies,
+):
+    result = MissionAssembler.build(
+        target="M31",
+        summary=summary,
+        context=context,
+        equipment=["setup"],
+        alternatives=[],
+        mission_input=mission_input(
+            frozen_time,
+            WeatherForecast(),
+            imaging_field_id="sh2-129_ou4",
+            acquisition_intent_id="sh2-129_ha",
+            selected_filter=None,
+        ),
+        _include_actionability_diagnostic=True,
+    )
+
+    assert result.mission is not None
+    assert result.mission.selected_filter is None
+    assert result.actionability_refusal is None
 
 
 @pytest.mark.parametrize("imaging_field_id", [None, "sh2-129_ou4"])

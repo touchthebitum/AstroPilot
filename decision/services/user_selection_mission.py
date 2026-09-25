@@ -2,6 +2,9 @@ from collections.abc import Mapping
 from dataclasses import replace
 
 from decision.mission.night_mission import NightMission
+from decision.filtering.intent_filter_reconciliation import (
+    validate_selected_filter_for_intent,
+)
 from decision.models.session_availability import SessionAvailability
 from decision.models.user_selection import UserSelection, UserSelectionSource
 from decision.recommendation.recommendation import Recommendation
@@ -111,6 +114,15 @@ class UserSelectionMissionService:
             )
 
         def build_selected_mission_input(evaluation):
+            evaluation = {
+                **evaluation,
+                "imaging_field_id": (
+                    validated_selection.selected_imaging_field_id
+                ),
+                "selected_acquisition_intent_id": (
+                    validated_selection.selected_acquisition_intent_id
+                ),
+            }
             mission_input = self.build_mission_input(
                 evaluation,
                 profile=profile,
@@ -139,6 +151,11 @@ class UserSelectionMissionService:
             raise UserSelectionValidationError("selected_target_not_actionable")
         if not isinstance(mission, NightMission):
             raise TypeError("Expected NightMission or None")
+        validate_selected_filter_for_intent(
+            imaging_field_id=mission.imaging_field_id,
+            acquisition_intent_id=mission.acquisition_intent_id,
+            selected_filter=mission.selected_filter,
+        )
         expected_mission_targets = {
             selected_catalog_key,
             selected_object.get("name"),

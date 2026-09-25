@@ -21,6 +21,9 @@ from astropilot.catalog import CATALOG
 from decision.mission.mission_input import MissionInput
 from decision.models.session_availability import SessionAvailability
 from decision.engines.image_quality_engine import ImageQualityEngine
+from decision.filtering.intent_filter_reconciliation import (
+    validate_selected_filter_for_intent,
+)
 from decision.quality.astro_quality_context import AstroQualityContext
 from decision.quality.astro_quality_engine import AstroQualityEngine
 from decision.quality.dew_risk_engine import DewRiskEngine
@@ -265,6 +268,13 @@ class MissionAssembler:
         mission_input: MissionInput | None = None,
         _include_actionability_diagnostic: bool = False,
     ):
+
+        if mission_input is not None:
+            validate_selected_filter_for_intent(
+                imaging_field_id=mission_input.imaging_field_id,
+                acquisition_intent_id=mission_input.acquisition_intent_id,
+                selected_filter=mission_input.selected_filter,
+            )
 
         reasons = []
 
