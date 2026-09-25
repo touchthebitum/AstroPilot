@@ -86,6 +86,8 @@ def test_root_serves_tonight_classic_ui():
     assert 'id="availability-duration"' in response.text
     assert 'id="availability-start"' in response.text
     assert 'id="availability-end"' in response.text
+    assert 'id="availability-overnight-hint"' in response.text
+    assert 'id="availability-overnight-hint" class="field-note availability-overnight-hint" role="status" aria-live="polite" hidden' in response.text
     for mode in (
         "all_night",
         "duration",
@@ -652,9 +654,93 @@ def test_availability_uses_read_only_site_timezone_and_local_wall_clock_transpor
     assert "availability.timezone" not in collector
     assert "timezone:" not in collector
     assert "new Date(" not in collector
-    assert "end <= start" in collector
+    assert "end === start" in collector
+    assert "!sameDate && end < start" in collector
     assert 'return { mode: "all_night" }' in collector
     assert 'const availability = { mode: "duration" }' in collector
+
+
+def test_fixed_window_overnight_hint_and_payload_follow_the_civil_contract(tmp_path):
+    import json
+    import shutil
+    import subprocess
+
+    import pytest
+
+    engine = shutil.which("node") or shutil.which("osascript")
+    if engine is None:
+        pytest.skip("A JavaScript runtime is required for the availability UI tests")
+    script = make_client().get("/ui/app.js").text
+    functions = "function hoursToIsoDuration(rawValue) {" + script.split(
+        "function hoursToIsoDuration(rawValue) {", 1
+    )[1].split("function updateAvailabilityFields()", 1)[0]
+    harness = r'''
+let selectedMode = "fixed_window";
+let startValue = "";
+let endValue = "";
+const hint = {hidden: true, textContent: ""};
+const ui = {availabilityOvernightHint: hint};
+const wallClockAvailabilityModes = Object.freeze(["start_and_duration", "until", "fixed_window"]);
+function currentSiteTimezone() { return "Europe/Zurich"; }
+const document = {
+  querySelector(selector) {
+    if (selector === 'input[name="availability-mode"]:checked') return {value: selectedMode};
+    if (selector === "#availability-start") return {value: startValue};
+    if (selector === "#availability-end") return {value: endValue};
+    if (selector === "#availability-duration") return {value: "1.5"};
+    throw new Error(`Unexpected selector: ${selector}`);
+  },
+};
+function scenario(mode, start, end) {
+  selectedMode = mode;
+  startValue = start;
+  endValue = end;
+  updateAvailabilityOvernightHint();
+  let payload = null;
+  let error = null;
+  try { payload = collectAvailabilityPayload(); }
+  catch (caught) { error = caught.availabilityCode; }
+  return {hidden: hint.hidden, text: hint.textContent, payload, error};
+}
+const output = {
+  rollover: scenario("fixed_window", "2026-09-25T20:30", "2026-09-25T00:00"),
+  normal: scenario("fixed_window", "2026-09-25T20:30", "2026-09-25T22:00"),
+  explicitNextDay: scenario("fixed_window", "2026-09-25T20:30", "2026-09-26T00:00"),
+  equal: scenario("fixed_window", "2026-09-25T20:30", "2026-09-25T20:30"),
+  otherMode: scenario("until", "2026-09-25T20:30", "2026-09-25T00:00"),
+};
+'''
+    output = "\nconsole.log(JSON.stringify(output));\n" if Path(engine).name == "node" else "\nJSON.stringify(output);\n"
+    path = tmp_path / "availability-overnight.js"
+    path.write_text(harness + functions + output)
+    command = [engine] if Path(engine).name == "node" else [engine, "-l", "JavaScript"]
+    completed = subprocess.run(
+        [*command, str(path)], text=True, capture_output=True, check=True,
+    )
+    result = json.loads(completed.stdout)
+
+    assert result["rollover"] == {
+        "hidden": False,
+        "text": "Fin interprétée le lendemain (26/09)",
+        "payload": {
+            "mode": "fixed_window",
+            "start_local": "2026-09-25T20:30",
+            "end_local": "2026-09-25T00:00",
+        },
+        "error": None,
+    }
+    assert result["normal"]["hidden"] is True
+    assert result["explicitNextDay"]["hidden"] is True
+    assert result["equal"]["hidden"] is True
+    assert result["equal"]["error"] == "availability_end_must_follow_start"
+    assert result["otherMode"]["hidden"] is True
+    assert result["otherMode"]["payload"] == {
+        "mode": "until",
+        "end_local": "2026-09-25T00:00",
+    }
+
+    assert 'addEventListener("input", updateAvailabilityOvernightHint)' in script
+    assert "new Date(" not in functions
 
 
 def test_wall_clock_modes_fail_closed_without_a_site_timezone():

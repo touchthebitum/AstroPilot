@@ -154,6 +154,7 @@ from decision.location.location_time import (
     LocalWallTimeError,
     LocationTimeError,
     LocationTimeResolver,
+    normalize_fixed_local_window,
     normalize_local_wall_time,
 )
 
@@ -470,16 +471,23 @@ class SessionAvailabilityRequest(BaseModel):
                 )
             if site_zone is None:
                 raise LocationTimeError("timezone_not_found")
-            start = (
-                normalize_local_wall_time(self.start_local, site_zone)
-                if self.start_local is not None
-                else None
-            )
-            end = (
-                normalize_local_wall_time(self.end_local, site_zone)
-                if self.end_local is not None
-                else None
-            )
+            if self.mode is SessionAvailabilityMode.FIXED_WINDOW:
+                start, end = normalize_fixed_local_window(
+                    self.start_local,
+                    self.end_local,
+                    site_zone,
+                )
+            else:
+                start = (
+                    normalize_local_wall_time(self.start_local, site_zone)
+                    if self.start_local is not None
+                    else None
+                )
+                end = (
+                    normalize_local_wall_time(self.end_local, site_zone)
+                    if self.end_local is not None
+                    else None
+                )
         else:
             # Transitional compatibility for the aware start/end transport;
             # Beta-2a2 moves the web UI to start_local/end_local.
