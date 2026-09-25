@@ -493,12 +493,24 @@ class SessionAvailabilityRequest(BaseModel):
             # Beta-2a2 moves the web UI to start_local/end_local.
             start = self.start
             end = self.end
-        return SessionAvailability(
+        availability = SessionAvailability(
             mode=self.mode,
             start=start,
             end=end,
             duration=self.duration,
         )
+        if (
+            not self.has_local_wall_time
+            and self.mode is SessionAvailabilityMode.FIXED_WINDOW
+            and (
+                availability.end.astimezone(timezone.utc)
+                - availability.start.astimezone(timezone.utc)
+            ) > timedelta(hours=24)
+        ):
+            # The compatibility transport no longer carries the original site
+            # wall times, so its safe equivalent is an absolute-duration cap.
+            raise ValueError("session_availability_fixed_window_too_long")
+        return availability
 
     @model_validator(mode="after")
     def validate_domain_contract(self):
