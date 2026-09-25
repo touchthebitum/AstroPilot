@@ -175,6 +175,9 @@ warnings.filterwarnings(
 from decision.filtering.filter_inventory_loader import FilterInventoryLoader
 from decision.filtering.filter_selection_context import FilterSelectionContext
 from decision.filtering.filter_selection_engine import FilterSelectionEngine
+from decision.filtering.intent_filter_reconciliation import (
+    reconcile_selected_filter,
+)
 from decision.filtering.target_semantics_resolver import (
     TargetSemanticsResolver,
 )
@@ -644,6 +647,18 @@ def build_mission_input(evaluation, *, profile=None):
                 ),
             )
         )
+    imaging_field_id = evaluation.get("imaging_field_id")
+    acquisition_intent_id = evaluation.get(
+        "selected_acquisition_intent_id"
+    )
+    if imaging_field_id is not None and acquisition_intent_id is not None:
+        selected_filter = reconcile_selected_filter(
+            imaging_field_id=imaging_field_id,
+            acquisition_intent_id=acquisition_intent_id,
+            available_filters=inventory,
+            selected_filter=selected_filter,
+        )
+
     return MissionInput(
         window_start=window_start,
         window_end=window_end,
@@ -657,6 +672,8 @@ def build_mission_input(evaluation, *, profile=None):
             projects=projects,
         ),
         selected_filter=selected_filter,
+        imaging_field_id=imaging_field_id,
+        acquisition_intent_id=acquisition_intent_id,
     )
 
 

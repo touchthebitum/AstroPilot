@@ -378,7 +378,12 @@ def mission(
         dew_risk=DewRiskResult(3.0, 4.0, "low", 0.2),
         tasks=[NightTask("20:00", "20:20", "Setup", "Polar align", 2, 0.0)],
         night_slices=[slice_value],
-        selected_filter=SelectedFilter("Ha", "narrowband", 3.0, "profile"),
+        selected_filter=SelectedFilter(
+            "OIII" if acquisition_intent_id == "ou4_oiii" else "Ha",
+            "OIII" if acquisition_intent_id == "ou4_oiii" else "Ha",
+            3.0,
+            "profile",
+        ),
         mission_id=mission_id,
         decision_id=decision_id,
         selection_id=selection_id,
@@ -810,6 +815,49 @@ def test_v8_mission_acquisition_intent_round_trip_is_exact():
     assert deserialize_night_mission(
         serialize_night_mission(night_mission)
     ) == night_mission
+
+
+def test_new_ha_mission_input_with_oiii_filter_is_rejected_on_persistence():
+    value = MissionInput(
+        window_start=START,
+        window_end=END,
+        astronomical_hours=4.0,
+        weather=None,
+        moon_penalty=None,
+        recommended_hours=3.5,
+        expected_gain=1.25,
+        selected_filter=SelectedFilter("OIII", "OIII"),
+        imaging_field_id="sh2-129_ou4",
+        acquisition_intent_id="sh2-129_ha",
+    )
+
+    with pytest.raises(
+        AcceptanceLineageCorruptionError,
+        match="selected_filter_intent_mismatch",
+    ):
+        _encode(value)
+
+
+@pytest.mark.parametrize("schema_version", [8, 9])
+def test_v8_v9_ha_mission_with_oiii_filter_loads_faithfully(
+    schema_version,
+):
+    document = serialize_night_mission(mission(
+        imaging_field_id="sh2-129_ou4",
+        acquisition_intent_id="sh2-129_ha",
+    ))
+    document["fields"]["selected_filter"]["fields"][
+        "filter_type"
+    ] = "OIII"
+
+    restored = deserialize_night_mission(
+        document,
+        schema_version=schema_version,
+    )
+
+    assert restored.imaging_field_id == "sh2-129_ou4"
+    assert restored.acquisition_intent_id == "sh2-129_ha"
+    assert restored.selected_filter.filter_type == "OIII"
 
 
 def test_v8_aggregate_preserves_matching_mission_acquisition_intent():

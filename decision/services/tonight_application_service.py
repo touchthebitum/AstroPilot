@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import Enum
@@ -271,6 +272,14 @@ class TonightApplicationService:
         )
 
         def build_actionability_mission_input(evaluation):
+            if isinstance(evaluation, Mapping):
+                evaluation = {
+                    **evaluation,
+                    "imaging_field_id": candidate.imaging_field_id,
+                    "selected_acquisition_intent_id": (
+                        candidate.selected_acquisition_intent_id
+                    ),
+                }
             mission_input = self.build_mission_input(
                 evaluation,
                 profile=effective_profile,

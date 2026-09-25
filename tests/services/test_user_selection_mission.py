@@ -6,6 +6,7 @@ import pytest
 
 from decision.mission.mission_input import MissionInput
 from decision.mission.night_mission import NightMission
+from decision.filtering.selected_filter import SelectedFilter
 from decision.models.acquisition_intent_selection import (
     AcquisitionIntentSelectionStatus,
 )
@@ -56,6 +57,7 @@ class RecordingMissionService:
             window_end=mission_input.window_end,
             recommended_hours=mission_input.recommended_hours,
             expected_gain=mission_input.expected_gain,
+            selected_filter=mission_input.selected_filter,
         )
 
 
@@ -221,6 +223,59 @@ def test_non_actionable_selection_is_rejected_instead_of_becoming_a_decline():
         composer.create(
             mission_id="mission-1",
             selection=user_selection(UserSelectionSource.ALTERNATIVE, "M42"),
+            decision_context=decision_context(),
+            recommendation=recommendation(),
+            night=night(),
+            profile={},
+        )
+
+
+@pytest.mark.parametrize(
+    "selected_filter",
+    [None, SelectedFilter("H-alpha", "Ha")],
+    ids=["without-legacy-filter", "with-ha-filter"],
+)
+def test_acceptance_allows_eligible_intent_with_compatible_filter(
+    selected_filter,
+):
+    composer, _, _ = service(
+        base_input=replace(mission_input(), selected_filter=selected_filter)
+    )
+
+    mission = composer.create(
+        mission_id="mission-1",
+        selection=user_selection(
+            UserSelectionSource.PRIMARY_RECOMMENDATION,
+            "M31",
+            selected_imaging_field_id="sh2-129_ou4",
+            selected_acquisition_intent_id="sh2-129_ha",
+        ),
+        decision_context=decision_context(),
+        recommendation=recommendation(),
+        night=night(),
+        profile={"active_equipment": "samyang_183"},
+    )
+
+    assert mission.selected_filter is selected_filter
+
+
+def test_acceptance_rejects_filter_diverging_from_selected_intent():
+    composer, _, _ = service(
+        base_input=replace(
+            mission_input(),
+            selected_filter=SelectedFilter("OIII", "OIII"),
+        )
+    )
+
+    with pytest.raises(ValueError, match="selected_filter_intent_mismatch"):
+        composer.create(
+            mission_id="mission-1",
+            selection=user_selection(
+                UserSelectionSource.PRIMARY_RECOMMENDATION,
+                "M31",
+                selected_imaging_field_id="sh2-129_ou4",
+                selected_acquisition_intent_id="sh2-129_ha",
+            ),
             decision_context=decision_context(),
             recommendation=recommendation(),
             night=night(),

@@ -9,6 +9,9 @@ from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 from decision.filtering.selected_filter import SelectedFilter
+from decision.filtering.intent_filter_reconciliation import (
+    validate_selected_filter_for_intent,
+)
 from decision.intelligence.analysis_result import AnalysisResult
 from decision.mission.mission_input import MissionInput
 from decision.mission.night_mission import MissionReason, NightMission
@@ -216,6 +219,15 @@ def _encode(value: object) -> object:
         }
     dataclass_tag = _DATACLASS_TAG_BY_TYPE.get(type(value))
     if dataclass_tag is not None:
+        if type(value) in (MissionInput, NightMission):
+            try:
+                validate_selected_filter_for_intent(
+                    imaging_field_id=value.imaging_field_id,
+                    acquisition_intent_id=value.acquisition_intent_id,
+                    selected_filter=value.selected_filter,
+                )
+            except ValueError as error:
+                raise AcceptanceLineageCorruptionError(str(error)) from error
         return {
             "$type": "dataclass",
             "class": dataclass_tag,
