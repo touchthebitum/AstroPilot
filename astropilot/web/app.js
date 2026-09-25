@@ -18,6 +18,7 @@ const ui = Object.freeze({
   savedMissionChoice: document.querySelector("#saved-mission-choice"),
   openSavedMission: document.querySelector("#open-saved-mission"),
   availabilityError: document.querySelector("#availability-error"),
+  availabilityOvernightHint: document.querySelector("#availability-overnight-hint"),
   availabilitySiteTimezone: document.querySelector("#availability-site-timezone"),
   availabilityTimezoneWarning: document.querySelector("#availability-timezone-warning"),
   recommendationSubmit: document.querySelector("#request-recommendation"),
@@ -1864,6 +1865,43 @@ function normalizeLocalDateTime(value) {
   return value;
 }
 
+function nextCivilDate(dateValue) {
+  const [yearValue, monthValue, dayValue] = dateValue.split("-").map(Number);
+  const leapYear = yearValue % 4 === 0 && (yearValue % 100 !== 0 || yearValue % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  let year = yearValue;
+  let month = monthValue;
+  let day = dayValue + 1;
+  if (day > daysInMonth[month - 1]) {
+    day = 1;
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function fixedWindowRolloverDate(start, end) {
+  if (!start || !end) return null;
+  const startDate = start.slice(0, 10);
+  const endDate = end.slice(0, 10);
+  if (startDate !== endDate || end.slice(11) >= start.slice(11)) return null;
+  return nextCivilDate(endDate);
+}
+
+function updateAvailabilityOvernightHint() {
+  const mode = document.querySelector('input[name="availability-mode"]:checked')?.value;
+  const start = normalizeLocalDateTime(document.querySelector("#availability-start").value);
+  const end = normalizeLocalDateTime(document.querySelector("#availability-end").value);
+  const rolloverDate = mode === "fixed_window" ? fixedWindowRolloverDate(start, end) : null;
+  ui.availabilityOvernightHint.hidden = !rolloverDate;
+  ui.availabilityOvernightHint.textContent = rolloverDate
+    ? `Fin interprétée le lendemain (${rolloverDate.slice(8, 10)}/${rolloverDate.slice(5, 7)})`
+    : "";
+}
+
 function availabilityInputError(code) {
   const error = new Error(code);
   error.availabilityCode = code;
@@ -1910,7 +1948,8 @@ function collectAvailabilityPayload() {
   if (mode === "fixed_window") {
     if (!start) throw availabilityInputError("availability_start_required");
     if (!end) throw availabilityInputError("availability_end_required");
-    if (end <= start) {
+    const sameDate = start.slice(0, 10) === end.slice(0, 10);
+    if (end === start || (!sameDate && end < start)) {
       throw availabilityInputError("availability_end_must_follow_start");
     }
     const availability = { mode: "fixed_window" };
@@ -1929,6 +1968,7 @@ function updateAvailabilityFields() {
     field.hidden = !visible;
     field.querySelector("input").disabled = !visible;
   }
+  updateAvailabilityOvernightHint();
   showAvailabilityError("");
 }
 
@@ -1948,6 +1988,12 @@ function backendAvailabilityMessage(detail) {
   }
   if (code === "session_availability_end_must_follow_start") {
     return "L’heure de fin doit être postérieure à l’heure de début.";
+  }
+  if (code === "session_availability_equal_times_ambiguous") {
+    return "Des heures de début et de fin identiques sont ambiguës. Indiquez explicitement le lendemain pour une plage de 24 h.";
+  }
+  if (code === "session_availability_fixed_window_too_long") {
+    return "La plage de disponibilité ne peut pas dépasser 24 heures.";
   }
   const descriptions = Array.isArray(detail)
     ? detail.map((item) => `${item?.msg || ""} ${item?.ctx?.error || ""}`).join(" ")
@@ -2472,6 +2518,8 @@ ui.retryPendingAcceptance.addEventListener("click", retryPendingAcceptance);
 for (const input of document.querySelectorAll('input[name="availability-mode"]')) {
   input.addEventListener("change", updateAvailabilityFields);
 }
+document.querySelector("#availability-start").addEventListener("input", updateAvailabilityOvernightHint);
+document.querySelector("#availability-end").addEventListener("input", updateAvailabilityOvernightHint);
 
 ui.availabilityForm.addEventListener("submit", (event) => {
   event.preventDefault();

@@ -606,6 +606,359 @@ def test_fixed_local_window_order_is_checked_after_site_normalization():
     )
 
 
+@pytest.mark.parametrize(
+    ("start_local", "end_local", "expected_start", "expected_end", "expected_hours"),
+    [
+        (
+            "2026-09-25T20:30",
+            "2026-09-25T00:00",
+            "2026-09-25T20:30:00+02:00",
+            "2026-09-26T00:00:00+02:00",
+            3.5,
+        ),
+        (
+            "2026-09-25T23:30",
+            "2026-09-25T00:30",
+            "2026-09-25T23:30:00+02:00",
+            "2026-09-26T00:30:00+02:00",
+            1.0,
+        ),
+        (
+            "2026-09-25T20:30",
+            "2026-09-25T22:00",
+            "2026-09-25T20:30:00+02:00",
+            "2026-09-25T22:00:00+02:00",
+            1.5,
+        ),
+        (
+            "2026-09-25T20:30",
+            "2026-09-26T00:00",
+            "2026-09-25T20:30:00+02:00",
+            "2026-09-26T00:00:00+02:00",
+            3.5,
+        ),
+        (
+            "2026-09-25T20:30",
+            "2026-09-25T19:00",
+            "2026-09-25T20:30:00+02:00",
+            "2026-09-26T19:00:00+02:00",
+            22.5,
+        ),
+        (
+            "2026-09-25T20:30",
+            "2026-09-26T20:30",
+            "2026-09-25T20:30:00+02:00",
+            "2026-09-26T20:30:00+02:00",
+            24.0,
+        ),
+        (
+            "2026-01-31T23:30",
+            "2026-01-31T00:30",
+            "2026-01-31T23:30:00+01:00",
+            "2026-02-01T00:30:00+01:00",
+            1.0,
+        ),
+        (
+            "2026-12-31T23:30",
+            "2026-12-31T00:30",
+            "2026-12-31T23:30:00+01:00",
+            "2027-01-01T00:30:00+01:00",
+            1.0,
+        ),
+        (
+            "2028-02-28T23:30",
+            "2028-02-28T00:30",
+            "2028-02-28T23:30:00+01:00",
+            "2028-02-29T00:30:00+01:00",
+            1.0,
+        ),
+    ],
+)
+def test_fixed_local_window_applies_only_the_civil_overnight_rollover(
+    start_local,
+    end_local,
+    expected_start,
+    expected_end,
+    expected_hours,
+):
+    evaluation_calls = []
+
+    class Service:
+        def evaluate(self, **kwargs):
+            evaluation_calls.append(kwargs)
+            return make_result()
+
+    app = create_app(
+        service_factory=lambda: Service(),
+        weather_provider=lambda lat, lon: DEFAULT_WEATHER,
+        profile_provider=valid_profile,
+        clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
+    )
+    response = TestClient(app).post(
+        "/v1/tonight",
+        json={
+            "availability": {
+                "mode": "fixed_window",
+                "start_local": start_local,
+                "end_local": end_local,
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    availability = evaluation_calls[0]["availability"]
+    assert availability.start == datetime.fromisoformat(expected_start)
+    assert availability.end == datetime.fromisoformat(expected_end)
+    assert availability.start.tzinfo is not None
+    assert availability.end.tzinfo is not None
+    actual_duration = (
+        availability.end.astimezone(timezone.utc)
+        - availability.start.astimezone(timezone.utc)
+    )
+    assert actual_duration == timedelta(hours=expected_hours)
+    assert availability.end.astimezone(timezone.utc) > availability.start.astimezone(timezone.utc)
+
+
+@pytest.mark.parametrize(
+    ("start_local", "end_local", "expected_code"),
+    [
+        (
+            "2026-09-25T20:30",
+            "2026-09-25T20:30",
+            "session_availability_equal_times_ambiguous",
+        ),
+        (
+            "2026-09-25T20:30",
+            "2026-09-26T20:31",
+            "session_availability_fixed_window_too_long",
+        ),
+        (
+            "2026-09-25T20:30",
+            "2026-09-24T21:00",
+            "session_availability_end_must_follow_start",
+        ),
+    ],
+)
+def test_fixed_local_window_rejects_ambiguous_or_unsanitary_ranges(
+    start_local,
+    end_local,
+    expected_code,
+):
+    app = create_app(
+        service_factory=lambda: pytest.fail("service must not be called"),
+        weather_provider=lambda lat, lon: pytest.fail("weather must not be called"),
+        profile_provider=valid_profile,
+    )
+    response = TestClient(app).post(
+        "/v1/tonight",
+        json={
+            "availability": {
+                "mode": "fixed_window",
+                "start_local": start_local,
+                "end_local": end_local,
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == expected_code
+
+
+@pytest.mark.parametrize(
+    ("start_local", "end_local", "expected_real_hours"),
+    [
+        ("2026-03-28T23:30", "2026-03-29T03:30", 3),
+        ("2026-10-24T23:30", "2026-10-25T03:30", 5),
+        ("2026-03-28T23:30", "2026-03-28T03:30", 3),
+        ("2026-10-24T23:30", "2026-10-24T03:30", 5),
+    ],
+)
+def test_fixed_local_window_crosses_zurich_dst_on_the_civil_calendar(
+    start_local,
+    end_local,
+    expected_real_hours,
+):
+    evaluation_calls = []
+
+    class Service:
+        def evaluate(self, **kwargs):
+            evaluation_calls.append(kwargs)
+            return make_result()
+
+    app = create_app(
+        service_factory=lambda: Service(),
+        weather_provider=lambda lat, lon: DEFAULT_WEATHER,
+        profile_provider=valid_profile,
+        clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
+    )
+    response = TestClient(app).post(
+        "/v1/tonight",
+        json={
+            "availability": {
+                "mode": "fixed_window",
+                "start_local": start_local,
+                "end_local": end_local,
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    availability = evaluation_calls[0]["availability"]
+    assert (
+        availability.end.astimezone(timezone.utc)
+        - availability.start.astimezone(timezone.utc)
+    ) == timedelta(hours=expected_real_hours)
+
+
+@pytest.mark.parametrize(
+    ("start_local", "end_local", "expected_code"),
+    [
+        (
+            "2026-03-28T23:30",
+            "2026-03-29T02:30",
+            "session_availability_local_time_nonexistent",
+        ),
+        (
+            "2026-10-24T23:30",
+            "2026-10-25T02:30",
+            "session_availability_local_time_ambiguous",
+        ),
+    ],
+)
+def test_fixed_local_window_rejects_invalid_zurich_dst_endpoints(
+    start_local,
+    end_local,
+    expected_code,
+):
+    app = create_app(
+        service_factory=lambda: pytest.fail("service must not be called"),
+        weather_provider=lambda lat, lon: pytest.fail("weather must not be called"),
+        profile_provider=valid_profile,
+    )
+    response = TestClient(app).post(
+        "/v1/tonight",
+        json={
+            "availability": {
+                "mode": "fixed_window",
+                "start_local": start_local,
+                "end_local": end_local,
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == expected_code
+
+
+def test_historical_aware_fixed_window_accepts_exactly_24_real_hours():
+    evaluation_calls = []
+
+    class Service:
+        def evaluate(self, **kwargs):
+            evaluation_calls.append(kwargs)
+            return make_result()
+
+    app = create_app(
+        service_factory=lambda: Service(),
+        weather_provider=lambda lat, lon: DEFAULT_WEATHER,
+        profile_provider=valid_profile,
+        clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
+    )
+    response = TestClient(app).post(
+        "/v1/tonight",
+        json={
+            "availability": {
+                "mode": "fixed_window",
+                "start": "2026-09-25T20:30:00+02:00",
+                "end": "2026-09-26T20:30:00+02:00",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    availability = evaluation_calls[0]["availability"]
+    assert availability.end - availability.start == timedelta(hours=24)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "expected_code"),
+    [
+        (
+            "2026-09-25T20:30:00+02:00",
+            "2026-09-27T20:30:00+02:00",
+            "session_availability_fixed_window_too_long",
+        ),
+        (
+            "2026-09-25T20:30:00+02:00",
+            "2026-09-26T20:31:00+02:00",
+            "session_availability_fixed_window_too_long",
+        ),
+        (
+            "2026-09-25T20:30:00+02:00",
+            "2026-09-25T20:30:00+02:00",
+            "session_availability_end_must_follow_start",
+        ),
+        (
+            "2026-09-25T20:30:00+02:00",
+            "2026-09-25T20:29:00+02:00",
+            "session_availability_end_must_follow_start",
+        ),
+    ],
+)
+def test_historical_aware_fixed_window_rejects_invalid_real_duration(
+    start,
+    end,
+    expected_code,
+):
+    app = create_app(
+        service_factory=lambda: pytest.fail("service must not be called"),
+        weather_provider=lambda lat, lon: pytest.fail("weather must not be called"),
+        profile_provider=valid_profile,
+    )
+    response = TestClient(app).post(
+        "/v1/tonight",
+        json={
+            "availability": {
+                "mode": "fixed_window",
+                "start": start,
+                "end": end,
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert expected_code in str(response.json()["detail"])
+
+
+def test_historical_aware_duration_mode_remains_uncapped():
+    evaluation_calls = []
+
+    class Service:
+        def evaluate(self, **kwargs):
+            evaluation_calls.append(kwargs)
+            return make_result()
+
+    app = create_app(
+        service_factory=lambda: Service(),
+        weather_provider=lambda lat, lon: DEFAULT_WEATHER,
+        profile_provider=valid_profile,
+        clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
+    )
+    response = TestClient(app).post(
+        "/v1/tonight",
+        json={
+            "availability": {
+                "mode": "start_and_duration",
+                "start": "2026-09-25T20:30:00+02:00",
+                "duration": "PT48H",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    assert evaluation_calls[0]["availability"].duration == timedelta(hours=48)
+
+
 def test_tonight_omitted_availability_remains_none_through_service_call():
     evaluation_calls = []
 
