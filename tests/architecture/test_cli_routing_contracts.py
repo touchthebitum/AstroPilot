@@ -162,8 +162,8 @@ def forecast_cli(monkeypatch, isolated_cli):
             run_portfolio=lambda **kwargs: calls.append(("portfolio", kwargs)),
             run_calendar=lambda **kwargs: calls.append(("calendar", kwargs)),
             run_full=lambda **kwargs: calls.append(("full", kwargs)),
-            present_mission=lambda mission: calls.append(
-                ("mission", mission)
+            present_mission=lambda mission, **kwargs: calls.append(
+                ("mission", mission, kwargs)
             ),
         ),
     )
@@ -245,6 +245,7 @@ def test_tonight_mode_routes_application_result_without_second_forecast(
                 forecast_available=True,
                 night=forecast_cli.nights[1],
                 mission=mission,
+                timeline_start=reference_time,
             )
 
     monkeypatch.setattr(
@@ -290,7 +291,11 @@ def test_tonight_mode_routes_application_result_without_second_forecast(
             "bortle": 6,
         }
     ]
-    assert forecast_cli.calls[0] == ("mission", mission)
+    assert forecast_cli.calls[0] == (
+        "mission",
+        mission,
+        {"timeline_start": reference_time},
+    )
     called_mode, kwargs = forecast_cli.calls[1]
     assert called_mode == "tonight_completion"
     assert kwargs["night_capacities"] is forecast_cli.capacities

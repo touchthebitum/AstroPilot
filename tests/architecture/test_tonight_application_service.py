@@ -945,6 +945,51 @@ def test_actionability_mission_has_no_fabricated_selection_provenance():
     assert len(mission_service.calls) == 1
 
 
+def test_result_transports_timeline_start_outside_persistent_mission_models():
+    timeline_start = datetime(2026, 10, 25, 1, 50, tzinfo=timezone.utc)
+    candidate = make_candidate()
+
+    class BuildingMissionService:
+        def create_with_actionability_diagnostic(
+            self,
+            *,
+            build_mission_input,
+            **_kwargs,
+        ):
+            build_mission_input({"catalog_key": "M31"})
+            return MissionAssemblyResult(make_actionable_mission())
+
+    service = TonightApplicationService(
+        forecast_nights=lambda *args, **kwargs: forecast_run([
+            {"date": "2026-10-25", "top_objects": []}
+        ]),
+        build_candidates=lambda *args, **kwargs: [candidate],
+        opportunity_recommendation_service=RecordingRecommendationService(
+            make_recommendation(candidate)
+        ),
+        tonight_mission_service=BuildingMissionService(),
+        build_mission_input=lambda _evaluation, *, profile: MissionInput(
+            window_start=timeline_start,
+            window_end=timeline_start + timedelta(hours=3),
+            astronomical_hours=3.0,
+            weather=None,
+            moon_penalty=0.0,
+            recommended_hours=3.0,
+            expected_gain=1.0,
+        ),
+    )
+
+    result = service.evaluate(
+        profile=make_profile(),
+        weather=object(),
+        reference_time_utc=REFERENCE_TIME,
+        bortle=3,
+    )
+
+    assert result.timeline_start is timeline_start
+    assert not hasattr(result.mission.productivity, "timeline_start")
+
+
 def test_non_productive_mission_without_diagnostic_fails_closed_as_no_mission():
     night = {"date": "2026-09-01", "top_objects": []}
     candidate = make_candidate()

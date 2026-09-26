@@ -124,6 +124,7 @@ class TonightResult:
     decision_id: str | None = None
     candidate_rejections: tuple[CandidateRejection, ...] = ()
     actionability_refusal: ActionabilityRefusal | None = None
+    timeline_start: datetime | None = None
 
     @property
     def forecast_available(self) -> bool:
@@ -271,7 +272,10 @@ class TonightApplicationService:
             candidate.get("name"),
         )
 
+        timeline_start = None
+
         def build_actionability_mission_input(evaluation):
+            nonlocal timeline_start
             if isinstance(evaluation, Mapping):
                 evaluation = {
                     **evaluation,
@@ -284,6 +288,7 @@ class TonightApplicationService:
                 evaluation,
                 profile=effective_profile,
             )
+            timeline_start = getattr(mission_input, "window_start", None)
             if inputs.availability is None:
                 return mission_input
             return replace(
@@ -326,6 +331,7 @@ class TonightApplicationService:
                 forecast_evidence=forecast_evidence,
                 candidate_rejections=candidate_rejections,
                 actionability_refusal=actionability_refusal,
+                timeline_start=timeline_start,
             )
 
         DecisionConsistencyGate.validate_mission(mission)
@@ -348,6 +354,7 @@ class TonightApplicationService:
                 forecast_evidence=forecast_evidence,
                 candidate_rejections=candidate_rejections,
                 actionability_refusal=actionability_refusal,
+                timeline_start=timeline_start,
             )
 
         return TonightResult(
@@ -357,4 +364,5 @@ class TonightApplicationService:
             status=TonightStatus.AVAILABLE,
             forecast_evidence=forecast_evidence,
             candidate_rejections=candidate_rejections,
+            timeline_start=timeline_start,
         )

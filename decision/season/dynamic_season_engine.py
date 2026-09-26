@@ -5,6 +5,7 @@ from astropy.time import Time
 
 from astropilot.catalog import CATALOG
 from astropilot.engines.sky_engine import SkyEngine
+from decision.time_math import add_elapsed_time
 
 
 
@@ -66,7 +67,7 @@ class DynamicSeasonEngine:
 
             samples.append((current, altitude))
 
-            current += timedelta(minutes=5)
+            current = add_elapsed_time(current, timedelta(minutes=5))
 
         return samples
 
@@ -154,7 +155,10 @@ class DynamicSeasonEngine:
 
             while current <= night_end:
                 sample_times.append(current)
-                current += timedelta(minutes=sample_minutes)
+                current = add_elapsed_time(
+                    current,
+                    timedelta(minutes=sample_minutes),
+                )
 
             sky = SkyEngine()
 

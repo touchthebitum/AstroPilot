@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Sequence
 from dataclasses import asdict, dataclass, field, is_dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from enum import Enum
 
 from astropilot.catalog import CATALOG
@@ -24,6 +24,7 @@ from decision.services.session_availability_windowing import (
     ActionabilityRefusal,
     ActionabilityRefusalStatus,
 )
+from decision.time_math import add_elapsed_time
 from decision.weather.weather_trust_decision import (
     WeatherDecisionAdmissibility,
     WeatherEvidenceQuality,
@@ -196,6 +197,45 @@ def _quality_label(score: float) -> str:
 def _clock_text(hour: float) -> str:
     total_minutes = round(hour * 60) % (24 * 60)
     return f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
+
+
+def _local_time_text(value: datetime) -> str:
+    text = value.strftime("%H:%M")
+    if (
+        value.tzinfo is None
+        or value.utcoffset() is None
+        or value.replace(fold=0).utcoffset()
+        == value.replace(fold=1).utcoffset()
+    ):
+        return text
+
+    offset = value.utcoffset()
+    total_minutes = int(offset.total_seconds() // 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    hours, minutes = divmod(abs(total_minutes), 60)
+    suffix = f"UTC{sign}{hours:02d}"
+    if minutes:
+        suffix += f":{minutes:02d}"
+    return f"{text} ({suffix})"
+
+
+def _window_time_text(
+    source,
+    offset_hours: float,
+    timeline_start: datetime | None,
+) -> str:
+    if (
+        timeline_start is None
+        or timeline_start.tzinfo is None
+        or timeline_start.utcoffset() is None
+    ):
+        return _clock_text(source.display_start_hour + offset_hours)
+
+    instant = add_elapsed_time(
+        timeline_start,
+        timedelta(hours=offset_hours),
+    )
+    return _local_time_text(instant.astimezone(timeline_start.tzinfo))
 
 
 @dataclass(frozen=True)
@@ -682,8 +722,16 @@ class TonightResponse:
                     TonightProductivityWindowResponse(
                         start_offset_hours=float(window.start_hour),
                         end_offset_hours=float(window.end_hour),
-                        start_time=_clock_text(base + window.start_hour),
-                        end_time=_clock_text(base + window.end_hour),
+                        start_time=_window_time_text(
+                            source,
+                            window.start_hour,
+                            result.timeline_start,
+                        ),
+                        end_time=_window_time_text(
+                            source,
+                            window.end_hour,
+                            result.timeline_start,
+                        ),
                         productivity=float(window.productivity),
                         productive=bool(window.productive),
                         reason=window.reason,

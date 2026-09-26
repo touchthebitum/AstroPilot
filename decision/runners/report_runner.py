@@ -88,6 +88,7 @@ class ReportRunner:
     ):
         mission = None
         recommended_key = None
+        timeline_start = None
 
         if recommendation is not None:
             candidate = recommendation.opportunity.candidate
@@ -103,12 +104,28 @@ class ReportRunner:
             and recommended_key is not None
             and build_mission_input is not None
         ):
+            def build_timeline_mission_input(evaluation):
+                nonlocal timeline_start
+                mission_input = build_mission_input(evaluation)
+                timeline_start = getattr(
+                    mission_input,
+                    "window_start",
+                    None,
+                )
+                return mission_input
+
             mission = self.tonight_mission_service.create(
                 winner=winner,
                 objects=objects,
                 recommended_key=recommended_key,
-                build_mission_input=build_mission_input,
+                build_mission_input=build_timeline_mission_input,
             )
 
         if mission is not None:
-            self.present_mission(mission)
+            if timeline_start is None:
+                self.present_mission(mission)
+            else:
+                self.present_mission(
+                    mission,
+                    timeline_start=timeline_start,
+                )
