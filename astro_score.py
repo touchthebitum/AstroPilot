@@ -126,6 +126,7 @@ from decision.models.context.equipment_context import EquipmentContext
 from decision.models.context.portfolio_context import PortfolioContext
 from decision.models.context.preferences_context import PreferencesContext
 from decision.validation.decision_consistency import DecisionConsistencyError
+from decision.time_math import elapsed_hours, elapsed_time, timeline_value
 from decision.models.sky.celestial_object import CelestialObject
 from decision.models.equipment.camera import Camera
 from decision.models.equipment.mount import Mount
@@ -569,7 +570,7 @@ def build_mission_input(evaluation, *, profile=None):
     window = evaluation["window"]
     window_start = window["start"]
     window_end = window["end"]
-    astronomical_hours = (window_end - window_start).total_seconds() / 3600
+    astronomical_hours = elapsed_hours(window_start, window_end)
     remaining_hours = evaluation.get("remaining_hours")
     recommended_hours = astronomical_hours
     if remaining_hours is not None:
@@ -1161,7 +1162,13 @@ def night_hours_rough(
         timezone=tz,
     )
 
-    night_rows = [r for r in rows if start <= r["time"] <= end]
+    start_instant = timeline_value(start)
+    end_instant = timeline_value(end)
+    night_rows = [
+        r
+        for r in rows
+        if start_instant <= timeline_value(r["time"]) <= end_instant
+    ]
 
     return night_rows
 
@@ -1419,7 +1426,7 @@ def build_decision_context(
         and selected_start.tzinfo is not None
         and isinstance(selected_end, datetime)
         and selected_end.tzinfo is not None
-        and selected_end <= selected_start
+        and timeline_value(selected_end) <= timeline_value(selected_start)
     ):
         issues.append("session_window_not_forward")
 
@@ -1487,7 +1494,7 @@ def build_decision_context(
     )
 
     session_zone = selected_start.tzinfo
-    available_duration = selected_end - selected_start
+    available_duration = elapsed_time(selected_start, selected_end)
 
     session_context = SessionContext(
         start_time=selected_start,
@@ -1635,9 +1642,12 @@ def build_selected_window_weather(
     best,
     sky,
 ):
+    start_instant = timeline_value(best["start"])
+    end_instant = timeline_value(best["end"])
     selected_hours = [
-        h for h in hours
-        if best["start"] <= h["time"] < best["end"]
+        h
+        for h in hours
+        if start_instant <= timeline_value(h["time"]) < end_instant
     ]
 
     return WeatherForecast(

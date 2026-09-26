@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 
+from decision.time_math import timeline_value
+
 
 class SessionAvailabilityMode(str, Enum):
     ALL_NIGHT = "all_night"
@@ -57,6 +59,6 @@ class SessionAvailability:
 
         if (
             self.mode is SessionAvailabilityMode.FIXED_WINDOW
-            and self.end <= self.start
+            and timeline_value(self.end) <= timeline_value(self.start)
         ):
             raise ValueError("session_availability_end_must_follow_start")
