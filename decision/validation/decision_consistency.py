@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from math import isfinite
 
+from decision.time_math import elapsed_hours, timeline_value
+
 
 class DecisionConsistencyError(ValueError):
     code = "decision_invalid"
@@ -51,7 +53,7 @@ class DecisionConsistencyGate:
             and start.tzinfo is not None
             and isinstance(end, datetime)
             and end.tzinfo is not None
-            and end <= start
+            and timeline_value(end) <= timeline_value(start)
         ):
             issues.append("window_not_forward")
 
@@ -61,9 +63,9 @@ class DecisionConsistencyGate:
             and start.tzinfo is not None
             and isinstance(end, datetime)
             and end.tzinfo is not None
-            and end > start
+            and timeline_value(end) > timeline_value(start)
         ):
-            window_hours = (end - start).total_seconds() / 3600
+            window_hours = elapsed_hours(start, end)
 
         cls._finite(mission.recommended_hours, "recommended_hours", issues, minimum=0)
         cls._finite(mission.expected_gain, "expected_gain", issues, minimum=0)

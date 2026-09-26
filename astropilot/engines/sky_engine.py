@@ -10,6 +10,7 @@ from astropy.utils import iers
 iers.conf.auto_download = False
 iers.conf.auto_max_age = None
 from astral import Depression
+from decision.time_math import add_elapsed_time
 
 import astropy.units as u
 class SkyEngine:
@@ -650,7 +651,10 @@ class SkyEngine:
 
             candidates.append({
                     "start": window[0]["time"],
-                    "end": window[-1]["time"] + timedelta(hours=1),
+                    "end": add_elapsed_time(
+                        window[-1]["time"],
+                        timedelta(hours=1),
+                    ),
                     "score": avg,
                     "hour_scores": scores,
                     "details": hour_details,

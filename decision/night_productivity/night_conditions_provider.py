@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from decision.season.dynamic_season_engine import DynamicSeasonEngine
+from decision.time_math import add_elapsed_time
 
 
 class NightConditionsProvider:
@@ -76,7 +77,10 @@ class NightConditionsProvider:
     @staticmethod
     def altitude(hour, context):
 
-        obs_time = context.observation_time + timedelta(hours=hour)
+        obs_time = add_elapsed_time(
+            context.observation_time,
+            timedelta(hours=hour),
+        )
 
         return DynamicSeasonEngine.target_altitude_at_time(
             target=context.target,

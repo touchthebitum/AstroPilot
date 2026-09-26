@@ -27,6 +27,7 @@ from decision.filtering.intent_filter_reconciliation import (
 from decision.quality.astro_quality_context import AstroQualityContext
 from decision.quality.astro_quality_engine import AstroQualityEngine
 from decision.quality.dew_risk_engine import DewRiskEngine
+from decision.time_math import elapsed_hours
 
 if TYPE_CHECKING:
     from decision.services.session_availability_windowing import (
@@ -77,14 +78,15 @@ class ProductiveWindowAssessment:
                 mission_input.window_start is not None
                 and mission_input.window_end is not None
             ):
-                astronomical_hours = (
-                    mission_input.window_end - mission_input.window_start
-                ).total_seconds() / 3600
+                astronomical_hours = elapsed_hours(
+                    mission_input.window_start,
+                    mission_input.window_end,
+                )
         if astronomical_hours is None and context_session is not None:
             start = getattr(context_session, "start_time", None)
             end = getattr(context_session, "end_time", None)
             if start is not None and end is not None:
-                astronomical_hours = (end - start).total_seconds() / 3600
+                astronomical_hours = elapsed_hours(start, end)
         if astronomical_hours is None:
             astronomical_hours = 6.0
 
