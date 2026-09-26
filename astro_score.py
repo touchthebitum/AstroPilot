@@ -829,6 +829,18 @@ def recommend_project_for_night(
             project,
             imaging_field_resolver,
         )
+        if (
+            not project_targets
+            and project.get("target_hours", 0) > 0
+            and project.get("hours", 0) >= project["target_hours"]
+        ):
+            rejections.append(CandidateRejection(
+                target=obj["name"], catalog_key=catalog_key,
+                provenance=CandidateProvenance.PROJECT,
+                basis=CandidateRejectionBasis.LEGACY_PROJECT_COMPLETED,
+                evaluation_score=astro_score,
+            ))
+            continue
         intent_remaining_progress = (
             derive_acquisition_intent_remaining_progress(
                 imaging_field, project_targets,

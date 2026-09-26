@@ -131,6 +131,105 @@ def test_candidate_only_rejected_when_every_target_is_conclusively_complete(monk
     assert completed.rejections[0].basis is CandidateRejectionBasis.INTENT_TARGETS_COMPLETED
 
 
+def test_completed_legacy_project_is_rejected_before_scoring(monkeypatch):
+    monkeypatch.setattr(
+        astro_score.future_engine,
+        "estimate",
+        lambda *args, **kwargs: pytest.fail("completed legacy project was scored"),
+    )
+    result = astro_score.recommend_project_for_night(
+        [{"name": "M31", "catalog_key": "M31", "global_score": 95}],
+        profile={"projects": {
+            "M31": {"hours": 10, "target_hours": 10, "importance": 10},
+        }},
+    )
+
+    assert result.candidates == ()
+    assert len(result.rejections) == 1
+    assert result.rejections[0].basis is CandidateRejectionBasis.LEGACY_PROJECT_COMPLETED
+    assert result.rejections[0].catalog_key == "M31"
+    assert result.rejections[0].evaluation_score == 95
+
+
+def test_completed_legacy_project_cannot_beat_partial_project(monkeypatch):
+    monkeypatch.setattr(
+        astro_score.future_engine,
+        "estimate",
+        lambda *args, **kwargs: SimpleNamespace(
+            risk="FAIBLE", opportunity_ratio=1,
+        ),
+    )
+    result = astro_score.recommend_project_for_night(
+        [
+            {"name": "M31", "catalog_key": "M31", "global_score": 99},
+            {"name": "M42", "catalog_key": "M42", "global_score": 65},
+        ],
+        profile={"projects": {
+            "M31": {"hours": 10, "target_hours": 10, "importance": 10},
+            "M42": {"hours": 2, "target_hours": 10, "importance": 5},
+        }},
+    )
+
+    assert [candidate.catalog_key for candidate in result] == ["M42"]
+    assert [rejection.catalog_key for rejection in result.rejections] == ["M31"]
+    opportunity = OpportunityEngine().evaluate(candidates=list(result))
+    assert opportunity.candidate.catalog_key == "M42"
+    assert opportunity.action is Action.CONTINUE_PROJECT
+
+
+def test_modern_unknown_progress_remains_authoritative_over_legacy_completion(monkeypatch):
+    monkeypatch.setattr(
+        astro_score.future_engine,
+        "estimate",
+        lambda *args, **kwargs: SimpleNamespace(
+            risk="FAIBLE", opportunity_ratio=1,
+        ),
+    )
+    project = {
+        "hours": 10,
+        "target_hours": 10,
+        "importance": 5,
+        "imaging_field_id": FIELD.imaging_field_id,
+        "acquisition_intent_targets": [{
+            "acquisition_intent_id": "sh2-129_ha",
+            "target_hours": 2,
+        }],
+    }
+    result = astro_score.recommend_project_for_night(
+        [{"name": "Sh2-129", "catalog_key": "Sh2-129", "global_score": 75}],
+        profile={"projects": {"Sh2-129": project}},
+    )
+
+    assert len(result) == 1
+    assert result.rejections == ()
+    assert result[0].acquisition_intent_remaining_progress[0].acquired_hours is None
+
+
+@pytest.mark.parametrize(("hours", "expected_action"), [
+    (2, Action.CONTINUE_PROJECT),
+    (0, Action.START_PROJECT),
+])
+def test_incomplete_legacy_action_regressions(monkeypatch, hours, expected_action):
+    monkeypatch.setattr(
+        astro_score.future_engine,
+        "estimate",
+        lambda *args, **kwargs: SimpleNamespace(
+            risk="FAIBLE", opportunity_ratio=1,
+        ),
+    )
+    result = astro_score.recommend_project_for_night(
+        [{"name": "M31", "catalog_key": "M31", "global_score": 75}],
+        profile={"projects": {
+            "M31": {"hours": hours, "target_hours": 10, "importance": 5},
+        }},
+    )
+
+    assert len(result) == 1
+    assert result.rejections == ()
+    opportunity = OpportunityEngine().evaluate(candidates=list(result))
+    assert opportunity.action is expected_action
+
+
 def test_execution_credit_completes_intent_without_changing_legacy_ranking(monkeypatch):
     monkeypatch.setattr(astro_score.future_engine, "estimate", lambda *args, **kwargs: SimpleNamespace(risk="FAIBLE", opportunity_ratio=1))
     project = {"hours": 2, "target_hours": 20, "importance": 5,
