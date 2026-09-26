@@ -1,11 +1,60 @@
+from datetime import datetime, timedelta
+
 from decision.mission.night_mission import NightMission
 from decision.advisor.night_advisor import NightAdvisor
+from decision.time_math import add_elapsed_time
+
+
+def _local_time_text(value: datetime) -> str:
+    text = value.strftime("%H:%M")
+    if (
+        value.tzinfo is None
+        or value.utcoffset() is None
+        or value.replace(fold=0).utcoffset()
+        == value.replace(fold=1).utcoffset()
+    ):
+        return text
+
+    offset = value.utcoffset()
+    total_minutes = int(offset.total_seconds() // 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    hours, minutes = divmod(abs(total_minutes), 60)
+    suffix = f"UTC{sign}{hours:02d}"
+    if minutes:
+        suffix += f":{minutes:02d}"
+    return f"{text} ({suffix})"
+
+
+def _window_time_text(
+    productivity,
+    offset_hours: float,
+    timeline_start: datetime | None,
+) -> str:
+    if (
+        timeline_start is None
+        or timeline_start.tzinfo is None
+        or timeline_start.utcoffset() is None
+    ):
+        hour = productivity.display_start_hour + offset_hours
+        hour_text = int(hour) % 24
+        minute_text = int((hour - int(hour)) * 60)
+        return f"{hour_text:02d}:{minute_text:02d}"
+
+    instant = add_elapsed_time(
+        timeline_start,
+        timedelta(hours=offset_hours),
+    )
+    return _local_time_text(instant.astimezone(timeline_start.tzinfo))
 
 
 class MissionPresenter:
 
     @staticmethod
-    def present(mission: NightMission):
+    def present(
+        mission: NightMission,
+        *,
+        timeline_start: datetime | None = None,
+    ):
 
         print("\n🌙 ===== MISSION DE CETTE NUIT =====\n")
 
@@ -90,19 +139,19 @@ class MissionPresenter:
             print("🌙 Fenêtres optimales")
 
             for w in mission.productivity.windows:
-                base = mission.productivity.display_start_hour
+                start_text = _window_time_text(
+                    mission.productivity,
+                    w.start_hour,
+                    timeline_start,
+                )
+                end_text = _window_time_text(
+                    mission.productivity,
+                    w.end_hour,
+                    timeline_start,
+                )
 
-                start = base + w.start_hour
-                end = base + w.end_hour
-
-                start_h = int(start) % 24
-                start_m = int((start - int(start)) * 60)
-
-                end_h = int(end) % 24
-                end_m = int((end - int(end)) * 60)
-                
                 print(
-                    f"{start_h:02d}:{start_m:02d} → {end_h:02d}:{end_m:02d}   "
+                    f"{start_text} → {end_text}   "
                     f"productivité {w.productivity:.0%}   "
                     f"{w.reason}"
                 )

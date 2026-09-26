@@ -2547,7 +2547,14 @@ def main(argv=None) -> int:
     elif args.mode == "tonight":
         if tonight_result.night is not None:
             if tonight_result.mission is not None:
-                report_runner.present_mission(tonight_result.mission)
+                report_runner.present_mission(
+                    tonight_result.mission,
+                    timeline_start=getattr(
+                        tonight_result,
+                        "timeline_start",
+                        None,
+                    ),
+                )
 
             tonight_runner.show_completion_forecast(
                 night_capacities,

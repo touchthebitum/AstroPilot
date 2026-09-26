@@ -91,6 +91,34 @@ from decision.services.user_selection_validator import (
 START = datetime(2026, 9, 12, 20, 30, tzinfo=timezone.utc)
 END = datetime(2026, 9, 13, 0, 30, tzinfo=timezone.utc)
 
+PRE_ANCHOR_V9_PRODUCTIVITY_DOCUMENT = {
+    "$type": "dataclass",
+    "class": (
+        "decision.night_productivity.night_productivity_result."
+        "NightProductivityResult"
+    ),
+    "fields": {
+        "astronomical_hours": 4.0,
+        "productive_hours": 3.5,
+        "confidence": 0.9,
+        "cloud_loss": 0.2,
+        "moon_loss": 0.1,
+        "altitude_loss": 0.1,
+        "weather_loss": 0.1,
+        "windows": {"$type": "list", "items": []},
+        "timeline": {
+            "$type": "dataclass",
+            "class": (
+                "decision.night_productivity.night_timeline.NightTimeline"
+            ),
+            "fields": {
+                "slices": {"$type": "list", "items": []},
+            },
+        },
+        "display_start_hour": 20,
+    },
+}
+
 
 def test_plain_date_round_trip_is_lossless_and_datetime_remains_datetime():
     observing_date = date(2026, 9, 12)
@@ -771,6 +799,43 @@ def test_complete_night_mission_typed_round_trip():
     assert type(restored.dew_risk) is DewRiskResult
     assert type(restored.tasks[0]) is NightTask
     assert type(restored.selected_filter) is SelectedFilter
+
+
+def test_pre_anchor_v9_productivity_payload_is_accepted_unchanged():
+    restored = _decode(
+        deepcopy(PRE_ANCHOR_V9_PRODUCTIVITY_DOCUMENT),
+        schema_version=9,
+    )
+
+    assert restored == NightProductivityResult(
+        astronomical_hours=4.0,
+        productive_hours=3.5,
+        confidence=0.9,
+        cloud_loss=0.2,
+        moon_loss=0.1,
+        altitude_loss=0.1,
+        weather_loss=0.1,
+        windows=[],
+        timeline=NightTimeline(),
+        display_start_hour=20,
+    )
+
+
+def test_new_v9_productivity_payload_matches_pre_anchor_structure_exactly():
+    encoded = _encode(NightProductivityResult(
+        astronomical_hours=4.0,
+        productive_hours=3.5,
+        confidence=0.9,
+        cloud_loss=0.2,
+        moon_loss=0.1,
+        altitude_loss=0.1,
+        weather_loss=0.1,
+        windows=[],
+        timeline=NightTimeline(),
+        display_start_hour=20,
+    ))
+
+    assert encoded == PRE_ANCHOR_V9_PRODUCTIVITY_DOCUMENT
 
 
 def test_v5_night_mission_contains_exact_imaging_field_key():

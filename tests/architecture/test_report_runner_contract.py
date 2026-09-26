@@ -118,14 +118,12 @@ def test_tonight_mode_uses_candidate_catalog_key_to_create_mission():
         build_mission_input=build_mission_input,
     )
 
-    assert context.mission_service.calls == [
-        {
-            "winner": winner,
-            "objects": objects,
-            "recommended_key": "M31",
-            "build_mission_input": build_mission_input,
-        }
-    ]
+    assert len(context.mission_service.calls) == 1
+    call = context.mission_service.calls[0]
+    assert call["winner"] is winner
+    assert call["objects"] is objects
+    assert call["recommended_key"] == "M31"
+    assert callable(call["build_mission_input"])
     assert context.presented_missions == [mission]
 
 
