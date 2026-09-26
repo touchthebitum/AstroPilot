@@ -2,13 +2,23 @@
 
 AI-powered astrophotography planning platform.
 
-Local release candidate: **1.0.0-beta.6** (canonical version `1.0.0b6`).
-Versioning is under local review: no beta.6 build, tag, or GitHub Release has
-been created. After the versioning commit, macOS and Windows must both be built
-from that same commit. The future tag is `v1.0.0-beta.6`.
+Local release candidate: **1.0.0-beta.7** (canonical version `1.0.0b7`).
+This preparation does not build, tag, publish, or push beta.7. After the
+versioning commit, macOS and Windows must both be built and validated from that
+same commit. The future tag is `v1.0.0-beta.7`.
 
-The historical `v1.0.0-beta.5` tag already exists. See the
-[beta.6 candidate notes and remaining gates](docs/release_checklist.md).
+The historical `v1.0.0-beta.6` tag is the comparison baseline. See the
+[beta.7 release notes](docs/release_notes_beta7.md) and
+[remaining release gates](docs/release_checklist.md).
+
+## Product and technical identity for beta.7
+
+**NightMerit is the user-visible application name.** To preserve upgrades and
+existing beta profiles, the distributed and technical identity remains
+**AstroPilot** for beta.7. In particular, beta.7 keeps `AstroPilot.app`,
+`AstroPilot.exe`, the AstroPilot installer, the existing bundle ID, existing
+data and log paths, and the Python package name `astropilot`. These technical
+artifacts and paths must not be renamed as part of beta.7.
 
 Published historical baseline: **v1.0.0-beta.4** (canonical version `1.0.0b4`).
 
@@ -25,7 +35,7 @@ installation, launch, update, uninstall, reinstall, and data preservation are
 validated. The beta.3 clean-machine test on the Mac mini, native Windows user
 path with spaces/accented characters, and Windows Start Menu launch have passed.
 Full suites were validated on macOS and Windows for beta.3. This is a historical
-validation record, not a validation of beta.6.
+validation record, not a validation of beta.7.
 
 See [closed-beta status and artifact SHA-256 values](docs/closed_beta.md),
 [release gates](docs/release_checklist.md), and

@@ -1,49 +1,65 @@
-# Release checklist: 1.0.0-beta.6
+# Release checklist: 1.0.0-beta.7
 
-Canonical project version: `1.0.0b6`. Tester label: `1.0.0-beta.6`.
-Future tag: `v1.0.0-beta.6` (not created in this versioning run).
-Historical tag `v1.0.0-beta.5` exists. The beta.3 checksums and native
-validation remain in the [historical closed-beta record](closed_beta.md).
+Canonical project version: `1.0.0b7`. Tester label: `1.0.0-beta.7`.
+Future tag: `v1.0.0-beta.7` (not created by release preparation).
+Comparison baseline: existing tag `v1.0.0-beta.6`.
 
-## Local versioning candidate
+## Release-preparation record
 
-- [x] Ultimate beta.6 release gate reported **PRÊT POUR VERSIONNAGE BETA.6**
-  on source HEAD `80e7d9bb8d973df86523394e54b88cad5f22bf7b`.
-- [x] Review version bump, UI label, notes, and local checks in this run:
-  `uv lock --check`, 140 targeted tests, 3332 full-suite tests (44 warnings),
-  JavaScript syntax, Python compilation, and `git diff --check` passed.
-- [x] Commit the reviewed versioning change: `b642342abb080aa412f3cb12058e7b9fda75fc00`.
+- [x] Confirm baseline before editing: `main == origin/main` at
+  `8410e7f6e33099beb7dcb1070b5e7f108885f3b7`, with no tracked changes and only
+  `.DS_Store` untracked.
+- [x] Confirm critical stash
+  `223ec1f5904131d726b694655f137670c0ddeb0b` is intact.
+- [x] Review the 18 merged PRs after `v1.0.0-beta.6` (#267 through #284) and
+  capture their tester-facing delta in [the beta.7 notes](release_notes_beta7.md).
+- [x] Set the canonical version and version-dependent contracts to `1.0.0b7`.
+- [x] Preserve the transitional NightMerit/AstroPilot identity contract.
+- [ ] Record the final release-preparation commit after review.
+
+## Local validation for the preparation change
+
+- [x] `uv lock --check` passes with 49 packages resolved.
+- [x] 117 targeted version, runtime identity, UI asset, macOS packaging, and
+  Windows installer contract tests pass.
+- [x] Python byte-compilation smoke validation passes for `astropilot`,
+  `decision`, `astro_score.py`, and `scripts`.
+- [x] `git diff --check` passes.
+
+These local checks validate release preparation only. They do not certify a
+native package, installability, upgrade behavior, signing, or publication.
+
+## Transitional branding contract
+
+NightMerit is the name visible to users in the application. For beta.7, the
+technical and distributed identity remains AstroPilot: `AstroPilot.app`,
+`AstroPilot.exe`, the AstroPilot installer, bundle ID `fr.astropilot.desktop`,
+the existing AstroPilot data and log paths, and Python package `astropilot`.
+Do not rename these artifacts, identifiers, packages, or paths in beta.7. This
+deliberate split preserves upgrades and existing beta profiles.
+
+## Native release gates (not performed by this increment)
+
 - [ ] Confirm a clean tree, `main == origin/main`, and the same final release
   commit on both build hosts before either build.
-- [ ] Build the macOS arm64 ZIP from that commit, then sign, notarize, staple,
-  inspect archive contents, extract, and verify Gatekeeper and signature.
+- [ ] Build the macOS arm64 application and ZIP from that commit; sign,
+  notarize, staple, inspect archive contents, extract, and verify Gatekeeper
+  and signature.
 - [ ] Build the Windows x86_64 onedir application and per-user installer from
-  that same commit; verify installed runtime identity and update behavior.
-- [ ] Record actual artifact names and SHA-256 checksums (none for beta.6 yet).
-- [ ] Validate installation, launch, persistence, and upgrade on clean/native
-  macOS and Windows accounts. Rerun relevant platform test suites.
-- [ ] Review all gates and only then create `v1.0.0-beta.6` and consider a
-  GitHub Release. Neither step belongs to this local versioning run.
+  the same commit. Windows output remains unsigned for beta.7; document the
+  warning shown to testers.
+- [ ] Validate installed runtime identity, launch, persistence, beta.6-to-beta.7
+  profile upgrade, uninstall, and reinstall on clean/native macOS and Windows
+  accounts. Run the dynamic UI suite where Node is available.
+- [ ] Record actual artifact names and SHA-256 checksums.
+- [ ] Review all gates and only then create `v1.0.0-beta.7` and consider a
+  GitHub Release. Neither step belongs to release preparation.
 
-Expected filenames from the current build scripts, **not existing beta.6 artifacts**:
-`AstroPilot-1.0.0-beta.6-macos-arm64.zip` and
-`AstroPilot-1.0.0b6-windows-x86_64-setup.exe`.
+Expected filenames from the current build scripts, **not existing artifacts**:
+`AstroPilot-1.0.0-beta.7-macos-arm64.zip` and
+`AstroPilot-1.0.0b7-windows-x86_64-setup.exe`.
 
-## Tester notes
+## Scope guard
 
-Since beta.5, primary recommendations again require an actionable Mission and
-continuous session window. Production ImagingField and AcquisitionIntent
-support enables a choice of acquisition intent where applicable: single,
-multiple, none, and legacy paths are handled in the UI. UserSelection carries
-the chosen intent to Mission; a saved Mission can be reopened after reload
-without a duplicate acceptance. Historical profiles are retained and require
-explicit Bortle confirmation before recommendation. Editing a saved
-configuration now has a contextual heading.
-
-Weather provider reliability history is still immature: partial weather
-validation and `CAUTION` are expected. This candidate does **not** claim
-automatic intent progression, direct Session/Execution provenance, a mature
-ProviderReliabilityReport, or advanced Learning.
-
-The versioning and local checks alone do not certify installability. No beta.5
-artifact/checksum is repurposed as a beta.6 build.
+This increment performs no packaging, native build, tag, GitHub Release, or
+push. No previous artifact or checksum may be repurposed as a beta.7 build.

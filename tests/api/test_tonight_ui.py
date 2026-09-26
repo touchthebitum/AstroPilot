@@ -132,7 +132,7 @@ def test_root_serves_tonight_classic_ui():
     assert "Fiabilité de la recommandation" in response.text
     assert 'id="alternatives-section"' in response.text
     assert 'id="alternatives-list"' in response.text
-    assert 'src="/ui/app.js?v=1.0.0b6-' in response.text
+    assert 'src="/ui/app.js?v=1.0.0b7-' in response.text
     assert "__ASTROPILOT_ASSET_TOKEN__" not in response.text
 
 

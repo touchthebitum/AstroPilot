@@ -6,7 +6,7 @@ procedure rebuilds the application from the release checkout before packaging.
 ## Recorded beta.3 status
 
 This is a historical beta.3 validation record (the current local versioning
-candidate is beta.6; see [release checklist](release_checklist.md)). Beta.3 was
+candidate is beta.7; see [release checklist](release_checklist.md)). Beta.3 was
 `1.0.0-beta.3` (canonical `1.0.0b3`),
 from source commit `c8566443c1caf612d122a8d217fe05884ac6aace`.
 
@@ -25,7 +25,7 @@ from source commit `c8566443c1caf612d122a8d217fe05884ac6aace`.
 - Full suite Windows beta.3: 2641 passed, 0 failed, 1 skipped (recorded result;
   not rerun during this documentation update).
 - Authenticode was outside beta.3 scope. At the time of this record, tag and
-  GitHub Release were listed as pending; this is not beta.6 status.
+  GitHub Release were listed as pending; this is not beta.7 status.
 
 The checklist below is a reusable procedure, not an assertion that every
 individual observation (for example optional shortcuts or automatic restart)
