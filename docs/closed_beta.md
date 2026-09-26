@@ -2,7 +2,7 @@
 
 Canonical version: `1.0.0b3`. Tester label: `1.0.0-beta.3`.
 This document preserves the beta.3 artifact and validation record; the current
-local versioning candidate is beta.6 (see [release checklist](release_checklist.md)).
+local versioning candidate is beta.7 (see [release checklist](release_checklist.md)).
 Beta.3 replaced beta.2. The historical text below describes what was recorded
 at that time, not the present publication status.
 
@@ -73,7 +73,7 @@ installer and signed/notarized macOS release). Final docs/release review is
 complete; the beta.3 validation gates were closed in the historical record.
 
 At the time of this beta.3 record, tag creation and GitHub Release were still
-listed as pending. This is not a statement about the current beta.6 candidate.
+listed as pending. This is not a statement about the current beta.7 candidate.
 
 ## Outside beta.3 scope
 

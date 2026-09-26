@@ -23,7 +23,7 @@ def test_runtime_identity_is_exact_and_non_sensitive(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.json() == {
         "application": "astropilot",
-        "version": "1.0.0b6",
+        "version": "1.0.0b7",
         "build": "8541acc",
         "architecture": response.json()["architecture"],
     }
@@ -47,7 +47,7 @@ def test_runtime_identity_does_not_resolve_application_state():
     identity = client.get("/v1/runtime-identity").json()
 
     assert identity["application"] == "astropilot"
-    assert identity["version"] == "1.0.0b6"
+    assert identity["version"] == "1.0.0b7"
     assert identity["build"]
     assert identity["architecture"]
 
@@ -57,7 +57,7 @@ def test_runtime_identity_has_controlled_development_build_fallback(monkeypatch)
 
     identity = TestClient(create_app()).get("/v1/runtime-identity").json()
 
-    assert identity["version"] == "1.0.0b6"
+    assert identity["version"] == "1.0.0b7"
     assert identity["build"] == "development"
 
 
