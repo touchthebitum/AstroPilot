@@ -23,6 +23,7 @@ astropilot-app = "astropilot.launcher:main"
 [project.optional-dependencies]
 packaging = [
     "pyinstaller>=6.22,<7.0",
+    "pyobjc-framework-Cocoa>=11,<13; sys_platform == 'darwin'",
     "tzdata>=2025.2",
 ]
 test = [

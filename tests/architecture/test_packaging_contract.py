@@ -62,6 +62,12 @@ def test_packaging_dependencies_are_isolated_from_runtime_dependencies():
         for dependency in packaging_dependencies
     )
     assert any(
+        dependency.lower().startswith("pyobjc-framework-cocoa>=11")
+        and "<13" in dependency
+        and "sys_platform == 'darwin'" in dependency
+        for dependency in packaging_dependencies
+    )
+    assert any(
         dependency.lower().startswith("tzdata")
         for dependency in packaging_dependencies
     )
@@ -134,6 +140,17 @@ def test_spec_collects_exact_runtime_assets_without_broad_hidden_imports():
     assert "hiddenimports=[]" in spec
     assert "collect_submodules" not in spec
     assert "tests/data" not in spec
+
+
+def test_macos_reopen_bridge_is_imported_by_the_packaged_launcher():
+    launcher = (ROOT / "astropilot" / "launcher.py").read_text(encoding="utf-8")
+    bridge = (ROOT / "astropilot" / "macos_app.py").read_text(encoding="utf-8")
+
+    assert "from astropilot.macos_app import run_macos_application" in launcher
+    assert "applicationShouldHandleReopen_hasVisibleWindows_" in bridge
+    assert "applicationShouldTerminate_" in bridge
+    assert "objc.protocolNamed(" in bridge
+    assert '"NSApplicationDelegate"' in bridge
 
 
 def _build_module():

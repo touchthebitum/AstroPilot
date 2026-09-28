@@ -152,6 +152,130 @@ def test_existing_instance_logs_runtime_metadata_and_browser_result(monkeypatch)
     assert "browser_open_succeeded" in log
 
 
+def test_macos_reactivation_after_readiness_opens_browser_without_second_launcher():
+    launcher_calls = []
+    browser_calls = []
+
+    def launcher_run(**options):
+        launcher_calls.append(options)
+        options["browser_open"](launcher.BROWSER_URL)
+
+    def application_runner(launch, reopen, shutdown):
+        launch()
+        reopen()
+
+    launcher._run_macos_application(
+        application_runner=application_runner,
+        launcher_run=launcher_run,
+        browser_open=browser_calls.append,
+    )
+
+    assert len(launcher_calls) == 1
+    assert set(launcher_calls[0]) == {"browser_open", "shutdown_event"}
+    assert browser_calls == [launcher.BROWSER_URL, launcher.BROWSER_URL]
+    assert "macos_reopen_received" in launcher_log()
+
+
+def test_macos_reopen_during_startup_waits_for_readiness():
+    browser_calls = []
+
+    def launcher_run(**options):
+        assert browser_calls == []
+        options["browser_open"](launcher.BROWSER_URL)
+
+    def application_runner(launch, reopen, shutdown):
+        reopen()
+        assert browser_calls == []
+        launch()
+
+    launcher._run_macos_application(
+        application_runner=application_runner,
+        launcher_run=launcher_run,
+        browser_open=browser_calls.append,
+    )
+
+    assert browser_calls == [launcher.BROWSER_URL]
+    assert "macos_reopen_deferred_until_ready" in launcher_log()
+
+
+def test_macos_reopen_during_failed_startup_does_not_open_browser():
+    browser_calls = []
+
+    def application_runner(launch, reopen, shutdown):
+        reopen()
+        with pytest.raises(RuntimeError, match="startup failed"):
+            launch()
+
+    launcher._run_macos_application(
+        application_runner=application_runner,
+        launcher_run=lambda **options: (_ for _ in ()).throw(
+            RuntimeError("startup failed")
+        ),
+        browser_open=browser_calls.append,
+    )
+
+    assert browser_calls == []
+
+
+def test_macos_multiple_reopens_during_startup_are_coalesced():
+    browser_calls = []
+
+    def launcher_run(**options):
+        options["browser_open"](launcher.BROWSER_URL)
+
+    def application_runner(launch, reopen, shutdown):
+        reopen()
+        reopen()
+        reopen()
+        assert browser_calls == []
+        launch()
+
+    launcher._run_macos_application(
+        application_runner=application_runner,
+        launcher_run=launcher_run,
+        browser_open=browser_calls.append,
+    )
+
+    assert browser_calls == [launcher.BROWSER_URL]
+    assert "macos_reopen_coalesced" in launcher_log()
+
+
+def test_macos_main_uses_native_application_event_loop(monkeypatch):
+    calls = []
+    monkeypatch.setattr(launcher.sys, "platform", "darwin")
+    monkeypatch.setattr(launcher.sys, "argv", ["AstroPilot"])
+    monkeypatch.setattr(
+        launcher,
+        "_run_macos_application",
+        lambda: calls.append("macos"),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "run",
+        lambda: pytest.fail("macOS must use the Cocoa event loop"),
+    )
+
+    launcher.main()
+
+    assert calls == ["macos"]
+
+
+def test_non_macos_main_keeps_direct_launcher_fallback(monkeypatch):
+    calls = []
+    monkeypatch.setattr(launcher.sys, "platform", "win32")
+    monkeypatch.setattr(launcher.sys, "argv", ["AstroPilot"])
+    monkeypatch.setattr(launcher, "run", lambda: calls.append("run"))
+    monkeypatch.setattr(
+        launcher,
+        "_run_macos_application",
+        lambda: pytest.fail("non-macOS must not start Cocoa"),
+    )
+
+    launcher.main()
+
+    assert calls == ["run"]
+
+
 def test_browser_failure_is_diagnostic_without_marking_healthy_server_failed(
     monkeypatch,
     capsys,
@@ -513,6 +637,42 @@ def test_launcher_reuses_existing_app_and_opens_browser_once_after_readiness():
     assert "owned_server_ready" in log
     assert "browser_open_attempt" in log
     assert "graceful_shutdown_requested" in log
+
+
+def test_application_shutdown_event_stops_active_owned_server():
+    shutdown_event = threading.Event()
+    browser_opened = threading.Event()
+    server_stopped = threading.Event()
+
+    class FakeServer:
+        def __init__(self, config):
+            self.started = False
+            self.should_exit = False
+
+        def run(self):
+            self.started = True
+            assert browser_opened.wait(timeout=1.0)
+            shutdown_event.set()
+            while not self.should_exit:
+                threading.Event().wait(0.001)
+            server_stopped.set()
+
+    server = launcher.run(
+        config_factory=lambda application, **options: object(),
+        server_factory=FakeServer,
+        browser_open=lambda url: browser_opened.set(),
+        shutdown_event=shutdown_event,
+        readiness_timeout=1.0,
+        poll_interval=0.001,
+    )
+
+    assert server.should_exit is True
+    assert server_stopped.is_set()
+    assert not any(
+        thread.name == "astropilot-shutdown-watcher" and thread.is_alive()
+        for thread in threading.enumerate()
+    )
+    assert "application_shutdown_received" in launcher_log()
 
 
 def test_startup_that_never_becomes_ready_does_not_open_browser():

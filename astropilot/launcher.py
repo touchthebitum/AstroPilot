@@ -250,6 +250,7 @@ def run(
     readiness_timeout: float = READINESS_TIMEOUT_SECONDS,
     poll_interval: float = READINESS_POLL_INTERVAL_SECONDS,
     port_probe: Callable[[], PortState] | None = None,
+    shutdown_event: threading.Event | None = None,
 ):
     """Run the existing AstroPilot application until its server exits."""
 
@@ -297,6 +298,7 @@ def run(
     stop_event = threading.Event()
     ready_event = threading.Event()
     timed_out_event = threading.Event()
+    server_finished_event = threading.Event()
 
     def open_browser_after_startup() -> None:
         try:
@@ -327,6 +329,22 @@ def run(
     )
     browser_thread.start()
 
+    shutdown_thread = None
+    if shutdown_event is not None:
+        def request_shutdown() -> None:
+            while not server_finished_event.wait(poll_interval):
+                if shutdown_event.is_set():
+                    logger.info("application_shutdown_received")
+                    server.should_exit = True
+                    return
+
+        shutdown_thread = threading.Thread(
+            target=request_shutdown,
+            name="astropilot-shutdown-watcher",
+            daemon=True,
+        )
+        shutdown_thread.start()
+
     interrupted = False
     run_error: BaseException | None = None
     logger.info("owned_server_starting")
@@ -344,7 +362,10 @@ def run(
     finally:
         server.should_exit = True
         stop_event.set()
+        server_finished_event.set()
         browser_thread.join(timeout=max(0.1, poll_interval * 2))
+        if shutdown_thread is not None:
+            shutdown_thread.join(timeout=max(0.1, poll_interval * 2))
         logger.info("graceful_shutdown_requested")
 
     if run_error is not None:
@@ -360,9 +381,59 @@ def run(
     return server
 
 
+def _run_macos_application(
+    *,
+    application_runner: Callable[..., Any] | None = None,
+    launcher_run: Callable[..., Any] = run,
+    browser_open: Callable[[str], Any] = webbrowser.open,
+) -> None:
+    if application_runner is None:
+        from astropilot.macos_app import run_macos_application
+
+        application_runner = run_macos_application
+
+    logger, log_path = _configure_launcher_logger()
+    shutdown_event = threading.Event()
+    browser_lock = threading.Lock()
+    browser_ready = False
+    pending_reopen = False
+
+    def open_browser_when_ready(url: str) -> Any:
+        nonlocal browser_ready, pending_reopen
+        with browser_lock:
+            browser_ready = True
+            pending_reopen = False
+            return browser_open(url)
+
+    def reopen() -> None:
+        nonlocal pending_reopen
+        logger.info("macos_reopen_received")
+        with browser_lock:
+            if not browser_ready:
+                if not pending_reopen:
+                    logger.info("macos_reopen_deferred_until_ready")
+                else:
+                    logger.info("macos_reopen_coalesced")
+                pending_reopen = True
+                return
+            _open_browser(browser_open, logger, log_path)
+
+    application_runner(
+        lambda: launcher_run(
+            browser_open=open_browser_when_ready,
+            shutdown_event=shutdown_event,
+        ),
+        reopen,
+        shutdown_event.set,
+    )
+
+
 def main() -> None:
     if sys.argv[1:] == ["--runtime-identity"]:
         print(json.dumps(runtime_identity_payload(), sort_keys=True))
+        return
+    if sys.platform == "darwin":
+        _run_macos_application()
         return
     run()
 

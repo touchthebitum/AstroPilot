@@ -144,7 +144,11 @@ uv run --locked --no-sync astropilot-app
 
 AstroPilot starts locally at <http://127.0.0.1:8000/> and opens that address
 in the default browser. A second launch detects the existing AstroPilot
-instance and reopens it. If another application is using port 8000,
+instance and reopens it. In the packaged macOS application, clicking the Dock
+icon while the server is already running is handled by the native Cocoa reopen
+event and opens the same local address without starting another server. The
+macOS packaging extra includes PyObjC solely for this application event loop.
+If another application is using port 8000,
 AstroPilot stops without changing ports or terminating that application.
 
 Launcher diagnostics are stored in `~/Library/Logs/AstroPilot/AstroPilot.log`.
