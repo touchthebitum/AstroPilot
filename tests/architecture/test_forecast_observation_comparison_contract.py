@@ -97,17 +97,26 @@ ALLOWED_IMPORTS = {
         ("enum", "Enum"),
         ("types", "MemberDescriptorType"),
         ("zoneinfo", "ZoneInfo"),
+        ("decision.field_observation", "CaptureMethod"),
         ("decision.field_observation", "CloudState"),
+        ("decision.field_observation", "Confidence"),
         ("decision.field_observation", "FieldObservation"),
+        ("decision.field_observation", "HfrUnit"),
         ("decision.field_observation", "ObservationProvenance"),
         ("decision.field_observation", "ObservationQuality"),
+        ("decision.field_observation", "ObservationSourceType"),
         ("decision.field_observation", "ObservedAcquisition"),
         ("decision.field_observation", "ObservedConditions"),
         ("decision.field_observation", "ObservedTechnical"),
         ("decision.field_observation", "QualityFlag"),
+        ("decision.field_observation", "SeeingCondition"),
+        ("decision.field_observation", "StopReason"),
+        ("decision.field_observation", "SurfaceCondition"),
+        ("decision.field_observation", "Transparency"),
         ("decision.models.forecast_observation_comparison", "ALGORITHM_VERSION"),
         ("decision.models.forecast_observation_comparison", "FORECAST_SCOPE"),
         ("decision.models.forecast_observation_comparison", "CloudComparisonOutcome"),
+        ("decision.models.forecast_observation_comparison", "CloudMappingComparisonPolicy"),
         ("decision.models.forecast_observation_comparison", "CloudVariableComparison"),
         ("decision.models.forecast_observation_comparison", "ComparisonReason"),
         ("decision.models.forecast_observation_comparison", "ForecastObservationComparison"),
@@ -116,6 +125,7 @@ ALLOWED_IMPORTS = {
         ("decision.models.forecast_observation_comparison", "ForecastPointProvenance"),
         ("decision.models.forecast_observation_comparison", "NumericVariableComparison"),
         ("decision.models.forecast_observation_comparison", "ObservationComparisonProvenance"),
+        ("decision.models.forecast_observation_comparison", "TemporalComparisonPolicy"),
         ("decision.models.forecast_observation_comparison", "VariableComparison"),
         ("decision.models.forecast_observation_comparison", "VariableComparisonStatus"),
         ("decision.weather.cloud_mapping_policy", "map_cloud_cover_to_condition"),
@@ -1223,6 +1233,54 @@ def test_observation_section_subclass_extra_state_is_rejected():
             )
 
 
+def test_original_observation_primitives_are_validated_before_reconstruction():
+    class FloatSubclass(float):
+        pass
+
+    class IntSubclass(int):
+        pass
+
+    class StringSubclass(str):
+        pass
+
+    class DatetimeSubclass(datetime):
+        pass
+
+    subclassed_datetime = DatetimeSubclass(
+        2026,
+        9,
+        1,
+        21,
+        0,
+        tzinfo=timezone.utc,
+    )
+    corruptions = (
+        ("conditions", "temperature_c", 8),
+        ("conditions", "temperature_c", FloatSubclass(8.0)),
+        ("acquisition", "attempted_frames", IntSubclass(1)),
+        ("provenance", "source_id", " station-42 "),
+        ("provenance", "source_id", StringSubclass("station-42")),
+        ("conditions", "cloud_state", Confidence.HIGH),
+        (None, "observed_at_utc", subclassed_datetime),
+        ("quality", "flags", [QualityFlag.ESTIMATED]),
+    )
+
+    for section_name, field_name, invalid_value in corruptions:
+        source = observation()
+        target = source if section_name is None else getattr(source, section_name)
+        object.__setattr__(target, field_name, invalid_value)
+
+        with pytest.raises(
+            ForecastObservationComparisonInputError,
+            match="^field_observation_invalid$",
+        ):
+            compare_forecast_to_field_observation(
+                DecisionForecastEvidence(()),
+                source,
+                computed_at_utc=COMPUTED_AT,
+            )
+
+
 @pytest.mark.parametrize("invalid_parameters", [False, 0, "", (), [], {}])
 def test_falsy_non_parameter_values_are_rejected(invalid_parameters):
     with pytest.raises(
@@ -1254,6 +1312,103 @@ def test_parameter_subclass_is_rejected_by_exact_type_contract():
             computed_at_utc=COMPUTED_AT,
             parameters=parameters,
         )
+
+
+def test_policy_subclasses_with_distinct_material_state_are_rejected():
+    class ExtendedTemporalPolicy(TemporalComparisonPolicy):
+        __slots__ = ("marker",)
+
+    class ExtendedCloudPolicy(CloudMappingComparisonPolicy):
+        __slots__ = ("marker",)
+
+    temporal_policies = []
+    cloud_policies = []
+    for marker in ("first", "second"):
+        temporal_policy = ExtendedTemporalPolicy()
+        object.__setattr__(temporal_policy, "marker", marker)
+        temporal_policies.append(
+            ForecastObservationParameters(temporal_policy=temporal_policy)
+        )
+        cloud_policy = ExtendedCloudPolicy()
+        object.__setattr__(cloud_policy, "marker", marker)
+        cloud_policies.append(
+            ForecastObservationParameters(cloud_mapping_policy=cloud_policy)
+        )
+
+    for parameters in (*temporal_policies, *cloud_policies):
+        with pytest.raises(
+            ForecastObservationComparisonInputError,
+            match="^invalid_forecast_observation_parameters$",
+        ):
+            compare_forecast_to_field_observation(
+                DecisionForecastEvidence(()),
+                observation(),
+                computed_at_utc=COMPUTED_AT,
+                parameters=parameters,
+            )
+
+
+def test_corrupted_parameter_primitives_fail_closed_without_technical_errors():
+    class TimedeltaSubclass(timedelta):
+        __slots__ = ("marker",)
+
+    class UnreadableTemporalPolicy(TemporalComparisonPolicy):
+        @property
+        def version(self):
+            raise RuntimeError("must not escape")
+
+    corruptions = []
+
+    offset_is_integer = ForecastObservationParameters()
+    object.__setattr__(
+        offset_is_integer.temporal_policy,
+        "maximum_absolute_offset",
+        0,
+    )
+    corruptions.append(offset_is_integer)
+
+    offset_has_extra_state = TimedeltaSubclass(minutes=30)
+    offset_has_extra_state.marker = "material"
+    offset_is_subclassed = ForecastObservationParameters()
+    object.__setattr__(
+        offset_is_subclassed.temporal_policy,
+        "maximum_absolute_offset",
+        offset_has_extra_state,
+    )
+    corruptions.append(offset_is_subclassed)
+
+    non_canonical_version = ForecastObservationParameters()
+    object.__setattr__(
+        non_canonical_version.temporal_policy,
+        "version",
+        " nearest_forecast_utc.v1 ",
+    )
+    corruptions.append(non_canonical_version)
+
+    non_canonical_mapping = ForecastObservationParameters()
+    object.__setattr__(
+        non_canonical_mapping.cloud_mapping_policy,
+        "version",
+        " cloud_mapping.v1 ",
+    )
+    corruptions.append(non_canonical_mapping)
+
+    unreadable_policy = object.__new__(UnreadableTemporalPolicy)
+    corruptions.append(
+        ForecastObservationParameters(temporal_policy=unreadable_policy)
+    )
+
+    for parameters in corruptions:
+        with pytest.raises(
+            ForecastObservationComparisonInputError,
+            match="^invalid_forecast_observation_parameters$",
+        ):
+            compare_forecast_to_field_observation(
+                DecisionForecastEvidence(()),
+                observation(),
+                computed_at_utc=COMPUTED_AT,
+                parameters=parameters,
+            )
 
 
 def test_unsupported_observation_dimensions_and_forecasts_are_excluded():
@@ -1296,6 +1451,39 @@ def test_no_supported_variables_keeps_invalid_evidence_reason_first():
     assert result.results == ()
     assert reason_codes(result) == (
         "decision_forecast_evidence_invalid",
+        "no_supported_observed_variables",
+    )
+
+
+@pytest.mark.parametrize(
+    ("evidence", "expected_evidence_reason"),
+    [
+        (None, "decision_forecast_evidence_missing"),
+        (DecisionForecastEvidence(()), "decision_forecast_evidence_empty"),
+    ],
+)
+def test_no_supported_variables_keeps_missing_or_empty_evidence_reason_first(
+    evidence,
+    expected_evidence_reason,
+):
+    source = observation(
+        conditions=ObservedConditions(
+            transparency=Transparency.GOOD,
+            seeing=SeeingCondition.POOR,
+            surface_condition=SurfaceCondition.DEW_PRESENT,
+        )
+    )
+
+    result = compare_forecast_to_field_observation(
+        evidence,
+        source,
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert result.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert result.results == ()
+    assert reason_codes(result) == (
+        expected_evidence_reason,
         "no_supported_observed_variables",
     )
 

@@ -9,19 +9,28 @@ from types import MemberDescriptorType
 from zoneinfo import ZoneInfo
 
 from decision.field_observation import (
+    CaptureMethod,
     CloudState,
+    Confidence,
     FieldObservation,
+    HfrUnit,
     ObservationProvenance,
     ObservationQuality,
+    ObservationSourceType,
     ObservedAcquisition,
     ObservedConditions,
     ObservedTechnical,
     QualityFlag,
+    SeeingCondition,
+    StopReason,
+    SurfaceCondition,
+    Transparency,
 )
 from decision.models.forecast_observation_comparison import (
     ALGORITHM_VERSION,
     FORECAST_SCOPE,
     CloudComparisonOutcome,
+    CloudMappingComparisonPolicy,
     CloudVariableComparison,
     ComparisonReason,
     ForecastObservationComparison,
@@ -30,6 +39,7 @@ from decision.models.forecast_observation_comparison import (
     ForecastPointProvenance,
     NumericVariableComparison,
     ObservationComparisonProvenance,
+    TemporalComparisonPolicy,
     VariableComparison,
     VariableComparisonStatus,
 )
@@ -1050,86 +1060,162 @@ def _validated_field_observation(value: object) -> FieldObservation:
         if type(quality) is not ObservationQuality:
             raise ValueError("invalid_quality")
 
+        observation_id = value.observation_id
+        decision_id = value.decision_id
+        execution_id = value.execution_id
+        observed_at_utc = value.observed_at_utc
+        recorded_at_utc = value.recorded_at_utc
+        supersedes_observation_id = value.supersedes_observation_id
+
+        temperature_c = conditions.temperature_c
+        relative_humidity_percent = conditions.relative_humidity_percent
+        cloud_state = conditions.cloud_state
+        transparency = conditions.transparency
+        seeing = conditions.seeing
+        wind_speed_kmh = conditions.wind_speed_kmh
+        surface_condition = conditions.surface_condition
+        moon_halo = conditions.moon_halo
+
+        attempted_frames = acquisition.attempted_frames
+        usable_frames = acquisition.usable_frames
+        stop_reason = acquisition.stop_reason
+
+        hfr = technical.hfr
+        hfr_unit = technical.hfr_unit
+        sky_background = technical.sky_background
+        sky_background_unit = technical.sky_background_unit
+        guiding_rms_arcsec = technical.guiding_rms_arcsec
+
+        source_type = provenance.source_type
+        capture_method = provenance.capture_method
+        source_id = provenance.source_id
+        imported_at_utc = provenance.imported_at_utc
+
+        confidence = quality.confidence
+        flags = quality.flags
+
+        exact_optional_strings = (
+            decision_id,
+            execution_id,
+            supersedes_observation_id,
+        )
+        exact_trimmed_optional_strings = (source_id, sky_background_unit)
+        exact_utc_datetimes = (observed_at_utc, recorded_at_utc)
+        exact_optional_utc_datetimes = (imported_at_utc,)
+        exact_optional_floats = (
+            temperature_c,
+            relative_humidity_percent,
+            wind_speed_kmh,
+            hfr,
+            sky_background,
+            guiding_rms_arcsec,
+        )
+        exact_optional_integers = (attempted_frames, usable_frames)
+        exact_optional_enums = (
+            (cloud_state, CloudState),
+            (transparency, Transparency),
+            (seeing, SeeingCondition),
+            (surface_condition, SurfaceCondition),
+            (stop_reason, StopReason),
+            (hfr_unit, HfrUnit),
+        )
+        if type(observation_id) is not str:
+            raise ValueError("non_canonical_observation_string")
+        if any(
+            item is not None and type(item) is not str
+            for item in exact_optional_strings
+        ):
+            raise ValueError("non_canonical_observation_string")
+        if any(
+            item is not None
+            and (type(item) is not str or not item or item != item.strip())
+            for item in exact_trimmed_optional_strings
+        ):
+            raise ValueError("non_canonical_observation_string")
+        if any(
+            type(item) is not datetime or item.tzinfo is not timezone.utc
+            for item in exact_utc_datetimes
+        ):
+            raise ValueError("non_canonical_observation_datetime")
+        if any(
+            item is not None
+            and (type(item) is not datetime or item.tzinfo is not timezone.utc)
+            for item in exact_optional_utc_datetimes
+        ):
+            raise ValueError("non_canonical_observation_datetime")
+        if any(
+            item is not None and type(item) is not float
+            for item in exact_optional_floats
+        ):
+            raise ValueError("non_canonical_observation_float")
+        if any(
+            item is not None and type(item) is not int
+            for item in exact_optional_integers
+        ):
+            raise ValueError("non_canonical_observation_integer")
+        if any(
+            item is not None and type(item) is not expected_type
+            for item, expected_type in exact_optional_enums
+        ):
+            raise ValueError("non_canonical_observation_enum")
+        if moon_halo is not None and type(moon_halo) is not bool:
+            raise ValueError("non_canonical_observation_boolean")
+        if type(source_type) is not ObservationSourceType:
+            raise ValueError("non_canonical_observation_source_type")
+        if type(capture_method) is not CaptureMethod:
+            raise ValueError("non_canonical_observation_capture_method")
+        if type(confidence) is not Confidence:
+            raise ValueError("non_canonical_observation_confidence")
+        if type(flags) is not tuple or any(
+            type(item) is not QualityFlag for item in flags
+        ):
+            raise ValueError("non_canonical_observation_quality_flags")
+
         rebuilt_conditions = ObservedConditions(
-            temperature_c=conditions.temperature_c,
-            relative_humidity_percent=conditions.relative_humidity_percent,
-            cloud_state=conditions.cloud_state,
-            transparency=conditions.transparency,
-            seeing=conditions.seeing,
-            wind_speed_kmh=conditions.wind_speed_kmh,
-            surface_condition=conditions.surface_condition,
-            moon_halo=conditions.moon_halo,
+            temperature_c=temperature_c,
+            relative_humidity_percent=relative_humidity_percent,
+            cloud_state=cloud_state,
+            transparency=transparency,
+            seeing=seeing,
+            wind_speed_kmh=wind_speed_kmh,
+            surface_condition=surface_condition,
+            moon_halo=moon_halo,
         )
         rebuilt_acquisition = ObservedAcquisition(
-            attempted_frames=acquisition.attempted_frames,
-            usable_frames=acquisition.usable_frames,
-            stop_reason=acquisition.stop_reason,
+            attempted_frames=attempted_frames,
+            usable_frames=usable_frames,
+            stop_reason=stop_reason,
         )
         rebuilt_technical = ObservedTechnical(
-            hfr=technical.hfr,
-            hfr_unit=technical.hfr_unit,
-            sky_background=technical.sky_background,
-            sky_background_unit=technical.sky_background_unit,
-            guiding_rms_arcsec=technical.guiding_rms_arcsec,
+            hfr=hfr,
+            hfr_unit=hfr_unit,
+            sky_background=sky_background,
+            sky_background_unit=sky_background_unit,
+            guiding_rms_arcsec=guiding_rms_arcsec,
         )
         rebuilt_provenance = ObservationProvenance(
-            source_type=provenance.source_type,
-            capture_method=provenance.capture_method,
-            source_id=provenance.source_id,
-            imported_at_utc=provenance.imported_at_utc,
+            source_type=source_type,
+            capture_method=capture_method,
+            source_id=source_id,
+            imported_at_utc=imported_at_utc,
         )
         rebuilt_quality = ObservationQuality(
-            confidence=quality.confidence,
-            flags=quality.flags,
+            confidence=confidence,
+            flags=flags,
         )
         rebuilt = FieldObservation(
-            observation_id=value.observation_id,
-            decision_id=value.decision_id,
-            execution_id=value.execution_id,
-            observed_at_utc=value.observed_at_utc,
-            recorded_at_utc=value.recorded_at_utc,
-            supersedes_observation_id=value.supersedes_observation_id,
+            observation_id=observation_id,
+            decision_id=decision_id,
+            execution_id=execution_id,
+            observed_at_utc=observed_at_utc,
+            recorded_at_utc=recorded_at_utc,
+            supersedes_observation_id=supersedes_observation_id,
             conditions=rebuilt_conditions,
             acquisition=rebuilt_acquisition,
             technical=rebuilt_technical,
             provenance=rebuilt_provenance,
             quality=rebuilt_quality,
         )
-        exact_optional_strings = (
-            rebuilt.decision_id,
-            rebuilt.execution_id,
-            rebuilt.supersedes_observation_id,
-            rebuilt.provenance.source_id,
-            rebuilt.technical.sky_background_unit,
-        )
-        exact_optional_datetimes = (
-            rebuilt.provenance.imported_at_utc,
-        )
-        exact_optional_integers = (
-            rebuilt.acquisition.attempted_frames,
-            rebuilt.acquisition.usable_frames,
-        )
-        if type(rebuilt.observation_id) is not str:
-            raise ValueError("non_canonical_observation_id")
-        if any(
-            item is not None and type(item) is not str
-            for item in exact_optional_strings
-        ):
-            raise ValueError("non_canonical_observation_string")
-        if type(rebuilt.observed_at_utc) is not datetime or type(
-            rebuilt.recorded_at_utc
-        ) is not datetime:
-            raise ValueError("non_canonical_observation_datetime")
-        if any(
-            item is not None and type(item) is not datetime
-            for item in exact_optional_datetimes
-        ):
-            raise ValueError("non_canonical_observation_datetime")
-        if any(
-            item is not None and type(item) is not int
-            for item in exact_optional_integers
-        ):
-            raise ValueError("non_canonical_observation_integer")
         return rebuilt
     except ForecastObservationComparisonInputError:
         raise
@@ -1176,6 +1262,75 @@ def _parameter_document(parameters: ForecastObservationParameters) -> dict:
             ),
         },
     }
+
+
+def _validated_parameters(value: object) -> ForecastObservationParameters:
+    """Validate every material parameter field before identity generation."""
+    if type(value) is not ForecastObservationParameters:
+        raise ForecastObservationComparisonInputError(
+            "invalid_forecast_observation_parameters"
+        )
+    try:
+        temporal_policy = value.temporal_policy
+        cloud_mapping_policy = value.cloud_mapping_policy
+        if type(temporal_policy) is not TemporalComparisonPolicy:
+            raise ValueError("invalid_temporal_policy")
+        if type(cloud_mapping_policy) is not CloudMappingComparisonPolicy:
+            raise ValueError("invalid_cloud_mapping_policy")
+
+        temporal_version = temporal_policy.version
+        maximum_absolute_offset = temporal_policy.maximum_absolute_offset
+        timezone_name = temporal_policy.timezone_name
+        selection_mode = temporal_policy.selection_mode
+        interpolation_enabled = temporal_policy.interpolation_enabled
+        averaging_enabled = temporal_policy.averaging_enabled
+        if any(
+            type(item) is not str or not item or item != item.strip()
+            for item in (temporal_version, timezone_name, selection_mode)
+        ):
+            raise ValueError("non_canonical_temporal_policy_string")
+        if type(maximum_absolute_offset) is not timedelta:
+            raise ValueError("non_canonical_maximum_absolute_offset")
+        if type(interpolation_enabled) is not bool or type(
+            averaging_enabled
+        ) is not bool:
+            raise ValueError("non_canonical_temporal_policy_boolean")
+
+        cloud_version = cloud_mapping_policy.version
+        boundaries_percent = cloud_mapping_policy.boundaries_percent
+        if (
+            type(cloud_version) is not str
+            or not cloud_version
+            or cloud_version != cloud_version.strip()
+        ):
+            raise ValueError("non_canonical_cloud_mapping_version")
+        if type(boundaries_percent) is not tuple or any(
+            type(item) is not float for item in boundaries_percent
+        ):
+            raise ValueError("non_canonical_cloud_mapping_boundaries")
+
+        rebuilt_temporal_policy = TemporalComparisonPolicy(
+            version=temporal_version,
+            maximum_absolute_offset=maximum_absolute_offset,
+            timezone_name=timezone_name,
+            selection_mode=selection_mode,
+            interpolation_enabled=interpolation_enabled,
+            averaging_enabled=averaging_enabled,
+        )
+        rebuilt_cloud_mapping_policy = CloudMappingComparisonPolicy(
+            version=cloud_version,
+            boundaries_percent=boundaries_percent,
+        )
+        return ForecastObservationParameters(
+            temporal_policy=rebuilt_temporal_policy,
+            cloud_mapping_policy=rebuilt_cloud_mapping_policy,
+        )
+    except ForecastObservationComparisonInputError:
+        raise
+    except Exception as error:
+        raise ForecastObservationComparisonInputError(
+            "invalid_forecast_observation_parameters"
+        ) from error
 
 
 def _source_digest(
@@ -1440,10 +1595,7 @@ def compare_forecast_to_field_observation(
     effective_parameters = (
         ForecastObservationParameters() if parameters is None else parameters
     )
-    if type(effective_parameters) is not ForecastObservationParameters:
-        raise ForecastObservationComparisonInputError(
-            "invalid_forecast_observation_parameters"
-        )
+    effective_parameters = _validated_parameters(effective_parameters)
 
     evidence_is_well_formed, canonical_evidence = _inspect_evidence(evidence)
     identity_persistable = canonical_evidence.get(
@@ -1508,7 +1660,7 @@ def compare_forecast_to_field_observation(
     results = []
     reasons = []
     if not observed_values:
-        if evidence_reason == "decision_forecast_evidence_invalid":
+        if evidence_reason is not None:
             reasons.append(ComparisonReason(evidence_reason))
         reasons.append(ComparisonReason("no_supported_observed_variables"))
     elif evidence_reason is not None:
