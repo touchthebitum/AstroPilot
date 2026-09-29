@@ -217,6 +217,24 @@ class WeatherVariableError:
     absolute_error: float
 
 
+def calculate_weather_variable_error(
+    *,
+    variable: WeatherVariable,
+    forecast_value: float,
+    observed_value: float,
+    unit: str,
+) -> WeatherVariableError:
+    signed_error = forecast_value - observed_value
+    return WeatherVariableError(
+        variable=variable,
+        forecast_value=forecast_value,
+        observed_value=observed_value,
+        unit=unit,
+        signed_error=signed_error,
+        absolute_error=abs(signed_error),
+    )
+
+
 @dataclass(frozen=True)
 class WeatherForecastVerification:
     provider_id: str
@@ -328,15 +346,12 @@ def compare_forecast_to_observation(
     for variable in common:
         predicted = forecast_values[variable]
         observed = observation_values[variable]
-        signed_error = predicted.value - observed.value
         errors.append(
-            WeatherVariableError(
+            calculate_weather_variable_error(
                 variable=variable,
                 forecast_value=predicted.value,
                 observed_value=observed.value,
                 unit=predicted.unit,
-                signed_error=signed_error,
-                absolute_error=abs(signed_error),
             )
         )
     return WeatherForecastVerification(
