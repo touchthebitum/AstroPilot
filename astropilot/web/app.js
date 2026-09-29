@@ -72,6 +72,7 @@ const state = {
   sessionBusy: false,
   sessionWriteAttempted: false,
   sessionWriteUncertain: false,
+  observationBusy: false,
 };
 
 const SESSION_PENDING_KEY = "astropilot.pendingSession";
@@ -158,6 +159,7 @@ function renderSession() {
       : session.credit ? "Crédit enregistré." : status === "completed" ? "Session terminée."
       : status === "in_progress" ? "Session en cours." : "Session prête à démarrer.");
   } else sessionMessage("Aucune session enregistrée pour cette mission.");
+  renderObservationLinkage();
 }
 
 async function reloadSessions({ selectId = null } = {}) {
@@ -304,6 +306,177 @@ async function creditSession(_missionId, confirmed) {
     expected_revision: session.profile_revision, evidence_ids: [evidence.evidence_id],
     confirm_historical_baseline: mustConfirm && confirmed,
   });
+}
+
+const OBSERVATION_RANGE_VALUES = Object.freeze({
+  clouds: Object.freeze({
+    0: ["clear", "Dégagé · 0 %"], 25: ["few", "Quelques nuages · 25 %"],
+    50: ["partly_cloudy", "Partiellement couvert · 50 %"],
+    75: ["mostly_cloudy", "Très nuageux · 75 %"], 100: ["overcast", "Couvert · 100 %"],
+  }),
+  transparency: Object.freeze({
+    0: ["poor", "Médiocre · 0 %"], 25: ["fair", "Moyenne · 25 %"],
+    50: ["fair", "Moyenne · 50 %"], 75: ["good", "Bonne · 75 %"],
+    100: ["excellent", "Excellente · 100 %"],
+  }),
+  wind: Object.freeze({
+    0: [0, "Nul"], 1: [5, "Faible"], 2: [15, "Modéré"], 3: [30, "Fort"],
+  }),
+});
+
+function renderObservationLinkage() {
+  const element = document.querySelector("#observation-linkage");
+  if (!element) return;
+  element.textContent = currentSession()?.execution.execution_id
+    ? "Liée à la session sélectionnée" : "Liée à la décision actuelle";
+}
+
+function observationMessage(message, { error = false } = {}) {
+  const element = document.querySelector("#observation-status");
+  element.textContent = message;
+  element.classList.toggle("observation-error", error);
+}
+
+function optionalObservationNumber(selector) {
+  const raw = document.querySelector(selector).value.trim();
+  return raw === "" ? null : Number(raw);
+}
+
+function selectedObservationRange(name) {
+  const input = document.querySelector(`[data-observation-range="${name}"]`);
+  if (input.dataset.touched !== "true") return null;
+  return OBSERVATION_RANGE_VALUES[name][input.value][0];
+}
+
+function buildFieldObservationPayload() {
+  const decisionId = state.acceptedMission?.decision_id;
+  if (!decisionId) return null;
+  const session = currentSession();
+  const surface = document.querySelector('input[name="observation-surface"]:checked')?.value || null;
+  const moonHalo = document.querySelector("#observation-moon-halo").value;
+  const hfr = optionalObservationNumber("#observation-hfr");
+  const conditions = {
+    temperature_c: optionalObservationNumber("#observation-temperature"),
+    relative_humidity_percent: optionalObservationNumber("#observation-humidity"),
+    cloud_state: selectedObservationRange("clouds"),
+    transparency: selectedObservationRange("transparency"),
+    seeing: document.querySelector("#observation-seeing").value || null,
+    wind_speed_kmh: selectedObservationRange("wind"),
+    surface_condition: surface,
+    moon_halo: moonHalo === "" ? null : moonHalo === "true",
+  };
+  const acquisition = {
+    attempted_frames: optionalObservationNumber("#observation-attempted-frames"),
+    usable_frames: optionalObservationNumber("#observation-usable-frames"),
+    stop_reason: document.querySelector("#observation-stop-reason").value || null,
+  };
+  const technical = {
+    hfr,
+    hfr_unit: hfr === null ? null : document.querySelector("#observation-hfr-unit").value,
+    sky_background: null,
+    sky_background_unit: null,
+    guiding_rms_arcsec: optionalObservationNumber("#observation-guiding"),
+  };
+  const hasFact = [...Object.values(conditions), ...Object.values(acquisition), ...Object.values(technical)]
+    .some((value) => value !== null);
+  if (!hasFact) return null;
+  const capturedAt = new Date().toISOString();
+  return {
+    observation_id: crypto.randomUUID(), decision_id: decisionId,
+    execution_id: session?.execution.execution_id || null,
+    observed_at_utc: capturedAt, recorded_at_utc: capturedAt,
+    supersedes_observation_id: null,
+    conditions, acquisition, technical, confidence: "medium",
+    quality_flags: ["estimated", "partial"],
+  };
+}
+
+function pendingObservationKey(decisionId, executionId) {
+  return `astropilot.pendingFieldObservation.${decisionId}.${executionId || "decision"}`;
+}
+
+function resetFieldObservationForm() {
+  const form = document.querySelector("#field-observation-form");
+  for (const input of form.querySelectorAll("[data-observation-range]")) {
+    input.value = input.dataset.observationRange === "wind" ? "1" : "50";
+    delete input.dataset.touched;
+    document.querySelector(`#observation-${input.dataset.observationRange}-value`).textContent = (
+      input.dataset.observationRange === "transparency" ? "Non renseignée" : "Non renseigné"
+    );
+  }
+  for (const input of form.querySelectorAll('input[type="number"]')) input.value = "";
+  for (const input of form.querySelectorAll('input[type="radio"]')) input.checked = false;
+  for (const select of form.querySelectorAll("select")) select.selectedIndex = 0;
+  document.querySelector(".observation-advanced").open = false;
+}
+
+async function storedFieldObservation(observationId) {
+  const response = await fetch(`/v1/field-observations/${encodeURIComponent(observationId)}`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw await sessionHttpError(response);
+  return response.json();
+}
+
+async function submitFieldObservation(event) {
+  event.preventDefault();
+  if (state.observationBusy) return;
+  const decisionId = state.acceptedMission?.decision_id;
+  if (!decisionId) {
+    observationMessage("La décision liée à cette mission est indisponible.", { error: true });
+    return;
+  }
+  const executionId = currentSession()?.execution.execution_id || null;
+  const key = pendingObservationKey(decisionId, executionId);
+  let pending = null;
+  try { pending = JSON.parse(localStorage.getItem(key) || "null"); } catch (_error) { localStorage.removeItem(key); }
+  const freshPayload = pending?.payload ? null : buildFieldObservationPayload();
+  if (!pending?.payload && !freshPayload) {
+    observationMessage("Renseignez au moins une observation terrain.", { error: true });
+    return;
+  }
+  const payload = pending?.payload || freshPayload;
+  localStorage.setItem(key, JSON.stringify({ payload }));
+  state.observationBusy = true;
+  document.querySelector("#observation-save").disabled = true;
+  observationMessage("Enregistrement en cours…");
+  try {
+    if (pending?.payload && await storedFieldObservation(payload.observation_id)) {
+      localStorage.removeItem(key);
+      resetFieldObservationForm();
+      observationMessage("Observation déjà enregistrée — aucune duplication.");
+      return;
+    }
+    const response = await fetch("/v1/field-observations", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      if (response.status >= 400 && response.status < 500) localStorage.removeItem(key);
+      throw await sessionHttpError(response);
+    }
+    localStorage.removeItem(key);
+    resetFieldObservationForm();
+    observationMessage(response.status === 201
+      ? "Observation enregistrée." : "Observation déjà enregistrée — aucune duplication.");
+  } catch (error) {
+    try {
+      const stored = await storedFieldObservation(payload.observation_id);
+      if (stored) {
+        localStorage.removeItem(key);
+        resetFieldObservationForm();
+        observationMessage("Observation enregistrée. La confirmation réseau avait été interrompue.");
+        return;
+      }
+    } catch (_lookupError) { /* Keep the idempotency key for a safe retry. */ }
+    const messages = {
+      409: "Conflit d’enregistrement : rechargez la mission avant de réessayer.",
+      422: "Certaines valeurs sont invalides. Vérifiez les détails saisis.",
+      503: "Enregistrement momentanément indisponible. Vous pouvez réessayer sans créer de doublon.",
+    };
+    observationMessage(messages[error?.status] || "Confirmation impossible. Réessayez : la même observation sera reprise sans doublon.", { error: true });
+  } finally {
+    state.observationBusy = false;
+    document.querySelector("#observation-save").disabled = false;
+  }
 }
 
 const PENDING_ACCEPTANCE_STORAGE_KEY = "astropilot.pendingAcceptance";
@@ -499,6 +672,8 @@ function setList(selector, items, fallback) {
 }
 
 function renderMission(mission) {
+  state.sessions = [];
+  state.activeSessionId = null;
   const start = clock(mission.window_start);
   const end = clock(mission.window_end);
   text("#mission-title", mission.target || "Mission de cette nuit");
@@ -549,6 +724,7 @@ function renderMission(mission) {
     tasks.append(item);
   }
 
+  renderSession();
   reloadSessions().catch(() => sessionMessage("Sessions momentanément indisponibles. Rechargez avant une action."));
 
 }
@@ -2622,6 +2798,14 @@ document.querySelector("#session-complete").addEventListener("click", () => sess
 document.querySelector("#session-interrupt").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "interrupted")));
 document.querySelector("#session-record-evidence").addEventListener("click", () => sessionCommand(recordSessionEvidence));
 document.querySelector("#session-apply-credit").addEventListener("click", () => sessionCommand(creditSession));
+for (const input of document.querySelectorAll("[data-observation-range]")) {
+  input.addEventListener("input", () => {
+    input.dataset.touched = "true";
+    const [, label] = OBSERVATION_RANGE_VALUES[input.dataset.observationRange][input.value];
+    document.querySelector(`#observation-${input.dataset.observationRange}-value`).textContent = label;
+  });
+}
+document.querySelector("#field-observation-form").addEventListener("submit", submitFieldObservation);
 ui.closeMission.addEventListener("click", () => ui.mission.close());
 ui.missionBack.addEventListener("click", () => ui.mission.close());
 ui.mission.addEventListener("click", (event) => {

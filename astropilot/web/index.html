@@ -499,6 +499,77 @@
             </dl>
           </section>
 
+          <section class="mission-section observation-panel" aria-labelledby="observation-title">
+            <div class="observation-heading">
+              <div>
+                <p class="observation-kicker">Relevé terrain · ~10 secondes</p>
+                <h3 id="observation-title">Comment est le ciel maintenant&nbsp;?</h3>
+              </div>
+              <span id="observation-linkage">Décision actuelle</span>
+            </div>
+            <form id="field-observation-form">
+              <div class="observation-quick-grid">
+                <label class="observation-slider" for="observation-clouds">
+                  <span><strong>Nuages</strong><output id="observation-clouds-value">Non renseigné</output></span>
+                  <input id="observation-clouds" type="range" min="0" max="100" step="25" value="50" data-observation-range="clouds">
+                  <small>Dégagé <span>Couvert</span></small>
+                </label>
+                <label class="observation-slider" for="observation-transparency">
+                  <span><strong>Transparence</strong><output id="observation-transparency-value">Non renseignée</output></span>
+                  <input id="observation-transparency" type="range" min="0" max="100" step="25" value="50" data-observation-range="transparency">
+                  <small>Médiocre <span>Excellente</span></small>
+                </label>
+                <label class="observation-slider" for="observation-wind">
+                  <span><strong>Vent</strong><output id="observation-wind-value">Non renseigné</output></span>
+                  <input id="observation-wind" type="range" min="0" max="3" step="1" value="1" data-observation-range="wind">
+                  <small>Nul <span>Fort</span></small>
+                </label>
+              </div>
+
+              <fieldset class="surface-choice">
+                <legend>Surface</legend>
+                <label><input type="radio" name="observation-surface" value="dry"> Sèche</label>
+                <label><input type="radio" name="observation-surface" value="damp"> Humide</label>
+                <label><input type="radio" name="observation-surface" value="dew_present"> Rosée</label>
+              </fieldset>
+
+              <details class="observation-advanced">
+                <summary>Ajouter des détails</summary>
+                <div class="observation-advanced-grid">
+                  <label>Température °C <input id="observation-temperature" type="number" step="0.1" inputmode="decimal"></label>
+                  <label>Humidité % <input id="observation-humidity" type="number" min="0" max="100" step="1" inputmode="numeric"></label>
+                  <label>Seeing
+                    <select id="observation-seeing">
+                      <option value="">Non renseigné</option><option value="poor">Médiocre</option><option value="fair">Moyen</option><option value="good">Bon</option><option value="excellent">Excellent</option>
+                    </select>
+                  </label>
+                  <label>Halo lunaire
+                    <select id="observation-moon-halo">
+                      <option value="">Non renseigné</option><option value="false">Non</option><option value="true">Oui</option>
+                    </select>
+                  </label>
+                  <label>Poses tentées <input id="observation-attempted-frames" type="number" min="0" step="1" inputmode="numeric"></label>
+                  <label>Poses conservées <input id="observation-usable-frames" type="number" min="0" step="1" inputmode="numeric"></label>
+                  <label>Cause d’arrêt
+                    <select id="observation-stop-reason">
+                      <option value="">Non renseignée</option><option value="completed">Terminé</option><option value="clouds">Nuages</option><option value="dew">Rosée</option><option value="wind">Vent</option><option value="technical">Technique</option><option value="target_lost">Cible perdue</option><option value="user">Choix utilisateur</option><option value="daylight">Jour</option><option value="not_started">Non démarré</option><option value="other">Autre</option>
+                    </select>
+                  </label>
+                  <label>HFR <input id="observation-hfr" type="number" min="0" step="0.01" inputmode="decimal"></label>
+                  <label>Unité HFR
+                    <select id="observation-hfr-unit"><option value="px">px</option><option value="arcsec">arcsec</option></select>
+                  </label>
+                  <label>Guidage RMS ″ <input id="observation-guiding" type="number" min="0" step="0.01" inputmode="decimal"></label>
+                </div>
+              </details>
+
+              <div class="observation-actions">
+                <p id="observation-status" role="status">Déplacez un curseur ou choisissez l’état de la surface.</p>
+                <button class="primary-button" id="observation-save" type="submit">Enregistrer l’observation</button>
+              </div>
+            </form>
+          </section>
+
           <footer class="mission-footer">
             <p>Mission créée après votre choix explicite et enregistrée par NightMerit.</p>
             <button class="secondary-button" id="mission-back" type="button">Retour à la recommandation</button>

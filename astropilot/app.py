@@ -12,7 +12,7 @@ import tomllib
 from typing import Annotated, Any, Callable, Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -126,6 +126,30 @@ from decision.services.execution_outcome_application import (
     ExecutionOutcomeApplicationError,
 )
 from decision.services.execution_transition import ExecutionTransitionError
+from decision.field_observation import (
+    CaptureMethod,
+    CloudState,
+    Confidence,
+    FieldObservation,
+    HfrUnit,
+    ObservationProvenance,
+    ObservationQuality,
+    ObservationSourceType,
+    ObservedAcquisition,
+    ObservedConditions,
+    ObservedTechnical,
+    QualityFlag,
+    SeeingCondition,
+    StopReason,
+    SurfaceCondition,
+    Transparency,
+)
+from decision.field_observation_persistence import (
+    FieldObservationPersistenceError,
+)
+from decision.services.field_observation_recording_service import (
+    FieldObservationRecordingError,
+)
 from decision.services.user_selection_validator import UserSelectionValidationError
 from decision.weather.provider_reliability import WeatherLocation
 from decision.weather.weather_trust_decision import (
@@ -755,6 +779,90 @@ class OutcomeEvidenceResponse(BaseModel):
     source: OutcomeEvidenceSource
     actual_capture_duration: timedelta | None = None
     usable_integration_duration: timedelta | None = None
+
+
+class FieldObservationConditionsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    temperature_c: float | None = None
+    relative_humidity_percent: float | None = None
+    cloud_state: CloudState | None = None
+    transparency: Transparency | None = None
+    seeing: SeeingCondition | None = None
+    wind_speed_kmh: float | None = None
+    surface_condition: SurfaceCondition | None = None
+    moon_halo: bool | None = None
+
+    def to_domain(self) -> ObservedConditions:
+        return ObservedConditions(**self.model_dump())
+
+
+class FieldObservationAcquisitionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    attempted_frames: int | None = None
+    usable_frames: int | None = None
+    stop_reason: StopReason | None = None
+
+    def to_domain(self) -> ObservedAcquisition:
+        return ObservedAcquisition(**self.model_dump())
+
+
+class FieldObservationTechnicalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    hfr: float | None = None
+    hfr_unit: HfrUnit | None = None
+    sky_background: float | None = None
+    sky_background_unit: str | None = None
+    guiding_rms_arcsec: float | None = None
+
+    def to_domain(self) -> ObservedTechnical:
+        return ObservedTechnical(**self.model_dump())
+
+
+class FieldObservationCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    observation_id: str
+    decision_id: str
+    execution_id: str | None = None
+    observed_at_utc: AwareDatetime
+    recorded_at_utc: AwareDatetime | None = None
+    supersedes_observation_id: str | None = None
+    conditions: FieldObservationConditionsRequest = Field(
+        default_factory=FieldObservationConditionsRequest
+    )
+    acquisition: FieldObservationAcquisitionRequest = Field(
+        default_factory=FieldObservationAcquisitionRequest
+    )
+    technical: FieldObservationTechnicalRequest = Field(
+        default_factory=FieldObservationTechnicalRequest
+    )
+    confidence: Confidence = Confidence.MEDIUM
+    quality_flags: tuple[QualityFlag, ...] = (QualityFlag.ESTIMATED,)
+
+    def to_domain(self) -> FieldObservation:
+        recorded_at = self.recorded_at_utc or self.observed_at_utc
+        return FieldObservation(
+            observation_id=self.observation_id,
+            decision_id=self.decision_id,
+            execution_id=self.execution_id,
+            observed_at_utc=self.observed_at_utc,
+            recorded_at_utc=recorded_at,
+            supersedes_observation_id=self.supersedes_observation_id,
+            conditions=self.conditions.to_domain(),
+            acquisition=self.acquisition.to_domain(),
+            technical=self.technical.to_domain(),
+            provenance=ObservationProvenance(
+                source_type=ObservationSourceType.USER,
+                capture_method=CaptureMethod.MANUAL,
+            ),
+            quality=ObservationQuality(
+                confidence=self.confidence,
+                flags=self.quality_flags,
+            ),
+        )
 
 
 class PortfolioCreditRequest(BaseModel):
@@ -2878,6 +2986,204 @@ def create_app(
             actual_end=execution.actual_end,
             actual_duration=execution.actual_duration,
         )
+
+    def field_observation_projection(observation: FieldObservation) -> dict:
+        return {
+            "observation_id": observation.observation_id,
+            "decision_id": observation.decision_id,
+            "execution_id": observation.execution_id,
+            "observed_at_utc": observation.observed_at_utc.isoformat(),
+            "recorded_at_utc": observation.recorded_at_utc.isoformat(),
+            "supersedes_observation_id": observation.supersedes_observation_id,
+            "conditions": {
+                "temperature_c": observation.conditions.temperature_c,
+                "relative_humidity_percent": (
+                    observation.conditions.relative_humidity_percent
+                ),
+                "cloud_state": (
+                    None
+                    if observation.conditions.cloud_state is None
+                    else observation.conditions.cloud_state.value
+                ),
+                "transparency": (
+                    None
+                    if observation.conditions.transparency is None
+                    else observation.conditions.transparency.value
+                ),
+                "seeing": (
+                    None
+                    if observation.conditions.seeing is None
+                    else observation.conditions.seeing.value
+                ),
+                "wind_speed_kmh": observation.conditions.wind_speed_kmh,
+                "surface_condition": (
+                    None
+                    if observation.conditions.surface_condition is None
+                    else observation.conditions.surface_condition.value
+                ),
+                "moon_halo": observation.conditions.moon_halo,
+            },
+            "acquisition": {
+                "attempted_frames": observation.acquisition.attempted_frames,
+                "usable_frames": observation.acquisition.usable_frames,
+                "stop_reason": (
+                    None
+                    if observation.acquisition.stop_reason is None
+                    else observation.acquisition.stop_reason.value
+                ),
+            },
+            "technical": {
+                "hfr": observation.technical.hfr,
+                "hfr_unit": (
+                    None
+                    if observation.technical.hfr_unit is None
+                    else observation.technical.hfr_unit.value
+                ),
+                "sky_background": observation.technical.sky_background,
+                "sky_background_unit": observation.technical.sky_background_unit,
+                "guiding_rms_arcsec": observation.technical.guiding_rms_arcsec,
+            },
+            "provenance": {
+                "source_type": observation.provenance.source_type.value,
+                "capture_method": observation.provenance.capture_method.value,
+                "source_id": observation.provenance.source_id,
+                "imported_at_utc": (
+                    None
+                    if observation.provenance.imported_at_utc is None
+                    else observation.provenance.imported_at_utc.isoformat()
+                ),
+            },
+            "quality": {
+                "confidence": observation.quality.confidence.value,
+                "flags": [flag.value for flag in observation.quality.flags],
+            },
+            "calibration_eligible": observation.calibration_eligible,
+        }
+
+    def raise_field_observation_error(exc: Exception):
+        code = str(exc)
+        if code in {
+            "decision_not_found",
+            "execution_not_found",
+            "mission_not_found",
+            "selection_not_found",
+        }:
+            status_code = 404
+        elif code in {
+            "field_observation_conflict",
+            "superseded_observation_missing",
+            "superseded_observation_decision_mismatch",
+            "observation_supersession_cycle",
+            "execution_decision_mismatch",
+            "execution_identity_mismatch",
+            "mission_identity_mismatch",
+            "selection_decision_mismatch",
+        }:
+            status_code = 409
+        else:
+            status_code = 422
+        raise HTTPException(status_code=status_code, detail={"code": code}) from exc
+
+    @application.post("/v1/field-observations", status_code=201)
+    def create_field_observation(
+        request: FieldObservationCreateRequest,
+        response: Response,
+    ):
+        try:
+            observation = request.to_domain()
+            result = application_service().record_field_observation(observation)
+        except (
+            FieldObservationRecordingError,
+            FieldObservationPersistenceError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise_field_observation_error(exc)
+        except (OSError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "field_observation_unavailable"},
+            ) from exc
+        response.status_code = 201 if result.created else 200
+        context = result.resolved_context
+        return {
+            "created": result.created,
+            "observation": field_observation_projection(result.observation),
+            "context": {
+                "decision_id": context.decision_id,
+                "site_name": context.site_name,
+                "latitude": context.latitude,
+                "longitude": context.longitude,
+                "target": context.target,
+                "catalog_key": context.catalog_key,
+                "imaging_field_id": context.imaging_field_id,
+                "acquisition_intent_id": context.acquisition_intent_id,
+                "mission_id": context.mission_id,
+                "execution_id": context.execution_id,
+                "execution_status": (
+                    None
+                    if context.execution_status is None
+                    else context.execution_status.value
+                ),
+                "forecast_evidence_available": (
+                    context.forecast_evidence_available
+                ),
+            },
+        }
+
+    @application.get("/v1/field-observations/{observation_id}")
+    def get_field_observation(observation_id: str):
+        try:
+            observation = application_service().load_field_observation(
+                observation_id
+            )
+        except FieldObservationPersistenceError as exc:
+            raise_field_observation_error(exc)
+        except (OSError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "field_observation_unavailable"},
+            ) from exc
+        if observation is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "field_observation_not_found"},
+            )
+        return field_observation_projection(observation)
+
+    @application.get("/v1/decisions/{decision_id}/field-observations")
+    def list_decision_field_observations(decision_id: str):
+        try:
+            observations = (
+                application_service().list_field_observations_by_decision(
+                    decision_id
+                )
+            )
+        except FieldObservationPersistenceError as exc:
+            raise_field_observation_error(exc)
+        except (OSError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "field_observation_unavailable"},
+            ) from exc
+        return [field_observation_projection(item) for item in observations]
+
+    @application.get("/v1/executions/{execution_id}/field-observations")
+    def list_execution_field_observations(execution_id: str):
+        try:
+            observations = (
+                application_service().list_field_observations_by_execution(
+                    execution_id
+                )
+            )
+        except FieldObservationPersistenceError as exc:
+            raise_field_observation_error(exc)
+        except (OSError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "field_observation_unavailable"},
+            ) from exc
+        return [field_observation_projection(item) for item in observations]
 
     def validated_session_credits(profile: dict, service, project_id: str,
                                   intent_id: str, current_aggregate) -> dict:
