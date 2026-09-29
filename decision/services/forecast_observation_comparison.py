@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from enum import Enum
 
 from decision.field_observation import (
@@ -171,28 +171,85 @@ def _safe_fingerprint_token(
             }
         if type(value) is float:
             return {"kind": "float", "digest": _digest(value.hex())}
-        if type(value) is datetime:
+        if isinstance(value, datetime):
             return {
                 "kind": "datetime",
-                "digest": _digest(_canonical_datetime(value)),
+                "type": f"{type(value).__module__}.{type(value).__qualname__}",
+                "digest": _digest(
+                    (
+                        datetime.year.__get__(value, datetime),
+                        datetime.month.__get__(value, datetime),
+                        datetime.day.__get__(value, datetime),
+                        datetime.hour.__get__(value, datetime),
+                        datetime.minute.__get__(value, datetime),
+                        datetime.second.__get__(value, datetime),
+                        datetime.microsecond.__get__(value, datetime),
+                        datetime.fold.__get__(value, datetime),
+                        _safe_fingerprint_token(
+                            datetime.tzinfo.__get__(value, datetime),
+                            seen=seen,
+                            depth=depth + 1,
+                        ),
+                    )
+                ),
             }
-        if type(value) is timedelta:
+        if isinstance(value, date):
+            return {
+                "kind": "date",
+                "type": f"{type(value).__module__}.{type(value).__qualname__}",
+                "digest": _digest(
+                    (
+                        date.year.__get__(value, date),
+                        date.month.__get__(value, date),
+                        date.day.__get__(value, date),
+                    )
+                ),
+            }
+        if isinstance(value, time):
+            return {
+                "kind": "time",
+                "type": f"{type(value).__module__}.{type(value).__qualname__}",
+                "digest": _digest(
+                    (
+                        time.hour.__get__(value, time),
+                        time.minute.__get__(value, time),
+                        time.second.__get__(value, time),
+                        time.microsecond.__get__(value, time),
+                        time.fold.__get__(value, time),
+                        _safe_fingerprint_token(
+                            time.tzinfo.__get__(value, time),
+                            seen=seen,
+                            depth=depth + 1,
+                        ),
+                    )
+                ),
+            }
+        if isinstance(value, timedelta):
             return {
                 "kind": "timedelta",
-                "digest": _digest(value.total_seconds()),
+                "type": f"{type(value).__module__}.{type(value).__qualname__}",
+                "digest": _digest(
+                    (
+                        timedelta.days.__get__(value, timedelta),
+                        timedelta.seconds.__get__(value, timedelta),
+                        timedelta.microseconds.__get__(value, timedelta),
+                    )
+                ),
             }
+        if type(value) is timezone:
+            return {"kind": "timezone", "digest": _digest(str(value))}
         if type(value) is WeatherVariable:
             return {
                 "kind": "weather_variable",
                 "digest": _digest(value.value),
             }
         if depth >= 8:
-            return {"kind": "depth_limit"}
+            return {"kind": "depth_limit", "persistable": False}
         if seen is None:
             seen = set()
         identity = id(value)
         if identity in seen:
-            return {"kind": "cycle"}
+            return {"kind": "cycle", "persistable": False}
         if type(value) in (tuple, list):
             seen.add(identity)
             items = [
@@ -201,6 +258,36 @@ def _safe_fingerprint_token(
             ]
             seen.remove(identity)
             return {"kind": type(value).__name__, "items": items}
+        if type(value) is dict:
+            seen.add(identity)
+            entries = [
+                {
+                    "key": _safe_fingerprint_token(
+                        key, seen=seen, depth=depth + 1
+                    ),
+                    "value": _safe_fingerprint_token(
+                        item, seen=seen, depth=depth + 1
+                    ),
+                }
+                for key, item in dict.items(value)
+            ]
+            seen.remove(identity)
+            entries.sort(key=_canonical_json)
+            return {"kind": "dict", "entries": entries}
+        if type(value) in (set, frozenset):
+            seen.add(identity)
+            items = [
+                _safe_fingerprint_token(item, seen=seen, depth=depth + 1)
+                for item in value
+            ]
+            seen.remove(identity)
+            items.sort(key=_canonical_json)
+            return {"kind": type(value).__name__, "items": items}
+        if type(value) in (bytes, bytearray):
+            return {
+                "kind": type(value).__name__,
+                "digest": hashlib.sha256(bytes(value)).hexdigest(),
+            }
         if type(value) in (
             DecisionForecastEvidence,
             WeatherForecastPoint,
@@ -208,7 +295,7 @@ def _safe_fingerprint_token(
             WeatherValue,
         ):
             seen.add(identity)
-            attributes = vars(value)
+            attributes = object.__getattribute__(value, "__dict__")
             fields = {
                 key: _safe_fingerprint_token(
                     attributes[key], seen=seen, depth=depth + 1
@@ -218,12 +305,38 @@ def _safe_fingerprint_token(
             }
             seen.remove(identity)
             return {"kind": type(value).__name__, "fields": fields}
+        try:
+            attributes = object.__getattribute__(value, "__dict__")
+        except Exception:
+            attributes = None
+        if type(attributes) is dict and attributes:
+            seen.add(identity)
+            token = _safe_fingerprint_token(
+                attributes, seen=seen, depth=depth + 1
+            )
+            seen.remove(identity)
+            return {
+                "kind": "object",
+                "type": f"{type(value).__module__}.{type(value).__qualname__}",
+                "attributes": token,
+            }
         return {
-            "kind": "unsupported",
+            "kind": "opaque",
             "type": f"{type(value).__module__}.{type(value).__qualname__}",
+            "persistable": False,
         }
     except Exception:
-        return {"kind": "unavailable"}
+        return {"kind": "unavailable", "persistable": False}
+
+
+def _fingerprint_is_persistable(value: object) -> bool:
+    if type(value) is dict:
+        if value.get("persistable") is False:
+            return False
+        return all(_fingerprint_is_persistable(item) for item in value.values())
+    if type(value) in (tuple, list):
+        return all(_fingerprint_is_persistable(item) for item in value)
+    return True
 
 
 def _record_inspected_value(
@@ -520,19 +633,21 @@ def _invalid_evidence_document(
     value: object,
     fingerprint_parts: list[dict],
 ) -> dict:
+    fingerprint_document = {
+        "inspected": fingerprint_parts,
+        "failure": {
+            "path": path,
+            "value": _safe_fingerprint_token(value),
+        },
+    }
     return {
         "state": "invalid",
         "invalid_reason_code": code,
         "invalid_path": path,
-        "invalid_fingerprint": _digest(
-            {
-                "inspected": fingerprint_parts,
-                "failure": {
-                    "path": path,
-                    "value": _safe_fingerprint_token(value),
-                },
-            }
+        "invalid_identity_persistable": _fingerprint_is_persistable(
+            fingerprint_document
         ),
+        "invalid_fingerprint": _digest(fingerprint_document),
     }
 
 
@@ -913,6 +1028,14 @@ def compare_forecast_to_field_observation(
     )
     provenance = _observation_provenance(observation)
 
+    evidence_reason = None
+    if evidence is None:
+        evidence_reason = "decision_forecast_evidence_missing"
+    elif not evidence_is_well_formed:
+        evidence_reason = "decision_forecast_evidence_invalid"
+    elif not evidence.forecast_points:
+        evidence_reason = "decision_forecast_evidence_empty"
+
     blocking_reasons = []
     if observation.legacy_lineage_incomplete:
         blocking_reasons.append(ComparisonReason("legacy_lineage_incomplete"))
@@ -923,6 +1046,8 @@ def compare_forecast_to_field_observation(
             ComparisonReason("observation_location_uncertain")
         )
     if blocking_reasons:
+        if evidence_reason == "decision_forecast_evidence_invalid":
+            blocking_reasons.insert(0, ComparisonReason(evidence_reason))
         return ForecastObservationComparison(
             comparison_id=identity,
             algorithm_version=algorithm_version,
@@ -938,18 +1063,12 @@ def compare_forecast_to_field_observation(
             reasons=tuple(blocking_reasons),
         )
 
-    evidence_reason = None
-    if evidence is None:
-        evidence_reason = "decision_forecast_evidence_missing"
-    elif not evidence_is_well_formed:
-        evidence_reason = "decision_forecast_evidence_invalid"
-    elif not evidence.forecast_points:
-        evidence_reason = "decision_forecast_evidence_empty"
-
     observed_values = _observed_values(observation)
     results = []
     reasons = []
     if not observed_values:
+        if evidence_reason == "decision_forecast_evidence_invalid":
+            reasons.append(ComparisonReason(evidence_reason))
         reasons.append(ComparisonReason("no_supported_observed_variables"))
     elif evidence_reason is not None:
         reasons.append(ComparisonReason(evidence_reason))

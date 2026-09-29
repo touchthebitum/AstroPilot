@@ -35,6 +35,7 @@ from decision.models.forecast_observation_comparison import (
 )
 from decision.services.forecast_observation_comparison import (
     ForecastObservationComparisonInputError,
+    _canonical_evidence,
     compare_forecast_to_field_observation,
 )
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
@@ -84,8 +85,11 @@ ALLOWED_IMPORTS = {
         ("hashlib", None),
         ("json", None),
         ("dataclasses", "asdict"),
+        ("datetime", "date"),
         ("datetime", "datetime"),
+        ("datetime", "time"),
         ("datetime", "timedelta"),
+        ("datetime", "timezone"),
         ("enum", "Enum"),
         ("decision.field_observation", "CloudState"),
         ("decision.field_observation", "FieldObservation"),
@@ -683,6 +687,83 @@ def test_materially_different_invalid_evidence_has_distinct_identity():
     )
 
 
+def test_distinct_corrupted_dicts_have_distinct_redacted_stable_identity():
+    def corrupted_evidence(requested_location):
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(
+            forecast_point, "requested_location", requested_location
+        )
+        return DecisionForecastEvidence((forecast_point,))
+
+    first_evidence = corrupted_evidence({"latitude": 1})
+    second_evidence = corrupted_evidence(
+        {"latitude": 999, "secret": "materially-different"}
+    )
+
+    first = compare_forecast_to_field_observation(
+        first_evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    repeated_first = compare_forecast_to_field_observation(
+        first_evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    second = compare_forecast_to_field_observation(
+        second_evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert first.source_digest == repeated_first.source_digest
+    assert first.comparison_id == repeated_first.comparison_id
+    assert first.source_digest != second.source_digest
+    assert first.comparison_id != second.comparison_id
+    invalid_document = _canonical_evidence(second_evidence)
+    assert invalid_document["invalid_identity_persistable"] is True
+    assert "materially-different" not in str(invalid_document)
+
+
+def test_distinct_corrupted_datetimes_have_distinct_stable_identity():
+    class CorruptedDatetime(datetime):
+        def astimezone(self, tz=None):
+            raise RuntimeError("corrupted datetime")
+
+    def corrupted_evidence(day):
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(
+            forecast_point,
+            "retrieved_at_utc",
+            CorruptedDatetime(2026, 9, day, 17, 0, tzinfo=timezone.utc),
+        )
+        return DecisionForecastEvidence((forecast_point,))
+
+    first_evidence = corrupted_evidence(1)
+    second_evidence = corrupted_evidence(2)
+
+    first = compare_forecast_to_field_observation(
+        first_evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    repeated_first = compare_forecast_to_field_observation(
+        first_evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    second = compare_forecast_to_field_observation(
+        second_evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert first.source_digest == repeated_first.source_digest
+    assert first.comparison_id == repeated_first.comparison_id
+    assert first.source_digest != second.source_digest
+    assert first.comparison_id != second.comparison_id
+
+
 @pytest.mark.parametrize(
     ("target", "attribute", "invalid_value"),
     [
@@ -758,6 +839,24 @@ def test_legacy_and_uncertain_observations_fail_closed(source, expected_reasons)
     assert reason_codes(result) == expected_reasons
 
 
+def test_legacy_observation_keeps_invalid_evidence_reason_first():
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    object.__setattr__(forecast_point, "requested_location", {"latitude": 1})
+
+    result = compare_forecast_to_field_observation(
+        DecisionForecastEvidence((forecast_point,)),
+        legacy_observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert result.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert result.results == ()
+    assert reason_codes(result) == (
+        "decision_forecast_evidence_invalid",
+        "legacy_lineage_incomplete",
+    )
+
+
 @pytest.mark.parametrize(
     ("invalid", "code"),
     [(None, "field_observation_missing"), ("corrupt", "field_observation_invalid")],
@@ -788,6 +887,31 @@ def test_unsupported_observation_dimensions_and_forecasts_are_excluded():
     assert result.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
     assert result.results == ()
     assert reason_codes(result) == ("no_supported_observed_variables",)
+
+
+def test_no_supported_variables_keeps_invalid_evidence_reason_first():
+    source = observation(
+        conditions=ObservedConditions(
+            transparency=Transparency.GOOD,
+            seeing=SeeingCondition.POOR,
+            surface_condition=SurfaceCondition.DEW_PRESENT,
+        )
+    )
+    forecast_point = point(WeatherVariable.DEW_POINT_C, 3.0)
+    object.__setattr__(forecast_point, "requested_location", {"latitude": 1})
+
+    result = compare_forecast_to_field_observation(
+        DecisionForecastEvidence((forecast_point,)),
+        source,
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert result.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert result.results == ()
+    assert reason_codes(result) == (
+        "decision_forecast_evidence_invalid",
+        "no_supported_observed_variables",
+    )
 
 
 def test_different_offsets_representing_same_instant_match_exactly():
