@@ -41,6 +41,9 @@ const session = (id) => ({execution: {execution_id: id, status: 'completed', act
 const state = {acceptedMission: {mission_id: 'mission-1', acquisitionIntentId: 'ha'},
   sessions: [session('execution-1'), session('execution-2')], activeSessionId: 'execution-1',
   sessionEvidenceInputExecutionId: null};
+// Keep the session test focused while preserving renderSession's Field Observation integration point.
+let observationLinkageRenderCount = 0;
+function renderObservationLinkage() { observationLinkageRenderCount++; }
 '''
     checks = r'''
 document.querySelector('#session-hours').value = '0';
@@ -60,6 +63,7 @@ state.activeSessionId = 'execution-1';
 renderSession();
 assert.equal(document.querySelector('#session-hours').value, '0');
 assert.equal(document.querySelector('#session-minutes').value, '30');
+assert.equal(observationLinkageRenderCount, 3);
 '''
     result = subprocess.run([node, "-e", harness + helpers + checks], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
