@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -71,9 +72,22 @@ def exclusive_file_lock(lock_path: Path) -> Iterator[None]:
 
     with process_lock:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a+b") as handle:
+        handle = path.open("a+b")
+        try:
             _acquire_os_lock(handle)
             try:
                 yield
             finally:
-                _release_os_lock(handle)
+                primary_error = sys.exception()
+                try:
+                    _release_os_lock(handle)
+                except BaseException:
+                    if primary_error is None:
+                        raise
+        finally:
+            primary_error = sys.exception()
+            try:
+                handle.close()
+            except BaseException:
+                if primary_error is None:
+                    raise

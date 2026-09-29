@@ -71,6 +71,7 @@ MODEL_PATH = (
 ALLOWED_IMPORTS = {
     MODEL_PATH: {
         ("__future__", "annotations"),
+        ("math", None),
         ("dataclasses", "dataclass"),
         ("dataclasses", "field"),
         ("datetime", "datetime"),
@@ -144,6 +145,55 @@ ALLOWED_IMPORTS = {
         ("decision.weather.provider_reliability", "calculate_weather_variable_error"),
     },
 }
+
+
+def _numeric_model_result(**overrides):
+    values = {
+        "variable": WeatherVariable.TEMPERATURE_C,
+        "status": VariableComparisonStatus.COMPARABLE,
+        "unit": "°C",
+        "forecast_value": 7.0,
+        "observed_value": 5.0,
+        "signed_error": 2.0,
+        "absolute_error": 2.0,
+        "forecast_point": object(),
+    }
+    values.update(overrides)
+    return NumericVariableComparison(**values)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("forecast_value", True),
+        ("observed_value", False),
+        ("signed_error", True),
+        ("absolute_error", True),
+        ("forecast_value", 7),
+        ("forecast_value", float("nan")),
+        ("forecast_value", float("inf")),
+        ("forecast_value", float("-inf")),
+        ("forecast_value", float("1e400")),
+    ],
+)
+def test_numeric_result_requires_exact_finite_floats(field, value):
+    with pytest.raises(ValueError, match=f"^invalid_{field}$"):
+        _numeric_model_result(**{field: value})
+
+
+def test_cloud_result_rejects_boolean_coverage():
+    with pytest.raises(ValueError, match="^invalid_forecast_coverage_percent$"):
+        CloudVariableComparison(
+            variable=WeatherVariable.CLOUD_COVER_PERCENT,
+            status=VariableComparisonStatus.COMPARABLE,
+            unit="%",
+            forecast_coverage_percent=True,
+            predicted_condition=CloudState.CLEAR,
+            observed_condition=CloudState.CLEAR,
+            outcome=CloudComparisonOutcome.MATCH,
+            confusion_cell=(CloudState.CLEAR, CloudState.CLEAR),
+            forecast_point=object(),
+        )
 
 
 def import_boundary_violations(source, allowed_imports):

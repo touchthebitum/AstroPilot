@@ -156,6 +156,46 @@ def test_unlock_failure_propagates(tmp_path, monkeypatch):
             pass
 
 
+def test_body_failure_is_not_masked_by_unlock_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        file_lock,
+        "_release_os_lock",
+        lambda handle: (_ for _ in ()).throw(OSError("unlock failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="^primary failed$"):
+        with file_lock.exclusive_file_lock(tmp_path / "unlock-primary.lock"):
+            raise RuntimeError("primary failed")
+
+
+class _CloseFailingHandle:
+    def fileno(self):
+        return 42
+
+    def close(self):
+        raise OSError("close failed")
+
+
+def test_body_failure_is_not_masked_by_close_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "open", lambda *_args, **_kwargs: _CloseFailingHandle())
+    monkeypatch.setattr(file_lock, "_acquire_os_lock", lambda _handle: None)
+    monkeypatch.setattr(file_lock, "_release_os_lock", lambda _handle: None)
+
+    with pytest.raises(RuntimeError, match="^primary failed$"):
+        with file_lock.exclusive_file_lock(tmp_path / "close-primary.lock"):
+            raise RuntimeError("primary failed")
+
+
+def test_close_failure_propagates_without_primary_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "open", lambda *_args, **_kwargs: _CloseFailingHandle())
+    monkeypatch.setattr(file_lock, "_acquire_os_lock", lambda _handle: None)
+    monkeypatch.setattr(file_lock, "_release_os_lock", lambda _handle: None)
+
+    with pytest.raises(OSError, match="^close failed$"):
+        with file_lock.exclusive_file_lock(tmp_path / "close.lock"):
+            pass
+
+
 class _RecordingHandle:
     def __init__(self):
         self.positions = []

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -26,6 +27,12 @@ def _is_canonical_sha256(value: object) -> bool:
         and len(value) == 64
         and all(character in "0123456789abcdef" for character in value)
     )
+
+
+def _finite_float(value: object, *, field_name: str) -> float:
+    if type(value) is not float or not math.isfinite(value):
+        raise ValueError(f"invalid_{field_name}")
+    return value
 
 
 def _utc(value: datetime, *, field_name: str) -> datetime:
@@ -113,6 +120,14 @@ class CloudMappingComparisonPolicy:
     def __post_init__(self) -> None:
         if not isinstance(self.version, str) or not self.version.strip():
             raise ValueError("invalid_cloud_mapping_policy_version")
+        if (
+            type(self.boundaries_percent) is not tuple
+            or any(
+                type(value) is not float or not math.isfinite(value)
+                for value in self.boundaries_percent
+            )
+        ):
+            raise ValueError("invalid_cloud_mapping_boundaries")
         if self.boundaries_percent != (10.0, 25.0, 50.0, 80.0):
             raise ValueError("unsupported_cloud_mapping_boundaries")
         object.__setattr__(self, "version", self.version.strip())
@@ -219,6 +234,15 @@ class NumericVariableComparison:
         if any(not isinstance(reason, ComparisonReason) for reason in reasons):
             raise ValueError("invalid_numeric_comparison_reasons")
         object.__setattr__(self, "reasons", reasons)
+        for field_name in (
+            "forecast_value",
+            "observed_value",
+            "signed_error",
+            "absolute_error",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                _finite_float(value, field_name=field_name)
         values = (
             self.forecast_value,
             self.observed_value,
@@ -261,6 +285,11 @@ class CloudVariableComparison:
         if any(not isinstance(reason, ComparisonReason) for reason in reasons):
             raise ValueError("invalid_cloud_comparison_reasons")
         object.__setattr__(self, "reasons", reasons)
+        if self.forecast_coverage_percent is not None:
+            _finite_float(
+                self.forecast_coverage_percent,
+                field_name="forecast_coverage_percent",
+            )
         values = (
             self.forecast_coverage_percent,
             self.predicted_condition,

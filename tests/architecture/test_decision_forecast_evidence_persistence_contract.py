@@ -3,6 +3,7 @@ import multiprocessing
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -458,16 +459,57 @@ def test_directory_fsync_failure_is_ambiguous_and_replay_is_idempotent(
 
     store = FileDecisionForecastEvidenceStore(tmp_path)
     source = evidence()
-    monkeypatch.setattr(
-        store_module,
-        "fsync_directory",
-        lambda *_: (_ for _ in ()).throw(OSError("directory fsync failed")),
-    )
+    fsync_calls = 0
+
+    def fail_once(*_):
+        nonlocal fsync_calls
+        fsync_calls += 1
+        if fsync_calls == 1:
+            raise OSError("directory fsync failed")
+
+    monkeypatch.setattr(store_module, "fsync_directory", fail_once)
 
     with pytest.raises(OSError, match="directory fsync failed"):
         store.save(decision_id="decision-123", evidence=source)
     assert store.load(decision_id="decision-123") == source
     store.save(decision_id="decision-123", evidence=source)
+    assert fsync_calls == 2
+
+
+def test_identical_file_exists_race_resynchronizes_directory(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.decision_forecast_evidence_store as store_module
+
+    source = evidence()
+    destination = tmp_path / "decision-123.json"
+    original_exists = Path.exists
+    original_link = os.link
+    fsync_calls = 0
+
+    def hide_destination(path):
+        if path == destination:
+            return False
+        return original_exists(path)
+
+    def publish_then_report_race(temporary, path):
+        original_link(temporary, path)
+        raise FileExistsError(path)
+
+    def record_fsync(*_):
+        nonlocal fsync_calls
+        fsync_calls += 1
+
+    monkeypatch.setattr(Path, "exists", hide_destination)
+    monkeypatch.setattr(os, "link", publish_then_report_race)
+    monkeypatch.setattr(store_module, "fsync_directory", record_fsync)
+
+    FileDecisionForecastEvidenceStore(tmp_path).save(
+        decision_id="decision-123",
+        evidence=source,
+    )
+    assert fsync_calls == 1
 
 
 def test_directory_fsync_failure_is_not_masked_by_cleanup_failure(

@@ -72,6 +72,7 @@ class FileDecisionForecastEvidenceStore:
             if path.exists():
                 existing = self._load_path(path, decision_id=decision_id)
                 if existing == evidence:
+                    fsync_directory(self._directory)
                     return
                 raise DecisionForecastEvidencePersistenceError(
                     "decision_forecast_evidence_conflict"
@@ -99,6 +100,7 @@ class FileDecisionForecastEvidenceStore:
                         raise DecisionForecastEvidencePersistenceError(
                             "decision_forecast_evidence_conflict"
                         )
+                    fsync_directory(self._directory)
                 else:
                     fsync_directory(self._directory)
             finally:

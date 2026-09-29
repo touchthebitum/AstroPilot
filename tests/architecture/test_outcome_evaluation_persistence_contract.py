@@ -288,6 +288,39 @@ def test_non_finite_numeric_documents_are_rejected(token):
         deserialize_outcome_evaluation(document)
 
 
+def test_huge_json_integer_is_rejected_as_the_field_persistence_error():
+    document = serialize_outcome_evaluation(evaluation())
+    huge_integer = "9" * 1000
+    document = document.replace(
+        '"forecast_value": 7.0',
+        f'"forecast_value": {huge_integer}',
+    )
+
+    with pytest.raises(
+        OutcomeEvaluationPersistenceError,
+        match="^invalid_forecast_value$",
+    ):
+        deserialize_outcome_evaluation(document)
+
+
+def test_listing_huge_json_integer_fails_closed_as_store_corruption(tmp_path):
+    source = evaluation()
+    path = tmp_path / f"{source.evaluation_id}.json"
+    document = serialize_outcome_evaluation(source).replace(
+        '"forecast_value": 7.0',
+        f'"forecast_value": {"9" * 1000}',
+    )
+    path.write_text(document, encoding="utf-8")
+
+    with pytest.raises(
+        OutcomeEvaluationPersistenceError,
+        match="^outcome_evaluation_corrupt$",
+    ):
+        FileOutcomeEvaluationStore(tmp_path).list_by_observation(
+            observation_id=source.comparison.observation_id
+        )
+
+
 @pytest.mark.parametrize("value", [
     "2026-09-29T21:00:00+01:00",
     "2026-09-29T20:00:00Z",
@@ -548,16 +581,54 @@ def test_directory_fsync_failure_is_ambiguous_and_replay_is_idempotent(
 
     source = evaluation()
     store = FileOutcomeEvaluationStore(tmp_path)
-    monkeypatch.setattr(
-        store_module,
-        "fsync_directory",
-        lambda *_: (_ for _ in ()).throw(OSError("directory fsync failed")),
-    )
+    fsync_calls = 0
+
+    def fail_once(*_):
+        nonlocal fsync_calls
+        fsync_calls += 1
+        if fsync_calls == 1:
+            raise OSError("directory fsync failed")
+
+    monkeypatch.setattr(store_module, "fsync_directory", fail_once)
 
     with pytest.raises(OSError, match="directory fsync failed"):
         store.save(evaluation=source)
     assert store.load(evaluation_id=source.evaluation_id) == source
     assert store.save(evaluation=source) is False
+    assert fsync_calls == 2
+
+
+def test_identical_file_exists_race_resynchronizes_directory(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.outcome_evaluation_store as store_module
+
+    source = evaluation()
+    destination = tmp_path / f"{source.evaluation_id}.json"
+    original_exists = Path.exists
+    original_link = os.link
+    fsync_calls = 0
+
+    def hide_destination(path):
+        if path == destination:
+            return False
+        return original_exists(path)
+
+    def publish_then_report_race(temporary, path):
+        original_link(temporary, path)
+        raise FileExistsError(path)
+
+    def record_fsync(*_):
+        nonlocal fsync_calls
+        fsync_calls += 1
+
+    monkeypatch.setattr(Path, "exists", hide_destination)
+    monkeypatch.setattr(os, "link", publish_then_report_race)
+    monkeypatch.setattr(store_module, "fsync_directory", record_fsync)
+
+    assert FileOutcomeEvaluationStore(tmp_path).save(evaluation=source) is False
+    assert fsync_calls == 1
 
 
 def test_directory_fsync_failure_is_not_masked_by_cleanup_failure(

@@ -60,6 +60,7 @@ class FileOutcomeEvaluationStore:
         with self._locked():
             if path.exists():
                 if self._load_path(path) == evaluation:
+                    fsync_directory(self._directory)
                     return False
                 raise OutcomeEvaluationPersistenceError("outcome_evaluation_conflict")
             temporary_path = None
@@ -80,6 +81,7 @@ class FileOutcomeEvaluationStore:
                     os.link(temporary_path, path)
                 except FileExistsError:
                     if self._load_path(path) == evaluation:
+                        fsync_directory(self._directory)
                         return False
                     raise OutcomeEvaluationPersistenceError("outcome_evaluation_conflict")
                 fsync_directory(self._directory)

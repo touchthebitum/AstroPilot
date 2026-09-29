@@ -225,10 +225,10 @@ def _datetime(value: object, field: str) -> datetime:
     return parsed
 
 
-def _number(value: object, field: str, *, optional: bool = False) -> int | float | None:
+def _number(value: object, field: str, *, optional: bool = False) -> float | None:
     if value is None and optional:
         return None
-    if type(value) not in (int, float) or not math.isfinite(value):
+    if type(value) is not float or not math.isfinite(value):
         raise OutcomeEvaluationPersistenceError(f"invalid_{field}")
     return value
 
