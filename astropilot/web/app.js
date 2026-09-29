@@ -314,6 +314,16 @@ const OBSERVATION_CHOICES = Object.freeze({
   clouds: Object.freeze(["clear", "few", "partly_cloudy", "mostly_cloudy", "overcast"]),
   transparency: Object.freeze(["poor", "fair", "good", "excellent"]),
 });
+const OBSERVATION_SEEING_CHOICES = Object.freeze(["poor", "fair", "good", "excellent"]);
+const OBSERVATION_STOP_REASONS = Object.freeze([
+  "completed", "clouds", "dew", "wind", "technical", "target_lost", "user", "daylight", "not_started", "other",
+]);
+const OBSERVATION_SURFACE_INPUTS = Object.freeze({
+  dry: 'input[name="observation-surface"][value="dry"]',
+  damp: 'input[name="observation-surface"][value="damp"]',
+  dew_present: 'input[name="observation-surface"][value="dew_present"]',
+});
+const OBSERVATION_IDENTITY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 function renderObservationLinkage() {
   const element = document.querySelector("#observation-linkage");
@@ -439,19 +449,108 @@ function removePendingFieldObservation(key) {
   }
 }
 
-function readPendingFieldObservation(key) {
+function plainObservationRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function exactObservationKeys(value, expected) {
+  return plainObservationRecord(value)
+    && Object.keys(value).sort().join("\u0000") === [...expected].sort().join("\u0000");
+}
+
+function validObservationIdentity(value) {
+  return typeof value === "string" && OBSERVATION_IDENTITY_PATTERN.test(value);
+}
+
+function validOptionalObservationNumber(value, { minimum = null, maximum = null, integer = false } = {}) {
+  if (value === null) return true;
+  return typeof value === "number" && Number.isFinite(value)
+    && (!integer || Number.isInteger(value))
+    && (minimum === null || value >= minimum)
+    && (maximum === null || value <= maximum);
+}
+
+function validOptionalObservationChoice(value, choices) {
+  return value === null || (typeof value === "string" && choices.includes(value));
+}
+
+function validObservationTimestamp(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
+}
+
+function validPendingFieldObservation(value, expectedContext) {
+  if (!exactObservationKeys(value, ["payload", "snapshot"]) || typeof value.snapshot !== "string") return false;
+  const payload = value.payload;
+  if (!exactObservationKeys(payload, [
+    "observation_id", "decision_id", "execution_id", "observed_at_utc", "recorded_at_utc",
+    "supersedes_observation_id", "conditions", "acquisition", "technical", "confidence", "quality_flags",
+  ])) return false;
+  if (!validObservationIdentity(payload.observation_id) || !validObservationIdentity(payload.decision_id)) return false;
+  if (payload.execution_id !== null && !validObservationIdentity(payload.execution_id)) return false;
+  if (payload.decision_id !== expectedContext.decision_id
+    || payload.execution_id !== (expectedContext.execution_id || null)) return false;
+  if (!validObservationTimestamp(payload.observed_at_utc) || !validObservationTimestamp(payload.recorded_at_utc)) return false;
+  if (Date.parse(payload.recorded_at_utc) < Date.parse(payload.observed_at_utc)) return false;
+  if (payload.supersedes_observation_id !== null || payload.confidence !== "medium") return false;
+  if (!Array.isArray(payload.quality_flags)
+    || payload.quality_flags.length !== 2
+    || payload.quality_flags[0] !== "estimated"
+    || payload.quality_flags[1] !== "partial") return false;
+
+  const conditions = payload.conditions;
+  if (!exactObservationKeys(conditions, [
+    "temperature_c", "relative_humidity_percent", "cloud_state", "transparency", "seeing",
+    "wind_speed_kmh", "surface_condition", "moon_halo",
+  ])) return false;
+  if (!validOptionalObservationNumber(conditions.temperature_c)
+    || !validOptionalObservationNumber(conditions.relative_humidity_percent, {minimum: 0, maximum: 100})
+    || !validOptionalObservationChoice(conditions.cloud_state, OBSERVATION_CHOICES.clouds)
+    || !validOptionalObservationChoice(conditions.transparency, OBSERVATION_CHOICES.transparency)
+    || !validOptionalObservationChoice(conditions.seeing, OBSERVATION_SEEING_CHOICES)
+    || !validOptionalObservationNumber(conditions.wind_speed_kmh, {minimum: 0})
+    || !validOptionalObservationChoice(conditions.surface_condition, Object.keys(OBSERVATION_SURFACE_INPUTS))
+    || (conditions.moon_halo !== null && typeof conditions.moon_halo !== "boolean")) return false;
+
+  const acquisition = payload.acquisition;
+  if (!exactObservationKeys(acquisition, ["attempted_frames", "usable_frames", "stop_reason"])) return false;
+  if (!validOptionalObservationNumber(acquisition.attempted_frames, {minimum: 0, integer: true})
+    || !validOptionalObservationNumber(acquisition.usable_frames, {minimum: 0, integer: true})
+    || !validOptionalObservationChoice(acquisition.stop_reason, OBSERVATION_STOP_REASONS)
+    || (acquisition.usable_frames !== null && acquisition.attempted_frames === null)
+    || (acquisition.usable_frames !== null && acquisition.usable_frames > acquisition.attempted_frames)) return false;
+
+  const technical = payload.technical;
+  if (!exactObservationKeys(technical, ["hfr", "hfr_unit", "sky_background", "sky_background_unit", "guiding_rms_arcsec"])) return false;
+  if (!validOptionalObservationNumber(technical.hfr, {minimum: 0})
+    || !validOptionalObservationChoice(technical.hfr_unit, ["px", "arcsec"])
+    || (technical.hfr === null) !== (technical.hfr_unit === null)
+    || technical.sky_background !== null
+    || technical.sky_background_unit !== null
+    || !validOptionalObservationNumber(technical.guiding_rms_arcsec, {minimum: 0})) return false;
+
+  const hasFact = [...Object.values(conditions), ...Object.values(acquisition), technical.hfr, technical.guiding_rms_arcsec]
+    .some((item) => item !== null);
+  return hasFact && value.snapshot === snapshotFromObservationPayload(payload);
+}
+
+function readPendingFieldObservation(key, expectedContext) {
   let raw;
   try {
     raw = localStorage.getItem(key);
   } catch (_error) {
-    return { available: false, value: null };
+    return { available: false, value: null, reason: "storage" };
   }
   if (raw === null) return { available: true, value: null };
   try {
-    return { available: true, value: JSON.parse(raw) };
+    const value = JSON.parse(raw);
+    if (validPendingFieldObservation(value, expectedContext)) return { available: true, value };
   } catch (_error) {
-    return { available: removePendingFieldObservation(key), value: null };
+    // The cleanup is best-effort only: corruption must remain blocking for this page.
   }
+  removePendingFieldObservation(key);
+  return { available: false, value: null, reason: "corrupt" };
 }
 
 function writePendingFieldObservation(key, value) {
@@ -481,6 +580,22 @@ function setOptionalObservationValue(selector, value) {
   document.querySelector(selector).value = value === null || value === undefined ? "" : String(value);
 }
 
+function unreadablePendingObservationMessage() {
+  return "Le brouillon local est illisible : la sécurité d’idempotence n’est plus garantie. Rechargez la page ou réinitialisez explicitement avant tout nouvel envoi.";
+}
+
+function blockUnreadablePendingObservation(key) {
+  if (!(state.unreadableFieldObservationContextKeys instanceof Set)) {
+    state.unreadableFieldObservationContextKeys = new Set();
+  }
+  state.unreadableFieldObservationContextKeys.add(key);
+}
+
+function unreadablePendingObservationBlocked(key) {
+  return state.unreadableFieldObservationContextKeys instanceof Set
+    && state.unreadableFieldObservationContextKeys.has(key);
+}
+
 function syncFieldObservationContext() {
   const nextContext = currentFieldObservationContext();
   const previousContext = state.fieldObservationDraftContext;
@@ -505,9 +620,19 @@ function restorePendingFieldObservation() {
   const decisionId = context?.decision_id;
   const executionId = context?.execution_id || null;
   if (!decisionId) return;
-  const storedPending = readPendingFieldObservation(pendingObservationKey(decisionId, executionId));
+  const key = pendingObservationKey(decisionId, executionId);
+  if (unreadablePendingObservationBlocked(key)) {
+    observationMessage(unreadablePendingObservationMessage(), { error: true });
+    return;
+  }
+  const storedPending = readPendingFieldObservation(key, context);
   if (!storedPending.available) {
-    observationMessage("Le stockage local est indisponible : impossible de restaurer une saisie en attente.", { error: true });
+    if (storedPending.reason === "corrupt") {
+      blockUnreadablePendingObservation(key);
+      observationMessage(unreadablePendingObservationMessage(), { error: true });
+    } else {
+      observationMessage("Le stockage local est indisponible : impossible de restaurer une saisie en attente.", { error: true });
+    }
     return;
   }
   const pending = storedPending.value;
@@ -521,7 +646,8 @@ function restorePendingFieldObservation() {
   document.querySelector("#observation-seeing").value = payload.conditions?.seeing || "";
   document.querySelector("#observation-moon-halo").value = payload.conditions?.moon_halo == null ? "" : String(payload.conditions.moon_halo);
   const surface = payload.conditions?.surface_condition;
-  const surfaceInput = surface ? document.querySelector(`input[name="observation-surface"][value="${surface}"]`) : null;
+  const surfaceSelector = surface === null ? null : OBSERVATION_SURFACE_INPUTS[surface];
+  const surfaceInput = surfaceSelector ? document.querySelector(surfaceSelector) : null;
   if (surfaceInput) surfaceInput.checked = true;
   setOptionalObservationValue("#observation-attempted-frames", payload.acquisition?.attempted_frames);
   setOptionalObservationValue("#observation-usable-frames", payload.acquisition?.usable_frames);
@@ -587,9 +713,18 @@ async function submitFieldObservation(event) {
     observationMessage("Ce contexte est périmé. Rechargez puis re-sélectionnez la mission et la session avant tout nouvel envoi.", { error: true });
     return;
   }
-  const storedPending = readPendingFieldObservation(key);
+  if (unreadablePendingObservationBlocked(key)) {
+    observationMessage(unreadablePendingObservationMessage(), { error: true });
+    return;
+  }
+  const storedPending = readPendingFieldObservation(key, context);
   if (!storedPending.available) {
-    observationMessage("Le stockage local est indisponible. Envoi bloqué pour éviter un doublon après une coupure réseau.", { error: true });
+    if (storedPending.reason === "corrupt") {
+      blockUnreadablePendingObservation(key);
+      observationMessage(unreadablePendingObservationMessage(), { error: true });
+    } else {
+      observationMessage("Le stockage local est indisponible. Envoi bloqué pour éviter un doublon après une coupure réseau.", { error: true });
+    }
     return;
   }
   const pending = storedPending.value;

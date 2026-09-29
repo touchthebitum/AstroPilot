@@ -102,6 +102,7 @@ function clearHarness() {
   storageFailures.get = false; storageFailures.set = false; storageFailures.remove = false;
   state.sessions = []; state.activeSessionId = null;
   state.invalidFieldObservationContextKey = null;
+  if (state.unreadableFieldObservationContextKeys instanceof Set) state.unreadableFieldObservationContextKeys.clear();
   resetFieldObservationForm();
   state.fieldObservationDraftContext = currentFieldObservationContext();
   element('#observation-status').textContent = '';
@@ -268,14 +269,48 @@ async function check() {
   assert.equal(blockedFetches, 0);
   assert.match(element('#observation-status').textContent, /Envoi bloqué/);
 
-  // Corrupt JSON and a failing cleanup never escape and also block the request.
+  // Corrupt JSON stays fail-closed even when cleanup succeeds; no identity is generated.
+  clearHarness(); setQuick({cloud: 'few'});
+  storage.set(pendingObservationKey('decision-1', null), '{broken');
+  blockedFetches = 0;
+  fetch = async () => { blockedFetches += 1; return response(201, {}); };
+  await submitFieldObservation(event);
+  assert.equal(blockedFetches, 0);
+  assert.equal(uuid, 0);
+  assert.equal(storage.has(pendingObservationKey('decision-1', null)), false);
+  assert.match(element('#observation-status').textContent, /brouillon local est illisible/i);
+  assert.match(element('#observation-status').textContent, /idempotence n’est plus garantie/i);
+  await submitFieldObservation(event);
+  assert.equal(blockedFetches, 0);
+  assert.equal(uuid, 0);
+
+  // Valid JSON with an invalid structure/surface cannot build a selector or reach the network.
+  clearHarness(); setQuick({cloud: 'few'});
+  const malformedPayload = buildFieldObservationPayload();
+  malformedPayload.conditions.surface_condition = 'dry\"]:not-valid[';
+  resetFieldObservationForm();
+  storage.set(pendingObservationKey('decision-1', null), JSON.stringify({
+    payload: malformedPayload, snapshot: snapshotFromObservationPayload(malformedPayload),
+  }));
+  blockedFetches = 0;
+  fetch = async () => { blockedFetches += 1; return response(201, {}); };
+  restorePendingFieldObservation();
+  assert.match(element('#observation-status').textContent, /brouillon local est illisible/i);
+  setQuick({cloud: 'few'});
+  await submitFieldObservation(event);
+  assert.equal(blockedFetches, 0);
+  assert.equal(uuid, 1);
+  assert.match(element('#observation-status').textContent, /brouillon local est illisible/i);
+
+  // Corrupt JSON with a failing cleanup is equally blocking.
   clearHarness(); setQuick({cloud: 'few'});
   storage.set(pendingObservationKey('decision-1', null), '{broken');
   storageFailures.remove = true; blockedFetches = 0;
   fetch = async () => { blockedFetches += 1; return response(201, {}); };
   await submitFieldObservation(event);
   assert.equal(blockedFetches, 0);
-  assert.match(element('#observation-status').textContent, /stockage local est indisponible/i);
+  assert.equal(uuid, 0);
+  assert.match(element('#observation-status').textContent, /brouillon local est illisible/i);
 
   // A timeout keeps the exact payload and a retry reuses it, yielding a 200 replay.
   clearHarness(); setQuick({cloud: 'few', transparency: 'good'});
