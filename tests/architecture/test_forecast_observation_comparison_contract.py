@@ -1520,6 +1520,229 @@ def test_external_dict_descriptor_is_never_material_storage_publicly():
     assert first.comparison_id == repeated.comparison_id
 
 
+@pytest.mark.parametrize("include_weakref", [False, True])
+def test_slots_only_external_dict_state_fails_closed_publicly(
+    include_weakref,
+):
+    external_storage = {}
+
+    class ExternalDictionary:
+        def __get__(self, instance, owner=None):
+            if instance is None:
+                return self
+            return external_storage[id(instance)]
+
+        def __set__(self, instance, value):
+            external_storage[id(instance)] = value
+
+    slots = ("slot", "__weakref__") if include_weakref else ("slot",)
+    location_type = type(
+        "SlotsOnlyExternalDictionaryLocation",
+        (),
+        {"__slots__": slots, "__dict__": ExternalDictionary()},
+    )
+    descriptor = type.__getattribute__(location_type, "__dict__")["__dict__"]
+    first_location = location_type()
+    first_location.slot = "same"
+    descriptor.__set__(first_location, {"external": "first"})
+    second_location = location_type()
+    second_location.slot = "same"
+    descriptor.__set__(second_location, {"external": "second"})
+
+    def result_for(location):
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point, "requested_location", location)
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    first = result_for(first_location)
+    repeated_first = result_for(first_location)
+    second = result_for(second_location)
+
+    assert type.__getattribute__(location_type, "__dictoffset__") == 0
+    assert first.identity_persistable is False
+    assert second.identity_persistable is False
+    assert first.source_digest == repeated_first.source_digest
+    assert first.comparison_id == repeated_first.comparison_id
+    assert first.source_digest == second.source_digest
+    assert first.comparison_id == second.comparison_id
+
+
+def test_slots_only_dict_property_returning_empty_fails_closed_publicly():
+    class MaskedSlotsLocation:
+        __slots__ = ("slot",)
+
+        @property
+        def __dict__(self):
+            return {}
+
+    location = MaskedSlotsLocation()
+    location.slot = "visible"
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    object.__setattr__(forecast_point, "requested_location", location)
+
+    result = compare_forecast_to_field_observation(
+        DecisionForecastEvidence((forecast_point,)),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert type.__getattribute__(MaskedSlotsLocation, "__dictoffset__") == 0
+    assert result.identity_persistable is False
+
+
+def test_slots_only_raising_dict_property_fails_closed_without_reading_it():
+    class RaisingDictionaryLocation:
+        __slots__ = ("slot",)
+
+        @property
+        def __dict__(self):
+            raise RuntimeError("must not be invoked")
+
+    location = RaisingDictionaryLocation()
+    location.slot = "visible"
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    object.__setattr__(forecast_point, "requested_location", location)
+
+    result = compare_forecast_to_field_observation(
+        DecisionForecastEvidence((forecast_point,)),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert type.__getattribute__(RaisingDictionaryLocation, "__dictoffset__") == 0
+    assert result.identity_persistable is False
+
+
+def test_slots_only_inherited_dict_shadowing_fails_closed_publicly():
+    external_storage = {}
+
+    class ExternalDictionary:
+        def __get__(self, instance, owner=None):
+            if instance is None:
+                return self
+            return external_storage[id(instance)]
+
+        def __set__(self, instance, value):
+            external_storage[id(instance)] = value
+
+    class DictionaryBase:
+        __slots__ = ("slot",)
+        __dict__ = ExternalDictionary()
+
+    class ShadowedDictionaryLocation(DictionaryBase):
+        __slots__ = ()
+
+        @property
+        def __dict__(self):
+            return {}
+
+    location = ShadowedDictionaryLocation()
+    location.slot = "visible"
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    object.__setattr__(forecast_point, "requested_location", location)
+
+    result = compare_forecast_to_field_observation(
+        DecisionForecastEvidence((forecast_point,)),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert (
+        type.__getattribute__(
+            ShadowedDictionaryLocation, "__dictoffset__"
+        )
+        == 0
+    )
+    assert result.identity_persistable is False
+
+
+def test_zero_dict_offset_temporal_external_state_fails_closed_publicly():
+    external_storage = {}
+
+    class ExternalDictionary:
+        def __get__(self, instance, owner=None):
+            if instance is None:
+                return self
+            return external_storage[id(instance)]
+
+        def __set__(self, instance, value):
+            external_storage[id(instance)] = value
+
+    class ExternalDictionaryDatetime(datetime):
+        __slots__ = ()
+        __dict__ = ExternalDictionary()
+
+    descriptor = type.__getattribute__(
+        ExternalDictionaryDatetime, "__dict__"
+    )["__dict__"]
+    first_datetime = ExternalDictionaryDatetime(
+        2026, 9, 1, 17, 0, tzinfo=timezone.utc
+    )
+    descriptor.__set__(first_datetime, {"external": "first"})
+    second_datetime = ExternalDictionaryDatetime(
+        2026, 9, 1, 17, 0, tzinfo=timezone.utc
+    )
+    descriptor.__set__(second_datetime, {"external": "second"})
+
+    def result_for(forecast_for_utc):
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(
+            forecast_point, "forecast_for_utc", forecast_for_utc
+        )
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    first = result_for(first_datetime)
+    repeated_first = result_for(first_datetime)
+    second = result_for(second_datetime)
+
+    assert (
+        type.__getattribute__(ExternalDictionaryDatetime, "__dictoffset__")
+        == 0
+    )
+    assert first.identity_persistable is False
+    assert second.identity_persistable is False
+    assert first.source_digest == repeated_first.source_digest
+    assert first.comparison_id == repeated_first.comparison_id
+    assert first.source_digest == second.source_digest
+    assert first.comparison_id == second.comparison_id
+
+
+def test_plain_slots_only_state_remains_complete_and_stable_publicly():
+    class SlotsOnlyLocation:
+        __slots__ = ("slot",)
+
+    def result_for(marker):
+        location = SlotsOnlyLocation()
+        location.slot = marker
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point, "requested_location", location)
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    first = result_for("first")
+    repeated_first = result_for("first")
+    second = result_for("second")
+
+    assert type.__getattribute__(SlotsOnlyLocation, "__dictoffset__") == 0
+    assert first.identity_persistable is True
+    assert second.identity_persistable is True
+    assert first.source_digest == repeated_first.source_digest
+    assert first.comparison_id == repeated_first.comparison_id
+    assert first.source_digest != second.source_digest
+    assert first.comparison_id != second.comparison_id
+
+
 def test_readable_material_dictionary_is_complete_and_stable_publicly():
     class DictionaryLocation:
         pass

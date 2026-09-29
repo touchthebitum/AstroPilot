@@ -561,9 +561,6 @@ def _safe_material_instance_dictionary(
         or type(dictionary_offset) is not int
     ):
         return None, False, False
-    if dictionary_offset == 0:
-        return None, True, False
-
     complete = True
     descriptors: dict[int, GetSetDescriptorType] = {}
     missing_binding = object()
@@ -606,6 +603,15 @@ def _safe_material_instance_dictionary(
                 descriptors[id(candidate)] = candidate
                 if binding is not candidate:
                     complete = False
+
+    if dictionary_offset == 0:
+        # A zero offset proves absence only after every raw MRO binding has
+        # been inspected. Custom/shadowing bindings may describe external
+        # state, while a genuine descriptor at a zero offset contradicts the
+        # expected layout; both cases must fail closed.
+        if descriptors:
+            return None, False, True
+        return None, complete, False
 
     if not descriptors:
         return None, False, True
