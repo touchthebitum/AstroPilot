@@ -196,15 +196,18 @@ def test_field_observation_api_rejects_empty_invalid_and_unknown_fields():
     assert service.observations == {}
 
 
-def test_field_observation_quick_capture_ui_is_slider_first_and_progressive():
+def test_field_observation_quick_capture_ui_is_categorical_and_progressive():
     root = Path(__file__).resolve().parents[2] / "astropilot" / "web"
     html = (root / "index.html").read_text(encoding="utf-8")
     script = (root / "app.js").read_text(encoding="utf-8")
 
-    assert html.count('data-observation-range="') == 3
-    assert 'type="range"' in html
+    assert html.count('data-observation-choice="') == 2
+    assert 'type="range"' not in html
+    assert 'value="partly_cloudy"' in html
+    assert 'value="excellent"' in html
+    assert 'id="observation-wind" type="number"' in html
     assert "Ajouter des détails" in html
     assert 'name="observation-surface"' in html
-    assert "OBSERVATION_RANGE_VALUES" in script
+    assert "OBSERVATION_CHOICES" in script
     assert 'quality_flags: ["estimated", "partial"]' in script
     assert "pendingFieldObservation" in script

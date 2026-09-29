@@ -308,20 +308,9 @@ async function creditSession(_missionId, confirmed) {
   });
 }
 
-const OBSERVATION_RANGE_VALUES = Object.freeze({
-  clouds: Object.freeze({
-    0: ["clear", "Dégagé · 0 %"], 25: ["few", "Quelques nuages · 25 %"],
-    50: ["partly_cloudy", "Partiellement couvert · 50 %"],
-    75: ["mostly_cloudy", "Très nuageux · 75 %"], 100: ["overcast", "Couvert · 100 %"],
-  }),
-  transparency: Object.freeze({
-    0: ["poor", "Médiocre · 0 %"], 25: ["fair", "Moyenne · 25 %"],
-    50: ["fair", "Moyenne · 50 %"], 75: ["good", "Bonne · 75 %"],
-    100: ["excellent", "Excellente · 100 %"],
-  }),
-  wind: Object.freeze({
-    0: [0, "Nul"], 1: [5, "Faible"], 2: [15, "Modéré"], 3: [30, "Fort"],
-  }),
+const OBSERVATION_CHOICES = Object.freeze({
+  clouds: Object.freeze(["clear", "few", "partly_cloudy", "mostly_cloudy", "overcast"]),
+  transparency: Object.freeze(["poor", "fair", "good", "excellent"]),
 });
 
 function renderObservationLinkage() {
@@ -329,6 +318,7 @@ function renderObservationLinkage() {
   if (!element) return;
   element.textContent = currentSession()?.execution.execution_id
     ? "Liée à la session sélectionnée" : "Liée à la décision actuelle";
+  restorePendingFieldObservation();
 }
 
 function observationMessage(message, { error = false } = {}) {
@@ -342,13 +332,12 @@ function optionalObservationNumber(selector) {
   return raw === "" ? null : Number(raw);
 }
 
-function selectedObservationRange(name) {
-  const input = document.querySelector(`[data-observation-range="${name}"]`);
-  if (input.dataset.touched !== "true") return null;
-  return OBSERVATION_RANGE_VALUES[name][input.value][0];
+function selectedObservationChoice(name) {
+  const value = document.querySelector(`[data-observation-choice="${name}"]`).value;
+  return OBSERVATION_CHOICES[name].includes(value) ? value : null;
 }
 
-function buildFieldObservationPayload() {
+function fieldObservationDraft() {
   const decisionId = state.acceptedMission?.decision_id;
   if (!decisionId) return null;
   const session = currentSession();
@@ -358,10 +347,10 @@ function buildFieldObservationPayload() {
   const conditions = {
     temperature_c: optionalObservationNumber("#observation-temperature"),
     relative_humidity_percent: optionalObservationNumber("#observation-humidity"),
-    cloud_state: selectedObservationRange("clouds"),
-    transparency: selectedObservationRange("transparency"),
+    cloud_state: selectedObservationChoice("clouds"),
+    transparency: selectedObservationChoice("transparency"),
     seeing: document.querySelector("#observation-seeing").value || null,
-    wind_speed_kmh: selectedObservationRange("wind"),
+    wind_speed_kmh: optionalObservationNumber("#observation-wind"),
     surface_condition: surface,
     moon_halo: moonHalo === "" ? null : moonHalo === "true",
   };
@@ -380,15 +369,36 @@ function buildFieldObservationPayload() {
   const hasFact = [...Object.values(conditions), ...Object.values(acquisition), ...Object.values(technical)]
     .some((value) => value !== null);
   if (!hasFact) return null;
+  return {
+    decision_id: decisionId, execution_id: session?.execution.execution_id || null,
+    conditions, acquisition, technical,
+  };
+}
+
+function buildFieldObservationPayload(draft = fieldObservationDraft()) {
+  if (!draft) return null;
   const capturedAt = new Date().toISOString();
   return {
-    observation_id: crypto.randomUUID(), decision_id: decisionId,
-    execution_id: session?.execution.execution_id || null,
+    observation_id: crypto.randomUUID(), decision_id: draft.decision_id,
+    execution_id: draft.execution_id,
     observed_at_utc: capturedAt, recorded_at_utc: capturedAt,
     supersedes_observation_id: null,
-    conditions, acquisition, technical, confidence: "medium",
+    conditions: draft.conditions, acquisition: draft.acquisition, technical: draft.technical,
+    confidence: "medium",
     quality_flags: ["estimated", "partial"],
   };
+}
+
+function fieldObservationSnapshot(draft = fieldObservationDraft()) {
+  return draft ? JSON.stringify(draft) : null;
+}
+
+function snapshotFromObservationPayload(payload) {
+  if (!payload) return null;
+  return JSON.stringify({
+    decision_id: payload.decision_id, execution_id: payload.execution_id || null,
+    conditions: payload.conditions, acquisition: payload.acquisition, technical: payload.technical,
+  });
 }
 
 function pendingObservationKey(decisionId, executionId) {
@@ -397,17 +407,43 @@ function pendingObservationKey(decisionId, executionId) {
 
 function resetFieldObservationForm() {
   const form = document.querySelector("#field-observation-form");
-  for (const input of form.querySelectorAll("[data-observation-range]")) {
-    input.value = input.dataset.observationRange === "wind" ? "1" : "50";
-    delete input.dataset.touched;
-    document.querySelector(`#observation-${input.dataset.observationRange}-value`).textContent = (
-      input.dataset.observationRange === "transparency" ? "Non renseignée" : "Non renseigné"
-    );
-  }
+  for (const input of form.querySelectorAll("[data-observation-choice]")) input.value = "";
   for (const input of form.querySelectorAll('input[type="number"]')) input.value = "";
   for (const input of form.querySelectorAll('input[type="radio"]')) input.checked = false;
   for (const select of form.querySelectorAll("select")) select.selectedIndex = 0;
   document.querySelector(".observation-advanced").open = false;
+}
+
+function setOptionalObservationValue(selector, value) {
+  document.querySelector(selector).value = value === null || value === undefined ? "" : String(value);
+}
+
+function restorePendingFieldObservation() {
+  const decisionId = state.acceptedMission?.decision_id;
+  if (!decisionId || fieldObservationDraft()) return;
+  const executionId = currentSession()?.execution.execution_id || null;
+  let pending = null;
+  try { pending = JSON.parse(localStorage.getItem(pendingObservationKey(decisionId, executionId)) || "null"); }
+  catch (_error) { return; }
+  const payload = pending?.payload;
+  if (!payload || payload.decision_id !== decisionId || (payload.execution_id || null) !== executionId) return;
+  document.querySelector("#observation-clouds").value = payload.conditions?.cloud_state || "";
+  document.querySelector("#observation-transparency").value = payload.conditions?.transparency || "";
+  setOptionalObservationValue("#observation-wind", payload.conditions?.wind_speed_kmh);
+  setOptionalObservationValue("#observation-temperature", payload.conditions?.temperature_c);
+  setOptionalObservationValue("#observation-humidity", payload.conditions?.relative_humidity_percent);
+  document.querySelector("#observation-seeing").value = payload.conditions?.seeing || "";
+  document.querySelector("#observation-moon-halo").value = payload.conditions?.moon_halo == null ? "" : String(payload.conditions.moon_halo);
+  const surface = payload.conditions?.surface_condition;
+  const surfaceInput = surface ? document.querySelector(`input[name="observation-surface"][value="${surface}"]`) : null;
+  if (surfaceInput) surfaceInput.checked = true;
+  setOptionalObservationValue("#observation-attempted-frames", payload.acquisition?.attempted_frames);
+  setOptionalObservationValue("#observation-usable-frames", payload.acquisition?.usable_frames);
+  document.querySelector("#observation-stop-reason").value = payload.acquisition?.stop_reason || "";
+  setOptionalObservationValue("#observation-hfr", payload.technical?.hfr);
+  document.querySelector("#observation-hfr-unit").value = payload.technical?.hfr_unit || "px";
+  setOptionalObservationValue("#observation-guiding", payload.technical?.guiding_rms_arcsec);
+  observationMessage("Saisie restaurée après une confirmation réseau incomplète.");
 }
 
 async function storedFieldObservation(observationId) {
@@ -415,6 +451,34 @@ async function storedFieldObservation(observationId) {
   if (response.status === 404) return null;
   if (!response.ok) throw await sessionHttpError(response);
   return response.json();
+}
+
+function storedObservationMatchesPayload(stored, payload) {
+  const normalizeDate = (value) => value == null ? null : new Date(value).toISOString();
+  return stored?.observation_id === payload.observation_id
+    && stored.decision_id === payload.decision_id
+    && (stored.execution_id || null) === (payload.execution_id || null)
+    && normalizeDate(stored.observed_at_utc) === normalizeDate(payload.observed_at_utc)
+    && normalizeDate(stored.recorded_at_utc) === normalizeDate(payload.recorded_at_utc)
+    && (stored.supersedes_observation_id || null) === (payload.supersedes_observation_id || null)
+    && JSON.stringify(stored.conditions) === JSON.stringify(payload.conditions)
+    && JSON.stringify(stored.acquisition) === JSON.stringify(payload.acquisition)
+    && JSON.stringify(stored.technical) === JSON.stringify(payload.technical)
+    && stored.quality?.confidence === payload.confidence
+    && JSON.stringify(stored.quality?.flags || []) === JSON.stringify(payload.quality_flags);
+}
+
+function observationConflictError() {
+  const error = new Error("field_observation_conflict");
+  error.status = 409;
+  return error;
+}
+
+function finishFieldObservationSubmission(key, submittedSnapshot, message) {
+  localStorage.removeItem(key);
+  if (fieldObservationSnapshot() === submittedSnapshot) resetFieldObservationForm();
+  else message += " Vos modifications en cours sont conservées.";
+  observationMessage(message);
 }
 
 async function submitFieldObservation(event) {
@@ -429,22 +493,27 @@ async function submitFieldObservation(event) {
   const key = pendingObservationKey(decisionId, executionId);
   let pending = null;
   try { pending = JSON.parse(localStorage.getItem(key) || "null"); } catch (_error) { localStorage.removeItem(key); }
-  const freshPayload = pending?.payload ? null : buildFieldObservationPayload();
-  if (!pending?.payload && !freshPayload) {
+  const draft = fieldObservationDraft();
+  if (!draft) {
     observationMessage("Renseignez au moins une observation terrain.", { error: true });
     return;
   }
-  const payload = pending?.payload || freshPayload;
-  localStorage.setItem(key, JSON.stringify({ payload }));
+  const submittedSnapshot = fieldObservationSnapshot(draft);
+  const pendingSnapshot = pending?.snapshot || snapshotFromObservationPayload(pending?.payload);
+  const reusingPending = Boolean(pending?.payload && pendingSnapshot === submittedSnapshot);
+  const payload = reusingPending ? pending.payload : buildFieldObservationPayload(draft);
+  localStorage.setItem(key, JSON.stringify({ payload, snapshot: submittedSnapshot }));
   state.observationBusy = true;
   document.querySelector("#observation-save").disabled = true;
   observationMessage("Enregistrement en cours…");
   try {
-    if (pending?.payload && await storedFieldObservation(payload.observation_id)) {
-      localStorage.removeItem(key);
-      resetFieldObservationForm();
-      observationMessage("Observation déjà enregistrée — aucune duplication.");
-      return;
+    if (reusingPending) {
+      const stored = await storedFieldObservation(payload.observation_id);
+      if (stored) {
+        if (!storedObservationMatchesPayload(stored, payload)) throw observationConflictError();
+        finishFieldObservationSubmission(key, submittedSnapshot, "Observation déjà enregistrée — aucune duplication.");
+        return;
+      }
     }
     const response = await fetch("/v1/field-observations", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
@@ -453,20 +522,22 @@ async function submitFieldObservation(event) {
       if (response.status >= 400 && response.status < 500) localStorage.removeItem(key);
       throw await sessionHttpError(response);
     }
-    localStorage.removeItem(key);
-    resetFieldObservationForm();
-    observationMessage(response.status === 201
+    finishFieldObservationSubmission(key, submittedSnapshot, response.status === 201
       ? "Observation enregistrée." : "Observation déjà enregistrée — aucune duplication.");
   } catch (error) {
-    try {
-      const stored = await storedFieldObservation(payload.observation_id);
-      if (stored) {
-        localStorage.removeItem(key);
-        resetFieldObservationForm();
-        observationMessage("Observation enregistrée. La confirmation réseau avait été interrompue.");
-        return;
+    if (!error?.status) {
+      try {
+        const stored = await storedFieldObservation(payload.observation_id);
+        if (stored) {
+          if (!storedObservationMatchesPayload(stored, payload)) throw observationConflictError();
+          finishFieldObservationSubmission(key, submittedSnapshot, "Observation enregistrée. La confirmation réseau avait été interrompue.");
+          return;
+        }
+      } catch (lookupError) {
+        if (lookupError?.status === 409) error = lookupError;
       }
-    } catch (_lookupError) { /* Keep the idempotency key for a safe retry. */ }
+    }
+    if (error?.status >= 400 && error.status < 500) localStorage.removeItem(key);
     const messages = {
       409: "Conflit d’enregistrement : rechargez la mission avant de réessayer.",
       422: "Certaines valeurs sont invalides. Vérifiez les détails saisis.",
@@ -2798,13 +2869,6 @@ document.querySelector("#session-complete").addEventListener("click", () => sess
 document.querySelector("#session-interrupt").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "interrupted")));
 document.querySelector("#session-record-evidence").addEventListener("click", () => sessionCommand(recordSessionEvidence));
 document.querySelector("#session-apply-credit").addEventListener("click", () => sessionCommand(creditSession));
-for (const input of document.querySelectorAll("[data-observation-range]")) {
-  input.addEventListener("input", () => {
-    input.dataset.touched = "true";
-    const [, label] = OBSERVATION_RANGE_VALUES[input.dataset.observationRange][input.value];
-    document.querySelector(`#observation-${input.dataset.observationRange}-value`).textContent = label;
-  });
-}
 document.querySelector("#field-observation-form").addEventListener("submit", submitFieldObservation);
 ui.closeMission.addEventListener("click", () => ui.mission.close());
 ui.missionBack.addEventListener("click", () => ui.mission.close());

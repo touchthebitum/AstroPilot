@@ -509,20 +509,26 @@
             </div>
             <form id="field-observation-form">
               <div class="observation-quick-grid">
-                <label class="observation-slider" for="observation-clouds">
-                  <span><strong>Nuages</strong><output id="observation-clouds-value">Non renseigné</output></span>
-                  <input id="observation-clouds" type="range" min="0" max="100" step="25" value="50" data-observation-range="clouds">
-                  <small>Dégagé <span>Couvert</span></small>
+                <label class="observation-choice" for="observation-clouds">
+                  <span><strong>Nuages</strong><small>Catégorie observée</small></span>
+                  <select id="observation-clouds" data-observation-choice="clouds">
+                    <option value="">Non renseigné</option>
+                    <option value="clear">Dégagé</option><option value="few">Quelques nuages</option>
+                    <option value="partly_cloudy">Partiellement couvert</option>
+                    <option value="mostly_cloudy">Très nuageux</option><option value="overcast">Couvert</option>
+                  </select>
                 </label>
-                <label class="observation-slider" for="observation-transparency">
-                  <span><strong>Transparence</strong><output id="observation-transparency-value">Non renseignée</output></span>
-                  <input id="observation-transparency" type="range" min="0" max="100" step="25" value="50" data-observation-range="transparency">
-                  <small>Médiocre <span>Excellente</span></small>
+                <label class="observation-choice" for="observation-transparency">
+                  <span><strong>Transparence</strong><small>Catégorie observée</small></span>
+                  <select id="observation-transparency" data-observation-choice="transparency">
+                    <option value="">Non renseignée</option>
+                    <option value="poor">Médiocre</option><option value="fair">Moyenne</option>
+                    <option value="good">Bonne</option><option value="excellent">Excellente</option>
+                  </select>
                 </label>
-                <label class="observation-slider" for="observation-wind">
-                  <span><strong>Vent</strong><output id="observation-wind-value">Non renseigné</output></span>
-                  <input id="observation-wind" type="range" min="0" max="3" step="1" value="1" data-observation-range="wind">
-                  <small>Nul <span>Fort</span></small>
+                <label class="observation-choice" for="observation-wind">
+                  <span><strong>Vent mesuré</strong><small>km/h · laisser vide sans mesure</small></span>
+                  <input id="observation-wind" type="number" min="0" step="0.1" inputmode="decimal" placeholder="Ex. 8">
                 </label>
               </div>
 
