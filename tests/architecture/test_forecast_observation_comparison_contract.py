@@ -1,4 +1,5 @@
 import ast
+import struct
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
@@ -87,6 +88,7 @@ ALLOWED_IMPORTS = {
         ("__future__", "annotations"),
         ("hashlib", None),
         ("json", None),
+        ("struct", None),
         ("dataclasses", "asdict"),
         ("datetime", "date"),
         ("datetime", "datetime"),
@@ -664,6 +666,146 @@ def test_runtime_error_while_normalizing_corrupted_datetime_fails_closed():
     assert result.results[0].reasons[0].code == (
         "decision_forecast_evidence_invalid"
     )
+
+
+def test_named_utc_evidence_timestamp_fails_closed_without_normalization():
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    named_utc = timezone(timedelta(0), "NAMED")
+    object.__setattr__(
+        forecast_point,
+        "forecast_for_utc",
+        OBSERVED_AT.replace(tzinfo=named_utc),
+    )
+
+    result = compare_forecast_to_field_observation(
+        DecisionForecastEvidence((forecast_point,)),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert result.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert reason_codes(result) == ("decision_forecast_evidence_invalid",)
+
+
+def test_opaque_zero_offset_evidence_timestamp_fails_closed():
+    class OpaqueZeroTimezone(tzinfo):
+        def utcoffset(self, value):
+            return timedelta(0)
+
+        def dst(self, value):
+            return timedelta(0)
+
+        def tzname(self, value):
+            return "UTC"
+
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    object.__setattr__(
+        forecast_point,
+        "retrieved_at_utc",
+        RETRIEVED_AT.replace(tzinfo=OpaqueZeroTimezone()),
+    )
+
+    result = compare_forecast_to_field_observation(
+        DecisionForecastEvidence((forecast_point,)),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert result.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert reason_codes(result) == ("decision_forecast_evidence_invalid",)
+
+
+def test_fold_one_evidence_timestamp_fails_closed():
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    object.__setattr__(
+        forecast_point,
+        "forecast_for_utc",
+        OBSERVED_AT.replace(fold=1),
+    )
+
+    result = compare_forecast_to_field_observation(
+        DecisionForecastEvidence((forecast_point,)),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert result.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert reason_codes(result) == ("decision_forecast_evidence_invalid",)
+
+
+def test_same_instant_with_non_canonical_tzinfo_is_not_equivalent_evidence():
+    canonical = compare(
+        observation(),
+        point(WeatherVariable.TEMPERATURE_C, 8.0),
+    )
+    non_canonical_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    object.__setattr__(
+        non_canonical_point,
+        "forecast_for_utc",
+        OBSERVED_AT.replace(tzinfo=ZoneInfo("UTC")),
+    )
+    non_canonical = compare(
+        observation(),
+        non_canonical_point,
+    )
+
+    assert canonical.status is ForecastObservationComparisonStatus.COMPARABLE
+    assert (
+        non_canonical.status
+        is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    )
+    assert reason_codes(non_canonical) == (
+        "decision_forecast_evidence_invalid",
+    )
+
+
+def test_invalid_nan_payload_bits_are_preserved_in_redacted_identity():
+    def corrupted_evidence(bits):
+        invalid_value = struct.unpack(">d", struct.pack(">Q", bits))[0]
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point.values[0], "value", invalid_value)
+        return DecisionForecastEvidence((forecast_point,))
+
+    first = compare_forecast_to_field_observation(
+        corrupted_evidence(0x7FF8000000000001),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    repeated_first = compare_forecast_to_field_observation(
+        corrupted_evidence(0x7FF8000000000001),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    second = compare_forecast_to_field_observation(
+        corrupted_evidence(0x7FF8000000000002),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert reason_codes(first) == ("decision_forecast_evidence_invalid",)
+    assert first.source_digest == repeated_first.source_digest
+    assert first.comparison_id == repeated_first.comparison_id
+    assert first.source_digest != second.source_digest
+    assert first.comparison_id != second.comparison_id
+
+
+def test_invalid_infinities_have_distinct_redacted_identity():
+    def corrupted_result(value):
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point.values[0], "value", value)
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    positive = corrupted_result(float("inf"))
+    negative = corrupted_result(float("-inf"))
+
+    assert reason_codes(positive) == ("decision_forecast_evidence_invalid",)
+    assert reason_codes(negative) == ("decision_forecast_evidence_invalid",)
+    assert positive.source_digest != negative.source_digest
+    assert positive.comparison_id != negative.comparison_id
 
 
 def test_materially_different_invalid_evidence_has_distinct_identity():
@@ -1281,6 +1423,42 @@ def test_original_observation_primitives_are_validated_before_reconstruction():
             )
 
 
+def test_fold_one_observation_timestamp_is_rejected_before_reconstruction():
+    source = observation()
+    object.__setattr__(source, "observed_at_utc", OBSERVED_AT.replace(fold=1))
+
+    with pytest.raises(
+        ForecastObservationComparisonInputError,
+        match="^field_observation_invalid$",
+    ):
+        compare_forecast_to_field_observation(
+            DecisionForecastEvidence(()),
+            source,
+            computed_at_utc=COMPUTED_AT,
+        )
+
+
+def test_named_utc_observation_timestamp_is_rejected_before_reconstruction():
+    source = observation()
+    object.__setattr__(
+        source,
+        "recorded_at_utc",
+        source.recorded_at_utc.replace(
+            tzinfo=timezone(timedelta(0), "NAMED")
+        ),
+    )
+
+    with pytest.raises(
+        ForecastObservationComparisonInputError,
+        match="^field_observation_invalid$",
+    ):
+        compare_forecast_to_field_observation(
+            DecisionForecastEvidence(()),
+            source,
+            computed_at_utc=COMPUTED_AT,
+        )
+
+
 @pytest.mark.parametrize("invalid_parameters", [False, 0, "", (), [], {}])
 def test_falsy_non_parameter_values_are_rejected(invalid_parameters):
     with pytest.raises(
@@ -1586,6 +1764,71 @@ def test_id_and_logical_content_are_deterministic_and_version_sensitive():
     assert first.comparison_id == second.comparison_id
     assert new_algorithm.comparison_id != first.comparison_id
     assert new_policy.comparison_id != first.comparison_id
+
+
+def test_algorithm_version_subclass_is_rejected_without_calling_strip():
+    class ExplodingString(str):
+        def strip(self, *args, **kwargs):
+            raise RuntimeError("must not be called")
+
+    with pytest.raises(
+        ForecastObservationComparisonInputError,
+        match="^invalid_algorithm_version$",
+    ):
+        compare(
+            observation(),
+            point(WeatherVariable.TEMPERATURE_C, 8.0),
+            algorithm_version=ExplodingString("forecast_observation.v1"),
+        )
+
+
+def test_algorithm_version_subclasses_with_material_state_are_rejected():
+    class StatefulString(str):
+        pass
+
+    for marker in ("first", "second"):
+        version = StatefulString("forecast_observation.v1")
+        version.marker = marker
+        with pytest.raises(
+            ForecastObservationComparisonInputError,
+            match="^invalid_algorithm_version$",
+        ):
+            compare(
+                observation(),
+                point(WeatherVariable.TEMPERATURE_C, 8.0),
+                algorithm_version=version,
+            )
+
+
+@pytest.mark.parametrize("algorithm_version", ["", " ", " version", "version "])
+def test_algorithm_version_must_be_nonempty_and_already_canonical(
+    algorithm_version,
+):
+    with pytest.raises(
+        ForecastObservationComparisonInputError,
+        match="^invalid_algorithm_version$",
+    ):
+        compare(
+            observation(),
+            point(WeatherVariable.TEMPERATURE_C, 8.0),
+            algorithm_version=algorithm_version,
+        )
+
+
+def test_canonical_algorithm_version_is_stable():
+    first = compare(
+        observation(),
+        point(WeatherVariable.TEMPERATURE_C, 8.0),
+        algorithm_version="forecast_observation.v1",
+    )
+    second = compare(
+        observation(),
+        point(WeatherVariable.TEMPERATURE_C, 8.0),
+        algorithm_version="forecast_observation.v1",
+    )
+
+    assert first.algorithm_version == "forecast_observation.v1"
+    assert first.comparison_id == second.comparison_id
 
 
 def test_sources_are_not_mutated_by_comparison():

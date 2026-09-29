@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import struct
 from dataclasses import asdict
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from enum import Enum
@@ -70,6 +71,14 @@ class ForecastObservationComparisonInputError(ValueError):
 
 def _canonical_datetime(value: datetime) -> str:
     return value.isoformat(timespec="microseconds")
+
+
+def _is_canonical_utc_datetime(value: object) -> bool:
+    return (
+        type(value) is datetime
+        and value.tzinfo is timezone.utc
+        and value.fold == 0
+    )
 
 
 def _canonicalize(value):
@@ -187,7 +196,13 @@ def _safe_fingerprint_token(
                 "digest": hashlib.sha256(encoded).hexdigest(),
             }
         if type(value) is float:
-            return {"kind": "float", "digest": _digest(value.hex())}
+            logical_value = 0.0 if value == 0.0 else value
+            return {
+                "kind": "float",
+                "digest": hashlib.sha256(
+                    struct.pack(">d", logical_value)
+                ).hexdigest(),
+            }
         if type(value) is timezone:
             offset = value.utcoffset(None)
             name = value.tzname(None)
@@ -863,13 +878,13 @@ def _validated_forecast_point(
         model_id,
     )
     _require_evidence_invariant(
-        type(retrieved_at_utc) is datetime,
+        _is_canonical_utc_datetime(retrieved_at_utc),
         "non_canonical_retrieved_at_utc",
         f"{path}.retrieved_at_utc",
         retrieved_at_utc,
     )
     _require_evidence_invariant(
-        type(forecast_for_utc) is datetime,
+        _is_canonical_utc_datetime(forecast_for_utc),
         "non_canonical_forecast_for_utc",
         f"{path}.forecast_for_utc",
         forecast_for_utc,
@@ -1133,13 +1148,13 @@ def _validated_field_observation(value: object) -> FieldObservation:
         ):
             raise ValueError("non_canonical_observation_string")
         if any(
-            type(item) is not datetime or item.tzinfo is not timezone.utc
+            not _is_canonical_utc_datetime(item)
             for item in exact_utc_datetimes
         ):
             raise ValueError("non_canonical_observation_datetime")
         if any(
             item is not None
-            and (type(item) is not datetime or item.tzinfo is not timezone.utc)
+            and not _is_canonical_utc_datetime(item)
             for item in exact_optional_utc_datetimes
         ):
             raise ValueError("non_canonical_observation_datetime")
@@ -1589,9 +1604,13 @@ def compare_forecast_to_field_observation(
             "field_observation_missing"
         )
     observation = _validated_field_observation(observation)
-    if not isinstance(algorithm_version, str) or not algorithm_version.strip():
+    if type(algorithm_version) is not str:
         raise ForecastObservationComparisonInputError("invalid_algorithm_version")
-    algorithm_version = algorithm_version.strip()
+    if (
+        not algorithm_version
+        or algorithm_version != algorithm_version.strip()
+    ):
+        raise ForecastObservationComparisonInputError("invalid_algorithm_version")
     effective_parameters = (
         ForecastObservationParameters() if parameters is None else parameters
     )
