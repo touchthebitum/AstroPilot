@@ -1,4 +1,5 @@
 import json
+import multiprocessing
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,21 @@ from decision.weather.provider_reliability import (
 
 
 RETRIEVED_AT = datetime(2026, 8, 31, 18, tzinfo=timezone.utc)
+
+
+def _multiprocess_forecast_save(directory, document, results):
+    source = deserialize_decision_forecast_evidence(
+        document,
+        decision_id="decision-123",
+    )
+    try:
+        FileDecisionForecastEvidenceStore(directory).save(
+            decision_id="decision-123",
+            evidence=source,
+        )
+        results.put("saved")
+    except Exception as error:
+        results.put((type(error).__name__, str(error)))
 
 
 def value(variable, number, *, aggregation_period=None):
@@ -409,3 +425,70 @@ def test_concurrent_divergent_writers_never_overwrite(tmp_path):
         "saved",
     ]
     assert stores[0].load(decision_id="decision-123") in (first, second)
+
+
+def test_multiprocess_identical_writers_use_interprocess_publication_lock(tmp_path):
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    document = document_for()
+    processes = [
+        context.Process(
+            target=_multiprocess_forecast_save,
+            args=(tmp_path, document, results),
+        )
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(15)
+        assert process.exitcode == 0
+
+    assert [results.get(timeout=2) for _ in processes] == ["saved", "saved"]
+    assert FileDecisionForecastEvidenceStore(tmp_path).load(
+        decision_id="decision-123"
+    ) == evidence()
+
+
+def test_directory_fsync_failure_is_ambiguous_and_replay_is_idempotent(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.decision_forecast_evidence_store as store_module
+
+    store = FileDecisionForecastEvidenceStore(tmp_path)
+    source = evidence()
+    monkeypatch.setattr(
+        store_module,
+        "fsync_directory",
+        lambda *_: (_ for _ in ()).throw(OSError("directory fsync failed")),
+    )
+
+    with pytest.raises(OSError, match="directory fsync failed"):
+        store.save(decision_id="decision-123", evidence=source)
+    assert store.load(decision_id="decision-123") == source
+    store.save(decision_id="decision-123", evidence=source)
+
+
+def test_directory_fsync_failure_is_not_masked_by_cleanup_failure(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.decision_forecast_evidence_store as store_module
+    from pathlib import Path
+
+    monkeypatch.setattr(
+        store_module,
+        "fsync_directory",
+        lambda *_: (_ for _ in ()).throw(OSError("directory fsync failed")),
+    )
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("cleanup failed")),
+    )
+    with pytest.raises(OSError, match="directory fsync failed"):
+        FileDecisionForecastEvidenceStore(tmp_path).save(
+            decision_id="decision-123",
+            evidence=evidence(),
+        )

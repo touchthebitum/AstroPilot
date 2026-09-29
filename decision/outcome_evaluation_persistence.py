@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from enum import Enum
@@ -214,9 +215,32 @@ def _datetime(value: object, field: str) -> datetime:
         parsed = datetime.fromisoformat(value)
     except ValueError as error:
         raise OutcomeEvaluationPersistenceError(f"invalid_{field}") from error
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
+    if (
+        parsed.tzinfo is None
+        or parsed.utcoffset() != timedelta(0)
+        or parsed.fold != 0
+        or parsed.isoformat() != value
+    ):
         raise OutcomeEvaluationPersistenceError(f"invalid_{field}")
     return parsed
+
+
+def _number(value: object, field: str, *, optional: bool = False) -> int | float | None:
+    if value is None and optional:
+        return None
+    if type(value) not in (int, float) or not math.isfinite(value):
+        raise OutcomeEvaluationPersistenceError(f"invalid_{field}")
+    return value
+
+
+def _digest(value: object, field: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise OutcomeEvaluationPersistenceError(f"invalid_{field}")
+    return value
 
 
 def _duration(value: object, field: str) -> timedelta:
@@ -277,7 +301,13 @@ def _result(value: object) -> NumericVariableComparison | CloudVariableCompariso
         reasons=tuple(_reason(entry) for entry in _list(item["reasons"], "invalid_result_reasons")),
     )
     if result_type == "numeric":
-        return NumericVariableComparison(**common, forecast_value=item["forecast_value"], observed_value=item["observed_value"], signed_error=item["signed_error"], absolute_error=item["absolute_error"])
+        return NumericVariableComparison(
+            **common,
+            forecast_value=_number(item["forecast_value"], "forecast_value", optional=True),
+            observed_value=_number(item["observed_value"], "observed_value", optional=True),
+            signed_error=_number(item["signed_error"], "signed_error", optional=True),
+            absolute_error=_number(item["absolute_error"], "absolute_error", optional=True),
+        )
     cell = item["confusion_cell"]
     confusion_cell = None
     if cell is not None:
@@ -286,7 +316,7 @@ def _result(value: object) -> NumericVariableComparison | CloudVariableCompariso
             raise OutcomeEvaluationPersistenceError("invalid_confusion_cell")
         confusion_cell = tuple(_enum(entry, CloudState, "confusion_cell") for entry in values)
     return CloudVariableComparison(
-        **common, forecast_coverage_percent=item["forecast_coverage_percent"],
+        **common, forecast_coverage_percent=_number(item["forecast_coverage_percent"], "forecast_coverage_percent", optional=True),
         predicted_condition=_enum(item["predicted_condition"], CloudState, "predicted_condition", True),
         observed_condition=_enum(item["observed_condition"], CloudState, "observed_condition", True),
         outcome=_enum(item["outcome"], CloudComparisonOutcome, "cloud_outcome", True),
@@ -306,15 +336,18 @@ def _comparison(value: object) -> ForecastObservationComparison:
     params = _mapping(item["parameters"], _PARAMETER_FIELDS, "invalid_parameter_fields")
     temporal = _mapping(params["temporal_policy"], _TEMPORAL_FIELDS, "invalid_temporal_policy_fields")
     cloud = _mapping(params["cloud_mapping_policy"], _CLOUD_POLICY_FIELDS, "invalid_cloud_policy_fields")
-    boundaries = _list(cloud["boundaries_percent"], "invalid_cloud_boundaries")
+    boundaries = tuple(
+        _number(entry, "cloud_boundary_percent")
+        for entry in _list(cloud["boundaries_percent"], "invalid_cloud_boundaries")
+    )
     provenance = _mapping(item["observation_provenance"], _PROVENANCE_FIELDS, "invalid_observation_provenance_fields")
     return ForecastObservationComparison(
-        comparison_id=item["comparison_id"], identity_persistable=item["identity_persistable"],
+        comparison_id=_digest(item["comparison_id"], "comparison_id"), identity_persistable=item["identity_persistable"],
         computed_at_utc=_datetime(item["computed_at_utc"], "computed_at_utc"), decision_id=item["decision_id"],
-        observation_id=item["observation_id"], execution_id=item["execution_id"], source_digest=item["source_digest"],
+        observation_id=item["observation_id"], execution_id=item["execution_id"], source_digest=_digest(item["source_digest"], "source_digest"),
         parameters=ForecastObservationParameters(
             temporal_policy=TemporalComparisonPolicy(version=temporal["version"], maximum_absolute_offset=_duration(temporal["maximum_absolute_offset_us"], "maximum_absolute_offset"), timezone_name=temporal["timezone_name"], selection_mode=temporal["selection_mode"], interpolation_enabled=temporal["interpolation_enabled"], averaging_enabled=temporal["averaging_enabled"]),
-            cloud_mapping_policy=CloudMappingComparisonPolicy(version=cloud["version"], boundaries_percent=tuple(boundaries)),
+            cloud_mapping_policy=CloudMappingComparisonPolicy(version=cloud["version"], boundaries_percent=boundaries),
         ),
         observation_provenance=ObservationComparisonProvenance(
             source_type=_enum(provenance["source_type"], ObservationSourceType, "observation_source_type"), source_id=provenance["source_id"],
@@ -334,7 +367,7 @@ def _evidence(value: object) -> ForecastComparisonOutcomeEvidence | None:
         return None
     item = _mapping(value, _EVIDENCE_FIELDS, "invalid_outcome_evidence_fields")
     return ForecastComparisonOutcomeEvidence(
-        evidence_id=item["evidence_id"], comparison_id=item["comparison_id"], decision_id=item["decision_id"], observation_id=item["observation_id"], execution_id=item["execution_id"],
+        evidence_id=_digest(item["evidence_id"], "evidence_id"), comparison_id=_digest(item["comparison_id"], "comparison_id"), decision_id=item["decision_id"], observation_id=item["observation_id"], execution_id=item["execution_id"],
         algorithm_version=item["algorithm_version"], derived_at_utc=_datetime(item["derived_at_utc"], "derived_at_utc"), source_type=_enum(item["source_type"], ForecastComparisonOutcomeEvidenceSourceType, "outcome_evidence_source_type"),
     )
 
@@ -378,7 +411,7 @@ def deserialize_outcome_evaluation(document: str, *, evaluation_id: str | None =
         raise OutcomeEvaluationPersistenceError("evaluation_id_mismatch")
     try:
         return OutcomeEvaluation(
-            evaluation_id=item["evaluation_id"], evaluation_algorithm_version=item["evaluation_algorithm_version"],
+            evaluation_id=_digest(item["evaluation_id"], "evaluation_id"), evaluation_algorithm_version=item["evaluation_algorithm_version"],
             comparison=_comparison(item["comparison"]), outcome_evidence=_evidence(item["outcome_evidence"]), assessment=_assessment(item["assessment"]),
         )
     except OutcomeEvaluationPersistenceError:

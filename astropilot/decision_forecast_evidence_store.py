@@ -5,6 +5,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from astropilot.durable_file_publication import fsync_directory
 from astropilot.file_lock import exclusive_file_lock
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 from decision.weather.decision_forecast_evidence_persistence import (
@@ -98,6 +99,8 @@ class FileDecisionForecastEvidenceStore:
                         raise DecisionForecastEvidencePersistenceError(
                             "decision_forecast_evidence_conflict"
                         )
+                else:
+                    fsync_directory(self._directory)
             finally:
                 if temporary_path is not None:
                     primary_error = sys.exception()

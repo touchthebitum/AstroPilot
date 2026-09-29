@@ -20,6 +20,14 @@ _V1_TEMPORAL_POLICY_VERSION = "nearest_forecast_utc.v1"
 _V1_MAXIMUM_ABSOLUTE_OFFSET = timedelta(minutes=30)
 
 
+def _is_canonical_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
 def _utc(value: datetime, *, field_name: str) -> datetime:
     if (
         not isinstance(value, datetime)
@@ -301,22 +309,14 @@ class ForecastObservationComparison:
     forecast_scope: str = FORECAST_SCOPE
 
     def __post_init__(self) -> None:
-        if not isinstance(self.comparison_id, str) or len(self.comparison_id) != 64:
+        if not _is_canonical_sha256(self.comparison_id):
             raise ValueError("invalid_comparison_id")
-        try:
-            int(self.comparison_id, 16)
-        except ValueError as error:
-            raise ValueError("invalid_comparison_id") from error
         if type(self.identity_persistable) is not bool:
             raise ValueError("invalid_identity_persistable")
         if not isinstance(self.observation_id, str) or not self.observation_id:
             raise ValueError("invalid_observation_id")
-        if not isinstance(self.source_digest, str) or len(self.source_digest) != 64:
+        if not _is_canonical_sha256(self.source_digest):
             raise ValueError("invalid_source_digest")
-        try:
-            int(self.source_digest, 16)
-        except ValueError as error:
-            raise ValueError("invalid_source_digest") from error
         if not isinstance(self.parameters, ForecastObservationParameters):
             raise ValueError("invalid_forecast_observation_parameters")
         if not isinstance(

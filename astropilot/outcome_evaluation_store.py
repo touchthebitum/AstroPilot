@@ -6,6 +6,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from astropilot.durable_file_publication import fsync_directory
 from astropilot.file_lock import exclusive_file_lock
 from astropilot.user_profile import get_user_data_dir
 from decision.models.outcome_evaluation import OutcomeEvaluation
@@ -81,6 +82,7 @@ class FileOutcomeEvaluationStore:
                     if self._load_path(path) == evaluation:
                         return False
                     raise OutcomeEvaluationPersistenceError("outcome_evaluation_conflict")
+                fsync_directory(self._directory)
             finally:
                 if temporary_path is not None:
                     primary_error = sys.exception()

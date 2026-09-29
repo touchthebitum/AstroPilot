@@ -90,12 +90,10 @@ def _required_identifier(value: object, *, field: str) -> str:
 
 def _digest_identifier(value: object, *, field: str) -> str:
     identity = _required_identifier(value, field=field)
-    if len(identity) != 64:
+    if len(identity) != 64 or any(
+        character not in "0123456789abcdef" for character in identity
+    ):
         raise ValueError(f"invalid_{field}")
-    try:
-        int(identity, 16)
-    except ValueError as error:
-        raise ValueError(f"invalid_{field}") from error
     return identity
 
 

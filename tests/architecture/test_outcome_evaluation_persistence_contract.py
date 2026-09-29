@@ -1,4 +1,5 @@
 import json
+import multiprocessing
 import os
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -9,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from astropilot.outcome_evaluation_store import FileOutcomeEvaluationStore
+from astropilot.durable_file_publication import fsync_directory
 from decision.field_observation import (
     CaptureMethod,
     CloudState,
@@ -19,6 +21,7 @@ from decision.field_observation import (
 from decision.models.forecast_observation_comparison import (
     CloudComparisonOutcome,
     CloudVariableComparison,
+    ComparisonReason,
     ForecastObservationComparison,
     ForecastObservationComparisonStatus,
     ForecastObservationParameters,
@@ -50,6 +53,14 @@ from decision.weather.provider_reliability import WeatherVariable
 
 
 NOW = datetime(2026, 9, 29, 20, tzinfo=timezone.utc)
+
+
+def _multiprocess_outcome_save(directory, document, results):
+    source = deserialize_outcome_evaluation(document)
+    try:
+        results.put(FileOutcomeEvaluationStore(Path(directory)).save(evaluation=source))
+    except Exception as error:
+        results.put((type(error).__name__, str(error)))
 
 
 def comparison(*, execution_id="execution-1", comparison_id="a" * 64, persistable=True):
@@ -145,12 +156,65 @@ def test_non_persistable_comparison_is_rejected_by_model_serializer_and_store(tm
 def test_full_numeric_cloud_round_trip_is_strict_and_lossless():
     source = evaluation()
     document = serialize_outcome_evaluation(source)
-    assert deserialize_outcome_evaluation(document, evaluation_id=source.evaluation_id) == source
+    restored = deserialize_outcome_evaluation(document, evaluation_id=source.evaluation_id)
+    assert restored == source
+    assert serialize_outcome_evaluation(restored) == document
     payload = json.loads(document)
     assert payload["schema_version"] == 1
     assert payload["domain_version"] == DOMAIN_VERSION
     assert payload["outcome_evaluation"]["comparison"]["results"][0]["result_type"] == "numeric"
     assert payload["outcome_evaluation"]["comparison"]["results"][1]["result_type"] == "cloud"
+
+
+@pytest.mark.parametrize("status", [
+    ForecastObservationComparisonStatus.PARTIAL,
+    ForecastObservationComparisonStatus.NOT_COMPARABLE,
+])
+def test_partial_and_not_comparable_round_trip_with_reasons_and_missing_point(status):
+    source = evaluation(execution=False)
+    unavailable = ComparisonReason(
+        code="forecast_value_unavailable",
+        variable=WeatherVariable.CLOUD_COVER_PERCENT,
+    )
+    non_comparable_cloud = CloudVariableComparison(
+        variable=WeatherVariable.CLOUD_COVER_PERCENT,
+        status=VariableComparisonStatus.NOT_COMPARABLE,
+        unit="%",
+        reasons=(unavailable,),
+    )
+    results = (non_comparable_cloud,)
+    if status is ForecastObservationComparisonStatus.PARTIAL:
+        results = (source.comparison.results[0], non_comparable_cloud)
+    updated_comparison = replace(
+        source.comparison,
+        results=results,
+        status=status,
+        reasons=(unavailable,),
+    )
+    updated = replace(
+        source,
+        evaluation_id=derive_outcome_evaluation_id(
+            comparison_id=updated_comparison.comparison_id
+        ),
+        comparison=updated_comparison,
+    )
+
+    document = serialize_outcome_evaluation(updated)
+    restored = deserialize_outcome_evaluation(document)
+
+    assert restored == updated
+    assert restored.comparison.results[-1].forecast_point is None
+    assert restored.comparison.results[-1].reasons == (unavailable,)
+    assert serialize_outcome_evaluation(restored) == document
+
+
+def test_decision_only_store_round_trip(tmp_path):
+    source = evaluation(execution=False)
+    store = FileOutcomeEvaluationStore(tmp_path)
+
+    assert store.save(evaluation=source) is True
+    assert store.load(evaluation_id=source.evaluation_id) == source
+    assert store.save(evaluation=source) is False
 
 
 @pytest.mark.parametrize("mutation,code", [
@@ -163,6 +227,105 @@ def test_unknown_fields_and_versions_are_rejected(mutation, code):
     mutation(payload)
     with pytest.raises(OutcomeEvaluationPersistenceError, match=code):
         deserialize_outcome_evaluation(json.dumps(payload))
+
+
+@pytest.mark.parametrize("mutation,code", [
+    (lambda root: root["outcome_evaluation"].update(extra=True), "invalid_outcome_evaluation_fields"),
+    (lambda root: root["outcome_evaluation"]["comparison"].update(extra=True), "invalid_comparison_fields"),
+    (lambda root: root["outcome_evaluation"]["comparison"]["parameters"].update(extra=True), "invalid_parameter_fields"),
+    (lambda root: root["outcome_evaluation"]["comparison"]["parameters"]["temporal_policy"].update(extra=True), "invalid_temporal_policy_fields"),
+    (lambda root: root["outcome_evaluation"]["comparison"]["parameters"]["cloud_mapping_policy"].update(extra=True), "invalid_cloud_policy_fields"),
+    (lambda root: root["outcome_evaluation"]["comparison"]["observation_provenance"].update(extra=True), "invalid_observation_provenance_fields"),
+    (lambda root: root["outcome_evaluation"]["comparison"]["results"][0].update(extra=True), "invalid_result_fields"),
+    (lambda root: root["outcome_evaluation"]["comparison"]["results"][0]["forecast_point"].update(extra=True), "invalid_forecast_point_fields"),
+    (lambda root: root["outcome_evaluation"]["outcome_evidence"].update(extra=True), "invalid_outcome_evidence_fields"),
+    (lambda root: root["outcome_evaluation"]["assessment"].update(extra=True), "invalid_assessment_fields"),
+    (lambda root: root["outcome_evaluation"]["assessment"]["findings"][0].update(extra=True), "invalid_finding_fields"),
+])
+def test_unknown_fields_are_rejected_at_nested_levels(mutation, code):
+    payload = json.loads(serialize_outcome_evaluation(evaluation()))
+    mutation(payload)
+    with pytest.raises(OutcomeEvaluationPersistenceError, match=code):
+        deserialize_outcome_evaluation(json.dumps(payload))
+
+
+def test_deserialized_non_persistable_identity_is_rejected():
+    payload = json.loads(serialize_outcome_evaluation(evaluation()))
+    payload["outcome_evaluation"]["comparison"]["identity_persistable"] = False
+    with pytest.raises(
+        OutcomeEvaluationPersistenceError,
+        match="comparison_identity_not_persistable",
+    ):
+        deserialize_outcome_evaluation(json.dumps(payload))
+
+
+@pytest.mark.parametrize("field_path", [
+    ("results", 0, "forecast_value"),
+    ("results", 0, "observed_value"),
+    ("results", 0, "signed_error"),
+    ("results", 0, "absolute_error"),
+    ("results", 0, "forecast_point", "temporal_offset_us"),
+    ("results", 1, "forecast_coverage_percent"),
+    ("results", 1, "forecast_point", "temporal_offset_us"),
+    ("parameters", "temporal_policy", "maximum_absolute_offset_us"),
+    ("parameters", "cloud_mapping_policy", "boundaries_percent", 0),
+])
+def test_boolean_comparison_numbers_are_rejected(field_path):
+    payload = json.loads(serialize_outcome_evaluation(evaluation()))
+    target = payload["outcome_evaluation"]["comparison"]
+    for key in field_path[:-1]:
+        target = target[key]
+    target[field_path[-1]] = True
+    with pytest.raises(OutcomeEvaluationPersistenceError, match="invalid_"):
+        deserialize_outcome_evaluation(json.dumps(payload))
+
+
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity", "1e400"])
+def test_non_finite_numeric_documents_are_rejected(token):
+    document = serialize_outcome_evaluation(evaluation())
+    document = document.replace('"forecast_value": 7.0', f'"forecast_value": {token}')
+    with pytest.raises(OutcomeEvaluationPersistenceError):
+        deserialize_outcome_evaluation(document)
+
+
+@pytest.mark.parametrize("value", [
+    "2026-09-29T21:00:00+01:00",
+    "2026-09-29T20:00:00Z",
+    "2026-09-29T20:00:00",
+])
+@pytest.mark.parametrize("field_path", [
+    ("comparison", "computed_at_utc"),
+    ("comparison", "results", 0, "forecast_point", "retrieved_at_utc"),
+    ("comparison", "results", 0, "forecast_point", "forecast_for_utc"),
+    ("outcome_evidence", "derived_at_utc"),
+    ("assessment", "assessed_at"),
+])
+def test_persisted_datetimes_require_canonical_utc_without_fold_aliases(
+    value,
+    field_path,
+):
+    payload = json.loads(serialize_outcome_evaluation(evaluation()))
+    target = payload["outcome_evaluation"]
+    for key in field_path[:-1]:
+        target = target[key]
+    target[field_path[-1]] = value
+    with pytest.raises(OutcomeEvaluationPersistenceError, match="invalid_"):
+        deserialize_outcome_evaluation(json.dumps(payload))
+
+
+def test_uppercase_sha256_identifiers_are_rejected_uniformly(tmp_path):
+    with pytest.raises(ValueError, match="invalid_comparison_id"):
+        comparison(comparison_id="A" * 64)
+
+    payload = json.loads(serialize_outcome_evaluation(evaluation()))
+    payload["outcome_evaluation"]["comparison"]["comparison_id"] = "A" * 64
+    with pytest.raises(OutcomeEvaluationPersistenceError, match="invalid_comparison_id"):
+        deserialize_outcome_evaluation(json.dumps(payload))
+
+    with pytest.raises(OutcomeEvaluationPersistenceError, match="invalid_comparison_id"):
+        FileOutcomeEvaluationStore(tmp_path).list_by_comparison(
+            comparison_id="A" * 64
+        )
 
 
 @pytest.mark.parametrize("document", ["{", "[]", "null"])
@@ -233,6 +396,29 @@ def test_concurrent_identical_and_divergent_writers_are_create_only(tmp_path):
     assert store_a.load(evaluation_id=source.evaluation_id) == source
 
 
+def test_multiprocess_identical_writers_use_interprocess_publication_lock(tmp_path):
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    document = serialize_outcome_evaluation(evaluation())
+    processes = [
+        context.Process(
+            target=_multiprocess_outcome_save,
+            args=(str(tmp_path), document, results),
+        )
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(15)
+        assert process.exitcode == 0
+
+    assert sorted(results.get(timeout=2) for _ in processes) == [False, True]
+    assert FileOutcomeEvaluationStore(tmp_path).load(
+        evaluation_id=evaluation().evaluation_id
+    ) == evaluation()
+
+
 def test_link_failure_leaves_no_partial_destination_or_temp(tmp_path, monkeypatch):
     store = FileOutcomeEvaluationStore(tmp_path)
     monkeypatch.setattr(os, "link", lambda *_: (_ for _ in ()).throw(OSError("link failed")))
@@ -271,6 +457,173 @@ def test_cleanup_failure_never_removes_or_partially_writes_destination(
     with pytest.raises(OSError, match="cleanup failed"):
         store.save(evaluation=source)
     assert store.load(evaluation_id=source.evaluation_id) == source
+
+
+class _FailingTemporary:
+    def __init__(self, wrapped, operation):
+        self._wrapped = wrapped
+        self._operation = operation
+        self.name = wrapped.name
+
+    def __enter__(self):
+        self._wrapped.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        return self._wrapped.__exit__(*args)
+
+    def write(self, document):
+        if self._operation == "write":
+            raise OSError("write failed")
+        return self._wrapped.write(document)
+
+    def flush(self):
+        if self._operation == "flush":
+            raise OSError("flush failed")
+        return self._wrapped.flush()
+
+    def fileno(self):
+        return self._wrapped.fileno()
+
+
+@pytest.mark.parametrize("operation", ["write", "flush"])
+def test_temp_write_and_flush_failures_preserve_primary_error(
+    tmp_path,
+    monkeypatch,
+    operation,
+):
+    real_temporary = tempfile.NamedTemporaryFile
+
+    def failing_temporary(*args, **kwargs):
+        return _FailingTemporary(real_temporary(*args, **kwargs), operation)
+
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", failing_temporary)
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("cleanup failed")),
+    )
+
+    with pytest.raises(OSError, match=f"{operation} failed"):
+        FileOutcomeEvaluationStore(tmp_path).save(evaluation=evaluation())
+    assert list(tmp_path.glob("*.json")) == []
+
+
+def test_temp_fsync_failure_preserves_primary_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        os,
+        "fsync",
+        lambda *_: (_ for _ in ()).throw(OSError("temp fsync failed")),
+    )
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("cleanup failed")),
+    )
+    with pytest.raises(OSError, match="temp fsync failed"):
+        FileOutcomeEvaluationStore(tmp_path).save(evaluation=evaluation())
+    assert list(tmp_path.glob("*.json")) == []
+
+
+def test_link_failure_is_not_masked_by_cleanup_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        os,
+        "link",
+        lambda *_: (_ for _ in ()).throw(OSError("link failed")),
+    )
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("cleanup failed")),
+    )
+    with pytest.raises(OSError, match="link failed"):
+        FileOutcomeEvaluationStore(tmp_path).save(evaluation=evaluation())
+
+
+def test_directory_fsync_failure_is_ambiguous_and_replay_is_idempotent(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.outcome_evaluation_store as store_module
+
+    source = evaluation()
+    store = FileOutcomeEvaluationStore(tmp_path)
+    monkeypatch.setattr(
+        store_module,
+        "fsync_directory",
+        lambda *_: (_ for _ in ()).throw(OSError("directory fsync failed")),
+    )
+
+    with pytest.raises(OSError, match="directory fsync failed"):
+        store.save(evaluation=source)
+    assert store.load(evaluation_id=source.evaluation_id) == source
+    assert store.save(evaluation=source) is False
+
+
+def test_directory_fsync_failure_is_not_masked_by_cleanup_failure(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.outcome_evaluation_store as store_module
+
+    monkeypatch.setattr(
+        store_module,
+        "fsync_directory",
+        lambda *_: (_ for _ in ()).throw(OSError("directory fsync failed")),
+    )
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("cleanup failed")),
+    )
+    with pytest.raises(OSError, match="directory fsync failed"):
+        FileOutcomeEvaluationStore(tmp_path).save(evaluation=evaluation())
+
+
+def test_store_directory_and_file_shape_errors_fail_closed(tmp_path):
+    directory_as_file = tmp_path / "store-file"
+    directory_as_file.write_text("occupied", encoding="utf-8")
+    with pytest.raises(OSError):
+        FileOutcomeEvaluationStore(directory_as_file).save(evaluation=evaluation())
+
+    source = evaluation()
+    destination = tmp_path / f"{source.evaluation_id}.json"
+    destination.mkdir()
+    with pytest.raises(OutcomeEvaluationPersistenceError, match="corrupt"):
+        FileOutcomeEvaluationStore(tmp_path).load(evaluation_id=source.evaluation_id)
+
+
+def test_directory_fsync_preserves_fsync_error_over_close_error(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.durable_file_publication as publication
+
+    monkeypatch.setattr(publication.os, "open", lambda *_: 123)
+    monkeypatch.setattr(
+        publication.os,
+        "fsync",
+        lambda *_: (_ for _ in ()).throw(OSError("fsync failed")),
+    )
+    monkeypatch.setattr(
+        publication.os,
+        "close",
+        lambda *_: (_ for _ in ()).throw(OSError("close failed")),
+    )
+    with pytest.raises(OSError, match="fsync failed"):
+        fsync_directory(tmp_path)
+
+
+def test_directory_fsync_has_explicit_windows_fallback(tmp_path, monkeypatch):
+    import astropilot.durable_file_publication as publication
+
+    monkeypatch.setattr(publication.os, "name", "nt")
+    monkeypatch.setattr(
+        publication.os,
+        "open",
+        lambda *_: (_ for _ in ()).throw(AssertionError("must not open")),
+    )
+    fsync_directory(tmp_path)
 
 
 def test_architecture_boundary_uses_no_forbidden_imports():
