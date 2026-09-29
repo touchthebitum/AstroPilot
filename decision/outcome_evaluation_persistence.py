@@ -61,6 +61,12 @@ def _duration_us(value: timedelta) -> int:
     return value.days * 86_400_000_000 + value.seconds * 1_000_000 + value.microseconds
 
 
+def _canonical_float(value: float | None) -> float | None:
+    if value is not None and value == 0.0:
+        return 0.0
+    return value
+
+
 def _reason_document(reason: ComparisonReason) -> dict[str, object]:
     return {"code": reason.code, "variable": None if reason.variable is None else reason.variable.value}
 
@@ -89,15 +95,17 @@ def _result_document(result: NumericVariableComparison | CloudVariableComparison
         return {
             "result_type": "numeric",
             **common,
-            "forecast_value": result.forecast_value,
-            "observed_value": result.observed_value,
-            "signed_error": result.signed_error,
-            "absolute_error": result.absolute_error,
+            "forecast_value": _canonical_float(result.forecast_value),
+            "observed_value": _canonical_float(result.observed_value),
+            "signed_error": _canonical_float(result.signed_error),
+            "absolute_error": _canonical_float(result.absolute_error),
         }
     return {
         "result_type": "cloud",
         **common,
-        "forecast_coverage_percent": result.forecast_coverage_percent,
+        "forecast_coverage_percent": _canonical_float(
+            result.forecast_coverage_percent
+        ),
         "predicted_condition": None if result.predicted_condition is None else result.predicted_condition.value,
         "observed_condition": None if result.observed_condition is None else result.observed_condition.value,
         "outcome": None if result.outcome is None else result.outcome.value,
@@ -125,7 +133,10 @@ def _comparison_document(value: ForecastObservationComparison) -> dict[str, obje
             },
             "cloud_mapping_policy": {
                 "version": value.parameters.cloud_mapping_policy.version,
-                "boundaries_percent": list(value.parameters.cloud_mapping_policy.boundaries_percent),
+                "boundaries_percent": [
+                    _canonical_float(item)
+                    for item in value.parameters.cloud_mapping_policy.boundaries_percent
+                ],
             },
         },
         "observation_provenance": {
@@ -233,9 +244,23 @@ def _number(value: object, field: str, *, optional: bool = False) -> float | Non
     return value
 
 
+def _boolean(value: object, field: str) -> bool:
+    if type(value) is not bool:
+        raise OutcomeEvaluationPersistenceError(f"invalid_{field}")
+    return value
+
+
+def _identifier(value: object, field: str, *, optional: bool = False) -> str | None:
+    if value is None and optional:
+        return None
+    if type(value) is not str or not value.strip():
+        raise OutcomeEvaluationPersistenceError(f"invalid_{field}")
+    return value
+
+
 def _digest(value: object, field: str) -> str:
     if (
-        not isinstance(value, str)
+        type(value) is not str
         or len(value) != 64
         or any(character not in "0123456789abcdef" for character in value)
     ):
@@ -281,7 +306,10 @@ def _point(value: object) -> ForecastPointProvenance | None:
         return None
     item = _mapping(value, _POINT_FIELDS, "invalid_forecast_point_fields")
     return ForecastPointProvenance(
-        provider_id=item["provider_id"], model_id=item["model_id"],
+        provider_id=_identifier(item["provider_id"], "forecast_provider_id"),
+        model_id=_identifier(
+            item["model_id"], "forecast_model_id", optional=True
+        ),
         retrieved_at_utc=_datetime(item["retrieved_at_utc"], "forecast_retrieved_at_utc"),
         forecast_for_utc=_datetime(item["forecast_for_utc"], "forecast_for_utc"),
         temporal_offset=_duration(item["temporal_offset_us"], "temporal_offset"),
@@ -342,15 +370,15 @@ def _comparison(value: object) -> ForecastObservationComparison:
     )
     provenance = _mapping(item["observation_provenance"], _PROVENANCE_FIELDS, "invalid_observation_provenance_fields")
     return ForecastObservationComparison(
-        comparison_id=_digest(item["comparison_id"], "comparison_id"), identity_persistable=item["identity_persistable"],
-        computed_at_utc=_datetime(item["computed_at_utc"], "computed_at_utc"), decision_id=item["decision_id"],
-        observation_id=item["observation_id"], execution_id=item["execution_id"], source_digest=_digest(item["source_digest"], "source_digest"),
+        comparison_id=_digest(item["comparison_id"], "comparison_id"), identity_persistable=_boolean(item["identity_persistable"], "identity_persistable"),
+        computed_at_utc=_datetime(item["computed_at_utc"], "computed_at_utc"), decision_id=_identifier(item["decision_id"], "decision_id", optional=True),
+        observation_id=_identifier(item["observation_id"], "observation_id"), execution_id=_identifier(item["execution_id"], "execution_id", optional=True), source_digest=_digest(item["source_digest"], "source_digest"),
         parameters=ForecastObservationParameters(
-            temporal_policy=TemporalComparisonPolicy(version=temporal["version"], maximum_absolute_offset=_duration(temporal["maximum_absolute_offset_us"], "maximum_absolute_offset"), timezone_name=temporal["timezone_name"], selection_mode=temporal["selection_mode"], interpolation_enabled=temporal["interpolation_enabled"], averaging_enabled=temporal["averaging_enabled"]),
+            temporal_policy=TemporalComparisonPolicy(version=temporal["version"], maximum_absolute_offset=_duration(temporal["maximum_absolute_offset_us"], "maximum_absolute_offset"), timezone_name=temporal["timezone_name"], selection_mode=temporal["selection_mode"], interpolation_enabled=_boolean(temporal["interpolation_enabled"], "interpolation_enabled"), averaging_enabled=_boolean(temporal["averaging_enabled"], "averaging_enabled")),
             cloud_mapping_policy=CloudMappingComparisonPolicy(version=cloud["version"], boundaries_percent=boundaries),
         ),
         observation_provenance=ObservationComparisonProvenance(
-            source_type=_enum(provenance["source_type"], ObservationSourceType, "observation_source_type"), source_id=provenance["source_id"],
+            source_type=_enum(provenance["source_type"], ObservationSourceType, "observation_source_type"), source_id=_identifier(provenance["source_id"], "observation_source_id", optional=True),
             capture_method=_enum(provenance["capture_method"], CaptureMethod, "capture_method"), confidence=_enum(provenance["confidence"], Confidence, "confidence"),
             quality_flags=tuple(_enum(flag, QualityFlag, "quality_flag") for flag in _list(provenance["quality_flags"], "invalid_quality_flags")),
         ),
@@ -367,7 +395,7 @@ def _evidence(value: object) -> ForecastComparisonOutcomeEvidence | None:
         return None
     item = _mapping(value, _EVIDENCE_FIELDS, "invalid_outcome_evidence_fields")
     return ForecastComparisonOutcomeEvidence(
-        evidence_id=_digest(item["evidence_id"], "evidence_id"), comparison_id=_digest(item["comparison_id"], "comparison_id"), decision_id=item["decision_id"], observation_id=item["observation_id"], execution_id=item["execution_id"],
+        evidence_id=_digest(item["evidence_id"], "evidence_id"), comparison_id=_digest(item["comparison_id"], "comparison_id"), decision_id=_identifier(item["decision_id"], "decision_id"), observation_id=_identifier(item["observation_id"], "observation_id"), execution_id=_identifier(item["execution_id"], "execution_id"),
         algorithm_version=item["algorithm_version"], derived_at_utc=_datetime(item["derived_at_utc"], "derived_at_utc"), source_type=_enum(item["source_type"], ForecastComparisonOutcomeEvidenceSourceType, "outcome_evidence_source_type"),
     )
 
@@ -382,8 +410,8 @@ def _assessment(value: object) -> OutcomeAssessment | None:
     findings = []
     for raw in _list(item["findings"], "invalid_findings"):
         finding = _mapping(raw, _FINDING_FIELDS, "invalid_finding_fields")
-        findings.append(OutcomeFinding(finding_id=finding["finding_id"], basis=finding["basis"], evidence_ids=tuple(_list(finding["evidence_ids"], "invalid_finding_evidence_ids"))))
-    return OutcomeAssessment(assessment_id=item["assessment_id"], execution_id=item["execution_id"], evidence_ids=tuple(evidence_ids), assessed_at=_datetime(item["assessed_at"], "assessed_at"), status=_enum(item["status"], OutcomeAssessmentStatus, "assessment_status"), findings=tuple(findings))
+        findings.append(OutcomeFinding(finding_id=_identifier(finding["finding_id"], "finding_id"), basis=finding["basis"], evidence_ids=tuple(_identifier(entry, "evidence_id") for entry in _list(finding["evidence_ids"], "invalid_finding_evidence_ids"))))
+    return OutcomeAssessment(assessment_id=_identifier(item["assessment_id"], "assessment_id"), execution_id=_identifier(item["execution_id"], "execution_id"), evidence_ids=tuple(_identifier(entry, "evidence_id") for entry in evidence_ids), assessed_at=_datetime(item["assessed_at"], "assessed_at"), status=_enum(item["status"], OutcomeAssessmentStatus, "assessment_status"), findings=tuple(findings))
 
 
 _ROOT_FIELDS = frozenset(("schema_version", "domain_version", "outcome_evaluation"))

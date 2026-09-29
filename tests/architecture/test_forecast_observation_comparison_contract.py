@@ -1,7 +1,7 @@
 import ast
 import struct
 from copy import deepcopy
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -398,6 +398,36 @@ def test_v1_temporal_policy_accepts_exactly_thirty_minutes():
     )
 
     assert policy.maximum_absolute_offset == timedelta(minutes=30)
+
+
+@pytest.mark.parametrize("field_name", ["interpolation_enabled", "averaging_enabled"])
+@pytest.mark.parametrize("value", [0, 1])
+def test_temporal_policy_boolean_fields_require_exact_bool(field_name, value):
+    with pytest.raises(ValueError, match=f"^invalid_{field_name}$"):
+        TemporalComparisonPolicy(**{field_name: value})
+
+
+class _StringSubclass(str):
+    pass
+
+
+@pytest.mark.parametrize(
+    "field_name,value",
+    [
+        ("decision_id", False),
+        ("decision_id", _StringSubclass("decision-123")),
+        ("execution_id", 0),
+        ("execution_id", _StringSubclass("execution-123")),
+        ("observation_id", _StringSubclass("observation-123")),
+    ],
+)
+def test_comparison_identity_fields_require_exact_strings(field_name, value):
+    valid = compare(
+        observation(),
+        point(WeatherVariable.TEMPERATURE_C, 8.0),
+    )
+    with pytest.raises(ValueError, match=f"^invalid_{field_name}$"):
+        replace(valid, **{field_name: value})
 
 
 @pytest.mark.parametrize(

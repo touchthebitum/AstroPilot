@@ -473,7 +473,7 @@ def test_directory_fsync_failure_is_ambiguous_and_replay_is_idempotent(
         store.save(decision_id="decision-123", evidence=source)
     assert store.load(decision_id="decision-123") == source
     store.save(decision_id="decision-123", evidence=source)
-    assert fsync_calls == 2
+    assert fsync_calls == 3
 
 
 def test_identical_file_exists_race_resynchronizes_directory(
@@ -509,7 +509,80 @@ def test_identical_file_exists_race_resynchronizes_directory(
         decision_id="decision-123",
         evidence=source,
     )
-    assert fsync_calls == 1
+    assert fsync_calls == 2
+
+
+def test_temp_unlink_is_followed_by_second_directory_fsync(tmp_path, monkeypatch):
+    import astropilot.decision_forecast_evidence_store as store_module
+
+    events = []
+    real_unlink = Path.unlink
+
+    def record_unlink(path, *args, **kwargs):
+        events.append("unlink")
+        return real_unlink(path, *args, **kwargs)
+
+    def record_fsync(*_):
+        events.append("fsync")
+
+    monkeypatch.setattr(Path, "unlink", record_unlink)
+    monkeypatch.setattr(store_module, "fsync_directory", record_fsync)
+
+    FileDecisionForecastEvidenceStore(tmp_path).save(
+        decision_id="decision-123",
+        evidence=evidence(),
+    )
+    assert events == ["fsync", "unlink", "fsync"]
+
+
+def test_second_directory_fsync_failure_keeps_final_and_replay_recovers(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.decision_forecast_evidence_store as store_module
+
+    source = evidence()
+    store = FileDecisionForecastEvidenceStore(tmp_path)
+    calls = 0
+
+    def fail_second(*_):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("cleanup directory fsync failed")
+
+    monkeypatch.setattr(store_module, "fsync_directory", fail_second)
+
+    with pytest.raises(OSError, match="cleanup directory fsync failed"):
+        store.save(decision_id="decision-123", evidence=source)
+    assert store.load(decision_id="decision-123") == source
+    assert list(tmp_path.glob("*.tmp")) == []
+    store.save(decision_id="decision-123", evidence=source)
+    assert calls == 3
+
+
+def test_primary_error_is_preserved_over_cleanup_directory_fsync_failure(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.decision_forecast_evidence_store as store_module
+
+    monkeypatch.setattr(
+        os,
+        "link",
+        lambda *_: (_ for _ in ()).throw(OSError("link failed")),
+    )
+    monkeypatch.setattr(
+        store_module,
+        "fsync_directory",
+        lambda *_: (_ for _ in ()).throw(OSError("cleanup fsync failed")),
+    )
+
+    with pytest.raises(OSError, match="^link failed$"):
+        FileDecisionForecastEvidenceStore(tmp_path).save(
+            decision_id="decision-123",
+            evidence=evidence(),
+        )
 
 
 def test_directory_fsync_failure_is_not_masked_by_cleanup_failure(

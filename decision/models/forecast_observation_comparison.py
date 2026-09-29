@@ -23,10 +23,17 @@ _V1_MAXIMUM_ABSOLUTE_OFFSET = timedelta(minutes=30)
 
 def _is_canonical_sha256(value: object) -> bool:
     return (
-        isinstance(value, str)
+        type(value) is str
         and len(value) == 64
         and all(character in "0123456789abcdef" for character in value)
     )
+
+
+def _identifier(value: object, *, field_name: str, optional: bool = False) -> None:
+    if value is None and optional:
+        return
+    if type(value) is not str or not value.strip():
+        raise ValueError(f"invalid_{field_name}")
 
 
 def _finite_float(value: object, *, field_name: str) -> float:
@@ -102,6 +109,10 @@ class TemporalComparisonPolicy:
             raise ValueError("temporal_policy_must_use_utc")
         if self.selection_mode != "nearest_per_variable":
             raise ValueError("unsupported_temporal_selection_mode")
+        if type(self.interpolation_enabled) is not bool:
+            raise ValueError("invalid_interpolation_enabled")
+        if type(self.averaging_enabled) is not bool:
+            raise ValueError("invalid_averaging_enabled")
         if self.interpolation_enabled or self.averaging_enabled:
             raise ValueError("forecast_interpolation_or_averaging_not_supported")
         object.__setattr__(self, "version", self.version.strip())
@@ -162,10 +173,11 @@ class ObservationComparisonProvenance:
     def __post_init__(self) -> None:
         if not isinstance(self.source_type, ObservationSourceType):
             raise ValueError("invalid_observation_source_type")
-        if self.source_id is not None and (
-            not isinstance(self.source_id, str) or not self.source_id.strip()
-        ):
-            raise ValueError("invalid_observation_source_id")
+        _identifier(
+            self.source_id,
+            field_name="observation_source_id",
+            optional=True,
+        )
         if not isinstance(self.capture_method, CaptureMethod):
             raise ValueError("invalid_observation_capture_method")
         if not isinstance(self.confidence, Confidence):
@@ -187,12 +199,8 @@ class ForecastPointProvenance:
     temporal_offset: timedelta
 
     def __post_init__(self) -> None:
-        if not isinstance(self.provider_id, str) or not self.provider_id.strip():
-            raise ValueError("invalid_forecast_provider_id")
-        if self.model_id is not None and (
-            not isinstance(self.model_id, str) or not self.model_id.strip()
-        ):
-            raise ValueError("invalid_forecast_model_id")
+        _identifier(self.provider_id, field_name="forecast_provider_id")
+        _identifier(self.model_id, field_name="forecast_model_id", optional=True)
         object.__setattr__(
             self,
             "retrieved_at_utc",
@@ -342,8 +350,9 @@ class ForecastObservationComparison:
             raise ValueError("invalid_comparison_id")
         if type(self.identity_persistable) is not bool:
             raise ValueError("invalid_identity_persistable")
-        if not isinstance(self.observation_id, str) or not self.observation_id:
-            raise ValueError("invalid_observation_id")
+        _identifier(self.decision_id, field_name="decision_id", optional=True)
+        _identifier(self.observation_id, field_name="observation_id")
+        _identifier(self.execution_id, field_name="execution_id", optional=True)
         if not _is_canonical_sha256(self.source_digest):
             raise ValueError("invalid_source_digest")
         if not isinstance(self.parameters, ForecastObservationParameters):

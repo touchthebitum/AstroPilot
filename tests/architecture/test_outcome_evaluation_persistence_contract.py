@@ -10,7 +10,10 @@ from pathlib import Path
 import pytest
 
 from astropilot.outcome_evaluation_store import FileOutcomeEvaluationStore
-from astropilot.durable_file_publication import fsync_directory
+from astropilot.durable_file_publication import (
+    fsync_directory,
+    remove_temporary_file_durably,
+)
 from decision.field_observation import (
     CaptureMethod,
     CloudState,
@@ -166,6 +169,72 @@ def test_full_numeric_cloud_round_trip_is_strict_and_lossless():
     assert payload["outcome_evaluation"]["comparison"]["results"][1]["result_type"] == "cloud"
 
 
+def test_non_utc_assessment_round_trip_is_canonical_utc_and_equivalent():
+    source = evaluation()
+    offset_assessment = replace(
+        source.assessment,
+        assessed_at=datetime(
+            2026,
+            9,
+            29,
+            21,
+            tzinfo=timezone(timedelta(hours=1)),
+        ),
+    )
+    normalized = replace(source, assessment=offset_assessment)
+
+    document = serialize_outcome_evaluation(normalized)
+    restored = deserialize_outcome_evaluation(document)
+
+    assert normalized.assessment.assessed_at == NOW
+    assert normalized.assessment.assessed_at.tzinfo is timezone.utc
+    assert restored == normalized
+    assert '"assessed_at": "2026-09-29T20:00:00+00:00"' in document
+
+
+def test_signed_zero_is_canonicalized_for_all_persisted_comparison_floats():
+    source = evaluation(execution=False)
+    numeric, cloud = source.comparison.results
+    negative = replace(
+        source,
+        comparison=replace(
+            source.comparison,
+            results=(
+                replace(
+                    numeric,
+                    forecast_value=-0.0,
+                    observed_value=-0.0,
+                    signed_error=-0.0,
+                    absolute_error=-0.0,
+                ),
+                replace(cloud, forecast_coverage_percent=-0.0),
+            ),
+        ),
+    )
+    positive = replace(
+        source,
+        comparison=replace(
+            source.comparison,
+            results=(
+                replace(
+                    numeric,
+                    forecast_value=0.0,
+                    observed_value=0.0,
+                    signed_error=0.0,
+                    absolute_error=0.0,
+                ),
+                replace(cloud, forecast_coverage_percent=0.0),
+            ),
+        ),
+    )
+
+    assert negative == positive
+    assert serialize_outcome_evaluation(negative) == serialize_outcome_evaluation(
+        positive
+    )
+    assert "-0.0" not in serialize_outcome_evaluation(negative)
+
+
 @pytest.mark.parametrize("status", [
     ForecastObservationComparisonStatus.PARTIAL,
     ForecastObservationComparisonStatus.NOT_COMPARABLE,
@@ -277,6 +346,36 @@ def test_boolean_comparison_numbers_are_rejected(field_path):
         target = target[key]
     target[field_path[-1]] = True
     with pytest.raises(OutcomeEvaluationPersistenceError, match="invalid_"):
+        deserialize_outcome_evaluation(json.dumps(payload))
+
+
+@pytest.mark.parametrize("field_name", ["interpolation_enabled", "averaging_enabled"])
+@pytest.mark.parametrize("value", [0, 1])
+def test_persisted_temporal_policy_booleans_require_exact_bool(field_name, value):
+    payload = json.loads(serialize_outcome_evaluation(evaluation()))
+    payload["outcome_evaluation"]["comparison"]["parameters"][
+        "temporal_policy"
+    ][field_name] = value
+
+    with pytest.raises(
+        OutcomeEvaluationPersistenceError,
+        match=f"^invalid_{field_name}$",
+    ):
+        deserialize_outcome_evaluation(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    "field_name,value",
+    [("decision_id", False), ("execution_id", 0)],
+)
+def test_persisted_comparison_ids_require_exact_strings(field_name, value):
+    payload = json.loads(serialize_outcome_evaluation(evaluation()))
+    payload["outcome_evaluation"]["comparison"][field_name] = value
+
+    with pytest.raises(
+        OutcomeEvaluationPersistenceError,
+        match=f"^invalid_{field_name}$",
+    ):
         deserialize_outcome_evaluation(json.dumps(payload))
 
 
@@ -595,7 +694,7 @@ def test_directory_fsync_failure_is_ambiguous_and_replay_is_idempotent(
         store.save(evaluation=source)
     assert store.load(evaluation_id=source.evaluation_id) == source
     assert store.save(evaluation=source) is False
-    assert fsync_calls == 2
+    assert fsync_calls == 3
 
 
 def test_identical_file_exists_race_resynchronizes_directory(
@@ -628,7 +727,74 @@ def test_identical_file_exists_race_resynchronizes_directory(
     monkeypatch.setattr(store_module, "fsync_directory", record_fsync)
 
     assert FileOutcomeEvaluationStore(tmp_path).save(evaluation=source) is False
-    assert fsync_calls == 1
+    assert fsync_calls == 2
+
+
+def test_temp_unlink_is_followed_by_second_directory_fsync(tmp_path, monkeypatch):
+    import astropilot.outcome_evaluation_store as store_module
+
+    events = []
+    real_unlink = Path.unlink
+
+    def record_unlink(path, *args, **kwargs):
+        events.append("unlink")
+        return real_unlink(path, *args, **kwargs)
+
+    def record_fsync(*_):
+        events.append("fsync")
+
+    monkeypatch.setattr(Path, "unlink", record_unlink)
+    monkeypatch.setattr(store_module, "fsync_directory", record_fsync)
+
+    assert FileOutcomeEvaluationStore(tmp_path).save(evaluation=evaluation()) is True
+    assert events == ["fsync", "unlink", "fsync"]
+
+
+def test_second_directory_fsync_failure_keeps_final_and_replay_recovers(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.outcome_evaluation_store as store_module
+
+    source = evaluation()
+    store = FileOutcomeEvaluationStore(tmp_path)
+    calls = 0
+
+    def fail_second(*_):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("cleanup directory fsync failed")
+
+    monkeypatch.setattr(store_module, "fsync_directory", fail_second)
+
+    with pytest.raises(OSError, match="cleanup directory fsync failed"):
+        store.save(evaluation=source)
+    assert store.load(evaluation_id=source.evaluation_id) == source
+    assert list(tmp_path.glob("*.tmp")) == []
+    assert store.save(evaluation=source) is False
+    assert calls == 3
+
+
+def test_primary_error_is_preserved_over_cleanup_directory_fsync_failure(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.outcome_evaluation_store as store_module
+
+    monkeypatch.setattr(
+        os,
+        "link",
+        lambda *_: (_ for _ in ()).throw(OSError("link failed")),
+    )
+    monkeypatch.setattr(
+        store_module,
+        "fsync_directory",
+        lambda *_: (_ for _ in ()).throw(OSError("cleanup fsync failed")),
+    )
+
+    with pytest.raises(OSError, match="^link failed$"):
+        FileOutcomeEvaluationStore(tmp_path).save(evaluation=evaluation())
 
 
 def test_directory_fsync_failure_is_not_masked_by_cleanup_failure(
@@ -695,6 +861,27 @@ def test_directory_fsync_has_explicit_windows_fallback(tmp_path, monkeypatch):
         lambda *_: (_ for _ in ()).throw(AssertionError("must not open")),
     )
     fsync_directory(tmp_path)
+
+
+def test_temporary_cleanup_has_explicit_windows_fallback(tmp_path, monkeypatch):
+    import astropilot.durable_file_publication as publication
+
+    temporary = tmp_path / "publication.tmp"
+    temporary.write_text("temporary", encoding="utf-8")
+    monkeypatch.setattr(publication.os, "name", "nt")
+    monkeypatch.setattr(
+        publication.os,
+        "open",
+        lambda *_: (_ for _ in ()).throw(AssertionError("must not open")),
+    )
+
+    remove_temporary_file_durably(
+        temporary,
+        tmp_path,
+        primary_error=None,
+    )
+
+    assert not temporary.exists()
 
 
 def test_architecture_boundary_uses_no_forbidden_imports():

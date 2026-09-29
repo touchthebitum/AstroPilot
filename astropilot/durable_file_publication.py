@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -26,3 +27,25 @@ def fsync_directory(directory: Path) -> None:
         except OSError:
             if primary_error is None:
                 raise
+
+
+def remove_temporary_file_durably(
+    temporary_path: Path,
+    directory: Path,
+    *,
+    primary_error: BaseException | None,
+    synchronize_directory: Callable[[Path], None] = fsync_directory,
+) -> None:
+    """Remove a publication temporary and durably record that removal."""
+    try:
+        temporary_path.unlink(missing_ok=True)
+    except OSError:
+        if primary_error is None:
+            raise
+        return
+
+    try:
+        synchronize_directory(directory)
+    except OSError:
+        if primary_error is None:
+            raise

@@ -1,7 +1,7 @@
 """Immutable assessment of explicitly supplied outcome evidence."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -14,7 +14,7 @@ class OutcomeAssessmentStatus(str, Enum):
 
 
 def _validate_identifier(name: str, value: object) -> None:
-    if not isinstance(value, str) or not value.strip():
+    if type(value) is not str or not value.strip():
         raise ValueError(f"{name}_required")
 
 
@@ -62,6 +62,7 @@ class OutcomeAssessment:
             raise TypeError("assessed_at_must_be_datetime")
         if self.assessed_at.tzinfo is None or self.assessed_at.utcoffset() is None:
             raise ValueError("assessed_at_timezone_required")
+        object.__setattr__(self, "assessed_at", self.assessed_at.astimezone(timezone.utc))
         if not isinstance(self.status, OutcomeAssessmentStatus):
             raise TypeError("Expected OutcomeAssessmentStatus")
         if not isinstance(self.findings, tuple):

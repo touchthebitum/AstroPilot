@@ -5,7 +5,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-from astropilot.durable_file_publication import fsync_directory
+from astropilot.durable_file_publication import (
+    fsync_directory,
+    remove_temporary_file_durably,
+)
 from astropilot.file_lock import exclusive_file_lock
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 from decision.weather.decision_forecast_evidence_persistence import (
@@ -105,9 +108,9 @@ class FileDecisionForecastEvidenceStore:
                     fsync_directory(self._directory)
             finally:
                 if temporary_path is not None:
-                    primary_error = sys.exception()
-                    try:
-                        temporary_path.unlink(missing_ok=True)
-                    except OSError:
-                        if primary_error is None:
-                            raise
+                    remove_temporary_file_durably(
+                        temporary_path,
+                        self._directory,
+                        primary_error=sys.exception(),
+                        synchronize_directory=fsync_directory,
+                    )

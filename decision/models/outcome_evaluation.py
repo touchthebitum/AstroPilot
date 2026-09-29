@@ -83,7 +83,7 @@ generate_forecast_comparison_outcome_evidence_id = (
 
 
 def _required_identifier(value: object, *, field: str) -> str:
-    if not isinstance(value, str) or not value.strip():
+    if type(value) is not str or not value.strip():
         raise ValueError(f"invalid_{field}")
     return value
 
