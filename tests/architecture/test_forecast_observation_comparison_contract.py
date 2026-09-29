@@ -56,6 +56,82 @@ SERVICE_PATH = (
     / "services"
     / "forecast_observation_comparison.py"
 )
+MODEL_PATH = (
+    Path(__file__).parents[2]
+    / "decision"
+    / "models"
+    / "forecast_observation_comparison.py"
+)
+
+ALLOWED_IMPORTS = {
+    MODEL_PATH: {
+        ("__future__", "annotations"),
+        ("dataclasses", "dataclass"),
+        ("dataclasses", "field"),
+        ("datetime", "datetime"),
+        ("datetime", "timedelta"),
+        ("datetime", "timezone"),
+        ("enum", "Enum"),
+        ("decision.field_observation", "CaptureMethod"),
+        ("decision.field_observation", "CloudState"),
+        ("decision.field_observation", "Confidence"),
+        ("decision.field_observation", "ObservationSourceType"),
+        ("decision.field_observation", "QualityFlag"),
+        ("decision.weather.provider_reliability", "WeatherVariable"),
+    },
+    SERVICE_PATH: {
+        ("__future__", "annotations"),
+        ("hashlib", None),
+        ("json", None),
+        ("dataclasses", "asdict"),
+        ("datetime", "datetime"),
+        ("enum", "Enum"),
+        ("decision.field_observation", "CloudState"),
+        ("decision.field_observation", "FieldObservation"),
+        ("decision.field_observation", "QualityFlag"),
+        ("decision.models.forecast_observation_comparison", "ALGORITHM_VERSION"),
+        ("decision.models.forecast_observation_comparison", "FORECAST_SCOPE"),
+        ("decision.models.forecast_observation_comparison", "CloudComparisonOutcome"),
+        ("decision.models.forecast_observation_comparison", "CloudVariableComparison"),
+        ("decision.models.forecast_observation_comparison", "ComparisonReason"),
+        ("decision.models.forecast_observation_comparison", "ForecastObservationComparison"),
+        ("decision.models.forecast_observation_comparison", "ForecastObservationComparisonStatus"),
+        ("decision.models.forecast_observation_comparison", "ForecastObservationParameters"),
+        ("decision.models.forecast_observation_comparison", "ForecastPointProvenance"),
+        ("decision.models.forecast_observation_comparison", "NumericVariableComparison"),
+        ("decision.models.forecast_observation_comparison", "ObservationComparisonProvenance"),
+        ("decision.models.forecast_observation_comparison", "VariableComparison"),
+        ("decision.models.forecast_observation_comparison", "VariableComparisonStatus"),
+        ("decision.weather.cloud_mapping_policy", "map_cloud_cover_to_condition"),
+        ("decision.weather.decision_forecast_evidence", "DecisionForecastEvidence"),
+        ("decision.weather.forecast_temporal_candidates", "build_forecast_temporal_candidates"),
+        ("decision.weather.forecast_temporal_selection", "ForecastTemporalSelectionError"),
+        ("decision.weather.forecast_temporal_selection", "select_forecast_temporal_candidate"),
+        ("decision.weather.provider_reliability", "CANONICAL_UNITS"),
+        ("decision.weather.provider_reliability", "WeatherForecastPoint"),
+        ("decision.weather.provider_reliability", "WeatherLocation"),
+        ("decision.weather.provider_reliability", "WeatherValue"),
+        ("decision.weather.provider_reliability", "WeatherVariable"),
+        ("decision.weather.provider_reliability", "calculate_weather_variable_error"),
+    },
+}
+
+
+def import_boundary_violations(source, allowed_imports):
+    violations = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            imports = ((alias.name, None, alias.asname) for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imports = (
+                (node.module, alias.name, alias.asname) for alias in node.names
+            )
+        else:
+            continue
+        for module, symbol, alias in imports:
+            if (module, symbol) not in allowed_imports or alias is not None:
+                violations.append((module, symbol, alias))
+    return tuple(violations)
 
 
 def observation(
@@ -127,6 +203,18 @@ def point(
                 }[variable],
             ),
         ),
+    )
+
+
+def multi_value_point(*values):
+    return WeatherForecastPoint(
+        provider_id="open_meteo",
+        model_id="best_match",
+        retrieved_at_utc=RETRIEVED_AT,
+        forecast_for_utc=OBSERVED_AT,
+        requested_location=LOCATION,
+        grid_location=LOCATION,
+        values=tuple(values),
     )
 
 
@@ -221,6 +309,31 @@ def test_thirty_minutes_plus_one_microsecond_is_rejected():
     assert reason_codes(result) == ("forecast_outside_temporal_tolerance",)
 
 
+def test_v1_temporal_policy_accepts_exactly_thirty_minutes():
+    policy = TemporalComparisonPolicy(
+        maximum_absolute_offset=timedelta(minutes=30)
+    )
+
+    assert policy.maximum_absolute_offset == timedelta(minutes=30)
+
+
+@pytest.mark.parametrize(
+    "maximum_absolute_offset",
+    [
+        timedelta(minutes=30, microseconds=1),
+        timedelta(minutes=31),
+    ],
+)
+def test_v1_temporal_policy_rejects_custom_tolerance_above_thirty_minutes(
+    maximum_absolute_offset,
+):
+    with pytest.raises(ValueError, match="^v1_maximum_absolute_offset_exceeded$"):
+        TemporalComparisonPolicy(
+            version="nearest_forecast_utc.v1",
+            maximum_absolute_offset=maximum_absolute_offset,
+        )
+
+
 def test_equal_before_and_after_is_fail_closed_for_variable():
     result = compare(
         observation(),
@@ -256,6 +369,32 @@ def test_strictly_identical_duplicates_are_deduplicated():
 
     single = compare(observation(), duplicate)
     repeated = compare(observation(), duplicate, duplicate)
+
+    assert repeated.status is ForecastObservationComparisonStatus.COMPARABLE
+    assert repeated.results == single.results
+    assert repeated.source_digest == single.source_digest
+    assert repeated.comparison_id == single.comparison_id
+
+
+def test_logical_duplicates_with_permuted_values_share_selection_and_identity():
+    temperature = WeatherValue(
+        variable=WeatherVariable.TEMPERATURE_C,
+        value=9.0,
+        unit="°C",
+    )
+    wind = WeatherValue(
+        variable=WeatherVariable.WIND_SPEED_KMH,
+        value=0.0,
+        unit="km/h",
+    )
+    ordered = multi_value_point(temperature, wind)
+    permuted = multi_value_point(wind, temperature)
+    source = observation(
+        conditions=ObservedConditions(temperature_c=8.0, wind_speed_kmh=0.0)
+    )
+
+    single = compare(source, ordered)
+    repeated = compare(source, ordered, permuted)
 
     assert repeated.status is ForecastObservationComparisonStatus.COMPARABLE
     assert repeated.results == single.results
@@ -337,6 +476,21 @@ def test_numeric_errors_use_exact_forecast_minus_observed_formula(
     assert numeric.unit == unit
     assert numeric.signed_error == signed
     assert numeric.absolute_error == absolute
+
+
+def test_signed_zero_is_normalized_in_observation_forecast_digest_and_id():
+    negative_zero = compare(
+        observation(conditions=ObservedConditions(wind_speed_kmh=-0.0)),
+        point(WeatherVariable.WIND_SPEED_KMH, -0.0),
+    )
+    positive_zero = compare(
+        observation(conditions=ObservedConditions(wind_speed_kmh=0.0)),
+        point(WeatherVariable.WIND_SPEED_KMH, 0.0),
+    )
+
+    assert negative_zero.results == positive_zero.results
+    assert negative_zero.source_digest == positive_zero.source_digest
+    assert negative_zero.comparison_id == positive_zero.comparison_id
 
 
 @pytest.mark.parametrize(
@@ -435,6 +589,44 @@ def test_malformed_evidence_container_returns_structured_invalid_reason():
 
     assert result.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
     assert reason_codes(result) == ("decision_forecast_evidence_invalid",)
+
+
+@pytest.mark.parametrize(
+    ("target", "attribute", "invalid_value"),
+    [
+        ("point", "values", "broken"),
+        ("point", "values", ("not-a-weather-value",)),
+        ("value", "variable", "temperature_c"),
+        ("value", "unit", "K"),
+        ("point", "provider_id", ""),
+        ("point", "model_id", ""),
+        ("point", "retrieved_at_utc", datetime(2026, 9, 1, 17, 0)),
+        ("point", "forecast_for_utc", "broken"),
+        ("point", "requested_location", "broken"),
+        ("point", "grid_location", "broken"),
+    ],
+)
+def test_deeply_corrupted_evidence_fails_closed(
+    target,
+    attribute,
+    invalid_value,
+):
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    evidence = DecisionForecastEvidence((forecast_point,))
+    corrupted = forecast_point if target == "point" else forecast_point.values[0]
+    object.__setattr__(corrupted, attribute, invalid_value)
+
+    result = compare_forecast_to_field_observation(
+        evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert result.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert reason_codes(result) == ("decision_forecast_evidence_invalid",)
+    assert result.results[0].reasons[0].code == (
+        "decision_forecast_evidence_invalid"
+    )
 
 
 @pytest.mark.parametrize(
@@ -600,24 +792,17 @@ def test_sources_are_not_mutated_by_comparison():
     assert evidence == evidence_before
 
 
-def test_engine_import_graph_excludes_product_decision_and_learning_layers():
-    tree = ast.parse(SERVICE_PATH.read_text(encoding="utf-8"))
-    imported_modules = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported_modules.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imported_modules.append(node.module)
+@pytest.mark.parametrize("path", [MODEL_PATH, SERVICE_PATH])
+def test_model_and_engine_imports_match_explicit_dependency_allowlist(path):
+    source = path.read_text(encoding="utf-8")
 
-    forbidden_fragments = (
-        "scoring",
-        "recommendation",
-        "learning",
-        "calibration",
-        "outcome_assessment",
-    )
-    assert all(
-        fragment not in module
-        for module in imported_modules
-        for fragment in forbidden_fragments
+    assert import_boundary_violations(source, ALLOWED_IMPORTS[path]) == ()
+
+
+def test_import_guard_rejects_forbidden_symbol_from_allowed_generic_module():
+    source = "from decision.field_observation import OutcomeAssessment as harmless"
+    allowed = {("decision.field_observation", "FieldObservation")}
+
+    assert import_boundary_violations(source, allowed) == (
+        ("decision.field_observation", "OutcomeAssessment", "harmless"),
     )

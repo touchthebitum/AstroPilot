@@ -38,6 +38,7 @@ from decision.weather.forecast_temporal_selection import (
 from decision.weather.provider_reliability import (
     CANONICAL_UNITS,
     WeatherForecastPoint,
+    WeatherLocation,
     WeatherValue,
     WeatherVariable,
     calculate_weather_variable_error,
@@ -59,6 +60,8 @@ def _canonicalize(value):
         return _canonical_datetime(value)
     if isinstance(value, Enum):
         return value.value
+    if isinstance(value, float) and value == 0.0:
+        return 0.0
     if isinstance(value, tuple):
         return [_canonicalize(item) for item in value]
     if isinstance(value, list):
@@ -115,7 +118,7 @@ def _canonical_forecast_point(point: WeatherForecastPoint) -> dict:
         "grid_location": _canonical_location(point.grid_location),
         "values": sorted(
             (_canonical_weather_value(value) for value in point.values),
-            key=lambda value: value["variable"],
+            key=_canonical_json,
         ),
     }
 
@@ -124,9 +127,13 @@ def _deduplicate_identical_points(
     points: tuple[WeatherForecastPoint, ...],
 ) -> tuple[WeatherForecastPoint, ...]:
     unique = []
+    identities = set()
     for point in points:
-        if point not in unique:
-            unique.append(point)
+        identity = _canonical_json(_canonical_forecast_point(point))
+        if identity in identities:
+            continue
+        identities.add(identity)
+        unique.append(point)
     return tuple(unique)
 
 
@@ -143,14 +150,51 @@ def _canonical_evidence(evidence: object) -> dict:
 
 
 def _evidence_is_well_formed(evidence: object) -> bool:
-    return (
-        isinstance(evidence, DecisionForecastEvidence)
-        and isinstance(evidence.forecast_points, tuple)
-        and all(
-            isinstance(point, WeatherForecastPoint)
-            for point in evidence.forecast_points
-        )
-    )
+    if not isinstance(evidence, DecisionForecastEvidence):
+        return False
+    try:
+        points = evidence.forecast_points
+        if not isinstance(points, tuple):
+            return False
+        for point in points:
+            if not isinstance(point, WeatherForecastPoint):
+                return False
+            values = point.values
+            if not isinstance(values, (tuple, list)) or not values:
+                return False
+            if any(not isinstance(value, WeatherValue) for value in values):
+                return False
+            validated_values = tuple(
+                WeatherValue(
+                    variable=value.variable,
+                    value=value.value,
+                    unit=value.unit,
+                    aggregation_period=value.aggregation_period,
+                )
+                for value in values
+            )
+            requested_location = WeatherLocation(
+                latitude=point.requested_location.latitude,
+                longitude=point.requested_location.longitude,
+                altitude_m=point.requested_location.altitude_m,
+            )
+            grid_location = WeatherLocation(
+                latitude=point.grid_location.latitude,
+                longitude=point.grid_location.longitude,
+                altitude_m=point.grid_location.altitude_m,
+            )
+            WeatherForecastPoint(
+                provider_id=point.provider_id,
+                model_id=point.model_id,
+                retrieved_at_utc=point.retrieved_at_utc,
+                forecast_for_utc=point.forecast_for_utc,
+                requested_location=requested_location,
+                grid_location=grid_location,
+                values=validated_values,
+            )
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return False
+    return True
 
 
 def _canonical_observation(observation: FieldObservation) -> dict:

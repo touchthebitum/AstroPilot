@@ -16,6 +16,8 @@ from decision.weather.provider_reliability import WeatherVariable
 
 ALGORITHM_VERSION = "forecast_observation.v1"
 FORECAST_SCOPE = "decision_attached_evidence"
+_V1_TEMPORAL_POLICY_VERSION = "nearest_forecast_utc.v1"
+_V1_MAXIMUM_ABSOLUTE_OFFSET = timedelta(minutes=30)
 
 
 def _utc(value: datetime, *, field_name: str) -> datetime:
@@ -76,6 +78,11 @@ class TemporalComparisonPolicy:
             or self.maximum_absolute_offset < timedelta(0)
         ):
             raise ValueError("invalid_maximum_absolute_offset")
+        if (
+            self.version.strip() == _V1_TEMPORAL_POLICY_VERSION
+            and self.maximum_absolute_offset > _V1_MAXIMUM_ABSOLUTE_OFFSET
+        ):
+            raise ValueError("v1_maximum_absolute_offset_exceeded")
         if self.timezone_name != "UTC":
             raise ValueError("temporal_policy_must_use_utc")
         if self.selection_mode != "nearest_per_variable":
