@@ -1,5 +1,6 @@
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -321,33 +322,90 @@ def test_present_corrupt_file_raises_instead_of_returning_none(
         store.load(decision_id="decision-123")
 
 
-def test_store_writes_complete_temp_file_then_atomically_replaces(
+def test_store_writes_complete_temp_file_then_publishes_create_only(
     tmp_path,
     monkeypatch,
 ):
     store = FileDecisionForecastEvidenceStore(tmp_path)
-    replacements = []
-    real_replace = os.replace
+    publications = []
+    real_link = os.link
 
-    def inspect_then_replace(source, destination):
+    def inspect_then_link(source, destination):
         source_path = type(tmp_path)(source)
         destination_path = type(tmp_path)(destination)
-        replacements.append(
+        publications.append(
             (
                 source_path.parent,
                 destination_path,
                 source_path.read_text(encoding="utf-8"),
             )
         )
-        real_replace(source, destination)
+        real_link(source, destination)
 
-    monkeypatch.setattr(os, "replace", inspect_then_replace)
+    monkeypatch.setattr(os, "link", inspect_then_link)
 
     store.save(decision_id="decision-123", evidence=evidence())
 
-    assert len(replacements) == 1
-    temp_parent, destination, complete_document = replacements[0]
+    assert len(publications) == 1
+    temp_parent, destination, complete_document = publications[0]
     assert temp_parent == tmp_path
     assert destination == tmp_path / "decision-123.json"
     assert json.loads(complete_document)["decision_id"] == "decision-123"
     assert store.load(decision_id="decision-123") == evidence()
+
+
+def test_concurrent_identical_writers_are_idempotent(tmp_path):
+    stores = (
+        FileDecisionForecastEvidenceStore(tmp_path),
+        FileDecisionForecastEvidenceStore(tmp_path),
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(
+            pool.map(
+                lambda store: store.save(
+                    decision_id="decision-123",
+                    evidence=evidence(),
+                ),
+                stores,
+            )
+        )
+
+    assert stores[0].load(decision_id="decision-123") == evidence()
+
+
+def test_concurrent_divergent_writers_never_overwrite(tmp_path):
+    stores = (
+        FileDecisionForecastEvidenceStore(tmp_path),
+        FileDecisionForecastEvidenceStore(tmp_path),
+    )
+    first = evidence()
+    second = DecisionForecastEvidence((point(hour=23),))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = (
+            pool.submit(
+                stores[0].save,
+                decision_id="decision-123",
+                evidence=first,
+            ),
+            pool.submit(
+                stores[1].save,
+                decision_id="decision-123",
+                evidence=second,
+            ),
+        )
+
+    outcomes = []
+    for future in futures:
+        try:
+            future.result()
+            outcomes.append("saved")
+        except DecisionForecastEvidencePersistenceError as error:
+            outcomes.append(str(error))
+
+    assert sorted(outcomes) == [
+        "decision_forecast_evidence_conflict",
+        "saved",
+    ]
+    assert stores[0].load(decision_id="decision-123") in (first, second)
