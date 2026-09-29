@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from astropilot.app import create_app
@@ -178,6 +179,92 @@ def test_field_observation_conflict_and_missing_decision_are_explicit():
     assert conflict.json()["detail"]["code"] == "field_observation_conflict"
     assert missing.status_code == 404
     assert missing.json()["detail"]["code"] == "decision_not_found"
+
+
+def test_field_observation_expected_domain_validation_code_is_public():
+    client, _service = client_and_service()
+    invalid = payload()
+    invalid["acquisition"] = {
+        "attempted_frames": 2,
+        "usable_frames": 3,
+        "stop_reason": None,
+    }
+
+    response = client.post("/v1/field-observations", json=invalid)
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == (
+        "usable_frames_exceed_attempted_frames"
+    )
+
+
+@pytest.mark.parametrize(
+    ("method_name", "make_request", "error_type"),
+    (
+        (
+            "record_field_observation",
+            lambda client: client.post("/v1/field-observations", json=payload()),
+            ValueError,
+        ),
+        (
+            "load_field_observation",
+            lambda client: client.get("/v1/field-observations/observation-1"),
+            TypeError,
+        ),
+        (
+            "list_field_observations_by_decision",
+            lambda client: client.get(
+                "/v1/decisions/decision-1/field-observations"
+            ),
+            FieldObservationPersistenceError,
+        ),
+        (
+            "list_field_observations_by_execution",
+            lambda client: client.get(
+                "/v1/executions/execution-1/field-observations"
+            ),
+            FieldObservationRecordingError,
+        ),
+    ),
+)
+def test_field_observation_unexpected_errors_are_generic(
+    method_name,
+    make_request,
+    error_type,
+):
+    client, service = client_and_service()
+    private_message = "/Users/private/profile.json: arbitrary malformed content"
+
+    def fail(*_args, **_kwargs):
+        raise error_type(private_message)
+
+    setattr(service, method_name, fail)
+    response = make_request(client)
+    serialized = response.text.lower()
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": {"code": "field_observation_internal_error"}
+    }
+    assert "/users/private" not in serialized
+    assert "arbitrary malformed content" not in serialized
+    assert "traceback" not in serialized
+
+
+def test_field_observation_dependency_io_error_is_generic_unavailable():
+    client, service = client_and_service()
+
+    def fail(*_args, **_kwargs):
+        raise OSError("/Users/private/observations: permission denied")
+
+    service.record_field_observation = fail
+    response = client.post("/v1/field-observations", json=payload())
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": {"code": "field_observation_unavailable"}
+    }
+    assert "/Users/private" not in response.text
 
 
 def test_field_observation_api_rejects_empty_invalid_and_unknown_fields():

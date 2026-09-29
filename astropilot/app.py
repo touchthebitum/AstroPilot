@@ -144,12 +144,6 @@ from decision.field_observation import (
     SurfaceCondition,
     Transparency,
 )
-from decision.field_observation_persistence import (
-    FieldObservationPersistenceError,
-)
-from decision.services.field_observation_recording_service import (
-    FieldObservationRecordingError,
-)
 from decision.services.user_selection_validator import UserSelectionValidationError
 from decision.weather.provider_reliability import WeatherLocation
 from decision.weather.weather_trust_decision import (
@@ -3060,29 +3054,93 @@ def create_app(
             "calibration_eligible": observation.calibration_eligible,
         }
 
+    field_observation_error_status = {
+        **{
+            code: 404
+            for code in {
+                "decision_not_found",
+                "execution_not_found",
+                "mission_not_found",
+                "selection_not_found",
+            }
+        },
+        **{
+            code: 409
+            for code in {
+                "field_observation_conflict",
+                "superseded_observation_missing",
+                "superseded_observation_decision_mismatch",
+                "observation_supersession_cycle",
+                "execution_decision_mismatch",
+                "execution_identity_mismatch",
+                "mission_identity_mismatch",
+                "selection_decision_mismatch",
+            }
+        },
+        **{
+            code: 422
+            for code in {
+                "invalid_field_observation",
+                "legacy_field_observation_read_only",
+                "invalid_observation_id",
+                "decision_id_required",
+                "invalid_decision_id",
+                "invalid_execution_id",
+                "invalid_observed_at_utc",
+                "invalid_recorded_at_utc",
+                "invalid_supersedes_observation_id",
+                "observation_cannot_supersede_itself",
+                "recorded_at_precedes_observed_at",
+                "invalid_temperature_c",
+                "invalid_relative_humidity_percent",
+                "invalid_cloud_state",
+                "invalid_transparency",
+                "invalid_seeing",
+                "invalid_wind_speed_kmh",
+                "invalid_surface_condition",
+                "invalid_moon_halo",
+                "invalid_attempted_frames",
+                "invalid_usable_frames",
+                "invalid_stop_reason",
+                "usable_frames_requires_attempted_frames",
+                "usable_frames_exceed_attempted_frames",
+                "invalid_hfr",
+                "invalid_hfr_unit",
+                "hfr_unit_required",
+                "hfr_unit_without_value",
+                "invalid_sky_background",
+                "sky_background_unit_required",
+                "sky_background_unit_without_value",
+                "invalid_guiding_rms_arcsec",
+                "invalid_conditions",
+                "invalid_acquisition",
+                "invalid_technical",
+                "invalid_provenance",
+                "invalid_quality",
+                "invalid_quality_flags",
+                "duplicate_quality_flags",
+                "field_observation_value_required",
+            }
+        },
+    }
+
     def raise_field_observation_error(exc: Exception):
+        if isinstance(exc, OSError):
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "field_observation_unavailable"},
+            ) from exc
         code = str(exc)
-        if code in {
-            "decision_not_found",
-            "execution_not_found",
-            "mission_not_found",
-            "selection_not_found",
-        }:
-            status_code = 404
-        elif code in {
-            "field_observation_conflict",
-            "superseded_observation_missing",
-            "superseded_observation_decision_mismatch",
-            "observation_supersession_cycle",
-            "execution_decision_mismatch",
-            "execution_identity_mismatch",
-            "mission_identity_mismatch",
-            "selection_decision_mismatch",
-        }:
-            status_code = 409
-        else:
-            status_code = 422
-        raise HTTPException(status_code=status_code, detail={"code": code}) from exc
+        status_code = field_observation_error_status.get(code)
+        if status_code is None:
+            raise HTTPException(
+                status_code=500,
+                detail={"code": "field_observation_internal_error"},
+            ) from exc
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": code},
+        ) from exc
 
     @application.post("/v1/field-observations", status_code=201)
     def create_field_observation(
@@ -3092,18 +3150,8 @@ def create_app(
         try:
             observation = request.to_domain()
             result = application_service().record_field_observation(observation)
-        except (
-            FieldObservationRecordingError,
-            FieldObservationPersistenceError,
-            TypeError,
-            ValueError,
-        ) as exc:
+        except Exception as exc:
             raise_field_observation_error(exc)
-        except (OSError, RuntimeError) as exc:
-            raise HTTPException(
-                status_code=503,
-                detail={"code": "field_observation_unavailable"},
-            ) from exc
         response.status_code = 201 if result.created else 200
         context = result.resolved_context
         return {
@@ -3137,13 +3185,8 @@ def create_app(
             observation = application_service().load_field_observation(
                 observation_id
             )
-        except FieldObservationPersistenceError as exc:
+        except Exception as exc:
             raise_field_observation_error(exc)
-        except (OSError, RuntimeError) as exc:
-            raise HTTPException(
-                status_code=503,
-                detail={"code": "field_observation_unavailable"},
-            ) from exc
         if observation is None:
             raise HTTPException(
                 status_code=404,
@@ -3159,13 +3202,8 @@ def create_app(
                     decision_id
                 )
             )
-        except FieldObservationPersistenceError as exc:
+        except Exception as exc:
             raise_field_observation_error(exc)
-        except (OSError, RuntimeError) as exc:
-            raise HTTPException(
-                status_code=503,
-                detail={"code": "field_observation_unavailable"},
-            ) from exc
         return [field_observation_projection(item) for item in observations]
 
     @application.get("/v1/executions/{execution_id}/field-observations")
@@ -3176,13 +3214,8 @@ def create_app(
                     execution_id
                 )
             )
-        except FieldObservationPersistenceError as exc:
+        except Exception as exc:
             raise_field_observation_error(exc)
-        except (OSError, RuntimeError) as exc:
-            raise HTTPException(
-                status_code=503,
-                detail={"code": "field_observation_unavailable"},
-            ) from exc
         return [field_observation_projection(item) for item in observations]
 
     def validated_session_credits(profile: dict, service, project_id: str,

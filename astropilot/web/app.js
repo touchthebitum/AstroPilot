@@ -423,7 +423,11 @@ function snapshotFromObservationPayload(payload) {
 }
 
 function pendingObservationKey(decisionId, executionId) {
-  return `astropilot.pendingFieldObservation.${decisionId}.${executionId || "decision"}`;
+  const decision = `decision:${encodeURIComponent(decisionId)}`;
+  const scope = executionId === null || executionId === undefined
+    ? "decision-only"
+    : `execution:${encodeURIComponent(executionId)}`;
+  return `astropilot.pendingFieldObservation.${decision}.${scope}`;
 }
 
 function removePendingFieldObservation(key) {

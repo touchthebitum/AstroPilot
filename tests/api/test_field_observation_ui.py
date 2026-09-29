@@ -111,10 +111,71 @@ function clearHarness() {
 async function check() {
   clearHarness();
   setQuick({cloud: 'mostly_cloudy', transparency: 'excellent', wind: '8.5'});
+  element('#surface-damp').checked = true;
+  element('#observation-temperature').value = '-2.4';
+  element('#observation-humidity').value = '87';
+  element('#observation-seeing').value = 'fair';
+  element('#observation-moon-halo').value = 'true';
+  element('#observation-attempted-frames').value = '120';
+  element('#observation-usable-frames').value = '95';
+  element('#observation-stop-reason').value = 'clouds';
+  element('#observation-hfr').value = '2.35';
+  element('#observation-hfr-unit').value = 'arcsec';
+  element('#observation-guiding').value = '0.72';
   let payload = buildFieldObservationPayload();
   assert.equal(payload.conditions.cloud_state, 'mostly_cloudy');
   assert.equal(payload.conditions.transparency, 'excellent');
   assert.equal(payload.conditions.wind_speed_kmh, 8.5);
+  assert.equal(payload.conditions.surface_condition, 'damp');
+  assert.equal(payload.conditions.temperature_c, -2.4);
+  assert.equal(payload.conditions.relative_humidity_percent, 87);
+  assert.equal(payload.conditions.seeing, 'fair');
+  assert.equal(payload.conditions.moon_halo, true);
+  assert.equal(payload.acquisition.attempted_frames, 120);
+  assert.equal(payload.acquisition.usable_frames, 95);
+  assert.equal(payload.acquisition.stop_reason, 'clouds');
+  assert.equal(payload.technical.hfr, 2.35);
+  assert.equal(payload.technical.hfr_unit, 'arcsec');
+  assert.equal(payload.technical.guiding_rms_arcsec, 0.72);
+  assert.equal(payload.technical.sky_background, null);
+  assert.equal(payload.technical.sky_background_unit, null);
+
+  // Empty controls stay null, including the HFR unit, and do not invent facts.
+  clearHarness(); setQuick({cloud: 'clear'});
+  element('#observation-hfr-unit').value = 'px';
+  payload = buildFieldObservationPayload();
+  assert.equal(payload.conditions.temperature_c, null);
+  assert.equal(payload.conditions.relative_humidity_percent, null);
+  assert.equal(payload.conditions.transparency, null);
+  assert.equal(payload.conditions.seeing, null);
+  assert.equal(payload.conditions.wind_speed_kmh, null);
+  assert.equal(payload.conditions.surface_condition, null);
+  assert.equal(payload.conditions.moon_halo, null);
+  assert.equal(payload.acquisition.attempted_frames, null);
+  assert.equal(payload.acquisition.usable_frames, null);
+  assert.equal(payload.acquisition.stop_reason, null);
+  assert.equal(payload.technical.hfr, null);
+  assert.equal(payload.technical.hfr_unit, null);
+  assert.equal(payload.technical.guiding_rms_arcsec, null);
+  clearHarness();
+  assert.equal(fieldObservationDraft(), null);
+  assert.equal(buildFieldObservationPayload(), null);
+
+  // Typed key components keep valid lookalike identifiers distinct.
+  const keyContexts = [
+    ['alpha', null],
+    ['alpha', 'decision'],
+    ['alpha', 'decision-only'],
+    ['alpha', 'execution'],
+    ['alpha', 'a.b_c-d'],
+    ['alpha.decision', null],
+    ['alpha', 'decision.decision-only'],
+  ];
+  const pendingKeys = keyContexts.map(([decisionId, executionId]) => pendingObservationKey(decisionId, executionId));
+  assert.equal(new Set(pendingKeys).size, keyContexts.length);
+  assert.notEqual(pendingObservationKey('alpha', null), pendingObservationKey('alpha', 'decision'));
+  assert.match(pendingObservationKey('a.b_c-d', null), /decision:a\.b_c-d\.decision-only$/);
+  assert.match(pendingObservationKey('a.b_c-d', 'decision'), /execution:decision$/);
 
   // Switching from session A to B clears A's values and cannot submit them as B.
   clearHarness();
