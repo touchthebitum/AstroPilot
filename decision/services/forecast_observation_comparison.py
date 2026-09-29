@@ -457,14 +457,20 @@ def _safe_type_metadata_token(
     depth: int,
 ) -> dict:
     """Redact runtime type metadata before it enters a fingerprint document."""
+    try:
+        module = type.__getattribute__(value_type, "__module__")
+        qualname = type.__getattribute__(value_type, "__qualname__")
+    except Exception:
+        module = None
+        qualname = None
     return {
         "module": _safe_fingerprint_token(
-            value_type.__module__,
+            module,
             seen=seen,
             depth=depth + 1,
         ),
         "qualname": _safe_fingerprint_token(
-            value_type.__qualname__,
+            qualname,
             seen=seen,
             depth=depth + 1,
         ),
@@ -509,20 +515,109 @@ def _safe_material_slot_values(
     seen: set[int],
     depth: int,
 ) -> tuple[list[dict], bool, bool]:
-    """Read real slot storage from member descriptors in each owner dict."""
+    """Read slots only when their complete CPython layout is provable.
+
+    The raw type dictionary and layout fields bypass metaclass attribute
+    hooks.  The immutable basic-size delta then proves how many pointer slots
+    were allocated even if a binding and ``__slots__`` are both changed after
+    class creation.  Any mismatch is fail-closed.
+    """
     slot_values = []
     complete = True
     found_material_slot = False
     canonical_slot_keys: set[str] = set()
     for owner in owners:
+        try:
+            owner_dictionary = type.__getattribute__(owner, "__dict__")
+            owner_name = type.__getattribute__(owner, "__name__")
+            owner_base = type.__getattribute__(owner, "__base__")
+            owner_basicsize = type.__getattribute__(owner, "__basicsize__")
+            owner_itemsize = type.__getattribute__(owner, "__itemsize__")
+            base_basicsize = type.__getattribute__(
+                owner_base, "__basicsize__"
+            )
+            base_itemsize = type.__getattribute__(owner_base, "__itemsize__")
+        except Exception:
+            complete = False
+            continue
+
         descriptors: dict[int, tuple[MemberDescriptorType, list[str]]] = {}
-        for binding_name, candidate in vars(owner).items():
+        for binding_name, candidate in owner_dictionary.items():
             if type(candidate) is not MemberDescriptorType:
                 continue
             descriptor_identity = id(candidate)
             if descriptor_identity not in descriptors:
                 descriptors[descriptor_identity] = (candidate, [])
             descriptors[descriptor_identity][1].append(binding_name)
+
+        owned_descriptors: dict[str, MemberDescriptorType] = {}
+        for descriptor, _ in descriptors.values():
+            try:
+                descriptor_owner = descriptor.__objclass__
+                descriptor_name = descriptor.__name__
+            except Exception:
+                complete = False
+                continue
+            if descriptor_owner is not owner or type(descriptor_name) is not str:
+                complete = False
+                continue
+            if descriptor_name in owned_descriptors:
+                complete = False
+                continue
+            owned_descriptors[descriptor_name] = descriptor
+
+        pointer_size = struct.calcsize("P")
+        layout_delta = owner_basicsize - base_basicsize
+        if (
+            type(owner_basicsize) is not int
+            or type(base_basicsize) is not int
+            or type(owner_itemsize) is not int
+            or type(base_itemsize) is not int
+            or owner_itemsize != base_itemsize
+            or layout_delta < 0
+            or layout_delta % pointer_size
+            or layout_delta // pointer_size != len(owned_descriptors)
+        ):
+            complete = False
+
+        declared_slots = owner_dictionary.get("__slots__", ())
+        if type(declared_slots) is str:
+            declared_slot_names = (declared_slots,)
+        elif type(declared_slots) in (tuple, list):
+            declared_slot_names = tuple(declared_slots)
+        elif type(declared_slots) is dict:
+            declared_slot_names = tuple(declared_slots)
+        else:
+            declared_slot_names = ()
+            complete = False
+        if not all(type(name) is str for name in declared_slot_names):
+            declared_slot_names = ()
+            complete = False
+
+        material_declared_names = []
+        for declared_name in declared_slot_names:
+            if declared_name in ("__dict__", "__weakref__"):
+                continue
+            mangled_name = declared_name
+            if (
+                declared_name.startswith("__")
+                and not declared_name.endswith("__")
+                and "." not in declared_name
+            ):
+                stripped_owner_name = owner_name.lstrip("_")
+                if stripped_owner_name:
+                    mangled_name = f"_{stripped_owner_name}{declared_name}"
+            material_declared_names.append(mangled_name)
+        if (
+            len(material_declared_names) != len(set(material_declared_names))
+            or set(material_declared_names) != set(owned_descriptors)
+        ):
+            complete = False
+        for expected_name in material_declared_names:
+            if owner_dictionary.get(expected_name) is not owned_descriptors.get(
+                expected_name
+            ):
+                complete = False
 
         for descriptor, binding_names in descriptors.values():
             try:
@@ -642,8 +737,13 @@ def _safe_temporal_subclass_state(
     if attributes is not None and type(attributes) is not dict:
         return {"kind": "unavailable"}, False
 
+    try:
+        value_type = type(value)
+        value_mro = type.__getattribute__(value_type, "__mro__")
+    except Exception:
+        return {"kind": "unavailable"}, False
     owners = []
-    for owner in type(value).__mro__:
+    for owner in value_mro:
         if owner is base_type:
             break
         owners.append(owner)
@@ -692,9 +792,9 @@ def _safe_object_state(
     identity = id(value)
     seen.add(identity)
     try:
-        owners = tuple(
-            owner for owner in type(value).__mro__ if owner is not object
-        )
+        value_type = type(value)
+        value_mro = type.__getattribute__(value_type, "__mro__")
+        owners = tuple(owner for owner in value_mro if owner is not object)
         slot_values, slots_complete, found_material_slot = (
             _safe_material_slot_values(
                 value,
@@ -705,12 +805,18 @@ def _safe_object_state(
         )
         complete = complete and slots_complete
         has_python_storage = has_python_storage or found_material_slot
-        if any(
-            owner.__module__ == "builtins"
-            and vars(owner).get("__slots__") is None
-            for owner in owners
-        ):
-            complete = False
+        for owner in owners:
+            try:
+                owner_module = type.__getattribute__(owner, "__module__")
+                owner_dictionary = type.__getattribute__(owner, "__dict__")
+            except Exception:
+                complete = False
+                continue
+            if (
+                owner_module == "builtins"
+                and owner_dictionary.get("__slots__") is None
+            ):
+                complete = False
         dictionary_token = (
             _safe_fingerprint_token(
                 attributes,

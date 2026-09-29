@@ -1171,8 +1171,8 @@ def test_material_slot_survives_mutated_slots_metadata(mutated_slots):
     repeated_first = result_for(first_location)
     second = result_for(second_location)
 
-    assert first.identity_persistable is True
-    assert second.identity_persistable is True
+    assert first.identity_persistable is False
+    assert second.identity_persistable is False
     assert first.source_digest == repeated_first.source_digest
     assert first.comparison_id == repeated_first.comparison_id
     assert first.source_digest != second.source_digest
@@ -1269,6 +1269,156 @@ def test_foreign_slot_descriptor_alias_is_explicitly_non_persistable():
     assert _fingerprint_is_persistable(token) is False
 
 
+def test_name_mangled_slot_alias_is_deduplicated_and_stable_publicly():
+    class PrivateLocation:
+        __slots__ = ("__marker",)
+
+    marker_descriptor = type.__getattribute__(
+        PrivateLocation, "__dict__"
+    )["_PrivateLocation__marker"]
+    PrivateLocation.marker_alias = marker_descriptor
+
+    def result_for(marker):
+        location = PrivateLocation()
+        marker_descriptor.__set__(location, marker)
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point, "requested_location", location)
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    first = result_for("first")
+    repeated_first = result_for("first")
+    second = result_for("second")
+
+    assert first.identity_persistable is True
+    assert second.identity_persistable is True
+    assert first.source_digest == repeated_first.source_digest
+    assert first.comparison_id == repeated_first.comparison_id
+    assert first.source_digest != second.source_digest
+    assert first.comparison_id != second.comparison_id
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["deleted", "replaced", "deleted_and_metadata_hidden"],
+)
+def test_missing_material_slot_binding_fails_closed_publicly(mutation):
+    class SlottedLocation:
+        __slots__ = ("marker", "__dict__")
+
+    marker_descriptor = type.__getattribute__(
+        SlottedLocation, "__dict__"
+    )["marker"]
+    first_location = SlottedLocation()
+    marker_descriptor.__set__(first_location, "first")
+    second_location = SlottedLocation()
+    marker_descriptor.__set__(second_location, "second")
+    if mutation in ("deleted", "deleted_and_metadata_hidden"):
+        del SlottedLocation.marker
+    else:
+        SlottedLocation.marker = object()
+    if mutation == "deleted_and_metadata_hidden":
+        SlottedLocation.__slots__ = ("__dict__",)
+
+    assert marker_descriptor.__get__(first_location, SlottedLocation) == "first"
+    assert marker_descriptor.__get__(second_location, SlottedLocation) == "second"
+
+    def result_for(location):
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point, "requested_location", location)
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    first = result_for(first_location)
+    repeated_first = result_for(first_location)
+    second = result_for(second_location)
+
+    assert first.identity_persistable is False
+    assert second.identity_persistable is False
+    assert first.source_digest == repeated_first.source_digest
+    assert first.comparison_id == repeated_first.comparison_id
+
+
+def test_raw_type_introspection_bypasses_lying_metaclass_publicly():
+    class LyingMeta(type):
+        def __getattribute__(cls, name):
+            if name == "__dict__":
+                return {}
+            if name == "__mro__":
+                return (object,)
+            return super().__getattribute__(name)
+
+    class SlottedLocation(metaclass=LyingMeta):
+        __slots__ = ("marker",)
+
+    first_location = SlottedLocation()
+    first_location.marker = "first"
+    second_location = SlottedLocation()
+    second_location.marker = "second"
+
+    def result_for(location):
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point, "requested_location", location)
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    first = result_for(first_location)
+    repeated_first = result_for(first_location)
+    second = result_for(second_location)
+
+    assert first.identity_persistable is True
+    assert second.identity_persistable is True
+    assert first.source_digest == repeated_first.source_digest
+    assert first.comparison_id == repeated_first.comparison_id
+    assert first.source_digest != second.source_digest
+    assert first.comparison_id != second.comparison_id
+
+
+def test_inherited_shadowed_slots_are_all_fingerprinted_publicly():
+    class BaseLocation:
+        __slots__ = ("marker",)
+
+    class ShadowedLocation(BaseLocation):
+        __slots__ = ("marker",)
+
+    base_descriptor = type.__getattribute__(BaseLocation, "__dict__")["marker"]
+    leaf_descriptor = type.__getattribute__(
+        ShadowedLocation, "__dict__"
+    )["marker"]
+
+    def result_for(base_marker, leaf_marker):
+        location = ShadowedLocation()
+        base_descriptor.__set__(location, base_marker)
+        leaf_descriptor.__set__(location, leaf_marker)
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point, "requested_location", location)
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    baseline = result_for("base", "leaf")
+    repeated = result_for("base", "leaf")
+    changed_base = result_for("changed", "leaf")
+    changed_leaf = result_for("base", "changed")
+
+    assert baseline.identity_persistable is True
+    assert baseline.source_digest == repeated.source_digest
+    assert baseline.comparison_id == repeated.comparison_id
+    assert baseline.source_digest != changed_base.source_digest
+    assert baseline.source_digest != changed_leaf.source_digest
+
+
 def test_temporal_material_slot_survives_mutated_slots_metadata():
     class ExtendedDatetime(datetime):
         __slots__ = ("marker",)
@@ -1283,10 +1433,88 @@ def test_temporal_material_slot_survives_mutated_slots_metadata():
     repeated_first_token = _safe_fingerprint_token(first)
     second_token = _safe_fingerprint_token(second)
 
-    assert _fingerprint_is_persistable(first_token) is True
-    assert _fingerprint_is_persistable(second_token) is True
+    assert _fingerprint_is_persistable(first_token) is False
+    assert _fingerprint_is_persistable(second_token) is False
     assert _digest(first_token) == _digest(repeated_first_token)
     assert _digest(first_token) != _digest(second_token)
+
+
+def test_temporal_deleted_material_slot_binding_fails_closed_publicly():
+    class ExtendedDatetime(datetime):
+        __slots__ = ("marker",)
+
+    marker_descriptor = type.__getattribute__(
+        ExtendedDatetime, "__dict__"
+    )["marker"]
+    first = ExtendedDatetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc)
+    marker_descriptor.__set__(first, "first")
+    second = ExtendedDatetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc)
+    marker_descriptor.__set__(second, "second")
+    del ExtendedDatetime.marker
+
+    def result_for(forecast_for_utc):
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(
+            forecast_point, "forecast_for_utc", forecast_for_utc
+        )
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    first_result = result_for(first)
+    repeated_first_result = result_for(first)
+    second_result = result_for(second)
+
+    assert marker_descriptor.__get__(first, ExtendedDatetime) == "first"
+    assert marker_descriptor.__get__(second, ExtendedDatetime) == "second"
+    assert first_result.identity_persistable is False
+    assert second_result.identity_persistable is False
+    assert first_result.source_digest == repeated_first_result.source_digest
+    assert first_result.comparison_id == repeated_first_result.comparison_id
+
+
+def test_same_named_dynamic_classes_with_different_layouts_do_not_collide():
+    shared_metadata = {
+        "__module__": "same.dynamic.module",
+        "__qualname__": "SameIdentity",
+    }
+    first_type = type(
+        "SameIdentity",
+        (),
+        {**shared_metadata, "__slots__": ("marker",)},
+    )
+    second_type = type(
+        "SameIdentity",
+        (),
+        {**shared_metadata, "__slots__": ("marker", "extra")},
+    )
+    first = first_type()
+    first.marker = "same"
+    second = second_type()
+    second.marker = "same"
+    second.extra = "layout-state"
+
+    def result_for(location):
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point, "requested_location", location)
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    first_result = result_for(first)
+    repeated_first_result = result_for(first)
+    second_result = result_for(second)
+
+    assert first_result.identity_persistable is True
+    assert second_result.identity_persistable is True
+    assert first_result.source_digest == repeated_first_result.source_digest
+    assert first_result.comparison_id == repeated_first_result.comparison_id
+    assert first_result.source_digest != second_result.source_digest
+    assert first_result.comparison_id != second_result.comparison_id
 
 
 @pytest.mark.parametrize("unsafe_state", ["opaque", "cycle", "depth"])
@@ -2117,7 +2345,7 @@ def test_qualified_slot_metadata_is_redacted_and_total(surrogate):
 
     assert first.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
     assert reason_codes(first) == ("decision_forecast_evidence_invalid",)
-    assert first.identity_persistable is True
+    assert first.identity_persistable is False
     assert first.source_digest == repeated.source_digest
     assert first.comparison_id == repeated.comparison_id
     assert surrogate not in str(_canonical_evidence(evidence))
@@ -2144,8 +2372,8 @@ def test_qualified_slot_metadata_corruptions_remain_distinct():
     high = result_with_slot_name("\ud800")
     low = result_with_slot_name("\udc00")
 
-    assert high.identity_persistable is True
-    assert low.identity_persistable is True
+    assert high.identity_persistable is False
+    assert low.identity_persistable is False
     assert high.source_digest != low.source_digest
     assert high.comparison_id != low.comparison_id
 
