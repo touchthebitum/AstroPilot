@@ -198,6 +198,111 @@ def test_field_observation_expected_domain_validation_code_is_public():
     )
 
 
+def test_field_observation_allowlisted_value_error_from_service_is_generic():
+    client, service = client_and_service()
+
+    def fail(*_args, **_kwargs):
+        raise ValueError("decision_not_found")
+
+    service.record_field_observation = fail
+    response = client.post("/v1/field-observations", json=payload())
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": {"code": "field_observation_internal_error"}
+    }
+    assert "decision_not_found" not in response.text
+
+
+@pytest.mark.parametrize(
+    "error",
+    (
+        FieldObservationRecordingError("invalid_temperature_c"),
+        FieldObservationPersistenceError("invalid_temperature_c"),
+    ),
+)
+def test_field_observation_validation_code_from_recording_is_generic(error):
+    client, service = client_and_service()
+
+    def fail(*_args, **_kwargs):
+        raise error
+
+    service.record_field_observation = fail
+    response = client.post("/v1/field-observations", json=payload())
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": {"code": "field_observation_internal_error"}
+    }
+    assert "invalid_temperature_c" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("method_name", "make_request"),
+    (
+        (
+            "load_field_observation",
+            lambda client: client.get("/v1/field-observations/observation-1"),
+        ),
+        (
+            "list_field_observations_by_decision",
+            lambda client: client.get(
+                "/v1/decisions/decision-1/field-observations"
+            ),
+        ),
+        (
+            "list_field_observations_by_execution",
+            lambda client: client.get(
+                "/v1/executions/execution-1/field-observations"
+            ),
+        ),
+    ),
+)
+def test_field_observation_persisted_validation_error_on_read_is_generic(
+    method_name,
+    make_request,
+):
+    client, service = client_and_service()
+
+    def fail(*_args, **_kwargs):
+        raise FieldObservationPersistenceError("invalid_temperature_c")
+
+    setattr(service, method_name, fail)
+    response = make_request(client)
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": {"code": "field_observation_internal_error"}
+    }
+    assert "invalid_temperature_c" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("url", "expected_code"),
+    (
+        ("/v1/field-observations/not%20valid", "invalid_observation_id"),
+        (
+            "/v1/decisions/not%20valid/field-observations",
+            "invalid_decision_id",
+        ),
+        (
+            "/v1/executions/not%20valid/field-observations",
+            "invalid_execution_id",
+        ),
+    ),
+)
+def test_field_observation_read_identifiers_are_validated_at_http_boundary(
+    url,
+    expected_code,
+):
+    client, _service = client_and_service()
+
+    response = client.get(url)
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": {"code": expected_code}}
+
+
 @pytest.mark.parametrize(
     ("method_name", "make_request", "error_type"),
     (

@@ -143,6 +143,13 @@ from decision.field_observation import (
     StopReason,
     SurfaceCondition,
     Transparency,
+    validate_observation_identity,
+)
+from decision.field_observation_persistence import (
+    FieldObservationPersistenceError,
+)
+from decision.services.field_observation_recording_service import (
+    FieldObservationRecordingError,
 )
 from decision.services.user_selection_validator import UserSelectionValidationError
 from decision.weather.provider_reliability import WeatherLocation
@@ -3054,7 +3061,49 @@ def create_app(
             "calibration_eligible": observation.calibration_eligible,
         }
 
-    field_observation_error_status = {
+    field_observation_domain_validation_codes = frozenset(
+        {
+            "invalid_observation_id",
+            "decision_id_required",
+            "invalid_decision_id",
+            "invalid_execution_id",
+            "invalid_observed_at_utc",
+            "invalid_recorded_at_utc",
+            "invalid_supersedes_observation_id",
+            "observation_cannot_supersede_itself",
+            "recorded_at_precedes_observed_at",
+            "invalid_temperature_c",
+            "invalid_relative_humidity_percent",
+            "invalid_cloud_state",
+            "invalid_transparency",
+            "invalid_seeing",
+            "invalid_wind_speed_kmh",
+            "invalid_surface_condition",
+            "invalid_moon_halo",
+            "invalid_attempted_frames",
+            "invalid_usable_frames",
+            "invalid_stop_reason",
+            "usable_frames_requires_attempted_frames",
+            "usable_frames_exceed_attempted_frames",
+            "invalid_hfr",
+            "invalid_hfr_unit",
+            "hfr_unit_required",
+            "hfr_unit_without_value",
+            "invalid_sky_background",
+            "sky_background_unit_required",
+            "sky_background_unit_without_value",
+            "invalid_guiding_rms_arcsec",
+            "invalid_conditions",
+            "invalid_acquisition",
+            "invalid_technical",
+            "invalid_provenance",
+            "invalid_quality",
+            "invalid_quality_flags",
+            "duplicate_quality_flags",
+            "field_observation_value_required",
+        }
+    )
+    field_observation_recording_error_status = {
         **{
             code: 404
             for code in {
@@ -3082,65 +3131,84 @@ def create_app(
             for code in {
                 "invalid_field_observation",
                 "legacy_field_observation_read_only",
-                "invalid_observation_id",
-                "decision_id_required",
-                "invalid_decision_id",
-                "invalid_execution_id",
-                "invalid_observed_at_utc",
-                "invalid_recorded_at_utc",
-                "invalid_supersedes_observation_id",
-                "observation_cannot_supersede_itself",
-                "recorded_at_precedes_observed_at",
-                "invalid_temperature_c",
-                "invalid_relative_humidity_percent",
-                "invalid_cloud_state",
-                "invalid_transparency",
-                "invalid_seeing",
-                "invalid_wind_speed_kmh",
-                "invalid_surface_condition",
-                "invalid_moon_halo",
-                "invalid_attempted_frames",
-                "invalid_usable_frames",
-                "invalid_stop_reason",
-                "usable_frames_requires_attempted_frames",
-                "usable_frames_exceed_attempted_frames",
-                "invalid_hfr",
-                "invalid_hfr_unit",
-                "hfr_unit_required",
-                "hfr_unit_without_value",
-                "invalid_sky_background",
-                "sky_background_unit_required",
-                "sky_background_unit_without_value",
-                "invalid_guiding_rms_arcsec",
-                "invalid_conditions",
-                "invalid_acquisition",
-                "invalid_technical",
-                "invalid_provenance",
-                "invalid_quality",
-                "invalid_quality_flags",
-                "duplicate_quality_flags",
-                "field_observation_value_required",
             }
         },
     }
 
-    def raise_field_observation_error(exc: Exception):
-        if isinstance(exc, OSError):
-            raise HTTPException(
-                status_code=503,
-                detail={"code": "field_observation_unavailable"},
-            ) from exc
-        code = str(exc)
-        status_code = field_observation_error_status.get(code)
-        if status_code is None:
-            raise HTTPException(
-                status_code=500,
-                detail={"code": "field_observation_internal_error"},
-            ) from exc
+    field_observation_persistence_write_error_status = {
+        code: field_observation_recording_error_status[code]
+        for code in {
+            "field_observation_conflict",
+            "superseded_observation_missing",
+            "superseded_observation_decision_mismatch",
+            "observation_supersession_cycle",
+        }
+    }
+
+    def raise_field_observation_internal_error(exc: Exception):
         raise HTTPException(
-            status_code=status_code,
+            status_code=500,
+            detail={"code": "field_observation_internal_error"},
+        ) from exc
+
+    def raise_field_observation_unavailable(exc: OSError):
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "field_observation_unavailable"},
+        ) from exc
+
+    def raise_field_observation_domain_error(exc: Exception):
+        code = str(exc)
+        if (
+            type(exc) is not ValueError
+            or code not in field_observation_domain_validation_codes
+        ):
+            raise_field_observation_internal_error(exc)
+        raise HTTPException(
+            status_code=422,
             detail={"code": code},
         ) from exc
+
+    def raise_field_observation_recording_error(exc: Exception):
+        if isinstance(exc, OSError):
+            raise_field_observation_unavailable(exc)
+        if type(exc) is FieldObservationRecordingError:
+            status_code = field_observation_recording_error_status.get(
+                str(exc)
+            )
+        elif type(exc) is FieldObservationPersistenceError:
+            status_code = field_observation_persistence_write_error_status.get(
+                str(exc)
+            )
+        else:
+            status_code = None
+        if status_code is None:
+            raise_field_observation_internal_error(exc)
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": str(exc)},
+        ) from exc
+
+    def raise_field_observation_read_error(exc: Exception):
+        if isinstance(exc, OSError):
+            raise_field_observation_unavailable(exc)
+        raise_field_observation_internal_error(exc)
+
+    def validated_field_observation_route_identity(
+        value: str,
+        *,
+        field: str,
+    ) -> str:
+        try:
+            return validate_observation_identity(value, field=field)
+        except Exception as exc:
+            expected_code = f"invalid_{field}"
+            if type(exc) is ValueError and str(exc) == expected_code:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": expected_code},
+                ) from exc
+            raise_field_observation_internal_error(exc)
 
     @application.post("/v1/field-observations", status_code=201)
     def create_field_observation(
@@ -3149,9 +3217,12 @@ def create_app(
     ):
         try:
             observation = request.to_domain()
+        except Exception as exc:
+            raise_field_observation_domain_error(exc)
+        try:
             result = application_service().record_field_observation(observation)
         except Exception as exc:
-            raise_field_observation_error(exc)
+            raise_field_observation_recording_error(exc)
         response.status_code = 201 if result.created else 200
         context = result.resolved_context
         return {
@@ -3181,12 +3252,16 @@ def create_app(
 
     @application.get("/v1/field-observations/{observation_id}")
     def get_field_observation(observation_id: str):
+        observation_id = validated_field_observation_route_identity(
+            observation_id,
+            field="observation_id",
+        )
         try:
             observation = application_service().load_field_observation(
                 observation_id
             )
         except Exception as exc:
-            raise_field_observation_error(exc)
+            raise_field_observation_read_error(exc)
         if observation is None:
             raise HTTPException(
                 status_code=404,
@@ -3196,6 +3271,10 @@ def create_app(
 
     @application.get("/v1/decisions/{decision_id}/field-observations")
     def list_decision_field_observations(decision_id: str):
+        decision_id = validated_field_observation_route_identity(
+            decision_id,
+            field="decision_id",
+        )
         try:
             observations = (
                 application_service().list_field_observations_by_decision(
@@ -3203,11 +3282,15 @@ def create_app(
                 )
             )
         except Exception as exc:
-            raise_field_observation_error(exc)
+            raise_field_observation_read_error(exc)
         return [field_observation_projection(item) for item in observations]
 
     @application.get("/v1/executions/{execution_id}/field-observations")
     def list_execution_field_observations(execution_id: str):
+        execution_id = validated_field_observation_route_identity(
+            execution_id,
+            field="execution_id",
+        )
         try:
             observations = (
                 application_service().list_field_observations_by_execution(
@@ -3215,7 +3298,7 @@ def create_app(
                 )
             )
         except Exception as exc:
-            raise_field_observation_error(exc)
+            raise_field_observation_read_error(exc)
         return [field_observation_projection(item) for item in observations]
 
     def validated_session_credits(profile: dict, service, project_id: str,
