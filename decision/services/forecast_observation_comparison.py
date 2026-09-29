@@ -81,6 +81,28 @@ def _is_canonical_utc_datetime(value: object) -> bool:
     )
 
 
+def _is_canonical_string(
+    value: object,
+    *,
+    allow_none: bool = False,
+    nonempty: bool = False,
+    trimmed: bool = False,
+) -> bool:
+    if value is None:
+        return allow_none
+    if type(value) is not str:
+        return False
+    if nonempty and not value:
+        return False
+    if trimmed and value != value.strip():
+        return False
+    try:
+        value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def _canonicalize(value):
     if isinstance(value, datetime):
         return _canonical_datetime(value)
@@ -759,7 +781,7 @@ def _validated_weather_value(
         numeric_value,
     )
     _require_evidence_invariant(
-        type(unit) is str,
+        _is_canonical_string(unit),
         "non_canonical_weather_unit",
         f"{path}.unit",
         unit,
@@ -854,25 +876,18 @@ def _validated_forecast_point(
         context, fingerprint_parts, f"{path}.values", point.values
     )
     _require_evidence_invariant(
-        type(provider_id) is str,
+        _is_canonical_string(provider_id, nonempty=True, trimmed=True),
         "non_canonical_provider_id",
         f"{path}.provider_id",
         provider_id,
     )
     _require_evidence_invariant(
-        bool(provider_id) and provider_id == provider_id.strip(),
-        "non_canonical_provider_id",
-        f"{path}.provider_id",
-        provider_id,
-    )
-    _require_evidence_invariant(
-        model_id is None or type(model_id) is str,
-        "non_canonical_model_id",
-        f"{path}.model_id",
-        model_id,
-    )
-    _require_evidence_invariant(
-        model_id is None or (bool(model_id) and model_id == model_id.strip()),
+        _is_canonical_string(
+            model_id,
+            allow_none=True,
+            nonempty=True,
+            trimmed=True,
+        ),
         "non_canonical_model_id",
         f"{path}.model_id",
         model_id,
@@ -1134,16 +1149,20 @@ def _validated_field_observation(value: object) -> FieldObservation:
             (stop_reason, StopReason),
             (hfr_unit, HfrUnit),
         )
-        if type(observation_id) is not str:
+        if not _is_canonical_string(observation_id):
             raise ValueError("non_canonical_observation_string")
         if any(
-            item is not None and type(item) is not str
+            not _is_canonical_string(item, allow_none=True)
             for item in exact_optional_strings
         ):
             raise ValueError("non_canonical_observation_string")
         if any(
-            item is not None
-            and (type(item) is not str or not item or item != item.strip())
+            not _is_canonical_string(
+                item,
+                allow_none=True,
+                nonempty=True,
+                trimmed=True,
+            )
             for item in exact_trimmed_optional_strings
         ):
             raise ValueError("non_canonical_observation_string")
@@ -1300,7 +1319,7 @@ def _validated_parameters(value: object) -> ForecastObservationParameters:
         interpolation_enabled = temporal_policy.interpolation_enabled
         averaging_enabled = temporal_policy.averaging_enabled
         if any(
-            type(item) is not str or not item or item != item.strip()
+            not _is_canonical_string(item, nonempty=True, trimmed=True)
             for item in (temporal_version, timezone_name, selection_mode)
         ):
             raise ValueError("non_canonical_temporal_policy_string")
@@ -1313,10 +1332,10 @@ def _validated_parameters(value: object) -> ForecastObservationParameters:
 
         cloud_version = cloud_mapping_policy.version
         boundaries_percent = cloud_mapping_policy.boundaries_percent
-        if (
-            type(cloud_version) is not str
-            or not cloud_version
-            or cloud_version != cloud_version.strip()
+        if not _is_canonical_string(
+            cloud_version,
+            nonempty=True,
+            trimmed=True,
         ):
             raise ValueError("non_canonical_cloud_mapping_version")
         if type(boundaries_percent) is not tuple or any(
@@ -1604,11 +1623,10 @@ def compare_forecast_to_field_observation(
             "field_observation_missing"
         )
     observation = _validated_field_observation(observation)
-    if type(algorithm_version) is not str:
-        raise ForecastObservationComparisonInputError("invalid_algorithm_version")
-    if (
-        not algorithm_version
-        or algorithm_version != algorithm_version.strip()
+    if not _is_canonical_string(
+        algorithm_version,
+        nonempty=True,
+        trimmed=True,
     ):
         raise ForecastObservationComparisonInputError("invalid_algorithm_version")
     effective_parameters = (

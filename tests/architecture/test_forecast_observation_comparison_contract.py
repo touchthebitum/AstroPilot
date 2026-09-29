@@ -1815,6 +1815,126 @@ def test_algorithm_version_must_be_nonempty_and_already_canonical(
         )
 
 
+@pytest.mark.parametrize("surrogate", ["\ud800", "\udc00"])
+def test_algorithm_version_with_isolated_surrogate_is_rejected(surrogate):
+    with pytest.raises(
+        ForecastObservationComparisonInputError,
+        match="^invalid_algorithm_version$",
+    ):
+        compare(
+            observation(),
+            point(WeatherVariable.TEMPERATURE_C, 8.0),
+            algorithm_version=surrogate,
+        )
+
+
+@pytest.mark.parametrize("surrogate", ["\ud800", "\udc00"])
+@pytest.mark.parametrize(
+    "policy_name",
+    ["temporal_policy", "cloud_mapping_policy"],
+)
+def test_policy_version_with_isolated_surrogate_is_rejected(
+    surrogate,
+    policy_name,
+):
+    parameters = ForecastObservationParameters()
+    object.__setattr__(getattr(parameters, policy_name), "version", surrogate)
+
+    with pytest.raises(
+        ForecastObservationComparisonInputError,
+        match="^invalid_forecast_observation_parameters$",
+    ):
+        compare(
+            observation(),
+            point(WeatherVariable.TEMPERATURE_C, 8.0),
+            parameters=parameters,
+        )
+
+
+@pytest.mark.parametrize("surrogate", ["\ud800", "\udc00"])
+def test_observation_source_id_with_isolated_surrogate_is_rejected(surrogate):
+    source = observation()
+    object.__setattr__(source.provenance, "source_id", surrogate)
+
+    with pytest.raises(
+        ForecastObservationComparisonInputError,
+        match="^field_observation_invalid$",
+    ):
+        compare(
+            source,
+            point(WeatherVariable.TEMPERATURE_C, 8.0),
+        )
+
+
+@pytest.mark.parametrize("surrogate", ["\ud800", "\udc00"])
+def test_evidence_provider_id_with_isolated_surrogate_is_structured_invalid(
+    surrogate,
+):
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    object.__setattr__(forecast_point, "provider_id", surrogate)
+    evidence = DecisionForecastEvidence((forecast_point,))
+
+    result = compare_forecast_to_field_observation(
+        evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert result.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert reason_codes(result) == ("decision_forecast_evidence_invalid",)
+    assert result.identity_persistable is True
+    invalid_document = _canonical_evidence(evidence)
+    assert invalid_document["invalid_reason_code"] == (
+        "non_canonical_provider_id"
+    )
+    assert invalid_document["invalid_path"] == "forecast_points[0].provider_id"
+    assert surrogate not in str(invalid_document)
+
+
+def test_valid_unicode_identity_strings_remain_deterministic():
+    source = observation()
+    object.__setattr__(
+        source.provenance,
+        "source_id",
+        "station-météo-東京-🔭",
+    )
+    forecast_point = point(
+        WeatherVariable.TEMPERATURE_C,
+        8.0,
+        provider="météo-東京-☀️",
+        model="modèle-気象-🌙",
+    )
+    parameters = ForecastObservationParameters()
+    object.__setattr__(
+        parameters.temporal_policy,
+        "version",
+        "nearest-prévision-時間-⏱️",
+    )
+    object.__setattr__(
+        parameters.cloud_mapping_policy,
+        "version",
+        "nuages-échelle-雲-☁️",
+    )
+
+    first = compare(
+        source,
+        forecast_point,
+        algorithm_version="comparaison-prévision-観測-🔭",
+        parameters=parameters,
+    )
+    second = compare(
+        source,
+        forecast_point,
+        algorithm_version="comparaison-prévision-観測-🔭",
+        parameters=parameters,
+    )
+
+    assert first.status is ForecastObservationComparisonStatus.COMPARABLE
+    assert first.identity_persistable is True
+    assert first.source_digest == second.source_digest
+    assert first.comparison_id == second.comparison_id
+
+
 def test_canonical_algorithm_version_is_stable():
     first = compare(
         observation(),
