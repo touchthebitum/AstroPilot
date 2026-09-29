@@ -1,7 +1,7 @@
 import ast
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -36,6 +36,9 @@ from decision.models.forecast_observation_comparison import (
 from decision.services.forecast_observation_comparison import (
     ForecastObservationComparisonInputError,
     _canonical_evidence,
+    _digest,
+    _fingerprint_is_persistable,
+    _safe_fingerprint_token,
     compare_forecast_to_field_observation,
 )
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
@@ -90,10 +93,17 @@ ALLOWED_IMPORTS = {
         ("datetime", "time"),
         ("datetime", "timedelta"),
         ("datetime", "timezone"),
+        ("datetime", "tzinfo"),
         ("enum", "Enum"),
         ("types", "MemberDescriptorType"),
+        ("zoneinfo", "ZoneInfo"),
         ("decision.field_observation", "CloudState"),
         ("decision.field_observation", "FieldObservation"),
+        ("decision.field_observation", "ObservationProvenance"),
+        ("decision.field_observation", "ObservationQuality"),
+        ("decision.field_observation", "ObservedAcquisition"),
+        ("decision.field_observation", "ObservedConditions"),
+        ("decision.field_observation", "ObservedTechnical"),
         ("decision.field_observation", "QualityFlag"),
         ("decision.models.forecast_observation_comparison", "ALGORITHM_VERSION"),
         ("decision.models.forecast_observation_comparison", "FORECAST_SCOPE"),
@@ -806,6 +816,151 @@ def test_same_named_timezones_with_distinct_offsets_have_distinct_identity():
     assert plus_one.comparison_id != plus_two.comparison_id
 
 
+def test_zoneinfo_wall_times_keep_structured_distinct_identity():
+    def corrupted_evidence(zone_name):
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(
+            forecast_point,
+            "retrieved_at_utc",
+            datetime(2026, 9, 1, 17, 0, tzinfo=ZoneInfo(zone_name)),
+        )
+        return DecisionForecastEvidence((forecast_point,))
+
+    zurich_evidence = corrupted_evidence("Europe/Zurich")
+    london_evidence = corrupted_evidence("Europe/London")
+    zurich = compare_forecast_to_field_observation(
+        zurich_evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    repeated_zurich = compare_forecast_to_field_observation(
+        zurich_evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    london = compare_forecast_to_field_observation(
+        london_evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert zurich.identity_persistable is False
+    assert london.identity_persistable is False
+    assert zurich.source_digest == repeated_zurich.source_digest
+    assert zurich.comparison_id == repeated_zurich.comparison_id
+    assert zurich.source_digest != london.source_digest
+    assert zurich.comparison_id != london.comparison_id
+
+
+def test_opaque_timezone_makes_invalid_identity_non_persistable_and_stable():
+    class OpaqueTimezone(tzinfo):
+        __slots__ = ()
+
+        def utcoffset(self, value):
+            return timedelta(hours=1)
+
+        def dst(self, value):
+            return timedelta(0)
+
+        def tzname(self, value):
+            return "OPAQUE"
+
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    object.__setattr__(
+        forecast_point,
+        "retrieved_at_utc",
+        datetime(2026, 9, 1, 17, 0, tzinfo=OpaqueTimezone()),
+    )
+    evidence = DecisionForecastEvidence((forecast_point,))
+
+    first = compare_forecast_to_field_observation(
+        evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    second = compare_forecast_to_field_observation(
+        evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert first.identity_persistable is False
+    assert first.source_digest == second.source_digest
+    assert first.comparison_id == second.comparison_id
+
+
+def test_datetime_subclass_slot_state_is_not_hidden_by_primitive_digest():
+    class ExtendedDatetime(datetime):
+        __slots__ = ("marker",)
+
+    def corrupted_evidence(marker):
+        value = ExtendedDatetime(
+            2026,
+            9,
+            1,
+            17,
+            0,
+            tzinfo=timezone.utc,
+        )
+        value.marker = marker
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point, "retrieved_at_utc", value)
+        return DecisionForecastEvidence((forecast_point,))
+
+    first_evidence = corrupted_evidence("first")
+    first = compare_forecast_to_field_observation(
+        first_evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    repeated_first = compare_forecast_to_field_observation(
+        first_evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    second = compare_forecast_to_field_observation(
+        corrupted_evidence("second"),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert first.identity_persistable is True
+    assert second.identity_persistable is True
+    assert first.source_digest == repeated_first.source_digest
+    assert first.comparison_id == repeated_first.comparison_id
+    assert first.source_digest != second.source_digest
+    assert first.comparison_id != second.comparison_id
+
+
+@pytest.mark.parametrize(
+    ("base_type", "arguments"),
+    [
+        (date, (2026, 9, 1)),
+        (time, (17, 0)),
+        (timedelta, (0, 1)),
+    ],
+)
+def test_other_temporal_subclass_slot_state_is_fully_fingerprinted(
+    base_type,
+    arguments,
+):
+    class ExtendedTemporal(base_type):
+        __slots__ = ("marker",)
+
+    first = ExtendedTemporal(*arguments)
+    first.marker = "first"
+    second = ExtendedTemporal(*arguments)
+    second.marker = "second"
+    first_token = _safe_fingerprint_token(first)
+    repeated_first_token = _safe_fingerprint_token(first)
+    second_token = _safe_fingerprint_token(second)
+
+    assert _fingerprint_is_persistable(first_token) is True
+    assert _fingerprint_is_persistable(second_token) is True
+    assert _digest(first_token) == _digest(repeated_first_token)
+    assert _digest(first_token) != _digest(second_token)
+
+
 def test_hybrid_dict_and_slots_state_is_fully_fingerprinted():
     class HybridState:
         __slots__ = ("slot_state", "__dict__")
@@ -996,6 +1151,108 @@ def test_missing_or_invalid_observation_raises_typed_input_error(invalid, code):
             DecisionForecastEvidence(()),
             invalid,
             computed_at_utc=COMPUTED_AT,
+        )
+
+
+def test_structurally_corrupted_observation_is_rejected_before_digest():
+    source = observation()
+    object.__setattr__(source, "conditions", "broken")
+
+    with pytest.raises(
+        ForecastObservationComparisonInputError,
+        match="^field_observation_invalid$",
+    ):
+        compare_forecast_to_field_observation(
+            DecisionForecastEvidence(()),
+            source,
+            computed_at_utc=COMPUTED_AT,
+        )
+
+
+def test_observation_subclass_extra_state_is_rejected_without_identity():
+    class ExtendedFieldObservation(FieldObservation):
+        __slots__ = ("marker",)
+
+    def extended_observation(marker):
+        source = observation()
+        extended = ExtendedFieldObservation(
+            observation_id=source.observation_id,
+            decision_id=source.decision_id,
+            execution_id=source.execution_id,
+            observed_at_utc=source.observed_at_utc,
+            recorded_at_utc=source.recorded_at_utc,
+            supersedes_observation_id=source.supersedes_observation_id,
+            conditions=source.conditions,
+            acquisition=source.acquisition,
+            technical=source.technical,
+            provenance=source.provenance,
+            quality=source.quality,
+        )
+        object.__setattr__(extended, "marker", marker)
+        return extended
+
+    for marker in ("first", "second"):
+        with pytest.raises(
+            ForecastObservationComparisonInputError,
+            match="^field_observation_invalid$",
+        ):
+            compare_forecast_to_field_observation(
+                DecisionForecastEvidence(()),
+                extended_observation(marker),
+                computed_at_utc=COMPUTED_AT,
+            )
+
+
+def test_observation_section_subclass_extra_state_is_rejected():
+    class ExtendedConditions(ObservedConditions):
+        __slots__ = ("marker",)
+
+    for marker in ("first", "second"):
+        conditions = ExtendedConditions(temperature_c=8.0)
+        object.__setattr__(conditions, "marker", marker)
+        source = observation()
+        object.__setattr__(source, "conditions", conditions)
+        with pytest.raises(
+            ForecastObservationComparisonInputError,
+            match="^field_observation_invalid$",
+        ):
+            compare_forecast_to_field_observation(
+                DecisionForecastEvidence(()),
+                source,
+                computed_at_utc=COMPUTED_AT,
+            )
+
+
+@pytest.mark.parametrize("invalid_parameters", [False, 0, "", (), [], {}])
+def test_falsy_non_parameter_values_are_rejected(invalid_parameters):
+    with pytest.raises(
+        ForecastObservationComparisonInputError,
+        match="^invalid_forecast_observation_parameters$",
+    ):
+        compare_forecast_to_field_observation(
+            DecisionForecastEvidence(()),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+            parameters=invalid_parameters,
+        )
+
+
+def test_parameter_subclass_is_rejected_by_exact_type_contract():
+    class ExtendedParameters(ForecastObservationParameters):
+        __slots__ = ("marker",)
+
+    parameters = ExtendedParameters()
+    object.__setattr__(parameters, "marker", "material")
+
+    with pytest.raises(
+        ForecastObservationComparisonInputError,
+        match="^invalid_forecast_observation_parameters$",
+    ):
+        compare_forecast_to_field_observation(
+            DecisionForecastEvidence(()),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+            parameters=parameters,
         )
 
 

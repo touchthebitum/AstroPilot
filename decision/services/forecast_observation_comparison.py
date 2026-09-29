@@ -3,13 +3,19 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from enum import Enum
 from types import MemberDescriptorType
+from zoneinfo import ZoneInfo
 
 from decision.field_observation import (
     CloudState,
     FieldObservation,
+    ObservationProvenance,
+    ObservationQuality,
+    ObservedAcquisition,
+    ObservedConditions,
+    ObservedTechnical,
     QualityFlag,
 )
 from decision.models.forecast_observation_comparison import (
@@ -172,91 +178,117 @@ def _safe_fingerprint_token(
             }
         if type(value) is float:
             return {"kind": "float", "digest": _digest(value.hex())}
-        if isinstance(value, datetime):
-            return {
-                "kind": "datetime",
-                "type": f"{type(value).__module__}.{type(value).__qualname__}",
-                "digest": _digest(
-                    (
-                        datetime.year.__get__(value, datetime),
-                        datetime.month.__get__(value, datetime),
-                        datetime.day.__get__(value, datetime),
-                        datetime.hour.__get__(value, datetime),
-                        datetime.minute.__get__(value, datetime),
-                        datetime.second.__get__(value, datetime),
-                        datetime.microsecond.__get__(value, datetime),
-                        datetime.fold.__get__(value, datetime),
-                        _safe_fingerprint_token(
-                            datetime.tzinfo.__get__(value, datetime),
-                            seen=seen,
-                            depth=depth + 1,
-                        ),
-                    )
-                ),
-            }
-        if isinstance(value, date):
-            return {
-                "kind": "date",
-                "type": f"{type(value).__module__}.{type(value).__qualname__}",
-                "digest": _digest(
-                    (
-                        date.year.__get__(value, date),
-                        date.month.__get__(value, date),
-                        date.day.__get__(value, date),
-                    )
-                ),
-            }
-        if isinstance(value, time):
-            return {
-                "kind": "time",
-                "type": f"{type(value).__module__}.{type(value).__qualname__}",
-                "digest": _digest(
-                    (
-                        time.hour.__get__(value, time),
-                        time.minute.__get__(value, time),
-                        time.second.__get__(value, time),
-                        time.microsecond.__get__(value, time),
-                        time.fold.__get__(value, time),
-                        _safe_fingerprint_token(
-                            time.tzinfo.__get__(value, time),
-                            seen=seen,
-                            depth=depth + 1,
-                        ),
-                    )
-                ),
-            }
-        if isinstance(value, timedelta):
-            return {
-                "kind": "timedelta",
-                "type": f"{type(value).__module__}.{type(value).__qualname__}",
-                "digest": _digest(
-                    (
-                        timedelta.days.__get__(value, timedelta),
-                        timedelta.seconds.__get__(value, timedelta),
-                        timedelta.microseconds.__get__(value, timedelta),
-                    )
-                ),
-            }
         if type(value) is timezone:
             offset = value.utcoffset(None)
             name = value.tzname(None)
             return {
                 "kind": "timezone",
-                "digest": _digest(
-                    {
-                        "offset": _safe_fingerprint_token(
-                            offset,
-                            seen=seen,
-                            depth=depth + 1,
-                        ),
-                        "name": _safe_fingerprint_token(
-                            name,
-                            seen=seen,
-                            depth=depth + 1,
-                        ),
-                    }
+                "offset": _safe_fingerprint_token(
+                    offset,
+                    seen=seen,
+                    depth=depth + 1,
+                ),
+                "name": _safe_fingerprint_token(
+                    name,
+                    seen=seen,
+                    depth=depth + 1,
                 ),
             }
+        if type(value) is ZoneInfo:
+            return {
+                "kind": "zoneinfo",
+                "key": _safe_fingerprint_token(
+                    value.key,
+                    seen=seen,
+                    depth=depth + 1,
+                ),
+                # A key distinguishes ordinary zones but does not prove which
+                # ruleset created a ZoneInfo (for example, from_file permits a
+                # caller-supplied key). Keep the identity useful but refuse to
+                # advertise it as persistence-safe without the full ruleset.
+                "persistable": False,
+            }
+        if isinstance(value, tzinfo):
+            if seen is None:
+                seen = set()
+            state, _ = _safe_object_state(
+                value,
+                seen=seen,
+                depth=depth,
+            )
+            return {
+                "kind": "arbitrary_tzinfo",
+                "type": f"{type(value).__module__}.{type(value).__qualname__}",
+                "state": state or {"kind": "opaque"},
+                "persistable": False,
+            }
+        if isinstance(value, datetime):
+            return _safe_temporal_fingerprint(
+                value,
+                base_type=datetime,
+                kind="datetime",
+                components=(
+                    ("year", datetime.year.__get__(value, datetime)),
+                    ("month", datetime.month.__get__(value, datetime)),
+                    ("day", datetime.day.__get__(value, datetime)),
+                    ("hour", datetime.hour.__get__(value, datetime)),
+                    ("minute", datetime.minute.__get__(value, datetime)),
+                    ("second", datetime.second.__get__(value, datetime)),
+                    (
+                        "microsecond",
+                        datetime.microsecond.__get__(value, datetime),
+                    ),
+                    ("fold", datetime.fold.__get__(value, datetime)),
+                    ("tzinfo", datetime.tzinfo.__get__(value, datetime)),
+                ),
+                seen=seen,
+                depth=depth,
+            )
+        if isinstance(value, date):
+            return _safe_temporal_fingerprint(
+                value,
+                base_type=date,
+                kind="date",
+                components=(
+                    ("year", date.year.__get__(value, date)),
+                    ("month", date.month.__get__(value, date)),
+                    ("day", date.day.__get__(value, date)),
+                ),
+                seen=seen,
+                depth=depth,
+            )
+        if isinstance(value, time):
+            return _safe_temporal_fingerprint(
+                value,
+                base_type=time,
+                kind="time",
+                components=(
+                    ("hour", time.hour.__get__(value, time)),
+                    ("minute", time.minute.__get__(value, time)),
+                    ("second", time.second.__get__(value, time)),
+                    ("microsecond", time.microsecond.__get__(value, time)),
+                    ("fold", time.fold.__get__(value, time)),
+                    ("tzinfo", time.tzinfo.__get__(value, time)),
+                ),
+                seen=seen,
+                depth=depth,
+            )
+        if isinstance(value, timedelta):
+            return _safe_temporal_fingerprint(
+                value,
+                base_type=timedelta,
+                kind="timedelta",
+                components=(
+                    ("days", timedelta.days.__get__(value, timedelta)),
+                    ("seconds", timedelta.seconds.__get__(value, timedelta)),
+                    (
+                        "microseconds",
+                        timedelta.microseconds.__get__(value, timedelta),
+                    ),
+                ),
+                seen=seen,
+                depth=depth,
+            )
         if type(value) is WeatherVariable:
             return {
                 "kind": "weather_variable",
@@ -346,6 +378,124 @@ def _safe_fingerprint_token(
         }
     except Exception:
         return {"kind": "unavailable", "persistable": False}
+
+
+def _safe_temporal_fingerprint(
+    value: object,
+    *,
+    base_type: type,
+    kind: str,
+    components: tuple[tuple[str, object], ...],
+    seen: set[int] | None,
+    depth: int,
+) -> dict:
+    """Fingerprint temporal primitives without hiding nested safety markers."""
+    if depth >= 8:
+        return {"kind": "depth_limit", "persistable": False}
+    if seen is None:
+        seen = set()
+    identity = id(value)
+    if identity in seen:
+        return {"kind": "cycle", "persistable": False}
+    seen.add(identity)
+    try:
+        component_tokens = {
+            name: _safe_fingerprint_token(
+                component,
+                seen=seen,
+                depth=depth + 1,
+            )
+            for name, component in components
+        }
+        storage = {"kind": "exact_builtin"}
+        storage_is_complete = True
+        if type(value) is not base_type:
+            storage, storage_is_complete = _safe_temporal_subclass_state(
+                value,
+                base_type=base_type,
+                seen=seen,
+                depth=depth,
+            )
+    finally:
+        seen.remove(identity)
+    return {
+        "kind": kind,
+        "type": f"{type(value).__module__}.{type(value).__qualname__}",
+        "components": component_tokens,
+        "storage": storage,
+        "persistable": storage_is_complete,
+    }
+
+
+def _safe_temporal_subclass_state(
+    value: object,
+    *,
+    base_type: type,
+    seen: set[int],
+    depth: int,
+) -> tuple[dict, bool]:
+    """Return all Python storage added above a known temporal primitive."""
+    try:
+        attributes = object.__getattribute__(value, "__dict__")
+    except AttributeError:
+        attributes = None
+    except Exception:
+        return {"kind": "unavailable"}, False
+    if attributes is not None and type(attributes) is not dict:
+        return {"kind": "unavailable"}, False
+
+    slot_values = {}
+    complete = True
+    for owner in type(value).__mro__:
+        if owner is base_type:
+            break
+        owner_slots = vars(owner).get("__slots__")
+        if owner_slots is None:
+            continue
+        if type(owner_slots) is str:
+            owner_slots = (owner_slots,)
+        elif type(owner_slots) not in (tuple, list):
+            complete = False
+            continue
+        for slot_name in owner_slots:
+            if type(slot_name) is not str:
+                complete = False
+                continue
+            if slot_name in ("__dict__", "__weakref__"):
+                continue
+            descriptor = vars(owner).get(slot_name)
+            if type(descriptor) is not MemberDescriptorType:
+                complete = False
+                continue
+            qualified_name = (
+                f"{owner.__module__}.{owner.__qualname__}.{slot_name}"
+            )
+            try:
+                slot_value = descriptor.__get__(value, type(value))
+            except AttributeError:
+                slot_values[qualified_name] = {"kind": "unset"}
+                continue
+            except Exception:
+                complete = False
+                continue
+            slot_values[qualified_name] = _safe_fingerprint_token(
+                slot_value,
+                seen=seen,
+                depth=depth + 1,
+            )
+    dictionary_token = (
+        _safe_fingerprint_token(
+            attributes,
+            seen=seen,
+            depth=depth + 1,
+        )
+        if type(attributes) is dict
+        else {"kind": "absent"}
+    )
+    return {
+        "dictionary": dictionary_token,
+        "slots": slot_values,
+    }, complete
 
 
 def _safe_object_state(
@@ -872,6 +1022,123 @@ def _evidence_is_well_formed(evidence: object) -> bool:
     return _inspect_evidence(evidence)[0]
 
 
+def _validated_field_observation(value: object) -> FieldObservation:
+    """Rebuild an observation from exact, known section types.
+
+    This validation deliberately runs before canonicalization or property
+    access. Subclasses are rejected because their additional material storage
+    is outside the v1 observation identity contract.
+    """
+    if type(value) is not FieldObservation:
+        raise ForecastObservationComparisonInputError(
+            "field_observation_invalid"
+        )
+    try:
+        conditions = value.conditions
+        acquisition = value.acquisition
+        technical = value.technical
+        provenance = value.provenance
+        quality = value.quality
+        if type(conditions) is not ObservedConditions:
+            raise ValueError("invalid_conditions")
+        if type(acquisition) is not ObservedAcquisition:
+            raise ValueError("invalid_acquisition")
+        if type(technical) is not ObservedTechnical:
+            raise ValueError("invalid_technical")
+        if type(provenance) is not ObservationProvenance:
+            raise ValueError("invalid_provenance")
+        if type(quality) is not ObservationQuality:
+            raise ValueError("invalid_quality")
+
+        rebuilt_conditions = ObservedConditions(
+            temperature_c=conditions.temperature_c,
+            relative_humidity_percent=conditions.relative_humidity_percent,
+            cloud_state=conditions.cloud_state,
+            transparency=conditions.transparency,
+            seeing=conditions.seeing,
+            wind_speed_kmh=conditions.wind_speed_kmh,
+            surface_condition=conditions.surface_condition,
+            moon_halo=conditions.moon_halo,
+        )
+        rebuilt_acquisition = ObservedAcquisition(
+            attempted_frames=acquisition.attempted_frames,
+            usable_frames=acquisition.usable_frames,
+            stop_reason=acquisition.stop_reason,
+        )
+        rebuilt_technical = ObservedTechnical(
+            hfr=technical.hfr,
+            hfr_unit=technical.hfr_unit,
+            sky_background=technical.sky_background,
+            sky_background_unit=technical.sky_background_unit,
+            guiding_rms_arcsec=technical.guiding_rms_arcsec,
+        )
+        rebuilt_provenance = ObservationProvenance(
+            source_type=provenance.source_type,
+            capture_method=provenance.capture_method,
+            source_id=provenance.source_id,
+            imported_at_utc=provenance.imported_at_utc,
+        )
+        rebuilt_quality = ObservationQuality(
+            confidence=quality.confidence,
+            flags=quality.flags,
+        )
+        rebuilt = FieldObservation(
+            observation_id=value.observation_id,
+            decision_id=value.decision_id,
+            execution_id=value.execution_id,
+            observed_at_utc=value.observed_at_utc,
+            recorded_at_utc=value.recorded_at_utc,
+            supersedes_observation_id=value.supersedes_observation_id,
+            conditions=rebuilt_conditions,
+            acquisition=rebuilt_acquisition,
+            technical=rebuilt_technical,
+            provenance=rebuilt_provenance,
+            quality=rebuilt_quality,
+        )
+        exact_optional_strings = (
+            rebuilt.decision_id,
+            rebuilt.execution_id,
+            rebuilt.supersedes_observation_id,
+            rebuilt.provenance.source_id,
+            rebuilt.technical.sky_background_unit,
+        )
+        exact_optional_datetimes = (
+            rebuilt.provenance.imported_at_utc,
+        )
+        exact_optional_integers = (
+            rebuilt.acquisition.attempted_frames,
+            rebuilt.acquisition.usable_frames,
+        )
+        if type(rebuilt.observation_id) is not str:
+            raise ValueError("non_canonical_observation_id")
+        if any(
+            item is not None and type(item) is not str
+            for item in exact_optional_strings
+        ):
+            raise ValueError("non_canonical_observation_string")
+        if type(rebuilt.observed_at_utc) is not datetime or type(
+            rebuilt.recorded_at_utc
+        ) is not datetime:
+            raise ValueError("non_canonical_observation_datetime")
+        if any(
+            item is not None and type(item) is not datetime
+            for item in exact_optional_datetimes
+        ):
+            raise ValueError("non_canonical_observation_datetime")
+        if any(
+            item is not None and type(item) is not int
+            for item in exact_optional_integers
+        ):
+            raise ValueError("non_canonical_observation_integer")
+        return rebuilt
+    except ForecastObservationComparisonInputError:
+        raise
+    except Exception as error:
+        raise ForecastObservationComparisonInputError(
+            "field_observation_invalid"
+        ) from error
+
+
 def _canonical_observation(observation: FieldObservation) -> dict:
     return {
         "observation_id": observation.observation_id,
@@ -1162,18 +1429,18 @@ def compare_forecast_to_field_observation(
     a result because its invalid evidence could not be covered completely and
     safely by the redacted identity document.
     """
-    if not isinstance(observation, FieldObservation):
-        code = (
+    if observation is None:
+        raise ForecastObservationComparisonInputError(
             "field_observation_missing"
-            if observation is None
-            else "field_observation_invalid"
         )
-        raise ForecastObservationComparisonInputError(code)
+    observation = _validated_field_observation(observation)
     if not isinstance(algorithm_version, str) or not algorithm_version.strip():
         raise ForecastObservationComparisonInputError("invalid_algorithm_version")
     algorithm_version = algorithm_version.strip()
-    effective_parameters = parameters or ForecastObservationParameters()
-    if not isinstance(effective_parameters, ForecastObservationParameters):
+    effective_parameters = (
+        ForecastObservationParameters() if parameters is None else parameters
+    )
+    if type(effective_parameters) is not ForecastObservationParameters:
         raise ForecastObservationComparisonInputError(
             "invalid_forecast_observation_parameters"
         )
