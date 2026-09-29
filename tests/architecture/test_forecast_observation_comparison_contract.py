@@ -85,6 +85,7 @@ ALLOWED_IMPORTS = {
         ("json", None),
         ("dataclasses", "asdict"),
         ("datetime", "datetime"),
+        ("datetime", "timedelta"),
         ("enum", "Enum"),
         ("decision.field_observation", "CloudState"),
         ("decision.field_observation", "FieldObservation"),
@@ -589,6 +590,97 @@ def test_malformed_evidence_container_returns_structured_invalid_reason():
 
     assert result.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
     assert reason_codes(result) == ("decision_forecast_evidence_invalid",)
+
+
+def test_list_corruption_of_canonical_point_values_fails_closed():
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    evidence = DecisionForecastEvidence((forecast_point,))
+    object.__setattr__(forecast_point, "values", list(forecast_point.values))
+
+    result = compare_forecast_to_field_observation(
+        evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert result.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert reason_codes(result) == ("decision_forecast_evidence_invalid",)
+    assert result.results[0].reasons[0].code == (
+        "decision_forecast_evidence_invalid"
+    )
+
+
+def test_runtime_error_while_normalizing_corrupted_datetime_fails_closed():
+    class CorruptedDatetime(datetime):
+        def astimezone(self, tz=None):
+            raise RuntimeError("corrupted datetime")
+
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    evidence = DecisionForecastEvidence((forecast_point,))
+    corrupted_datetime = CorruptedDatetime(
+        2026, 9, 1, 17, 0, tzinfo=timezone.utc
+    )
+    object.__setattr__(
+        forecast_point, "retrieved_at_utc", corrupted_datetime
+    )
+
+    result = compare_forecast_to_field_observation(
+        evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert result.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert reason_codes(result) == ("decision_forecast_evidence_invalid",)
+    assert result.results[0].reasons[0].code == (
+        "decision_forecast_evidence_invalid"
+    )
+
+
+def test_materially_different_invalid_evidence_has_distinct_identity():
+    invalid_provider_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    object.__setattr__(invalid_provider_point, "provider_id", "")
+    invalid_unit_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    object.__setattr__(invalid_unit_point.values[0], "unit", "K")
+
+    invalid_provider = compare_forecast_to_field_observation(
+        DecisionForecastEvidence((invalid_provider_point,)),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    repeated_invalid_provider = compare_forecast_to_field_observation(
+        DecisionForecastEvidence((invalid_provider_point,)),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    invalid_unit = compare_forecast_to_field_observation(
+        DecisionForecastEvidence((invalid_unit_point,)),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert (
+        invalid_provider.status
+        is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    )
+    assert (
+        invalid_unit.status
+        is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    )
+    assert reason_codes(invalid_provider) == (
+        "decision_forecast_evidence_invalid",
+    )
+    assert reason_codes(invalid_unit) == ("decision_forecast_evidence_invalid",)
+    assert invalid_provider.source_digest != invalid_unit.source_digest
+    assert invalid_provider.comparison_id != invalid_unit.comparison_id
+    assert (
+        repeated_invalid_provider.source_digest
+        == invalid_provider.source_digest
+    )
+    assert (
+        repeated_invalid_provider.comparison_id
+        == invalid_provider.comparison_id
+    )
 
 
 @pytest.mark.parametrize(

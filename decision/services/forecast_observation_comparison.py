@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 
 from decision.field_observation import (
@@ -137,64 +137,474 @@ def _deduplicate_identical_points(
     return tuple(unique)
 
 
-def _canonical_evidence(evidence: object) -> dict:
+class _InvalidEvidence(ValueError):
+    def __init__(self, code: str, path: str, value: object) -> None:
+        self.code = code
+        self.path = path
+        self.value = value
+        super().__init__(code)
+
+
+def _safe_fingerprint_token(
+    value: object,
+    *,
+    seen: set[int] | None = None,
+    depth: int = 0,
+) -> dict:
+    try:
+        if value is None:
+            return {"kind": "none"}
+        if type(value) is str:
+            encoded = value.encode("utf-8", errors="surrogatepass")
+            return {
+                "kind": "str",
+                "digest": hashlib.sha256(encoded).hexdigest(),
+            }
+        if type(value) is bool:
+            return {"kind": "bool", "value": value}
+        if type(value) is int:
+            byte_count = max(1, (value.bit_length() + 8) // 8)
+            encoded = value.to_bytes(byte_count, "big", signed=True)
+            return {
+                "kind": "int",
+                "digest": hashlib.sha256(encoded).hexdigest(),
+            }
+        if type(value) is float:
+            return {"kind": "float", "digest": _digest(value.hex())}
+        if type(value) is datetime:
+            return {
+                "kind": "datetime",
+                "digest": _digest(_canonical_datetime(value)),
+            }
+        if type(value) is timedelta:
+            return {
+                "kind": "timedelta",
+                "digest": _digest(value.total_seconds()),
+            }
+        if type(value) is WeatherVariable:
+            return {
+                "kind": "weather_variable",
+                "digest": _digest(value.value),
+            }
+        if depth >= 8:
+            return {"kind": "depth_limit"}
+        if seen is None:
+            seen = set()
+        identity = id(value)
+        if identity in seen:
+            return {"kind": "cycle"}
+        if type(value) in (tuple, list):
+            seen.add(identity)
+            items = [
+                _safe_fingerprint_token(item, seen=seen, depth=depth + 1)
+                for item in value
+            ]
+            seen.remove(identity)
+            return {"kind": type(value).__name__, "items": items}
+        if type(value) in (
+            DecisionForecastEvidence,
+            WeatherForecastPoint,
+            WeatherLocation,
+            WeatherValue,
+        ):
+            seen.add(identity)
+            attributes = vars(value)
+            fields = {
+                key: _safe_fingerprint_token(
+                    attributes[key], seen=seen, depth=depth + 1
+                )
+                for key in sorted(attributes)
+                if type(key) is str
+            }
+            seen.remove(identity)
+            return {"kind": type(value).__name__, "fields": fields}
+        return {
+            "kind": "unsupported",
+            "type": f"{type(value).__module__}.{type(value).__qualname__}",
+        }
+    except Exception:
+        return {"kind": "unavailable"}
+
+
+def _record_inspected_value(
+    context: dict,
+    fingerprint_parts: list[dict],
+    path: str,
+    value: object,
+) -> object:
+    context["path"] = path
+    context["value"] = value
+    fingerprint_parts.append(
+        {"path": path, "value": _safe_fingerprint_token(value)}
+    )
+    return value
+
+
+def _require_evidence_invariant(
+    condition: bool,
+    code: str,
+    path: str,
+    value: object,
+) -> None:
+    if not condition:
+        raise _InvalidEvidence(code, path, value)
+
+
+def _validated_location(
+    location: object,
+    *,
+    path: str,
+    context: dict,
+    fingerprint_parts: list[dict],
+) -> WeatherLocation:
+    _require_evidence_invariant(
+        type(location) is WeatherLocation,
+        "invalid_location_type",
+        path,
+        location,
+    )
+    latitude = _record_inspected_value(
+        context, fingerprint_parts, f"{path}.latitude", location.latitude
+    )
+    longitude = _record_inspected_value(
+        context, fingerprint_parts, f"{path}.longitude", location.longitude
+    )
+    altitude_m = _record_inspected_value(
+        context, fingerprint_parts, f"{path}.altitude_m", location.altitude_m
+    )
+    _require_evidence_invariant(
+        type(latitude) is float,
+        "non_canonical_latitude",
+        f"{path}.latitude",
+        latitude,
+    )
+    _require_evidence_invariant(
+        type(longitude) is float,
+        "non_canonical_longitude",
+        f"{path}.longitude",
+        longitude,
+    )
+    _require_evidence_invariant(
+        altitude_m is None or type(altitude_m) is float,
+        "non_canonical_altitude",
+        f"{path}.altitude_m",
+        altitude_m,
+    )
+    rebuilt = WeatherLocation(latitude, longitude, altitude_m=altitude_m)
+    _require_evidence_invariant(
+        rebuilt == location,
+        "location_invariant_mismatch",
+        path,
+        location,
+    )
+    return rebuilt
+
+
+def _validated_weather_value(
+    value: object,
+    *,
+    path: str,
+    context: dict,
+    fingerprint_parts: list[dict],
+) -> WeatherValue:
+    _require_evidence_invariant(
+        type(value) is WeatherValue,
+        "invalid_weather_value_type",
+        path,
+        value,
+    )
+    variable = _record_inspected_value(
+        context, fingerprint_parts, f"{path}.variable", value.variable
+    )
+    numeric_value = _record_inspected_value(
+        context, fingerprint_parts, f"{path}.value", value.value
+    )
+    unit = _record_inspected_value(
+        context, fingerprint_parts, f"{path}.unit", value.unit
+    )
+    aggregation_period = _record_inspected_value(
+        context,
+        fingerprint_parts,
+        f"{path}.aggregation_period",
+        value.aggregation_period,
+    )
+    _require_evidence_invariant(
+        type(variable) is WeatherVariable,
+        "invalid_weather_variable",
+        f"{path}.variable",
+        variable,
+    )
+    _require_evidence_invariant(
+        type(numeric_value) is float,
+        "non_canonical_weather_value",
+        f"{path}.value",
+        numeric_value,
+    )
+    _require_evidence_invariant(
+        type(unit) is str,
+        "non_canonical_weather_unit",
+        f"{path}.unit",
+        unit,
+    )
+    _require_evidence_invariant(
+        unit == CANONICAL_UNITS[variable],
+        "non_canonical_weather_unit",
+        f"{path}.unit",
+        unit,
+    )
+    _require_evidence_invariant(
+        aggregation_period is None or type(aggregation_period) is timedelta,
+        "non_canonical_aggregation_period",
+        f"{path}.aggregation_period",
+        aggregation_period,
+    )
+    rebuilt = WeatherValue(
+        variable=variable,
+        value=numeric_value,
+        unit=unit,
+        aggregation_period=aggregation_period,
+    )
+    _require_evidence_invariant(
+        rebuilt == value,
+        "weather_value_invariant_mismatch",
+        path,
+        value,
+    )
+    return rebuilt
+
+
+def _validated_forecast_point(
+    point: object,
+    *,
+    index: int,
+    context: dict,
+    fingerprint_parts: list[dict],
+) -> WeatherForecastPoint:
+    path = f"forecast_points[{index}]"
+    _require_evidence_invariant(
+        type(point) is WeatherForecastPoint,
+        "invalid_forecast_point_type",
+        path,
+        point,
+    )
+    provider_id = _record_inspected_value(
+        context, fingerprint_parts, f"{path}.provider_id", point.provider_id
+    )
+    model_id = _record_inspected_value(
+        context, fingerprint_parts, f"{path}.model_id", point.model_id
+    )
+    retrieved_at_utc = _record_inspected_value(
+        context,
+        fingerprint_parts,
+        f"{path}.retrieved_at_utc",
+        point.retrieved_at_utc,
+    )
+    forecast_for_utc = _record_inspected_value(
+        context,
+        fingerprint_parts,
+        f"{path}.forecast_for_utc",
+        point.forecast_for_utc,
+    )
+    requested_location = _record_inspected_value(
+        context,
+        fingerprint_parts,
+        f"{path}.requested_location",
+        point.requested_location,
+    )
+    grid_location = _record_inspected_value(
+        context,
+        fingerprint_parts,
+        f"{path}.grid_location",
+        point.grid_location,
+    )
+    values = _record_inspected_value(
+        context, fingerprint_parts, f"{path}.values", point.values
+    )
+    _require_evidence_invariant(
+        type(provider_id) is str,
+        "non_canonical_provider_id",
+        f"{path}.provider_id",
+        provider_id,
+    )
+    _require_evidence_invariant(
+        bool(provider_id) and provider_id == provider_id.strip(),
+        "non_canonical_provider_id",
+        f"{path}.provider_id",
+        provider_id,
+    )
+    _require_evidence_invariant(
+        model_id is None or type(model_id) is str,
+        "non_canonical_model_id",
+        f"{path}.model_id",
+        model_id,
+    )
+    _require_evidence_invariant(
+        model_id is None or (bool(model_id) and model_id == model_id.strip()),
+        "non_canonical_model_id",
+        f"{path}.model_id",
+        model_id,
+    )
+    _require_evidence_invariant(
+        type(retrieved_at_utc) is datetime,
+        "non_canonical_retrieved_at_utc",
+        f"{path}.retrieved_at_utc",
+        retrieved_at_utc,
+    )
+    _require_evidence_invariant(
+        type(forecast_for_utc) is datetime,
+        "non_canonical_forecast_for_utc",
+        f"{path}.forecast_for_utc",
+        forecast_for_utc,
+    )
+    _require_evidence_invariant(
+        type(values) is tuple,
+        "non_canonical_forecast_values",
+        f"{path}.values",
+        values,
+    )
+    _require_evidence_invariant(
+        bool(values),
+        "forecast_values_required",
+        f"{path}.values",
+        values,
+    )
+    rebuilt_requested_location = _validated_location(
+        requested_location,
+        path=f"{path}.requested_location",
+        context=context,
+        fingerprint_parts=fingerprint_parts,
+    )
+    rebuilt_grid_location = _validated_location(
+        grid_location,
+        path=f"{path}.grid_location",
+        context=context,
+        fingerprint_parts=fingerprint_parts,
+    )
+    rebuilt_values = tuple(
+        _validated_weather_value(
+            value,
+            path=f"{path}.values[{value_index}]",
+            context=context,
+            fingerprint_parts=fingerprint_parts,
+        )
+        for value_index, value in enumerate(values)
+    )
+    context["path"] = path
+    context["value"] = point
+    rebuilt = WeatherForecastPoint(
+        provider_id=provider_id,
+        model_id=model_id,
+        retrieved_at_utc=retrieved_at_utc,
+        forecast_for_utc=forecast_for_utc,
+        requested_location=rebuilt_requested_location,
+        grid_location=rebuilt_grid_location,
+        values=rebuilt_values,
+    )
+    _require_evidence_invariant(
+        rebuilt == point
+        and _canonical_datetime(rebuilt.retrieved_at_utc)
+        == _canonical_datetime(retrieved_at_utc)
+        and _canonical_datetime(rebuilt.forecast_for_utc)
+        == _canonical_datetime(forecast_for_utc),
+        "forecast_point_invariant_mismatch",
+        path,
+        point,
+    )
+    return rebuilt
+
+
+def _invalid_evidence_document(
+    *,
+    code: str,
+    path: str,
+    value: object,
+    fingerprint_parts: list[dict],
+) -> dict:
+    return {
+        "state": "invalid",
+        "invalid_reason_code": code,
+        "invalid_path": path,
+        "invalid_fingerprint": _digest(
+            {
+                "inspected": fingerprint_parts,
+                "failure": {
+                    "path": path,
+                    "value": _safe_fingerprint_token(value),
+                },
+            }
+        ),
+    }
+
+
+def _inspect_evidence(evidence: object) -> tuple[bool, dict]:
     if evidence is None:
-        return {"state": "missing"}
-    if not _evidence_is_well_formed(evidence):
-        return {"state": "invalid", "type": type(evidence).__name__}
-    assert isinstance(evidence, DecisionForecastEvidence)
-    points = _deduplicate_identical_points(evidence.forecast_points)
-    documents = [_canonical_forecast_point(point) for point in points]
-    documents.sort(key=_canonical_json)
-    return {"state": "present", "forecast_points": documents}
+        return False, {"state": "missing"}
+    fingerprint_parts: list[dict] = []
+    context = {"path": "evidence", "value": evidence}
+    try:
+        _require_evidence_invariant(
+            type(evidence) is DecisionForecastEvidence,
+            "invalid_evidence_type",
+            "evidence",
+            evidence,
+        )
+        points = _record_inspected_value(
+            context,
+            fingerprint_parts,
+            "forecast_points",
+            evidence.forecast_points,
+        )
+        _require_evidence_invariant(
+            type(points) is tuple,
+            "non_canonical_forecast_points",
+            "forecast_points",
+            points,
+        )
+        rebuilt_points = tuple(
+            _validated_forecast_point(
+                point,
+                index=index,
+                context=context,
+                fingerprint_parts=fingerprint_parts,
+            )
+            for index, point in enumerate(points)
+        )
+        context["path"] = "evidence"
+        context["value"] = evidence
+        rebuilt_evidence = DecisionForecastEvidence(rebuilt_points)
+        _require_evidence_invariant(
+            rebuilt_evidence == evidence,
+            "evidence_invariant_mismatch",
+            "evidence",
+            evidence,
+        )
+        unique_points = _deduplicate_identical_points(rebuilt_points)
+        documents = [_canonical_forecast_point(point) for point in unique_points]
+        documents.sort(key=_canonical_json)
+        return True, {"state": "present", "forecast_points": documents}
+    except Exception as error:
+        if isinstance(error, _InvalidEvidence):
+            code = error.code
+            path = error.path
+            value = error.value
+        else:
+            code = "evidence_inspection_failed"
+            path = context["path"]
+            value = context["value"]
+        return False, _invalid_evidence_document(
+            code=code,
+            path=path,
+            value=value,
+            fingerprint_parts=fingerprint_parts,
+        )
+
+
+def _canonical_evidence(evidence: object) -> dict:
+    return _inspect_evidence(evidence)[1]
 
 
 def _evidence_is_well_formed(evidence: object) -> bool:
-    if not isinstance(evidence, DecisionForecastEvidence):
-        return False
-    try:
-        points = evidence.forecast_points
-        if not isinstance(points, tuple):
-            return False
-        for point in points:
-            if not isinstance(point, WeatherForecastPoint):
-                return False
-            values = point.values
-            if not isinstance(values, (tuple, list)) or not values:
-                return False
-            if any(not isinstance(value, WeatherValue) for value in values):
-                return False
-            validated_values = tuple(
-                WeatherValue(
-                    variable=value.variable,
-                    value=value.value,
-                    unit=value.unit,
-                    aggregation_period=value.aggregation_period,
-                )
-                for value in values
-            )
-            requested_location = WeatherLocation(
-                latitude=point.requested_location.latitude,
-                longitude=point.requested_location.longitude,
-                altitude_m=point.requested_location.altitude_m,
-            )
-            grid_location = WeatherLocation(
-                latitude=point.grid_location.latitude,
-                longitude=point.grid_location.longitude,
-                altitude_m=point.grid_location.altitude_m,
-            )
-            WeatherForecastPoint(
-                provider_id=point.provider_id,
-                model_id=point.model_id,
-                retrieved_at_utc=point.retrieved_at_utc,
-                forecast_for_utc=point.forecast_for_utc,
-                requested_location=requested_location,
-                grid_location=grid_location,
-                values=validated_values,
-            )
-    except (AttributeError, TypeError, ValueError, OverflowError):
-        return False
-    return True
+    return _inspect_evidence(evidence)[0]
 
 
 def _canonical_observation(observation: FieldObservation) -> dict:
@@ -237,12 +647,12 @@ def _parameter_document(parameters: ForecastObservationParameters) -> dict:
 
 
 def _source_digest(
-    evidence: object,
+    canonical_evidence: dict,
     observation: FieldObservation,
 ) -> str:
     return _digest(
         {
-            "decision_forecast_evidence": _canonical_evidence(evidence),
+            "decision_forecast_evidence": canonical_evidence,
             "field_observation": _canonical_observation(observation),
         }
     )
@@ -493,7 +903,8 @@ def compare_forecast_to_field_observation(
             "invalid_forecast_observation_parameters"
         )
 
-    digest = _source_digest(evidence, observation)
+    evidence_is_well_formed, canonical_evidence = _inspect_evidence(evidence)
+    digest = _source_digest(canonical_evidence, observation)
     identity = _comparison_id(
         observation=observation,
         source_digest=digest,
@@ -530,7 +941,7 @@ def compare_forecast_to_field_observation(
     evidence_reason = None
     if evidence is None:
         evidence_reason = "decision_forecast_evidence_missing"
-    elif not _evidence_is_well_formed(evidence):
+    elif not evidence_is_well_formed:
         evidence_reason = "decision_forecast_evidence_invalid"
     elif not evidence.forecast_points:
         evidence_reason = "decision_forecast_evidence_empty"
