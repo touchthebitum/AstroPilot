@@ -91,6 +91,7 @@ ALLOWED_IMPORTS = {
         ("datetime", "timedelta"),
         ("datetime", "timezone"),
         ("enum", "Enum"),
+        ("types", "MemberDescriptorType"),
         ("decision.field_observation", "CloudState"),
         ("decision.field_observation", "FieldObservation"),
         ("decision.field_observation", "QualityFlag"),
@@ -127,7 +128,11 @@ def import_boundary_violations(source, allowed_imports):
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
             imports = ((alias.name, None, alias.asname) for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
+        elif isinstance(node, ast.ImportFrom):
+            if node.level != 0:
+                for alias in node.names:
+                    violations.append((node.module, alias.name, alias.asname))
+                continue
             imports = (
                 (node.module, alias.name, alias.asname) for alias in node.names
             )
@@ -764,6 +769,130 @@ def test_distinct_corrupted_datetimes_have_distinct_stable_identity():
     assert first.comparison_id != second.comparison_id
 
 
+def test_same_named_timezones_with_distinct_offsets_have_distinct_identity():
+    def corrupted_evidence(offset_hours):
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(
+            forecast_point,
+            "retrieved_at_utc",
+            datetime(
+                2026,
+                9,
+                1,
+                17,
+                0,
+                tzinfo=timezone(timedelta(hours=offset_hours), "SAME"),
+            ),
+        )
+        return DecisionForecastEvidence((forecast_point,))
+
+    plus_one_evidence = corrupted_evidence(1)
+    plus_two_evidence = corrupted_evidence(2)
+
+    plus_one = compare_forecast_to_field_observation(
+        plus_one_evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    plus_two = compare_forecast_to_field_observation(
+        plus_two_evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert plus_one.identity_persistable is True
+    assert plus_two.identity_persistable is True
+    assert plus_one.source_digest != plus_two.source_digest
+    assert plus_one.comparison_id != plus_two.comparison_id
+
+
+def test_hybrid_dict_and_slots_state_is_fully_fingerprinted():
+    class HybridState:
+        __slots__ = ("slot_state", "__dict__")
+
+        def __init__(self, slot_state):
+            self.dictionary_state = "same"
+            self.slot_state = slot_state
+
+    def corrupted_evidence(slot_state):
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(
+            forecast_point,
+            "requested_location",
+            HybridState(slot_state),
+        )
+        return DecisionForecastEvidence((forecast_point,))
+
+    first = compare_forecast_to_field_observation(
+        corrupted_evidence("first"),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    second = compare_forecast_to_field_observation(
+        corrupted_evidence("second"),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert first.identity_persistable is True
+    assert second.identity_persistable is True
+    assert first.source_digest != second.source_digest
+    assert first.comparison_id != second.comparison_id
+
+
+@pytest.mark.parametrize("unsafe_state", ["opaque", "cycle", "depth"])
+def test_non_canonicalizable_identity_is_publicly_non_persistable(unsafe_state):
+    if unsafe_state == "opaque":
+        replacement = object()
+    elif unsafe_state == "cycle":
+        replacement = []
+        replacement.append(replacement)
+    else:
+        replacement = "leaf"
+        for _ in range(10):
+            replacement = [replacement]
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    object.__setattr__(forecast_point, "requested_location", replacement)
+
+    result = compare_forecast_to_field_observation(
+        DecisionForecastEvidence((forecast_point,)),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert result.identity_persistable is False
+    assert len(result.comparison_id) == 64
+    assert reason_codes(result) == ("decision_forecast_evidence_invalid",)
+
+
+@pytest.mark.parametrize("target", ["evidence", "point", "location", "value"])
+def test_undeclared_material_on_known_evidence_types_fails_closed(target):
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    if target == "location":
+        local_location = WeatherLocation(46.7508, 6.5495, altitude_m=1245.0)
+        object.__setattr__(forecast_point, "requested_location", local_location)
+        corrupted = local_location
+    elif target == "value":
+        corrupted = forecast_point.values[0]
+    elif target == "point":
+        corrupted = forecast_point
+    evidence = DecisionForecastEvidence((forecast_point,))
+    if target == "evidence":
+        corrupted = evidence
+    object.__setattr__(corrupted, "undeclared_material", "redacted-secret")
+
+    result = compare_forecast_to_field_observation(
+        evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert result.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert reason_codes(result) == ("decision_forecast_evidence_invalid",)
+    assert result.identity_persistable is True
+    assert "redacted-secret" not in str(_canonical_evidence(evidence))
+
+
 @pytest.mark.parametrize(
     ("target", "attribute", "invalid_value"),
     [
@@ -914,6 +1043,42 @@ def test_no_supported_variables_keeps_invalid_evidence_reason_first():
     )
 
 
+def test_all_applicable_blocking_reasons_are_aggregated_in_contract_order():
+    source = observation(
+        decision_id=None,
+        execution_id=None,
+        flags=(
+            QualityFlag.LEGACY_LINEAGE_INCOMPLETE,
+            QualityFlag.TIME_UNCERTAIN,
+            QualityFlag.LOCATION_UNCERTAIN,
+        ),
+        conditions=ObservedConditions(
+            transparency=Transparency.GOOD,
+            seeing=SeeingCondition.POOR,
+            surface_condition=SurfaceCondition.DEW_PRESENT,
+        ),
+    )
+    forecast_point = point(WeatherVariable.DEW_POINT_C, 3.0)
+    object.__setattr__(forecast_point, "requested_location", object())
+
+    result = compare_forecast_to_field_observation(
+        DecisionForecastEvidence((forecast_point,)),
+        source,
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert result.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert result.results == ()
+    assert reason_codes(result) == (
+        "decision_forecast_evidence_invalid",
+        "legacy_lineage_incomplete",
+        "observation_time_uncertain",
+        "observation_location_uncertain",
+        "no_supported_observed_variables",
+    )
+    assert result.identity_persistable is False
+
+
 def test_different_offsets_representing_same_instant_match_exactly():
     plus_two = timezone(timedelta(hours=2))
     local_instant = OBSERVED_AT.astimezone(plus_two)
@@ -1022,3 +1187,19 @@ def test_import_guard_rejects_forbidden_symbol_from_allowed_generic_module():
     assert import_boundary_violations(source, allowed) == (
         ("decision.field_observation", "OutcomeAssessment", "harmless"),
     )
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("from . import persistence", ((None, "persistence", None),)),
+        (
+            "from .decision.field_observation import FieldObservation",
+            (("decision.field_observation", "FieldObservation", None),),
+        ),
+    ],
+)
+def test_import_guard_rejects_all_relative_imports(source, expected):
+    allowed = {("decision.field_observation", "FieldObservation")}
+
+    assert import_boundary_violations(source, allowed) == expected

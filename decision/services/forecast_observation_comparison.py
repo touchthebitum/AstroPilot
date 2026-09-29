@@ -5,6 +5,7 @@ import json
 from dataclasses import asdict
 from datetime import date, datetime, time, timedelta, timezone
 from enum import Enum
+from types import MemberDescriptorType
 
 from decision.field_observation import (
     CloudState,
@@ -237,7 +238,25 @@ def _safe_fingerprint_token(
                 ),
             }
         if type(value) is timezone:
-            return {"kind": "timezone", "digest": _digest(str(value))}
+            offset = value.utcoffset(None)
+            name = value.tzname(None)
+            return {
+                "kind": "timezone",
+                "digest": _digest(
+                    {
+                        "offset": _safe_fingerprint_token(
+                            offset,
+                            seen=seen,
+                            depth=depth + 1,
+                        ),
+                        "name": _safe_fingerprint_token(
+                            name,
+                            seen=seen,
+                            depth=depth + 1,
+                        ),
+                    }
+                ),
+            }
         if type(value) is WeatherVariable:
             return {
                 "kind": "weather_variable",
@@ -295,30 +314,30 @@ def _safe_fingerprint_token(
             WeatherValue,
         ):
             seen.add(identity)
-            attributes = object.__getattribute__(value, "__dict__")
-            fields = {
-                key: _safe_fingerprint_token(
-                    attributes[key], seen=seen, depth=depth + 1
+            try:
+                attributes = object.__getattribute__(value, "__dict__")
+                attributes_token = _safe_fingerprint_token(
+                    attributes,
+                    seen=seen,
+                    depth=depth + 1,
                 )
-                for key in sorted(attributes)
-                if type(key) is str
+            finally:
+                seen.remove(identity)
+            return {
+                "kind": type(value).__name__,
+                "attributes": attributes_token,
             }
-            seen.remove(identity)
-            return {"kind": type(value).__name__, "fields": fields}
-        try:
-            attributes = object.__getattribute__(value, "__dict__")
-        except Exception:
-            attributes = None
-        if type(attributes) is dict and attributes:
-            seen.add(identity)
-            token = _safe_fingerprint_token(
-                attributes, seen=seen, depth=depth + 1
-            )
-            seen.remove(identity)
+        object_state, state_is_complete = _safe_object_state(
+            value,
+            seen=seen,
+            depth=depth,
+        )
+        if object_state is not None:
             return {
                 "kind": "object",
                 "type": f"{type(value).__module__}.{type(value).__qualname__}",
-                "attributes": token,
+                "state": object_state,
+                "persistable": state_is_complete,
             }
         return {
             "kind": "opaque",
@@ -327,6 +346,89 @@ def _safe_fingerprint_token(
         }
     except Exception:
         return {"kind": "unavailable", "persistable": False}
+
+
+def _safe_object_state(
+    value: object,
+    *,
+    seen: set[int],
+    depth: int,
+) -> tuple[dict | None, bool]:
+    """Return redacted Python storage only when all material storage is known.
+
+    Instance dictionaries and real slot member descriptors are combined. Any
+    opaque native base, custom slot descriptor, or unreadable slot makes the
+    technical fingerprint explicitly non-persistable.
+    """
+    try:
+        attributes = object.__getattribute__(value, "__dict__")
+    except Exception:
+        attributes = None
+    if attributes is not None and type(attributes) is not dict:
+        return None, False
+
+    slot_values = {}
+    complete = True
+    has_python_storage = type(attributes) is dict
+    identity = id(value)
+    seen.add(identity)
+    try:
+        for owner in type(value).__mro__:
+            if owner is object:
+                continue
+            owner_slots = vars(owner).get("__slots__")
+            if owner_slots is None:
+                if owner.__module__ == "builtins":
+                    complete = False
+                continue
+            has_python_storage = True
+            if type(owner_slots) is str:
+                owner_slots = (owner_slots,)
+            elif type(owner_slots) not in (tuple, list):
+                complete = False
+                continue
+            for slot_name in owner_slots:
+                if type(slot_name) is not str:
+                    complete = False
+                    continue
+                if slot_name in ("__dict__", "__weakref__"):
+                    continue
+                descriptor = vars(owner).get(slot_name)
+                if type(descriptor) is not MemberDescriptorType:
+                    complete = False
+                    continue
+                try:
+                    slot_value = descriptor.__get__(value, type(value))
+                except AttributeError:
+                    slot_values[
+                        f"{owner.__module__}.{owner.__qualname__}.{slot_name}"
+                    ] = {"kind": "unset"}
+                    continue
+                except Exception:
+                    complete = False
+                    continue
+                slot_values[
+                    f"{owner.__module__}.{owner.__qualname__}.{slot_name}"
+                ] = _safe_fingerprint_token(
+                    slot_value, seen=seen, depth=depth + 1
+                )
+        dictionary_token = (
+            _safe_fingerprint_token(
+                attributes,
+                seen=seen,
+                depth=depth + 1,
+            )
+            if type(attributes) is dict
+            else {"kind": "absent"}
+        )
+    finally:
+        seen.remove(identity)
+    if not has_python_storage:
+        return None, False
+    return {
+        "dictionary": dictionary_token,
+        "slots": slot_values,
+    }, complete
 
 
 def _fingerprint_is_persistable(value: object) -> bool:
@@ -363,6 +465,24 @@ def _require_evidence_invariant(
         raise _InvalidEvidence(code, path, value)
 
 
+def _require_exact_stored_attributes(
+    value: object,
+    expected: frozenset[str],
+    *,
+    path: str,
+) -> None:
+    try:
+        attributes = object.__getattribute__(value, "__dict__")
+    except Exception:
+        attributes = None
+    _require_evidence_invariant(
+        type(attributes) is dict and frozenset(attributes) == expected,
+        "unexpected_stored_attributes",
+        path,
+        value,
+    )
+
+
 def _validated_location(
     location: object,
     *,
@@ -375,6 +495,11 @@ def _validated_location(
         "invalid_location_type",
         path,
         location,
+    )
+    _require_exact_stored_attributes(
+        location,
+        frozenset(("latitude", "longitude", "altitude_m")),
+        path=path,
     )
     latitude = _record_inspected_value(
         context, fingerprint_parts, f"{path}.latitude", location.latitude
@@ -425,6 +550,11 @@ def _validated_weather_value(
         "invalid_weather_value_type",
         path,
         value,
+    )
+    _require_exact_stored_attributes(
+        value,
+        frozenset(("variable", "value", "unit", "aggregation_period")),
+        path=path,
     )
     variable = _record_inspected_value(
         context, fingerprint_parts, f"{path}.variable", value.variable
@@ -499,6 +629,21 @@ def _validated_forecast_point(
         "invalid_forecast_point_type",
         path,
         point,
+    )
+    _require_exact_stored_attributes(
+        point,
+        frozenset(
+            (
+                "provider_id",
+                "model_id",
+                "retrieved_at_utc",
+                "forecast_for_utc",
+                "requested_location",
+                "grid_location",
+                "values",
+            )
+        ),
+        path=path,
     )
     provider_id = _record_inspected_value(
         context, fingerprint_parts, f"{path}.provider_id", point.provider_id
@@ -663,6 +808,11 @@ def _inspect_evidence(evidence: object) -> tuple[bool, dict]:
             "evidence",
             evidence,
         )
+        _require_exact_stored_attributes(
+            evidence,
+            frozenset(("forecast_points",)),
+            path="evidence",
+        )
         points = _record_inspected_value(
             context,
             fingerprint_parts,
@@ -764,11 +914,14 @@ def _parameter_document(parameters: ForecastObservationParameters) -> dict:
 def _source_digest(
     canonical_evidence: dict,
     observation: FieldObservation,
+    *,
+    identity_persistable: bool,
 ) -> str:
     return _digest(
         {
             "decision_forecast_evidence": canonical_evidence,
             "field_observation": _canonical_observation(observation),
+            "identity_persistable": identity_persistable,
         }
     )
 
@@ -777,6 +930,7 @@ def _comparison_id(
     *,
     observation: FieldObservation,
     source_digest: str,
+    identity_persistable: bool,
     algorithm_version: str,
     parameters: ForecastObservationParameters,
 ) -> str:
@@ -785,6 +939,7 @@ def _comparison_id(
             "decision_id": observation.decision_id,
             "observation_id": observation.observation_id,
             "source_digest": source_digest,
+            "identity_persistable": identity_persistable,
             "algorithm_version": algorithm_version,
             "forecast_scope": FORECAST_SCOPE,
             "parameters": _parameter_document(parameters),
@@ -1001,6 +1156,11 @@ def compare_forecast_to_field_observation(
     side effect. Missing or invalid forecast evidence is represented as a
     structured not-comparable result. A missing/invalid observation raises a
     typed input error because no comparison identity can be constructed.
+
+    ``comparison_id`` remains a deterministic technical correlation ID when
+    ``identity_persistable`` is false. Persistence boundaries must reject such
+    a result because its invalid evidence could not be covered completely and
+    safely by the redacted identity document.
     """
     if not isinstance(observation, FieldObservation):
         code = (
@@ -1019,10 +1179,19 @@ def compare_forecast_to_field_observation(
         )
 
     evidence_is_well_formed, canonical_evidence = _inspect_evidence(evidence)
-    digest = _source_digest(canonical_evidence, observation)
+    identity_persistable = canonical_evidence.get(
+        "invalid_identity_persistable",
+        True,
+    )
+    digest = _source_digest(
+        canonical_evidence,
+        observation,
+        identity_persistable=identity_persistable,
+    )
     identity = _comparison_id(
         observation=observation,
         source_digest=digest,
+        identity_persistable=identity_persistable,
         algorithm_version=algorithm_version,
         parameters=effective_parameters,
     )
@@ -1036,6 +1205,7 @@ def compare_forecast_to_field_observation(
     elif not evidence.forecast_points:
         evidence_reason = "decision_forecast_evidence_empty"
 
+    observed_values = _observed_values(observation)
     blocking_reasons = []
     if observation.legacy_lineage_incomplete:
         blocking_reasons.append(ComparisonReason("legacy_lineage_incomplete"))
@@ -1046,10 +1216,15 @@ def compare_forecast_to_field_observation(
             ComparisonReason("observation_location_uncertain")
         )
     if blocking_reasons:
-        if evidence_reason == "decision_forecast_evidence_invalid":
-            blocking_reasons.insert(0, ComparisonReason(evidence_reason))
+        reasons = []
+        if evidence_reason is not None:
+            reasons.append(ComparisonReason(evidence_reason))
+        reasons.extend(blocking_reasons)
+        if not observed_values:
+            reasons.append(ComparisonReason("no_supported_observed_variables"))
         return ForecastObservationComparison(
             comparison_id=identity,
+            identity_persistable=identity_persistable,
             algorithm_version=algorithm_version,
             computed_at_utc=computed_at_utc,
             decision_id=observation.decision_id,
@@ -1060,10 +1235,9 @@ def compare_forecast_to_field_observation(
             observation_provenance=provenance,
             results=(),
             status=ForecastObservationComparisonStatus.NOT_COMPARABLE,
-            reasons=tuple(blocking_reasons),
+            reasons=tuple(reasons),
         )
 
-    observed_values = _observed_values(observation)
     results = []
     reasons = []
     if not observed_values:
@@ -1120,6 +1294,7 @@ def compare_forecast_to_field_observation(
     result_tuple = tuple(results)
     return ForecastObservationComparison(
         comparison_id=identity,
+        identity_persistable=identity_persistable,
         algorithm_version=algorithm_version,
         computed_at_utc=computed_at_utc,
         decision_id=observation.decision_id,

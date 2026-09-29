@@ -286,6 +286,7 @@ VariableComparison = NumericVariableComparison | CloudVariableComparison
 @dataclass(frozen=True, slots=True)
 class ForecastObservationComparison:
     comparison_id: str
+    identity_persistable: bool
     computed_at_utc: datetime
     decision_id: str | None
     observation_id: str
@@ -306,6 +307,8 @@ class ForecastObservationComparison:
             int(self.comparison_id, 16)
         except ValueError as error:
             raise ValueError("invalid_comparison_id") from error
+        if type(self.identity_persistable) is not bool:
+            raise ValueError("invalid_identity_persistable")
         if not isinstance(self.observation_id, str) or not self.observation_id:
             raise ValueError("invalid_observation_id")
         if not isinstance(self.source_digest, str) or len(self.source_digest) != 64:
