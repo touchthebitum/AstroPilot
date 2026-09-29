@@ -265,7 +265,11 @@ def _safe_fingerprint_token(
             )
             return {
                 "kind": "arbitrary_tzinfo",
-                "type": f"{type(value).__module__}.{type(value).__qualname__}",
+                "type": _safe_type_metadata_token(
+                    type(value),
+                    seen=seen,
+                    depth=depth + 1,
+                ),
                 "state": state or {"kind": "opaque"},
                 "persistable": False,
             }
@@ -355,7 +359,10 @@ def _safe_fingerprint_token(
                 for item in value
             ]
             seen.remove(identity)
-            return {"kind": type(value).__name__, "items": items}
+            return {
+                "kind": "tuple" if type(value) is tuple else "list",
+                "items": items,
+            }
         if type(value) is dict:
             seen.add(identity)
             entries = [
@@ -380,10 +387,13 @@ def _safe_fingerprint_token(
             ]
             seen.remove(identity)
             items.sort(key=_canonical_json)
-            return {"kind": type(value).__name__, "items": items}
+            return {
+                "kind": "set" if type(value) is set else "frozenset",
+                "items": items,
+            }
         if type(value) in (bytes, bytearray):
             return {
-                "kind": type(value).__name__,
+                "kind": "bytes" if type(value) is bytes else "bytearray",
                 "digest": hashlib.sha256(bytes(value)).hexdigest(),
             }
         if type(value) in (
@@ -403,7 +413,12 @@ def _safe_fingerprint_token(
             finally:
                 seen.remove(identity)
             return {
-                "kind": type(value).__name__,
+                "kind": "structured_object",
+                "type": _safe_type_metadata_token(
+                    type(value),
+                    seen=seen,
+                    depth=depth + 1,
+                ),
                 "attributes": attributes_token,
             }
         object_state, state_is_complete = _safe_object_state(
@@ -414,17 +429,68 @@ def _safe_fingerprint_token(
         if object_state is not None:
             return {
                 "kind": "object",
-                "type": f"{type(value).__module__}.{type(value).__qualname__}",
+                "type": _safe_type_metadata_token(
+                    type(value),
+                    seen=seen,
+                    depth=depth + 1,
+                ),
                 "state": object_state,
                 "persistable": state_is_complete,
             }
         return {
             "kind": "opaque",
-            "type": f"{type(value).__module__}.{type(value).__qualname__}",
+            "type": _safe_type_metadata_token(
+                type(value),
+                seen=seen,
+                depth=depth + 1,
+            ),
             "persistable": False,
         }
     except Exception:
         return {"kind": "unavailable", "persistable": False}
+
+
+def _safe_type_metadata_token(
+    value_type: type,
+    *,
+    seen: set[int] | None,
+    depth: int,
+) -> dict:
+    """Redact runtime type metadata before it enters a fingerprint document."""
+    return {
+        "module": _safe_fingerprint_token(
+            value_type.__module__,
+            seen=seen,
+            depth=depth + 1,
+        ),
+        "qualname": _safe_fingerprint_token(
+            value_type.__qualname__,
+            seen=seen,
+            depth=depth + 1,
+        ),
+    }
+
+
+def _safe_slot_metadata_token(
+    owner: type,
+    slot_name: str,
+    *,
+    seen: set[int],
+    depth: int,
+) -> dict:
+    """Redact a slot owner and name without constructing a raw path."""
+    return {
+        "owner": _safe_type_metadata_token(
+            owner,
+            seen=seen,
+            depth=depth + 1,
+        ),
+        "name": _safe_fingerprint_token(
+            slot_name,
+            seen=seen,
+            depth=depth + 1,
+        ),
+    }
 
 
 def _safe_temporal_fingerprint(
@@ -467,7 +533,11 @@ def _safe_temporal_fingerprint(
         seen.remove(identity)
     return {
         "kind": kind,
-        "type": f"{type(value).__module__}.{type(value).__qualname__}",
+        "type": _safe_type_metadata_token(
+            type(value),
+            seen=seen,
+            depth=depth + 1,
+        ),
         "components": component_tokens,
         "storage": storage,
         "persistable": storage_is_complete,
@@ -491,7 +561,7 @@ def _safe_temporal_subclass_state(
     if attributes is not None and type(attributes) is not dict:
         return {"kind": "unavailable"}, False
 
-    slot_values = {}
+    slot_values = []
     complete = True
     for owner in type(value).__mro__:
         if owner is base_type:
@@ -514,22 +584,33 @@ def _safe_temporal_subclass_state(
             if type(descriptor) is not MemberDescriptorType:
                 complete = False
                 continue
-            qualified_name = (
-                f"{owner.__module__}.{owner.__qualname__}.{slot_name}"
+            slot_metadata = _safe_slot_metadata_token(
+                owner,
+                slot_name,
+                seen=seen,
+                depth=depth + 1,
             )
             try:
                 slot_value = descriptor.__get__(value, type(value))
             except AttributeError:
-                slot_values[qualified_name] = {"kind": "unset"}
+                slot_values.append(
+                    {"slot": slot_metadata, "value": {"kind": "unset"}}
+                )
                 continue
             except Exception:
                 complete = False
                 continue
-            slot_values[qualified_name] = _safe_fingerprint_token(
-                slot_value,
-                seen=seen,
-                depth=depth + 1,
+            slot_values.append(
+                {
+                    "slot": slot_metadata,
+                    "value": _safe_fingerprint_token(
+                        slot_value,
+                        seen=seen,
+                        depth=depth + 1,
+                    ),
+                }
             )
+    slot_values.sort(key=_canonical_json)
     dictionary_token = (
         _safe_fingerprint_token(
             attributes,
@@ -564,7 +645,7 @@ def _safe_object_state(
     if attributes is not None and type(attributes) is not dict:
         return None, False
 
-    slot_values = {}
+    slot_values = []
     complete = True
     has_python_storage = type(attributes) is dict
     identity = id(value)
@@ -597,18 +678,35 @@ def _safe_object_state(
                 try:
                     slot_value = descriptor.__get__(value, type(value))
                 except AttributeError:
-                    slot_values[
-                        f"{owner.__module__}.{owner.__qualname__}.{slot_name}"
-                    ] = {"kind": "unset"}
+                    slot_values.append(
+                        {
+                            "slot": _safe_slot_metadata_token(
+                                owner,
+                                slot_name,
+                                seen=seen,
+                                depth=depth + 1,
+                            ),
+                            "value": {"kind": "unset"},
+                        }
+                    )
                     continue
                 except Exception:
                     complete = False
                     continue
-                slot_values[
-                    f"{owner.__module__}.{owner.__qualname__}.{slot_name}"
-                ] = _safe_fingerprint_token(
-                    slot_value, seen=seen, depth=depth + 1
+                slot_values.append(
+                    {
+                        "slot": _safe_slot_metadata_token(
+                            owner,
+                            slot_name,
+                            seen=seen,
+                            depth=depth + 1,
+                        ),
+                        "value": _safe_fingerprint_token(
+                            slot_value, seen=seen, depth=depth + 1
+                        ),
+                    }
                 )
+        slot_values.sort(key=_canonical_json)
         dictionary_token = (
             _safe_fingerprint_token(
                 attributes,

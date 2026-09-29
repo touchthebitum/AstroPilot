@@ -1891,6 +1891,165 @@ def test_evidence_provider_id_with_isolated_surrogate_is_structured_invalid(
     assert surrogate not in str(invalid_document)
 
 
+@pytest.mark.parametrize("surrogate", ["\ud800", "\udc00"])
+@pytest.mark.parametrize("metadata_name", ["__qualname__", "__module__"])
+def test_opaque_evidence_type_metadata_is_redacted_and_total(
+    surrogate,
+    metadata_name,
+):
+    class OpaqueEvidence:
+        pass
+
+    setattr(OpaqueEvidence, metadata_name, surrogate)
+    evidence = OpaqueEvidence()
+
+    first = compare_forecast_to_field_observation(
+        evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    repeated = compare_forecast_to_field_observation(
+        evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert first.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert reason_codes(first) == ("decision_forecast_evidence_invalid",)
+    assert first.identity_persistable is True
+    assert first.source_digest == repeated.source_digest
+    assert first.comparison_id == repeated.comparison_id
+    assert surrogate not in str(_canonical_evidence(evidence))
+
+
+@pytest.mark.parametrize("metadata_name", ["__qualname__", "__module__"])
+def test_opaque_evidence_type_metadata_corruptions_remain_distinct(
+    metadata_name,
+):
+    class OpaqueEvidence:
+        pass
+
+    setattr(OpaqueEvidence, metadata_name, "\ud800")
+    high = compare_forecast_to_field_observation(
+        OpaqueEvidence(),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    setattr(OpaqueEvidence, metadata_name, "\udc00")
+    low = compare_forecast_to_field_observation(
+        OpaqueEvidence(),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert high.identity_persistable is True
+    assert low.identity_persistable is True
+    assert high.source_digest != low.source_digest
+    assert high.comparison_id != low.comparison_id
+
+
+@pytest.mark.parametrize("surrogate", ["\ud800", "\udc00"])
+def test_qualified_slot_metadata_is_redacted_and_total(surrogate):
+    class SlottedLocation:
+        __slots__ = ("marker",)
+
+    location = SlottedLocation()
+    location.marker = "same-state"
+    marker_descriptor = vars(SlottedLocation)["marker"]
+    SlottedLocation.__slots__ = (surrogate,)
+    setattr(SlottedLocation, surrogate, marker_descriptor)
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    object.__setattr__(forecast_point, "requested_location", location)
+    evidence = DecisionForecastEvidence((forecast_point,))
+
+    first = compare_forecast_to_field_observation(
+        evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    repeated = compare_forecast_to_field_observation(
+        evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert first.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert reason_codes(first) == ("decision_forecast_evidence_invalid",)
+    assert first.identity_persistable is True
+    assert first.source_digest == repeated.source_digest
+    assert first.comparison_id == repeated.comparison_id
+    assert surrogate not in str(_canonical_evidence(evidence))
+
+
+def test_qualified_slot_metadata_corruptions_remain_distinct():
+    def result_with_slot_name(slot_name):
+        class SlottedLocation:
+            __slots__ = ("marker",)
+
+        location = SlottedLocation()
+        location.marker = "same-state"
+        marker_descriptor = vars(SlottedLocation)["marker"]
+        SlottedLocation.__slots__ = (slot_name,)
+        setattr(SlottedLocation, slot_name, marker_descriptor)
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point, "requested_location", location)
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    high = result_with_slot_name("\ud800")
+    low = result_with_slot_name("\udc00")
+
+    assert high.identity_persistable is True
+    assert low.identity_persistable is True
+    assert high.source_digest != low.source_digest
+    assert high.comparison_id != low.comparison_id
+
+
+@pytest.mark.parametrize("surrogate", ["\ud800", "\udc00"])
+def test_arbitrary_tzinfo_type_metadata_is_redacted_and_total(surrogate):
+    class CorruptedTimezone(tzinfo):
+        __slots__ = ()
+
+        def utcoffset(self, value):
+            return timedelta(0)
+
+        def dst(self, value):
+            return timedelta(0)
+
+        def tzname(self, value):
+            return "CORRUPTED"
+
+    CorruptedTimezone.__qualname__ = surrogate
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    object.__setattr__(
+        forecast_point,
+        "retrieved_at_utc",
+        RETRIEVED_AT.replace(tzinfo=CorruptedTimezone()),
+    )
+    evidence = DecisionForecastEvidence((forecast_point,))
+
+    first = compare_forecast_to_field_observation(
+        evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    repeated = compare_forecast_to_field_observation(
+        evidence,
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert first.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert reason_codes(first) == ("decision_forecast_evidence_invalid",)
+    assert first.identity_persistable is False
+    assert first.source_digest == repeated.source_digest
+    assert first.comparison_id == repeated.comparison_id
+    assert surrogate not in str(_canonical_evidence(evidence))
+
+
 def test_valid_unicode_identity_strings_remain_deterministic():
     source = observation()
     object.__setattr__(
@@ -1933,6 +2092,20 @@ def test_valid_unicode_identity_strings_remain_deterministic():
     assert first.identity_persistable is True
     assert first.source_digest == second.source_digest
     assert first.comparison_id == second.comparison_id
+
+
+def test_valid_evidence_identity_is_unchanged_by_redacted_metadata_tokens():
+    result = compare(
+        observation(),
+        point(WeatherVariable.TEMPERATURE_C, 8.0),
+    )
+
+    assert result.source_digest == (
+        "ce68eaedc955bf4a0a31093a5494ba8eb35f54a66ed1b97ddd12fe328e35fbe1"
+    )
+    assert result.comparison_id == (
+        "a7a6e47d84cb64bcff124e59802c3e18566b015501ab7e88b4482aaed23bcf36"
+    )
 
 
 def test_canonical_algorithm_version_is_stable():
