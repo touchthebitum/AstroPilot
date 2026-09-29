@@ -21,6 +21,12 @@ from decision.services.durable_portfolio_credit_application import (
 )
 from decision.services.intent_progress_credit import apply_execution_credit
 from decision.services.user_selection_mission import UserSelectionMissionService
+from decision.services.field_observation_context import (
+    FieldObservationContextResolver,
+)
+from decision.services.field_observation_recording_service import (
+    FieldObservationRecordingService,
+)
 from decision.weather.decision_forecast_evidence_persistence import (
     DecisionForecastEvidenceStore,
 )
@@ -47,6 +53,7 @@ class DurableTonightApplicationService:
         clock: Callable | None = None,
         profile_loader: Callable | None = None,
         profile_saver: Callable | None = None,
+        field_observation_store=None,
     ) -> None:
         self.application_service = application_service
         self.evidence_store = evidence_store
@@ -59,6 +66,8 @@ class DurableTonightApplicationService:
         self.profile_loader = profile_loader
         self.profile_saver = profile_saver
         self._portfolio_credit_service = None
+        self.field_observation_store = field_observation_store
+        self._field_observation_service = None
 
     def evaluate(self, **kwargs) -> TonightResult:
         result = self.application_service.evaluate(**kwargs)
@@ -161,6 +170,68 @@ class DurableTonightApplicationService:
     def load_outcome_evidence(self, evidence_id: str):
         return self._execution_outcome_application_service().load_outcome_evidence(
             evidence_id
+        )
+
+    @staticmethod
+    def _optional_lineage_load(loader, identity):
+        try:
+            return loader(identity)
+        except ValueError as error:
+            if str(error).endswith("_not_found"):
+                return None
+            raise
+
+    def _field_observation_recording_service(
+        self,
+    ) -> FieldObservationRecordingService:
+        if self.field_observation_store is None:
+            raise RuntimeError("field_observation_persistence_unavailable")
+        if self._field_observation_service is None:
+            acceptance = self._decision_acceptance_service()
+            resolver = FieldObservationContextResolver(
+                decision_evidence_loader=lambda decision_id: (
+                    self.evidence_store.load(decision_id=decision_id)
+                ),
+                execution_loader=self.load_execution,
+                mission_loader=lambda mission_id: self._optional_lineage_load(
+                    acceptance.load_mission,
+                    mission_id,
+                ),
+                selection_loader=lambda selection_id: self._optional_lineage_load(
+                    acceptance.load_selection,
+                    selection_id,
+                ),
+            )
+            self._field_observation_service = FieldObservationRecordingService(
+                observation_store=self.field_observation_store,
+                context_resolver=resolver,
+            )
+        return self._field_observation_service
+
+    def record_field_observation(self, observation):
+        return self._field_observation_recording_service().record_observation(
+            observation
+        )
+
+    def load_field_observation(self, observation_id: str):
+        if self.field_observation_store is None:
+            raise RuntimeError("field_observation_persistence_unavailable")
+        return self.field_observation_store.load(
+            observation_id=observation_id
+        )
+
+    def list_field_observations_by_decision(self, decision_id: str):
+        if self.field_observation_store is None:
+            raise RuntimeError("field_observation_persistence_unavailable")
+        return self.field_observation_store.list_by_decision(
+            decision_id=decision_id
+        )
+
+    def list_field_observations_by_execution(self, execution_id: str):
+        if self.field_observation_store is None:
+            raise RuntimeError("field_observation_persistence_unavailable")
+        return self.field_observation_store.list_by_execution(
+            execution_id=execution_id
         )
 
     def _durable_portfolio_credit_application_service(

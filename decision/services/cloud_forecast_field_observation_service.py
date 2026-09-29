@@ -1,9 +1,5 @@
 from datetime import timedelta
 
-from decision.execution_record_persistence import (
-    ExecutionRecordPersistenceError,
-    ExecutionRecordStore,
-)
 from decision.field_observation_persistence import (
     FieldObservationPersistenceError,
     FieldObservationStore,
@@ -29,11 +25,9 @@ class CloudForecastFieldObservationService:
         self,
         *,
         observation_store: FieldObservationStore,
-        execution_store: ExecutionRecordStore,
         evidence_store: DecisionForecastEvidenceStore,
     ) -> None:
         self.observation_store = observation_store
-        self.execution_store = execution_store
         self.evidence_store = evidence_store
 
     def compare(
@@ -55,25 +49,12 @@ class CloudForecastFieldObservationService:
                 "field_observation_missing"
             )
 
-        try:
-            execution = self.execution_store.load(
-                execution_id=observation.execution_id,
-            )
-        except ExecutionRecordPersistenceError as error:
-            raise CloudForecastFieldObservationServiceError(
-                "execution_record_invalid"
-            ) from error
-        if execution is None:
-            raise CloudForecastFieldObservationServiceError(
-                "execution_record_missing"
-            )
-
-        if execution.decision_id is None:
+        if observation.decision_id is None:
             return None
 
         try:
             evidence = self.evidence_store.load(
-                decision_id=execution.decision_id,
+                decision_id=observation.decision_id,
             )
         except DecisionForecastEvidencePersistenceError as error:
             raise CloudForecastFieldObservationServiceError(

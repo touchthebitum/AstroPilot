@@ -1,15 +1,25 @@
 from __future__ import annotations
 
-from decision.execution_record_persistence import (
-    ExecutionRecordPersistenceError,
-    ExecutionRecordStore,
-)
+from dataclasses import dataclass
+
 from decision.field_observation import FieldObservation
 from decision.field_observation_persistence import FieldObservationStore
+from decision.services.field_observation_context import (
+    FieldObservationContextError,
+    FieldObservationContextResolver,
+    ResolvedFieldObservationContext,
+)
 
 
 class FieldObservationRecordingError(ValueError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class FieldObservationRecordingResult:
+    observation: FieldObservation
+    resolved_context: ResolvedFieldObservationContext
+    created: bool
 
 
 class FieldObservationRecordingService:
@@ -17,26 +27,30 @@ class FieldObservationRecordingService:
         self,
         *,
         observation_store: FieldObservationStore,
-        execution_store: ExecutionRecordStore,
+        context_resolver: FieldObservationContextResolver,
     ) -> None:
         self.observation_store = observation_store
-        self.execution_store = execution_store
+        self.context_resolver = context_resolver
 
-    def record_observation(self, observation: FieldObservation) -> None:
-        if not isinstance(observation, FieldObservation):
+    def record_observation(
+        self,
+        observation: FieldObservation,
+    ) -> FieldObservationRecordingResult:
+        if type(observation) is not FieldObservation:
             raise FieldObservationRecordingError(
                 "invalid_field_observation"
             )
-
-        try:
-            execution = self.execution_store.load(
-                execution_id=observation.execution_id,
-            )
-        except ExecutionRecordPersistenceError as error:
+        if observation.legacy_lineage_incomplete:
             raise FieldObservationRecordingError(
-                "execution_record_invalid"
-            ) from error
-        if execution is None:
-            raise FieldObservationRecordingError("execution_record_missing")
-
-        self.observation_store.save(observation=observation)
+                "legacy_field_observation_read_only"
+            )
+        try:
+            resolved_context = self.context_resolver.resolve(observation)
+        except FieldObservationContextError as error:
+            raise FieldObservationRecordingError(str(error)) from error
+        created = self.observation_store.save(observation=observation)
+        return FieldObservationRecordingResult(
+            observation=observation,
+            resolved_context=resolved_context,
+            created=created,
+        )

@@ -3,9 +3,17 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from decision.field_observation import (
+    CaptureMethod,
     CloudCondition,
     FieldObservation,
+    ObservationProvenance,
+    ObservationQuality,
+    ObservationSourceType,
+    ObservedAcquisition,
+    ObservedConditions,
+    ObservedTechnical,
     SeeingCondition,
+    SurfaceCondition,
     Transparency,
 )
 from decision.weather.cloud_forecast_evidence_comparison import (
@@ -32,17 +40,36 @@ LOCATION = WeatherLocation(46.7508, 6.5495)
 
 
 def observation(**overrides):
-    values = {
-        "observation_id": "observation-123",
-        "execution_id": "execution-123",
-        "observed_at_utc": OBSERVED_AT,
-        "cloud_condition": CloudCondition.FEW,
-        "transparency": None,
-        "seeing": None,
-        "dew_detected": None,
-    }
-    values.update(overrides)
-    return FieldObservation(**values)
+    cloud = overrides.pop("cloud_condition", CloudCondition.FEW)
+    transparency = overrides.pop("transparency", None)
+    seeing = overrides.pop("seeing", None)
+    dew = overrides.pop("dew_detected", None)
+    surface = (
+        None if dew is None else SurfaceCondition.DEW_PRESENT
+        if dew else SurfaceCondition.DRY
+    )
+    return FieldObservation(
+        observation_id="observation-123",
+        decision_id="decision-123",
+        execution_id="execution-123",
+        observed_at_utc=OBSERVED_AT,
+        recorded_at_utc=OBSERVED_AT,
+        supersedes_observation_id=None,
+        conditions=ObservedConditions(
+            cloud_state=cloud,
+            transparency=transparency,
+            seeing=seeing,
+            surface_condition=surface,
+        ),
+        acquisition=ObservedAcquisition(),
+        technical=ObservedTechnical(),
+        provenance=ObservationProvenance(
+            source_type=ObservationSourceType.USER,
+            capture_method=CaptureMethod.MANUAL,
+        ),
+        quality=ObservationQuality(),
+        **overrides,
+    )
 
 
 def cloud_point(offset_minutes, cloud_cover_percent):
