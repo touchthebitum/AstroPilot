@@ -69,14 +69,16 @@ radioIds.forEach((selector, index) => { element(selector).value = ['dry', 'damp'
 element('#field-observation-form');
 element('.observation-advanced');
 const storage = new Map();
+const storageFailures = {get: false, set: false, remove: false};
 const localStorage = {
-  getItem: key => storage.has(key) ? storage.get(key) : null,
-  setItem: (key, value) => storage.set(key, value),
-  removeItem: key => storage.delete(key),
+  getItem(key) { if (storageFailures.get) throw new Error('get denied'); return storage.has(key) ? storage.get(key) : null; },
+  setItem(key, value) { if (storageFailures.set) throw new Error('quota exceeded'); storage.set(key, value); },
+  removeItem(key) { if (storageFailures.remove) throw new Error('remove denied'); storage.delete(key); },
 };
 let uuid = 0;
 const crypto = {randomUUID: () => `observation-${++uuid}`};
-const state = {acceptedMission: {decision_id: 'decision-1'}, sessions: [], activeSessionId: null, observationBusy: false};
+const state = {acceptedMission: {decision_id: 'decision-1'}, sessions: [], activeSessionId: null,
+  observationBusy: false, fieldObservationDraftContext: null, invalidFieldObservationContextKey: null};
 function currentSession() { return state.sessions.find(item => item.execution.execution_id === state.activeSessionId) || null; }
 async function sessionHttpError(response) {
   const error = new Error('request_refused'); error.status = response.status;
@@ -97,7 +99,11 @@ function storedProjection(payload) {
 }
 function clearHarness() {
   storage.clear(); state.observationBusy = false; uuid = 0;
+  storageFailures.get = false; storageFailures.set = false; storageFailures.remove = false;
+  state.sessions = []; state.activeSessionId = null;
+  state.invalidFieldObservationContextKey = null;
   resetFieldObservationForm();
+  state.fieldObservationDraftContext = currentFieldObservationContext();
   element('#observation-status').textContent = '';
 }
 '''
@@ -109,6 +115,33 @@ async function check() {
   assert.equal(payload.conditions.cloud_state, 'mostly_cloudy');
   assert.equal(payload.conditions.transparency, 'excellent');
   assert.equal(payload.conditions.wind_speed_kmh, 8.5);
+
+  // Switching from session A to B clears A's values and cannot submit them as B.
+  clearHarness();
+  state.sessions = [
+    {execution: {execution_id: 'session-a'}},
+    {execution: {execution_id: 'session-b'}},
+  ];
+  state.activeSessionId = 'session-a'; syncFieldObservationContext();
+  setQuick({cloud: 'overcast', transparency: 'poor', wind: '12'});
+  state.activeSessionId = 'session-b'; syncFieldObservationContext();
+  assert.equal(element('#observation-clouds').value, '');
+  assert.equal(element('#observation-transparency').value, '');
+  assert.equal(element('#observation-wind').value, '');
+  assert.match(element('#observation-status').textContent, /session précédente a été effacée/);
+  let sessionPosts = 0;
+  fetch = async () => { sessionPosts += 1; return response(201, {}); };
+  await submitFieldObservation(event);
+  assert.equal(sessionPosts, 0);
+  setQuick({cloud: 'clear'});
+  let sessionPayload;
+  fetch = async (_url, options) => { sessionPosts += 1; sessionPayload = JSON.parse(options.body); return response(201, {}); };
+  await submitFieldObservation(event);
+  assert.equal(sessionPosts, 1);
+  assert.equal(sessionPayload.execution_id, 'session-b');
+  assert.equal(sessionPayload.conditions.cloud_state, 'clear');
+  assert.equal(sessionPayload.conditions.transparency, null);
+  assert.equal(sessionPayload.conditions.wind_speed_kmh, null);
 
   // A server-declared conflict is never reconciled into success and keeps input.
   clearHarness(); setQuick({cloud: 'overcast'});
@@ -133,6 +166,55 @@ async function check() {
   await submitFieldObservation(event);
   assert.match(element('#observation-status').textContent, /Conflit/);
   assert.equal(element('#observation-clouds').value, 'few');
+
+  // A 404 invalidates the pending payload and identifies the stale context.
+  clearHarness(); setQuick({cloud: 'few'});
+  const staleKey = pendingObservationKey('decision-1', null);
+  fetch = async (_url, options) => {
+    assert.ok(options);
+    return response(404, {detail: {code: 'field_observation_context_not_found'}});
+  };
+  await submitFieldObservation(event);
+  assert.equal(storage.has(staleKey), false);
+  assert.equal(element('#observation-clouds').value, 'few');
+  assert.match(element('#observation-status').textContent, /introuvable ou périmée/);
+  assert.match(element('#observation-status').textContent, /Rechargez puis re-sélectionnez/);
+  await submitFieldObservation(event);
+  assert.match(element('#observation-status').textContent, /contexte est périmé/);
+
+  // A failing removeItem during 404 invalidation falls back to a safe tombstone.
+  clearHarness(); setQuick({cloud: 'few'});
+  fetch = async (_url, options) => {
+    assert.ok(options); storageFailures.remove = true;
+    return response(404, {detail: {code: 'field_observation_context_not_found'}});
+  };
+  await submitFieldObservation(event);
+  const invalidated = JSON.parse(storage.get(staleKey));
+  assert.equal(invalidated.invalidated, true);
+  assert.equal(invalidated.payload, undefined);
+  assert.match(element('#observation-status').textContent, /introuvable ou périmée/);
+
+  // Storage read/write failures block all network traffic with an explicit error.
+  clearHarness(); setQuick({cloud: 'few'});
+  let blockedFetches = 0;
+  fetch = async () => { blockedFetches += 1; return response(201, {}); };
+  storageFailures.get = true;
+  await submitFieldObservation(event);
+  assert.equal(blockedFetches, 0);
+  assert.match(element('#observation-status').textContent, /stockage local est indisponible/i);
+  storageFailures.get = false; storageFailures.set = true;
+  await submitFieldObservation(event);
+  assert.equal(blockedFetches, 0);
+  assert.match(element('#observation-status').textContent, /Envoi bloqué/);
+
+  // Corrupt JSON and a failing cleanup never escape and also block the request.
+  clearHarness(); setQuick({cloud: 'few'});
+  storage.set(pendingObservationKey('decision-1', null), '{broken');
+  storageFailures.remove = true; blockedFetches = 0;
+  fetch = async () => { blockedFetches += 1; return response(201, {}); };
+  await submitFieldObservation(event);
+  assert.equal(blockedFetches, 0);
+  assert.match(element('#observation-status').textContent, /stockage local est indisponible/i);
 
   // A timeout keeps the exact payload and a retry reuses it, yielding a 200 replay.
   clearHarness(); setQuick({cloud: 'few', transparency: 'good'});

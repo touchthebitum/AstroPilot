@@ -73,6 +73,8 @@ const state = {
   sessionWriteAttempted: false,
   sessionWriteUncertain: false,
   observationBusy: false,
+  fieldObservationDraftContext: null,
+  invalidFieldObservationContextKey: null,
 };
 
 const SESSION_PENDING_KEY = "astropilot.pendingSession";
@@ -318,7 +320,7 @@ function renderObservationLinkage() {
   if (!element) return;
   element.textContent = currentSession()?.execution.execution_id
     ? "Liée à la session sélectionnée" : "Liée à la décision actuelle";
-  restorePendingFieldObservation();
+  syncFieldObservationContext();
 }
 
 function observationMessage(message, { error = false } = {}) {
@@ -337,10 +339,22 @@ function selectedObservationChoice(name) {
   return OBSERVATION_CHOICES[name].includes(value) ? value : null;
 }
 
-function fieldObservationDraft() {
+function currentFieldObservationContext() {
   const decisionId = state.acceptedMission?.decision_id;
   if (!decisionId) return null;
-  const session = currentSession();
+  return {
+    decision_id: decisionId,
+    execution_id: currentSession()?.execution.execution_id || null,
+  };
+}
+
+function sameFieldObservationContext(left, right) {
+  return left?.decision_id === right?.decision_id
+    && (left?.execution_id || null) === (right?.execution_id || null);
+}
+
+function fieldObservationDraftForContext(context) {
+  if (!context?.decision_id) return null;
   const surface = document.querySelector('input[name="observation-surface"]:checked')?.value || null;
   const moonHalo = document.querySelector("#observation-moon-halo").value;
   const hfr = optionalObservationNumber("#observation-hfr");
@@ -370,9 +384,16 @@ function fieldObservationDraft() {
     .some((value) => value !== null);
   if (!hasFact) return null;
   return {
-    decision_id: decisionId, execution_id: session?.execution.execution_id || null,
+    decision_id: context.decision_id, execution_id: context.execution_id || null,
     conditions, acquisition, technical,
   };
+}
+
+function fieldObservationDraft() {
+  const currentContext = currentFieldObservationContext();
+  const draftContext = state.fieldObservationDraftContext;
+  if (!sameFieldObservationContext(draftContext, currentContext)) return null;
+  return fieldObservationDraftForContext(draftContext);
 }
 
 function buildFieldObservationPayload(draft = fieldObservationDraft()) {
@@ -405,6 +426,44 @@ function pendingObservationKey(decisionId, executionId) {
   return `astropilot.pendingFieldObservation.${decisionId}.${executionId || "decision"}`;
 }
 
+function removePendingFieldObservation(key) {
+  try {
+    localStorage.removeItem(key);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function readPendingFieldObservation(key) {
+  let raw;
+  try {
+    raw = localStorage.getItem(key);
+  } catch (_error) {
+    return { available: false, value: null };
+  }
+  if (raw === null) return { available: true, value: null };
+  try {
+    return { available: true, value: JSON.parse(raw) };
+  } catch (_error) {
+    return { available: removePendingFieldObservation(key), value: null };
+  }
+}
+
+function writePendingFieldObservation(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function invalidatePendingFieldObservation(key) {
+  if (removePendingFieldObservation(key)) return true;
+  return writePendingFieldObservation(key, { invalidated: true });
+}
+
 function resetFieldObservationForm() {
   const form = document.querySelector("#field-observation-form");
   for (const input of form.querySelectorAll("[data-observation-choice]")) input.value = "";
@@ -418,13 +477,36 @@ function setOptionalObservationValue(selector, value) {
   document.querySelector(selector).value = value === null || value === undefined ? "" : String(value);
 }
 
+function syncFieldObservationContext() {
+  const nextContext = currentFieldObservationContext();
+  const previousContext = state.fieldObservationDraftContext;
+  if (!sameFieldObservationContext(previousContext, nextContext)) {
+    const discardedDraft = fieldObservationDraftForContext(previousContext);
+    resetFieldObservationForm();
+    state.fieldObservationDraftContext = nextContext;
+    state.invalidFieldObservationContextKey = null;
+    if (discardedDraft) {
+      observationMessage(
+        "La saisie de la session précédente a été effacée. Saisissez un nouveau relevé pour la session sélectionnée.",
+        { error: true },
+      );
+    }
+  }
+  restorePendingFieldObservation();
+}
+
 function restorePendingFieldObservation() {
-  const decisionId = state.acceptedMission?.decision_id;
-  if (!decisionId || fieldObservationDraft()) return;
-  const executionId = currentSession()?.execution.execution_id || null;
-  let pending = null;
-  try { pending = JSON.parse(localStorage.getItem(pendingObservationKey(decisionId, executionId)) || "null"); }
-  catch (_error) { return; }
+  const context = state.fieldObservationDraftContext;
+  if (!sameFieldObservationContext(context, currentFieldObservationContext()) || fieldObservationDraft()) return;
+  const decisionId = context?.decision_id;
+  const executionId = context?.execution_id || null;
+  if (!decisionId) return;
+  const storedPending = readPendingFieldObservation(pendingObservationKey(decisionId, executionId));
+  if (!storedPending.available) {
+    observationMessage("Le stockage local est indisponible : impossible de restaurer une saisie en attente.", { error: true });
+    return;
+  }
+  const pending = storedPending.value;
   const payload = pending?.payload;
   if (!payload || payload.decision_id !== decisionId || (payload.execution_id || null) !== executionId) return;
   document.querySelector("#observation-clouds").value = payload.conditions?.cloud_state || "";
@@ -475,24 +557,38 @@ function observationConflictError() {
 }
 
 function finishFieldObservationSubmission(key, submittedSnapshot, message) {
-  localStorage.removeItem(key);
+  const removed = removePendingFieldObservation(key);
   if (fieldObservationSnapshot() === submittedSnapshot) resetFieldObservationForm();
   else message += " Vos modifications en cours sont conservées.";
+  if (!removed) message += " Le brouillon local n’a pas pu être nettoyé.";
   observationMessage(message);
 }
 
 async function submitFieldObservation(event) {
   event.preventDefault();
   if (state.observationBusy) return;
-  const decisionId = state.acceptedMission?.decision_id;
+  const context = state.fieldObservationDraftContext;
+  if (!sameFieldObservationContext(context, currentFieldObservationContext())) {
+    observationMessage("Le contexte du relevé a changé. Re-sélectionnez la mission ou la session avant de saisir.", { error: true });
+    return;
+  }
+  const decisionId = context?.decision_id;
   if (!decisionId) {
     observationMessage("La décision liée à cette mission est indisponible.", { error: true });
     return;
   }
-  const executionId = currentSession()?.execution.execution_id || null;
+  const executionId = context.execution_id || null;
   const key = pendingObservationKey(decisionId, executionId);
-  let pending = null;
-  try { pending = JSON.parse(localStorage.getItem(key) || "null"); } catch (_error) { localStorage.removeItem(key); }
+  if (state.invalidFieldObservationContextKey === key) {
+    observationMessage("Ce contexte est périmé. Rechargez puis re-sélectionnez la mission et la session avant tout nouvel envoi.", { error: true });
+    return;
+  }
+  const storedPending = readPendingFieldObservation(key);
+  if (!storedPending.available) {
+    observationMessage("Le stockage local est indisponible. Envoi bloqué pour éviter un doublon après une coupure réseau.", { error: true });
+    return;
+  }
+  const pending = storedPending.value;
   const draft = fieldObservationDraft();
   if (!draft) {
     observationMessage("Renseignez au moins une observation terrain.", { error: true });
@@ -502,7 +598,10 @@ async function submitFieldObservation(event) {
   const pendingSnapshot = pending?.snapshot || snapshotFromObservationPayload(pending?.payload);
   const reusingPending = Boolean(pending?.payload && pendingSnapshot === submittedSnapshot);
   const payload = reusingPending ? pending.payload : buildFieldObservationPayload(draft);
-  localStorage.setItem(key, JSON.stringify({ payload, snapshot: submittedSnapshot }));
+  if (!writePendingFieldObservation(key, { payload, snapshot: submittedSnapshot })) {
+    observationMessage("Le stockage local est indisponible. Envoi bloqué pour garantir qu’un retry ne crée pas de doublon.", { error: true });
+    return;
+  }
   state.observationBusy = true;
   document.querySelector("#observation-save").disabled = true;
   observationMessage("Enregistrement en cours…");
@@ -519,7 +618,6 @@ async function submitFieldObservation(event) {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     });
     if (!response.ok) {
-      if (response.status >= 400 && response.status < 500) localStorage.removeItem(key);
       throw await sessionHttpError(response);
     }
     finishFieldObservationSubmission(key, submittedSnapshot, response.status === 201
@@ -537,8 +635,10 @@ async function submitFieldObservation(event) {
         if (lookupError?.status === 409) error = lookupError;
       }
     }
-    if (error?.status >= 400 && error.status < 500) localStorage.removeItem(key);
+    if (error?.status >= 400 && error.status < 500) invalidatePendingFieldObservation(key);
+    if (error?.status === 404) state.invalidFieldObservationContextKey = key;
     const messages = {
+      404: "La décision ou la session liée à ce relevé est introuvable ou périmée. Rechargez puis re-sélectionnez la mission et la session.",
       409: "Conflit d’enregistrement : rechargez la mission avant de réessayer.",
       422: "Certaines valeurs sont invalides. Vérifiez les détails saisis.",
       503: "Enregistrement momentanément indisponible. Vous pouvez réessayer sans créer de doublon.",
@@ -2862,6 +2962,7 @@ ui.openSavedMission.addEventListener("click", () => {
 });
 document.querySelector("#session-choice").addEventListener("change", (event) => {
   state.activeSessionId = event.target.value;
+  state.invalidFieldObservationContextKey = null;
   renderSession();
 });
 document.querySelector("#session-start").addEventListener("click", () => sessionCommand(startSession));

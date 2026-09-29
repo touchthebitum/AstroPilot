@@ -211,3 +211,6 @@ def test_field_observation_quick_capture_ui_is_categorical_and_progressive():
     assert "OBSERVATION_CHOICES" in script
     assert 'quality_flags: ["estimated", "partial"]' in script
     assert "pendingFieldObservation" in script
+    assert "Déplacez un curseur" not in html
+    assert "vent mesuré en km/h" in html
+    assert "La décision ou la session liée à ce relevé est introuvable ou périmée" in script
