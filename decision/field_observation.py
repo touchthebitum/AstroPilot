@@ -82,6 +82,11 @@ class Confidence(str, Enum):
     UNKNOWN = "unknown"
 
 
+class HfrUnit(str, Enum):
+    PX = "px"
+    ARCSEC = "arcsec"
+
+
 class QualityFlag(str, Enum):
     ESTIMATED = "estimated"
     SENSOR_UNCALIBRATED = "sensor_uncalibrated"
@@ -120,7 +125,10 @@ def _optional_finite(
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"invalid_{field}")
-    normalized = float(value)
+    try:
+        normalized = float(value)
+    except OverflowError as error:
+        raise ValueError(f"invalid_{field}") from error
     if not math.isfinite(normalized):
         raise ValueError(f"invalid_{field}")
     if minimum is not None and normalized < minimum:
@@ -246,7 +254,7 @@ class ObservedAcquisition:
 @dataclass(frozen=True, slots=True)
 class ObservedTechnical:
     hfr: float | None = None
-    hfr_unit: str | None = None
+    hfr_unit: HfrUnit | None = None
     sky_background: float | None = None
     sky_background_unit: str | None = None
     guiding_rms_arcsec: float | None = None
@@ -275,7 +283,13 @@ class ObservedTechnical:
                 minimum=0,
             ),
         )
-        self._validate_unit_pair(self.hfr, self.hfr_unit, field="hfr")
+        if self.hfr is None:
+            if self.hfr_unit is not None:
+                raise ValueError("hfr_unit_without_value")
+        elif self.hfr_unit is None:
+            raise ValueError("hfr_unit_required")
+        elif type(self.hfr_unit) is not HfrUnit:
+            raise ValueError("invalid_hfr_unit")
         self._validate_unit_pair(
             self.sky_background,
             self.sky_background_unit,

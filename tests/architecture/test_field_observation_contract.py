@@ -8,6 +8,7 @@ from decision.field_observation import (
     CloudState,
     Confidence,
     FieldObservation,
+    HfrUnit,
     ObservationProvenance,
     ObservationQuality,
     ObservationSourceType,
@@ -119,14 +120,22 @@ def test_frame_counts_are_coherent(factory, code):
     [
         (lambda: ObservedConditions(relative_humidity_percent=101), "invalid_relative_humidity_percent"),
         (lambda: ObservedConditions(wind_speed_kmh=-0.1), "invalid_wind_speed_kmh"),
+        (lambda: ObservedConditions(temperature_c=10**400), "invalid_temperature_c"),
         (lambda: ObservedTechnical(guiding_rms_arcsec=float("nan")), "invalid_guiding_rms_arcsec"),
         (lambda: ObservedTechnical(hfr=1.2), "hfr_unit_required"),
-        (lambda: ObservedTechnical(hfr_unit="px"), "hfr_unit_without_value"),
+        (lambda: ObservedTechnical(hfr_unit=HfrUnit.PX), "hfr_unit_without_value"),
+        (lambda: ObservedTechnical(hfr=1.2, hfr_unit="px"), "invalid_hfr_unit"),
+        (lambda: ObservedTechnical(hfr=1.2, hfr_unit="bananas"), "invalid_hfr_unit"),
     ],
 )
 def test_numeric_measurements_are_finite_bounded_and_unit_explicit(factory, code):
     with pytest.raises(ValueError, match=code):
         factory()
+
+
+@pytest.mark.parametrize("unit", [HfrUnit.PX, HfrUnit.ARCSEC])
+def test_hfr_accepts_only_canonical_units(unit):
+    assert ObservedTechnical(hfr=1.2, hfr_unit=unit).hfr_unit is unit
 
 
 def test_timestamps_are_normalized_to_utc_and_recording_cannot_precede_observation():
@@ -162,7 +171,7 @@ def test_technical_units_and_compatibility_read_properties():
         ),
         technical=ObservedTechnical(
             hfr=2.1,
-            hfr_unit="px",
+            hfr_unit=HfrUnit.PX,
             sky_background=850,
             sky_background_unit="adu",
         ),

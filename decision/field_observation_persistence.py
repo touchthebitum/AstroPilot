@@ -11,6 +11,7 @@ from decision.field_observation import (
     CloudState,
     Confidence,
     FieldObservation,
+    HfrUnit,
     ObservationProvenance,
     ObservationQuality,
     ObservationSourceType,
@@ -150,7 +151,7 @@ def serialize_field_observation(observation: FieldObservation) -> str:
             },
             "technical": {
                 "hfr": observation.technical.hfr,
-                "hfr_unit": observation.technical.hfr_unit,
+                "hfr_unit": _enum_value(observation.technical.hfr_unit),
                 "sky_background": observation.technical.sky_background,
                 "sky_background_unit": (
                     observation.technical.sky_background_unit
@@ -336,7 +337,9 @@ def _deserialize_v2(
             ),
             technical=ObservedTechnical(
                 hfr=technical["hfr"],
-                hfr_unit=technical["hfr_unit"],
+                hfr_unit=_enum(
+                    technical["hfr_unit"], HfrUnit, field="hfr_unit"
+                ),
                 sky_background=technical["sky_background"],
                 sky_background_unit=technical["sky_background_unit"],
                 guiding_rms_arcsec=technical["guiding_rms_arcsec"],

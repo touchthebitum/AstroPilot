@@ -11,6 +11,7 @@ from decision.field_observation import (
     CloudState,
     Confidence,
     FieldObservation,
+    HfrUnit,
     ObservationProvenance,
     ObservationQuality,
     ObservationSourceType,
@@ -49,7 +50,7 @@ def observation(**overrides):
             usable_frames=17,
             stop_reason=StopReason.COMPLETED,
         ),
-        "technical": ObservedTechnical(hfr=2.3, hfr_unit="px"),
+        "technical": ObservedTechnical(hfr=2.3, hfr_unit=HfrUnit.PX),
         "provenance": ObservationProvenance(
             source_type=ObservationSourceType.USER,
             capture_method=CaptureMethod.MANUAL,
@@ -124,6 +125,29 @@ def test_v2_rejects_unknown_fields_and_wrong_domain_version(mutation):
 def test_non_standard_json_numbers_are_rejected(constant):
     document = serialize_field_observation(observation()).replace("12.4", constant)
     with pytest.raises(FieldObservationPersistenceError):
+        deserialize_field_observation(document, observation_id="observation-123")
+
+
+def test_non_canonical_hfr_unit_is_rejected_during_deserialization():
+    payload = json.loads(serialize_field_observation(observation()))
+    payload["observation"]["technical"]["hfr_unit"] = "bananas"
+    with pytest.raises(
+        FieldObservationPersistenceError,
+        match="invalid_hfr_unit",
+    ):
+        deserialize_field_observation(
+            json.dumps(payload), observation_id="observation-123"
+        )
+
+
+def test_huge_json_integer_is_translated_to_persistence_error():
+    document = serialize_field_observation(observation()).replace(
+        "12.4", str(10**400)
+    )
+    with pytest.raises(
+        FieldObservationPersistenceError,
+        match="invalid_field_observation",
+    ):
         deserialize_field_observation(document, observation_id="observation-123")
 
 
@@ -224,5 +248,33 @@ def test_supersession_requires_existing_observation_from_same_decision(tmp_path)
                 observation_id="correction",
                 decision_id="decision-other",
                 supersedes_observation_id="original",
+            )
+        )
+
+
+def test_supersession_rejects_cycle_in_corrupted_history(tmp_path):
+    first = observation(
+        observation_id="observation-a",
+        supersedes_observation_id="observation-b",
+    )
+    second = observation(
+        observation_id="observation-b",
+        supersedes_observation_id="observation-a",
+    )
+    (tmp_path / "observation-a.json").write_text(
+        serialize_field_observation(first), encoding="utf-8"
+    )
+    (tmp_path / "observation-b.json").write_text(
+        serialize_field_observation(second), encoding="utf-8"
+    )
+
+    with pytest.raises(
+        FieldObservationPersistenceError,
+        match="observation_supersession_cycle",
+    ):
+        FileFieldObservationStore(tmp_path).save(
+            observation=observation(
+                observation_id="observation-c",
+                supersedes_observation_id="observation-a",
             )
         )
