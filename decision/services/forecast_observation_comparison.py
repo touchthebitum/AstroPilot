@@ -474,11 +474,12 @@ def _safe_type_metadata_token(
 def _safe_slot_metadata_token(
     owner: type,
     slot_name: str,
+    binding_names: tuple[str, ...],
     *,
     seen: set[int],
     depth: int,
 ) -> dict:
-    """Redact a slot owner and name without constructing a raw path."""
+    """Redact a material slot and every class-dictionary binding to it."""
     return {
         "owner": _safe_type_metadata_token(
             owner,
@@ -490,7 +491,87 @@ def _safe_slot_metadata_token(
             seen=seen,
             depth=depth + 1,
         ),
+        "bindings": [
+            _safe_fingerprint_token(
+                binding_name,
+                seen=seen,
+                depth=depth + 1,
+            )
+            for binding_name in binding_names
+        ],
     }
+
+
+def _safe_material_slot_values(
+    value: object,
+    *,
+    owners: tuple[type, ...],
+    seen: set[int],
+    depth: int,
+) -> tuple[list[dict], bool, bool]:
+    """Read real slot storage from member descriptors in each owner dict."""
+    slot_values = []
+    complete = True
+    found_material_slot = False
+    canonical_slot_keys: set[str] = set()
+    for owner in owners:
+        descriptors: dict[int, tuple[MemberDescriptorType, list[str]]] = {}
+        for binding_name, candidate in vars(owner).items():
+            if type(candidate) is not MemberDescriptorType:
+                continue
+            descriptor_identity = id(candidate)
+            if descriptor_identity not in descriptors:
+                descriptors[descriptor_identity] = (candidate, [])
+            descriptors[descriptor_identity][1].append(binding_name)
+
+        for descriptor, binding_names in descriptors.values():
+            try:
+                descriptor_owner = descriptor.__objclass__
+                descriptor_name = descriptor.__name__
+            except Exception:
+                complete = False
+                continue
+            if descriptor_owner is not owner or type(descriptor_name) is not str:
+                complete = False
+                continue
+            if not all(type(binding_name) is str for binding_name in binding_names):
+                complete = False
+                continue
+
+            found_material_slot = True
+            binding_names_tuple = tuple(sorted(binding_names))
+            slot_metadata = _safe_slot_metadata_token(
+                owner,
+                descriptor_name,
+                binding_names_tuple,
+                seen=seen,
+                depth=depth + 1,
+            )
+            canonical_slot_key = _canonical_json(slot_metadata)
+            if canonical_slot_key in canonical_slot_keys:
+                complete = False
+            canonical_slot_keys.add(canonical_slot_key)
+            try:
+                slot_value = descriptor.__get__(value, type(value))
+            except AttributeError:
+                slot_token = {"kind": "unset"}
+            except Exception:
+                complete = False
+                continue
+            else:
+                slot_token = _safe_fingerprint_token(
+                    slot_value,
+                    seen=seen,
+                    depth=depth + 1,
+                )
+            slot_values.append(
+                {
+                    "slot": slot_metadata,
+                    "value": slot_token,
+                }
+            )
+    slot_values.sort(key=_canonical_json)
+    return slot_values, complete, found_material_slot
 
 
 def _safe_temporal_fingerprint(
@@ -561,56 +642,17 @@ def _safe_temporal_subclass_state(
     if attributes is not None and type(attributes) is not dict:
         return {"kind": "unavailable"}, False
 
-    slot_values = []
-    complete = True
+    owners = []
     for owner in type(value).__mro__:
         if owner is base_type:
             break
-        owner_slots = vars(owner).get("__slots__")
-        if owner_slots is None:
-            continue
-        if type(owner_slots) is str:
-            owner_slots = (owner_slots,)
-        elif type(owner_slots) not in (tuple, list):
-            complete = False
-            continue
-        for slot_name in owner_slots:
-            if type(slot_name) is not str:
-                complete = False
-                continue
-            if slot_name in ("__dict__", "__weakref__"):
-                continue
-            descriptor = vars(owner).get(slot_name)
-            if type(descriptor) is not MemberDescriptorType:
-                complete = False
-                continue
-            slot_metadata = _safe_slot_metadata_token(
-                owner,
-                slot_name,
-                seen=seen,
-                depth=depth + 1,
-            )
-            try:
-                slot_value = descriptor.__get__(value, type(value))
-            except AttributeError:
-                slot_values.append(
-                    {"slot": slot_metadata, "value": {"kind": "unset"}}
-                )
-                continue
-            except Exception:
-                complete = False
-                continue
-            slot_values.append(
-                {
-                    "slot": slot_metadata,
-                    "value": _safe_fingerprint_token(
-                        slot_value,
-                        seen=seen,
-                        depth=depth + 1,
-                    ),
-                }
-            )
-    slot_values.sort(key=_canonical_json)
+        owners.append(owner)
+    slot_values, complete, _ = _safe_material_slot_values(
+        value,
+        owners=tuple(owners),
+        seen=seen,
+        depth=depth,
+    )
     dictionary_token = (
         _safe_fingerprint_token(
             attributes,
@@ -645,68 +687,30 @@ def _safe_object_state(
     if attributes is not None and type(attributes) is not dict:
         return None, False
 
-    slot_values = []
     complete = True
     has_python_storage = type(attributes) is dict
     identity = id(value)
     seen.add(identity)
     try:
-        for owner in type(value).__mro__:
-            if owner is object:
-                continue
-            owner_slots = vars(owner).get("__slots__")
-            if owner_slots is None:
-                if owner.__module__ == "builtins":
-                    complete = False
-                continue
-            has_python_storage = True
-            if type(owner_slots) is str:
-                owner_slots = (owner_slots,)
-            elif type(owner_slots) not in (tuple, list):
-                complete = False
-                continue
-            for slot_name in owner_slots:
-                if type(slot_name) is not str:
-                    complete = False
-                    continue
-                if slot_name in ("__dict__", "__weakref__"):
-                    continue
-                descriptor = vars(owner).get(slot_name)
-                if type(descriptor) is not MemberDescriptorType:
-                    complete = False
-                    continue
-                try:
-                    slot_value = descriptor.__get__(value, type(value))
-                except AttributeError:
-                    slot_values.append(
-                        {
-                            "slot": _safe_slot_metadata_token(
-                                owner,
-                                slot_name,
-                                seen=seen,
-                                depth=depth + 1,
-                            ),
-                            "value": {"kind": "unset"},
-                        }
-                    )
-                    continue
-                except Exception:
-                    complete = False
-                    continue
-                slot_values.append(
-                    {
-                        "slot": _safe_slot_metadata_token(
-                            owner,
-                            slot_name,
-                            seen=seen,
-                            depth=depth + 1,
-                        ),
-                        "value": _safe_fingerprint_token(
-                            slot_value, seen=seen, depth=depth + 1
-                        ),
-                    }
-                )
-        slot_values.sort(key=_canonical_json)
+        owners = tuple(
+            owner for owner in type(value).__mro__ if owner is not object
+        )
+        slot_values, slots_complete, found_material_slot = (
+            _safe_material_slot_values(
+                value,
+                owners=owners,
+                seen=seen,
+                depth=depth,
+            )
+        )
+        complete = complete and slots_complete
+        has_python_storage = has_python_storage or found_material_slot
+        if any(
+            owner.__module__ == "builtins"
+            and vars(owner).get("__slots__") is None
+            for owner in owners
+        ):
+            complete = False
         dictionary_token = (
             _safe_fingerprint_token(
                 attributes,

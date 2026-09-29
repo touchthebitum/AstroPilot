@@ -1147,6 +1147,148 @@ def test_hybrid_dict_and_slots_state_is_fully_fingerprinted():
     assert first.comparison_id != second.comparison_id
 
 
+@pytest.mark.parametrize("mutated_slots", [(), ("renamed",)])
+def test_material_slot_survives_mutated_slots_metadata(mutated_slots):
+    class SlottedLocation:
+        __slots__ = ("marker",)
+
+    first_location = SlottedLocation()
+    first_location.marker = "first"
+    second_location = SlottedLocation()
+    second_location.marker = "second"
+    SlottedLocation.__slots__ = mutated_slots
+
+    def result_for(location):
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point, "requested_location", location)
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    first = result_for(first_location)
+    repeated_first = result_for(first_location)
+    second = result_for(second_location)
+
+    assert first.identity_persistable is True
+    assert second.identity_persistable is True
+    assert first.source_digest == repeated_first.source_digest
+    assert first.comparison_id == repeated_first.comparison_id
+    assert first.source_digest != second.source_digest
+    assert first.comparison_id != second.comparison_id
+
+
+def test_material_slots_across_multilevel_and_multiple_inheritance_are_unique():
+    class RootState:
+        __slots__ = ("root",)
+
+    class IntermediateState(RootState):
+        __slots__ = ("middle",)
+
+    class EmptyBranch:
+        __slots__ = ()
+
+    class CombinedState(IntermediateState, EmptyBranch):
+        __slots__ = ("leaf",)
+
+    def token(root, middle, leaf):
+        value = CombinedState()
+        value.root = root
+        value.middle = middle
+        value.leaf = leaf
+        return _safe_fingerprint_token(value)
+
+    baseline = token("root", "middle", "leaf")
+    repeated = token("root", "middle", "leaf")
+    changed_root = token("changed", "middle", "leaf")
+    changed_middle = token("root", "changed", "leaf")
+    changed_leaf = token("root", "middle", "changed")
+
+    assert _fingerprint_is_persistable(baseline) is True
+    assert _digest(baseline) == _digest(repeated)
+    assert len(baseline["state"]["slots"]) == 3
+    assert len(
+        {
+            _digest(slot["slot"])
+            for slot in baseline["state"]["slots"]
+        }
+    ) == 3
+    assert _digest(baseline) != _digest(changed_root)
+    assert _digest(baseline) != _digest(changed_middle)
+    assert _digest(baseline) != _digest(changed_leaf)
+
+
+def test_same_named_dynamic_classes_include_material_slot_state():
+    class_attributes = {
+        "__module__": "same.dynamic.module",
+        "__qualname__": "SameIdentity",
+        "__slots__": ("marker",),
+    }
+    first_type = type("SameIdentity", (), class_attributes)
+    second_type = type("SameIdentity", (), class_attributes)
+    first = first_type()
+    first.marker = "first"
+    second = second_type()
+    second.marker = "second"
+
+    def result_for(location):
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point, "requested_location", location)
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    first_result = result_for(first)
+    repeated_first_result = result_for(first)
+    second_result = result_for(second)
+
+    assert first_result.identity_persistable is True
+    assert second_result.identity_persistable is True
+    assert first_result.source_digest == repeated_first_result.source_digest
+    assert first_result.comparison_id == repeated_first_result.comparison_id
+    assert first_result.source_digest != second_result.source_digest
+    assert first_result.comparison_id != second_result.comparison_id
+
+
+def test_foreign_slot_descriptor_alias_is_explicitly_non_persistable():
+    class ForeignState:
+        __slots__ = ("foreign",)
+
+    class LocalState:
+        __slots__ = ("local",)
+
+    LocalState.ambiguous = vars(ForeignState)["foreign"]
+    value = LocalState()
+    value.local = "material"
+
+    token = _safe_fingerprint_token(value)
+
+    assert _fingerprint_is_persistable(token) is False
+
+
+def test_temporal_material_slot_survives_mutated_slots_metadata():
+    class ExtendedDatetime(datetime):
+        __slots__ = ("marker",)
+
+    first = ExtendedDatetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc)
+    first.marker = "first"
+    second = ExtendedDatetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc)
+    second.marker = "second"
+    ExtendedDatetime.__slots__ = ()
+
+    first_token = _safe_fingerprint_token(first)
+    repeated_first_token = _safe_fingerprint_token(first)
+    second_token = _safe_fingerprint_token(second)
+
+    assert _fingerprint_is_persistable(first_token) is True
+    assert _fingerprint_is_persistable(second_token) is True
+    assert _digest(first_token) == _digest(repeated_first_token)
+    assert _digest(first_token) != _digest(second_token)
+
+
 @pytest.mark.parametrize("unsafe_state", ["opaque", "cycle", "depth"])
 def test_non_canonicalizable_identity_is_publicly_non_persistable(unsafe_state):
     if unsafe_state == "opaque":
