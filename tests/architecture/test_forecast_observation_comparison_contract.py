@@ -98,6 +98,7 @@ ALLOWED_IMPORTS = {
         ("datetime", "tzinfo"),
         ("enum", "Enum"),
         ("types", "MemberDescriptorType"),
+        ("types", "GetSetDescriptorType"),
         ("zoneinfo", "ZoneInfo"),
         ("decision.field_observation", "CaptureMethod"),
         ("decision.field_observation", "CloudState"),
@@ -1417,6 +1418,172 @@ def test_inherited_shadowed_slots_are_all_fingerprinted_publicly():
     assert baseline.comparison_id == repeated.comparison_id
     assert baseline.source_digest != changed_base.source_digest
     assert baseline.source_digest != changed_leaf.source_digest
+
+
+def test_custom_dict_property_cannot_hide_material_object_state_publicly():
+    class MaskedDictionaryLocation:
+        @property
+        def __dict__(self):
+            return {}
+
+    def result_for(marker):
+        location = MaskedDictionaryLocation()
+        object.__setattr__(location, "marker", marker)
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point, "requested_location", location)
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    first = result_for("first")
+    repeated_first = result_for("first")
+    second = result_for("second")
+
+    assert first.identity_persistable is False
+    assert second.identity_persistable is False
+    assert first.source_digest == repeated_first.source_digest
+    assert first.comparison_id == repeated_first.comparison_id
+
+
+def test_custom_dict_property_cannot_hide_temporal_state_publicly():
+    class MaskedDictionaryDatetime(datetime):
+        @property
+        def __dict__(self):
+            return {}
+
+    def result_for(marker):
+        forecast_for_utc = MaskedDictionaryDatetime(
+            2026,
+            9,
+            1,
+            17,
+            0,
+            tzinfo=timezone.utc,
+        )
+        object.__setattr__(forecast_for_utc, "marker", marker)
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(
+            forecast_point, "forecast_for_utc", forecast_for_utc
+        )
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    first = result_for("first")
+    repeated_first = result_for("first")
+    second = result_for("second")
+
+    assert first.identity_persistable is False
+    assert second.identity_persistable is False
+    assert first.source_digest == repeated_first.source_digest
+    assert first.comparison_id == repeated_first.comparison_id
+
+
+def test_external_dict_descriptor_is_never_material_storage_publicly():
+    external_storage = {}
+
+    class ExternalDictionary:
+        def __get__(self, instance, owner=None):
+            if instance is None:
+                return self
+            return external_storage.setdefault(id(instance), {})
+
+        def __set__(self, instance, value):
+            external_storage[id(instance)] = value
+
+    class ExternalDictionaryLocation:
+        __dict__ = ExternalDictionary()
+
+    location = ExternalDictionaryLocation()
+    object.__setattr__(location, "marker", "material")
+    location.__dict__["external"] = "decoy"
+    forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+    object.__setattr__(forecast_point, "requested_location", location)
+
+    first = compare_forecast_to_field_observation(
+        DecisionForecastEvidence((forecast_point,)),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+    repeated = compare_forecast_to_field_observation(
+        DecisionForecastEvidence((forecast_point,)),
+        observation(),
+        computed_at_utc=COMPUTED_AT,
+    )
+
+    assert first.identity_persistable is False
+    assert first.source_digest == repeated.source_digest
+    assert first.comparison_id == repeated.comparison_id
+
+
+def test_readable_material_dictionary_is_complete_and_stable_publicly():
+    class DictionaryLocation:
+        pass
+
+    def result_for(marker):
+        location = DictionaryLocation()
+        location.marker = marker
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point, "requested_location", location)
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    first = result_for("first")
+    repeated_first = result_for("first")
+    second = result_for("second")
+
+    assert first.identity_persistable is True
+    assert second.identity_persistable is True
+    assert first.source_digest == repeated_first.source_digest
+    assert first.comparison_id == repeated_first.comparison_id
+    assert first.source_digest != second.source_digest
+    assert first.comparison_id != second.comparison_id
+
+
+def test_inherited_dict_shadow_is_read_but_fails_closed_publicly():
+    class DictionaryBase:
+        pass
+
+    class ShadowedDictionaryLocation(DictionaryBase):
+        @property
+        def __dict__(self):
+            return {}
+
+    material_dictionary_descriptor = type.__getattribute__(
+        DictionaryBase, "__dict__"
+    )["__dict__"]
+
+    def result_for(marker):
+        location = ShadowedDictionaryLocation()
+        object.__setattr__(location, "marker", marker)
+        assert material_dictionary_descriptor.__get__(
+            location, ShadowedDictionaryLocation
+        )["marker"] == marker
+        forecast_point = point(WeatherVariable.TEMPERATURE_C, 8.0)
+        object.__setattr__(forecast_point, "requested_location", location)
+        return compare_forecast_to_field_observation(
+            DecisionForecastEvidence((forecast_point,)),
+            observation(),
+            computed_at_utc=COMPUTED_AT,
+        )
+
+    first = result_for("first")
+    repeated_first = result_for("first")
+    second = result_for("second")
+
+    assert first.identity_persistable is False
+    assert second.identity_persistable is False
+    assert first.source_digest == repeated_first.source_digest
+    assert first.comparison_id == repeated_first.comparison_id
+    assert first.source_digest != second.source_digest
+    assert first.comparison_id != second.comparison_id
 
 
 def test_temporal_material_slot_survives_mutated_slots_metadata():

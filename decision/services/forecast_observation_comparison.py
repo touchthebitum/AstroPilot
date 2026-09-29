@@ -6,7 +6,7 @@ import struct
 from dataclasses import asdict
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from enum import Enum
-from types import MemberDescriptorType
+from types import GetSetDescriptorType, MemberDescriptorType
 from zoneinfo import ZoneInfo
 
 from decision.field_observation import (
@@ -508,6 +508,129 @@ def _safe_slot_metadata_token(
     }
 
 
+_TYPE_DICTIONARY_DESCRIPTOR = type.__getattribute__(type, "__dict__")[
+    "__dict__"
+]
+_TYPE_LAYOUT_DESCRIPTORS = {
+    name: type.__getattribute__(type, "__dict__")[name]
+    for name in (
+        "__base__",
+        "__basicsize__",
+        "__dictoffset__",
+        "__itemsize__",
+        "__mro__",
+        "__name__",
+        "__weakrefoffset__",
+    )
+}
+
+
+def _raw_type_dictionary(owner: type):
+    """Read a class dictionary without consulting its metaclass hooks."""
+    return _TYPE_DICTIONARY_DESCRIPTOR.__get__(owner, type(owner))
+
+
+def _raw_type_layout_attribute(owner: type, name: str):
+    """Read immutable type-layout metadata through ``type``'s descriptor."""
+    return _TYPE_LAYOUT_DESCRIPTORS[name].__get__(owner, type(owner))
+
+
+def _safe_material_instance_dictionary(
+    value: object,
+) -> tuple[dict | None, bool, bool]:
+    """Read the real instance dictionary only when its layout is provable.
+
+    ``object.__getattribute__(value, "__dict__")`` still honors a data
+    descriptor named ``__dict__``. Instead, inspect raw class dictionaries
+    and call the genuine CPython get-set descriptors directly. A material
+    dictionary that has lost or had its expected binding shadowed is treated
+    as present but incomplete, even if another alias still permits reading it.
+    """
+    try:
+        value_type = type(value)
+        value_mro = _raw_type_layout_attribute(value_type, "__mro__")
+        dictionary_offset = _raw_type_layout_attribute(
+            value_type, "__dictoffset__"
+        )
+    except Exception:
+        return None, False, False
+    if (
+        type(value_mro) is not tuple
+        or not value_mro
+        or value_mro[0] is not value_type
+        or type(dictionary_offset) is not int
+    ):
+        return None, False, False
+    if dictionary_offset == 0:
+        return None, True, False
+
+    complete = True
+    descriptors: dict[int, GetSetDescriptorType] = {}
+    missing_binding = object()
+    for owner in value_mro:
+        try:
+            owner_dictionary = _raw_type_dictionary(owner)
+            owner_dictionary_offset = _raw_type_layout_attribute(
+                owner, "__dictoffset__"
+            )
+        except Exception:
+            complete = False
+            continue
+        if type(owner_dictionary_offset) is not int:
+            complete = False
+
+        binding = owner_dictionary.get("__dict__", missing_binding)
+        if binding is not missing_binding:
+            if type(binding) is not GetSetDescriptorType:
+                complete = False
+            else:
+                try:
+                    binding_owner = binding.__objclass__
+                    binding_name = binding.__name__
+                except Exception:
+                    complete = False
+                else:
+                    if binding_owner is not owner or binding_name != "__dict__":
+                        complete = False
+
+        for candidate in owner_dictionary.values():
+            if type(candidate) is not GetSetDescriptorType:
+                continue
+            try:
+                candidate_owner = candidate.__objclass__
+                candidate_name = candidate.__name__
+            except Exception:
+                complete = False
+                continue
+            if candidate_owner is owner and candidate_name == "__dict__":
+                descriptors[id(candidate)] = candidate
+                if binding is not candidate:
+                    complete = False
+
+    if not descriptors:
+        return None, False, True
+
+    dictionaries = []
+    for descriptor in descriptors.values():
+        try:
+            attributes = descriptor.__get__(value, value_type)
+        except Exception:
+            complete = False
+            continue
+        if type(attributes) is not dict:
+            complete = False
+            continue
+        dictionaries.append(attributes)
+    if not dictionaries:
+        return None, False, True
+    material_dictionary = dictionaries[0]
+    if any(
+        attributes is not material_dictionary for attributes in dictionaries[1:]
+    ):
+        complete = False
+    return material_dictionary, complete, True
+
+
 def _safe_material_slot_values(
     value: object,
     *,
@@ -528,15 +651,31 @@ def _safe_material_slot_values(
     canonical_slot_keys: set[str] = set()
     for owner in owners:
         try:
-            owner_dictionary = type.__getattribute__(owner, "__dict__")
-            owner_name = type.__getattribute__(owner, "__name__")
-            owner_base = type.__getattribute__(owner, "__base__")
-            owner_basicsize = type.__getattribute__(owner, "__basicsize__")
-            owner_itemsize = type.__getattribute__(owner, "__itemsize__")
-            base_basicsize = type.__getattribute__(
+            owner_dictionary = _raw_type_dictionary(owner)
+            owner_name = _raw_type_layout_attribute(owner, "__name__")
+            owner_base = _raw_type_layout_attribute(owner, "__base__")
+            owner_basicsize = _raw_type_layout_attribute(
+                owner, "__basicsize__"
+            )
+            owner_itemsize = _raw_type_layout_attribute(owner, "__itemsize__")
+            owner_dictionary_offset = _raw_type_layout_attribute(
+                owner, "__dictoffset__"
+            )
+            owner_weakref_offset = _raw_type_layout_attribute(
+                owner, "__weakrefoffset__"
+            )
+            base_basicsize = _raw_type_layout_attribute(
                 owner_base, "__basicsize__"
             )
-            base_itemsize = type.__getattribute__(owner_base, "__itemsize__")
+            base_itemsize = _raw_type_layout_attribute(
+                owner_base, "__itemsize__"
+            )
+            base_dictionary_offset = _raw_type_layout_attribute(
+                owner_base, "__dictoffset__"
+            )
+            base_weakref_offset = _raw_type_layout_attribute(
+                owner_base, "__weakrefoffset__"
+            )
         except Exception:
             complete = False
             continue
@@ -568,15 +707,37 @@ def _safe_material_slot_values(
 
         pointer_size = struct.calcsize("P")
         layout_delta = owner_basicsize - base_basicsize
+        special_layout_delta = 0
+        if base_weakref_offset == 0 and owner_weakref_offset > 0:
+            special_layout_delta += pointer_size
+        elif (
+            owner_weakref_offset != base_weakref_offset
+            and not (base_weakref_offset == 0 and owner_weakref_offset < 0)
+        ):
+            complete = False
+        if base_dictionary_offset == 0 and owner_dictionary_offset > 0:
+            special_layout_delta += pointer_size
+        elif (
+            base_dictionary_offset != owner_dictionary_offset
+            and not (
+                base_dictionary_offset == 0 and owner_dictionary_offset < 0
+            )
+        ):
+            complete = False
+        material_slot_delta = layout_delta - special_layout_delta
         if (
             type(owner_basicsize) is not int
             or type(base_basicsize) is not int
             or type(owner_itemsize) is not int
             or type(base_itemsize) is not int
+            or type(owner_dictionary_offset) is not int
+            or type(base_dictionary_offset) is not int
+            or type(owner_weakref_offset) is not int
+            or type(base_weakref_offset) is not int
             or owner_itemsize != base_itemsize
-            or layout_delta < 0
-            or layout_delta % pointer_size
-            or layout_delta // pointer_size != len(owned_descriptors)
+            or material_slot_delta < 0
+            or material_slot_delta % pointer_size
+            or material_slot_delta // pointer_size != len(owned_descriptors)
         ):
             complete = False
 
@@ -729,25 +890,19 @@ def _safe_temporal_subclass_state(
 ) -> tuple[dict, bool]:
     """Return all Python storage added above a known temporal primitive."""
     try:
-        attributes = object.__getattribute__(value, "__dict__")
-    except AttributeError:
-        attributes = None
-    except Exception:
-        return {"kind": "unavailable"}, False
-    if attributes is not None and type(attributes) is not dict:
-        return {"kind": "unavailable"}, False
-
-    try:
         value_type = type(value)
-        value_mro = type.__getattribute__(value_type, "__mro__")
+        value_mro = _raw_type_layout_attribute(value_type, "__mro__")
     except Exception:
         return {"kind": "unavailable"}, False
+    attributes, dictionary_complete, _ = _safe_material_instance_dictionary(
+        value
+    )
     owners = []
     for owner in value_mro:
         if owner is base_type:
             break
         owners.append(owner)
-    slot_values, complete, _ = _safe_material_slot_values(
+    slot_values, slots_complete, _ = _safe_material_slot_values(
         value,
         owners=tuple(owners),
         seen=seen,
@@ -765,7 +920,7 @@ def _safe_temporal_subclass_state(
     return {
         "dictionary": dictionary_token,
         "slots": slot_values,
-    }, complete
+    }, dictionary_complete and slots_complete
 
 
 def _safe_object_state(
@@ -780,20 +935,16 @@ def _safe_object_state(
     opaque native base, custom slot descriptor, or unreadable slot makes the
     technical fingerprint explicitly non-persistable.
     """
-    try:
-        attributes = object.__getattribute__(value, "__dict__")
-    except Exception:
-        attributes = None
-    if attributes is not None and type(attributes) is not dict:
-        return None, False
-
-    complete = True
-    has_python_storage = type(attributes) is dict
     identity = id(value)
     seen.add(identity)
     try:
         value_type = type(value)
-        value_mro = type.__getattribute__(value_type, "__mro__")
+        value_mro = _raw_type_layout_attribute(value_type, "__mro__")
+        attributes, dictionary_complete, has_material_dictionary = (
+            _safe_material_instance_dictionary(value)
+        )
+        complete = dictionary_complete
+        has_python_storage = has_material_dictionary
         owners = tuple(owner for owner in value_mro if owner is not object)
         slot_values, slots_complete, found_material_slot = (
             _safe_material_slot_values(
@@ -807,8 +958,8 @@ def _safe_object_state(
         has_python_storage = has_python_storage or found_material_slot
         for owner in owners:
             try:
-                owner_module = type.__getattribute__(owner, "__module__")
-                owner_dictionary = type.__getattribute__(owner, "__dict__")
+                owner_dictionary = _raw_type_dictionary(owner)
+                owner_module = owner_dictionary.get("__module__")
             except Exception:
                 complete = False
                 continue
