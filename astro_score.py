@@ -2227,6 +2227,7 @@ def build_durable_tonight_application_service(
         FileDecisionAcceptanceLineageStore,
     )
     from astropilot.execution_lineage_store import FileExecutionLineageStore
+    from astropilot.field_observation_store import FileFieldObservationStore
 
     return DurableTonightApplicationService(
         application_service=build_tonight_application_service(),
@@ -2238,6 +2239,9 @@ def build_durable_tonight_application_service(
         ),
         execution_lineage_store=FileExecutionLineageStore(
             get_user_data_dir() / "execution_lineage"
+        ),
+        field_observation_store=FileFieldObservationStore(
+            get_user_data_dir() / "field_observations"
         ),
         decision_id_factory=generate_decision_id,
         profile_loader=load_user_profile,

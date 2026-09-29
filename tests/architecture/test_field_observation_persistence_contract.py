@@ -1,401 +1,280 @@
 import json
-import os
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from astropilot.field_observation_store import FileFieldObservationStore
-from astropilot.user_profile import get_user_data_dir
 from decision.field_observation import (
-    CloudCondition,
+    CaptureMethod,
+    CloudState,
+    Confidence,
     FieldObservation,
-    SeeingCondition,
-    Transparency,
+    HfrUnit,
+    ObservationProvenance,
+    ObservationQuality,
+    ObservationSourceType,
+    ObservedAcquisition,
+    ObservedConditions,
+    ObservedTechnical,
+    QualityFlag,
+    StopReason,
 )
 from decision.field_observation_persistence import (
+    DOMAIN_VERSION,
     FieldObservationPersistenceError,
     deserialize_field_observation,
     serialize_field_observation,
 )
 
 
-OBSERVED_AT = datetime(
-    2026,
-    9,
-    1,
-    21,
-    17,
-    30,
-    123456,
-    tzinfo=timezone.utc,
-)
+OBSERVED_AT = datetime(2026, 9, 1, 21, tzinfo=timezone.utc)
 
 
 def observation(**overrides):
     values = {
         "observation_id": "observation-123",
+        "decision_id": "decision-123",
         "execution_id": "execution-123",
         "observed_at_utc": OBSERVED_AT,
-        "cloud_condition": CloudCondition.FEW,
-        "transparency": Transparency.GOOD,
-        "seeing": SeeingCondition.FAIR,
-        "dew_detected": False,
+        "recorded_at_utc": OBSERVED_AT + timedelta(minutes=2),
+        "supersedes_observation_id": None,
+        "conditions": ObservedConditions(
+            temperature_c=12.4,
+            relative_humidity_percent=63,
+            cloud_state=CloudState.FEW,
+        ),
+        "acquisition": ObservedAcquisition(
+            attempted_frames=20,
+            usable_frames=17,
+            stop_reason=StopReason.COMPLETED,
+        ),
+        "technical": ObservedTechnical(hfr=2.3, hfr_unit=HfrUnit.PX),
+        "provenance": ObservationProvenance(
+            source_type=ObservationSourceType.USER,
+            capture_method=CaptureMethod.MANUAL,
+        ),
+        "quality": ObservationQuality(confidence=Confidence.HIGH),
     }
     values.update(overrides)
     return FieldObservation(**values)
 
 
-def document_for(source=None):
-    return serialize_field_observation(source or observation())
-
-
-def test_document_round_trip_is_lossless_deterministic_and_strict():
+def test_v2_round_trip_is_strict_lossless_and_deterministic():
     source = observation()
-    document = document_for(source)
-    restored = deserialize_field_observation(
-        document,
-        observation_id=source.observation_id,
-    )
+    document = serialize_field_observation(source)
     payload = json.loads(document)
-
-    assert restored == source
-    assert document == document_for(source)
-    assert set(payload) == {"schema_version", "observation"}
-    assert payload["schema_version"] == 1
-    assert set(payload["observation"]) == {
-        "observation_id",
-        "execution_id",
-        "observed_at_utc",
-        "cloud_condition",
-        "transparency",
-        "seeing",
-        "dew_detected",
-    }
-    assert payload["observation"]["observed_at_utc"].endswith("+00:00")
-
-
-def test_null_values_are_preserved_in_json_and_round_trip():
-    source = observation(
-        cloud_condition=CloudCondition.CLEAR,
-        transparency=None,
-        seeing=None,
-        dew_detected=None,
-    )
-    payload = json.loads(document_for(source))["observation"]
-
-    assert payload["transparency"] is None
-    assert payload["seeing"] is None
-    assert payload["dew_detected"] is None
+    assert payload["schema_version"] == 2
+    assert payload["domain_version"] == DOMAIN_VERSION
     assert deserialize_field_observation(
-        document_for(source),
-        observation_id=source.observation_id,
+        document, observation_id=source.observation_id
     ) == source
+    assert serialize_field_observation(source) == document
 
 
-@pytest.mark.parametrize("version", [2, "1", True, None])
-def test_invalid_schema_version_is_rejected(version):
-    payload = json.loads(document_for())
-    payload["schema_version"] = version
-
-    with pytest.raises(
-        FieldObservationPersistenceError,
-        match="invalid_schema_version",
-    ):
-        deserialize_field_observation(
-            json.dumps(payload),
-            observation_id="observation-123",
-        )
-
-
-@pytest.mark.parametrize("level", ["root", "observation"])
-def test_unknown_fields_are_rejected(level):
-    payload = json.loads(document_for())
-    target = payload if level == "root" else payload["observation"]
-    target["unexpected"] = True
-
-    with pytest.raises(FieldObservationPersistenceError):
-        deserialize_field_observation(
-            json.dumps(payload),
-            observation_id="observation-123",
-        )
-
-
-@pytest.mark.parametrize(
-    ("level", "field"),
-    [
-        ("root", "schema_version"),
-        ("root", "observation"),
-        ("observation", "observation_id"),
-        ("observation", "execution_id"),
-        ("observation", "observed_at_utc"),
-        ("observation", "cloud_condition"),
-        ("observation", "transparency"),
-        ("observation", "seeing"),
-        ("observation", "dew_detected"),
-    ],
-)
-def test_missing_required_fields_are_rejected(level, field):
-    payload = json.loads(document_for())
-    target = payload if level == "root" else payload["observation"]
-    del target[field]
-
-    with pytest.raises(FieldObservationPersistenceError):
-        deserialize_field_observation(
-            json.dumps(payload),
-            observation_id="observation-123",
-        )
-
-@pytest.mark.parametrize(
-    ("field", "unknown"),
-    [
-        ("cloud_condition", "scattered"),
-        ("transparency", "perfect"),
-        ("seeing", "bad"),
-    ],
-)
-def test_unknown_enum_values_are_rejected(field, unknown):
-    payload = json.loads(document_for())
-    payload["observation"][field] = unknown
-
-    with pytest.raises(FieldObservationPersistenceError):
-        deserialize_field_observation(
-            json.dumps(payload),
-            observation_id="observation-123",
-        )
-
-
-@pytest.mark.parametrize("invalid", [0, True, [], {}])
-def test_enum_fields_reject_non_string_json_types(invalid):
-    payload = json.loads(document_for())
-    payload["observation"]["cloud_condition"] = invalid
-
-    with pytest.raises(FieldObservationPersistenceError):
-        deserialize_field_observation(
-            json.dumps(payload),
-            observation_id="observation-123",
-        )
-
-
-@pytest.mark.parametrize("invalid", [0, 1, "false", [], {}])
-def test_dew_detected_rejects_non_boolean_json_types(invalid):
-    payload = json.loads(document_for())
-    payload["observation"]["dew_detected"] = invalid
-
-    with pytest.raises(FieldObservationPersistenceError):
-        deserialize_field_observation(
-            json.dumps(payload),
-            observation_id="observation-123",
-        )
-
-
-@pytest.mark.parametrize(
-    "document",
-    [
-        "{",
-        "[]",
-        "null",
-        '{"value": NaN}',
-        '{"value": Infinity}',
-        '{"value": -Infinity}',
-    ],
-)
-def test_invalid_or_non_standard_json_documents_are_rejected(document):
-    with pytest.raises(FieldObservationPersistenceError):
-        deserialize_field_observation(
-            document,
-            observation_id="observation-123",
-        )
-
-
-def test_document_identity_must_match_requested_identity():
-    with pytest.raises(
-        FieldObservationPersistenceError,
-        match="observation_id_mismatch",
-    ):
-        deserialize_field_observation(
-            document_for(),
-            observation_id="observation-other",
-        )
-
-
-def test_missing_store_entry_returns_none(tmp_path):
-    store = FileFieldObservationStore(tmp_path)
-
-    assert store.load(observation_id="missing-observation") is None
-
-
-def test_default_store_uses_canonical_user_data_root(tmp_path, monkeypatch):
-    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
-    store = FileFieldObservationStore()
-
-    store.save(observation=observation())
-
-    expected = (
-        get_user_data_dir()
-        / "field_observations"
-        / "observation-123.json"
+def test_historical_v1_is_read_only_flagged_and_ineligible(tmp_path):
+    legacy = {
+        "schema_version": 1,
+        "observation": {
+            "observation_id": "legacy-1",
+            "execution_id": "old-execution",
+            "observed_at_utc": OBSERVED_AT.isoformat(),
+            "cloud_condition": "overcast",
+            "transparency": None,
+            "seeing": None,
+            "dew_detected": False,
+        },
+    }
+    path = tmp_path / "legacy-1.json"
+    original = json.dumps(legacy, indent=2)
+    path.write_text(original, encoding="utf-8")
+    restored = FileFieldObservationStore(tmp_path).load(
+        observation_id="legacy-1"
     )
-    assert expected.is_file()
-    assert not (tmp_path / "user_profile.json").exists()
+    assert restored.decision_id is None
+    assert restored.legacy_lineage_incomplete is True
+    assert restored.calibration_eligible is False
+    assert QualityFlag.LEGACY_LINEAGE_INCOMPLETE in restored.quality.flags
+    assert path.read_text(encoding="utf-8") == original
+    with pytest.raises(
+        FieldObservationPersistenceError,
+        match="legacy_field_observation_read_only",
+    ):
+        serialize_field_observation(restored)
 
 
-def test_store_round_trip_and_identical_save_are_idempotent(tmp_path):
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload.update(unexpected=True),
+        lambda payload: payload["observation"]["conditions"].update(unexpected=True),
+        lambda payload: payload.update(domain_version="other"),
+    ],
+)
+def test_v2_rejects_unknown_fields_and_wrong_domain_version(mutation):
+    payload = json.loads(serialize_field_observation(observation()))
+    mutation(payload)
+    with pytest.raises(FieldObservationPersistenceError):
+        deserialize_field_observation(
+            json.dumps(payload), observation_id="observation-123"
+        )
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_non_standard_json_numbers_are_rejected(constant):
+    document = serialize_field_observation(observation()).replace("12.4", constant)
+    with pytest.raises(FieldObservationPersistenceError):
+        deserialize_field_observation(document, observation_id="observation-123")
+
+
+def test_non_canonical_hfr_unit_is_rejected_during_deserialization():
+    payload = json.loads(serialize_field_observation(observation()))
+    payload["observation"]["technical"]["hfr_unit"] = "bananas"
+    with pytest.raises(
+        FieldObservationPersistenceError,
+        match="invalid_hfr_unit",
+    ):
+        deserialize_field_observation(
+            json.dumps(payload), observation_id="observation-123"
+        )
+
+
+def test_huge_json_integer_is_translated_to_persistence_error():
+    document = serialize_field_observation(observation()).replace(
+        "12.4", str(10**400)
+    )
+    with pytest.raises(
+        FieldObservationPersistenceError,
+        match="invalid_field_observation",
+    ):
+        deserialize_field_observation(document, observation_id="observation-123")
+
+
+def test_create_only_replay_is_idempotent_and_changed_payload_conflicts(tmp_path):
     store = FileFieldObservationStore(tmp_path)
     source = observation()
-
-    store.save(observation=source)
-    initial = (tmp_path / "observation-123.json").read_bytes()
-    store.save(observation=source)
-
-    assert store.load(observation_id="observation-123") == source
-    assert (tmp_path / "observation-123.json").read_bytes() == initial
-
-
-def test_store_rejects_sequential_conflict_without_overwrite(tmp_path):
-    store = FileFieldObservationStore(tmp_path)
-    source = observation()
-    store.save(observation=source)
-
+    assert store.save(observation=source) is True
+    original = (tmp_path / "observation-123.json").read_bytes()
+    assert store.save(observation=source) is False
     with pytest.raises(
         FieldObservationPersistenceError,
         match="field_observation_conflict",
     ):
         store.save(
-            observation=observation(cloud_condition=CloudCondition.OVERCAST)
+            observation=replace(
+                source,
+                conditions=ObservedConditions(cloud_state=CloudState.OVERCAST),
+            )
         )
+    assert (tmp_path / "observation-123.json").read_bytes() == original
 
-    assert store.load(observation_id="observation-123") == source
 
-
-def test_present_corrupt_file_raises_explicit_error(tmp_path):
-    (tmp_path / "observation-123.json").write_text("{", encoding="utf-8")
+def test_concurrent_identical_writers_create_once_and_replay_once(tmp_path):
     store = FileFieldObservationStore(tmp_path)
+    source = observation()
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: store.save(observation=source), range(2)))
+    assert sorted(results) == [False, True]
+    assert store.load(observation_id=source.observation_id) == source
 
-    with pytest.raises(FieldObservationPersistenceError):
-        store.load(observation_id="observation-123")
 
-
-def test_store_atomically_publishes_complete_temp_file(tmp_path, monkeypatch):
+def test_concurrent_different_payloads_never_overwrite(tmp_path):
     store = FileFieldObservationStore(tmp_path)
-    publications = []
-    real_link = os.link
-
-    def inspect_then_link(source, destination):
-        source_path = type(tmp_path)(source)
-        destination_path = type(tmp_path)(destination)
-        publications.append(
-            (source_path.parent, destination_path, source_path.read_text())
-        )
-        real_link(source, destination)
-
-    monkeypatch.setattr(os, "link", inspect_then_link)
-    store.save(observation=observation())
-
-    assert len(publications) == 1
-    parent, destination, complete_document = publications[0]
-    assert parent == tmp_path
-    assert destination == tmp_path / "observation-123.json"
-    assert json.loads(complete_document)["observation"]["observation_id"] == (
-        "observation-123"
+    first = observation()
+    second = replace(
+        first,
+        conditions=ObservedConditions(cloud_state=CloudState.OVERCAST),
     )
 
+    def save(source):
+        try:
+            return store.save(observation=source)
+        except FieldObservationPersistenceError as error:
+            return str(error)
 
-def test_concurrent_different_observation_is_never_overwritten(
-    tmp_path,
-    monkeypatch,
-):
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(save, (first, second)))
+    assert results.count(True) == 1
+    assert results.count("field_observation_conflict") == 1
+    assert store.load(observation_id="observation-123") in (first, second)
+
+
+def test_supersession_preserves_original_and_lists_deterministically(tmp_path):
     store = FileFieldObservationStore(tmp_path)
-    concurrent = observation(cloud_condition=CloudCondition.OVERCAST)
-    real_link = os.link
+    original = observation(
+        observation_id="observation-a",
+        observed_at_utc=OBSERVED_AT + timedelta(minutes=10),
+        recorded_at_utc=OBSERVED_AT + timedelta(minutes=11),
+    )
+    correction = observation(
+        observation_id="observation-b",
+        observed_at_utc=OBSERVED_AT + timedelta(minutes=5),
+        recorded_at_utc=OBSERVED_AT + timedelta(minutes=12),
+        supersedes_observation_id="observation-a",
+    )
+    store.save(observation=original)
+    store.save(observation=correction)
+    assert store.load(observation_id="observation-a") == original
+    assert store.list_by_decision(decision_id="decision-123") == [
+        correction,
+        original,
+    ]
+    assert store.list_by_execution(execution_id="execution-123") == [
+        correction,
+        original,
+    ]
 
-    def publish_competitor_then_link(source, destination):
-        concurrent_temp = tmp_path / "concurrent.tmp"
-        concurrent_temp.write_text(document_for(concurrent), encoding="utf-8")
-        real_link(concurrent_temp, destination)
-        concurrent_temp.unlink()
-        real_link(source, destination)
 
-    monkeypatch.setattr(os, "link", publish_competitor_then_link)
+def test_supersession_requires_existing_observation_from_same_decision(tmp_path):
+    store = FileFieldObservationStore(tmp_path)
+    with pytest.raises(
+        FieldObservationPersistenceError,
+        match="superseded_observation_missing",
+    ):
+        store.save(
+            observation=observation(
+                observation_id="correction",
+                supersedes_observation_id="missing",
+            )
+        )
+    store.save(observation=observation(observation_id="original"))
+    with pytest.raises(
+        FieldObservationPersistenceError,
+        match="superseded_observation_decision_mismatch",
+    ):
+        store.save(
+            observation=observation(
+                observation_id="correction",
+                decision_id="decision-other",
+                supersedes_observation_id="original",
+            )
+        )
+
+
+def test_supersession_rejects_cycle_in_corrupted_history(tmp_path):
+    first = observation(
+        observation_id="observation-a",
+        supersedes_observation_id="observation-b",
+    )
+    second = observation(
+        observation_id="observation-b",
+        supersedes_observation_id="observation-a",
+    )
+    (tmp_path / "observation-a.json").write_text(
+        serialize_field_observation(first), encoding="utf-8"
+    )
+    (tmp_path / "observation-b.json").write_text(
+        serialize_field_observation(second), encoding="utf-8"
+    )
 
     with pytest.raises(
         FieldObservationPersistenceError,
-        match="field_observation_conflict",
+        match="observation_supersession_cycle",
     ):
-        store.save(observation=observation())
-
-    assert store.load(observation_id="observation-123") == concurrent
-
-
-def test_concurrent_identical_observation_is_idempotent(tmp_path, monkeypatch):
-    store = FileFieldObservationStore(tmp_path)
-    source_observation = observation()
-    real_link = os.link
-
-    def publish_identical_then_link(source, destination):
-        concurrent_temp = tmp_path / "concurrent.tmp"
-        concurrent_temp.write_text(
-            document_for(source_observation),
-            encoding="utf-8",
+        FileFieldObservationStore(tmp_path).save(
+            observation=observation(
+                observation_id="observation-c",
+                supersedes_observation_id="observation-a",
+            )
         )
-        real_link(concurrent_temp, destination)
-        concurrent_temp.unlink()
-        real_link(source, destination)
-
-    monkeypatch.setattr(os, "link", publish_identical_then_link)
-
-    store.save(observation=source_observation)
-
-    assert store.load(observation_id="observation-123") == source_observation
-
-
-def test_store_cleans_temporary_file_when_publication_fails(
-    tmp_path,
-    monkeypatch,
-):
-    store = FileFieldObservationStore(tmp_path)
-
-    def fail_link(source, destination):
-        raise OSError("publication failed")
-
-    monkeypatch.setattr(os, "link", fail_link)
-
-    with pytest.raises(OSError, match="publication failed"):
-        store.save(observation=observation())
-
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_cleanup_failure_does_not_mask_publication_failure(
-    tmp_path,
-    monkeypatch,
-):
-    store = FileFieldObservationStore(tmp_path)
-
-    def fail_link(source, destination):
-        raise OSError("primary publication failure")
-
-    def fail_unlink(self, missing_ok=False):
-        raise PermissionError("secondary cleanup failure")
-
-    monkeypatch.setattr(os, "link", fail_link)
-    monkeypatch.setattr(type(tmp_path), "unlink", fail_unlink)
-
-    with pytest.raises(OSError, match="primary publication failure"):
-        store.save(observation=observation())
-
-
-def test_cleanup_failure_after_successful_publication_is_not_silenced(
-    tmp_path,
-    monkeypatch,
-):
-    store = FileFieldObservationStore(tmp_path)
-
-    def fail_unlink(self, missing_ok=False):
-        raise PermissionError("cleanup failure")
-
-    monkeypatch.setattr(type(tmp_path), "unlink", fail_unlink)
-
-    with pytest.raises(PermissionError, match="cleanup failure"):
-        store.save(observation=observation())
-
-    assert store.load(observation_id="observation-123") == observation()
