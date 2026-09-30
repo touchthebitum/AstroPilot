@@ -1,6 +1,7 @@
 """Execute the real field-observation UI helpers against a small browser harness."""
 
 from pathlib import Path
+import json
 import shutil
 import subprocess
 
@@ -10,8 +11,18 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[2] / "astropilot/web/app.js"
 
 
+def javascript_engine():
+    node = shutil.which("node")
+    bundled = Path.home() / ".cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    if node:
+        return node
+    if bundled.exists():
+        return str(bundled)
+    return shutil.which("osascript")
+
+
 def test_session_control_is_explicit_and_invalidates_open_observation_immediately():
-    engine = shutil.which("node") or shutil.which("osascript")
+    engine = javascript_engine()
     if engine is None:
         pytest.skip("A JavaScript runtime is required for the dynamic session control test")
     source = SCRIPT.read_text(encoding="utf-8")
@@ -65,6 +76,7 @@ const document = {
 function text(selector, value) { document.querySelector(selector).textContent = value; }
 function renderObservationLinkage() {}
 function siteTimezone() { return 'Europe/Zurich'; }
+function siteConfigurationIdentity() { return null; }
 function observationMessage(message) { document.querySelector('#observation-status').textContent = message; }
 function pendingObservationKey(decisionId, executionId) { return `${decisionId}:${executionId || 'none'}`; }
 const storage = new Map();
@@ -176,7 +188,7 @@ async function fetch() { return {ok: true, json: async () => clone(serverSession
 
 
 def test_field_observation_retry_conflict_and_form_state_are_dynamic(tmp_path):
-    engine = shutil.which("node") or shutil.which("osascript")
+    engine = javascript_engine()
     if engine is None:
         pytest.skip("A JavaScript runtime is required for the dynamic UI test")
     source = SCRIPT.read_text(encoding="utf-8")
@@ -719,7 +731,7 @@ async function check() {
   await submitFieldObservation(event);
   assert.equal(blockedFetches, 0);
   assert.equal(uuid, 0);
-  assert.equal(storage.has(pendingObservationKey('decision-1', null)), false);
+  assert.equal(storage.has(pendingObservationKey('decision-1', null)), true);
   assert.match(element('#observation-status').textContent, /brouillon local est illisible/i);
   assert.match(element('#observation-status').textContent, /idempotence n’est plus garantie/i);
   await submitFieldObservation(event);
@@ -755,8 +767,8 @@ async function check() {
   element('#observation-observed-at').value = '2026-09-29T21:00';
   restorePendingFieldObservation();
   const migrated = JSON.parse(storage.get(legacyKey));
-  assert.equal(migrated.version, PENDING_FIELD_OBSERVATION_VERSION);
-  assert.equal(migrated.observed_at_local, '2026-09-29T22:14');
+  assert.equal(migrated.version, undefined);
+  assert.equal(migrated.observed_at_local, undefined);
   assert.equal(element('#observation-observed-at').value, '2026-09-29T22:14');
 
   // Corrupt JSON with a failing cleanup is equally blocking.
@@ -864,7 +876,7 @@ async function check() {
   const tabALock = {version: FIELD_OBSERVATION_LOCK_VERSION,
     generation: fieldObservationLockGeneration(tabAPending), status: 'pending', key: tabAKey,
     pending: tabAPending, context: clone(state.fieldObservationDraftContext)};
-  assert.equal(acquireFieldObservationLockCas(tabALock), true, 'tab A acquisition');
+  assert.equal(acquireFieldObservationLockUnlocked(tabALock), true, 'tab A acquisition');
   const tabAState = state.fieldObservationLock;
   state.fieldObservationLock = null;
   handleFieldObservationStorageEvent({key: FIELD_OBSERVATION_LOCK_KEY,
@@ -876,18 +888,18 @@ async function check() {
     tabBPending.payload, tabBPending.observed_at_local, tabBPending.timezone,
   );
   const tabBLock = {...tabALock, generation: fieldObservationLockGeneration(tabBPending), pending: tabBPending};
-  assert.equal(acquireFieldObservationLockCas(tabBLock), false);
+  assert.equal(acquireFieldObservationLockUnlocked(tabBLock), false);
   storage.set(tabAKey, JSON.stringify(tabBPending));
   storage.set(FIELD_OBSERVATION_LOCK_KEY, JSON.stringify(storedFieldObservationLockValue(tabBLock)));
   state.fieldObservationLock = tabAState;
-  assert.equal(clearFieldObservationLock(tabAState), false);
+  assert.equal(clearFieldObservationLockUnlocked(tabAState), false);
   assert.equal(state.fieldObservationLock.generation, tabBLock.generation);
   assert.equal(storage.has(FIELD_OBSERVATION_LOCK_KEY), true, 'tab B lock preserved');
 
   // Startup inventory reconstructs one orphan and blocks explicitly instead of choosing among several.
   clearHarness();
   storage.set(tabAKey, JSON.stringify(tabAPending));
-  assert.equal(restorePendingFieldObservationInventory(), true, 'single inventory');
+  assert.equal(await restorePendingFieldObservationInventory(), true, 'single inventory');
   assert.equal(state.fieldObservationLock.generation, tabALock.generation);
   storage.delete(FIELD_OBSERVATION_LOCK_KEY);
   state.fieldObservationLock = null;
@@ -902,7 +914,7 @@ async function check() {
     generation: fieldObservationLockGeneration(blockedCandidatePending), status: 'pending',
     key: pendingObservationKey('decision-2', null), pending: blockedCandidatePending,
     context: blockedCandidateContext};
-  assert.equal(acquireFieldObservationLockCas(blockedCandidateLock), false);
+  assert.equal(acquireFieldObservationLockUnlocked(blockedCandidateLock), false);
   assert.equal(state.fieldObservationLock.generation, tabALock.generation);
   storage.delete(FIELD_OBSERVATION_LOCK_KEY);
   state.fieldObservationLock = null;
@@ -913,10 +925,10 @@ async function check() {
     secondPending.payload, secondPending.observed_at_local, secondPending.timezone,
   );
   storage.set(pendingObservationKey('decision-2', null), JSON.stringify(secondPending));
-  assert.equal(restorePendingFieldObservationInventory(), true, 'multiple inventory');
+  assert.equal(await restorePendingFieldObservationInventory(), true, 'multiple inventory');
   assert.equal(state.fieldObservationLock.status, 'multiple_pending');
   assert.equal(state.fieldObservationLock.entries.length, 2);
-  assert.match(fieldObservationLockMessage(), /Plusieurs observations locales/);
+  assert.match(fieldObservationLockMessage(), /observations locales non résolues/);
 
   // An external localStorage.clear() cannot silently remove the in-memory reconciliation lock.
   state.fieldObservationLock = replacementLock;
@@ -936,7 +948,7 @@ async function check() {
     assert.match(url, new RegExp(originalUncertainAfterRaces.payload.observation_id));
     return response(200, storedProjection(originalUncertainAfterRaces.payload));
   };
-  await reconcileFieldObservationLock();
+  await reconcileFieldObservationEntry(replacementLock.key);
   assert.equal(state.fieldObservationLock, null);
 
   // Edits made while the request is in flight survive the successful response.
@@ -947,6 +959,7 @@ async function check() {
     return new Promise(resolve => { resolvePost = resolve; });
   };
   const submitting = submitFieldObservation(event);
+  while (!resolvePost) await Promise.resolve();
   setQuick({cloud: 'overcast'});
   resolvePost(response(201, {created: true}));
   await submitting;
@@ -961,6 +974,7 @@ async function check() {
     return new Promise(resolve => { resolveStalePost = resolve; });
   };
   const staleSuccess = submitFieldObservation(event);
+  while (!resolveStalePost) await Promise.resolve();
   state.acceptedMission = {decision_id: 'decision-2', mission: {night_date: '2026-09-30'}};
   syncFieldObservationContext();
   resolveStalePost(response(201, {created: true}));
@@ -985,6 +999,7 @@ async function check() {
     ? new Promise((_resolve, reject) => { rejectStalePost = reject; })
     : response(404, {detail: {code: 'field_observation_not_found'}});
   const staleFailure = submitFieldObservation(event);
+  while (!rejectStalePost) await Promise.resolve();
   state.activeSessionId = 'session-b';
   state.fieldObservationSelectedExecutionId = 'session-b';
   syncFieldObservationContext();
@@ -1053,4 +1068,196 @@ async function check() {
         file.write_text(program, encoding="utf-8")
         command = [engine, "-l", "JavaScript", str(file)]
     result = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+
+
+def test_field_observation_two_context_web_locks_inventory_and_clear():
+    """Two isolated JS globals share one origin/storage and a controlled Web Locks queue."""
+    engine = javascript_engine()
+    if engine is None or Path(engine).name != "node":
+        pytest.skip("Node.js is required for the isolated multi-context harness")
+    source = SCRIPT.read_text(encoding="utf-8")
+    helpers = source[
+        source.index("const OBSERVATION_CHOICES ="):
+        source.index("const PENDING_ACCEPTANCE_STORAGE_KEY =")
+    ]
+    program = r'''
+const vm = require('vm');
+const assert = require('assert').strict;
+const helpers = HELPERS_SOURCE;
+const shared = new Map();
+const contexts = [];
+let lockTail = Promise.resolve();
+const controlledLocks = {request(_name, options, callback) {
+  assert.equal(options.mode, 'exclusive');
+  const run = lockTail.then(() => callback());
+  lockTail = run.catch(() => {});
+  return run;
+}};
+class Element {
+  constructor(id = '') { this.id = id; this.value = ''; this.checked = false; this.disabled = false;
+    this.hidden = false; this.textContent = ''; this.open = true; this.children = []; this.listeners = {};
+    this.classList = {toggle() {}}; }
+  addEventListener(name, callback) { this.listeners[name] = callback; }
+  querySelectorAll(selector) {
+    if (selector === '[data-observation-choice]') return [this.owner('#observation-clouds'), this.owner('#observation-transparency')];
+    if (selector === 'input[type="number"]') return numberIds.map(this.owner);
+    if (selector === 'input[type="radio"]') return radioIds.map(this.owner);
+    if (selector === 'select') return selectIds.map(this.owner);
+    if (selector === 'input, select, button') return [...numberIds, ...radioIds, ...selectIds,
+      '#observation-observed-at', '#observation-save'].map(this.owner);
+    return [];
+  }
+  replaceChildren() { this.children = []; }
+  append(...children) { this.children.push(...children); }
+  set selectedIndex(value) { if (value === 0) this.value = ''; }
+}
+const numberIds = ['#observation-wind', '#observation-temperature', '#observation-humidity',
+  '#observation-attempted-frames', '#observation-usable-frames', '#observation-hfr', '#observation-guiding'];
+const selectIds = ['#observation-clouds', '#observation-transparency', '#observation-seeing',
+  '#observation-moon-halo', '#observation-stop-reason', '#observation-hfr-unit'];
+const radioIds = ['dry', 'damp', 'dew_present'].map(value => `#surface-${value}`);
+function makeContext(name, locks = controlledLocks) {
+  const elements = new Map();
+  const element = selector => {
+    if (!elements.has(selector)) { const item = new Element(selector); item.owner = element; elements.set(selector, item); }
+    return elements.get(selector);
+  };
+  const document = {querySelector(selector) {
+    const choice = selector.match(/^\[data-observation-choice="([^"]+)"\]$/);
+    if (choice) return element(`#observation-${choice[1]}`);
+    if (selector === 'input[name="observation-surface"]:checked') return radioIds.map(element).find(item => item.checked) || null;
+    const radio = selector.match(/^input\[name="observation-surface"\]\[value="([^"]+)"\]$/);
+    return radio ? element(`#surface-${radio[1]}`) : element(selector);
+  }, createElement() { const item = new Element(); item.owner = element; return item; }};
+  let uuid = 0;
+  const sandbox = {console, structuredClone, URL, TextEncoder, Intl, Date, JSON, Map, Set, Object, Array,
+    String, Number, Boolean, RegExp, Error, TypeError, Promise, encodeURIComponent,
+    document, window: {confirm: () => true}, navigator: locks ? {locks} : {},
+    crypto: {randomUUID: () => `${name}-uuid-${++uuid}`}, posts: [], uuidCount: () => uuid};
+  sandbox.state = {configuration: {site: {name: 'Site A', latitude: 47.1, longitude: 6.8, bortle: 4, timezone: 'Europe/Zurich'}},
+    currentDecision: {decision_id: 'decision-1', night_date: '2026-09-29'},
+    acceptedMission: {decision_id: 'decision-1', mission: {night_date: '2026-09-29'}},
+    sessions: [], activeSessionId: null, fieldObservationSelectedExecutionId: null, observationBusy: false,
+    fieldObservationDraftContext: null, fieldObservationContextInvalid: false,
+    invalidFieldObservationContextKey: null, fieldObservationConflict: null, fieldObservationLock: null};
+  sandbox.currentSession = () => null;
+  sandbox.text = (selector, value) => { element(selector).textContent = value; };
+  sandbox.observationMessage = (message) => { element('#observation-status').textContent = message; };
+  sandbox.sessionHttpError = async response => { const error = new Error('request_refused'); error.status = response.status; return error; };
+  sandbox.ui = {observation: element('#field-observation-dialog')};
+  sandbox.fetch = async (url, options) => {
+    if (options) { sandbox.posts.push(JSON.parse(options.body)); return {ok: true, status: 201, json: async () => ({})}; }
+    const id = decodeURIComponent(url.split('/').pop());
+    const stored = sandbox.canonical?.[id];
+    return stored ? {ok: true, status: 200, json: async () => stored}
+      : {ok: false, status: 404, json: async () => ({})};
+  };
+  sandbox.localStorage = {get length() { return shared.size; }, key(index) { return [...shared.keys()][index] ?? null; },
+    getItem(key) { return shared.has(key) ? shared.get(key) : null; },
+    setItem(key, value) { const oldValue = shared.get(key) ?? null; shared.set(key, value); dispatch(sandbox, {key, oldValue, newValue: value}); },
+    removeItem(key) { const oldValue = shared.get(key) ?? null; shared.delete(key); dispatch(sandbox, {key, oldValue, newValue: null}); }};
+  const context = vm.createContext(sandbox); contexts.push({sandbox, context});
+  vm.runInContext(helpers, context);
+  vm.runInContext(`
+    document.querySelector('#observation-observed-at').value = '2026-09-29T22:14';
+    document.querySelector('#observation-clouds').value = 'few';
+    state.fieldObservationDraftContext = Object.freeze({decision_id: 'decision-1', execution_id: null,
+      night_date: '2026-09-29', source: 'mission', timezone: 'Europe/Zurich',
+      site_identity: siteConfigurationIdentity(), mission_id: null});
+    updateFieldObservationSubmitState();`, context);
+  return {sandbox, context};
+}
+function dispatch(source, event) {
+  for (const item of contexts) if (item.sandbox !== source) {
+    item.sandbox.__storageEvent = event;
+    vm.runInContext('handleFieldObservationStorageEvent(__storageEvent)', item.context);
+  }
+}
+const run = (tab, code) => vm.runInContext(code, tab.context);
+const projection = payload => ({...structuredClone(payload),
+  quality: {confidence: payload.confidence, flags: payload.quality_flags}});
+(async () => {
+  // Two distinct states contend concurrently; the controlled exclusive queue permits one POST only.
+  const a = makeContext('a'); const b = makeContext('b');
+  await Promise.all([run(a, 'submitFieldObservation({preventDefault(){}})'), run(b, 'submitFieldObservation({preventDefault(){}})')]);
+  assert.equal(a.sandbox.posts.length + b.sandbox.posts.length, 1);
+  assert.equal([...shared.keys()].filter(key => key.startsWith('astropilot.pendingFieldObservation.')).length, 1);
+  assert.ok(run(a, 'state.fieldObservationLock') || run(b, 'state.fieldObservationLock'));
+  const readOnly = makeContext('readonly', null);
+  await run(readOnly, 'restorePendingFieldObservationInventory()');
+  assert.ok(run(readOnly, 'state.fieldObservationLock.pending.payload.observation_id'));
+  const readOnlyId = run(readOnly, 'state.fieldObservationLock.pending.payload.observation_id');
+  readOnly.sandbox.canonical = {[readOnlyId]: projection(run(readOnly, 'state.fieldObservationLock.pending.payload'))};
+  await run(readOnly, 'reconcileFieldObservationLock()');
+  assert.ok(run(readOnly, 'state.fieldObservationLock'));
+  assert.equal(readOnly.sandbox.posts.length, 0);
+
+  // Missing or throwing Web Locks fails before UUID creation and before POST.
+  shared.clear(); contexts.length = 0;
+  const noLocks = makeContext('none', null);
+  await run(noLocks, 'submitFieldObservation({preventDefault(){}})');
+  assert.equal(noLocks.sandbox.uuidCount(), 0); assert.equal(noLocks.sandbox.posts.length, 0);
+  const denied = makeContext('denied', {request() { throw new Error('denied'); }});
+  await run(denied, 'submitFieldObservation({preventDefault(){}})');
+  assert.equal(denied.sandbox.uuidCount(), 0); assert.equal(denied.sandbox.posts.length, 0);
+
+  // Build two valid orphan entries, then resolve exactly one and abandon exactly the other.
+  shared.clear(); contexts.length = 0; const tab = makeContext('inventory');
+  const first = run(tab, `(() => { const payload = buildFieldObservationPayload(); return {key: pendingObservationKey('decision-1', null),
+    pending: {version: PENDING_FIELD_OBSERVATION_VERSION, payload, snapshot: fieldObservationSnapshot(),
+      observed_at_local: '2026-09-29T22:14', timezone: 'Europe/Zurich'}}; })()`);
+  const second = structuredClone(first); second.pending.payload.decision_id = 'decision-2';
+  second.pending.payload.observation_id = 'inventory-uuid-2';
+  second.key = run(tab, `pendingObservationKey('decision-2', null)`);
+  tab.sandbox.__second = second.pending;
+  second.pending.snapshot = run(tab, `snapshotFromObservationPayload(__second.payload, __second.observed_at_local, __second.timezone)`);
+  shared.set(first.key, JSON.stringify(first.pending)); shared.set(second.key, JSON.stringify(second.pending));
+  await run(tab, 'restorePendingFieldObservationInventory()');
+  assert.equal(run(tab, 'state.fieldObservationLock.status'), 'multiple_pending');
+  assert.equal(run(tab, 'state.fieldObservationLock.entries.length'), 2);
+  const metadata = run(tab, 'state.fieldObservationLock.entries.map(e => [e.key, e.pending.payload.decision_id, e.pending.payload.execution_id, e.pending.payload.observation_id, e.status, e.pending.payload.observed_at_utc, e.pending.payload.recorded_at_utc])');
+  assert.equal(metadata.length, 2); assert.ok(metadata.every(row => row.length === 7));
+  tab.sandbox.canonical = {[first.pending.payload.observation_id]: projection(first.pending.payload)};
+  await run(tab, `reconcileFieldObservationEntry(${JSON.stringify(first.key)})`);
+  assert.equal(shared.has(first.key), false); assert.equal(shared.has(second.key), true);
+  assert.equal(run(tab, 'state.fieldObservationLock.key'), second.key);
+  const postsBefore = tab.sandbox.posts.length;
+  await run(tab, 'submitFieldObservation({preventDefault(){}})');
+  assert.equal(tab.sandbox.posts.length, postsBefore);
+  await run(tab, `abandonFieldObservationEntry(${JSON.stringify(second.key)})`);
+  assert.equal(run(tab, 'state.fieldObservationLock'), null);
+
+  // Corruption alone and beside a valid pending is retained with a structured reason.
+  const badKey = 'astropilot.pendingFieldObservation.decision:bad.decision-only';
+  shared.set(badKey, '{broken'); await run(tab, 'restorePendingFieldObservationInventory()');
+  assert.equal(run(tab, 'state.fieldObservationLock.status'), 'corrupt_pending');
+  assert.equal(run(tab, 'state.fieldObservationLock.entries.length'), 0);
+  await run(tab, `removeCorruptFieldObservationEntry(${JSON.stringify(badKey)})`);
+  assert.equal(run(tab, 'state.fieldObservationLock'), null);
+  shared.set(first.key, JSON.stringify(first.pending)); shared.set(badKey, '{broken');
+  await run(tab, 'restorePendingFieldObservationInventory()');
+  assert.equal(run(tab, 'state.fieldObservationLock.status'), 'corrupt_pending');
+  assert.equal(run(tab, 'state.fieldObservationLock.corruptions[0].reason'), 'invalid_json');
+  await run(tab, `removeCorruptFieldObservationEntry(${JSON.stringify(badKey)})`);
+  assert.equal(shared.has(badKey), false); assert.equal(shared.has(first.key), true);
+
+  // clear() is handled first for multiple, simple and busy reconciliation state.
+  shared.set(second.key, JSON.stringify(second.pending));
+  await run(tab, 'restorePendingFieldObservationInventory()');
+  run(tab, 'beginFieldObservationOperation("reconcile_entry", state.fieldObservationLock.entries[0])');
+  shared.clear(); run(tab, 'handleFieldObservationStorageEvent({key: null, newValue: null})');
+  assert.equal(run(tab, 'state.observationBusy'), false);
+  assert.equal(run(tab, 'state.fieldObservationLock.status'), 'persistence_missing');
+  assert.equal(run(tab, 'state.fieldObservationLock.entries.length'), 2);
+  shared.set(first.key, JSON.stringify(first.pending));
+  await run(tab, 'restorePendingFieldObservationInventory()');
+  run(tab, 'beginFieldObservationOperation("reconcile", state.fieldObservationLock)');
+  shared.clear(); run(tab, 'handleFieldObservationStorageEvent({key: null, newValue: null})');
+  assert.equal(run(tab, 'state.observationBusy'), false);
+  assert.equal(run(tab, 'state.fieldObservationLock.status'), 'persistence_missing');
+  assert.equal(run(tab, 'state.fieldObservationLock.persistence_missing'), true);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''.replace("HELPERS_SOURCE", json.dumps(helpers))
+    result = subprocess.run([engine, "-e", program], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr

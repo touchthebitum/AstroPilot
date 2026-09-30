@@ -236,6 +236,10 @@ button { color: inherit; }
 .observation-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 18px; }
 .observation-actions p { flex: 1 1 100%; margin: 0; color: var(--muted); font-size: 12px; }
 .observation-actions p.observation-error { color: var(--danger, #f4938b); }
+.observation-pending-diagnostics { flex: 1 1 100%; display: grid; gap: 10px; }
+.observation-pending-entry { border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: grid; gap: 8px; }
+.observation-pending-entry p { font-size: 12px; overflow-wrap: anywhere; }
+.observation-pending-entry .observation-entry-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 760px) {
   .observation-quick-grid, .observation-advanced-grid { grid-template-columns: 1fr; }
   .observation-heading, .observation-actions { align-items: stretch; flex-direction: column; }
