@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
 
 from astropilot.durable_file_publication import (
+    cleanup_temporary_files_durably,
     fsync_directory,
-    remove_temporary_file_durably,
 )
 from astropilot.file_lock import exclusive_file_lock
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
@@ -16,6 +17,11 @@ from decision.weather.decision_forecast_evidence_persistence import (
     deserialize_decision_forecast_evidence,
     serialize_decision_forecast_evidence,
     validate_decision_id,
+)
+
+
+_TEMPORARY_NAME = re.compile(
+    r"\.[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.[a-z0-9_]{8}\.tmp"
 )
 
 
@@ -55,10 +61,11 @@ class FileDecisionForecastEvidenceStore:
         decision_id: str,
     ) -> DecisionForecastEvidence | None:
         path = self._path(decision_id)
-        with self._locked():
-            if not path.exists():
-                return None
-            return self._load_path(path, decision_id=decision_id)
+        # Final documents are immutable and published by atomic hard-link, so a
+        # read does not need to create or open the writer lock file.
+        if not path.exists():
+            return None
+        return self._load_path(path, decision_id=decision_id)
 
     def save(
         self,
@@ -72,17 +79,16 @@ class FileDecisionForecastEvidenceStore:
             evidence=evidence,
         )
         with self._locked():
-            if path.exists():
-                existing = self._load_path(path, decision_id=decision_id)
-                if existing == evidence:
-                    fsync_directory(self._directory)
-                    return
-                raise DecisionForecastEvidencePersistenceError(
-                    "decision_forecast_evidence_conflict"
-                )
-
             temporary_path = None
             try:
+                if path.exists():
+                    existing = self._load_path(path, decision_id=decision_id)
+                    if existing == evidence:
+                        fsync_directory(self._directory)
+                        return
+                    raise DecisionForecastEvidencePersistenceError(
+                        "decision_forecast_evidence_conflict"
+                    )
                 with tempfile.NamedTemporaryFile(
                     mode="w",
                     encoding="utf-8",
@@ -107,10 +113,9 @@ class FileDecisionForecastEvidenceStore:
                 else:
                     fsync_directory(self._directory)
             finally:
-                if temporary_path is not None:
-                    remove_temporary_file_durably(
-                        temporary_path,
-                        self._directory,
-                        primary_error=sys.exception(),
-                        synchronize_directory=fsync_directory,
-                    )
+                cleanup_temporary_files_durably(
+                    self._directory,
+                    name_pattern=_TEMPORARY_NAME,
+                    primary_error=sys.exception(),
+                    synchronize_directory=fsync_directory,
+                )

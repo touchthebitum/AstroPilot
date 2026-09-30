@@ -420,11 +420,26 @@ def _reject_constant(value: str):
     raise ValueError(value)
 
 
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise OutcomeEvaluationPersistenceError("duplicate_json_key")
+        result[key] = value
+    return result
+
+
 def deserialize_outcome_evaluation(document: str, *, evaluation_id: str | None = None) -> OutcomeEvaluation:
     if not isinstance(document, str):
         raise OutcomeEvaluationPersistenceError("invalid_json_document")
     try:
-        payload = json.loads(document, parse_constant=_reject_constant)
+        payload = json.loads(
+            document,
+            parse_constant=_reject_constant,
+            object_pairs_hook=_unique_json_object,
+        )
+    except OutcomeEvaluationPersistenceError:
+        raise
     except (TypeError, ValueError, json.JSONDecodeError) as error:
         raise OutcomeEvaluationPersistenceError("invalid_json_document") from error
     if not isinstance(payload, Mapping):

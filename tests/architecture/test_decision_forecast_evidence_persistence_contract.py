@@ -1,6 +1,7 @@
 import json
 import multiprocessing
 import os
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -449,6 +450,154 @@ def test_multiprocess_identical_writers_use_interprocess_publication_lock(tmp_pa
     assert FileDecisionForecastEvidenceStore(tmp_path).load(
         decision_id="decision-123"
     ) == evidence()
+
+
+def test_multiprocess_divergent_writers_have_one_winner_and_one_conflict(
+    tmp_path,
+):
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    first = evidence()
+    second = DecisionForecastEvidence((point(hour=23),))
+    processes = [
+        context.Process(
+            target=_multiprocess_forecast_save,
+            args=(tmp_path, document, results),
+        )
+        for document in (document_for(first), document_for(second))
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(15)
+        assert process.exitcode == 0
+
+    outcomes = [results.get(timeout=2) for _ in processes]
+    assert outcomes.count("saved") == 1
+    assert outcomes.count(
+        (
+            "DecisionForecastEvidencePersistenceError",
+            "decision_forecast_evidence_conflict",
+        )
+    ) == 1
+    assert FileDecisionForecastEvidenceStore(tmp_path).load(
+        decision_id="decision-123"
+    ) in (first, second)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions coverage")
+def test_read_only_directory_supports_load_but_not_writes(tmp_path):
+    source = evidence()
+    (tmp_path / "decision-123.json").write_text(
+        document_for(source),
+        encoding="utf-8",
+    )
+    store = FileDecisionForecastEvidenceStore(tmp_path)
+    tmp_path.chmod(0o555)
+    try:
+        assert store.load(decision_id="decision-123") == source
+        with pytest.raises(OSError):
+            store.save(decision_id="decision-456", evidence=source)
+    finally:
+        tmp_path.chmod(0o755)
+
+
+def test_replay_cleans_only_strictly_named_forecast_orphan_temps(tmp_path):
+    source = evidence()
+    store = FileDecisionForecastEvidenceStore(tmp_path)
+    store.save(decision_id="decision-123", evidence=source)
+    orphan = tmp_path / ".decision-123.deadbeef.tmp"
+    similar = tmp_path / ".decision-123.deadbeef.tmp.backup"
+    orphan.write_text("orphan", encoding="utf-8")
+    similar.write_text("preserve", encoding="utf-8")
+
+    store.save(decision_id="decision-123", evidence=source)
+
+    assert not orphan.exists()
+    assert similar.read_text(encoding="utf-8") == "preserve"
+
+
+class _FailingTemporary:
+    def __init__(self, wrapped, operation):
+        self._wrapped = wrapped
+        self._operation = operation
+        self.name = wrapped.name
+
+    def __enter__(self):
+        self._wrapped.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        result = self._wrapped.__exit__(*args)
+        if self._operation == "close":
+            raise OSError("close failed")
+        return result
+
+    def write(self, document):
+        if self._operation == "write":
+            raise OSError("write failed")
+        return self._wrapped.write(document)
+
+    def flush(self):
+        if self._operation == "flush":
+            raise OSError("flush failed")
+        return self._wrapped.flush()
+
+    def fileno(self):
+        return self._wrapped.fileno()
+
+
+@pytest.mark.parametrize("operation", ["write", "flush", "close"])
+def test_forecast_temp_write_flush_and_close_failures_preserve_primary_error(
+    tmp_path,
+    monkeypatch,
+    operation,
+):
+    real_temporary = tempfile.NamedTemporaryFile
+
+    def failing_temporary(*args, **kwargs):
+        return _FailingTemporary(real_temporary(*args, **kwargs), operation)
+
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", failing_temporary)
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError("cleanup failed")
+        ),
+    )
+
+    with pytest.raises(OSError, match=f"^{operation} failed$"):
+        FileDecisionForecastEvidenceStore(tmp_path).save(
+            decision_id="decision-123",
+            evidence=evidence(),
+        )
+    assert list(tmp_path.glob("*.json")) == []
+
+
+def test_forecast_temp_fsync_failure_preserves_primary_error(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        os,
+        "fsync",
+        lambda *_: (_ for _ in ()).throw(OSError("temp fsync failed")),
+    )
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError("cleanup failed")
+        ),
+    )
+
+    with pytest.raises(OSError, match="^temp fsync failed$"):
+        FileDecisionForecastEvidenceStore(tmp_path).save(
+            decision_id="decision-123",
+            evidence=evidence(),
+        )
+    assert list(tmp_path.glob("*.json")) == []
 
 
 def test_directory_fsync_failure_is_ambiguous_and_replay_is_idempotent(

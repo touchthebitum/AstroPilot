@@ -466,6 +466,65 @@ def test_invalid_json_is_rejected(document):
         deserialize_outcome_evaluation(document)
 
 
+@pytest.mark.parametrize(
+    "duplicate_document",
+    [
+        lambda document: document.replace(
+            '"schema_version": 1\n}',
+            '"schema_version": 2,\n  "schema_version": 1\n}',
+            1,
+        ),
+        lambda document: document.replace(
+            '"evaluation_algorithm_version": "outcome_evaluation.v1",',
+            '"evaluation_algorithm_version": "ambiguous",\n'
+            '    "evaluation_algorithm_version": "outcome_evaluation.v1",',
+            1,
+        ),
+    ],
+    ids=("root", "nested"),
+)
+def test_duplicate_json_keys_are_rejected_at_every_object_level(
+    duplicate_document,
+):
+    document = duplicate_document(serialize_outcome_evaluation(evaluation()))
+
+    with pytest.raises(
+        OutcomeEvaluationPersistenceError,
+        match="^duplicate_json_key$",
+    ):
+        deserialize_outcome_evaluation(document)
+
+
+@pytest.mark.parametrize("operation", ["load", "listing"])
+def test_store_load_and_listing_fail_closed_on_duplicate_json_keys(
+    tmp_path,
+    operation,
+):
+    source = evaluation()
+    document = serialize_outcome_evaluation(source).replace(
+        '"evaluation_algorithm_version": "outcome_evaluation.v1",',
+        '"evaluation_algorithm_version": "ambiguous",\n'
+        '    "evaluation_algorithm_version": "outcome_evaluation.v1",',
+        1,
+    )
+    (tmp_path / f"{source.evaluation_id}.json").write_text(
+        document,
+        encoding="utf-8",
+    )
+    store = FileOutcomeEvaluationStore(tmp_path)
+
+    with pytest.raises(
+        OutcomeEvaluationPersistenceError,
+        match="^outcome_evaluation_corrupt$",
+    ):
+        if operation == "load":
+            store.load(evaluation_id=source.evaluation_id)
+        else:
+            store.list_by_observation(
+                observation_id=source.comparison.observation_id
+            )
+
+
 def test_ids_change_with_algorithm_version_and_comparison_id():
     assert evaluation(version="outcome_evaluation.v1").evaluation_id != evaluation(version="outcome_evaluation.v2").evaluation_id
     assert evaluation(comparison_id="a" * 64).evaluation_id != evaluation(comparison_id="c" * 64).evaluation_id
@@ -549,6 +608,118 @@ def test_multiprocess_identical_writers_use_interprocess_publication_lock(tmp_pa
     assert FileOutcomeEvaluationStore(tmp_path).load(
         evaluation_id=evaluation().evaluation_id
     ) == evaluation()
+
+
+def test_multiprocess_divergent_writers_have_one_winner_and_one_conflict(
+    tmp_path,
+):
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    source = evaluation()
+    divergent = replace(
+        source,
+        assessment=replace(source.assessment, assessment_id="different"),
+    )
+    processes = [
+        context.Process(
+            target=_multiprocess_outcome_save,
+            args=(str(tmp_path), document, results),
+        )
+        for document in (
+            serialize_outcome_evaluation(source),
+            serialize_outcome_evaluation(divergent),
+        )
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(15)
+        assert process.exitcode == 0
+
+    outcomes = [results.get(timeout=2) for _ in processes]
+    assert outcomes.count(True) == 1
+    assert outcomes.count(
+        ("OutcomeEvaluationPersistenceError", "outcome_evaluation_conflict")
+    ) == 1
+    assert FileOutcomeEvaluationStore(tmp_path).load(
+        evaluation_id=source.evaluation_id
+    ) in (source, divergent)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions coverage")
+def test_read_only_directory_supports_load_and_listing_but_not_writes(tmp_path):
+    source = evaluation()
+    (tmp_path / f"{source.evaluation_id}.json").write_text(
+        serialize_outcome_evaluation(source),
+        encoding="utf-8",
+    )
+    store = FileOutcomeEvaluationStore(tmp_path)
+    tmp_path.chmod(0o555)
+    try:
+        assert store.load(evaluation_id=source.evaluation_id) == source
+        assert store.list_by_observation(
+            observation_id=source.comparison.observation_id
+        ) == [source]
+        with pytest.raises(OSError):
+            store.save(evaluation=evaluation(version="outcome_evaluation.v2"))
+    finally:
+        tmp_path.chmod(0o755)
+
+
+def test_replay_cleans_only_strictly_named_outcome_orphan_temps(tmp_path):
+    source = evaluation()
+    store = FileOutcomeEvaluationStore(tmp_path)
+    assert store.save(evaluation=source) is True
+    orphan = tmp_path / f".{source.evaluation_id}.deadbeef.tmp"
+    similar = tmp_path / f".{source.evaluation_id}.deadbeef.tmp.backup"
+    orphan.write_text("orphan", encoding="utf-8")
+    similar.write_text("preserve", encoding="utf-8")
+
+    assert store.save(evaluation=source) is False
+
+    assert not orphan.exists()
+    assert similar.read_text(encoding="utf-8") == "preserve"
+
+
+@pytest.mark.parametrize("cleanup_failure", ["unlink", "fsync"])
+def test_orphan_cleanup_failure_does_not_mask_primary_conflict(
+    tmp_path,
+    monkeypatch,
+    cleanup_failure,
+):
+    import astropilot.outcome_evaluation_store as store_module
+
+    source = evaluation()
+    divergent = replace(
+        source,
+        assessment=replace(source.assessment, assessment_id="different"),
+    )
+    (tmp_path / f"{source.evaluation_id}.json").write_text(
+        serialize_outcome_evaluation(source),
+        encoding="utf-8",
+    )
+    orphan = tmp_path / f".{source.evaluation_id}.deadbeef.tmp"
+    orphan.write_text("orphan", encoding="utf-8")
+    if cleanup_failure == "unlink":
+        monkeypatch.setattr(
+            Path,
+            "unlink",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                OSError("cleanup unlink failed")
+            ),
+        )
+    else:
+        monkeypatch.setattr(
+            store_module,
+            "fsync_directory",
+            lambda *_: (_ for _ in ()).throw(OSError("cleanup fsync failed")),
+        )
+
+    with pytest.raises(
+        OutcomeEvaluationPersistenceError,
+        match="^outcome_evaluation_conflict$",
+    ):
+        FileOutcomeEvaluationStore(tmp_path).save(evaluation=divergent)
 
 
 def test_link_failure_leaves_no_partial_destination_or_temp(tmp_path, monkeypatch):

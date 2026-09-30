@@ -7,8 +7,8 @@ import tempfile
 from pathlib import Path
 
 from astropilot.durable_file_publication import (
+    cleanup_temporary_files_durably,
     fsync_directory,
-    remove_temporary_file_durably,
 )
 from astropilot.file_lock import exclusive_file_lock
 from astropilot.user_profile import get_user_data_dir
@@ -21,6 +21,7 @@ from decision.outcome_evaluation_persistence import (
 
 
 _DIGEST = re.compile(r"[0-9a-f]{64}")
+_TEMPORARY_NAME = re.compile(r"\.[0-9a-f]{64}\.[a-z0-9_]{8}\.tmp")
 
 
 class FileOutcomeEvaluationStore:
@@ -48,10 +49,11 @@ class FileOutcomeEvaluationStore:
 
     def load(self, *, evaluation_id: str) -> OutcomeEvaluation | None:
         path = self._path(evaluation_id)
-        with self._locked():
-            if not path.exists():
-                return None
-            return self._load_path(path)
+        # Final documents are immutable and appear atomically via hard-link, so
+        # readers can safely avoid a writable lock file on read-only snapshots.
+        if not path.exists():
+            return None
+        return self._load_path(path)
 
     def save(self, *, evaluation: OutcomeEvaluation) -> bool:
         if type(evaluation) is not OutcomeEvaluation:
@@ -61,13 +63,13 @@ class FileOutcomeEvaluationStore:
         path = self._path(evaluation.evaluation_id)
         document = serialize_outcome_evaluation(evaluation)
         with self._locked():
-            if path.exists():
-                if self._load_path(path) == evaluation:
-                    fsync_directory(self._directory)
-                    return False
-                raise OutcomeEvaluationPersistenceError("outcome_evaluation_conflict")
             temporary_path = None
             try:
+                if path.exists():
+                    if self._load_path(path) == evaluation:
+                        fsync_directory(self._directory)
+                        return False
+                    raise OutcomeEvaluationPersistenceError("outcome_evaluation_conflict")
                 with tempfile.NamedTemporaryFile(
                     mode="w",
                     encoding="utf-8",
@@ -89,13 +91,12 @@ class FileOutcomeEvaluationStore:
                     raise OutcomeEvaluationPersistenceError("outcome_evaluation_conflict")
                 fsync_directory(self._directory)
             finally:
-                if temporary_path is not None:
-                    remove_temporary_file_durably(
-                        temporary_path,
-                        self._directory,
-                        primary_error=sys.exception(),
-                        synchronize_directory=fsync_directory,
-                    )
+                cleanup_temporary_files_durably(
+                    self._directory,
+                    name_pattern=_TEMPORARY_NAME,
+                    primary_error=sys.exception(),
+                    synchronize_directory=fsync_directory,
+                )
         return True
 
     def _load_all(self) -> list[OutcomeEvaluation]:
@@ -108,8 +109,9 @@ class FileOutcomeEvaluationStore:
         return sorted(values, key=lambda item: item.evaluation_id)
 
     def _list(self, predicate) -> list[OutcomeEvaluation]:
-        with self._locked():
-            return self._sorted([item for item in self._load_all() if predicate(item)])
+        # See load(): atomic create-only publication makes final files safe to
+        # enumerate without creating or opening the writer lock.
+        return self._sorted([item for item in self._load_all() if predicate(item)])
 
     def list_by_observation(self, *, observation_id: str) -> list[OutcomeEvaluation]:
         if not isinstance(observation_id, str) or not observation_id.strip():
