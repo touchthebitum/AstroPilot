@@ -1,5 +1,5 @@
 from dataclasses import FrozenInstanceError, asdict, fields
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -81,6 +81,15 @@ def test_invalid_identifiers_rejected(name, value):
 def test_invalid_or_naive_assessed_at_rejected(value):
     with pytest.raises((TypeError, ValueError)):
         assessment(assessed_at=value)
+
+
+def test_assessed_at_is_normalized_to_utc():
+    source = datetime(2026, 9, 29, 21, tzinfo=timezone(timedelta(hours=1)))
+
+    record = assessment(assessed_at=source)
+
+    assert record.assessed_at == datetime(2026, 9, 29, 20, tzinfo=timezone.utc)
+    assert record.assessed_at.tzinfo is timezone.utc
 
 
 def test_zero_referenced_evidence_rejected():

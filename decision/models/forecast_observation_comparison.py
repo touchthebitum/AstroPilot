@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -18,6 +19,27 @@ ALGORITHM_VERSION = "forecast_observation.v1"
 FORECAST_SCOPE = "decision_attached_evidence"
 _V1_TEMPORAL_POLICY_VERSION = "nearest_forecast_utc.v1"
 _V1_MAXIMUM_ABSOLUTE_OFFSET = timedelta(minutes=30)
+
+
+def _is_canonical_sha256(value: object) -> bool:
+    return (
+        type(value) is str
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _identifier(value: object, *, field_name: str, optional: bool = False) -> None:
+    if value is None and optional:
+        return
+    if type(value) is not str or not value.strip():
+        raise ValueError(f"invalid_{field_name}")
+
+
+def _finite_float(value: object, *, field_name: str) -> float:
+    if type(value) is not float or not math.isfinite(value):
+        raise ValueError(f"invalid_{field_name}")
+    return value
 
 
 def _utc(value: datetime, *, field_name: str) -> datetime:
@@ -87,6 +109,10 @@ class TemporalComparisonPolicy:
             raise ValueError("temporal_policy_must_use_utc")
         if self.selection_mode != "nearest_per_variable":
             raise ValueError("unsupported_temporal_selection_mode")
+        if type(self.interpolation_enabled) is not bool:
+            raise ValueError("invalid_interpolation_enabled")
+        if type(self.averaging_enabled) is not bool:
+            raise ValueError("invalid_averaging_enabled")
         if self.interpolation_enabled or self.averaging_enabled:
             raise ValueError("forecast_interpolation_or_averaging_not_supported")
         object.__setattr__(self, "version", self.version.strip())
@@ -105,6 +131,14 @@ class CloudMappingComparisonPolicy:
     def __post_init__(self) -> None:
         if not isinstance(self.version, str) or not self.version.strip():
             raise ValueError("invalid_cloud_mapping_policy_version")
+        if (
+            type(self.boundaries_percent) is not tuple
+            or any(
+                type(value) is not float or not math.isfinite(value)
+                for value in self.boundaries_percent
+            )
+        ):
+            raise ValueError("invalid_cloud_mapping_boundaries")
         if self.boundaries_percent != (10.0, 25.0, 50.0, 80.0):
             raise ValueError("unsupported_cloud_mapping_boundaries")
         object.__setattr__(self, "version", self.version.strip())
@@ -139,10 +173,11 @@ class ObservationComparisonProvenance:
     def __post_init__(self) -> None:
         if not isinstance(self.source_type, ObservationSourceType):
             raise ValueError("invalid_observation_source_type")
-        if self.source_id is not None and (
-            not isinstance(self.source_id, str) or not self.source_id.strip()
-        ):
-            raise ValueError("invalid_observation_source_id")
+        _identifier(
+            self.source_id,
+            field_name="observation_source_id",
+            optional=True,
+        )
         if not isinstance(self.capture_method, CaptureMethod):
             raise ValueError("invalid_observation_capture_method")
         if not isinstance(self.confidence, Confidence):
@@ -164,12 +199,8 @@ class ForecastPointProvenance:
     temporal_offset: timedelta
 
     def __post_init__(self) -> None:
-        if not isinstance(self.provider_id, str) or not self.provider_id.strip():
-            raise ValueError("invalid_forecast_provider_id")
-        if self.model_id is not None and (
-            not isinstance(self.model_id, str) or not self.model_id.strip()
-        ):
-            raise ValueError("invalid_forecast_model_id")
+        _identifier(self.provider_id, field_name="forecast_provider_id")
+        _identifier(self.model_id, field_name="forecast_model_id", optional=True)
         object.__setattr__(
             self,
             "retrieved_at_utc",
@@ -211,6 +242,15 @@ class NumericVariableComparison:
         if any(not isinstance(reason, ComparisonReason) for reason in reasons):
             raise ValueError("invalid_numeric_comparison_reasons")
         object.__setattr__(self, "reasons", reasons)
+        for field_name in (
+            "forecast_value",
+            "observed_value",
+            "signed_error",
+            "absolute_error",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                _finite_float(value, field_name=field_name)
         values = (
             self.forecast_value,
             self.observed_value,
@@ -253,6 +293,11 @@ class CloudVariableComparison:
         if any(not isinstance(reason, ComparisonReason) for reason in reasons):
             raise ValueError("invalid_cloud_comparison_reasons")
         object.__setattr__(self, "reasons", reasons)
+        if self.forecast_coverage_percent is not None:
+            _finite_float(
+                self.forecast_coverage_percent,
+                field_name="forecast_coverage_percent",
+            )
         values = (
             self.forecast_coverage_percent,
             self.predicted_condition,
@@ -301,22 +346,15 @@ class ForecastObservationComparison:
     forecast_scope: str = FORECAST_SCOPE
 
     def __post_init__(self) -> None:
-        if not isinstance(self.comparison_id, str) or len(self.comparison_id) != 64:
+        if not _is_canonical_sha256(self.comparison_id):
             raise ValueError("invalid_comparison_id")
-        try:
-            int(self.comparison_id, 16)
-        except ValueError as error:
-            raise ValueError("invalid_comparison_id") from error
         if type(self.identity_persistable) is not bool:
             raise ValueError("invalid_identity_persistable")
-        if not isinstance(self.observation_id, str) or not self.observation_id:
-            raise ValueError("invalid_observation_id")
-        if not isinstance(self.source_digest, str) or len(self.source_digest) != 64:
+        _identifier(self.decision_id, field_name="decision_id", optional=True)
+        _identifier(self.observation_id, field_name="observation_id")
+        _identifier(self.execution_id, field_name="execution_id", optional=True)
+        if not _is_canonical_sha256(self.source_digest):
             raise ValueError("invalid_source_digest")
-        try:
-            int(self.source_digest, 16)
-        except ValueError as error:
-            raise ValueError("invalid_source_digest") from error
         if not isinstance(self.parameters, ForecastObservationParameters):
             raise ValueError("invalid_forecast_observation_parameters")
         if not isinstance(

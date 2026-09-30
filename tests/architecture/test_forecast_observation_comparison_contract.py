@@ -1,7 +1,7 @@
 import ast
 import struct
 from copy import deepcopy
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -71,6 +71,7 @@ MODEL_PATH = (
 ALLOWED_IMPORTS = {
     MODEL_PATH: {
         ("__future__", "annotations"),
+        ("math", None),
         ("dataclasses", "dataclass"),
         ("dataclasses", "field"),
         ("datetime", "datetime"),
@@ -144,6 +145,55 @@ ALLOWED_IMPORTS = {
         ("decision.weather.provider_reliability", "calculate_weather_variable_error"),
     },
 }
+
+
+def _numeric_model_result(**overrides):
+    values = {
+        "variable": WeatherVariable.TEMPERATURE_C,
+        "status": VariableComparisonStatus.COMPARABLE,
+        "unit": "°C",
+        "forecast_value": 7.0,
+        "observed_value": 5.0,
+        "signed_error": 2.0,
+        "absolute_error": 2.0,
+        "forecast_point": object(),
+    }
+    values.update(overrides)
+    return NumericVariableComparison(**values)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("forecast_value", True),
+        ("observed_value", False),
+        ("signed_error", True),
+        ("absolute_error", True),
+        ("forecast_value", 7),
+        ("forecast_value", float("nan")),
+        ("forecast_value", float("inf")),
+        ("forecast_value", float("-inf")),
+        ("forecast_value", float("1e400")),
+    ],
+)
+def test_numeric_result_requires_exact_finite_floats(field, value):
+    with pytest.raises(ValueError, match=f"^invalid_{field}$"):
+        _numeric_model_result(**{field: value})
+
+
+def test_cloud_result_rejects_boolean_coverage():
+    with pytest.raises(ValueError, match="^invalid_forecast_coverage_percent$"):
+        CloudVariableComparison(
+            variable=WeatherVariable.CLOUD_COVER_PERCENT,
+            status=VariableComparisonStatus.COMPARABLE,
+            unit="%",
+            forecast_coverage_percent=True,
+            predicted_condition=CloudState.CLEAR,
+            observed_condition=CloudState.CLEAR,
+            outcome=CloudComparisonOutcome.MATCH,
+            confusion_cell=(CloudState.CLEAR, CloudState.CLEAR),
+            forecast_point=object(),
+        )
 
 
 def import_boundary_violations(source, allowed_imports):
@@ -348,6 +398,36 @@ def test_v1_temporal_policy_accepts_exactly_thirty_minutes():
     )
 
     assert policy.maximum_absolute_offset == timedelta(minutes=30)
+
+
+@pytest.mark.parametrize("field_name", ["interpolation_enabled", "averaging_enabled"])
+@pytest.mark.parametrize("value", [0, 1])
+def test_temporal_policy_boolean_fields_require_exact_bool(field_name, value):
+    with pytest.raises(ValueError, match=f"^invalid_{field_name}$"):
+        TemporalComparisonPolicy(**{field_name: value})
+
+
+class _StringSubclass(str):
+    pass
+
+
+@pytest.mark.parametrize(
+    "field_name,value",
+    [
+        ("decision_id", False),
+        ("decision_id", _StringSubclass("decision-123")),
+        ("execution_id", 0),
+        ("execution_id", _StringSubclass("execution-123")),
+        ("observation_id", _StringSubclass("observation-123")),
+    ],
+)
+def test_comparison_identity_fields_require_exact_strings(field_name, value):
+    valid = compare(
+        observation(),
+        point(WeatherVariable.TEMPERATURE_C, 8.0),
+    )
+    with pytest.raises(ValueError, match=f"^invalid_{field_name}$"):
+        replace(valid, **{field_name: value})
 
 
 @pytest.mark.parametrize(

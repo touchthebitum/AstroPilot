@@ -1,6 +1,10 @@
 import json
+import multiprocessing
 import os
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -22,6 +26,21 @@ from decision.weather.provider_reliability import (
 
 
 RETRIEVED_AT = datetime(2026, 8, 31, 18, tzinfo=timezone.utc)
+
+
+def _multiprocess_forecast_save(directory, document, results):
+    source = deserialize_decision_forecast_evidence(
+        document,
+        decision_id="decision-123",
+    )
+    try:
+        FileDecisionForecastEvidenceStore(directory).save(
+            decision_id="decision-123",
+            evidence=source,
+        )
+        results.put("saved")
+    except Exception as error:
+        results.put((type(error).__name__, str(error)))
 
 
 def value(variable, number, *, aggregation_period=None):
@@ -321,33 +340,419 @@ def test_present_corrupt_file_raises_instead_of_returning_none(
         store.load(decision_id="decision-123")
 
 
-def test_store_writes_complete_temp_file_then_atomically_replaces(
+def test_store_writes_complete_temp_file_then_publishes_create_only(
     tmp_path,
     monkeypatch,
 ):
     store = FileDecisionForecastEvidenceStore(tmp_path)
-    replacements = []
-    real_replace = os.replace
+    publications = []
+    real_link = os.link
 
-    def inspect_then_replace(source, destination):
+    def inspect_then_link(source, destination):
         source_path = type(tmp_path)(source)
         destination_path = type(tmp_path)(destination)
-        replacements.append(
+        publications.append(
             (
                 source_path.parent,
                 destination_path,
                 source_path.read_text(encoding="utf-8"),
             )
         )
-        real_replace(source, destination)
+        real_link(source, destination)
 
-    monkeypatch.setattr(os, "replace", inspect_then_replace)
+    monkeypatch.setattr(os, "link", inspect_then_link)
 
     store.save(decision_id="decision-123", evidence=evidence())
 
-    assert len(replacements) == 1
-    temp_parent, destination, complete_document = replacements[0]
+    assert len(publications) == 1
+    temp_parent, destination, complete_document = publications[0]
     assert temp_parent == tmp_path
     assert destination == tmp_path / "decision-123.json"
     assert json.loads(complete_document)["decision_id"] == "decision-123"
     assert store.load(decision_id="decision-123") == evidence()
+
+
+def test_concurrent_identical_writers_are_idempotent(tmp_path):
+    stores = (
+        FileDecisionForecastEvidenceStore(tmp_path),
+        FileDecisionForecastEvidenceStore(tmp_path),
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(
+            pool.map(
+                lambda store: store.save(
+                    decision_id="decision-123",
+                    evidence=evidence(),
+                ),
+                stores,
+            )
+        )
+
+    assert stores[0].load(decision_id="decision-123") == evidence()
+
+
+def test_concurrent_divergent_writers_never_overwrite(tmp_path):
+    stores = (
+        FileDecisionForecastEvidenceStore(tmp_path),
+        FileDecisionForecastEvidenceStore(tmp_path),
+    )
+    first = evidence()
+    second = DecisionForecastEvidence((point(hour=23),))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = (
+            pool.submit(
+                stores[0].save,
+                decision_id="decision-123",
+                evidence=first,
+            ),
+            pool.submit(
+                stores[1].save,
+                decision_id="decision-123",
+                evidence=second,
+            ),
+        )
+
+    outcomes = []
+    for future in futures:
+        try:
+            future.result()
+            outcomes.append("saved")
+        except DecisionForecastEvidencePersistenceError as error:
+            outcomes.append(str(error))
+
+    assert sorted(outcomes) == [
+        "decision_forecast_evidence_conflict",
+        "saved",
+    ]
+    assert stores[0].load(decision_id="decision-123") in (first, second)
+
+
+def test_multiprocess_identical_writers_use_interprocess_publication_lock(tmp_path):
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    document = document_for()
+    processes = [
+        context.Process(
+            target=_multiprocess_forecast_save,
+            args=(tmp_path, document, results),
+        )
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(15)
+        assert process.exitcode == 0
+
+    assert [results.get(timeout=2) for _ in processes] == ["saved", "saved"]
+    assert FileDecisionForecastEvidenceStore(tmp_path).load(
+        decision_id="decision-123"
+    ) == evidence()
+
+
+def test_multiprocess_divergent_writers_have_one_winner_and_one_conflict(
+    tmp_path,
+):
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    first = evidence()
+    second = DecisionForecastEvidence((point(hour=23),))
+    processes = [
+        context.Process(
+            target=_multiprocess_forecast_save,
+            args=(tmp_path, document, results),
+        )
+        for document in (document_for(first), document_for(second))
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(15)
+        assert process.exitcode == 0
+
+    outcomes = [results.get(timeout=2) for _ in processes]
+    assert outcomes.count("saved") == 1
+    assert outcomes.count(
+        (
+            "DecisionForecastEvidencePersistenceError",
+            "decision_forecast_evidence_conflict",
+        )
+    ) == 1
+    assert FileDecisionForecastEvidenceStore(tmp_path).load(
+        decision_id="decision-123"
+    ) in (first, second)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions coverage")
+def test_read_only_directory_supports_load_but_not_writes(tmp_path):
+    source = evidence()
+    (tmp_path / "decision-123.json").write_text(
+        document_for(source),
+        encoding="utf-8",
+    )
+    store = FileDecisionForecastEvidenceStore(tmp_path)
+    tmp_path.chmod(0o555)
+    try:
+        assert store.load(decision_id="decision-123") == source
+        with pytest.raises(OSError):
+            store.save(decision_id="decision-456", evidence=source)
+    finally:
+        tmp_path.chmod(0o755)
+
+
+def test_replay_cleans_only_strictly_named_forecast_orphan_temps(tmp_path):
+    source = evidence()
+    store = FileDecisionForecastEvidenceStore(tmp_path)
+    store.save(decision_id="decision-123", evidence=source)
+    orphan = tmp_path / ".decision-123.deadbeef.tmp"
+    similar = tmp_path / ".decision-123.deadbeef.tmp.backup"
+    orphan.write_text("orphan", encoding="utf-8")
+    similar.write_text("preserve", encoding="utf-8")
+
+    store.save(decision_id="decision-123", evidence=source)
+
+    assert not orphan.exists()
+    assert similar.read_text(encoding="utf-8") == "preserve"
+
+
+class _FailingTemporary:
+    def __init__(self, wrapped, operation):
+        self._wrapped = wrapped
+        self._operation = operation
+        self.name = wrapped.name
+
+    def __enter__(self):
+        self._wrapped.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        result = self._wrapped.__exit__(*args)
+        if self._operation == "close":
+            raise OSError("close failed")
+        return result
+
+    def write(self, document):
+        if self._operation == "write":
+            raise OSError("write failed")
+        return self._wrapped.write(document)
+
+    def flush(self):
+        if self._operation == "flush":
+            raise OSError("flush failed")
+        return self._wrapped.flush()
+
+    def fileno(self):
+        return self._wrapped.fileno()
+
+
+@pytest.mark.parametrize("operation", ["write", "flush", "close"])
+def test_forecast_temp_write_flush_and_close_failures_preserve_primary_error(
+    tmp_path,
+    monkeypatch,
+    operation,
+):
+    real_temporary = tempfile.NamedTemporaryFile
+
+    def failing_temporary(*args, **kwargs):
+        return _FailingTemporary(real_temporary(*args, **kwargs), operation)
+
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", failing_temporary)
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError("cleanup failed")
+        ),
+    )
+
+    with pytest.raises(OSError, match=f"^{operation} failed$"):
+        FileDecisionForecastEvidenceStore(tmp_path).save(
+            decision_id="decision-123",
+            evidence=evidence(),
+        )
+    assert list(tmp_path.glob("*.json")) == []
+
+
+def test_forecast_temp_fsync_failure_preserves_primary_error(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        os,
+        "fsync",
+        lambda *_: (_ for _ in ()).throw(OSError("temp fsync failed")),
+    )
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError("cleanup failed")
+        ),
+    )
+
+    with pytest.raises(OSError, match="^temp fsync failed$"):
+        FileDecisionForecastEvidenceStore(tmp_path).save(
+            decision_id="decision-123",
+            evidence=evidence(),
+        )
+    assert list(tmp_path.glob("*.json")) == []
+
+
+def test_directory_fsync_failure_is_ambiguous_and_replay_is_idempotent(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.decision_forecast_evidence_store as store_module
+
+    store = FileDecisionForecastEvidenceStore(tmp_path)
+    source = evidence()
+    fsync_calls = 0
+
+    def fail_once(*_):
+        nonlocal fsync_calls
+        fsync_calls += 1
+        if fsync_calls == 1:
+            raise OSError("directory fsync failed")
+
+    monkeypatch.setattr(store_module, "fsync_directory", fail_once)
+
+    with pytest.raises(OSError, match="directory fsync failed"):
+        store.save(decision_id="decision-123", evidence=source)
+    assert store.load(decision_id="decision-123") == source
+    store.save(decision_id="decision-123", evidence=source)
+    assert fsync_calls == 3
+
+
+def test_identical_file_exists_race_resynchronizes_directory(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.decision_forecast_evidence_store as store_module
+
+    source = evidence()
+    destination = tmp_path / "decision-123.json"
+    original_exists = Path.exists
+    original_link = os.link
+    fsync_calls = 0
+
+    def hide_destination(path):
+        if path == destination:
+            return False
+        return original_exists(path)
+
+    def publish_then_report_race(temporary, path):
+        original_link(temporary, path)
+        raise FileExistsError(path)
+
+    def record_fsync(*_):
+        nonlocal fsync_calls
+        fsync_calls += 1
+
+    monkeypatch.setattr(Path, "exists", hide_destination)
+    monkeypatch.setattr(os, "link", publish_then_report_race)
+    monkeypatch.setattr(store_module, "fsync_directory", record_fsync)
+
+    FileDecisionForecastEvidenceStore(tmp_path).save(
+        decision_id="decision-123",
+        evidence=source,
+    )
+    assert fsync_calls == 2
+
+
+def test_temp_unlink_is_followed_by_second_directory_fsync(tmp_path, monkeypatch):
+    import astropilot.decision_forecast_evidence_store as store_module
+
+    events = []
+    real_unlink = Path.unlink
+
+    def record_unlink(path, *args, **kwargs):
+        events.append("unlink")
+        return real_unlink(path, *args, **kwargs)
+
+    def record_fsync(*_):
+        events.append("fsync")
+
+    monkeypatch.setattr(Path, "unlink", record_unlink)
+    monkeypatch.setattr(store_module, "fsync_directory", record_fsync)
+
+    FileDecisionForecastEvidenceStore(tmp_path).save(
+        decision_id="decision-123",
+        evidence=evidence(),
+    )
+    assert events == ["fsync", "unlink", "fsync"]
+
+
+def test_second_directory_fsync_failure_keeps_final_and_replay_recovers(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.decision_forecast_evidence_store as store_module
+
+    source = evidence()
+    store = FileDecisionForecastEvidenceStore(tmp_path)
+    calls = 0
+
+    def fail_second(*_):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("cleanup directory fsync failed")
+
+    monkeypatch.setattr(store_module, "fsync_directory", fail_second)
+
+    with pytest.raises(OSError, match="cleanup directory fsync failed"):
+        store.save(decision_id="decision-123", evidence=source)
+    assert store.load(decision_id="decision-123") == source
+    assert list(tmp_path.glob("*.tmp")) == []
+    store.save(decision_id="decision-123", evidence=source)
+    assert calls == 3
+
+
+def test_primary_error_is_preserved_over_cleanup_directory_fsync_failure(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.decision_forecast_evidence_store as store_module
+
+    monkeypatch.setattr(
+        os,
+        "link",
+        lambda *_: (_ for _ in ()).throw(OSError("link failed")),
+    )
+    monkeypatch.setattr(
+        store_module,
+        "fsync_directory",
+        lambda *_: (_ for _ in ()).throw(OSError("cleanup fsync failed")),
+    )
+
+    with pytest.raises(OSError, match="^link failed$"):
+        FileDecisionForecastEvidenceStore(tmp_path).save(
+            decision_id="decision-123",
+            evidence=evidence(),
+        )
+
+
+def test_directory_fsync_failure_is_not_masked_by_cleanup_failure(
+    tmp_path,
+    monkeypatch,
+):
+    import astropilot.decision_forecast_evidence_store as store_module
+    from pathlib import Path
+
+    monkeypatch.setattr(
+        store_module,
+        "fsync_directory",
+        lambda *_: (_ for _ in ()).throw(OSError("directory fsync failed")),
+    )
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("cleanup failed")),
+    )
+    with pytest.raises(OSError, match="directory fsync failed"):
+        FileDecisionForecastEvidenceStore(tmp_path).save(
+            decision_id="decision-123",
+            evidence=evidence(),
+        )
