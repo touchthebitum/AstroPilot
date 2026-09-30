@@ -3068,6 +3068,7 @@ def create_app(
             "invalid_decision_id",
             "invalid_execution_id",
             "invalid_observed_at_utc",
+            "observed_at_in_future",
             "invalid_recorded_at_utc",
             "invalid_supersedes_observation_id",
             "observation_cannot_supersede_itself",
@@ -3216,6 +3217,10 @@ def create_app(
         response: Response,
     ):
         try:
+            if request.observed_at_utc.astimezone(
+                timezone.utc
+            ) > clock().astimezone(timezone.utc):
+                raise ValueError("observed_at_in_future")
             observation = request.to_domain()
         except Exception as exc:
             raise_field_observation_domain_error(exc)

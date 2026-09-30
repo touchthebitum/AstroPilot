@@ -160,6 +160,56 @@ def test_field_observation_create_replay_read_and_list_contract():
     assert len(service.observations) == 1
 
 
+def test_field_observation_decision_only_accepts_historical_site_time_in_utc():
+    client, service = client_and_service()
+
+    response = client.post(
+        "/v1/field-observations",
+        json=payload(
+            execution_id=None,
+            observed_at_utc="2026-09-29T20:14:00Z",
+        ),
+    )
+
+    assert response.status_code == 201
+    assert response.json()["observation"]["execution_id"] is None
+    assert response.json()["observation"]["observed_at_utc"] == (
+        "2026-09-29T20:14:00+00:00"
+    )
+    assert response.json()["context"]["mission_id"] is None
+    assert response.json()["context"]["execution_id"] is None
+    assert service.observations["observation-1"].execution_id is None
+
+
+def test_field_observation_legacy_utc_payload_and_future_rejection():
+    client, service = client_and_service()
+    legacy = payload(
+        observation_id="legacy-observation",
+        execution_id=None,
+        observed_at_utc="2026-09-28T20:14:00Z",
+    )
+    legacy.pop("recorded_at_utc")
+
+    accepted = client.post("/v1/field-observations", json=legacy)
+    future = client.post(
+        "/v1/field-observations",
+        json=payload(
+            observation_id="future-observation",
+            execution_id=None,
+            observed_at_utc="2026-09-29T21:11:00Z",
+            recorded_at_utc="2026-09-29T21:11:00Z",
+        ),
+    )
+
+    assert accepted.status_code == 201
+    assert accepted.json()["observation"]["recorded_at_utc"] == (
+        "2026-09-28T20:14:00+00:00"
+    )
+    assert future.status_code == 422
+    assert future.json()["detail"]["code"] == "observed_at_in_future"
+    assert set(service.observations) == {"legacy-observation"}
+
+
 def test_field_observation_conflict_and_missing_decision_are_explicit():
     client, _service = client_and_service()
     assert client.post("/v1/field-observations", json=payload()).status_code == 201
@@ -400,9 +450,19 @@ def test_field_observation_quick_capture_ui_is_categorical_and_progressive():
     assert 'id="observation-wind" type="number"' in html
     assert "Ajouter des détails" in html
     assert 'name="observation-surface"' in html
+    assert html.count('id="field-observation-dialog"') == 1
+    assert html.count("Ajouter une observation terrain") == 3
+    assert 'id="observation-observed-at" type="datetime-local"' in html
+    assert "Observé le" in html
+    assert "Fuseau du site" in html
     assert "OBSERVATION_CHOICES" in script
     assert 'quality_flags: ["estimated", "partial"]' in script
     assert "pendingFieldObservation" in script
+    assert "PENDING_FIELD_OBSERVATION_VERSION = 2" in script
+    assert "localDateTimeToUtc" in script
+    assert "nonexistent_local_datetime" in script
+    assert "ambiguous_local_datetime" in script
+    assert "state.configuration?.site?.timezone" in script
     assert "Déplacez un curseur" not in html
     assert "vent mesuré en km/h" in html
     assert "La décision ou la session liée à ce relevé est introuvable ou périmée" in script
