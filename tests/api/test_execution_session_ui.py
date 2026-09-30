@@ -120,7 +120,7 @@ async function fetch(url, options) {
 '''
     checks = r'''
 (async () => {
-  await reloadSessions();
+  await reloadSessions({selectId: 'execution-1'});
   assert.equal(document.querySelector('#session-credit').hidden, false);
   assert.equal(document.querySelector('#session-baseline-confirm-wrap').hidden, false);
   await sessionCommand(creditSession);
@@ -199,7 +199,7 @@ async function fetch(url, options) {
       canonical.execution.status = action.sessionStatus;
       canonical.execution.actual_start = action.sessionStatus === 'not_started' ? null : '2026-09-21T20:00:00Z';
       canonical.evidence = action.evidence ? [{evidence_id: 'evidence-1', category: 'acquisition', usable_integration_duration: 1800}] : [];
-      state.activeSessionId = null;
+      state.activeSessionId = 'execution-1';
       status = failure; lost = failure === 'lost'; writes = 0;
       await sessionCommand(action.command);
       assert.equal(writes, 1, `${action.name}/${failure}`);
@@ -213,15 +213,16 @@ async function fetch(url, options) {
   }
   canonical.execution.status = 'unconfirmed';
   canonical.evidence = [{evidence_id: 'evidence-1', category: 'acquisition', usable_integration_duration: 1800}];
-  await reloadSessions();
+  await reloadSessions({selectId: 'execution-1'});
   assert.equal(document.querySelector('#session-start').hidden, true);
   assert.equal(document.querySelector('#session-credit').hidden, true);
   assert.match(document.querySelector('#session-status').textContent, /Session non confirmée/);
-  assert.match(document.querySelector('#session-choice').children[0].textContent, /Session non confirmée/);
+  assert.equal(document.querySelector('#session-choice').children[0].textContent, 'Sans session');
+  assert.match(document.querySelector('#session-choice').children[1].textContent, /Session non confirmée/);
   canonical.execution.status = 'completed';
   for (const value of [null, 0]) {
     canonical.evidence[0].usable_integration_duration = value;
-    await reloadSessions();
+    await reloadSessions({selectId: 'execution-1'});
     assert.equal(document.querySelector('#session-credit').hidden, true);
     assert.equal(document.querySelector('#session-evidence').hidden, false);
   }

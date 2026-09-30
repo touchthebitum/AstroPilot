@@ -10,6 +10,162 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[2] / "astropilot/web/app.js"
 
 
+def test_session_control_is_explicit_and_invalidates_open_observation_immediately():
+    engine = shutil.which("node") or shutil.which("osascript")
+    if engine is None:
+        pytest.skip("A JavaScript runtime is required for the dynamic session control test")
+    source = SCRIPT.read_text(encoding="utf-8")
+    session_helpers = source[
+        source.index("const SESSION_PENDING_KEY ="):
+        source.index("async function sessionCommand")
+    ]
+    context_helpers = source[
+        source.index("function observationContext("):
+        source.index("function openFieldObservation(")
+    ]
+    same_context = source[
+        source.index("function sameFieldObservationContext("):
+        source.index("function localDateTimeParts(")
+    ]
+    sync_context = source[
+        source.index("function syncFieldObservationContext("):
+        source.index("function restorePendingFieldObservation(")
+    ]
+    choice_listener = source[
+        source.index('document.querySelector("#session-choice").addEventListener'):
+        source.index('document.querySelector("#session-start").addEventListener')
+    ]
+    harness = r'''
+const assert = {
+  equal(actual, expected, message = '') { if (actual !== expected) throw new Error(message || `${actual} !== ${expected}`); },
+  ok(value, message = '') { if (!value) throw new Error(message || 'expected truthy value'); },
+  match(value, pattern, message = '') { if (!pattern.test(value)) throw new Error(message || `${value} does not match ${pattern}`); },
+};
+const clone = value => JSON.parse(JSON.stringify(value));
+class Element {
+  constructor() {
+    this.hidden = false; this.disabled = false; this.checked = false; this.open = false;
+    this.textContent = ''; this.value = ''; this.children = []; this.listeners = {};
+    this.classList = {toggle() {}};
+  }
+  replaceChildren() { this.children = []; this.value = ''; }
+  append(child) { this.children.push(child); }
+  addEventListener(name, callback) { this.listeners[name] = callback; }
+  querySelectorAll(selector) { return selector === 'input, select, button' ? formControls : []; }
+}
+const elements = new Map();
+const formControls = [new Element(), new Element(), new Element()];
+const document = {
+  querySelector(selector) {
+    if (!elements.has(selector)) elements.set(selector, new Element());
+    return elements.get(selector);
+  },
+  createElement() { return new Element(); },
+};
+function text(selector, value) { document.querySelector(selector).textContent = value; }
+function renderObservationLinkage() {}
+function siteTimezone() { return 'Europe/Zurich'; }
+function observationMessage(message) { document.querySelector('#observation-status').textContent = message; }
+const storage = new Map();
+const localStorage = {
+  getItem(key) { return storage.get(key) || null; },
+  removeItem(key) { storage.delete(key); },
+};
+const session = (id) => ({
+  execution: {execution_id: id, status: 'completed', actual_start: null},
+  acquisition_intent_id: 'ha', evidence: [], credit: null,
+  historical_baseline_seconds: 0, historical_baseline_confirmed: false,
+  acquired_before_seconds: 0, session_credit_seconds: 0, acquired_after_seconds: 0,
+  current_acquired_seconds: 0, target_hours: null, remaining_hours: null,
+});
+const state = {
+  acceptedMission: {mission_id: 'mission-1', decision_id: 'decision-1', acquisitionIntentId: 'ha',
+    mission: {night_date: '2026-09-29'}},
+  currentDecision: {decision_id: 'decision-1', night_date: '2026-09-29'},
+  sessions: [], activeSessionId: null, fieldObservationSelectedExecutionId: null,
+  sessionEvidenceInputExecutionId: null, fieldObservationDraftContext: null,
+  fieldObservationContextInvalid: false, invalidFieldObservationContextKey: null,
+};
+let serverSessions = [session('session-only')];
+async function fetch() { return {ok: true, json: async () => clone(serverSessions)}; }
+'''
+    checks = r'''
+(async () => {
+  const choice = document.querySelector('#session-choice');
+  await reloadSessions();
+  assert.equal(choice.children.length, 2);
+  assert.equal(choice.children[0].value, '');
+  assert.equal(choice.children[0].textContent, 'Sans session');
+  assert.equal(choice.value, '');
+  assert.equal(state.activeSessionId, null);
+  assert.equal(state.fieldObservationSelectedExecutionId, null);
+
+  // The sole session is linked only through the real change handler.
+  choice.value = 'session-only';
+  choice.listeners.change({target: choice});
+  assert.equal(state.activeSessionId, 'session-only');
+  assert.equal(state.fieldObservationSelectedExecutionId, 'session-only');
+  assert.equal(observationContext('mission').execution_id, 'session-only');
+
+  document.querySelector('#field-observation-dialog').open = true;
+  state.fieldObservationDraftContext = Object.freeze({decision_id: 'decision-1', execution_id: 'session-only',
+    night_date: '2026-09-29', source: 'mission', timezone: 'Europe/Zurich'});
+  state.fieldObservationContextInvalid = false;
+  formControls.forEach(control => { control.disabled = false; });
+  choice.value = '';
+  choice.listeners.change({target: choice});
+  assert.equal(state.fieldObservationContextInvalid, true);
+  assert.ok(formControls.every(control => control.disabled));
+  assert.match(document.querySelector('#observation-status').textContent, /éditeur est bloqué/);
+  assert.equal(state.fieldObservationDraftContext.execution_id, 'session-only');
+
+  // A different explicit session selection also invalidates without rebinding.
+  document.querySelector('#field-observation-dialog').open = false;
+  serverSessions = [session('session-a'), session('session-b')];
+  await reloadSessions();
+  choice.value = 'session-a';
+  choice.listeners.change({target: choice});
+  document.querySelector('#field-observation-dialog').open = true;
+  state.fieldObservationDraftContext = Object.freeze({decision_id: 'decision-1', execution_id: 'session-a',
+    night_date: '2026-09-29', source: 'mission', timezone: 'Europe/Zurich'});
+  state.fieldObservationContextInvalid = false;
+  formControls.forEach(control => { control.disabled = false; });
+  choice.value = 'session-b';
+  choice.listeners.change({target: choice});
+  assert.equal(state.fieldObservationContextInvalid, true);
+  assert.ok(formControls.every(control => control.disabled));
+  assert.equal(state.fieldObservationDraftContext.execution_id, 'session-a');
+
+  // A refresh that removes the selected session invalidates immediately too.
+  document.querySelector('#field-observation-dialog').open = false;
+  choice.value = 'session-a';
+  choice.listeners.change({target: choice});
+  document.querySelector('#field-observation-dialog').open = true;
+  state.fieldObservationDraftContext = Object.freeze({decision_id: 'decision-1', execution_id: 'session-a',
+    night_date: '2026-09-29', source: 'mission', timezone: 'Europe/Zurich'});
+  state.fieldObservationContextInvalid = false;
+  formControls.forEach(control => { control.disabled = false; });
+  serverSessions = [session('session-b')];
+  await reloadSessions();
+  assert.equal(state.activeSessionId, null);
+  assert.equal(state.fieldObservationSelectedExecutionId, null);
+  assert.equal(choice.value, '');
+  assert.equal(state.fieldObservationContextInvalid, true);
+  assert.ok(formControls.every(control => control.disabled));
+  assert.equal(state.fieldObservationDraftContext.execution_id, 'session-a');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''
+    program = harness + session_helpers + context_helpers + same_context + sync_context + choice_listener + checks
+    command = [engine, "-e", program] if Path(engine).name == "node" else [engine, "-l", "JavaScript", "-e", program]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_field_observation_retry_conflict_and_form_state_are_dynamic(tmp_path):
     engine = shutil.which("node") or shutil.which("osascript")
     if engine is None:
@@ -39,6 +195,8 @@ class Element {
     if (selector === 'input[type="number"]') return numberIds.map(element);
     if (selector === 'input[type="radio"]') return radioIds.map(element);
     if (selector === 'select') return selectIds.map(element);
+    if (selector === 'input, select, button') return [...numberIds, ...radioIds, ...selectIds,
+      '#observation-observed-at', '#observation-submit'].map(element);
     return [];
   }
   set selectedIndex(value) { if (value === 0) this.value = ''; }
@@ -157,15 +315,40 @@ async function check() {
   assert.equal(payload.observed_at_utc, '2026-09-29T20:14:00.000Z');
   assert.notEqual(payload.observed_at_utc, payload.recorded_at_utc);
 
-  // IANA conversion is deterministic in winter/summer and rejects both DST gaps and folds.
+  // IANA conversion is deterministic in winter/summer, including fractional and historical offsets.
   assert.equal(localDateTimeToUtc('2026-07-15T22:00', 'Europe/Zurich'), '2026-07-15T20:00:00.000Z');
   assert.equal(localDateTimeToUtc('2026-01-15T22:00', 'Europe/Zurich'), '2026-01-15T21:00:00.000Z');
+  assert.equal(localDateTimeToUtc('2026-07-15T12:00', 'Asia/Kathmandu'), '2026-07-15T06:15:00.000Z');
+  assert.equal(localDateTimeToUtc('2026-07-15T12:00', 'Australia/Eucla'), '2026-07-15T03:15:00.000Z');
+  assert.equal(localDateTimeToUtc('1985-07-15T12:00', 'Asia/Kathmandu'), '1985-07-15T06:30:00.000Z');
   let timezoneError = null;
   try { localDateTimeToUtc('2026-03-29T02:30', 'Europe/Zurich'); } catch (error) { timezoneError = error.message; }
   assert.equal(timezoneError, 'nonexistent_local_datetime');
   timezoneError = null;
   try { localDateTimeToUtc('2026-10-25T02:30', 'Europe/Zurich'); } catch (error) { timezoneError = error.message; }
   assert.equal(timezoneError, 'ambiguous_local_datetime');
+  timezoneError = null;
+  try { localDateTimeToUtc('2026-09-29T22:14', 'Not/A_Timezone'); } catch (error) { timezoneError = error.message; }
+  assert.equal(timezoneError, 'unsupported_site_timezone');
+
+  const nativeDateTimeFormat = Intl.DateTimeFormat;
+  const expectTimezoneUnavailable = (replacement) => {
+    Intl.DateTimeFormat = replacement;
+    let message = null;
+    try { localDateTimeToUtc('2026-09-29T22:14', 'Europe/Zurich'); } catch (error) { message = error.message; }
+    assert.equal(message, 'timezone_unavailable');
+  };
+  try {
+    expectTimezoneUnavailable(function DateTimeFormatWithoutParts() { return {}; });
+    expectTimezoneUnavailable(function DateTimeFormatThrowingParts() {
+      return {formatToParts() { throw new Error('runtime unavailable'); }};
+    });
+    expectTimezoneUnavailable(function DateTimeFormatMissingParts() {
+      return {formatToParts() { return [{type: 'year', value: '2026'}]; }};
+    });
+  } finally {
+    Intl.DateTimeFormat = nativeDateTimeFormat;
+  }
   timezoneError = null;
   try { buildFieldObservationPayload(fieldObservationDraft(), '2026-09-29T20:13:00.000Z'); } catch (error) { timezoneError = error.message; }
   assert.equal(timezoneError, 'observed_at_in_future');
@@ -212,8 +395,6 @@ async function check() {
   state.sessions = [{execution: {execution_id: 'session-a'}}];
   state.activeSessionId = 'session-a';
   assert.equal(observationContext('mission').execution_id, null);
-  state.fieldObservationSelectedExecutionId = 'session-a';
-  assert.equal(observationContext('mission').execution_id, 'session-a');
 
   // Switching from session A to B preserves the frozen draft and blocks submission.
   clearHarness();
@@ -234,6 +415,9 @@ async function check() {
   assert.equal(element('#observation-wind').value, '12');
   assert.equal(state.fieldObservationContextInvalid, true);
   assert.match(element('#observation-status').textContent, /éditeur est bloqué/);
+  for (const control of element('#field-observation-form').querySelectorAll('input, select, button')) {
+    assert.equal(control.disabled, true);
+  }
   let sessionPosts = 0;
   fetch = async () => { sessionPosts += 1; return response(201, {}); };
   await submitFieldObservation(event);
@@ -263,6 +447,9 @@ async function check() {
   assert.equal(state.fieldObservationContextInvalid, true);
   assert.equal(element('#observation-clouds').value, 'few');
   assert.equal(state.fieldObservationDraftContext.decision_id, 'decision-1');
+  for (const control of element('#field-observation-form').querySelectorAll('input, select, button')) {
+    assert.equal(control.disabled, true);
+  }
 
   // A server-declared conflict is never reconciled into success and keeps input.
   clearHarness(); setQuick({cloud: 'overcast'});

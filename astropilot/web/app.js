@@ -132,6 +132,10 @@ function renderSession() {
   const status = session?.execution.status;
   const choice = document.querySelector("#session-choice");
   choice.replaceChildren();
+  const noSessionOption = document.createElement("option");
+  noSessionOption.value = "";
+  noSessionOption.textContent = "Sans session";
+  choice.append(noSessionOption);
   for (const item of state.sessions) {
     const option = document.createElement("option");
     option.value = item.execution.execution_id;
@@ -139,7 +143,7 @@ function renderSession() {
     choice.append(option);
   }
   choice.hidden = !state.sessions.length;
-  if (session) choice.value = session.execution.execution_id;
+  choice.value = session?.execution.execution_id || "";
   const intentId = session?.acquisition_intent_id || state.acceptedMission?.acquisitionIntentId;
   text("#session-intent", `Intent de la mission : ${intentId || "non défini"}`);
   document.querySelector("#session-start").hidden = status === "in_progress" || status === "unconfirmed";
@@ -184,18 +188,13 @@ async function reloadSessions({ selectId = null } = {}) {
   const candidate = selectId || (pending?.mission_id === missionId ? pending.execution_id : null);
   state.activeSessionId = sessions.some((item) => item.execution.execution_id === candidate)
     ? candidate : sessions.some((item) => item.execution.execution_id === state.activeSessionId)
-      ? state.activeSessionId : sessions[0]?.execution.execution_id || null;
-  if (selectId && sessions.some((item) => item.execution.execution_id === selectId)) {
-    state.fieldObservationSelectedExecutionId = selectId;
-  } else if (!sessions.some((item) => (
-    item.execution.execution_id === state.fieldObservationSelectedExecutionId
-  ))) {
-    state.fieldObservationSelectedExecutionId = null;
-  }
+      ? state.activeSessionId : null;
+  state.fieldObservationSelectedExecutionId = state.activeSessionId;
   if (pending?.mission_id === missionId && sessions.some((item) => item.execution.execution_id === pending.execution_id)) {
     localStorage.removeItem(SESSION_PENDING_KEY);
   }
   renderSession();
+  syncFieldObservationContext();
 }
 
 async function sessionCommand(command) {
@@ -438,6 +437,9 @@ function localDateTimeParts(value) {
 }
 
 function zonedDateTimeParts(date, timezone) {
+  if (typeof Intl === "undefined" || typeof Intl.DateTimeFormat !== "function") {
+    throw new Error("timezone_unavailable");
+  }
   let formatter;
   try {
     formatter = new Intl.DateTimeFormat("en-CA", {
@@ -445,10 +447,24 @@ function zonedDateTimeParts(date, timezone) {
       hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
     });
   } catch (_error) {
-    throw new Error("invalid_site_timezone");
+    throw new Error("unsupported_site_timezone");
   }
-  const values = Object.fromEntries(formatter.formatToParts(date)
-    .filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]));
+  let values;
+  try {
+    if (typeof formatter?.formatToParts !== "function") throw new Error("format_to_parts_unavailable");
+    values = Object.fromEntries(formatter.formatToParts(date)
+      .filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]));
+  } catch (_error) {
+    throw new Error("timezone_unavailable");
+  }
+  const componentRanges = {
+    year: [1, 9999], month: [1, 12], day: [1, 31],
+    hour: [0, 23], minute: [0, 59], second: [0, 59],
+  };
+  if (Object.entries(componentRanges).some(([name, [minimum, maximum]]) => (
+    !Number.isFinite(values[name]) || !Number.isInteger(values[name])
+      || values[name] < minimum || values[name] > maximum
+  ))) throw new Error("timezone_unavailable");
   return {year: values.year, month: values.month, day: values.day,
     hour: values.hour, minute: values.minute, second: values.second};
 }
@@ -460,7 +476,7 @@ function formatDateTimeLocalInZone(date, timezone) {
 }
 
 function localDateTimeToUtc(value, timezone) {
-  if (!timezone) throw new Error("invalid_site_timezone");
+  if (!timezone) throw new Error("timezone_unavailable");
   const wanted = localDateTimeParts(value);
   const wallClockAsUtc = Date.UTC(wanted.year, wanted.month - 1, wanted.day, wanted.hour, wanted.minute);
   const offsets = new Set();
@@ -908,7 +924,8 @@ async function submitFieldObservation(event) {
   } catch (error) {
     const messages = {
       invalid_local_datetime: "Indiquez une date et une heure d’observation valides.",
-      invalid_site_timezone: "Le fuseau du site configuré est indisponible ou invalide. Corrigez la configuration du site.",
+      timezone_unavailable: "La conversion du fuseau du site est indisponible sur cet appareil. Utilisez un navigateur compatible avant l’envoi.",
+      unsupported_site_timezone: "Le fuseau du site configuré n’est pas reconnu. Corrigez la configuration du site.",
       nonexistent_local_datetime: "Cette heure locale n’existe pas dans le fuseau du site à cause du passage à l’heure d’été. Choisissez une autre heure.",
       ambiguous_local_datetime: "Cette heure locale est ambiguë dans le fuseau du site à cause du passage à l’heure d’hiver. Choisissez une heure non ambiguë.",
       observed_at_in_future: "L’heure observée ne peut pas être postérieure à l’heure d’enregistrement.",
@@ -1185,6 +1202,7 @@ function renderMission(mission) {
   state.sessions = [];
   state.activeSessionId = null;
   state.fieldObservationSelectedExecutionId = null;
+  syncFieldObservationContext();
   const start = clock(mission.window_start);
   const end = clock(mission.window_end);
   text("#mission-title", mission.target || "Mission de cette nuit");
@@ -3311,10 +3329,11 @@ ui.openSavedMission.addEventListener("click", () => {
   ui.mission.showModal();
 });
 document.querySelector("#session-choice").addEventListener("change", (event) => {
-  state.activeSessionId = event.target.value;
+  state.activeSessionId = event.target.value || null;
   state.fieldObservationSelectedExecutionId = event.target.value || null;
   state.invalidFieldObservationContextKey = null;
   renderSession();
+  syncFieldObservationContext();
 });
 document.querySelector("#session-start").addEventListener("click", () => sessionCommand(startSession));
 document.querySelector("#session-complete").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "completed")));
