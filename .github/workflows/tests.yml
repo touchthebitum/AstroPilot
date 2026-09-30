@@ -35,6 +35,9 @@ jobs:
       - name: Install project and test dependencies
         run: uv sync --locked --extra test
 
+      - name: Require Node.js for dynamic UI tests
+        run: node --version
+
       - name: Run test suite
         run: uv run --locked --no-sync python -m pytest -q
 

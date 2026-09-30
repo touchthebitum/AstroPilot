@@ -84,6 +84,7 @@ const state = {
   invalidFieldObservationContextKey: null,
   fieldObservationConflict: null,
   fieldObservationLock: null,
+  fieldObservationInventoryReady: false,
 };
 
 const SESSION_PENDING_KEY = "astropilot.pendingSession";
@@ -428,6 +429,8 @@ function fieldObservationEditorBlocked() {
   const context = state.fieldObservationDraftContext;
   const key = fieldObservationContextKey(context);
   return !context
+    || !webLocksAvailable()
+    || state.fieldObservationInventoryReady === false
     || state.fieldObservationContextInvalid
     || !sameFieldObservationContext(context, activeObservationContext())
     || (key !== null && state.invalidFieldObservationContextKey === key)
@@ -445,9 +448,9 @@ function updateFieldObservationSubmitState() {
   const reconcile = document.querySelector("#observation-reconcile");
   const refresh = document.querySelector("#observation-refresh-context");
   const abandon = document.querySelector("#observation-abandon-pending");
-  if (reconcile) reconcile.hidden = !lock || ["invalid", "unreadable", "multiple_pending", "corrupt_pending", "persistence_missing"].includes(lock.status);
+  if (reconcile) reconcile.hidden = !lock || ["invalid", "unreadable", "multiple_pending", "corrupt_pending", "persistence_missing", "inconsistent_persistence", "migration_requires_web_locks", "migration_failed"].includes(lock.status);
   if (refresh) refresh.hidden = lock?.status !== "invalid";
-  if (abandon) abandon.hidden = !lock || ["multiple_pending", "corrupt_pending", "persistence_missing"].includes(lock.status);
+  if (abandon) abandon.hidden = !lock || ["multiple_pending", "corrupt_pending", "persistence_missing", "inconsistent_persistence", "migration_requires_web_locks", "migration_failed"].includes(lock.status);
   if (reconcile) reconcile.disabled = state.observationBusy || reconcile.hidden;
   if (refresh) refresh.disabled = state.observationBusy || refresh.hidden;
   if (abandon) abandon.disabled = state.observationBusy || abandon.hidden;
@@ -464,7 +467,7 @@ function renderFieldObservationPendingDiagnostics() {
   const container = document.querySelector("#observation-pending-diagnostics");
   if (!container || typeof document.createElement !== "function") return;
   const lock = state.fieldObservationLock;
-  const entries = ["multiple_pending", "corrupt_pending", "persistence_missing"].includes(lock?.status)
+  const entries = ["multiple_pending", "corrupt_pending", "persistence_missing", "inconsistent_persistence", "migration_requires_web_locks", "migration_failed"].includes(lock?.status)
     ? lock.entries || [] : [];
   const corruptions = lock?.corruptions || [];
   container.replaceChildren();
@@ -538,6 +541,11 @@ function openFieldObservation(source) {
   }
   observationMessage("Choisissez les catégories observées, indiquez le vent mesuré en km/h ou précisez l’état de la surface.");
   ui.observation.showModal();
+  if (!webLocksAvailable()) {
+    updateFieldObservationSubmitState();
+    observationMessage("Publication indisponible sur ce navigateur : cette fonction exige Web Locks. La consultation et la réconciliation en lecture seule restent possibles.", {error: true});
+    return;
+  }
   if (openingError) {
     updateFieldObservationSubmitState();
     observationMessage(state.fieldObservationLock
@@ -860,6 +868,24 @@ function validPendingFieldObservation(value, expectedContext) {
     );
 }
 
+function migratedLegacyPendingFieldObservation(value, expectedContext) {
+  if (!exactObservationKeys(value, ["payload", "snapshot"])
+      || typeof value.snapshot !== "string"
+      || !expectedContext?.timezone
+      || !validPendingFieldObservationPayload(value.payload, expectedContext)
+      || value.snapshot !== legacySnapshotFromObservationPayload(value.payload)) return null;
+  const observedAtLocal = formatDateTimeLocalInZone(
+    new Date(value.payload.observed_at_utc), expectedContext.timezone,
+  );
+  return {
+    version: PENDING_FIELD_OBSERVATION_VERSION,
+    payload: value.payload,
+    snapshot: snapshotFromObservationPayload(value.payload, observedAtLocal, expectedContext.timezone),
+    observed_at_local: observedAtLocal,
+    timezone: expectedContext.timezone,
+  };
+}
+
 function validFieldObservationLock(value) {
   const validEntry = (entry) => (exactObservationKeys(entry, ["key", "pending", "context"])
       || exactObservationKeys(entry, ["key", "pending", "context", "status"]))
@@ -944,6 +970,8 @@ function adoptFieldObservationLock(lock) {
 function parseStoredFieldObservationLock(raw) {
   const parsed = JSON.parse(raw);
   if (parsed?.version === 1 && exactObservationKeys(parsed, ["version", "status", "key", "pending", "context"])) {
+    const migratedPending = migratedLegacyPendingFieldObservation(parsed.pending, parsed.context);
+    if (migratedPending) parsed.pending = migratedPending;
     parsed.version = FIELD_OBSERVATION_LOCK_VERSION;
     parsed.generation = fieldObservationLockGeneration(parsed.pending);
   }
@@ -964,9 +992,12 @@ function persistedFieldObservationLock() {
   try {
     const raw = localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY);
     return raw === null ? {available: true, raw: null, lock: null}
-      : {available: true, raw, lock: parseStoredFieldObservationLock(raw)};
-  } catch (_error) {
-    return {available: false, raw: null, lock: null};
+      : {available: true, raw, lock: parseStoredFieldObservationLock(raw),
+        migration: JSON.parse(raw)?.version === 1};
+  } catch (error) {
+    let raw = null;
+    try { raw = localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY); } catch (_storageError) {}
+    return {available: false, raw, lock: null, reason: error?.message || "storage"};
   }
 }
 
@@ -974,14 +1005,16 @@ function webLocksAvailable() {
   return typeof navigator !== "undefined" && typeof navigator.locks?.request === "function";
 }
 
-async function withFieldObservationWebLock(callback) {
+async function withFieldObservationWebLock(callback, operation = null) {
   if (!webLocksAvailable()) return {executed: false, reason: "web_locks_unavailable", value: false};
   let executed = false;
   try {
+    const options = {mode: "exclusive"};
+    if (operation?.abortController?.signal) options.signal = operation.abortController.signal;
     const value = await navigator.locks.request(
       FIELD_OBSERVATION_WEB_LOCK_NAME,
-      {mode: "exclusive"},
-      async () => {
+      options,
+      () => {
         executed = true;
         return callback();
       },
@@ -1085,6 +1118,15 @@ function fieldObservationLockMessage(lock = state.fieldObservationLock) {
   if (lock.status === "corrupt_pending") {
     return `${lock.corruptions.length} clé(s) locale(s) illisible(s) ont été détectée(s). Supprimez explicitement chaque clé ciblée avant tout nouvel envoi.`;
   }
+  if (lock.status === "inconsistent_persistence") {
+    return "Le verrou global et les observations locales divergent. Toutes les données disponibles sont conservées ; réconciliez ou abandonnez uniquement l’entrée ciblée.";
+  }
+  if (lock.status === "migration_requires_web_locks") {
+    return "Une observation d’un ancien format doit être migrée. Web Locks est indisponible : aucune donnée locale n’a été modifiée et toute publication reste bloquée.";
+  }
+  if (lock.status === "migration_failed") {
+    return "La migration sûre de l’observation locale a échoué. Les données d’origine sont conservées et toute publication reste bloquée.";
+  }
   if (lock.status === "conflict") return fieldObservationConflictMessage();
   if (lock.status === "invalid") {
     return "Le contexte canonique de l’observation précédente est introuvable. Utilisez « Actualiser le contexte » avant toute nouvelle tentative.";
@@ -1106,20 +1148,8 @@ function readPendingFieldObservation(key, expectedContext) {
   try {
     const value = JSON.parse(raw);
     if (validPendingFieldObservation(value, expectedContext)) return { available: true, value };
-    if (exactObservationKeys(value, ["payload", "snapshot"])
-        && typeof value.snapshot === "string"
-        && validPendingFieldObservationPayload(value.payload, expectedContext)
-        && value.snapshot === legacySnapshotFromObservationPayload(value.payload)) {
-      const observedAtLocal = formatDateTimeLocalInZone(
-        new Date(value.payload.observed_at_utc), expectedContext.timezone,
-      );
-      const migrated = {
-        version: PENDING_FIELD_OBSERVATION_VERSION,
-        payload: value.payload,
-        snapshot: snapshotFromObservationPayload(value.payload, observedAtLocal, expectedContext.timezone),
-        observed_at_local: observedAtLocal,
-        timezone: expectedContext.timezone,
-      };
+    const migrated = migratedLegacyPendingFieldObservation(value, expectedContext);
+    if (migrated) {
       return { available: true, value: migrated, migrated: true };
     }
   } catch (_error) {
@@ -1143,7 +1173,16 @@ function recoveredFieldObservationContext(pending) {
 function pendingFieldObservationInventory() {
   const entries = [];
   const corruptions = [];
+  const migrations = [];
   try {
+    let legacyLock = null;
+    try {
+      const lockRaw = localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY);
+      const candidate = lockRaw === null ? null : JSON.parse(lockRaw);
+      if (candidate?.version === 1) legacyLock = candidate;
+    } catch (_error) {
+      // The persisted lock is diagnosed separately; pending data must still be inventoried.
+    }
     for (let index = 0; index < localStorage.length; index += 1) {
       const key = localStorage.key(index);
       if (typeof key !== "string" || !key.startsWith(FIELD_OBSERVATION_PENDING_PREFIX)) continue;
@@ -1159,23 +1198,61 @@ function pendingFieldObservationInventory() {
         corruptions.push(Object.freeze({key, reason: "invalid_shape", raw}));
         continue;
       }
-      const context = recoveredFieldObservationContext(pending);
+      const legacyContext = legacyLock?.key === key ? legacyLock.context : null;
+      const pendingTimezone = pending.timezone || legacyContext?.timezone || siteTimezone();
+      const context = pending.version === PENDING_FIELD_OBSERVATION_VERSION
+        ? recoveredFieldObservationContext(pending)
+        : Object.freeze({
+          decision_id: pending.payload.decision_id,
+          execution_id: pending.payload.execution_id || null,
+          night_date: legacyContext?.night_date || null,
+          source: legacyContext?.source || "recovered",
+          timezone: pendingTimezone,
+          site_identity: legacyContext?.site_identity
+            || siteConfigurationIdentity() || JSON.stringify({recovered_timezone: pendingTimezone}),
+          mission_id: legacyContext?.mission_id || null,
+        });
       if (key !== fieldObservationContextKey(context)) {
         corruptions.push(Object.freeze({key, reason: "context_key_mismatch", raw}));
         continue;
       }
       if (!validPendingFieldObservation(pending, context)) {
+        const migrated = migratedLegacyPendingFieldObservation(pending, context);
+        if (migrated) {
+          const entry = Object.freeze({key, pending: migrated, context, status: "pending"});
+          entries.push(entry);
+          migrations.push(Object.freeze({key, raw, pending: migrated}));
+          continue;
+        }
+        if (exactObservationKeys(pending, ["payload", "snapshot"])) {
+          corruptions.push(Object.freeze({key, reason: "legacy_timezone_unavailable", raw}));
+          continue;
+        }
         corruptions.push(Object.freeze({key, reason: "invalid_envelope", raw}));
         continue;
       }
       entries.push(Object.freeze({key, pending, context, status: "pending"}));
     }
   } catch (_error) {
-    return {available: false, entries: [], corruptions: []};
+    return {available: false, entries: [], corruptions: [], migrations: []};
   }
   entries.sort((left, right) => left.key.localeCompare(right.key));
   corruptions.sort((left, right) => left.key.localeCompare(right.key));
-  return {available: true, entries, corruptions};
+  return {available: true, entries, corruptions, migrations};
+}
+
+function migrateLegacyFieldObservationsUnlocked(inventory) {
+  try {
+    for (const migration of inventory.migrations || []) {
+      if (localStorage.getItem(migration.key) !== migration.raw) return false;
+    }
+    for (const migration of inventory.migrations || []) {
+      localStorage.setItem(migration.key, JSON.stringify(migration.pending));
+    }
+    return true;
+  } catch (_error) {
+    return false;
+  }
 }
 
 function installInventoriedFieldObservationLockUnlocked(lock) {
@@ -1247,6 +1324,10 @@ function acquireFieldObservationLockUnlocked(candidate) {
 function inventoriedFieldObservationLock(inventory) {
   if (!inventory.available) return {status: "unreadable", persistence_missing: true};
   const persisted = persistedFieldObservationLock();
+  if (!persisted.available) {
+    return {status: "unreadable", persistence_missing: true,
+      persisted_raw: persisted.raw, corruptions: inventory.corruptions};
+  }
   const entries = inventory.entries.map((entry) => {
     const persistedEntry = persisted.lock?.entries?.find((candidate) => candidate.key === entry.key
       && candidate.pending?.payload?.observation_id === entry.pending.payload.observation_id);
@@ -1256,6 +1337,28 @@ function inventoriedFieldObservationLock(inventory) {
     return Object.freeze({...entry, status});
   });
   const corruptions = inventory.corruptions;
+  if (persisted.lock && !["multiple_pending", "corrupt_pending"].includes(persisted.lock.status)) {
+    const matching = entries.find((entry) => entry.key === persisted.lock.key
+      && JSON.stringify(entry.pending) === JSON.stringify(persisted.lock.pending)
+      && persisted.lock.generation === fieldObservationLockGeneration(entry.pending));
+    const divergent = entries.filter((entry) => entry !== matching);
+    if (!matching || divergent.length > 0) {
+      const lockEntry = Object.freeze({generation: persisted.lock.generation,
+        key: persisted.lock.key, pending: persisted.lock.pending,
+        context: persisted.lock.context, status: persisted.lock.status, origin: "global_lock"});
+      return {
+        version: FIELD_OBSERVATION_LOCK_VERSION,
+        generation: persisted.lock.generation,
+        status: "inconsistent_persistence",
+        entries: [lockEntry, ...divergent.map((entry) => Object.freeze({...entry, origin: "pending_storage"}))],
+        corruptions,
+        persisted_lock: persisted.lock,
+        diagnostic: !matching ? "lock_pending_missing_or_mismatched" : "unrelated_pending_present",
+      };
+    }
+    return {...persisted.lock, pending: matching.pending};
+  }
+  if (!persisted.lock && entries.length === 0 && corruptions.length === 0) return null;
   if (corruptions.length > 0 && entries.length <= 1) {
     return {
       version: FIELD_OBSERVATION_LOCK_VERSION,
@@ -1284,12 +1387,24 @@ function inventoriedFieldObservationLock(inventory) {
 }
 
 function rebuildPendingFieldObservationInventoryUnlocked() {
-  const inventory = pendingFieldObservationInventory();
+  let inventory = pendingFieldObservationInventory();
   if (!inventory.available) {
     adoptFieldObservationLock({status: "unreadable", persistence_missing: true});
     return false;
   }
+  if (inventory.migrations.length > 0) {
+    if (!migrateLegacyFieldObservationsUnlocked(inventory)) {
+      adoptFieldObservationLock({status: "migration_failed", entries: inventory.entries,
+        corruptions: inventory.corruptions});
+      return false;
+    }
+    inventory = pendingFieldObservationInventory();
+  }
   const lock = inventoriedFieldObservationLock(inventory);
+  if (["inconsistent_persistence", "unreadable", "migration_failed"].includes(lock?.status)) {
+    adoptFieldObservationLock(lock);
+    return false;
+  }
   if (!lock) {
     try {
       localStorage.removeItem(FIELD_OBSERVATION_LOCK_KEY);
@@ -1304,11 +1419,22 @@ function rebuildPendingFieldObservationInventoryUnlocked() {
 }
 
 async function restorePendingFieldObservationInventory() {
+  if (state.observationBusy) invalidateFieldObservationOperation();
+  state.fieldObservationInventoryReady = false;
   const inventory = pendingFieldObservationInventory();
-  const diagnostic = inventoriedFieldObservationLock(inventory);
+  let diagnostic = inventoriedFieldObservationLock(inventory);
+  if (inventory.migrations?.length > 0 && !webLocksAvailable()) {
+    diagnostic = {status: "migration_requires_web_locks", entries: inventory.entries,
+      corruptions: inventory.corruptions, migrations: inventory.migrations};
+  }
   if (diagnostic) adoptFieldObservationLock(diagnostic);
   else if (inventory.available) adoptFieldObservationLock(null);
+  if (diagnostic?.status === "migration_requires_web_locks") {
+    updateFieldObservationSubmitState();
+    return false;
+  }
   const result = await withFieldObservationWebLock(rebuildPendingFieldObservationInventoryUnlocked);
+  state.fieldObservationInventoryReady = result.executed;
   updateFieldObservationSubmitState();
   return result.executed && result.value === true;
 }
@@ -1346,6 +1472,7 @@ function syncFieldObservationContext() {
   const dialog = document.querySelector("#field-observation-dialog");
   if (!dialog.open || !state.fieldObservationDraftContext) return;
   if (sameFieldObservationContext(state.fieldObservationDraftContext, activeObservationContext())) return;
+  invalidateFieldObservationOperation();
   state.fieldObservationContextInvalid = true;
   updateFieldObservationSubmitState();
   observationMessage(
@@ -1417,6 +1544,7 @@ function restorePendingFieldObservation() {
 }
 
 function beginFieldObservationOperation(kind, lock = state.fieldObservationLock) {
+  const abortController = typeof AbortController === "function" ? new AbortController() : null;
   const operation = Object.freeze({
     token: ++fieldObservationOperationGeneration,
     kind,
@@ -1424,6 +1552,7 @@ function beginFieldObservationOperation(kind, lock = state.fieldObservationLock)
     lockGeneration: lock?.generation || null,
     lockKey: lock?.key || null,
     observationId: lock?.pending?.payload?.observation_id || null,
+    abortController,
   });
   activeFieldObservationOperation = operation;
   state.observationBusy = true;
@@ -1443,6 +1572,7 @@ function fieldObservationOperationCurrent(operation) {
 }
 
 function invalidateFieldObservationOperation() {
+  activeFieldObservationOperation?.abortController?.abort();
   fieldObservationOperationGeneration += 1;
   activeFieldObservationOperation = null;
   state.observationBusy = false;
@@ -1462,8 +1592,11 @@ function staleFieldObservationOperationError() {
   return error;
 }
 
-async function storedFieldObservation(observationId, operation = null) {
-  const response = await fetch(`/v1/field-observations/${encodeURIComponent(observationId)}`);
+async function storedFieldObservation(observationId, operation = null, signal = undefined) {
+  const response = await fetch(
+    `/v1/field-observations/${encodeURIComponent(observationId)}`,
+    signal ? {signal} : undefined,
+  );
   if (operation && !fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
   if (response.status === 404) return null;
   if (!response.ok) throw await sessionHttpError(response);
@@ -1502,7 +1635,7 @@ async function finishFieldObservationSubmission(key, submittedSnapshot, message,
     if (operation && !fieldObservationOperationCurrent(operation)) return false;
     if (!clearFieldObservationLockUnlocked(lock)) return false;
     return rebuildPendingFieldObservationInventoryUnlocked();
-  });
+  }, operation);
   const removed = result.executed && result.value === true;
   if (fieldObservationSnapshot() === submittedSnapshot) resetFieldObservationForm();
   else message += " Vos modifications en cours sont conservées.";
@@ -1515,8 +1648,103 @@ async function transitionFieldObservationLockStatus(lock, status, operation = nu
   const result = await withFieldObservationWebLock(() => {
     if (operation && !fieldObservationOperationCurrent(operation)) return false;
     return writeFieldObservationLockUnlocked({...storedFieldObservationLockValue(lock), status}, lock);
-  });
+  }, operation);
   return result.executed && result.value === true;
+}
+
+function validatedFieldObservationPublicationLockUnlocked(expectedLock) {
+  const persisted = persistedFieldObservationLock();
+  if (!persisted.available || !sameFieldObservationLock(persisted.lock, expectedLock)
+      || persisted.raw !== JSON.stringify(storedFieldObservationLockValue(expectedLock))) return null;
+  let pendingRaw;
+  try { pendingRaw = localStorage.getItem(expectedLock.key); } catch (_error) { return null; }
+  if (pendingRaw !== JSON.stringify(expectedLock.pending)) return null;
+  const inventory = pendingFieldObservationInventory();
+  if (!inventory.available || inventory.corruptions.length > 0 || inventory.migrations.length > 0
+      || inventory.entries.length !== 1
+      || inventory.entries[0].key !== expectedLock.key
+      || JSON.stringify(inventory.entries[0].pending) !== JSON.stringify(expectedLock.pending)
+      || expectedLock.generation !== fieldObservationLockGeneration(expectedLock.pending)) return null;
+  adoptFieldObservationLock(persisted.lock);
+  return persisted.lock;
+}
+
+function finishFieldObservationSubmissionUnlocked(lock, submittedSnapshot, message) {
+  const removed = clearFieldObservationLockUnlocked(lock)
+    && rebuildPendingFieldObservationInventoryUnlocked();
+  if (fieldObservationSnapshot() === submittedSnapshot) resetFieldObservationForm();
+  else message += " Vos modifications en cours sont conservées.";
+  if (!removed) message += " Le brouillon local n’a pas pu être nettoyé.";
+  observationMessage(message, {error: !removed});
+  return removed;
+}
+
+async function publishFieldObservationUnlocked(lock, key, payload, submittedSnapshot, reusingPending, operation) {
+  const signal = operation.abortController?.signal;
+  const canonicalLock = validatedFieldObservationPublicationLockUnlocked(lock);
+  if (!canonicalLock || !fieldObservationOperationCurrent(operation)) {
+    observationMessage("Publication annulée : le verrou global ou le brouillon persistant a changé. Aucun POST n’a été envoyé.", {error: true});
+    return false;
+  }
+  try {
+    if (reusingPending) {
+      const stored = await storedFieldObservation(payload.observation_id, operation, signal);
+      if (stored) {
+        if (!storedObservationMatchesPayload(stored, payload)) throw observationConflictError();
+        return finishFieldObservationSubmissionUnlocked(
+          canonicalLock, submittedSnapshot, "Observation déjà enregistrée — aucune duplication.",
+        );
+      }
+    }
+    if (!fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
+    const response = await fetch("/v1/field-observations", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal,
+    });
+    if (!fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
+    if (!response.ok) throw await sessionHttpError(response);
+    return finishFieldObservationSubmissionUnlocked(canonicalLock, submittedSnapshot, response.status === 201
+      ? "Observation enregistrée." : "Observation déjà enregistrée — aucune duplication.");
+  } catch (error) {
+    if (error?.staleFieldObservationOperation || !fieldObservationOperationCurrent(operation)) return false;
+    if (!error?.status) {
+      try {
+        const stored = await storedFieldObservation(payload.observation_id, operation, signal);
+        if (stored) {
+          if (!storedObservationMatchesPayload(stored, payload)) throw observationConflictError();
+          return finishFieldObservationSubmissionUnlocked(
+            canonicalLock, submittedSnapshot,
+            "Observation enregistrée. La confirmation réseau avait été interrompue.",
+          );
+        }
+      } catch (lookupError) {
+        if (lookupError?.staleFieldObservationOperation || !fieldObservationOperationCurrent(operation)) return false;
+        if (lookupError?.status === 409) error = lookupError;
+      }
+    }
+    if (error?.status === 404) {
+      state.invalidFieldObservationContextKey = key;
+      state.fieldObservationContextInvalid = true;
+      writeFieldObservationLockUnlocked({...storedFieldObservationLockValue(canonicalLock), status: "invalid"}, canonicalLock);
+    } else if (error?.status === 409) {
+      writeFieldObservationLockUnlocked({...storedFieldObservationLockValue(canonicalLock), status: "conflict"}, canonicalLock);
+    } else if (error?.status >= 400 && error.status < 500) {
+      if (!(clearFieldObservationLockUnlocked(canonicalLock)
+          && rebuildPendingFieldObservationInventoryUnlocked())) blockUnreadablePendingObservation(key);
+    }
+    const validationMessage = ["recorded_at_precedes_observed_at", "observed_at_in_future"].includes(error?.code)
+      ? "L’heure observée est dans le futur par rapport à l’enregistrement. Vérifiez la date, l’heure et le fuseau du site."
+      : ["invalid_observed_at_utc", "invalid_recorded_at_utc"].includes(error?.code)
+        ? "L’horodatage est invalide. Vérifiez la date, l’heure et le fuseau du site."
+        : "Certaines valeurs sont invalides. Vérifiez l’heure observée et les détails saisis.";
+    const messages = {
+      404: "La décision ou la session liée à ce relevé est introuvable ou périmée. Le formulaire et son UUID sont conservés ; utilisez « Actualiser le contexte ».",
+      409: fieldObservationConflictMessage(), 422: validationMessage,
+      503: "Enregistrement momentanément indisponible. Vous pouvez réessayer sans créer de doublon.",
+    };
+    observationMessage(messages[error?.status]
+      || "Confirmation impossible. Réessayez : la même observation sera reprise sans doublon.", {error: true});
+    return false;
+  }
 }
 
 async function submitFieldObservation(event) {
@@ -1609,6 +1837,7 @@ async function submitFieldObservation(event) {
     const acquisitionOperation = beginFieldObservationOperation("restore", null);
     const acquisition = await withFieldObservationWebLock(
       () => acquireFieldObservationLockUnlocked(candidate),
+      acquisitionOperation,
     );
     if (activeFieldObservationOperation?.token !== acquisitionOperation.token
         || !acquisition.executed || acquisition.value !== true) {
@@ -1643,7 +1872,7 @@ async function submitFieldObservation(event) {
         status: "pending", key, pending: envelope, context: Object.freeze({...context}),
       };
       return acquireFieldObservationLockUnlocked(candidate) ? {candidate, payload: acquiredPayload} : null;
-    });
+    }, acquisitionOperation);
     const acquired = acquisition.executed ? acquisition.value : null;
     if (activeFieldObservationOperation?.token !== acquisitionOperation.token
         || !acquired || !sameFieldObservationLock(state.fieldObservationLock, acquired.candidate)) {
@@ -1661,71 +1890,17 @@ async function submitFieldObservation(event) {
   const operation = beginFieldObservationOperation("submit", state.fieldObservationLock);
   observationMessage("Enregistrement en cours…");
   try {
-    if (reusingPending) {
-      const stored = await storedFieldObservation(payload.observation_id, operation);
-      if (stored) {
-        if (!storedObservationMatchesPayload(stored, payload)) throw observationConflictError();
-        await finishFieldObservationSubmission(key, submittedSnapshot, "Observation déjà enregistrée — aucune duplication.", operation);
-        return;
-      }
+    // The network phase intentionally stays under the origin-wide Web Lock. This makes
+    // retry, POST, terminal persistence and abandon one serial critical section.
+    const publication = await withFieldObservationWebLock(
+      () => publishFieldObservationUnlocked(
+        state.fieldObservationLock, key, payload, submittedSnapshot, reusingPending, operation,
+      ),
+      operation,
+    );
+    if (!publication.executed && activeFieldObservationOperation?.token === operation.token) {
+      observationMessage("Envoi bloqué : Web Locks est indisponible, refusé ou interrompu. Aucun POST n’a été envoyé.", {error: true});
     }
-    const response = await fetch("/v1/field-observations", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-    });
-    if (!fieldObservationOperationCurrent(operation)) return;
-    if (!response.ok) {
-      const responseError = await sessionHttpError(response);
-      if (!fieldObservationOperationCurrent(operation)) return;
-      throw responseError;
-    }
-    await finishFieldObservationSubmission(key, submittedSnapshot, response.status === 201
-      ? "Observation enregistrée." : "Observation déjà enregistrée — aucune duplication.", operation);
-  } catch (error) {
-    if (error?.staleFieldObservationOperation || !fieldObservationOperationCurrent(operation)) return;
-    if (!error?.status) {
-      try {
-        const stored = await storedFieldObservation(payload.observation_id, operation);
-        if (stored) {
-          if (!storedObservationMatchesPayload(stored, payload)) throw observationConflictError();
-          await finishFieldObservationSubmission(key, submittedSnapshot, "Observation enregistrée. La confirmation réseau avait été interrompue.", operation);
-          return;
-        }
-      } catch (lookupError) {
-        if (lookupError?.staleFieldObservationOperation || !fieldObservationOperationCurrent(operation)) return;
-        if (lookupError?.status === 409) error = lookupError;
-      }
-    }
-    if (!fieldObservationOperationCurrent(operation)) return;
-    if (error?.status === 404) {
-      state.invalidFieldObservationContextKey = key;
-      state.fieldObservationContextInvalid = true;
-      await transitionFieldObservationLockStatus(state.fieldObservationLock, "invalid", operation);
-    }
-    if (error?.status === 409) {
-      await transitionFieldObservationLockStatus(state.fieldObservationLock, "conflict", operation);
-    }
-    if (error?.status >= 400 && error.status < 500
-        && ![404, 409].includes(error.status)) {
-      const lock = state.fieldObservationLock;
-      const cleared = await withFieldObservationWebLock(() => {
-        if (!fieldObservationOperationCurrent(operation)) return false;
-        if (!clearFieldObservationLockUnlocked(lock)) return false;
-        return rebuildPendingFieldObservationInventoryUnlocked();
-      });
-      if (!cleared.executed || cleared.value !== true) blockUnreadablePendingObservation(key);
-    }
-    const validationMessage = ["recorded_at_precedes_observed_at", "observed_at_in_future"].includes(error?.code)
-      ? "L’heure observée est dans le futur par rapport à l’enregistrement. Vérifiez la date, l’heure et le fuseau du site."
-      : ["invalid_observed_at_utc", "invalid_recorded_at_utc"].includes(error?.code)
-        ? "L’horodatage est invalide. Vérifiez la date, l’heure et le fuseau du site."
-        : "Certaines valeurs sont invalides. Vérifiez l’heure observée et les détails saisis.";
-    const messages = {
-      404: "La décision ou la session liée à ce relevé est introuvable ou périmée. Le formulaire et son UUID sont conservés ; utilisez « Actualiser le contexte ».",
-      409: fieldObservationConflictMessage(),
-      422: validationMessage,
-      503: "Enregistrement momentanément indisponible. Vous pouvez réessayer sans créer de doublon.",
-    };
-    observationMessage(messages[error?.status] || "Confirmation impossible. Réessayez : la même observation sera reprise sans doublon.", { error: true });
   } finally {
     finishFieldObservationOperation(operation);
   }
@@ -1842,6 +2017,21 @@ function fieldObservationEntryForKey(key) {
 function removeFieldObservationEntryUnlocked(entry) {
   try {
     const currentRaw = localStorage.getItem(entry.key);
+    const activeLock = state.fieldObservationLock;
+    if (activeLock?.key === entry.key
+        && activeLock.pending?.payload?.observation_id === entry.pending.payload.observation_id) {
+      if (!clearFieldObservationLockUnlocked(activeLock)) return false;
+      return rebuildPendingFieldObservationInventoryUnlocked();
+    }
+    if (entry.origin === "global_lock") {
+      const persisted = persistedFieldObservationLock();
+      if (!persisted.available || !sameFieldObservationLock(persisted.lock, entry)) return false;
+      if (currentRaw !== null && currentRaw !== JSON.stringify(entry.pending)) return false;
+      if (currentRaw === JSON.stringify(entry.pending)) localStorage.removeItem(entry.key);
+      if (localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY) !== persisted.raw) return false;
+      localStorage.removeItem(FIELD_OBSERVATION_LOCK_KEY);
+      return rebuildPendingFieldObservationInventoryUnlocked();
+    }
     if (currentRaw === null && state.fieldObservationLock?.status === "persistence_missing") {
       const remaining = (state.fieldObservationLock.entries || []).filter((candidate) => candidate.key !== entry.key);
       if (remaining.length === 0) adoptFieldObservationLock(null);
@@ -1887,14 +2077,14 @@ async function reconcileFieldObservationEntry(key) {
       await withFieldObservationWebLock(() => {
         if (!fieldObservationOperationCurrent(operation)) return false;
         return transitionFieldObservationEntryStatusUnlocked(entry, "conflict");
-      });
+      }, operation);
       observationMessage("L’UUID ciblé existe avec un contenu différent ; cette entrée reste bloquée.", {error: true});
       return;
     }
     const result = await withFieldObservationWebLock(() => {
       if (!fieldObservationOperationCurrent(operation)) return false;
       return removeFieldObservationEntryUnlocked(entry);
-    });
+    }, operation);
     observationMessage(result.executed && result.value
       ? "Entrée ciblée réconciliée ; l’inventaire local a été reconstruit."
       : "L’entrée a été retrouvée, mais sa suppression sûre exige Web Locks ; elle reste bloquée.",
@@ -1917,7 +2107,7 @@ async function abandonFieldObservationEntry(key) {
   const result = await withFieldObservationWebLock(() => {
     if (!fieldObservationOperationCurrent(operation)) return false;
     return removeFieldObservationEntryUnlocked(entry);
-  });
+  }, operation);
   finishFieldObservationOperation(operation);
   observationMessage(result.executed && result.value
     ? "Seule l’entrée ciblée a été abandonnée ; l’inventaire local a été reconstruit."
@@ -1943,7 +2133,7 @@ async function removeCorruptFieldObservationEntry(key) {
     } catch (_error) {
       return false;
     }
-  });
+  }, operation);
   finishFieldObservationOperation(operation);
   observationMessage(result.executed && result.value
     ? "Clé corrompue ciblée supprimée ; les autres entrées sont conservées."
@@ -1955,7 +2145,7 @@ async function abandonFieldObservationLock() {
   if (state.observationBusy) return;
   const lock = state.fieldObservationLock;
   if (!lock) return;
-  if (["multiple_pending", "corrupt_pending"].includes(lock.status)) {
+  if (["multiple_pending", "corrupt_pending", "inconsistent_persistence", "migration_requires_web_locks", "migration_failed"].includes(lock.status)) {
     observationMessage("Choisissez l’action de l’entrée concernée ; aucune suppression globale n’est proposée.", {error: true});
     return;
   }
@@ -1967,7 +2157,7 @@ async function abandonFieldObservationLock() {
     if (!fieldObservationOperationCurrent(operation)) return false;
     if (!clearFieldObservationLockUnlocked(lock)) return false;
     return rebuildPendingFieldObservationInventoryUnlocked();
-  });
+  }, operation);
   const removed = result.executed && result.value === true;
   finishFieldObservationOperation(operation);
   if (state.invalidFieldObservationContextKey === key) state.invalidFieldObservationContextKey = null;
@@ -2051,6 +2241,17 @@ function handleFieldObservationStorageEvent(event) {
   updateFieldObservationSubmitState();
   if (document.querySelector("#field-observation-dialog").open) {
     observationMessage(fieldObservationLockMessage(state.fieldObservationLock), { error: true });
+  }
+}
+
+async function handleFieldObservationPageShow(event) {
+  if (!event.persisted) return;
+  invalidateFieldObservationOperation();
+  state.fieldObservationInventoryReady = false;
+  updateFieldObservationSubmitState();
+  await restorePendingFieldObservationInventory();
+  if (document.querySelector("#field-observation-dialog").open && state.fieldObservationLock) {
+    observationMessage(fieldObservationLockMessage(state.fieldObservationLock), {error: true});
   }
 }
 
@@ -3399,6 +3600,7 @@ function initializeConfiguration(payload) {
   ui.configurationRecover.hidden = true;
   prefillConfiguration();
   renderAvailabilityTimezone();
+  restorePendingFieldObservationInventory();
 }
 
 async function restoreSavedMission() {
@@ -4393,18 +4595,26 @@ document.querySelector("#observation-reconcile").addEventListener("click", recon
 document.querySelector("#observation-refresh-context").addEventListener("click", refreshInvalidFieldObservationContext);
 document.querySelector("#observation-abandon-pending").addEventListener("click", abandonFieldObservationLock);
 window.addEventListener("storage", handleFieldObservationStorageEvent);
+window.addEventListener("pageshow", handleFieldObservationPageShow);
 ui.addObservationMessage.addEventListener("click", () => openFieldObservation("decision"));
 ui.addObservationDecision.addEventListener("click", () => openFieldObservation("decision"));
 ui.addObservationMission.addEventListener("click", () => openFieldObservation("mission"));
-ui.closeObservation.addEventListener("click", () => ui.observation.close());
+  ui.closeObservation.addEventListener("click", () => {
+    invalidateFieldObservationOperation();
+    ui.observation.close();
+  });
 ui.observation.addEventListener("click", (event) => {
-  if (event.target === ui.observation) ui.observation.close();
-});
+    if (event.target === ui.observation) {
+      invalidateFieldObservationOperation();
+      ui.observation.close();
+    }
+  });
 ui.closeMission.addEventListener("click", () => ui.mission.close());
 ui.missionBack.addEventListener("click", () => ui.mission.close());
 ui.mission.addEventListener("click", (event) => {
   if (event.target === ui.mission) ui.mission.close();
 });
+ui.observation.addEventListener("close", invalidateFieldObservationOperation);
 restoreFieldObservationLock();
 restorePendingFieldObservationInventory();
 if (restorePendingAcceptanceAttempt()) showUnresolvedAcceptance();

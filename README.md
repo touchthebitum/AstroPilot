@@ -136,6 +136,14 @@ it separately before committing changes.
 
 ## API and UI
 
+La publication des observations terrain exige l’API navigateur Web Locks :
+Chrome/Chromium 69+, Edge 79+, Firefox 96+ ou Safari 15.4+. AstroPilot s’ouvre
+dans le navigateur par défaut et vérifie cette capacité à l’usage ; un navigateur
+plus ancien, un mode de sécurité qui désactive Web Locks ou un contexte qui la
+refuse peut consulter l’application, mais la saisie et la publication terrain
+sont bloquées avec un diagnostic visible. Le repli `localStorage` n’est pas
+présenté comme une exclusion multi-onglets sûre.
+
 Start the API and bundled UI after synchronizing the runtime environment:
 
 ```bash

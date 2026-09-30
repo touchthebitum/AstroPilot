@@ -78,6 +78,8 @@ function renderObservationLinkage() {}
 function siteTimezone() { return 'Europe/Zurich'; }
 function siteConfigurationIdentity() { return null; }
 function observationMessage(message) { document.querySelector('#observation-status').textContent = message; }
+function invalidateFieldObservationOperation() {}
+function webLocksAvailable() { return true; }
 function pendingObservationKey(decisionId, executionId) { return `${decisionId}:${executionId || 'none'}`; }
 const storage = new Map();
 const localStorage = {
@@ -293,6 +295,9 @@ function setQuick({cloud = '', transparency = '', wind = ''} = {}) {
 function storedProjection(payload) {
   return {...clone(payload), provenance: {source_type: 'user', capture_method: 'manual', source_id: null, imported_at_utc: null},
     quality: {confidence: payload.confidence, flags: payload.quality_flags}, calibration_eligible: false};
+}
+function assertReadRequest(options) {
+  assert.ok(options === undefined || (options.signal && options.method === undefined && options.body === undefined));
 }
 function clearHarness() {
   storage.clear(); state.observationBusy = false; uuid = 0;
@@ -613,7 +618,7 @@ async function check() {
 
   // Reconciliation reads only the original UUID and clears the lock on an exact canonical match.
   fetch = (url, options) => {
-    assert.equal(options, undefined);
+    assertReadRequest(options);
     assert.match(url, new RegExp(originalConflictId));
     return response(200, storedProjection(JSON.parse(originalConflictPending).payload));
   };
@@ -634,14 +639,14 @@ async function check() {
   const conflictingStored = storedProjection(pendingPayload);
   conflictingStored.conditions.cloud_state = 'overcast';
   fetch = (url, options) => {
-    assert.equal(options, undefined);
+    assertReadRequest(options);
     return response(200, conflictingStored);
   };
   await submitFieldObservation(event);
   assert.match(element('#observation-status').textContent, /Conflit/);
   assert.equal(element('#observation-clouds').value, 'few');
   fetch = (_url, options) => {
-    assert.equal(options, undefined);
+    assertReadRequest(options);
     return response(404, {});
   };
   await reconcileFieldObservationLock();
@@ -676,7 +681,7 @@ async function check() {
 
   // Canonical refresh leaves the invalid lock in place while the context is absent.
   fetch = (url, options) => {
-    assert.equal(options, undefined);
+    assertReadRequest(options);
     if (url.includes('/field-observations/')) return response(404, {});
     return response(200, null);
   };
@@ -686,7 +691,7 @@ async function check() {
 
   // Once the canonical mission confirms the exact decision, refresh downgrades to the original pending.
   fetch = (url, options) => {
-    assert.equal(options, undefined);
+    assertReadRequest(options);
     if (url.includes('/field-observations/')) return response(404, {});
     assert.equal(url, '/v1/accepted-mission/current');
     return response(200, {status: 'accepted', decision_id: 'decision-1', mission_id: null});
@@ -763,12 +768,13 @@ async function check() {
   storage.set(legacyKey, JSON.stringify({
     payload: legacyPayload, snapshot: legacySnapshotFromObservationPayload(legacyPayload),
   }));
+  await restorePendingFieldObservationInventory();
   resetFieldObservationForm();
   element('#observation-observed-at').value = '2026-09-29T21:00';
   restorePendingFieldObservation();
   const migrated = JSON.parse(storage.get(legacyKey));
-  assert.equal(migrated.version, undefined);
-  assert.equal(migrated.observed_at_local, undefined);
+  assert.equal(migrated.version, PENDING_FIELD_OBSERVATION_VERSION);
+  assert.equal(migrated.observed_at_local, '2026-09-29T22:14');
   assert.equal(element('#observation-observed-at').value, '2026-09-29T22:14');
 
   // Corrupt JSON with a failing cleanup is equally blocking.
@@ -786,7 +792,7 @@ async function check() {
   const posted = [];
   let phase = 0;
   fetch = async (url, options) => {
-    if (options) {
+    if (options?.method === 'POST') {
       posted.push(options.body);
       if (phase++ === 0) throw new TypeError('network timeout');
       return response(200, {created: false});
@@ -809,7 +815,7 @@ async function check() {
   clearHarness(); setQuick({cloud: 'few'});
   const changedPosts = [];
   fetch = async (url, options) => {
-    if (!options) return response(404, {});
+    if (options?.method !== 'POST') return response(404, {});
     changedPosts.push(JSON.parse(options.body));
     throw new TypeError('network timeout');
   };
@@ -844,7 +850,7 @@ async function check() {
 
   // A stale reconciliation response cannot mutate a newer lock generation.
   clearHarness(); setQuick({cloud: 'few'});
-  fetch = (_url, options) => options ? Promise.reject(new TypeError('offline')) : response(404, {});
+  fetch = (_url, options) => options?.method === 'POST' ? Promise.reject(new TypeError('offline')) : response(404, {});
   await submitFieldObservation(event);
   const oldLock = clone(state.fieldObservationLock);
   const replacementPending = clone(oldLock.pending);
@@ -944,7 +950,7 @@ async function check() {
 
   // The original in-memory envelope remains reconcilable even after external storage deletion.
   fetch = (url, options) => {
-    assert.equal(options, undefined);
+    assertReadRequest(options);
     assert.match(url, new RegExp(originalUncertainAfterRaces.payload.observation_id));
     return response(200, storedProjection(originalUncertainAfterRaces.payload));
   };
@@ -1013,7 +1019,7 @@ async function check() {
 
   // An uncertain request is rehydrated from local storage after a page/form reset.
   clearHarness(); setQuick({cloud: 'partly_cloudy', transparency: 'poor', wind: '4.2'});
-  fetch = async (url, options) => options ? Promise.reject(new TypeError('offline')) : response(404, {});
+  fetch = async (url, options) => options?.method === 'POST' ? Promise.reject(new TypeError('offline')) : response(404, {});
   await submitFieldObservation(event);
   resetFieldObservationForm();
   restorePendingFieldObservation();
@@ -1090,7 +1096,10 @@ const contexts = [];
 let lockTail = Promise.resolve();
 const controlledLocks = {request(_name, options, callback) {
   assert.equal(options.mode, 'exclusive');
-  const run = lockTail.then(() => callback());
+  const run = lockTail.then(() => {
+    if (options.signal?.aborted) throw new Error('AbortError');
+    return callback();
+  });
   lockTail = run.catch(() => {});
   return run;
 }};
@@ -1131,7 +1140,7 @@ function makeContext(name, locks = controlledLocks) {
     return radio ? element(`#surface-${radio[1]}`) : element(selector);
   }, createElement() { const item = new Element(); item.owner = element; return item; }};
   let uuid = 0;
-  const sandbox = {console, structuredClone, URL, TextEncoder, Intl, Date, JSON, Map, Set, Object, Array,
+      const sandbox = {console, structuredClone, URL, TextEncoder, Intl, Date, JSON, Map, Set, Object, Array, AbortController,
     String, Number, Boolean, RegExp, Error, TypeError, Promise, encodeURIComponent,
     document, window: {confirm: () => true}, navigator: locks ? {locks} : {},
     crypto: {randomUUID: () => `${name}-uuid-${++uuid}`}, posts: [], uuidCount: () => uuid};
@@ -1146,8 +1155,12 @@ function makeContext(name, locks = controlledLocks) {
   sandbox.observationMessage = (message) => { element('#observation-status').textContent = message; };
   sandbox.sessionHttpError = async response => { const error = new Error('request_refused'); error.status = response.status; return error; };
   sandbox.ui = {observation: element('#field-observation-dialog')};
-  sandbox.fetch = async (url, options) => {
-    if (options) { sandbox.posts.push(JSON.parse(options.body)); return {ok: true, status: 201, json: async () => ({})}; }
+      sandbox.fetch = async (url, options) => {
+            if (options?.method === 'POST') {
+              sandbox.posts.push(JSON.parse(options.body));
+              if (sandbox.postGate) await sandbox.postGate;
+              return {ok: true, status: 201, json: async () => ({})};
+            }
     const id = decodeURIComponent(url.split('/').pop());
     const stored = sandbox.canonical?.[id];
     return stored ? {ok: true, status: 200, json: async () => stored}
@@ -1181,24 +1194,20 @@ const projection = payload => ({...structuredClone(payload),
   // Two distinct states contend concurrently; the controlled exclusive queue permits one POST only.
   const a = makeContext('a'); const b = makeContext('b');
   await Promise.all([run(a, 'submitFieldObservation({preventDefault(){}})'), run(b, 'submitFieldObservation({preventDefault(){}})')]);
-  assert.equal(a.sandbox.posts.length + b.sandbox.posts.length, 1);
-  assert.equal([...shared.keys()].filter(key => key.startsWith('astropilot.pendingFieldObservation.')).length, 1);
-  assert.ok(run(a, 'state.fieldObservationLock') || run(b, 'state.fieldObservationLock'));
-  const readOnly = makeContext('readonly', null);
-  await run(readOnly, 'restorePendingFieldObservationInventory()');
-  assert.ok(run(readOnly, 'state.fieldObservationLock.pending.payload.observation_id'));
-  const readOnlyId = run(readOnly, 'state.fieldObservationLock.pending.payload.observation_id');
-  readOnly.sandbox.canonical = {[readOnlyId]: projection(run(readOnly, 'state.fieldObservationLock.pending.payload'))};
-  await run(readOnly, 'reconcileFieldObservationLock()');
-  assert.ok(run(readOnly, 'state.fieldObservationLock'));
-  assert.equal(readOnly.sandbox.posts.length, 0);
+      assert.equal(a.sandbox.posts.length + b.sandbox.posts.length, 1,
+        JSON.stringify({a: run(a, 'state.fieldObservationLock'), b: run(b, 'state.fieldObservationLock'),
+          am: run(a, 'document.querySelector("#observation-status").textContent'),
+          bm: run(b, 'document.querySelector("#observation-status").textContent'), keys: [...shared.keys()]}));
+      assert.equal([...shared.keys()].filter(key => key.startsWith('astropilot.pendingFieldObservation.')).length, 0);
 
   // Missing or throwing Web Locks fails before UUID creation and before POST.
   shared.clear(); contexts.length = 0;
-  const noLocks = makeContext('none', null);
-  await run(noLocks, 'submitFieldObservation({preventDefault(){}})');
+      const noLocks = makeContext('none', null);
+      assert.equal(run(noLocks, 'webLocksAvailable()'), false);
+      await run(noLocks, 'submitFieldObservation({preventDefault(){}})');
   assert.equal(noLocks.sandbox.uuidCount(), 0); assert.equal(noLocks.sandbox.posts.length, 0);
-  const denied = makeContext('denied', {request() { throw new Error('denied'); }});
+      const denied = makeContext('denied', {request() { throw new Error('denied'); }});
+      assert.equal(run(denied, 'webLocksAvailable()'), true);
   await run(denied, 'submitFieldObservation({preventDefault(){}})');
   assert.equal(denied.sandbox.uuidCount(), 0); assert.equal(denied.sandbox.posts.length, 0);
 
@@ -1209,10 +1218,139 @@ const projection = payload => ({...structuredClone(payload),
       observed_at_local: '2026-09-29T22:14', timezone: 'Europe/Zurich'}}; })()`);
   const second = structuredClone(first); second.pending.payload.decision_id = 'decision-2';
   second.pending.payload.observation_id = 'inventory-uuid-2';
-  second.key = run(tab, `pendingObservationKey('decision-2', null)`);
-  tab.sandbox.__second = second.pending;
-  second.pending.snapshot = run(tab, `snapshotFromObservationPayload(__second.payload, __second.observed_at_local, __second.timezone)`);
-  shared.set(first.key, JSON.stringify(first.pending)); shared.set(second.key, JSON.stringify(second.pending));
+      second.key = run(tab, `pendingObservationKey('decision-2', null)`);
+      tab.sandbox.__second = second.pending;
+      second.pending.snapshot = run(tab, `snapshotFromObservationPayload(__second.payload, __second.observed_at_local, __second.timezone)`);
+
+      // A restored pending is read-only without Web Locks and can never reach POST.
+      shared.clear(); contexts.length = 0;
+      shared.set(first.key, JSON.stringify(first.pending));
+      const restoredNoLocks = makeContext('restored-no-locks', null);
+      await run(restoredNoLocks, 'restorePendingFieldObservationInventory()');
+      await run(restoredNoLocks, 'restorePendingFieldObservation(); submitFieldObservation({preventDefault(){}})');
+      assert.equal(restoredNoLocks.sandbox.posts.length, 0);
+      assert.equal(shared.get(first.key), JSON.stringify(first.pending));
+
+      // Two tabs retrying the exact same pending serialize GET/POST and produce one POST.
+      shared.clear(); contexts.length = 0;
+      shared.set(first.key, JSON.stringify(first.pending));
+      const lockContext = run(tab, `recoveredFieldObservationContext(__second || ${JSON.stringify(first.pending)})`);
+      const firstLock = {version: 2, generation: `lock-${first.pending.payload.observation_id}`,
+        status: 'pending', key: first.key, pending: first.pending,
+        context: {...lockContext, decision_id: first.pending.payload.decision_id}};
+      shared.set('astropilot.fieldObservationLock', JSON.stringify(firstLock));
+      const retryA = makeContext('retry-a'); const retryB = makeContext('retry-b');
+      await run(retryA, '(async () => { await restorePendingFieldObservationInventory(); restorePendingFieldObservation(); })()');
+      await run(retryB, '(async () => { await restorePendingFieldObservationInventory(); restorePendingFieldObservation(); })()');
+      await Promise.all([run(retryA, 'submitFieldObservation({preventDefault(){}})'),
+        run(retryB, 'submitFieldObservation({preventDefault(){}})')]);
+      assert.equal(retryA.sandbox.posts.length + retryB.sandbox.posts.length, 1);
+
+      // Publication retains the origin-wide lock; a concurrent abandon cannot delete its pending.
+      shared.clear(); contexts.length = 0;
+      shared.set(first.key, JSON.stringify(first.pending));
+      shared.set('astropilot.fieldObservationLock', JSON.stringify(firstLock));
+      const publishing = makeContext('publishing'); const abandoning = makeContext('abandoning');
+      await run(publishing, '(async () => { await restorePendingFieldObservationInventory(); restorePendingFieldObservation(); })()');
+      await run(abandoning, '(async () => { await restorePendingFieldObservationInventory(); restorePendingFieldObservation(); })()');
+      let releasePost;
+      publishing.sandbox.postGate = new Promise(resolve => { releasePost = resolve; });
+      const publication = run(publishing, 'submitFieldObservation({preventDefault(){}})');
+      while (publishing.sandbox.posts.length === 0) await Promise.resolve();
+      const abandon = run(abandoning, `abandonFieldObservationEntry(${JSON.stringify(first.key)})`);
+      await Promise.resolve();
+      assert.equal(shared.has(first.key), true, 'abandon must wait behind publication');
+      releasePost();
+      await Promise.all([publication, abandon]);
+      assert.equal(shared.has(first.key), false);
+
+      // Startup never erases a valid global lock when its pending is absent or divergent.
+      shared.clear(); contexts.length = 0;
+      const lockOnlyRaw = JSON.stringify(firstLock);
+      shared.set('astropilot.fieldObservationLock', lockOnlyRaw);
+      const lockOnly = makeContext('lock-only');
+      await run(lockOnly, 'restorePendingFieldObservationInventory()');
+      assert.equal(run(lockOnly, 'state.fieldObservationLock.status'), 'inconsistent_persistence');
+      assert.equal(shared.get('astropilot.fieldObservationLock'), lockOnlyRaw);
+      shared.set(second.key, JSON.stringify(second.pending));
+      await run(lockOnly, 'restorePendingFieldObservationInventory()');
+      assert.equal(run(lockOnly, 'state.fieldObservationLock.status'), 'inconsistent_persistence');
+      assert.equal(run(lockOnly, 'state.fieldObservationLock.entries.length'), 2);
+      assert.equal(shared.get('astropilot.fieldObservationLock'), lockOnlyRaw);
+
+      // An externally deleted pending is diagnosed fail-closed and the lock payload survives.
+      shared.clear(); shared.set(first.key, JSON.stringify(first.pending));
+      shared.set('astropilot.fieldObservationLock', lockOnlyRaw);
+      await run(lockOnly, 'restorePendingFieldObservationInventory()');
+      shared.delete(first.key);
+      await run(lockOnly, `(async () => {
+        handleFieldObservationStorageEvent({key: ${JSON.stringify(first.key)}, newValue: null});
+        await restorePendingFieldObservationInventory();
+      })()`);
+      assert.equal(run(lockOnly, 'state.fieldObservationLock.status'), 'inconsistent_persistence');
+      assert.equal(run(lockOnly, 'state.fieldObservationLock.entries[0].pending.payload.observation_id'),
+        first.pending.payload.observation_id);
+
+      // Legacy pending migration is a real v2 write under Web Locks, with or without a v1 lock.
+      const legacyPending = {payload: first.pending.payload,
+        snapshot: run(lockOnly, `legacySnapshotFromObservationPayload(${JSON.stringify(first.pending.payload)})`)};
+      shared.clear(); contexts.length = 0; shared.set(first.key, JSON.stringify(legacyPending));
+      const legacy = makeContext('legacy');
+      await run(legacy, 'restorePendingFieldObservationInventory()');
+      assert.equal(JSON.parse(shared.get(first.key)).version, 2);
+      assert.equal(JSON.parse(shared.get('astropilot.fieldObservationLock')).version, 2);
+      const stablePending = shared.get(first.key); const stableLock = shared.get('astropilot.fieldObservationLock');
+      const legacyReload = makeContext('legacy-reload');
+      await run(legacyReload, 'restorePendingFieldObservationInventory()');
+      assert.equal(shared.get(first.key), stablePending); assert.equal(shared.get('astropilot.fieldObservationLock'), stableLock);
+      shared.clear(); contexts.length = 0; shared.set(first.key, JSON.stringify(legacyPending));
+      shared.set('astropilot.fieldObservationLock', JSON.stringify({...firstLock, version: 1,
+        pending: legacyPending, generation: undefined}));
+      const legacyLock = makeContext('legacy-lock');
+      await run(legacyLock, 'restorePendingFieldObservationInventory()');
+      assert.equal(JSON.parse(shared.get(first.key)).version, 2);
+      assert.equal(JSON.parse(shared.get('astropilot.fieldObservationLock')).version, 2);
+      shared.clear(); contexts.length = 0; shared.set(first.key, JSON.stringify(legacyPending));
+      const legacyNoLocks = makeContext('legacy-no-locks', null);
+      await run(legacyNoLocks, 'restorePendingFieldObservationInventory()');
+      assert.equal(run(legacyNoLocks, 'state.fieldObservationLock.status'), 'migration_requires_web_locks');
+      assert.equal(shared.get(first.key), JSON.stringify(legacyPending));
+
+      // Waiting lock requests are abortable on close/context invalidation and cannot publish later.
+      shared.clear(); contexts.length = 0;
+      let releaseBlocker;
+      const blocker = controlledLocks.request('blocker', {mode: 'exclusive'},
+        () => new Promise(resolve => { releaseBlocker = resolve; }));
+      await Promise.resolve();
+      const waiting = makeContext('waiting');
+      const waitingSubmit = run(waiting, 'submitFieldObservation({preventDefault(){}})');
+      run(waiting, 'invalidateFieldObservationOperation()');
+      releaseBlocker(); await blocker; await waitingSubmit;
+      assert.equal(waiting.sandbox.posts.length, 0);
+      assert.equal([...shared.keys()].filter(key => key.startsWith('astropilot.pendingFieldObservation.')).length, 0);
+      let releaseContextBlocker;
+      const contextBlocker = controlledLocks.request('blocker', {mode: 'exclusive'},
+        () => new Promise(resolve => { releaseContextBlocker = resolve; }));
+      await Promise.resolve();
+      const contextSubmit = run(waiting, 'submitFieldObservation({preventDefault(){}})');
+      run(waiting, `state.acceptedMission = {decision_id: 'changed', mission: {night_date: '2026-09-30'}};
+        syncFieldObservationContext()`);
+      releaseContextBlocker(); await contextBlocker; await contextSubmit;
+      assert.equal(waiting.sandbox.posts.length, 0);
+
+      // bfcache restore re-inventories storage under Web Locks before mutations resume.
+      shared.clear(); contexts.length = 0; shared.set(first.key, JSON.stringify(first.pending));
+      shared.set('astropilot.fieldObservationLock', lockOnlyRaw);
+      const cached = makeContext('cached');
+      await run(cached, 'restorePendingFieldObservationInventory()');
+      shared.delete(first.key); shared.set(second.key, JSON.stringify(second.pending));
+      await run(cached, 'handleFieldObservationPageShow({persisted: true})');
+      assert.equal(run(cached, 'state.fieldObservationLock.status'), 'inconsistent_persistence');
+      assert.equal(run(cached, 'state.fieldObservationInventoryReady'), true);
+
+      shared.clear(); contexts.length = 0; const inventoryTab = makeContext('inventory-final');
+      Object.assign(tab, inventoryTab);
+      shared.set(first.key, JSON.stringify(first.pending)); shared.set(second.key, JSON.stringify(second.pending));
   await run(tab, 'restorePendingFieldObservationInventory()');
   assert.equal(run(tab, 'state.fieldObservationLock.status'), 'multiple_pending');
   assert.equal(run(tab, 'state.fieldObservationLock.entries.length'), 2);
