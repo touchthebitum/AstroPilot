@@ -205,7 +205,8 @@ class OutcomeEvaluationOrchestrationService:
     def _evaluation(
         *,
         comparison: ForecastObservationComparison,
-        artifact_time: datetime,
+        derived_at: datetime,
+        assessed_at: datetime,
     ) -> OutcomeEvaluation:
         evaluation_id = derive_outcome_evaluation_id(
             comparison_id=comparison.comparison_id,
@@ -239,7 +240,7 @@ class OutcomeEvaluationOrchestrationService:
             algorithm_version=(
                 FORECAST_COMPARISON_OUTCOME_EVIDENCE_ALGORITHM_VERSION
             ),
-            derived_at_utc=artifact_time,
+            derived_at_utc=derived_at,
             source_type=(
                 ForecastComparisonOutcomeEvidenceSourceType.SYSTEM_DERIVED
             ),
@@ -252,9 +253,28 @@ class OutcomeEvaluationOrchestrationService:
                 comparison=comparison,
                 evaluation_id=evaluation_id,
                 evidence_id=evidence_id,
-                assessed_at=artifact_time,
+                assessed_at=assessed_at,
             ),
         )
+
+    def _existing_for_observation(
+        self,
+        *,
+        observation_id: str,
+    ) -> OutcomeEvaluation | None:
+        candidates = tuple(
+            candidate
+            for candidate in self.outcome_evaluation_store.list_by_observation(
+                observation_id=observation_id
+            )
+            if candidate.evaluation_algorithm_version
+            == OUTCOME_EVALUATION_ALGORITHM_VERSION
+        )
+        if len(candidates) > 1:
+            raise OutcomeEvaluationOrchestrationError(
+                "outcome_evaluation_conflict"
+            )
+        return candidates[0] if candidates else None
 
     def evaluate(
         self,
@@ -276,11 +296,28 @@ class OutcomeEvaluationOrchestrationService:
                     "decision_forecast_evidence_missing"
                 )
 
-            artifact_time = self._utc_instant(self.clock())
+            existing = self._existing_for_observation(
+                observation_id=observation.observation_id
+            )
+            if existing is None:
+                comparison_time = self._utc_instant(self.clock())
+                derived_at = comparison_time
+                assessed_at = comparison_time
+            else:
+                comparison_time = existing.comparison.computed_at_utc
+                if existing.outcome_evidence is None:
+                    derived_at = comparison_time
+                else:
+                    derived_at = existing.outcome_evidence.derived_at_utc
+                if existing.assessment is None:
+                    assessed_at = comparison_time
+                else:
+                    assessed_at = existing.assessment.assessed_at
+
             comparison = self._comparison(
                 observation=observation,
                 evidence=evidence,
-                computed_at=artifact_time,
+                computed_at=comparison_time,
             )
             evaluation_id = derive_outcome_evaluation_id(
                 comparison_id=comparison.comparison_id,
@@ -288,33 +325,15 @@ class OutcomeEvaluationOrchestrationService:
                     OUTCOME_EVALUATION_ALGORITHM_VERSION
                 ),
             )
-            existing_for_observation = (
-                self.outcome_evaluation_store.list_by_observation(
-                    observation_id=observation.observation_id
-                )
-            )
-            existing = None
-            for candidate in existing_for_observation:
-                if (
-                    candidate.evaluation_algorithm_version
-                    == OUTCOME_EVALUATION_ALGORITHM_VERSION
-                ):
-                    if candidate.evaluation_id != evaluation_id:
-                        raise OutcomeEvaluationOrchestrationError(
-                            "outcome_evaluation_conflict"
-                        )
-                    existing = candidate
-            if existing is not None:
-                artifact_time = existing.comparison.computed_at_utc
-                comparison = self._comparison(
-                    observation=observation,
-                    evidence=evidence,
-                    computed_at=artifact_time,
+            if existing is not None and existing.evaluation_id != evaluation_id:
+                raise OutcomeEvaluationOrchestrationError(
+                    "outcome_evaluation_conflict"
                 )
 
             evaluation = self._evaluation(
                 comparison=comparison,
-                artifact_time=artifact_time,
+                derived_at=derived_at,
+                assessed_at=assessed_at,
             )
             created = self.outcome_evaluation_store.save(
                 evaluation=evaluation
