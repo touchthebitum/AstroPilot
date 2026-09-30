@@ -344,7 +344,11 @@ const OBSERVATION_SURFACE_INPUTS = Object.freeze({
 const OBSERVATION_IDENTITY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const PENDING_FIELD_OBSERVATION_VERSION = 2;
 const FIELD_OBSERVATION_LOCK_KEY = "astropilot.fieldObservationLock";
-const FIELD_OBSERVATION_LOCK_VERSION = 1;
+const FIELD_OBSERVATION_LOCK_VERSION = 2;
+const FIELD_OBSERVATION_PENDING_PREFIX = "astropilot.pendingFieldObservation.";
+const FIELD_OBSERVATION_WEB_LOCK_NAME = "astropilot.fieldObservationLock.acquire";
+let fieldObservationOperationGeneration = 0;
+let activeFieldObservationOperation = null;
 
 function renderObservationLinkage() {
   const element = document.querySelector("#observation-linkage");
@@ -401,7 +405,8 @@ function activeObservationContext() {
 
 function setFieldObservationEditorDisabled(disabled) {
   for (const control of document.querySelector("#field-observation-form").querySelectorAll("input, select, button")) {
-    if (["observation-reconcile", "observation-refresh-context", "observation-abandon-pending"].includes(control.id)) continue;
+    if (!state.observationBusy
+        && ["observation-reconcile", "observation-refresh-context", "observation-abandon-pending"].includes(control.id)) continue;
     control.disabled = disabled;
   }
 }
@@ -440,9 +445,12 @@ function updateFieldObservationSubmitState() {
   const reconcile = document.querySelector("#observation-reconcile");
   const refresh = document.querySelector("#observation-refresh-context");
   const abandon = document.querySelector("#observation-abandon-pending");
-  if (reconcile) reconcile.hidden = !lock || lock.status === "invalid" || lock.status === "unreadable";
+  if (reconcile) reconcile.hidden = !lock || ["invalid", "unreadable", "multiple_pending"].includes(lock.status);
   if (refresh) refresh.hidden = lock?.status !== "invalid";
   if (abandon) abandon.hidden = !lock;
+  if (reconcile) reconcile.disabled = state.observationBusy || reconcile.hidden;
+  if (refresh) refresh.disabled = state.observationBusy || refresh.hidden;
+  if (abandon) abandon.disabled = state.observationBusy || abandon.hidden;
 }
 
 function fieldObservationConflictMessage() {
@@ -804,9 +812,21 @@ function validPendingFieldObservation(value, expectedContext) {
 }
 
 function validFieldObservationLock(value) {
-  if (!exactObservationKeys(value, ["version", "status", "key", "pending", "context"])
+  if (exactObservationKeys(value, ["version", "generation", "status", "entries"])
+      && value.version === FIELD_OBSERVATION_LOCK_VERSION
+      && value.status === "multiple_pending"
+      && validObservationIdentity(value.generation)
+      && Array.isArray(value.entries)
+      && value.entries.length > 1) {
+    return value.entries.every((entry) => exactObservationKeys(entry, ["key", "pending", "context"])
+      && typeof entry.key === "string"
+      && entry.key === fieldObservationContextKey(entry.context)
+      && validPendingFieldObservation(entry.pending, entry.context));
+  }
+  if (!exactObservationKeys(value, ["version", "generation", "status", "key", "pending", "context"])
       || value.version !== FIELD_OBSERVATION_LOCK_VERSION
       || !["pending", "conflict", "invalid"].includes(value.status)
+      || !validObservationIdentity(value.generation)
       || typeof value.key !== "string"
       || !plainObservationRecord(value.context)
       || typeof value.context.site_identity !== "string"
@@ -816,8 +836,17 @@ function validFieldObservationLock(value) {
 }
 
 function storedFieldObservationLockValue(lock) {
+  if (lock.status === "multiple_pending") {
+    return {
+      version: FIELD_OBSERVATION_LOCK_VERSION,
+      generation: lock.generation,
+      status: lock.status,
+      entries: lock.entries,
+    };
+  }
   return {
     version: FIELD_OBSERVATION_LOCK_VERSION,
+    generation: lock.generation,
     status: lock.status,
     key: lock.key,
     pending: lock.pending,
@@ -825,37 +854,88 @@ function storedFieldObservationLockValue(lock) {
   };
 }
 
-function writeFieldObservationLock(lock) {
+function fieldObservationLockGeneration(pending) {
+  return `lock-${pending.payload.observation_id}`;
+}
+
+function sameFieldObservationLock(left, right) {
+  return Boolean(left && right
+    && left.generation === right.generation
+    && (left.key || null) === (right.key || null)
+    && left.pending?.payload?.observation_id === right.pending?.payload?.observation_id);
+}
+
+function adoptFieldObservationLock(lock) {
   state.fieldObservationLock = Object.freeze(lock);
   state.fieldObservationConflict = lock.status === "conflict"
     ? Object.freeze({key: lock.key, pending: lock.pending}) : null;
+}
+
+function parseStoredFieldObservationLock(raw) {
+  const parsed = JSON.parse(raw);
+  if (parsed?.version === 1 && exactObservationKeys(parsed, ["version", "status", "key", "pending", "context"])) {
+    parsed.version = FIELD_OBSERVATION_LOCK_VERSION;
+    parsed.generation = fieldObservationLockGeneration(parsed.pending);
+  }
+  if (!validFieldObservationLock(parsed)) throw new Error("invalid_field_observation_lock");
+  return parsed;
+}
+
+function adoptStoredFieldObservationLockOrBlock(raw) {
   try {
-    localStorage.setItem(FIELD_OBSERVATION_LOCK_KEY, JSON.stringify(storedFieldObservationLockValue(lock)));
+    if (raw === null) throw new Error("missing_field_observation_lock");
+    adoptFieldObservationLock(parseStoredFieldObservationLock(raw));
+  } catch (_error) {
+    adoptFieldObservationLock({status: "unreadable", persistence_missing: true});
+  }
+}
+
+function persistedFieldObservationLock() {
+  try {
+    const raw = localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY);
+    return raw === null ? {available: true, raw: null, lock: null}
+      : {available: true, raw, lock: parseStoredFieldObservationLock(raw)};
+  } catch (_error) {
+    return {available: false, raw: null, lock: null};
+  }
+}
+
+function writeFieldObservationLock(lock, expectedLock = state.fieldObservationLock) {
+  const stored = storedFieldObservationLockValue(lock);
+  const expectedRaw = expectedLock ? JSON.stringify(storedFieldObservationLockValue(expectedLock)) : null;
+  try {
+    const currentRaw = localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY);
+    if (currentRaw !== expectedRaw) {
+      if (currentRaw !== null) adoptStoredFieldObservationLockOrBlock(currentRaw);
+      else if (expectedLock) adoptFieldObservationLock({...expectedLock, persistence_missing: true});
+      return false;
+    }
+    const storedRaw = JSON.stringify(stored);
+    localStorage.setItem(FIELD_OBSERVATION_LOCK_KEY, storedRaw);
+    if (localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY) !== storedRaw) return false;
+    adoptFieldObservationLock(stored);
     return true;
   } catch (_error) {
-    state.fieldObservationLock = Object.freeze({...lock, persistence_missing: true});
+    adoptFieldObservationLock({...lock, persistence_missing: true});
     return false;
   }
 }
 
 function restoreFieldObservationLock() {
-  let raw;
-  try {
-    raw = localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY);
-  } catch (_error) {
-    state.fieldObservationLock = Object.freeze({status: "unreadable", persistence_missing: true});
+  const persisted = persistedFieldObservationLock();
+  if (!persisted.available) {
+    adoptFieldObservationLock({status: "unreadable", persistence_missing: true});
     return false;
   }
-  if (raw === null) return true;
+  if (persisted.raw === null) return true;
   try {
-    const lock = JSON.parse(raw);
-    if (!validFieldObservationLock(lock)) throw new Error("invalid_field_observation_lock");
-    state.fieldObservationLock = Object.freeze(lock);
-    state.fieldObservationConflict = lock.status === "conflict"
-      ? Object.freeze({key: lock.key, pending: lock.pending}) : null;
+    adoptFieldObservationLock(persisted.lock);
+    if (JSON.parse(persisted.raw).version !== FIELD_OBSERVATION_LOCK_VERSION) {
+      localStorage.setItem(FIELD_OBSERVATION_LOCK_KEY, JSON.stringify(storedFieldObservationLockValue(persisted.lock)));
+    }
     return true;
   } catch (_error) {
-    state.fieldObservationLock = Object.freeze({status: "unreadable", persistence_missing: true});
+    adoptFieldObservationLock({status: "unreadable", persistence_missing: true});
     return false;
   }
 }
@@ -863,9 +943,52 @@ function restoreFieldObservationLock() {
 function clearFieldObservationLock(lock = state.fieldObservationLock) {
   if (!lock) return true;
   let removed = true;
-  try { localStorage.removeItem(FIELD_OBSERVATION_LOCK_KEY); } catch (_error) { removed = false; }
-  if (lock.key) removed = removePendingFieldObservation(lock.key) && removed;
-  if (state.fieldObservationLock === lock || state.fieldObservationLock?.key === lock.key) {
+  const expectedRaw = JSON.stringify(storedFieldObservationLockValue(lock));
+  try {
+    const currentRaw = localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY);
+    if (currentRaw !== expectedRaw) {
+      if (currentRaw === null && lock.persistence_missing) {
+        if (lock.key) {
+          const pendingRaw = localStorage.getItem(lock.key);
+          if (pendingRaw === JSON.stringify(lock.pending)) localStorage.removeItem(lock.key);
+          else if (pendingRaw !== null) return false;
+        }
+        if (sameFieldObservationLock(state.fieldObservationLock, lock)) {
+          state.fieldObservationLock = null;
+          state.fieldObservationConflict = null;
+        }
+        return true;
+      }
+      removed = false;
+      if (currentRaw !== null) adoptFieldObservationLock(parseStoredFieldObservationLock(currentRaw));
+      else adoptFieldObservationLock({...lock, persistence_missing: true});
+      return false;
+    }
+    if (lock.status === "multiple_pending") {
+      for (const key of [...new Set(lock.entries.map((entry) => entry.key))]) {
+        const pendingRaw = localStorage.getItem(key);
+        const expectedValues = lock.entries.filter((entry) => entry.key === key)
+          .map((entry) => JSON.stringify(entry.pending));
+        if (expectedValues.includes(pendingRaw)) localStorage.removeItem(key);
+        else if (pendingRaw !== null) return false;
+      }
+    } else if (lock.key) {
+      const expectedPending = JSON.stringify(lock.pending);
+      if (localStorage.getItem(lock.key) === expectedPending) localStorage.removeItem(lock.key);
+      else if (localStorage.getItem(lock.key) !== null) return false;
+    }
+    const confirmedRaw = localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY);
+    if (confirmedRaw !== expectedRaw) {
+      if (confirmedRaw !== null) adoptFieldObservationLock(parseStoredFieldObservationLock(confirmedRaw));
+      else adoptFieldObservationLock({...lock, persistence_missing: true});
+      return false;
+    }
+    localStorage.removeItem(FIELD_OBSERVATION_LOCK_KEY);
+    if (localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY) !== null) return false;
+  } catch (_error) {
+    removed = false;
+  }
+  if (removed && sameFieldObservationLock(state.fieldObservationLock, lock)) {
     state.fieldObservationLock = null;
     state.fieldObservationConflict = null;
   }
@@ -874,6 +997,9 @@ function clearFieldObservationLock(lock = state.fieldObservationLock) {
 
 function fieldObservationLockMessage(lock = state.fieldObservationLock) {
   if (!lock) return "";
+  if (lock.status === "multiple_pending") {
+    return "Plusieurs observations locales non résolues ont été détectées. Aucun contexte ne sera choisi automatiquement : réconciliez-les dans leur contexte d’origine ou abandonnez-les explicitement avant tout nouvel envoi.";
+  }
   if (lock.status === "conflict") return fieldObservationConflictMessage();
   if (lock.status === "invalid") {
     return "Le contexte canonique de l’observation précédente est introuvable. Utilisez « Actualiser le contexte » avant toute nouvelle tentative.";
@@ -928,6 +1054,166 @@ function writePendingFieldObservation(key, value) {
   } catch (_error) {
     return false;
   }
+}
+
+function recoveredFieldObservationContext(pending) {
+  return Object.freeze({
+    decision_id: pending.payload.decision_id,
+    execution_id: pending.payload.execution_id || null,
+    night_date: null,
+    source: "recovered",
+    timezone: pending.timezone,
+    site_identity: siteConfigurationIdentity() || JSON.stringify({recovered_timezone: pending.timezone}),
+    mission_id: null,
+  });
+}
+
+function pendingFieldObservationInventory() {
+  const entries = [];
+  try {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (typeof key !== "string" || !key.startsWith(FIELD_OBSERVATION_PENDING_PREFIX)) continue;
+      const raw = localStorage.getItem(key);
+      const pending = JSON.parse(raw);
+      if (!plainObservationRecord(pending) || !plainObservationRecord(pending.payload)) {
+        throw new Error("invalid_pending_field_observation");
+      }
+      const context = recoveredFieldObservationContext(pending);
+      if (key !== fieldObservationContextKey(context) || !validPendingFieldObservation(pending, context)) {
+        throw new Error("invalid_pending_field_observation");
+      }
+      entries.push(Object.freeze({key, pending, context}));
+    }
+  } catch (_error) {
+    return {available: false, entries: []};
+  }
+  entries.sort((left, right) => left.key.localeCompare(right.key));
+  return {available: true, entries};
+}
+
+function installInventoriedFieldObservationLock(lock) {
+  try {
+    const before = localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY);
+    const raw = JSON.stringify(storedFieldObservationLockValue(lock));
+    localStorage.setItem(FIELD_OBSERVATION_LOCK_KEY, raw);
+    const confirmedRaw = localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY);
+    if (confirmedRaw !== raw) {
+      adoptStoredFieldObservationLockOrBlock(confirmedRaw);
+      return false;
+    }
+    // A synchronous storage section cannot detect every cross-process race. Re-read and
+    // fail closed; Web Locks is used for live acquisitions when the browser supports it.
+    if (before !== null && before === raw) {
+      adoptFieldObservationLock(lock);
+      return true;
+    }
+    adoptFieldObservationLock(lock);
+    return true;
+  } catch (_error) {
+    adoptFieldObservationLock({...lock, persistence_missing: true});
+    return false;
+  }
+}
+
+function acquireFieldObservationLockCas(candidate) {
+  const candidateRaw = JSON.stringify(storedFieldObservationLockValue(candidate));
+  const pendingRaw = JSON.stringify(candidate.pending);
+  try {
+    const currentRaw = localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY);
+    if (currentRaw !== null) {
+      adoptStoredFieldObservationLockOrBlock(currentRaw);
+      return false;
+    }
+    const inventory = pendingFieldObservationInventory();
+    if (!inventory.available) {
+      adoptFieldObservationLock({status: "unreadable", persistence_missing: true});
+      return false;
+    }
+    const unrelated = inventory.entries.filter((entry) => entry.key !== candidate.key
+      || JSON.stringify(entry.pending) !== pendingRaw);
+    if (unrelated.length > 0) {
+      restorePendingFieldObservationInventory();
+      return false;
+    }
+    const existingPending = localStorage.getItem(candidate.key);
+    if (existingPending !== null && existingPending !== pendingRaw) return false;
+    localStorage.setItem(FIELD_OBSERVATION_LOCK_KEY, candidateRaw);
+    let confirmedRaw = localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY);
+    if (confirmedRaw !== candidateRaw) {
+      adoptStoredFieldObservationLockOrBlock(confirmedRaw);
+      return false;
+    }
+    if (existingPending === null) localStorage.setItem(candidate.key, pendingRaw);
+    confirmedRaw = localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY);
+    if (confirmedRaw !== candidateRaw || localStorage.getItem(candidate.key) !== pendingRaw) {
+      adoptStoredFieldObservationLockOrBlock(confirmedRaw);
+      return false;
+    }
+    adoptFieldObservationLock(candidate);
+    return true;
+  } catch (_error) {
+    adoptFieldObservationLock({...candidate, persistence_missing: true});
+    return false;
+  }
+}
+
+async function acquireFieldObservationLock(candidate) {
+  const acquire = () => acquireFieldObservationLockCas(candidate);
+  if (typeof navigator !== "undefined" && navigator.locks?.request) {
+    return navigator.locks.request(FIELD_OBSERVATION_WEB_LOCK_NAME, {mode: "exclusive"}, acquire);
+  }
+  return acquire();
+}
+
+function restorePendingFieldObservationInventory() {
+  const inventory = pendingFieldObservationInventory();
+  if (!inventory.available) {
+    adoptFieldObservationLock({status: "unreadable", persistence_missing: true});
+    return false;
+  }
+  const current = state.fieldObservationLock;
+  const entries = [...inventory.entries];
+  if (current?.pending && !entries.some((entry) => entry.key === current.key
+      && JSON.stringify(entry.pending) === JSON.stringify(current.pending))) {
+    entries.push(Object.freeze({key: current.key, pending: current.pending, context: current.context}));
+  }
+  if (entries.length === 0) return true;
+  if (entries.length === 1) {
+    const entry = entries[0];
+    if (sameFieldObservationLock(current, {
+      generation: fieldObservationLockGeneration(entry.pending), key: entry.key,
+      pending: entry.pending,
+    })) return true;
+    return installInventoriedFieldObservationLock({
+      version: FIELD_OBSERVATION_LOCK_VERSION,
+      generation: fieldObservationLockGeneration(entry.pending),
+      status: "pending",
+      key: entry.key,
+      pending: entry.pending,
+      context: entry.context,
+    });
+  }
+  const uniqueEntries = entries.filter((entry, index) => entries.findIndex((candidate) =>
+    candidate.key === entry.key && JSON.stringify(candidate.pending) === JSON.stringify(entry.pending)) === index);
+  if (uniqueEntries.length === 1) {
+    const entry = uniqueEntries[0];
+    return installInventoriedFieldObservationLock({
+      version: FIELD_OBSERVATION_LOCK_VERSION,
+      generation: fieldObservationLockGeneration(entry.pending),
+      status: "pending",
+      key: entry.key,
+      pending: entry.pending,
+      context: entry.context,
+    });
+  }
+  const generation = `multiple-${uniqueEntries.map((entry) => entry.pending.payload.observation_id).sort().join("-")}`;
+  return installInventoriedFieldObservationLock({
+    version: FIELD_OBSERVATION_LOCK_VERSION,
+    generation: generation.slice(0, 128),
+    status: "multiple_pending",
+    entries: uniqueEntries,
+  });
 }
 
 function invalidatePendingFieldObservation(key) {
@@ -1009,8 +1295,9 @@ function restorePendingFieldObservation() {
   if (!state.fieldObservationLock) {
     writeFieldObservationLock({
       version: FIELD_OBSERVATION_LOCK_VERSION,
+      generation: fieldObservationLockGeneration(pending),
       status: "pending", key, pending, context: Object.freeze({...context}),
-    });
+    }, null);
   }
   document.querySelector("#observation-observed-at").value = pending.observed_at_local;
   document.querySelector("#observation-clouds").value = payload.conditions?.cloud_state || "";
@@ -1037,11 +1324,57 @@ function restorePendingFieldObservation() {
   { error: state.fieldObservationLock?.status === "conflict" });
 }
 
-async function storedFieldObservation(observationId) {
+function beginFieldObservationOperation(kind, lock = state.fieldObservationLock) {
+  const operation = Object.freeze({
+    token: ++fieldObservationOperationGeneration,
+    kind,
+    lockGeneration: lock?.generation || null,
+    lockKey: lock?.key || null,
+    observationId: lock?.pending?.payload?.observation_id || null,
+  });
+  activeFieldObservationOperation = operation;
+  state.observationBusy = true;
+  updateFieldObservationSubmitState();
+  return operation;
+}
+
+function fieldObservationOperationCurrent(operation) {
+  return activeFieldObservationOperation?.token === operation?.token
+    && state.observationBusy
+    && state.fieldObservationLock?.generation === operation.lockGeneration
+    && state.fieldObservationLock?.key === operation.lockKey
+    && state.fieldObservationLock?.pending?.payload?.observation_id === operation.observationId;
+}
+
+function invalidateFieldObservationOperation() {
+  fieldObservationOperationGeneration += 1;
+  activeFieldObservationOperation = null;
+  state.observationBusy = false;
+}
+
+function finishFieldObservationOperation(operation) {
+  if (activeFieldObservationOperation?.token !== operation?.token) return false;
+  activeFieldObservationOperation = null;
+  state.observationBusy = false;
+  updateFieldObservationSubmitState();
+  return true;
+}
+
+function staleFieldObservationOperationError() {
+  const error = new Error("stale_field_observation_operation");
+  error.staleFieldObservationOperation = true;
+  return error;
+}
+
+async function storedFieldObservation(observationId, operation = null) {
   const response = await fetch(`/v1/field-observations/${encodeURIComponent(observationId)}`);
+  if (operation && !fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
   if (response.status === 404) return null;
   if (!response.ok) throw await sessionHttpError(response);
-  return response.json();
+  if (operation && !fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
+  const stored = await response.json();
+  if (operation && !fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
+  return stored;
 }
 
 function storedObservationMatchesPayload(stored, payload) {
@@ -1065,13 +1398,16 @@ function observationConflictError() {
   return error;
 }
 
-function finishFieldObservationSubmission(key, submittedSnapshot, message) {
+function finishFieldObservationSubmission(key, submittedSnapshot, message, operation = null) {
+  if (operation && !fieldObservationOperationCurrent(operation)) return false;
   const lock = state.fieldObservationLock?.key === key ? state.fieldObservationLock : null;
+  if (!lock || (operation && lock.generation !== operation.lockGeneration)) return false;
   const removed = lock ? clearFieldObservationLock(lock) : removePendingFieldObservation(key);
   if (fieldObservationSnapshot() === submittedSnapshot) resetFieldObservationForm();
   else message += " Vos modifications en cours sont conservées.";
   if (!removed) message += " Le brouillon local n’a pas pu être nettoyé.";
   observationMessage(message);
+  return removed;
 }
 
 async function submitFieldObservation(event) {
@@ -1135,8 +1471,9 @@ async function submitFieldObservation(event) {
     if (!state.fieldObservationLock) {
       writeFieldObservationLock({
         version: FIELD_OBSERVATION_LOCK_VERSION,
+        generation: fieldObservationLockGeneration(pending),
         status: "pending", key, pending, context: Object.freeze({...context}),
-      });
+      }, null);
     }
     updateFieldObservationSubmitState();
     observationMessage(
@@ -1167,59 +1504,66 @@ async function submitFieldObservation(event) {
     observed_at_local: draft.observed_at_local,
     timezone: draft.timezone,
   };
-  if (!reusingPending) {
-    if (!writePendingFieldObservation(key, envelope)
-        || !writeFieldObservationLock({
-          version: FIELD_OBSERVATION_LOCK_VERSION,
-          status: "pending", key, pending: envelope, context: Object.freeze({...context}),
-        })) {
-      observationMessage("Le stockage local est indisponible. Envoi bloqué pour garantir qu’un retry ne crée pas de doublon.", { error: true });
-      updateFieldObservationSubmitState();
-      return;
-    }
-  } else if (!state.fieldObservationLock) {
-    if (!writeFieldObservationLock({
+  if (!state.fieldObservationLock) {
+    const candidate = {
       version: FIELD_OBSERVATION_LOCK_VERSION,
+      generation: fieldObservationLockGeneration(envelope),
       status: "pending", key, pending: envelope, context: Object.freeze({...context}),
-    })) {
+    };
+    const acquisitionOperation = beginFieldObservationOperation("acquire", candidate);
+    let acquired = false;
+    try {
+      acquired = await acquireFieldObservationLock(candidate);
+    } catch (_error) {
+      acquired = false;
+    }
+    if (activeFieldObservationOperation?.token !== acquisitionOperation.token
+        || !acquired || !sameFieldObservationLock(state.fieldObservationLock, candidate)) {
+      finishFieldObservationOperation(acquisitionOperation);
       observationMessage("Le verrou local ne peut pas être garanti. Envoi bloqué jusqu’à une action explicite.", { error: true });
       updateFieldObservationSubmitState();
       return;
     }
+    finishFieldObservationOperation(acquisitionOperation);
   }
-  state.observationBusy = true;
-  updateFieldObservationSubmitState();
+  const operation = beginFieldObservationOperation("submit", state.fieldObservationLock);
   observationMessage("Enregistrement en cours…");
   try {
     if (reusingPending) {
-      const stored = await storedFieldObservation(payload.observation_id);
+      const stored = await storedFieldObservation(payload.observation_id, operation);
       if (stored) {
         if (!storedObservationMatchesPayload(stored, payload)) throw observationConflictError();
-        finishFieldObservationSubmission(key, submittedSnapshot, "Observation déjà enregistrée — aucune duplication.");
+        finishFieldObservationSubmission(key, submittedSnapshot, "Observation déjà enregistrée — aucune duplication.", operation);
         return;
       }
     }
     const response = await fetch("/v1/field-observations", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     });
+    if (!fieldObservationOperationCurrent(operation)) return;
     if (!response.ok) {
-      throw await sessionHttpError(response);
+      const responseError = await sessionHttpError(response);
+      if (!fieldObservationOperationCurrent(operation)) return;
+      throw responseError;
     }
     finishFieldObservationSubmission(key, submittedSnapshot, response.status === 201
-      ? "Observation enregistrée." : "Observation déjà enregistrée — aucune duplication.");
+      ? "Observation enregistrée." : "Observation déjà enregistrée — aucune duplication.", operation);
   } catch (error) {
+    if (error?.staleFieldObservationOperation || !fieldObservationOperationCurrent(operation)) return;
     if (!error?.status) {
       try {
-        const stored = await storedFieldObservation(payload.observation_id);
+        const stored = await storedFieldObservation(payload.observation_id, operation);
         if (stored) {
           if (!storedObservationMatchesPayload(stored, payload)) throw observationConflictError();
-          finishFieldObservationSubmission(key, submittedSnapshot, "Observation enregistrée. La confirmation réseau avait été interrompue.");
+          finishFieldObservationSubmission(key, submittedSnapshot, "Observation enregistrée. La confirmation réseau avait été interrompue.", operation);
           return;
         }
       } catch (lookupError) {
+        if (lookupError?.staleFieldObservationOperation || !fieldObservationOperationCurrent(operation)) return;
         if (lookupError?.status === 409) error = lookupError;
       }
     }
+    if (!fieldObservationOperationCurrent(operation)) return;
     if (error?.status === 404) {
       state.invalidFieldObservationContextKey = key;
       state.fieldObservationContextInvalid = true;
@@ -1251,19 +1595,17 @@ async function submitFieldObservation(event) {
     };
     observationMessage(messages[error?.status] || "Confirmation impossible. Réessayez : la même observation sera reprise sans doublon.", { error: true });
   } finally {
-    state.observationBusy = false;
-    updateFieldObservationSubmitState();
+    finishFieldObservationOperation(operation);
   }
 }
 
 async function reconcileFieldObservationLock() {
   const lock = state.fieldObservationLock;
   if (!lock?.pending?.payload || state.observationBusy) return;
-  state.observationBusy = true;
-  updateFieldObservationSubmitState();
+  const operation = beginFieldObservationOperation("reconcile", lock);
   observationMessage("Réconciliation de l’UUID d’origine en cours…");
   try {
-    const stored = await storedFieldObservation(lock.pending.payload.observation_id);
+    const stored = await storedFieldObservation(lock.pending.payload.observation_id, operation);
     if (!stored) {
       observationMessage(
         "L’UUID d’origine n’est pas encore présent côté serveur. Le verrou reste actif ; vous pouvez réessayer la réconciliation ou abandonner explicitement.",
@@ -1272,6 +1614,7 @@ async function reconcileFieldObservationLock() {
       return;
     }
     if (!storedObservationMatchesPayload(stored, lock.pending.payload)) {
+      if (!fieldObservationOperationCurrent(operation)) return;
       writeFieldObservationLock({...storedFieldObservationLockValue(lock), status: "conflict"});
       observationMessage("L’UUID d’origine existe avec un contenu différent. Le conflit reste bloqué.", { error: true });
       return;
@@ -1279,46 +1622,52 @@ async function reconcileFieldObservationLock() {
     finishFieldObservationSubmission(
       lock.key, lock.pending.snapshot,
       "Observation d’origine retrouvée et réconciliée — aucun doublon créé.",
+      operation,
     );
-  } catch (_error) {
+  } catch (error) {
+    if (error?.staleFieldObservationOperation || !fieldObservationOperationCurrent(operation)) return;
     observationMessage("La réconciliation canonique a échoué. Le verrou et l’UUID d’origine restent conservés.", { error: true });
   } finally {
-    state.observationBusy = false;
-    updateFieldObservationSubmitState();
+    finishFieldObservationOperation(operation);
   }
 }
 
-async function canonicalFieldObservationContextAvailable(context) {
+async function canonicalFieldObservationContextAvailable(context, operation = null) {
   if (context.execution_id) {
     const response = await fetch(`/v1/executions/${encodeURIComponent(context.execution_id)}/session`);
+    if (operation && !fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
     if (!response.ok) return false;
     const canonical = await response.json();
+    if (operation && !fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
     return canonical?.execution?.execution_id === context.execution_id
       && canonical?.mission?.decision_id === context.decision_id;
   }
   if (context.source === "mission") {
     const response = await fetch("/v1/accepted-mission/current");
+    if (operation && !fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
     if (!response.ok) return false;
     const canonical = await response.json();
+    if (operation && !fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
     return canonical?.status === "accepted"
       && canonical?.decision_id === context.decision_id
       && (!context.mission_id || canonical?.mission_id === context.mission_id);
   }
   if (!state.availability) return false;
   await loadTonight(state.availability);
+  if (operation && !fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
   return sameFieldObservationContext(context, observationContext("decision"));
 }
 
 async function refreshInvalidFieldObservationContext() {
   const lock = state.fieldObservationLock;
   if (lock?.status !== "invalid" || state.observationBusy) return;
-  state.observationBusy = true;
-  updateFieldObservationSubmitState();
+  const operation = beginFieldObservationOperation("refresh", lock);
   observationMessage("Actualisation du contexte canonique en cours…");
   try {
-    const stored = await storedFieldObservation(lock.pending.payload.observation_id);
+    const stored = await storedFieldObservation(lock.pending.payload.observation_id, operation);
     if (stored) {
       if (!storedObservationMatchesPayload(stored, lock.pending.payload)) {
+        if (!fieldObservationOperationCurrent(operation)) return;
         writeFieldObservationLock({...storedFieldObservationLockValue(lock), status: "conflict"});
         observationMessage("L’UUID d’origine existe avec un contenu divergent. Le conflit reste bloqué.", { error: true });
         return;
@@ -1326,13 +1675,16 @@ async function refreshInvalidFieldObservationContext() {
       finishFieldObservationSubmission(
         lock.key, lock.pending.snapshot,
         "Observation d’origine retrouvée pendant l’actualisation — aucun doublon créé.",
+        operation,
       );
       return;
     }
-    if (!await canonicalFieldObservationContextAvailable(lock.context)) {
+    if (!await canonicalFieldObservationContextAvailable(lock.context, operation)) {
+      if (!fieldObservationOperationCurrent(operation)) return;
       observationMessage("La décision ou la session d’origine reste absente. Le contexte demeure bloqué.", { error: true });
       return;
     }
+    if (!fieldObservationOperationCurrent(operation)) return;
     state.invalidFieldObservationContextKey = null;
     state.fieldObservationContextInvalid = !sameFieldObservationContext(
       state.fieldObservationDraftContext, activeObservationContext(),
@@ -1341,15 +1693,16 @@ async function refreshInvalidFieldObservationContext() {
     observationMessage(
       "Le contexte canonique est de nouveau disponible. La prochaine tentative réutilisera strictement l’UUID et le contenu d’origine.",
     );
-  } catch (_error) {
+  } catch (error) {
+    if (error?.staleFieldObservationOperation || !fieldObservationOperationCurrent(operation)) return;
     observationMessage("L’actualisation canonique a échoué. Le contexte reste bloqué.", { error: true });
   } finally {
-    state.observationBusy = false;
-    updateFieldObservationSubmitState();
+    finishFieldObservationOperation(operation);
   }
 }
 
 function abandonFieldObservationLock() {
+  if (state.observationBusy) return;
   const lock = state.fieldObservationLock;
   if (!lock) return;
   if (typeof window !== "undefined" && typeof window.confirm === "function"
@@ -1369,12 +1722,44 @@ function abandonFieldObservationLock() {
 
 function handleFieldObservationStorageEvent(event) {
   const lock = state.fieldObservationLock;
-  if (!lock || ![FIELD_OBSERVATION_LOCK_KEY, lock.key, null].includes(event.key)) return;
-  if (event.key === FIELD_OBSERVATION_LOCK_KEY && event.newValue) {
-    const expected = JSON.stringify(storedFieldObservationLockValue(lock));
-    if (event.newValue === expected) return;
+  if (event.key === FIELD_OBSERVATION_LOCK_KEY) {
+    if (event.newValue) {
+      try {
+        const incoming = parseStoredFieldObservationLock(event.newValue);
+        if (sameFieldObservationLock(lock, incoming)
+            && JSON.stringify(storedFieldObservationLockValue(lock)) === event.newValue) return;
+        if (state.observationBusy) invalidateFieldObservationOperation();
+        adoptFieldObservationLock(incoming);
+      } catch (_error) {
+        if (state.observationBusy) invalidateFieldObservationOperation();
+        adoptFieldObservationLock({status: "unreadable", persistence_missing: true});
+      }
+    } else if (lock) {
+      if (state.observationBusy) invalidateFieldObservationOperation();
+      adoptFieldObservationLock({...lock, persistence_missing: true});
+    } else {
+      return;
+    }
+  } else {
+    if (!lock && typeof event.key === "string"
+        && event.key.startsWith(FIELD_OBSERVATION_PENDING_PREFIX)) {
+      restorePendingFieldObservationInventory();
+      updateFieldObservationSubmitState();
+      if (document.querySelector("#field-observation-dialog").open && state.fieldObservationLock) {
+        observationMessage(fieldObservationLockMessage(state.fieldObservationLock), { error: true });
+      }
+      return;
+    }
+    const watchedKeys = lock?.status === "multiple_pending"
+      ? lock.entries.map((entry) => entry.key) : [lock?.key];
+    if (!lock || (event.key !== null && !watchedKeys.includes(event.key))) return;
+    const watchedEntry = lock.status === "multiple_pending"
+      ? lock.entries.find((entry) => entry.key === event.key) : lock;
+    const expectedPending = watchedEntry?.pending ? JSON.stringify(watchedEntry.pending) : null;
+    if (event.newValue === expectedPending) return;
+    if (state.observationBusy) invalidateFieldObservationOperation();
+    adoptFieldObservationLock({...lock, persistence_missing: true});
   }
-  state.fieldObservationLock = Object.freeze({...lock, persistence_missing: true});
   updateFieldObservationSubmitState();
   if (document.querySelector("#field-observation-dialog").open) {
     observationMessage(fieldObservationLockMessage(state.fieldObservationLock), { error: true });
@@ -3733,5 +4118,6 @@ ui.mission.addEventListener("click", (event) => {
   if (event.target === ui.mission) ui.mission.close();
 });
 restoreFieldObservationLock();
+restorePendingFieldObservationInventory();
 if (restorePendingAcceptanceAttempt()) showUnresolvedAcceptance();
 else loadConfiguration();

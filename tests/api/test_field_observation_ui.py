@@ -242,12 +242,21 @@ const ui = {observation: element('#field-observation-dialog')};
 const storage = new Map();
 const storageFailures = {get: false, set: false, remove: false};
 const localStorage = {
+  get length() { return storage.size; },
+  key(index) { return [...storage.keys()][index] ?? null; },
   getItem(key) { if (storageFailures.get) throw new Error('get denied'); return storage.has(key) ? storage.get(key) : null; },
   setItem(key, value) { if (storageFailures.set) throw new Error('quota exceeded'); storage.set(key, value); },
   removeItem(key) { if (storageFailures.remove) throw new Error('remove denied'); storage.delete(key); },
 };
 let uuid = 0;
 const crypto = {randomUUID: () => `observation-${++uuid}`};
+let webLockRequests = 0;
+const navigator = {locks: {request(name, options, callback) {
+  assert.equal(name, FIELD_OBSERVATION_WEB_LOCK_NAME);
+  assert.equal(options.mode, 'exclusive');
+  webLockRequests += 1;
+  return callback();
+}}};
 const state = {configuration: {site: {name: 'Site A', latitude: 47.1, longitude: 6.8, bortle: 4, timezone: 'Europe/Zurich'}},
   currentDecision: {decision_id: 'decision-1', night_date: '2026-09-29'},
   acceptedMission: {decision_id: 'decision-1', mission: {night_date: '2026-09-29'}},
@@ -275,6 +284,7 @@ function storedProjection(payload) {
 }
 function clearHarness() {
   storage.clear(); state.observationBusy = false; uuid = 0;
+  activeFieldObservationOperation = null; fieldObservationOperationGeneration = 0;
   storageFailures.get = false; storageFailures.set = false; storageFailures.remove = false;
   state.sessions = []; state.activeSessionId = null;
   state.fieldObservationSelectedExecutionId = null;
@@ -803,20 +813,128 @@ async function check() {
   assert.equal(state.fieldObservationLock.pending.snapshot, originalUncertain.snapshot);
   assert.match(element('#observation-status').textContent, /modifications sont conservées séparément/);
 
+  // Every lock transition is disabled and defensively ignored while a POST is in flight.
+  clearHarness(); setQuick({cloud: 'few'});
+  fetch = (_url, options) => {
+    assert.ok(options);
+    assert.equal(state.observationBusy, true);
+    assert.equal(element('#observation-reconcile').disabled, true, 'reconcile busy');
+    assert.equal(element('#observation-refresh-context').disabled, true, 'refresh busy');
+    assert.equal(element('#observation-abandon-pending').disabled, true, 'abandon busy');
+    const busyLock = state.fieldObservationLock;
+    abandonFieldObservationLock();
+    assert.equal(state.fieldObservationLock.generation, busyLock.generation);
+    return response(201, {created: true});
+  };
+  await submitFieldObservation(event);
+  assert.equal(state.fieldObservationLock, null);
+  assert.ok(webLockRequests > 0);
+
+  // A stale reconciliation response cannot mutate a newer lock generation.
+  clearHarness(); setQuick({cloud: 'few'});
+  fetch = (_url, options) => options ? Promise.reject(new TypeError('offline')) : response(404, {});
+  await submitFieldObservation(event);
+  const oldLock = clone(state.fieldObservationLock);
+  const replacementPending = clone(oldLock.pending);
+  replacementPending.payload.observation_id = 'observation-replacement';
+  replacementPending.snapshot = snapshotFromObservationPayload(
+    replacementPending.payload, replacementPending.observed_at_local, replacementPending.timezone,
+  );
+  const replacementLock = {...oldLock, generation: fieldObservationLockGeneration(replacementPending),
+    pending: replacementPending};
+  fetch = () => {
+    storage.set(oldLock.key, JSON.stringify(replacementPending));
+    storage.set(FIELD_OBSERVATION_LOCK_KEY, JSON.stringify(storedFieldObservationLockValue(replacementLock)));
+    handleFieldObservationStorageEvent({key: FIELD_OBSERVATION_LOCK_KEY,
+      newValue: JSON.stringify(storedFieldObservationLockValue(replacementLock))});
+    return response(200, storedProjection(oldLock.pending.payload));
+  };
+  await reconcileFieldObservationLock();
+  assert.equal(state.fieldObservationLock.generation, replacementLock.generation);
+  assert.equal(storage.has(FIELD_OBSERVATION_LOCK_KEY), true, 'replacement persisted');
+
+  // Two simulated tabs share storage: B adopts A, cannot overwrite it, and A cannot delete B's successor.
+  clearHarness(); setQuick({cloud: 'few'});
+  const tabAPending = {
+    version: PENDING_FIELD_OBSERVATION_VERSION,
+    payload: buildFieldObservationPayload(), snapshot: fieldObservationSnapshot(),
+    observed_at_local: '2026-09-29T22:14', timezone: 'Europe/Zurich',
+  };
+  const tabAKey = pendingObservationKey('decision-1', null);
+  const tabALock = {version: FIELD_OBSERVATION_LOCK_VERSION,
+    generation: fieldObservationLockGeneration(tabAPending), status: 'pending', key: tabAKey,
+    pending: tabAPending, context: clone(state.fieldObservationDraftContext)};
+  assert.equal(acquireFieldObservationLockCas(tabALock), true, 'tab A acquisition');
+  const tabAState = state.fieldObservationLock;
+  state.fieldObservationLock = null;
+  handleFieldObservationStorageEvent({key: FIELD_OBSERVATION_LOCK_KEY,
+    newValue: JSON.stringify(storedFieldObservationLockValue(tabALock))});
+  assert.equal(state.fieldObservationLock.generation, tabALock.generation);
+  const tabBPending = clone(tabAPending);
+  tabBPending.payload.observation_id = 'observation-tab-b';
+  tabBPending.snapshot = snapshotFromObservationPayload(
+    tabBPending.payload, tabBPending.observed_at_local, tabBPending.timezone,
+  );
+  const tabBLock = {...tabALock, generation: fieldObservationLockGeneration(tabBPending), pending: tabBPending};
+  assert.equal(acquireFieldObservationLockCas(tabBLock), false);
+  storage.set(tabAKey, JSON.stringify(tabBPending));
+  storage.set(FIELD_OBSERVATION_LOCK_KEY, JSON.stringify(storedFieldObservationLockValue(tabBLock)));
+  state.fieldObservationLock = tabAState;
+  assert.equal(clearFieldObservationLock(tabAState), false);
+  assert.equal(state.fieldObservationLock.generation, tabBLock.generation);
+  assert.equal(storage.has(FIELD_OBSERVATION_LOCK_KEY), true, 'tab B lock preserved');
+
+  // Startup inventory reconstructs one orphan and blocks explicitly instead of choosing among several.
+  clearHarness();
+  storage.set(tabAKey, JSON.stringify(tabAPending));
+  assert.equal(restorePendingFieldObservationInventory(), true, 'single inventory');
+  assert.equal(state.fieldObservationLock.generation, tabALock.generation);
+  storage.delete(FIELD_OBSERVATION_LOCK_KEY);
+  state.fieldObservationLock = null;
+  const blockedCandidatePending = clone(tabAPending);
+  blockedCandidatePending.payload.decision_id = 'decision-2';
+  blockedCandidatePending.payload.observation_id = 'observation-blocked-candidate';
+  blockedCandidatePending.snapshot = snapshotFromObservationPayload(
+    blockedCandidatePending.payload, blockedCandidatePending.observed_at_local, blockedCandidatePending.timezone,
+  );
+  const blockedCandidateContext = {...clone(state.fieldObservationDraftContext), decision_id: 'decision-2'};
+  const blockedCandidateLock = {version: FIELD_OBSERVATION_LOCK_VERSION,
+    generation: fieldObservationLockGeneration(blockedCandidatePending), status: 'pending',
+    key: pendingObservationKey('decision-2', null), pending: blockedCandidatePending,
+    context: blockedCandidateContext};
+  assert.equal(acquireFieldObservationLockCas(blockedCandidateLock), false);
+  assert.equal(state.fieldObservationLock.generation, tabALock.generation);
+  storage.delete(FIELD_OBSERVATION_LOCK_KEY);
+  state.fieldObservationLock = null;
+  const secondPending = clone(tabAPending);
+  secondPending.payload.decision_id = 'decision-2';
+  secondPending.payload.observation_id = 'observation-second';
+  secondPending.snapshot = snapshotFromObservationPayload(
+    secondPending.payload, secondPending.observed_at_local, secondPending.timezone,
+  );
+  storage.set(pendingObservationKey('decision-2', null), JSON.stringify(secondPending));
+  assert.equal(restorePendingFieldObservationInventory(), true, 'multiple inventory');
+  assert.equal(state.fieldObservationLock.status, 'multiple_pending');
+  assert.equal(state.fieldObservationLock.entries.length, 2);
+  assert.match(fieldObservationLockMessage(), /Plusieurs observations locales/);
+
   // An external localStorage.clear() cannot silently remove the in-memory reconciliation lock.
+  state.fieldObservationLock = replacementLock;
+  storage.set(replacementLock.key, JSON.stringify(replacementLock.pending));
+  storage.set(FIELD_OBSERVATION_LOCK_KEY, JSON.stringify(storedFieldObservationLockValue(replacementLock)));
+  const originalUncertainAfterRaces = clone(replacementLock.pending);
   storage.clear();
   handleFieldObservationStorageEvent({key: null, newValue: null});
   assert.equal(state.fieldObservationLock.persistence_missing, true);
   await submitFieldObservation(event);
   assert.equal(changedPosts.length, 1);
-  assert.equal(uuid, 1);
   assert.match(element('#observation-status').textContent, /a disparu ou est illisible/);
 
   // The original in-memory envelope remains reconcilable even after external storage deletion.
   fetch = (url, options) => {
     assert.equal(options, undefined);
-    assert.match(url, new RegExp(originalUncertain.payload.observation_id));
-    return response(200, storedProjection(originalUncertain.payload));
+    assert.match(url, new RegExp(originalUncertainAfterRaces.payload.observation_id));
+    return response(200, storedProjection(originalUncertainAfterRaces.payload));
   };
   await reconcileFieldObservationLock();
   assert.equal(state.fieldObservationLock, null);
