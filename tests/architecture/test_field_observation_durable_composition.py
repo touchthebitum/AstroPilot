@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from astropilot.field_observation_store import FileFieldObservationStore
+from astropilot.outcome_evaluation_store import FileOutcomeEvaluationStore
 from decision.services.durable_tonight_application_service import (
     DurableTonightApplicationService,
 )
@@ -57,4 +58,9 @@ def test_production_composition_uses_canonical_user_data_directory(
     assert service.field_observation_store._directory == (
         Path(tmp_path) / "field_observations"
     )
+    assert type(service.outcome_evaluation_store) is FileOutcomeEvaluationStore
+    assert service.outcome_evaluation_store._directory == (
+        Path(tmp_path) / "outcome_evaluations"
+    )
     assert not (tmp_path / "field_observations").exists()
+    assert not (tmp_path / "outcome_evaluations").exists()

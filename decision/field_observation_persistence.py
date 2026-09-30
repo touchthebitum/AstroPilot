@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from contextlib import AbstractContextManager
 from datetime import datetime
 from enum import Enum
 from typing import Protocol, TypeVar
@@ -99,6 +100,12 @@ class FieldObservationStore(Protocol):
     def list_by_decision(self, *, decision_id: str) -> list[FieldObservation]: ...
 
     def list_by_execution(self, *, execution_id: str) -> list[FieldObservation]: ...
+
+    def active_observation_lease(
+        self,
+        *,
+        observation_id: str,
+    ) -> AbstractContextManager[FieldObservation]: ...
 
 
 def _enum_value(value: Enum | None) -> str | None:

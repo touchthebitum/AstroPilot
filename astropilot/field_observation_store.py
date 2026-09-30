@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from astropilot.file_lock import exclusive_file_lock
@@ -71,6 +73,101 @@ class FileFieldObservationStore:
         ]
 
     @staticmethod
+    def _lineage_by_id(
+        observations: list[FieldObservation],
+    ) -> dict[str, FieldObservation]:
+        return {
+            observation.observation_id: observation
+            for observation in observations
+        }
+
+    @staticmethod
+    def _children_by_parent(
+        observations: list[FieldObservation],
+    ) -> dict[str, list[FieldObservation]]:
+        children: dict[str, list[FieldObservation]] = {}
+        for observation in observations:
+            parent_id = observation.supersedes_observation_id
+            if parent_id is not None:
+                children.setdefault(parent_id, []).append(observation)
+        return children
+
+    def _validate_active_lineage(
+        self,
+        *,
+        observation: FieldObservation,
+        observations: list[FieldObservation],
+    ) -> None:
+        by_id = self._lineage_by_id(observations)
+        children = self._children_by_parent(observations)
+
+        visited: set[str] = set()
+        current = observation
+        while True:
+            if current.observation_id in visited:
+                raise FieldObservationPersistenceError(
+                    "field_observation_supersession_corrupt"
+                )
+            visited.add(current.observation_id)
+            direct_children = children.get(current.observation_id, [])
+            if len(direct_children) > 1:
+                raise FieldObservationPersistenceError(
+                    "field_observation_supersession_ambiguous"
+                )
+            if direct_children:
+                child = direct_children[0]
+                if child.decision_id != current.decision_id:
+                    raise FieldObservationPersistenceError(
+                        "field_observation_supersession_corrupt"
+                    )
+                current = child
+                continue
+            break
+
+        current = observation
+        while current.supersedes_observation_id is not None:
+            parent = by_id.get(current.supersedes_observation_id)
+            if parent is None or parent.decision_id != current.decision_id:
+                raise FieldObservationPersistenceError(
+                    "field_observation_supersession_corrupt"
+                )
+            if parent.observation_id in visited:
+                raise FieldObservationPersistenceError(
+                    "field_observation_supersession_corrupt"
+                )
+            visited.add(parent.observation_id)
+            if len(children.get(parent.observation_id, [])) > 1:
+                raise FieldObservationPersistenceError(
+                    "field_observation_supersession_ambiguous"
+                )
+            current = parent
+
+        if children.get(observation.observation_id):
+            raise FieldObservationPersistenceError(
+                "field_observation_superseded"
+            )
+
+    @contextmanager
+    def active_observation_lease(
+        self,
+        *,
+        observation_id: str,
+    ) -> Iterator[FieldObservation]:
+        path = self._path(observation_id)
+        with self._locked():
+            if not path.exists():
+                raise FieldObservationPersistenceError(
+                    "field_observation_missing"
+                )
+            observation = self._load_path(path)
+            observations = self._load_all()
+            self._validate_active_lineage(
+                observation=observation,
+                observations=observations,
+            )
+            yield observation
+
+    @staticmethod
     def _sorted(
         observations: list[FieldObservation],
     ) -> list[FieldObservation]:
@@ -131,7 +228,6 @@ class FileFieldObservationStore:
             raise FieldObservationPersistenceError(
                 "superseded_observation_decision_mismatch"
             )
-
         visited = {observation.observation_id}
         current = superseded
         while current.supersedes_observation_id is not None:
@@ -146,6 +242,13 @@ class FileFieldObservationStore:
                     "superseded_observation_missing"
                 )
             current = self._load_path(ancestor_path)
+        if any(
+            existing.supersedes_observation_id == superseded_id
+            for existing in self._load_all()
+        ):
+            raise FieldObservationPersistenceError(
+                "observation_already_superseded"
+            )
 
     def save(self, *, observation: FieldObservation) -> bool:
         if type(observation) is not FieldObservation:
