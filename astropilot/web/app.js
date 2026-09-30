@@ -1005,6 +1005,128 @@ function webLocksAvailable() {
   return typeof navigator !== "undefined" && typeof navigator.locks?.request === "function";
 }
 
+// Separate origin storage: localStorage.clear() cannot erase this recovery journal.
+// Every read/write and publication is serialized by the same mandatory Web Lock.
+const FIELD_OBSERVATION_RECOVERY_DB = "fieldObservationRecovery";
+let fieldObservationRecoveryJournal = null;
+let fieldObservationRecoveryResolved = new Set();
+
+function recoveryFieldObservationArtifacts() {
+  const artifacts = fieldObservationArtifacts(state.fieldObservationLock);
+  return [...artifacts.entries, ...artifacts.corruptions];
+}
+
+function validFieldObservationRecoveryJournal(value) {
+  return exactObservationKeys(value, ["version", "entries", "resolved"])
+    && value.version === 1 && Array.isArray(value.entries) && Array.isArray(value.resolved)
+    && value.resolved.every(id => typeof id === "string")
+    && new Set(value.entries.map(item => item?.entry_id)).size === value.entries.length
+    && value.entries.every(item => {
+      if (!plainObservationRecord(item) || typeof item.entry_id !== "string"
+          || item.entry_id !== fieldObservationEntryId(item)
+          || !["pending_storage", "global_lock"].includes(item.origin)
+          || typeof item.key !== "string" || typeof item.created_at !== "string"
+          || typeof item.updated_at !== "string"
+          || !Number.isFinite(Date.parse(item.created_at)) || !Number.isFinite(Date.parse(item.updated_at))) return false;
+      if (item.pending) return item.key === fieldObservationContextKey(item.context)
+        && validPendingFieldObservation(item.pending, item.context)
+        && typeof item.generation === "string";
+      return typeof item.raw === "string" && typeof item.reason === "string"
+        && (item.key.startsWith(FIELD_OBSERVATION_PENDING_PREFIX)
+          || (item.origin === "global_lock" && item.key === FIELD_OBSERVATION_LOCK_KEY));
+    });
+}
+
+function fieldObservationRecoveryTransaction(value = undefined) {
+  return new Promise((resolve, reject) => {
+    let db = null;
+    let transaction = null;
+    let settled = false;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error && transaction) { try { transaction.abort(); } catch (_error) {} }
+      if (db) db.close();
+      if (error) reject(error); else resolve(result);
+    };
+    const timer = setTimeout(() => finish(new Error("recovery_timeout")), 15000);
+    try {
+      if (typeof indexedDB === "undefined") throw new Error("recovery_unavailable");
+      const request = indexedDB.open(FIELD_OBSERVATION_RECOVERY_DB, 1);
+      request.onblocked = () => finish(new Error("recovery_blocked"));
+      request.onerror = () => finish(new Error("recovery_open_failed"));
+      request.onupgradeneeded = () => request.result.createObjectStore("journal");
+      request.onsuccess = () => {
+        db = request.result;
+        if (settled) { db.close(); return; }
+        try {
+          transaction = db.transaction("journal", value === undefined ? "readonly" : "readwrite");
+          const store = transaction.objectStore("journal");
+          const operation = value === undefined ? store.get("inventory") : store.put(value, "inventory");
+          let result;
+          operation.onsuccess = () => { result = operation.result; };
+          transaction.oncomplete = () => finish(null, result);
+          transaction.onerror = transaction.onabort = () => finish(new Error("recovery_transaction_failed"));
+        } catch (error) { finish(error); }
+      };
+    } catch (error) { finish(error); }
+  });
+}
+
+function markResolvedFieldObservationRecovery(entry, equivalent = false) {
+  for (const candidate of [...recoveryFieldObservationArtifacts(), ...(fieldObservationRecoveryJournal?.entries || []), entry]) {
+    if (fieldObservationEntryId(candidate) === fieldObservationEntryId(entry)
+        || (equivalent && sameFieldObservationArtifact(candidate, entry))) {
+      fieldObservationRecoveryResolved.add(fieldObservationEntryId(candidate));
+    }
+  }
+}
+
+async function loadFieldObservationRecoveryUnlocked() {
+  const journal = await fieldObservationRecoveryTransaction();
+  if (journal !== undefined && !validFieldObservationRecoveryJournal(journal)) throw new Error("recovery_corrupt");
+  fieldObservationRecoveryJournal = journal || {version: 1, entries: [], resolved: []};
+  fieldObservationRecoveryResolved = new Set();
+  const memory = fieldObservationArtifacts(state.fieldObservationLock);
+  const disk = fieldObservationArtifacts(persistedInventoryFieldObservationLock(pendingFieldObservationInventory()));
+  // Tombstones prevent a stale live page from resurrecting an explicitly resolved entry.
+  const keep = entry => !fieldObservationRecoveryJournal.resolved.includes(fieldObservationEntryId(entry))
+    || [...disk.entries, ...disk.corruptions].some(candidate => sameFieldObservationArtifact(candidate, entry));
+  const entries = memory.entries.filter(keep);
+  const corruptions = memory.corruptions.filter(keep);
+  for (const entry of fieldObservationRecoveryJournal.entries) {
+    const list = entry.pending ? entries : corruptions;
+    if (!list.some(candidate => sameFieldObservationArtifact(candidate, entry))) list.push(entry);
+  }
+  if (entries.length || corruptions.length) {
+    const unchanged = entries.length === memory.entries.length && corruptions.length === memory.corruptions.length
+      && entries.every((entry, index) => entry === memory.entries[index])
+      && corruptions.every((entry, index) => entry === memory.corruptions[index]);
+    if (!unchanged) adoptFieldObservationLock({status: "persistence_missing", entries, corruptions});
+  } else if (memory.entries.length || memory.corruptions.length
+      || state.fieldObservationLock?.recovery_error) adoptFieldObservationLock(null);
+  adoptFieldObservationLock(inventoriedFieldObservationLock(pendingFieldObservationInventory()));
+  await saveFieldObservationRecoveryUnlocked();
+}
+
+async function saveFieldObservationRecoveryUnlocked() {
+  const now = new Date().toISOString();
+  const entries = new Map(fieldObservationRecoveryJournal.entries.map(entry => [entry.entry_id, entry]));
+  for (const entry of recoveryFieldObservationArtifacts()) {
+    const entry_id = fieldObservationEntryId(entry);
+    entries.set(entry_id, {...entry, origin: entry.origin || "pending_storage",
+      generation: entry.generation || (entry.pending ? fieldObservationLockGeneration(entry.pending) : null),
+      entry_id, created_at: entries.get(entry_id)?.created_at || now, updated_at: now});
+  }
+  for (const id of fieldObservationRecoveryResolved) entries.delete(id);
+  const journal = {version: 1, entries: [...entries.values()],
+    resolved: [...new Set([...fieldObservationRecoveryJournal.resolved, ...fieldObservationRecoveryResolved])]};
+  if (!validFieldObservationRecoveryJournal(journal)) throw new Error("recovery_invalid_write");
+  await fieldObservationRecoveryTransaction(journal);
+  fieldObservationRecoveryJournal = journal;
+}
+
 async function withFieldObservationWebLock(callback, operation = null) {
   if (!webLocksAvailable()) return {executed: false, reason: "web_locks_unavailable", value: false};
   let executed = false;
@@ -1014,13 +1136,22 @@ async function withFieldObservationWebLock(callback, operation = null) {
     const value = await navigator.locks.request(
       FIELD_OBSERVATION_WEB_LOCK_NAME,
       options,
-      () => {
+      async () => {
+        await loadFieldObservationRecoveryUnlocked();
+        if (operation?.abortController?.signal.aborted) throw staleFieldObservationOperationError();
         executed = true;
-        return callback();
+        try { return await callback(); }
+        finally { await saveFieldObservationRecoveryUnlocked(); }
       },
     );
     return {executed, reason: executed ? null : "web_lock_denied", value};
   } catch (error) {
+    if (error?.message?.startsWith("recovery_")) {
+      adoptFieldObservationLock({...state.fieldObservationLock, status: "unreadable", recovery_error: error.message});
+      state.fieldObservationInventoryReady = false;
+      updateFieldObservationSubmitState();
+      observationMessage("Le journal de récupération est indisponible ou illisible. Toute publication reste bloquée.", {error: true});
+    }
     return {executed: false, reason: "web_lock_failed", value: false, error};
   }
 }
@@ -1076,6 +1207,7 @@ function clearFieldObservationLockUnlocked(lock = state.fieldObservationLock) {
           if (pendingRaw === JSON.stringify(lock.pending)) localStorage.removeItem(lock.key);
           else if (pendingRaw !== null) return false;
         }
+        markResolvedFieldObservationRecovery(lock, true);
         if (sameFieldObservationLock(state.fieldObservationLock, lock)) {
           state.fieldObservationLock = null;
           state.fieldObservationConflict = null;
@@ -1103,6 +1235,7 @@ function clearFieldObservationLockUnlocked(lock = state.fieldObservationLock) {
   } catch (_error) {
     removed = false;
   }
+  if (removed) markResolvedFieldObservationRecovery(lock, true);
   if (removed && sameFieldObservationLock(state.fieldObservationLock, lock)) {
     state.fieldObservationLock = null;
     state.fieldObservationConflict = null;
@@ -1346,7 +1479,8 @@ function fieldObservationArtifacts(lock) {
 function forgetResolvedFieldObservationArtifact(entry) {
   const lock = state.fieldObservationLock;
   const artifacts = fieldObservationArtifacts(lock);
-  const keep = candidate => !sameFieldObservationArtifact(candidate, entry);
+  markResolvedFieldObservationRecovery(entry);
+  const keep = candidate => fieldObservationEntryId(candidate) !== fieldObservationEntryId(entry);
   const entries = artifacts.entries.filter(keep);
   const corruptions = artifacts.corruptions.filter(keep);
   adoptFieldObservationLock(entries.length || corruptions.length
@@ -1954,6 +2088,7 @@ async function submitFieldObservation(event) {
         rebuildPendingFieldObservationInventoryUnlocked();
         return null;
       }
+      if (state.fieldObservationLock) return null;
       const acquiredPayload = buildFieldObservationPayload(draft);
       const envelope = {
         version: PENDING_FIELD_OBSERVATION_VERSION,
@@ -2115,9 +2250,6 @@ function memoryOnlyFieldObservationEntryUnlocked(entry, disk) {
   const memory = fieldObservationArtifacts(state.fieldObservationLock);
   const siblings = [...memory.entries, ...memory.corruptions];
   if (!siblings.some(candidate => fieldObservationEntryId(candidate) === id)) return false;
-  if (siblings.some(candidate => candidate.key === entry.key
-      && (candidate.origin || "pending_storage") === (entry.origin || "pending_storage")
-      && fieldObservationEntryId(candidate) !== id)) return false;
   if (localStorage.getItem(entry.key) !== null) return false;
   const persisted = fieldObservationArtifacts(disk);
   return ![...persisted.entries, ...persisted.corruptions].some(candidate => candidate.key === entry.key);

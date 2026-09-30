@@ -8,6 +8,39 @@ import subprocess
 import pytest
 
 
+RECOVERY_IDB_HARNESS = r'''
+
+// Small asynchronous IndexedDB simulator: requests precede transaction commit.
+// Its map is independent of localStorage and is shared by fresh VM contexts.
+function recoveryIndexedDB(records) {
+  return {open() {
+    const request = {};
+    Promise.resolve().then(() => {
+      request.result = {createObjectStore() {}, close() {}, transaction(_store, mode) {
+        const transaction = {abort() { transaction.onabort?.(); }, objectStore() {
+          return {get(key) { const operation = {};
+            Promise.resolve().then(() => {
+              operation.result = records.has(key) ? JSON.parse(JSON.stringify(records.get(key))) : undefined;
+              operation.onsuccess?.();
+              Promise.resolve().then(() => transaction.oncomplete?.());
+            }); return operation;
+          }, put(value, key) { const operation = {};
+            Promise.resolve().then(() => {
+              if (records.failWrite) { transaction.onerror?.(); return; }
+              records.set(key, JSON.parse(JSON.stringify(value)));
+              operation.onsuccess?.();
+              Promise.resolve().then(() => transaction.oncomplete?.());
+            }); return operation;
+          }};
+        }}; return transaction;
+      }};
+      request.onsuccess?.();
+    }); return request;
+  }};
+}
+'''
+
+
 SCRIPT = Path(__file__).resolve().parents[2] / "astropilot/web/app.js"
 
 
@@ -300,7 +333,7 @@ function assertReadRequest(options) {
   assert.ok(options === undefined || (options.signal && options.method === undefined && options.body === undefined));
 }
 function clearHarness() {
-  storage.clear(); state.observationBusy = false; uuid = 0;
+  storage.clear(); recoveryRecords.clear(); state.observationBusy = false; uuid = 0;
   activeFieldObservationOperation = null; fieldObservationOperationGeneration = 0;
   storageFailures.get = false; storageFailures.set = false; storageFailures.remove = false;
   state.sessions = []; state.activeSessionId = null;
@@ -323,6 +356,7 @@ function clearHarness() {
   updateFieldObservationSubmitState();
 }
 '''
+    harness = RECOVERY_IDB_HARNESS + '\nconst recoveryRecords = new Map(); const indexedDB = recoveryIndexedDB(recoveryRecords);\n' + harness
     checks = r'''
 async function check() {
   clearHarness();
@@ -937,6 +971,7 @@ async function check() {
   assert.match(fieldObservationLockMessage(), /observations locales non résolues/);
 
   // An external localStorage.clear() cannot silently remove the in-memory reconciliation lock.
+  recoveryRecords.clear(); // New independent fixture after the orphan inventory scenario.
   state.fieldObservationLock = replacementLock;
   storage.set(replacementLock.key, JSON.stringify(replacementLock.pending));
   storage.set(FIELD_OBSERVATION_LOCK_KEY, JSON.stringify(storedFieldObservationLockValue(replacementLock)));
@@ -1092,6 +1127,8 @@ const vm = require('vm');
 const assert = require('assert').strict;
 const helpers = HELPERS_SOURCE;
 const shared = new Map();
+const recoveryRecords = new Map();
+RECOVERY_IDB_SOURCE
 const contexts = [];
 // Controlled simulator of separate JS contexts, not a real browser. Delivery is
 // a separate task: tests may hold, duplicate and reorder the storage queue.
@@ -1160,7 +1197,7 @@ function makeContext(name, locks = controlledLocks) {
   let uuid = 0;
       const sandbox = {console, structuredClone, URL, TextEncoder, Intl, Date, JSON, Map, Set, Object, Array, AbortController,
     String, Number, Boolean, RegExp, Error, TypeError, Promise, encodeURIComponent, setTimeout, clearTimeout,
-    document, window: {confirm: () => true}, navigator: locks ? {locks} : {},
+    document, indexedDB: recoveryIndexedDB(recoveryRecords), window: {confirm: () => true}, navigator: locks ? {locks} : {},
     crypto: {randomUUID: () => `${name}-uuid-${++uuid}`}, posts: [], uuidCount: () => uuid};
   sandbox.state = {configuration: {site: {name: 'Site A', latitude: 47.1, longitude: 6.8, bortle: 4, timezone: 'Europe/Zurich'}},
     currentDecision: {decision_id: 'decision-1', night_date: '2026-09-29'},
@@ -1240,7 +1277,7 @@ const projection = payload => ({...structuredClone(payload),
   await deliverStorage({reverse: true, duplicate: true});
 
   // Missing or throwing Web Locks fails before UUID creation and before POST.
-  shared.clear(); contexts.length = 0;
+  shared.clear(); recoveryRecords.clear(); contexts.length = 0;
       const noLocks = makeContext('none', null);
       assert.equal(run(noLocks, 'webLocksAvailable()'), false);
       await run(noLocks, 'submitFieldObservation({preventDefault(){}})');
@@ -1251,7 +1288,7 @@ const projection = payload => ({...structuredClone(payload),
   assert.equal(denied.sandbox.uuidCount(), 0); assert.equal(denied.sandbox.posts.length, 0);
 
   // Build two valid orphan entries, then resolve exactly one and abandon exactly the other.
-  shared.clear(); contexts.length = 0; const tab = makeContext('inventory');
+  shared.clear(); recoveryRecords.clear(); contexts.length = 0; const tab = makeContext('inventory');
   const first = run(tab, `(() => { const payload = buildFieldObservationPayload(); return {key: pendingObservationKey('decision-1', null),
     pending: {version: PENDING_FIELD_OBSERVATION_VERSION, payload, snapshot: fieldObservationSnapshot(),
       observed_at_local: '2026-09-29T22:14', timezone: 'Europe/Zurich'}}; })()`);
@@ -1262,7 +1299,7 @@ const projection = payload => ({...structuredClone(payload),
       second.pending.snapshot = run(tab, `snapshotFromObservationPayload(__second.payload, __second.observed_at_local, __second.timezone)`);
 
       // A restored pending is read-only without Web Locks and can never reach POST.
-      shared.clear(); contexts.length = 0;
+      shared.clear(); recoveryRecords.clear(); contexts.length = 0;
       shared.set(first.key, JSON.stringify(first.pending));
       const restoredNoLocks = makeContext('restored-no-locks', null);
       await run(restoredNoLocks, 'restorePendingFieldObservationInventory()');
@@ -1271,7 +1308,7 @@ const projection = payload => ({...structuredClone(payload),
       assert.equal(shared.get(first.key), JSON.stringify(first.pending));
 
       // Two tabs retrying the exact same pending serialize GET/POST and produce one POST.
-      shared.clear(); contexts.length = 0;
+      shared.clear(); recoveryRecords.clear(); contexts.length = 0;
       shared.set(first.key, JSON.stringify(first.pending));
       const lockContext = run(tab, `recoveredFieldObservationContext(__second || ${JSON.stringify(first.pending)})`);
       const firstLock = {version: 2, generation: `lock-${first.pending.payload.observation_id}`,
@@ -1286,7 +1323,7 @@ const projection = payload => ({...structuredClone(payload),
       assert.equal(retryA.sandbox.posts.length + retryB.sandbox.posts.length, 1);
 
       // Publication retains the origin-wide lock; a concurrent abandon cannot delete its pending.
-      shared.clear(); contexts.length = 0;
+      shared.clear(); recoveryRecords.clear(); contexts.length = 0;
       shared.set(first.key, JSON.stringify(first.pending));
       shared.set('astropilot.fieldObservationLock', JSON.stringify(firstLock));
       const publishing = makeContext('publishing'); const abandoning = makeContext('abandoning');
@@ -1304,7 +1341,7 @@ const projection = payload => ({...structuredClone(payload),
       assert.equal(shared.has(first.key), false);
 
       // Startup never erases a valid global lock when its pending is absent or divergent.
-      shared.clear(); contexts.length = 0;
+      shared.clear(); recoveryRecords.clear(); contexts.length = 0;
       const lockOnlyRaw = JSON.stringify(firstLock);
       shared.set('astropilot.fieldObservationLock', lockOnlyRaw);
       const lockOnly = makeContext('lock-only');
@@ -1333,7 +1370,7 @@ const projection = payload => ({...structuredClone(payload),
       // Legacy pending migration is a real v2 write under Web Locks, with or without a v1 lock.
       const legacyPending = {payload: first.pending.payload,
         snapshot: run(lockOnly, `legacySnapshotFromObservationPayload(${JSON.stringify(first.pending.payload)})`)};
-      shared.clear(); contexts.length = 0; shared.set(first.key, JSON.stringify(legacyPending));
+      shared.clear(); recoveryRecords.clear(); contexts.length = 0; shared.set(first.key, JSON.stringify(legacyPending));
       const legacy = makeContext('legacy');
       await run(legacy, 'restorePendingFieldObservationInventory()');
       assert.equal(JSON.parse(shared.get(first.key)).version, 2);
@@ -1342,21 +1379,21 @@ const projection = payload => ({...structuredClone(payload),
       const legacyReload = makeContext('legacy-reload');
       await run(legacyReload, 'restorePendingFieldObservationInventory()');
       assert.equal(shared.get(first.key), stablePending); assert.equal(shared.get('astropilot.fieldObservationLock'), stableLock);
-      shared.clear(); contexts.length = 0; shared.set(first.key, JSON.stringify(legacyPending));
+      shared.clear(); recoveryRecords.clear(); contexts.length = 0; shared.set(first.key, JSON.stringify(legacyPending));
       shared.set('astropilot.fieldObservationLock', JSON.stringify({...firstLock, version: 1,
         pending: legacyPending, generation: undefined}));
       const legacyLock = makeContext('legacy-lock');
       await run(legacyLock, 'restorePendingFieldObservationInventory()');
       assert.equal(JSON.parse(shared.get(first.key)).version, 2);
       assert.equal(JSON.parse(shared.get('astropilot.fieldObservationLock')).version, 2);
-      shared.clear(); contexts.length = 0; shared.set(first.key, JSON.stringify(legacyPending));
+      shared.clear(); recoveryRecords.clear(); contexts.length = 0; shared.set(first.key, JSON.stringify(legacyPending));
       const legacyNoLocks = makeContext('legacy-no-locks', null);
       await run(legacyNoLocks, 'restorePendingFieldObservationInventory()');
       assert.equal(run(legacyNoLocks, 'state.fieldObservationLock.status'), 'migration_requires_web_locks');
       assert.equal(shared.get(first.key), JSON.stringify(legacyPending));
 
       // Waiting lock requests are abortable on close/context invalidation and cannot publish later.
-      shared.clear(); contexts.length = 0;
+      shared.clear(); recoveryRecords.clear(); contexts.length = 0;
       let releaseBlocker;
       const blocker = controlledLocks.request('blocker', {mode: 'exclusive'},
         () => new Promise(resolve => { releaseBlocker = resolve; }));
@@ -1378,7 +1415,7 @@ const projection = payload => ({...structuredClone(payload),
       assert.equal(waiting.sandbox.posts.length, 0);
 
       // bfcache restore re-inventories storage under Web Locks before mutations resume.
-      shared.clear(); contexts.length = 0; shared.set(first.key, JSON.stringify(first.pending));
+      shared.clear(); recoveryRecords.clear(); contexts.length = 0; shared.set(first.key, JSON.stringify(first.pending));
       shared.set('astropilot.fieldObservationLock', lockOnlyRaw);
       const cached = makeContext('cached');
       await run(cached, 'restorePendingFieldObservationInventory()');
@@ -1387,7 +1424,7 @@ const projection = payload => ({...structuredClone(payload),
       assert.equal(run(cached, 'state.fieldObservationLock.status'), 'inconsistent_persistence');
       assert.equal(run(cached, 'state.fieldObservationInventoryReady'), true);
 
-      shared.clear(); contexts.length = 0; const inventoryTab = makeContext('inventory-final');
+      shared.clear(); recoveryRecords.clear(); contexts.length = 0; const inventoryTab = makeContext('inventory-final');
       Object.assign(tab, inventoryTab);
       shared.set(first.key, JSON.stringify(first.pending)); shared.set(second.key, JSON.stringify(second.pending));
   await run(tab, 'restorePendingFieldObservationInventory()');
@@ -1437,7 +1474,7 @@ const projection = payload => ({...structuredClone(payload),
 
   // Aggregate original is never reduced by deleted/divergent inventory, even on reload.
   for (const diverge of [false, true]) {
-    shared.clear(); contexts.length = 0; storageEvents.length = 0;
+    shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
     const owner = makeContext('aggregate'); const peer = makeContext('aggregate-peer');
     shared.set(first.key, JSON.stringify(first.pending)); shared.set(second.key, JSON.stringify(second.pending));
     await run(owner, 'restorePendingFieldObservationInventory()');
@@ -1472,7 +1509,7 @@ const projection = payload => ({...structuredClone(payload),
 
   // Same key, two generations/UUIDs: independent UI buttons, exact GET, 2 -> 1 -> 0.
   for (const resolveGlobalFirst of [true, false]) {
-    shared.clear(); contexts.length = 0; storageEvents.length = 0;
+    shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
     const exact = makeContext('same-key');
     const divergent = structuredClone(first.pending); divergent.payload.observation_id = 'same-key-B';
     shared.set(first.key, JSON.stringify(divergent));
@@ -1505,7 +1542,7 @@ const projection = payload => ({...structuredClone(payload),
   }
 
   // Stale buttons cannot resolve a replaced envelope or corruption, even with same key.
-  shared.clear(); contexts.length = 0; storageEvents.length = 0;
+  shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
   const stale = makeContext('stale-entry');
   shared.set(first.key, JSON.stringify(first.pending)); shared.set(second.key, JSON.stringify(second.pending));
   await run(stale, 'restorePendingFieldObservationInventory()');
@@ -1518,7 +1555,7 @@ const projection = payload => ({...structuredClone(payload),
 
 
   // Exact same UUID/key with different payload is still a different inventory artifact.
-  shared.clear(); contexts.length = 0; storageEvents.length = 0;
+  shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
   const changedPayload = makeContext('changed-payload');
   shared.set(first.key, JSON.stringify(first.pending)); shared.set(second.key, JSON.stringify(second.pending));
   await run(changedPayload, 'restorePendingFieldObservationInventory()');
@@ -1533,7 +1570,7 @@ const projection = payload => ({...structuredClone(payload),
   assert.equal(unexpectedGets, 0); assert.equal(shared.get(first.key), JSON.stringify(mutated));
 
   // Corruption identities include raw source; replacing that raw cannot be deleted by an old button.
-  shared.clear(); contexts.length = 0; storageEvents.length = 0;
+  shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
   const corrupt = makeContext('corrupt-target');
   shared.set(first.key, JSON.stringify(first.pending)); shared.set(badKey, '{old');
   await run(corrupt, 'restorePendingFieldObservationInventory()');
@@ -1551,7 +1588,7 @@ const projection = payload => ({...structuredClone(payload),
   assert.equal(shared.has(badKey), false); assert.equal(shared.has(first.key), true);
 
   // Three distinct pending entries reconstruct N -> 2 -> 1 -> 0 without dropping a sibling.
-  shared.clear(); contexts.length = 0; storageEvents.length = 0;
+  shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
   const many = makeContext('many');
   const third = structuredClone(second); third.key = run(many, `pendingObservationKey('decision-3', null)`);
   third.pending.payload.decision_id = 'decision-3'; third.pending.payload.observation_id = 'third-uuid';
@@ -1567,7 +1604,7 @@ const projection = payload => ({...structuredClone(payload),
   // Non-cooperative hung fetch: controlled deadlines release the real lock queue.
   // Repeat before POST, after POST, and during confirmation. Late replies cannot clean storage.
   for (const phase of ['before', 'body', 'post', 'confirmation']) {
-    shared.clear(); contexts.length = 0; storageEvents.length = 0;
+    shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
     const hung = makeContext(`hung-${phase}`); hung.sandbox.manualDeadlines = true;
     shared.set(first.key, JSON.stringify(first.pending));
     shared.set('astropilot.fieldObservationLock', JSON.stringify(firstLock));
@@ -1608,7 +1645,7 @@ const projection = payload => ({...structuredClone(payload),
 
 
   // A newly generated POST can hang as well; retry from another context reuses its UUID.
-  shared.clear(); contexts.length = 0; storageEvents.length = 0;
+  shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
   const fresh = makeContext('fresh-hang'); fresh.sandbox.manualDeadlines = true;
   let newPayload;
   fresh.sandbox.fetch = (_url, options) => {
@@ -1627,7 +1664,7 @@ const projection = payload => ({...structuredClone(payload),
   assert.equal(freshRetry.sandbox.posts.length, 0); assert.equal(shared.size, 0);
 
   // clear() delivers asynchronously; captured artifacts survive until explicit resolution.
-  shared.clear(); contexts.length = 0; storageEvents.length = 0;
+  shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
   const clearer = makeContext('clear-source'); const cleared = makeContext('clear-target');
   shared.set(first.key, JSON.stringify(first.pending));
   await run(cleared, 'restorePendingFieldObservationInventory()');
@@ -1652,7 +1689,7 @@ const projection = payload => ({...structuredClone(payload),
   assert.equal(run(cleared, 'state.fieldObservationLock'), null);
 
   for (let repeat = 0; repeat < 3; repeat++) {
-    shared.clear(); contexts.length = 0; storageEvents.length = 0;
+    shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
     const source = makeContext('foreign-source'); const empty = makeContext('empty-target');
     await run(empty, 'restorePendingFieldObservationInventory()');
     source.sandbox.localStorage.setItem('foreign', 'value'); source.sandbox.localStorage.clear();
@@ -1663,7 +1700,7 @@ const projection = payload => ({...structuredClone(payload),
     assert.equal(run(empty, 'document.querySelector("#observation-save").disabled'), false);
 
     for (const withPending of [false, true]) {
-      shared.clear(); contexts.length = 0; storageEvents.length = 0;
+      shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
       const broken = makeContext('broken-global');
       shared.set('astropilot.fieldObservationLock', '{broken-global');
       if (withPending) shared.set(first.key, JSON.stringify(first.pending));
@@ -1688,7 +1725,7 @@ const projection = payload => ({...structuredClone(payload),
         assert.equal(shared.size, 0); assert.equal(run(broken, 'state.fieldObservationLock'), null);
       }
     }
-    shared.clear(); contexts.length = 0; storageEvents.length = 0;
+    shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
     const changed = makeContext('changed-global');
     shared.set('astropilot.fieldObservationLock', '{old-global');
     await run(changed, 'restorePendingFieldObservationInventory()');
@@ -1702,7 +1739,7 @@ const projection = payload => ({...structuredClone(payload),
   // Exact review regressions, repeated with independent contexts and delayed/reordered events.
   const ids = tab => run(tab, 'fieldObservationArtifacts(state.fieldObservationLock).entries.map(e => e.pending.payload.observation_id).sort().join(",")');
   const prepareMemory = async (name, corruption = false) => {
-    shared.clear(); contexts.length = 0; storageEvents.length = 0;
+    shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
     const source = makeContext(`${name}-source`); const target = makeContext(name);
     shared.set(corruption ? 'astropilot.fieldObservationLock' : first.key,
       corruption ? '{memory-global' : JSON.stringify(first.pending));
@@ -1822,7 +1859,135 @@ const projection = payload => ({...structuredClone(payload),
     assert.equal(run(target, 'state.fieldObservationLock'), null);
   }
 
+  // P1: a real reload discards every JS global, retaining only the two storage backends.
+  for (let repeat = 0; repeat < 3; repeat++) {
+    for (const method of ['reconcileFieldObservationEntry', 'abandonFieldObservationEntry']) {
+      const {target} = await prepareMemory('durable-reload');
+      const originalId = targetId(target);
+      assert.equal(recoveryRecords.get('inventory').entries.length, 1);
+      assert.equal(shared.size, 0);
+      contexts.length = 0; storageEvents.length = 0; // Destroy the old page, no pageshow reuse.
+      const fresh = makeContext('fresh-page');
+      await run(fresh, 'restorePendingFieldObservationInventory()');
+      assert.equal(ids(fresh), first.pending.payload.observation_id);
+      assert.equal(targetId(fresh), originalId);
+      await run(fresh, 'submitFieldObservation({preventDefault(){}})');
+      assert.equal(fresh.sandbox.uuidCount(), 0); assert.equal(fresh.sandbox.posts.length, 0);
+      fresh.sandbox.canonical = {[first.pending.payload.observation_id]: projection(first.pending.payload)};
+      await resolve(fresh, method, originalId);
+      assert.equal(recoveryRecords.get('inventory').entries.length, 0);
+      assert.equal(run(fresh, 'state.fieldObservationLock'), null);
+      const afterResolution = makeContext('resolved-reload');
+      await run(afterResolution, 'restorePendingFieldObservationInventory()');
+      assert.equal(run(afterResolution, 'state.fieldObservationLock'), null);
+      await run(afterResolution, 'submitFieldObservation({preventDefault(){}})');
+      assert.equal(afterResolution.sandbox.uuidCount(), 1); assert.equal(afterResolution.sandbox.posts.length, 1);
+    }
+    // A stale page must not reinsert an explicitly resolved journal entry.
+    {
+      const {target} = await prepareMemory('stale-journal');
+      const fresh = makeContext('journal-resolver');
+      await run(fresh, 'restorePendingFieldObservationInventory()');
+      await resolve(fresh, 'abandonFieldObservationEntry', targetId(fresh));
+      await run(target, 'restorePendingFieldObservationInventory()');
+      assert.equal(run(target, 'state.fieldObservationLock'), null);
+      assert.equal(recoveryRecords.get('inventory').entries.length, 0);
+    }
+    for (const failure of ['unavailable', 'blocked', 'read', 'write', 'corrupt', 'payload']) {
+      const {target} = await prepareMemory('recovery-failure');
+      contexts.length = 0; storageEvents.length = 0;
+      const fresh = makeContext('failed-reload');
+      if (failure === 'unavailable') fresh.sandbox.indexedDB = undefined;
+      if (failure === 'blocked' || failure === 'read') fresh.sandbox.indexedDB = {open() {
+        const request = {}; Promise.resolve().then(() => failure === 'blocked' ? request.onblocked() : request.onerror());
+        return request;
+      }};
+      if (failure === 'write') recoveryRecords.failWrite = true;
+      if (failure === 'corrupt') recoveryRecords.set('inventory', {version: 99, entries: [], resolved: []});
+      if (failure === 'payload') recoveryRecords.get('inventory').entries[0].pending.payload.observation_id = 'tampered';
+      await run(fresh, 'restorePendingFieldObservationInventory()');
+      await run(fresh, 'submitFieldObservation({preventDefault(){}})');
+      assert.equal(fresh.sandbox.uuidCount(), 0); assert.equal(fresh.sandbox.posts.length, 0);
+      assert.equal(run(fresh, 'state.fieldObservationLock.status'), 'unreadable');
+      assert.equal(run(fresh, 'document.querySelector("#observation-save").disabled'), true);
+      delete recoveryRecords.failWrite;
+    }
+
+    // Reload also preserves a corrupt global-lock artifact and its exact confirmed removal.
+    {
+      await prepareMemory('corrupt-durable', true);
+      contexts.length = 0; storageEvents.length = 0;
+      const fresh = makeContext('corrupt-reload');
+      await run(fresh, 'restorePendingFieldObservationInventory()');
+      assert.equal(run(fresh, 'state.fieldObservationLock.corruptions[0].raw'), '{memory-global');
+      await run(fresh, 'removeCorruptFieldObservationEntry(fieldObservationEntryId(state.fieldObservationLock.corruptions[0]))');
+      assert.equal(recoveryRecords.get('inventory').entries.length, 0);
+      assert.equal(run(fresh, 'state.fieldObservationLock'), null);
+    }
+    // Divergent persistence before action or during canonical GET cannot delete either history.
+    for (const duringGet of [false, true]) {
+      const {source, target} = await prepareMemory('two-history-race');
+      const aId = targetId(target);
+      const history = structuredClone(first.pending); history.payload.observation_id = 'race-history-2';
+      source.sandbox.localStorage.setItem(first.key, JSON.stringify(history));
+      await run(target, 'restorePendingFieldObservationInventory()');
+      source.sandbox.localStorage.clear();
+      await deliverStorage({reverse: true, duplicate: true});
+      await run(target, 'restorePendingFieldObservationInventory()');
+      const replacement = structuredClone(first.pending); replacement.payload.observation_id = 'race-current-3';
+      target.sandbox.canonical = {[first.pending.payload.observation_id]: projection(first.pending.payload)};
+      let action;
+      if (duringGet) {
+        let finishGet;
+        target.sandbox.fetch = () => new Promise(resolve => { finishGet = resolve; });
+        action = resolve(target, 'reconcileFieldObservationEntry', aId);
+        await drainMicrotasks();
+        assert.equal(typeof finishGet, 'function');
+        source.sandbox.localStorage.setItem(first.key, JSON.stringify(replacement));
+        finishGet({ok: true, status: 200, json: async () => projection(first.pending.payload)});
+      } else {
+        source.sandbox.localStorage.setItem(first.key, JSON.stringify(replacement));
+        action = resolve(target, 'abandonFieldObservationEntry', aId);
+      }
+      await action;
+      assert.equal(shared.get(first.key), JSON.stringify(replacement));
+      assert.ok(ids(target).includes(first.pending.payload.observation_id));
+      assert.ok(ids(target).includes('race-history-2'));
+      assert.ok(recoveryRecords.get('inventory').entries.some(e => e.pending.payload.observation_id === first.pending.payload.observation_id));
+      assert.ok(recoveryRecords.get('inventory').entries.some(e => e.pending.payload.observation_id === 'race-history-2'));
+      assert.equal(target.sandbox.posts.length, 0);
+    }
+    // P2: two historical memory artifacts have the SAME key + origin, different full identities.
+    for (const reverse of [false, true]) {
+      const {source, target} = await prepareMemory('same-key-history');
+      const aId = targetId(target);
+      const divergent = structuredClone(first.pending);
+      divergent.payload.observation_id = 'history-uuid-2';
+      divergent.payload.conditions.cloud_state = 'overcast';
+      divergent.snapshot = run(target, `snapshotFromObservationPayload(${JSON.stringify(divergent.payload)},
+        '2026-09-29T22:14', 'Europe/Zurich')`);
+      source.sandbox.localStorage.setItem(first.key, JSON.stringify(divergent));
+      await run(target, 'restorePendingFieldObservationInventory()');
+      source.sandbox.localStorage.clear();
+      await deliverStorage({reverse: true, duplicate: true});
+      await run(target, 'restorePendingFieldObservationInventory()');
+      const bId = run(target, 'fieldObservationEntryId(state.fieldObservationLock.entries.find(e => e.pending.payload.observation_id === "history-uuid-2"))');
+      assert.equal(run(target, 'new Set(state.fieldObservationLock.entries.map(e => e.origin || "pending_storage")).size'), 1);
+      assert.equal(run(target, 'new Set(state.fieldObservationLock.entries.map(e => e.key)).size'), 1);
+      target.sandbox.canonical = {[first.pending.payload.observation_id]: projection(first.pending.payload)};
+      if (reverse) await resolve(target, 'abandonFieldObservationEntry', bId);
+      else await resolve(target, 'reconcileFieldObservationEntry', aId);
+      assert.equal(ids(target), reverse ? first.pending.payload.observation_id : 'history-uuid-2');
+      assert.equal(recoveryRecords.get('inventory').entries.length, 1);
+      if (reverse) await resolve(target, 'reconcileFieldObservationEntry', aId);
+      else await resolve(target, 'abandonFieldObservationEntry', bId);
+      assert.equal(run(target, 'state.fieldObservationLock'), null);
+      assert.equal(recoveryRecords.get('inventory').entries.length, 0);
+      assert.equal(target.sandbox.posts.length, 0);
+    }
+  }
+
 })().catch(error => { console.error(error); process.exitCode = 1; });
-'''.replace("HELPERS_SOURCE", json.dumps(helpers))
+'''.replace("HELPERS_SOURCE", json.dumps(helpers)).replace("RECOVERY_IDB_SOURCE", RECOVERY_IDB_HARNESS)
     result = subprocess.run([engine, "-e", program], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr

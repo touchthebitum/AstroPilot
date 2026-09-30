@@ -164,13 +164,28 @@ Chaque ré-inventorisation fusionne les artefacts persistants avec les artefacts
 mémoire non résolus, y compris après `clear()` et un retour bfcache. Un artefact
 absent reste diagnostiqué et bloquant jusqu’à résolution ciblée explicite ou
 réconciliation canonique ; il n’est pas réécrit automatiquement dans le stockage.
+Le journal typé IndexedDB `fieldObservationRecovery` conserve séparément les
+artefacts non résolus (identité complète, UUID, pending canonique, contexte,
+origine, clé, génération, statut/raison et dates de création/mise à jour).
+Il survit à `localStorage.clear()` et à un rechargement complet : le démarrage
+fusionne ce journal avec l’inventaire local avant d’autoriser un nouvel UUID.
+Les lectures et transactions atomiques sont sérialisées sous le même Web Lock ;
+la transaction de sauvegarde doit être terminée avant toute publication.
+Un journal inaccessible, bloqué ou corrompu bloque toute publication, sans repli
+vers la seule mémoire. Chaque résolution explicite retire son entrée du journal ;
+des identités résolues empêchent une page ancienne de la réintroduire.
+Ce stockage est propre à l’origine navigateur ; effacer aussi IndexedDB ou toutes
+les données du site supprime cette preuve locale de récupération.
+
 Les diagnostics de migration (`migration_failed`, `migration_requires_web_locks`)
 s’ajoutent à cet inventaire fusionné : les entrées et corruptions mémoire restent
 présentes même lorsqu’un autre pending legacy ne peut pas être migré.
 La résolution mémoire cible chaque artefact indépendamment du statut global.
 Sous Web Lock, elle exige son identité mémoire exacte, l’absence persistante de
-sa clé et l’absence de remplacement divergent. La réconciliation vérifie le GET
-canonique du même UUID, puis revalide la cible avant son retrait ; l’abandon ou
+sa clé et l’absence de remplacement divergent dans la persistance actuelle.
+Un voisin historique uniquement mémoire de même clé et même origine ne bloque
+pas la résolution : chaque `entry_id` distinct est résolu indépendamment.
+La réconciliation vérifie le GET canonique du même UUID, puis revalide la cible avant son retrait ; l’abandon ou
 la suppression d’une corruption exige une confirmation explicite. Seule la cible
 est oubliée, puis l’inventaire restant est reconstruit (0/1/N), sans retirer les
 autres pending. Un brut réapparu ou remplacé impose une ré-inventorisation bloquante.
@@ -180,9 +195,10 @@ identifiant immuable), affichée à côté des pending valides. Sa suppression c
 revalide exactement le brut sous Web Lock et ne supprime aucun pending valide.
 
 Le harness multi-contexte est un simulateur contrôlé de globals JavaScript
-séparés, pas un navigateur réel. Le stockage partagé et la file Web Locks sont
-indépendants d’une file d’événements `storage`. Les écritures identiques ne
-produisent aucun événement ; la livraison se fait dans une tâche ultérieure et
+séparés, pas un navigateur réel. Les stockages localStorage et IndexedDB sont
+distincts ; un vrai reload du test crée un nouveau contexte JS et conserve
+uniquement ces stockages. La file Web Locks est indépendante de la file
+d’événements `storage`. Les écritures identiques ne produisent aucun événement ; la livraison se fait dans une tâche ultérieure et
 peut être retardée, dupliquée ou réordonnée. Les échéances réseau sont déclenchées
 explicitement dans les scénarios suspendus, sans réduire la constante de production.
 
