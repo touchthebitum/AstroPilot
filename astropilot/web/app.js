@@ -36,6 +36,11 @@ const ui = Object.freeze({
   openMission: document.querySelector("#open-mission"),
   closeMission: document.querySelector("#close-mission"),
   missionBack: document.querySelector("#mission-back"),
+  observation: document.querySelector("#field-observation-dialog"),
+  closeObservation: document.querySelector("#close-field-observation"),
+  addObservationMessage: document.querySelector("#add-field-observation-message"),
+  addObservationDecision: document.querySelector("#add-field-observation-decision"),
+  addObservationMission: document.querySelector("#add-field-observation-mission"),
   acceptanceStatus: document.querySelector("#acceptance-status"),
   recommendationConfidencePanel: document.querySelector("#recommendation-confidence"),
   recommendationConfidence: document.querySelector("#recommendation-confidence-value"),
@@ -74,6 +79,7 @@ const state = {
   sessionWriteUncertain: false,
   observationBusy: false,
   fieldObservationDraftContext: null,
+  fieldObservationContextInvalid: false,
   invalidFieldObservationContextKey: null,
 };
 
@@ -324,13 +330,65 @@ const OBSERVATION_SURFACE_INPUTS = Object.freeze({
   dew_present: 'input[name="observation-surface"][value="dew_present"]',
 });
 const OBSERVATION_IDENTITY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const PENDING_FIELD_OBSERVATION_VERSION = 2;
 
 function renderObservationLinkage() {
   const element = document.querySelector("#observation-linkage");
   if (!element) return;
-  element.textContent = currentSession()?.execution.execution_id
-    ? "Liée à la session sélectionnée" : "Liée à la décision actuelle";
+  const context = state.fieldObservationDraftContext;
+  element.textContent = context?.execution_id
+    ? `Session liée : ${context.execution_id}` : "Sans session";
+  const night = context?.night_date ? ` · nuit du ${context.night_date}` : "";
+  text("#observation-context-decision", context
+    ? `Décision ${context.decision_id}${night}` : "Décision indisponible");
+}
+
+function siteTimezone() {
+  const timezone = state.configuration?.site?.timezone;
+  return typeof timezone === "string" && timezone.trim() ? timezone.trim() : null;
+}
+
+function observationContext(source) {
+  const decision = source === "mission" ? state.acceptedMission : state.currentDecision;
+  const decisionId = decision?.decision_id;
+  if (!decisionId) return null;
+  return {
+    decision_id: decisionId,
+    execution_id: source === "mission" ? currentSession()?.execution.execution_id || null : null,
+    night_date: decision?.night_date || decision?.mission?.night_date || state.currentDecision?.night_date || null,
+    source,
+    timezone: siteTimezone(),
+  };
+}
+
+function activeObservationContext() {
+  const source = state.fieldObservationDraftContext?.source;
+  return source ? observationContext(source) : null;
+}
+
+function setFieldObservationEditorDisabled(disabled) {
+  for (const control of document.querySelector("#field-observation-form").querySelectorAll("input, select, button")) {
+    control.disabled = disabled;
+  }
+}
+
+function openFieldObservation(source) {
+  const context = observationContext(source);
+  if (!context?.decision_id) return;
+  resetFieldObservationForm();
+  state.fieldObservationDraftContext = Object.freeze(context);
+  state.fieldObservationContextInvalid = false;
+  state.invalidFieldObservationContextKey = null;
+  setFieldObservationEditorDisabled(false);
+  renderObservationLinkage();
+  text("#observation-timezone", context.timezone
+    ? `Fuseau du site : ${context.timezone}` : "Fuseau du site indisponible");
+  const observedAt = document.querySelector("#observation-observed-at");
+  observedAt.value = context.timezone ? formatDateTimeLocalInZone(new Date(), context.timezone) : "";
+  observationMessage("Choisissez les catégories observées, indiquez le vent mesuré en km/h ou précisez l’état de la surface.");
+  ui.observation.showModal();
   syncFieldObservationContext();
+  restorePendingFieldObservation();
 }
 
 function observationMessage(message, { error = false } = {}) {
@@ -349,18 +407,67 @@ function selectedObservationChoice(name) {
   return OBSERVATION_CHOICES[name].includes(value) ? value : null;
 }
 
-function currentFieldObservationContext() {
-  const decisionId = state.acceptedMission?.decision_id;
-  if (!decisionId) return null;
-  return {
-    decision_id: decisionId,
-    execution_id: currentSession()?.execution.execution_id || null,
-  };
-}
-
 function sameFieldObservationContext(left, right) {
   return left?.decision_id === right?.decision_id
-    && (left?.execution_id || null) === (right?.execution_id || null);
+    && (left?.execution_id || null) === (right?.execution_id || null)
+    && left?.timezone === right?.timezone;
+}
+
+function localDateTimeParts(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value || "");
+  if (!match) throw new Error("invalid_local_datetime");
+  const parts = match.slice(1).map(Number);
+  const [year, month, day, hour, minute] = parts;
+  const check = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1
+      || check.getUTCDate() !== day || check.getUTCHours() !== hour
+      || check.getUTCMinutes() !== minute) throw new Error("invalid_local_datetime");
+  return {year, month, day, hour, minute};
+}
+
+function zonedDateTimeParts(date, timezone) {
+  let formatter;
+  try {
+    formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    });
+  } catch (_error) {
+    throw new Error("invalid_site_timezone");
+  }
+  const values = Object.fromEntries(formatter.formatToParts(date)
+    .filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]));
+  return {year: values.year, month: values.month, day: values.day,
+    hour: values.hour, minute: values.minute, second: values.second};
+}
+
+function formatDateTimeLocalInZone(date, timezone) {
+  const parts = zonedDateTimeParts(date, timezone);
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
+}
+
+function localDateTimeToUtc(value, timezone) {
+  if (!timezone) throw new Error("invalid_site_timezone");
+  const wanted = localDateTimeParts(value);
+  const wallClockAsUtc = Date.UTC(wanted.year, wanted.month - 1, wanted.day, wanted.hour, wanted.minute);
+  const offsets = new Set();
+  for (let hours = -48; hours <= 48; hours += 6) {
+    const instant = wallClockAsUtc + hours * 3600000;
+    const parts = zonedDateTimeParts(new Date(instant), timezone);
+    offsets.add(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - instant);
+  }
+  const matches = [];
+  for (const offset of offsets) {
+    const instant = wallClockAsUtc - offset;
+    const parts = zonedDateTimeParts(new Date(instant), timezone);
+    if (parts.year === wanted.year && parts.month === wanted.month && parts.day === wanted.day
+        && parts.hour === wanted.hour && parts.minute === wanted.minute) matches.push(instant);
+  }
+  const unique = [...new Set(matches)].sort((left, right) => left - right);
+  if (!unique.length) throw new Error("nonexistent_local_datetime");
+  if (unique.length > 1) throw new Error("ambiguous_local_datetime");
+  return new Date(unique[0]).toISOString();
 }
 
 function fieldObservationDraftForContext(context) {
@@ -395,24 +502,26 @@ function fieldObservationDraftForContext(context) {
   if (!hasFact) return null;
   return {
     decision_id: context.decision_id, execution_id: context.execution_id || null,
+    observed_at_local: document.querySelector("#observation-observed-at").value,
+    timezone: context.timezone,
     conditions, acquisition, technical,
   };
 }
 
 function fieldObservationDraft() {
-  const currentContext = currentFieldObservationContext();
   const draftContext = state.fieldObservationDraftContext;
-  if (!sameFieldObservationContext(draftContext, currentContext)) return null;
+  if (!draftContext || state.fieldObservationContextInvalid) return null;
   return fieldObservationDraftForContext(draftContext);
 }
 
-function buildFieldObservationPayload(draft = fieldObservationDraft()) {
+function buildFieldObservationPayload(draft = fieldObservationDraft(), recordedAt = new Date().toISOString()) {
   if (!draft) return null;
-  const capturedAt = new Date().toISOString();
+  const observedAt = localDateTimeToUtc(draft.observed_at_local, draft.timezone);
+  if (Date.parse(observedAt) > Date.parse(recordedAt)) throw new Error("observed_at_in_future");
   return {
     observation_id: crypto.randomUUID(), decision_id: draft.decision_id,
     execution_id: draft.execution_id,
-    observed_at_utc: capturedAt, recorded_at_utc: capturedAt,
+    observed_at_utc: observedAt, recorded_at_utc: recordedAt,
     supersedes_observation_id: null,
     conditions: draft.conditions, acquisition: draft.acquisition, technical: draft.technical,
     confidence: "medium",
@@ -424,7 +533,16 @@ function fieldObservationSnapshot(draft = fieldObservationDraft()) {
   return draft ? JSON.stringify(draft) : null;
 }
 
-function snapshotFromObservationPayload(payload) {
+function snapshotFromObservationPayload(payload, observedAtLocal, timezone) {
+  if (!payload) return null;
+  return JSON.stringify({
+    decision_id: payload.decision_id, execution_id: payload.execution_id || null,
+    observed_at_local: observedAtLocal, timezone,
+    conditions: payload.conditions, acquisition: payload.acquisition, technical: payload.technical,
+  });
+}
+
+function legacySnapshotFromObservationPayload(payload) {
   if (!payload) return null;
   return JSON.stringify({
     decision_id: payload.decision_id, execution_id: payload.execution_id || null,
@@ -480,9 +598,7 @@ function validObservationTimestamp(value) {
   return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
 }
 
-function validPendingFieldObservation(value, expectedContext) {
-  if (!exactObservationKeys(value, ["payload", "snapshot"]) || typeof value.snapshot !== "string") return false;
-  const payload = value.payload;
+function validPendingFieldObservationPayload(payload, expectedContext) {
   if (!exactObservationKeys(payload, [
     "observation_id", "decision_id", "execution_id", "observed_at_utc", "recorded_at_utc",
     "supersedes_observation_id", "conditions", "acquisition", "technical", "confidence", "quality_flags",
@@ -532,7 +648,26 @@ function validPendingFieldObservation(value, expectedContext) {
 
   const hasFact = [...Object.values(conditions), ...Object.values(acquisition), technical.hfr, technical.guiding_rms_arcsec]
     .some((item) => item !== null);
-  return hasFact && value.snapshot === snapshotFromObservationPayload(payload);
+  return hasFact;
+}
+
+function validPendingFieldObservation(value, expectedContext) {
+  if (!exactObservationKeys(value, ["version", "payload", "snapshot", "observed_at_local", "timezone"])
+      || value.version !== PENDING_FIELD_OBSERVATION_VERSION
+      || typeof value.snapshot !== "string"
+      || typeof value.observed_at_local !== "string"
+      || value.timezone !== expectedContext.timezone
+      || !validPendingFieldObservationPayload(value.payload, expectedContext)) return false;
+  let normalized;
+  try {
+    normalized = localDateTimeToUtc(value.observed_at_local, value.timezone);
+  } catch (_error) {
+    return false;
+  }
+  return normalized === value.payload.observed_at_utc
+    && value.snapshot === snapshotFromObservationPayload(
+      value.payload, value.observed_at_local, value.timezone,
+    );
 }
 
 function readPendingFieldObservation(key, expectedContext) {
@@ -546,6 +681,25 @@ function readPendingFieldObservation(key, expectedContext) {
   try {
     const value = JSON.parse(raw);
     if (validPendingFieldObservation(value, expectedContext)) return { available: true, value };
+    if (exactObservationKeys(value, ["payload", "snapshot"])
+        && typeof value.snapshot === "string"
+        && validPendingFieldObservationPayload(value.payload, expectedContext)
+        && value.snapshot === legacySnapshotFromObservationPayload(value.payload)) {
+      const observedAtLocal = formatDateTimeLocalInZone(
+        new Date(value.payload.observed_at_utc), expectedContext.timezone,
+      );
+      const migrated = {
+        version: PENDING_FIELD_OBSERVATION_VERSION,
+        payload: value.payload,
+        snapshot: snapshotFromObservationPayload(value.payload, observedAtLocal, expectedContext.timezone),
+        observed_at_local: observedAtLocal,
+        timezone: expectedContext.timezone,
+      };
+      if (!writePendingFieldObservation(key, migrated)) {
+        return { available: false, value: null, reason: "storage" };
+      }
+      return { available: true, value: migrated, migrated: true };
+    }
   } catch (_error) {
     // The cleanup is best-effort only: corruption must remain blocking for this page.
   }
@@ -597,26 +751,20 @@ function unreadablePendingObservationBlocked(key) {
 }
 
 function syncFieldObservationContext() {
-  const nextContext = currentFieldObservationContext();
-  const previousContext = state.fieldObservationDraftContext;
-  if (!sameFieldObservationContext(previousContext, nextContext)) {
-    const discardedDraft = fieldObservationDraftForContext(previousContext);
-    resetFieldObservationForm();
-    state.fieldObservationDraftContext = nextContext;
-    state.invalidFieldObservationContextKey = null;
-    if (discardedDraft) {
-      observationMessage(
-        "La saisie de la session précédente a été effacée. Saisissez un nouveau relevé pour la session sélectionnée.",
-        { error: true },
-      );
-    }
-  }
-  restorePendingFieldObservation();
+  const dialog = document.querySelector("#field-observation-dialog");
+  if (!dialog.open || !state.fieldObservationDraftContext) return;
+  if (sameFieldObservationContext(state.fieldObservationDraftContext, activeObservationContext())) return;
+  state.fieldObservationContextInvalid = true;
+  setFieldObservationEditorDisabled(true);
+  observationMessage(
+    "La décision ou la session a changé. Cet éditeur est bloqué pour éviter un rattachement incorrect. Fermez-le puis rouvrez-le.",
+    { error: true },
+  );
 }
 
 function restorePendingFieldObservation() {
   const context = state.fieldObservationDraftContext;
-  if (!sameFieldObservationContext(context, currentFieldObservationContext()) || fieldObservationDraft()) return;
+  if (!context || state.fieldObservationContextInvalid || fieldObservationDraft()) return;
   const decisionId = context?.decision_id;
   const executionId = context?.execution_id || null;
   if (!decisionId) return;
@@ -638,6 +786,7 @@ function restorePendingFieldObservation() {
   const pending = storedPending.value;
   const payload = pending?.payload;
   if (!payload || payload.decision_id !== decisionId || (payload.execution_id || null) !== executionId) return;
+  document.querySelector("#observation-observed-at").value = pending.observed_at_local;
   document.querySelector("#observation-clouds").value = payload.conditions?.cloud_state || "";
   document.querySelector("#observation-transparency").value = payload.conditions?.transparency || "";
   setOptionalObservationValue("#observation-wind", payload.conditions?.wind_speed_kmh);
@@ -698,8 +847,9 @@ async function submitFieldObservation(event) {
   event.preventDefault();
   if (state.observationBusy) return;
   const context = state.fieldObservationDraftContext;
-  if (!sameFieldObservationContext(context, currentFieldObservationContext())) {
-    observationMessage("Le contexte du relevé a changé. Re-sélectionnez la mission ou la session avant de saisir.", { error: true });
+  if (state.fieldObservationContextInvalid
+      || !sameFieldObservationContext(context, activeObservationContext())) {
+    observationMessage("Le contexte du relevé a changé. Fermez cet éditeur puis rouvrez-le depuis la décision ou la mission voulue.", { error: true });
     return;
   }
   const decisionId = context?.decision_id;
@@ -734,10 +884,30 @@ async function submitFieldObservation(event) {
     return;
   }
   const submittedSnapshot = fieldObservationSnapshot(draft);
-  const pendingSnapshot = pending?.snapshot || snapshotFromObservationPayload(pending?.payload);
+  const pendingSnapshot = pending?.snapshot;
   const reusingPending = Boolean(pending?.payload && pendingSnapshot === submittedSnapshot);
-  const payload = reusingPending ? pending.payload : buildFieldObservationPayload(draft);
-  if (!writePendingFieldObservation(key, { payload, snapshot: submittedSnapshot })) {
+  let payload;
+  try {
+    payload = reusingPending ? pending.payload : buildFieldObservationPayload(draft);
+  } catch (error) {
+    const messages = {
+      invalid_local_datetime: "Indiquez une date et une heure d’observation valides.",
+      invalid_site_timezone: "Le fuseau du site configuré est indisponible ou invalide. Corrigez la configuration du site.",
+      nonexistent_local_datetime: "Cette heure locale n’existe pas dans le fuseau du site à cause du passage à l’heure d’été. Choisissez une autre heure.",
+      ambiguous_local_datetime: "Cette heure locale est ambiguë dans le fuseau du site à cause du passage à l’heure d’hiver. Choisissez une heure non ambiguë.",
+      observed_at_in_future: "L’heure observée ne peut pas être postérieure à l’heure d’enregistrement.",
+    };
+    observationMessage(messages[error?.message] || "L’horodatage de l’observation est invalide.", { error: true });
+    return;
+  }
+  const envelope = {
+    version: PENDING_FIELD_OBSERVATION_VERSION,
+    payload,
+    snapshot: submittedSnapshot,
+    observed_at_local: draft.observed_at_local,
+    timezone: draft.timezone,
+  };
+  if (!writePendingFieldObservation(key, envelope)) {
     observationMessage("Le stockage local est indisponible. Envoi bloqué pour garantir qu’un retry ne crée pas de doublon.", { error: true });
     return;
   }
@@ -775,11 +945,20 @@ async function submitFieldObservation(event) {
       }
     }
     if (error?.status >= 400 && error.status < 500) invalidatePendingFieldObservation(key);
-    if (error?.status === 404) state.invalidFieldObservationContextKey = key;
+    if (error?.status === 404) {
+      state.invalidFieldObservationContextKey = key;
+      state.fieldObservationContextInvalid = true;
+      setFieldObservationEditorDisabled(true);
+    }
+    const validationMessage = ["recorded_at_precedes_observed_at", "observed_at_in_future"].includes(error?.code)
+      ? "L’heure observée est dans le futur par rapport à l’enregistrement. Vérifiez la date, l’heure et le fuseau du site."
+      : ["invalid_observed_at_utc", "invalid_recorded_at_utc"].includes(error?.code)
+        ? "L’horodatage est invalide. Vérifiez la date, l’heure et le fuseau du site."
+        : "Certaines valeurs sont invalides. Vérifiez l’heure observée et les détails saisis.";
     const messages = {
-      404: "La décision ou la session liée à ce relevé est introuvable ou périmée. Rechargez puis re-sélectionnez la mission et la session.",
+      404: "La décision ou la session liée à ce relevé est introuvable ou périmée. Le formulaire est conservé mais bloqué ; rechargez puis rouvrez l’observation depuis le bon contexte.",
       409: "Conflit d’enregistrement : rechargez la mission avant de réessayer.",
-      422: "Certaines valeurs sont invalides. Vérifiez les détails saisis.",
+      422: validationMessage,
       503: "Enregistrement momentanément indisponible. Vous pouvez réessayer sans créer de doublon.",
     };
     observationMessage(messages[error?.status] || "Confirmation impossible. Réessayez : la même observation sera reprise sans doublon.", { error: true });
@@ -1595,6 +1774,7 @@ function renderDecision(decision) {
   ui.openMission.dataset.acceptanceSource = "primary_recommendation";
   ui.openMission.dataset.catalogKey = decision.catalog_key || "";
   ui.openMission.dataset.decisionId = decision.decision_id || "";
+  if (ui.addObservationDecision) ui.addObservationDecision.hidden = !decision.decision_id;
   renderAlternatives(decision);
   restoreAcceptanceControls();
   show("decision");
@@ -2628,6 +2808,7 @@ function showMessage(title, body, { kicker = "Décision indisponible", retry = t
   text("#message-title", title);
   text("#message-body", body);
   ui.retry.hidden = !retry;
+  ui.addObservationMessage.hidden = !state.currentDecision?.decision_id;
   show("message");
 }
 
@@ -2902,6 +3083,9 @@ async function loadTonight(availability) {
   show("loading");
   ui.refresh.disabled = true;
   state.currentDecision = null;
+  ui.addObservationMessage.hidden = true;
+  ui.addObservationDecision.hidden = true;
+  syncFieldObservationContext();
 
   try {
     const response = await fetch("/v1/tonight", {
@@ -2943,6 +3127,8 @@ async function loadTonight(availability) {
     }
 
     clearAcceptedMission();
+    state.currentDecision = payload?.decision_id ? payload : null;
+    syncFieldObservationContext();
     if (payload.status === "weather_refused") {
       showMessage(
         payload.weather_decision.presentation.label,
@@ -3110,6 +3296,13 @@ document.querySelector("#session-interrupt").addEventListener("click", () => ses
 document.querySelector("#session-record-evidence").addEventListener("click", () => sessionCommand(recordSessionEvidence));
 document.querySelector("#session-apply-credit").addEventListener("click", () => sessionCommand(creditSession));
 document.querySelector("#field-observation-form").addEventListener("submit", submitFieldObservation);
+ui.addObservationMessage.addEventListener("click", () => openFieldObservation("decision"));
+ui.addObservationDecision.addEventListener("click", () => openFieldObservation("decision"));
+ui.addObservationMission.addEventListener("click", () => openFieldObservation("mission"));
+ui.closeObservation.addEventListener("click", () => ui.observation.close());
+ui.observation.addEventListener("click", (event) => {
+  if (event.target === ui.observation) ui.observation.close();
+});
 ui.closeMission.addEventListener("click", () => ui.mission.close());
 ui.missionBack.addEventListener("click", () => ui.mission.close());
 ui.mission.addEventListener("click", (event) => {

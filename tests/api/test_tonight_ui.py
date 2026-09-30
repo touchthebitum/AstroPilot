@@ -1337,3 +1337,21 @@ function run() {
     assert results['continue_project']['values']['#recommendation'] == 'Continuer ce projet'
     assert results['recommended']['values']['#target-label'] == 'Cible prioritaire'
     assert not results['recommended']['disabled']
+
+
+def test_field_observation_entry_points_require_a_persisted_decision():
+    response = make_client().get('/')
+    script = make_client().get('/ui/app.js').text
+
+    assert response.status_code == 200
+    assert 'id="add-field-observation-message"' in response.text
+    assert 'id="add-field-observation-decision"' in response.text
+    assert 'id="add-field-observation-mission"' in response.text
+    assert 'state.currentDecision = payload?.decision_id ? payload : null' in script
+    assert 'ui.addObservationMessage.hidden = !state.currentDecision?.decision_id' in script
+    assert 'ui.addObservationDecision.hidden = !decision.decision_id' in script
+    assert 'openFieldObservation("decision")' in script
+    assert 'openFieldObservation("mission")' in script
+    assert 'payload.status === "no_productive_window"' in script
+    assert 'state.currentDecision = null' in script
+    assert 'ui.addObservationMessage.hidden = true' in script

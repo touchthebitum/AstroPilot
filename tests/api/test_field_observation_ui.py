@@ -77,8 +77,12 @@ const localStorage = {
 };
 let uuid = 0;
 const crypto = {randomUUID: () => `observation-${++uuid}`};
-const state = {acceptedMission: {decision_id: 'decision-1'}, sessions: [], activeSessionId: null,
-  observationBusy: false, fieldObservationDraftContext: null, invalidFieldObservationContextKey: null};
+const state = {configuration: {site: {timezone: 'Europe/Zurich'}},
+  currentDecision: {decision_id: 'decision-1', night_date: '2026-09-29'},
+  acceptedMission: {decision_id: 'decision-1', mission: {night_date: '2026-09-29'}},
+  sessions: [], activeSessionId: null, observationBusy: false,
+  fieldObservationDraftContext: null, fieldObservationContextInvalid: false,
+  invalidFieldObservationContextKey: null};
 function currentSession() { return state.sessions.find(item => item.execution.execution_id === state.activeSessionId) || null; }
 async function sessionHttpError(response) {
   const error = new Error('request_refused'); error.status = response.status;
@@ -101,10 +105,16 @@ function clearHarness() {
   storage.clear(); state.observationBusy = false; uuid = 0;
   storageFailures.get = false; storageFailures.set = false; storageFailures.remove = false;
   state.sessions = []; state.activeSessionId = null;
+  state.currentDecision = {decision_id: 'decision-1', night_date: '2026-09-29'};
+  state.acceptedMission = {decision_id: 'decision-1', mission: {night_date: '2026-09-29'}};
+  state.fieldObservationContextInvalid = false;
   state.invalidFieldObservationContextKey = null;
   if (state.unreadableFieldObservationContextKeys instanceof Set) state.unreadableFieldObservationContextKeys.clear();
   resetFieldObservationForm();
-  state.fieldObservationDraftContext = currentFieldObservationContext();
+  element('#observation-observed-at').value = '2026-09-29T22:14';
+  element('#field-observation-dialog').open = true;
+  state.fieldObservationDraftContext = Object.freeze({decision_id: 'decision-1', execution_id: null,
+    night_date: '2026-09-29', source: 'mission', timezone: 'Europe/Zurich'});
   element('#observation-status').textContent = '';
 }
 '''
@@ -140,6 +150,22 @@ async function check() {
   assert.equal(payload.technical.guiding_rms_arcsec, 0.72);
   assert.equal(payload.technical.sky_background, null);
   assert.equal(payload.technical.sky_background_unit, null);
+  assert.equal(payload.execution_id, null);
+  assert.equal(payload.observed_at_utc, '2026-09-29T20:14:00.000Z');
+  assert.notEqual(payload.observed_at_utc, payload.recorded_at_utc);
+
+  // IANA conversion is deterministic in winter/summer and rejects both DST gaps and folds.
+  assert.equal(localDateTimeToUtc('2026-07-15T22:00', 'Europe/Zurich'), '2026-07-15T20:00:00.000Z');
+  assert.equal(localDateTimeToUtc('2026-01-15T22:00', 'Europe/Zurich'), '2026-01-15T21:00:00.000Z');
+  let timezoneError = null;
+  try { localDateTimeToUtc('2026-03-29T02:30', 'Europe/Zurich'); } catch (error) { timezoneError = error.message; }
+  assert.equal(timezoneError, 'nonexistent_local_datetime');
+  timezoneError = null;
+  try { localDateTimeToUtc('2026-10-25T02:30', 'Europe/Zurich'); } catch (error) { timezoneError = error.message; }
+  assert.equal(timezoneError, 'ambiguous_local_datetime');
+  timezoneError = null;
+  try { buildFieldObservationPayload(fieldObservationDraft(), '2026-09-29T20:13:00.000Z'); } catch (error) { timezoneError = error.message; }
+  assert.equal(timezoneError, 'observed_at_in_future');
 
   // Empty controls stay null, including the HFR unit, and do not invent facts.
   clearHarness(); setQuick({cloud: 'clear'});
@@ -178,23 +204,31 @@ async function check() {
   assert.match(pendingObservationKey('a.b_c-d', null), /decision:a\.b_c-d\.decision-only$/);
   assert.match(pendingObservationKey('a.b_c-d', 'decision'), /execution:decision$/);
 
-  // Switching from session A to B clears A's values and cannot submit them as B.
+  // Switching from session A to B preserves the frozen draft and blocks submission.
   clearHarness();
   state.sessions = [
     {execution: {execution_id: 'session-a'}},
     {execution: {execution_id: 'session-b'}},
   ];
-  state.activeSessionId = 'session-a'; syncFieldObservationContext();
+  state.activeSessionId = 'session-a';
+  state.fieldObservationDraftContext = Object.freeze({decision_id: 'decision-1', execution_id: 'session-a',
+    night_date: '2026-09-29', source: 'mission', timezone: 'Europe/Zurich'});
   setQuick({cloud: 'overcast', transparency: 'poor', wind: '12'});
   state.activeSessionId = 'session-b'; syncFieldObservationContext();
-  assert.equal(element('#observation-clouds').value, '');
-  assert.equal(element('#observation-transparency').value, '');
-  assert.equal(element('#observation-wind').value, '');
-  assert.match(element('#observation-status').textContent, /session précédente a été effacée/);
+  assert.equal(element('#observation-clouds').value, 'overcast');
+  assert.equal(element('#observation-transparency').value, 'poor');
+  assert.equal(element('#observation-wind').value, '12');
+  assert.equal(state.fieldObservationContextInvalid, true);
+  assert.match(element('#observation-status').textContent, /éditeur est bloqué/);
   let sessionPosts = 0;
   fetch = async () => { sessionPosts += 1; return response(201, {}); };
   await submitFieldObservation(event);
   assert.equal(sessionPosts, 0);
+  resetFieldObservationForm();
+  element('#observation-observed-at').value = '2026-09-29T22:14';
+  state.fieldObservationContextInvalid = false;
+  state.fieldObservationDraftContext = Object.freeze({decision_id: 'decision-1', execution_id: 'session-b',
+    night_date: '2026-09-29', source: 'mission', timezone: 'Europe/Zurich'});
   setQuick({cloud: 'clear'});
   let sessionPayload;
   fetch = async (_url, options) => { sessionPosts += 1; sessionPayload = JSON.parse(options.body); return response(201, {}); };
@@ -204,6 +238,16 @@ async function check() {
   assert.equal(sessionPayload.conditions.cloud_state, 'clear');
   assert.equal(sessionPayload.conditions.transparency, null);
   assert.equal(sessionPayload.conditions.wind_speed_kmh, null);
+
+  // A decision switch also invalidates the open editor without rebinding or erasing it.
+  clearHarness(); setQuick({cloud: 'few'});
+  state.fieldObservationDraftContext = Object.freeze({decision_id: 'decision-1', execution_id: null,
+    night_date: '2026-09-29', source: 'decision', timezone: 'Europe/Zurich'});
+  state.currentDecision = {decision_id: 'decision-2', night_date: '2026-09-30'};
+  syncFieldObservationContext();
+  assert.equal(state.fieldObservationContextInvalid, true);
+  assert.equal(element('#observation-clouds').value, 'few');
+  assert.equal(state.fieldObservationDraftContext.decision_id, 'decision-1');
 
   // A server-declared conflict is never reconciled into success and keeps input.
   clearHarness(); setQuick({cloud: 'overcast'});
@@ -217,7 +261,9 @@ async function check() {
   const pendingPayload = buildFieldObservationPayload();
   const pendingKey = pendingObservationKey('decision-1', null);
   localStorage.setItem(pendingKey, JSON.stringify({
+    version: PENDING_FIELD_OBSERVATION_VERSION,
     payload: pendingPayload, snapshot: fieldObservationSnapshot(),
+    observed_at_local: '2026-09-29T22:14', timezone: 'Europe/Zurich',
   }));
   const conflictingStored = storedProjection(pendingPayload);
   conflictingStored.conditions.cloud_state = 'overcast';
@@ -240,9 +286,9 @@ async function check() {
   assert.equal(storage.has(staleKey), false);
   assert.equal(element('#observation-clouds').value, 'few');
   assert.match(element('#observation-status').textContent, /introuvable ou périmée/);
-  assert.match(element('#observation-status').textContent, /Rechargez puis re-sélectionnez/);
+  assert.match(element('#observation-status').textContent, /formulaire est conservé mais bloqué/);
   await submitFieldObservation(event);
-  assert.match(element('#observation-status').textContent, /contexte est périmé/);
+  assert.match(element('#observation-status').textContent, /contexte du relevé a changé/);
 
   // A failing removeItem during 404 invalidation falls back to a safe tombstone.
   clearHarness(); setQuick({cloud: 'few'});
@@ -302,6 +348,21 @@ async function check() {
   assert.equal(uuid, 1);
   assert.match(element('#observation-status').textContent, /brouillon local est illisible/i);
 
+  // The implicit v1 envelope migrates to v2 and restores its local wall clock.
+  clearHarness(); setQuick({cloud: 'few'});
+  const legacyPayload = buildFieldObservationPayload(fieldObservationDraft(), '2026-09-29T20:20:00.000Z');
+  const legacyKey = pendingObservationKey('decision-1', null);
+  storage.set(legacyKey, JSON.stringify({
+    payload: legacyPayload, snapshot: legacySnapshotFromObservationPayload(legacyPayload),
+  }));
+  resetFieldObservationForm();
+  element('#observation-observed-at').value = '2026-09-29T21:00';
+  restorePendingFieldObservation();
+  const migrated = JSON.parse(storage.get(legacyKey));
+  assert.equal(migrated.version, PENDING_FIELD_OBSERVATION_VERSION);
+  assert.equal(migrated.observed_at_local, '2026-09-29T22:14');
+  assert.equal(element('#observation-observed-at').value, '2026-09-29T22:14');
+
   // Corrupt JSON with a failing cleanup is equally blocking.
   clearHarness(); setQuick({cloud: 'few'});
   storage.set(pendingObservationKey('decision-1', null), '{broken');
@@ -326,6 +387,11 @@ async function check() {
   };
   await submitFieldObservation(event);
   assert.equal(element('#observation-clouds').value, 'few');
+  const offlineEnvelope = JSON.parse(storage.get(pendingObservationKey('decision-1', null)));
+  assert.equal(offlineEnvelope.version, PENDING_FIELD_OBSERVATION_VERSION);
+  const firstOfflinePayload = JSON.parse(posted[0]);
+  assert.equal(offlineEnvelope.payload.observed_at_utc, firstOfflinePayload.observed_at_utc);
+  assert.equal(offlineEnvelope.payload.recorded_at_utc, firstOfflinePayload.recorded_at_utc);
   await submitFieldObservation(event);
   assert.equal(posted.length, 2);
   assert.equal(posted[0], posted[1]);
@@ -372,6 +438,7 @@ async function check() {
   assert.equal(element('#observation-clouds').value, 'partly_cloudy');
   assert.equal(element('#observation-transparency').value, 'poor');
   assert.equal(element('#observation-wind').value, '4.2');
+  assert.equal(element('#observation-observed-at').value, '2026-09-29T22:14');
 
   // Native selects accept direct discrete changes (keyboard/touch behavior is browser-owned).
   element('#observation-clouds').value = 'clear';

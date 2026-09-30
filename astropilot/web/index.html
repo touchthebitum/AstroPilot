@@ -270,7 +270,10 @@
           <h2 id="message-title">Impossible de préparer la nuit.</h2>
           <p id="message-body"></p>
         </div>
-        <button class="secondary-button" id="message-retry" type="button">Réessayer</button>
+        <div class="message-actions">
+          <button class="secondary-button" id="add-field-observation-message" type="button" hidden>Ajouter une observation terrain</button>
+          <button class="secondary-button" id="message-retry" type="button">Réessayer</button>
+        </div>
       </section>
 
       <section id="pending-acceptance-state" class="state-panel message-panel" hidden aria-live="assertive">
@@ -310,10 +313,13 @@
             <p id="decision-essential">Décision calculée pour votre configuration actuelle.</p>
             <p id="acceptance-status" class="acceptance-status" role="status" hidden></p>
           </div>
-          <button class="mission-button" id="open-mission" type="button">
-            Photographier cette cible
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-          </button>
+          <div class="decision-actions">
+            <button class="secondary-button" id="add-field-observation-decision" type="button" hidden>Ajouter une observation terrain</button>
+            <button class="mission-button" id="open-mission" type="button">
+              Photographier cette cible
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+          </div>
         </footer>
 
         <div class="decision-grid">
@@ -497,17 +503,42 @@
               <div><dt>Acquis actuel de cet intent</dt><dd id="session-current">—</dd></div>
               <div><dt>Restant actuel jusqu’à l’objectif de cet intent</dt><dd id="session-remaining">—</dd></div>
             </dl>
+            <button class="secondary-button" id="add-field-observation-mission" type="button">Ajouter une observation terrain</button>
           </section>
 
-          <section class="mission-section observation-panel" aria-labelledby="observation-title">
+          <footer class="mission-footer">
+            <p>Mission créée après votre choix explicite et enregistrée par NightMerit.</p>
+            <button class="secondary-button" id="mission-back" type="button">Retour à la recommandation</button>
+          </footer>
+        </div>
+      </dialog>
+
+      <dialog class="observation-dialog" id="field-observation-dialog" aria-labelledby="observation-title">
+        <div class="observation-surface observation-panel">
+          <header class="observation-heading">
+            <div>
+              <p class="observation-kicker">Relevé terrain · ~10 secondes</p>
+              <h2 id="observation-title">Observation terrain</h2>
+            </div>
+            <button class="dialog-close" id="close-field-observation" type="button" aria-label="Fermer l’observation terrain">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+            </button>
+          </header>
+          <section aria-label="Contexte de l’observation">
+            <p id="observation-context-decision"></p>
+            <span id="observation-linkage">Sans session</span>
+          </section>
             <div class="observation-heading">
               <div>
-                <p class="observation-kicker">Relevé terrain · ~10 secondes</p>
-                <h3 id="observation-title">Comment est le ciel maintenant&nbsp;?</h3>
+                <h3>Comment est le ciel maintenant&nbsp;?</h3>
               </div>
-              <span id="observation-linkage">Décision actuelle</span>
             </div>
             <form id="field-observation-form">
+              <label class="observation-time" for="observation-observed-at">
+                <span>Observé le</span>
+                <input id="observation-observed-at" type="datetime-local" required>
+                <small id="observation-timezone">Fuseau du site : —</small>
+              </label>
               <div class="observation-quick-grid">
                 <label class="observation-choice" for="observation-clouds">
                   <span><strong>Nuages</strong><small>Catégorie observée</small></span>
@@ -574,12 +605,6 @@
                 <button class="primary-button" id="observation-save" type="submit">Enregistrer l’observation</button>
               </div>
             </form>
-          </section>
-
-          <footer class="mission-footer">
-            <p>Mission créée après votre choix explicite et enregistrée par NightMerit.</p>
-            <button class="secondary-button" id="mission-back" type="button">Retour à la recommandation</button>
-          </footer>
         </div>
       </dialog>
     </main>

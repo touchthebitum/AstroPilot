@@ -140,6 +140,7 @@ button { color: inherit; }
 
 .message-icon { display: grid; flex: 0 0 auto; width: 50px; height: 50px; place-items: center; color: var(--gold); background: rgba(240,201,120,.1); border: 1px solid rgba(240,201,120,.25); border-radius: 50%; font-weight: 750; }
 .message-panel > div { flex: 1; }
+.message-panel .message-actions { display: flex; flex: 0 0 auto; flex-direction: column; gap: 9px; }
 .secondary-button { padding: 10px 15px; background: transparent; border: 1px solid var(--line-bright); border-radius: 10px; cursor: pointer; }
 .secondary-button:hover { background: rgba(255,255,255,.05); }
 .primary-button { padding: 11px 17px; color: #07111c; background: var(--cyan); border: 1px solid var(--cyan); border-radius: 10px; font-weight: 720; cursor: pointer; }
@@ -203,7 +204,14 @@ button { color: inherit; }
 .session-panel dl { display: grid; gap: 8px; }
 .session-panel dl div { display: flex; justify-content: space-between; gap: 12px; }
 .observation-panel { margin: 20px 0; padding: 22px; border: 1px solid rgba(103,228,209,.3); border-radius: 12px; background: linear-gradient(145deg, rgba(103,228,209,.07), rgba(255,255,255,.02)); }
+.observation-dialog { width: min(820px, calc(100% - 32px)); max-height: calc(100vh - 32px); padding: 0; color: var(--ink); background: transparent; border: 0; border-radius: var(--radius); }
+.observation-dialog::backdrop { background: rgba(1, 6, 12, .82); backdrop-filter: blur(9px); }
+.observation-surface { overflow: auto; max-height: calc(100vh - 32px); margin: 0; background: linear-gradient(145deg, #122136, #091321); box-shadow: 0 32px 100px rgba(0,0,0,.55); }
+.observation-surface > section { display: flex; justify-content: space-between; gap: 15px; align-items: center; margin-bottom: 18px; padding: 12px 14px; background: rgba(6,14,25,.48); border: 1px solid var(--line); border-radius: 10px; }
+.observation-surface > section p { margin: 0; color: var(--muted); font-size: 12px; }
+.observation-surface > section span { color: var(--cyan); font-size: 11px; }
 .observation-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 20px; }
+.observation-heading h2 { margin: 3px 0 0; font-family: Georgia, serif; font-size: 31px; font-weight: 400; }
 .observation-heading h3 { margin: 3px 0 0; font-family: Georgia, serif; font-size: 24px; font-weight: 400; }
 .observation-heading > span { padding: 6px 9px; color: var(--cyan); border: 1px solid rgba(103,228,209,.3); border-radius: 999px; font-size: 11px; white-space: nowrap; }
 .observation-kicker { margin: 0; color: var(--cyan); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
@@ -212,6 +220,10 @@ button { color: inherit; }
 .observation-choice > span { display: flex; justify-content: space-between; gap: 10px; }
 .observation-choice small { color: var(--subtle); font-size: 10px; }
 .observation-choice select, .observation-choice input { width: 100%; min-width: 0; padding: 9px; color: var(--ink); background: var(--panel-strong); border: 1px solid var(--line-bright); border-radius: 6px; }
+.observation-time { display: grid; gap: 6px; max-width: 360px; margin-bottom: 16px; color: var(--muted); font-size: 12px; }
+.observation-time input { padding: 9px; color: var(--ink); color-scheme: dark; background: var(--panel-strong); border: 1px solid var(--line-bright); border-radius: 6px; }
+.observation-time small { color: var(--subtle); }
+.decision-actions { display: flex; flex: 0 0 auto !important; flex-direction: column; gap: 9px; align-items: stretch; }
 .surface-choice { display: flex; flex-wrap: wrap; gap: 9px; margin: 14px 0 0; padding: 0; border: 0; }
 .surface-choice legend { width: 100%; margin-bottom: 2px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
 .surface-choice label { padding: 9px 13px; background: rgba(255,255,255,.025); border: 1px solid var(--line); border-radius: 999px; cursor: pointer; }
@@ -228,6 +240,8 @@ button { color: inherit; }
   .observation-quick-grid, .observation-advanced-grid { grid-template-columns: 1fr; }
   .observation-heading, .observation-actions { align-items: stretch; flex-direction: column; }
   .observation-heading > span { align-self: flex-start; }
+  .observation-dialog { width: calc(100% - 20px); max-height: calc(100vh - 20px); }
+  .observation-surface { max-height: calc(100vh - 20px); }
 }
 .review-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 24px 0 0; }
 .review-grid div { padding: 15px; background: rgba(255,255,255,.025); border: 1px solid var(--line); border-radius: 11px; }
