@@ -466,3 +466,32 @@ def test_field_observation_quick_capture_ui_is_categorical_and_progressive():
     assert "Déplacez un curseur" not in html
     assert "vent mesuré en km/h" in html
     assert "La décision ou la session liée à ce relevé est introuvable ou périmée" in script
+
+
+@pytest.mark.parametrize(
+    ("decision_id", "failure", "expected_status", "expected_code"),
+    [
+        ("not valid", None, 422, "invalid_decision_id"),
+        ("missing", None, 404, "decision_not_found"),
+        ("decision-1", OSError("private-path"), 503, "field_observation_unavailable"),
+        ("decision-1", RuntimeError("private-data"), 500, "field_observation_internal_error"),
+    ],
+)
+def test_canonical_decision_context_read_is_validated_and_fail_closed(
+    decision_id, failure, expected_status, expected_code,
+):
+    from types import SimpleNamespace
+
+    calls = []
+    def load(*, decision_id):
+        calls.append(decision_id)
+        if failure:
+            raise failure
+        return None
+
+    service = SimpleNamespace(evidence_store=SimpleNamespace(load=load))
+    client = TestClient(create_app(service_factory=lambda: service))
+    response = client.get(f"/v1/decisions/{decision_id}/context")
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": {"code": expected_code}}
+    assert calls == ([] if expected_status == 422 else [decision_id])

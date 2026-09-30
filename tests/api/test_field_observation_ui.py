@@ -296,7 +296,7 @@ const localStorage = {
   removeItem(key) { if (storageFailures.remove) throw new Error('remove denied'); storage.delete(key); },
 };
 let uuid = 0;
-const crypto = {randomUUID: () => `observation-${++uuid}`};
+const crypto = {subtle: require("crypto").webcrypto.subtle, randomUUID: () => `observation-${++uuid}`};
 let webLockRequests = 0;
 const navigator = {locks: {request(name, options, callback) {
   assert.equal(name, FIELD_OBSERVATION_WEB_LOCK_NAME);
@@ -1000,7 +1000,7 @@ async function check() {
     return new Promise(resolve => { resolvePost = resolve; });
   };
   const submitting = submitFieldObservation(event);
-  while (!resolvePost) await Promise.resolve();
+  while (!resolvePost) await new Promise(resolve => setImmediate(resolve));
   setQuick({cloud: 'overcast'});
   resolvePost(response(201, {created: true}));
   await submitting;
@@ -1015,7 +1015,7 @@ async function check() {
     return new Promise(resolve => { resolveStalePost = resolve; });
   };
   const staleSuccess = submitFieldObservation(event);
-  while (!resolveStalePost) await Promise.resolve();
+  while (!resolveStalePost) await new Promise(resolve => setImmediate(resolve));
   state.acceptedMission = {decision_id: 'decision-2', mission: {night_date: '2026-09-30'}};
   syncFieldObservationContext();
   resolveStalePost(response(201, {created: true}));
@@ -1040,7 +1040,7 @@ async function check() {
     ? new Promise((_resolve, reject) => { rejectStalePost = reject; })
     : response(404, {detail: {code: 'field_observation_not_found'}});
   const staleFailure = submitFieldObservation(event);
-  while (!rejectStalePost) await Promise.resolve();
+  while (!rejectStalePost) await new Promise(resolve => setImmediate(resolve));
   state.activeSessionId = 'session-b';
   state.fieldObservationSelectedExecutionId = 'session-b';
   syncFieldObservationContext();
@@ -1112,7 +1112,7 @@ async function check() {
     assert result.returncode == 0, result.stderr
 
 
-def test_field_observation_two_context_web_locks_inventory_and_clear():
+def _field_observation_multicontext_program():
     """Controlled simulator, not a browser: separate globals, locks, and event tasks."""
     engine = javascript_engine()
     if engine is None or Path(engine).name != "node":
@@ -1197,8 +1197,8 @@ function makeContext(name, locks = controlledLocks) {
   let uuid = 0;
       const sandbox = {console, structuredClone, URL, TextEncoder, Intl, Date, JSON, Map, Set, Object, Array, AbortController,
     String, Number, Boolean, RegExp, Error, TypeError, Promise, encodeURIComponent, setTimeout, clearTimeout,
-    document, indexedDB: recoveryIndexedDB(recoveryRecords), window: {confirm: () => true}, navigator: locks ? {locks} : {},
-    crypto: {randomUUID: () => `${name}-uuid-${++uuid}`}, posts: [], uuidCount: () => uuid};
+    TextEncoder, document, indexedDB: recoveryIndexedDB(recoveryRecords), window: {confirm: () => true}, navigator: locks ? {locks} : {},
+    crypto: {subtle: require("crypto").webcrypto.subtle, randomUUID: () => `${name}-uuid-${++uuid}`}, posts: [], uuidCount: () => uuid};
   sandbox.state = {configuration: {site: {name: 'Site A', latitude: 47.1, longitude: 6.8, bortle: 4, timezone: 'Europe/Zurich'}},
     currentDecision: {decision_id: 'decision-1', night_date: '2026-09-29'},
     acceptedMission: {decision_id: 'decision-1', mission: {night_date: '2026-09-29'}},
@@ -1248,7 +1248,7 @@ function makeContext(name, locks = controlledLocks) {
   return {sandbox, context};
 }
 const run = (tab, code) => vm.runInContext(code, tab.context);
-const drainMicrotasks = async () => { for (let i = 0; i < 60; i++) await Promise.resolve(); };
+const drainMicrotasks = async () => { for (let i = 0; i < 10; i++) await new Promise(resolve => setImmediate(resolve)); };
 const expireNetwork = async tab => {
   await drainMicrotasks();
   assert.equal(tab.sandbox.networkTimers.size, 1);
@@ -1332,7 +1332,7 @@ const projection = payload => ({...structuredClone(payload),
       let releasePost;
       publishing.sandbox.postGate = new Promise(resolve => { releasePost = resolve; });
       const publication = run(publishing, 'submitFieldObservation({preventDefault(){}})');
-      while (publishing.sandbox.posts.length === 0) await Promise.resolve();
+      while (publishing.sandbox.posts.length === 0) await new Promise(resolve => setImmediate(resolve));
       const abandon = run(abandoning, `abandonFieldObservationEntry(fieldObservationEntryId(state.fieldObservationLock.key ? state.fieldObservationLock : state.fieldObservationLock.entries.find(e => e.key === ${JSON.stringify(first.key)})))`);
       await Promise.resolve();
       assert.equal(shared.has(first.key), true, 'abandon must wait behind publication');
@@ -1449,7 +1449,8 @@ const projection = payload => ({...structuredClone(payload),
   assert.equal(run(tab, 'state.fieldObservationLock.entries.length'), 0);
   await run(tab, `removeCorruptFieldObservationEntry(fieldObservationEntryId(state.fieldObservationLock.corruptions.find(e => e.key === ${JSON.stringify(badKey)})))`);
   assert.equal(run(tab, 'state.fieldObservationLock'), null);
-  shared.set(first.key, JSON.stringify(first.pending)); shared.set(badKey, '{broken');
+  const newOrphan = structuredClone(first.pending); newOrphan.payload.observation_id = 'new-orphan';
+  shared.set(first.key, JSON.stringify(newOrphan)); shared.set(badKey, '{new-broken');
   await run(tab, 'restorePendingFieldObservationInventory()');
   assert.equal(run(tab, 'state.fieldObservationLock.status'), 'corrupt_pending');
   assert.equal(run(tab, 'state.fieldObservationLock.corruptions[0].reason'), 'invalid_json');
@@ -1457,7 +1458,8 @@ const projection = payload => ({...structuredClone(payload),
   assert.equal(shared.has(badKey), false); assert.equal(shared.has(first.key), true);
 
   // clear() is handled first for multiple, simple and busy reconciliation state.
-  shared.set(second.key, JSON.stringify(second.pending));
+  const newSecond = structuredClone(second.pending); newSecond.payload.observation_id = 'new-second';
+  shared.set(second.key, JSON.stringify(newSecond));
   await run(tab, 'restorePendingFieldObservationInventory()');
   run(tab, 'beginFieldObservationOperation("reconcile_entry", state.fieldObservationLock.entries[0])');
   shared.clear(); run(tab, 'handleFieldObservationStorageEvent({key: null, newValue: null})');
@@ -2086,14 +2088,275 @@ const projection = payload => ({...structuredClone(payload),
     shared.clear(); recoveryRecords.clear(); contexts.length = 0;
     const tab = makeContext('quota');
     recoveryRecords.set('inventory', {version: 1, entries: [], resolved: Array.from({length: 110}, (_, i) => `${i}:` + 'x'.repeat(5000))});
-    const original = JSON.stringify(recoveryRecords.get('inventory'));
     await run(tab, 'submitFieldObservation({preventDefault(){}})');
-    assert.equal(run(tab, 'state.fieldObservationLock.recovery_error'), 'recovery_quota');
-    assert.equal(tab.sandbox.uuidCount(), 0); assert.equal(tab.sandbox.posts.length, 0);
-    assert.equal(JSON.stringify(recoveryRecords.get('inventory')), original);
+    assert.equal(tab.sandbox.posts.length, 1);
+    assert.equal(recoveryRecords.get('inventory').version, 2);
+    assert.equal(recoveryRecords.get('inventory').resolved.length, 110);
+    assert.ok(JSON.stringify(recoveryRecords.get('inventory')).length < 16000);
+  }
+
+  // 1,100 real UI acquisitions/publications: completed history stays constant size.
+  shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
+  const stress = makeContext('stress'); let maxJournalSize = 0;
+  let ancient;
+  for (let i = 0; i < 1100; i++) {
+    run(stress, `document.querySelector('#observation-clouds').value = 'few'`);
+    // Keep the first unresolved page snapshot, without delivering storage events.
+    if (i === 0) {
+      stress.sandbox.fetch = async (url, options) => {
+        if (options?.method === 'POST') {
+          if (!ancient) ancient = JSON.parse(run(stress, 'JSON.stringify(state.fieldObservationLock)'));
+          stress.sandbox.posts.push(JSON.parse(options.body));
+          return {ok: true, status: 201};
+        }
+        return {ok: false, status: 404};
+      };
+    }
+    await run(stress, 'submitFieldObservation({preventDefault(){}})');
+    assert.equal(stress.sandbox.posts.length, i + 1);
+    const journal = recoveryRecords.get('inventory');
+    assert.equal(journal.entries.length, 0); assert.equal(journal.resolved.length, 0);
+    assert.equal(journal.epoch, i + 1); assert.equal(journal.resolved_watermark, i + 1);
+    maxJournalSize = Math.max(maxJournalSize, JSON.stringify(journal).length);
+  }
+  assert.ok(maxJournalSize < 256, `bounded journal: ${maxJournalSize}`);
+  const stable = JSON.stringify(recoveryRecords.get('inventory'));
+  const reloaded = makeContext('stress-reload');
+  await run(reloaded, 'restorePendingFieldObservationInventory()');
+  assert.equal(run(reloaded, 'state.fieldObservationLock'), null);
+  assert.equal(JSON.stringify(recoveryRecords.get('inventory')), stable);
+  // Old memory and identical resurrected disk envelopes are fenced by the watermark.
+  const old = makeContext('old-page'); old.sandbox.__ancient = ancient;
+  run(old, 'adoptFieldObservationLock(__ancient); state.fieldObservationInventoryReady = true;');
+  shared.set(ancient.key, JSON.stringify(ancient.pending));
+  shared.set('astropilot.fieldObservationLock', JSON.stringify(ancient));
+  await run(old, 'submitFieldObservation({preventDefault(){}})');
+  assert.equal(old.sandbox.posts.length, 0); assert.equal(old.sandbox.uuidCount(), 0);
+  assert.equal(run(old, 'state.fieldObservationLock'), null);
+  assert.equal(shared.has(ancient.key), false);
+  assert.equal(JSON.stringify(recoveryRecords.get('inventory')), stable);
+  // An old memory-only context cannot write the compacted entry either.
+  run(old, 'adoptFieldObservationLock(__ancient)');
+  await run(old, 'withFieldObservationWebLock(() => true)');
+  assert.equal(run(old, 'state.fieldObservationLock'), null);
+  assert.equal(JSON.stringify(recoveryRecords.get('inventory')), stable);
+
+
+  // A live sequence gap keeps later resolutions fenced until the gap is resolved.
+  shared.clear(); recoveryRecords.clear(); contexts.length = 0;
+  const gap = makeContext('watermark-gap');
+  const low = structuredClone(ancient); low.pending.payload.observation_id = 'gap-low';
+  low.generation = 'lock-gap-low'; low.pending.recovery_sequence = 1;
+  const high = structuredClone(ancient); high.pending.payload.observation_id = 'gap-high';
+  high.generation = 'lock-gap-high'; high.pending.recovery_sequence = 2;
+  gap.sandbox.__low = low; gap.sandbox.__high = high;
+  const makeJournalEntry = lock => {gap.sandbox.__lock = lock; return {...lock, origin: 'pending_storage',
+    entry_id: run(gap, 'fieldObservationEntryId(__lock)'), created_at: new Date().toISOString(), updated_at: new Date().toISOString()};};
+  const lowEntry = makeJournalEntry(low), highEntry = makeJournalEntry(high);
+  recoveryRecords.set('inventory', {version: 2, entries: [lowEntry, highEntry], resolved: [], epoch: 2, resolved_watermark: 0});
+  await run(gap, 'restorePendingFieldObservationInventory()');
+  gap.sandbox.fetch = async url => ({ok: true, status: 200,
+    json: async () => projection(url.endsWith('gap-high') ? high.pending.payload : low.pending.payload)});
+  await run(gap, `reconcileFieldObservationEntry(${JSON.stringify(highEntry.entry_id)})`);
+  assert.equal(recoveryRecords.get('inventory').entries.length, 1);
+  assert.equal(recoveryRecords.get('inventory').resolved_watermark, 0);
+  assert.equal(recoveryRecords.get('inventory').resolved[0].sequence, 2);
+  // Even above the watermark, the retained digest rejects a stale later resolution.
+  const lateGap = makeContext('gap-stale'); lateGap.sandbox.__high = high;
+  run(lateGap, 'adoptFieldObservationLock(__high)');
+  await run(lateGap, 'restorePendingFieldObservationInventory()');
+  assert.ok(run(lateGap, 'recoveryFieldObservationArtifacts().every(e => e.pending.payload.observation_id !== "gap-high")'));
+  await run(gap, `reconcileFieldObservationEntry(${JSON.stringify(lowEntry.entry_id)})`);
+  assert.equal(recoveryRecords.get('inventory').entries.length, 0);
+  assert.equal(recoveryRecords.get('inventory').resolved_watermark, 2);
+  assert.equal(recoveryRecords.get('inventory').resolved.length, 0);
+
+  // Migration hashes also fence exact unsequenced legacy artefacts after compaction.
+  shared.clear(); recoveryRecords.clear(); contexts.length = 0;
+  const migrated = makeContext('legacy-compacted');
+  migrated.sandbox.__legacy = {...low, pending: {...low.pending}};
+  delete migrated.sandbox.__legacy.pending.recovery_sequence;
+  const legacyId = run(migrated, 'fieldObservationEntryId(__legacy)');
+  recoveryRecords.set('inventory', {version: 1, entries: [], resolved: [legacyId]});
+  shared.set(low.key, JSON.stringify(migrated.sandbox.__legacy.pending));
+  shared.set('astropilot.fieldObservationLock', JSON.stringify(migrated.sandbox.__legacy));
+  run(migrated, 'adoptFieldObservationLock(__legacy)');
+  await run(migrated, 'withFieldObservationWebLock(() => true)');
+  assert.equal(run(migrated, 'state.fieldObservationLock'), null);
+  assert.equal(shared.size, 0);
+  assert.equal(recoveryRecords.get('inventory').resolved[0].digest.length, 64);
+  assert.equal(recoveryRecords.get('inventory').entries.length, 0);
+  // Restore captured before recovery load cannot reacquire the compacted legacy UUID.
+  shared.set(low.key, JSON.stringify(migrated.sandbox.__legacy.pending));
+  run(migrated, 'state.fieldObservationInventoryReady = true');
+  await run(migrated, 'submitFieldObservation({preventDefault(){}})');
+  assert.equal(migrated.sandbox.uuidCount(), 0); assert.equal(migrated.sandbox.posts.length, 0);
+  assert.equal(shared.size, 0);
+  assert.equal(recoveryRecords.get('inventory').entries.length, 0);
+
+  // Real remaining capacity exhaustion, after compaction, precedes UUID/storage/POST.
+  shared.clear(); recoveryRecords.clear(); contexts.length = 0;
+  const full = makeContext('capacity');
+  const journal = {version: 2, entries: [], resolved: [], epoch: 0, resolved_watermark: 0};
+  for (let i = 0; JSON.stringify(journal).length < 512 * 1024 - 500; i++) {
+    journal.resolved.push({digest: i.toString(16).padStart(64, '0'), sequence: 0});
+  }
+  recoveryRecords.set('inventory', journal);
+  const fullBefore = JSON.stringify(journal);
+  await run(full, 'submitFieldObservation({preventDefault(){}})');
+  assert.equal(full.sandbox.uuidCount(), 0); assert.equal(full.sandbox.posts.length, 0);
+  assert.equal(shared.size, 0);
+  assert.equal(JSON.stringify(recoveryRecords.get('inventory')), fullBefore);
+  assert.match(run(full, 'document.querySelector("#observation-status").textContent'), /recovery_quota.*Aucun UUID ni POST créé/);
+
+  // Confirmed POST with terminal IDB failure: retain the durable pending and tell the truth.
+  for (let repeat = 0; repeat < 3; repeat++) {
+    shared.clear(); recoveryRecords.clear(); contexts.length = 0;
+    const success = makeContext(`cleanup-success-${repeat}`); let confirmedPayload;
+    success.sandbox.fetch = async (url, options) => {
+      assert.equal(options.method, 'POST');
+      success.sandbox.completedOperation = run(success, 'activeFieldObservationOperation');
+      confirmedPayload = JSON.parse(options.body);
+      success.sandbox.posts.push(confirmedPayload);
+      recoveryRecords.failWrite = true;
+      return {ok: true, status: 201};
+    };
+    await run(success, 'submitFieldObservation({preventDefault(){}})');
+    assert.equal(success.sandbox.posts.length, 1);
+    assert.equal(success.sandbox.completedOperation.results.network_result, 'confirmed');
+    assert.equal(success.sandbox.completedOperation.results.recovery_cleanup_result, 'pending');
+    assert.equal(run(success, 'document.querySelector("#observation-status").textContent'),
+      run(success, 'FIELD_OBSERVATION_CONFIRMED_RECOVERY_PENDING'));
+    assert.doesNotMatch(run(success, 'document.querySelector("#observation-status").textContent'), /Aucun POST/);
+    assert.equal(recoveryRecords.get('inventory').entries[0].pending.payload.observation_id, confirmedPayload.observation_id);
+    delete recoveryRecords.failWrite;
+    shared.clear();
+    const reload = makeContext('cleanup-reload');
+    await run(reload, 'restorePendingFieldObservationInventory()');
+    const entry = run(reload, 'fieldObservationEntryId(state.fieldObservationLock.entries[0])');
+    assert.equal(run(reload, 'state.fieldObservationLock.entries[0].pending.payload.observation_id'), confirmedPayload.observation_id);
+    reload.sandbox.fetch = async (url, options) => {
+      assert.ok(url.endsWith('/' + confirmedPayload.observation_id));
+      assert.notEqual(options?.method, 'POST');
+      return {ok: true, status: 200, json: async () => projection(confirmedPayload)};
+    };
+    await run(reload, `reconcileFieldObservationEntry(${JSON.stringify(entry)})`);
+    assert.equal(recoveryRecords.get('inventory').entries.length, 0);
+    assert.equal(recoveryRecords.get('inventory').resolved.length, 0);
+    assert.equal(reload.sandbox.posts.length, 0);
+    const lastReload = makeContext('cleanup-stable');
+    await run(lastReload, 'restorePendingFieldObservationInventory()');
+    assert.equal(run(lastReload, 'state.fieldObservationLock'), null);
   }
 
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''.replace("HELPERS_SOURCE", json.dumps(helpers)).replace("RECOVERY_IDB_SOURCE", RECOVERY_IDB_HARNESS)
-    result = subprocess.run([engine, "-e", program], capture_output=True, text=True, check=False)
+    return program
+
+
+def test_field_observation_two_context_web_locks_inventory_and_clear():
+    program = _field_observation_multicontext_program()
+    result = subprocess.run([javascript_engine(), "-e", program], capture_output=True, text=True, check=False, timeout=90)
     assert result.returncode == 0, result.stderr
+
+
+def test_decision_only_refresh_reads_actual_durable_uuid_without_new_decision(tmp_path):
+    """Production UUID generation and file persistence -> HTTP GET -> real UI refresh.
+
+    Only the upstream astronomy/weather evaluation is fixed; durable evaluation,
+    storage, HTTP routing, and refresh are the production implementations.
+    The pipe transport avoids opening a network socket in CI.
+    """
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    from astropilot.app import create_app
+    from astropilot.decision_forecast_evidence_store import FileDecisionForecastEvidenceStore
+    from astropilot.field_observation_store import FileFieldObservationStore
+    from decision.services.durable_tonight_application_service import (
+        DurableTonightApplicationService, generate_decision_id,
+    )
+    from decision.services.tonight_application_service import TonightResult, TonightStatus
+    from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
+
+    calls = []
+    result = TonightResult(
+        night={"date": "2026-09-29"}, recommendation=None, mission=None,
+        status=TonightStatus.NO_PRODUCTIVE_WINDOW,
+        forecast_evidence=DecisionForecastEvidence(()),
+    )
+    def evaluate(**kwargs):
+        calls.append(kwargs)
+        return result
+
+    store = FileDecisionForecastEvidenceStore(tmp_path / "decisions")
+    service = DurableTonightApplicationService(
+        application_service=SimpleNamespace(evaluate=evaluate), evidence_store=store,
+        decision_id_factory=generate_decision_id,
+        field_observation_store=FileFieldObservationStore(tmp_path / "observations"),
+    )
+    decision = service.evaluate()
+    decision_id = decision.decision_id
+    assert decision_id is not None
+    before = {path.name: path.read_bytes() for path in (tmp_path / "decisions").iterdir()}
+    assert len(list((tmp_path / "decisions").glob("*.json"))) == 1
+    client = TestClient(create_app(service_factory=lambda: service,
+        clock=lambda: datetime(2026, 9, 29, 22, tzinfo=timezone.utc)))
+    prefix = _field_observation_multicontext_program().split("(async () => {\n  // Two distinct states")[0]
+    checks = r'''
+const fs = require('fs');
+function replyFromPython(url, options) {
+  process.stdout.write(JSON.stringify({url, method: options?.method || 'GET'}) + '\n');
+  let line = ''; const byte = Buffer.alloc(1);
+  while (fs.readSync(0, byte, 0, 1, null) && byte[0] !== 10) line += byte.toString();
+  const reply = JSON.parse(line);
+  return {ok: reply.status >= 200 && reply.status < 300, status: reply.status, json: async () => reply.body};
+}
+(async () => {
+  const tab = makeContext('durable-refresh');
+  tab.sandbox.__decisionId = DECISION_ID;
+  run(tab, `state.acceptedMission = null;
+    state.currentDecision = {decision_id: __decisionId, night_date: '2026-09-29'};
+    state.fieldObservationDraftContext = Object.freeze({...state.fieldObservationDraftContext,
+      source: 'decision', decision_id: __decisionId});`);
+  // The publication 404 is the invalid context being recovered, not a new decision.
+  tab.sandbox.fetch = async () => ({ok: false, status: 404});
+  await run(tab, 'submitFieldObservation({preventDefault(){}})');
+  assert.equal(run(tab, 'state.fieldObservationLock.status'), 'invalid');
+  const pending = run(tab, 'JSON.stringify(state.fieldObservationLock.pending)');
+  const current = tab.sandbox.state.currentDecision;
+  tab.sandbox.fetch = async (url, options) => replyFromPython(url, options);
+  await run(tab, 'refreshInvalidFieldObservationContext()');
+  assert.equal(run(tab, 'state.fieldObservationLock.status'), 'pending');
+  assert.equal(run(tab, 'state.fieldObservationContextInvalid'), false);
+  assert.equal(run(tab, 'JSON.stringify(state.fieldObservationLock.pending)'), pending);
+  assert.equal(tab.sandbox.state.currentDecision, current);
+  assert.equal(run(tab, 'state.fieldObservationLock.pending.payload.decision_id'), DECISION_ID);
+  assert.equal(run(tab, 'state.observationBusy'), false);
+  assert.equal(tab.sandbox.uuidCount(), 1);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''.replace("DECISION_ID", json.dumps(decision_id))
+    process = subprocess.Popen([javascript_engine(), "-e", prefix + checks],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    requests = []
+    try:
+        for line in process.stdout:
+            request = json.loads(line)
+            requests.append(request)
+            assert request["method"] == "GET"
+            assert request["url"] != "/v1/tonight"
+            response = client.request(request["method"], request["url"])
+            process.stdin.write(json.dumps({"status": response.status_code, "body": response.json()}) + "\n")
+            process.stdin.flush()
+        assert process.wait(timeout=15) == 0, process.stderr.read()
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+    assert len(requests) == 2
+    assert requests[-1]["url"] == f"/v1/decisions/{decision_id}/context"
+    assert len(calls) == 1
+    after = {path.name: path.read_bytes() for path in (tmp_path / "decisions").iterdir()}
+    assert after == before
+    assert len(list((tmp_path / "decisions").glob("*.json"))) == 1
+    assert store.load(decision_id=decision_id) == decision.forecast_evidence

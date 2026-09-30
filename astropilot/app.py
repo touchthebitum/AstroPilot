@@ -3211,6 +3211,25 @@ def create_app(
                 ) from exc
             raise_field_observation_internal_error(exc)
 
+    @application.get("/v1/decisions/{decision_id}/context")
+    def get_persisted_decision_context(decision_id: str):
+        decision_id = validated_field_observation_route_identity(
+            decision_id, field="decision_id",
+        )
+        try:
+            # Immutable evidence is the existing canonical durable identity source.
+            # Reading it never evaluates tonight or allocates a decision ID.
+            evidence = application_service().evidence_store.load(
+                decision_id=decision_id,
+            )
+        except Exception as exc:
+            raise_field_observation_read_error(exc)
+        if evidence is None:
+            raise HTTPException(
+                status_code=404, detail={"code": "decision_not_found"},
+            )
+        return {"decision_id": decision_id}
+
     @application.post("/v1/field-observations", status_code=201)
     def create_field_observation(
         request: FieldObservationCreateRequest,

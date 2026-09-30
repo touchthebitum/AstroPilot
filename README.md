@@ -182,13 +182,28 @@ Un timeout `context_refresh_timeout` libère busy et conserve le pending.
 Les erreurs IndexedDB sont classées `recovery_unavailable`, `recovery_schema`,
 `recovery_transaction` ou `recovery_corrupt`, avec leur cause native si disponible.
 
-Limite explicite : les tombstones ne sont pas compactés, car les pages anciennes
-ne disposent pas d’un protocole d’epoch durable permettant une éviction sûre.
-Le document sérialisé est plafonné à 512 Ki unités UTF-16 (au plus 1 Mio en UTF-16).
-Un dépassement `recovery_quota` bloque toute nouvelle mutation/publication avant
-écriture et conserve le journal précédent ; aucune identité résolue n’est évincée.
-Cette garde borne la croissance persistée mais peut nécessiter une récupération
-assistée après un grand nombre de résolutions ; ce n’est pas une compaction.
+Le journal v2 utilise un `epoch` monotone et un `resolved_watermark` persistant.
+Chaque nouvelle enveloppe pending porte sa `recovery_sequence`, sans changer le
+payload envoyé au serveur. Après résolution, le watermark avance jusqu’à la plus
+ancienne séquence encore non résolue moins un (ou l’epoch si aucune ne reste).
+Les tombstones sous ce watermark sont compactés ; une ancienne page ré-inventorie
+sous Web Lock avant toute mutation et écarte les enveloppes mémoire/localStorage
+ayant une séquence inférieure ou égale au watermark, sans leur attribuer un nouvel
+epoch. Les identités legacy non séquencées sont conservées sous forme de digests
+SHA-256 complets ; la migration v1 compacte donc aussi les anciennes tombstones
+sans perdre leur identité exacte. Les artefacts legacy résolus réapparus à l’identique sont écartés ; les versions
+divergentes restent soumises aux règles de réconciliation ciblée déjà établies.
+Le plafond reste 512 Ki unités UTF-16. La capacité est vérifiée après compaction,
+avant UUID et localStorage ; une capacité réellement insuffisante bloque sans POST.
+Le refresh décision seule appelle `GET /v1/decisions/{decision_id}/context`, qui
+relit uniquement l’evidence immuable persistée et retourne l’ID exact : aucun
+recompute météo ni nouvelle décision. Cette evidence ne contient pas de fingerprint
+site/config canonique ; le fingerprint local reste revalidé sous Web Lock.
+Le résultat réseau et le nettoyage recovery sont distincts. Si le serveur a confirmé
+l’observation mais que l’écriture recovery terminale échoue : « Observation confirmée
+côté serveur. Le nettoyage local durable doit être réconcilié ; l’UUID d’origine
+reste conservé dans la recovery pending. » Le journal antérieur conserve le pending,
+qu’un reload peut retrouver puis nettoyer par GET canonique sans nouvel UUID/POST.
 
 Ce stockage est propre à l’origine navigateur ; effacer aussi IndexedDB ou toutes
 les données du site supprime cette preuve locale de récupération.

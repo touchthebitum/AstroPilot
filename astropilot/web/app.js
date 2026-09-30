@@ -721,12 +721,12 @@ function fieldObservationDraft() {
   return fieldObservationDraftForContext(draftContext);
 }
 
-function buildFieldObservationPayload(draft = fieldObservationDraft(), recordedAt = new Date().toISOString()) {
+function buildFieldObservationPayload(draft = fieldObservationDraft(), recordedAt = new Date().toISOString(), observationId = null) {
   if (!draft) return null;
   const observedAt = localDateTimeToUtc(draft.observed_at_local, draft.timezone);
   if (Date.parse(observedAt) > Date.parse(recordedAt)) throw new Error("observed_at_in_future");
   return {
-    observation_id: crypto.randomUUID(), decision_id: draft.decision_id,
+    observation_id: observationId || crypto.randomUUID(), decision_id: draft.decision_id,
     execution_id: draft.execution_id,
     observed_at_utc: observedAt, recorded_at_utc: recordedAt,
     supersedes_observation_id: null,
@@ -850,7 +850,9 @@ function validPendingFieldObservationPayload(payload, expectedContext) {
 }
 
 function validPendingFieldObservation(value, expectedContext) {
-  if (!exactObservationKeys(value, ["version", "payload", "snapshot", "observed_at_local", "timezone"])
+  if (!(exactObservationKeys(value, ["version", "payload", "snapshot", "observed_at_local", "timezone"])
+      || (exactObservationKeys(value, ["version", "payload", "snapshot", "observed_at_local", "timezone", "recovery_sequence"])
+        && Number.isSafeInteger(value.recovery_sequence) && value.recovery_sequence > 0))
       || value.version !== PENDING_FIELD_OBSERVATION_VERSION
       || typeof value.snapshot !== "string"
       || typeof value.observed_at_local !== "string"
@@ -903,7 +905,7 @@ function validFieldObservationLock(value) {
       && value.version === FIELD_OBSERVATION_LOCK_VERSION
       && value.status === "multiple_pending"
       && validObservationIdentity(value.generation)
-      && Array.isArray(value.entries)
+     && Array.isArray(value.entries)
       && value.entries.length > 1) {
     return value.entries.every(validEntry)
       && (!value.corruptions || value.corruptions.every(validCorruption));
@@ -1010,6 +1012,8 @@ function webLocksAvailable() {
 const FIELD_OBSERVATION_RECOVERY_DB = "fieldObservationRecovery";
 let fieldObservationRecoveryJournal = null;
 let fieldObservationRecoveryResolved = new Set();
+let fieldObservationRecoveryRetired = new Set();
+const FIELD_OBSERVATION_CONFIRMED_RECOVERY_PENDING = "Observation confirmée côté serveur. Le nettoyage local durable doit être réconcilié ; l’UUID d’origine reste conservé dans la recovery pending.";
 
 function recoveryFieldObservationArtifacts() {
   const artifacts = fieldObservationArtifacts(state.fieldObservationLock);
@@ -1017,9 +1021,15 @@ function recoveryFieldObservationArtifacts() {
 }
 
 function validFieldObservationRecoveryJournal(value) {
-  return exactObservationKeys(value, ["version", "entries", "resolved"])
-    && value.version === 1 && Array.isArray(value.entries) && Array.isArray(value.resolved)
-    && value.resolved.every(id => typeof id === "string")
+  return (exactObservationKeys(value, ["version", "entries", "resolved"]) && value.version === 1
+      || exactObservationKeys(value, ["version", "entries", "resolved", "epoch", "resolved_watermark"])
+        && value.version === 2 && Number.isSafeInteger(value.epoch) && value.epoch >= 0
+        && Number.isSafeInteger(value.resolved_watermark) && value.resolved_watermark >= 0
+        && value.resolved_watermark <= value.epoch)
+     && Array.isArray(value.entries) && Array.isArray(value.resolved)
+    && value.resolved.every(id => value.version === 1 ? typeof id === "string"
+      : exactObservationKeys(id, ["digest", "sequence"]) && /^[a-f0-9]{64}$/.test(id.digest)
+        && Number.isSafeInteger(id.sequence) && id.sequence >= 0 && id.sequence <= value.epoch)
     && new Set(value.entries.map(item => item?.entry_id)).size === value.entries.length
     && value.entries.every(item => {
       if (!plainObservationRecord(item) || typeof item.entry_id !== "string"
@@ -1028,13 +1038,22 @@ function validFieldObservationRecoveryJournal(value) {
           || typeof item.key !== "string" || typeof item.created_at !== "string"
           || typeof item.updated_at !== "string"
           || !Number.isFinite(Date.parse(item.created_at)) || !Number.isFinite(Date.parse(item.updated_at))) return false;
-      if (item.pending) return item.key === fieldObservationContextKey(item.context)
+      if (item.pending) return (value.version === 1 || item.pending.recovery_sequence === undefined
+          || item.pending.recovery_sequence > value.resolved_watermark && item.pending.recovery_sequence <= value.epoch)
+        && item.key === fieldObservationContextKey(item.context)
         && validPendingFieldObservation(item.pending, item.context)
         && typeof item.generation === "string";
       return typeof item.raw === "string" && typeof item.reason === "string"
         && (item.key.startsWith(FIELD_OBSERVATION_PENDING_PREFIX)
           || (item.origin === "global_lock" && item.key === FIELD_OBSERVATION_LOCK_KEY));
     });
+}
+
+async function fieldObservationRecoveryDigest(id) {
+  try {
+    const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(id));
+    return Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, "0")).join("");
+  } catch (error) { throw fieldObservationRecoveryError("recovery_unavailable", error); }
 }
 
 function fieldObservationRecoveryError(code, cause) {
@@ -1096,13 +1115,46 @@ function markResolvedFieldObservationRecovery(entry, equivalent = false) {
 async function loadFieldObservationRecoveryUnlocked() {
   const journal = await fieldObservationRecoveryTransaction();
   if (journal !== undefined && !validFieldObservationRecoveryJournal(journal)) throw new Error("recovery_corrupt");
-  fieldObservationRecoveryJournal = journal || {version: 1, entries: [], resolved: []};
+  // Version 1 identities remain as migration tombstones. Version 2 publications
+  // carry a sequence in the envelope, so a watermark replaces their tombstones.
+  fieldObservationRecoveryJournal = journal?.version === 2 ? journal
+    : {...(journal || {entries: [], resolved: []}), version: 2, epoch: 0, resolved_watermark: 0,
+      resolved: await Promise.all((journal?.resolved || []).map(async id => ({digest: await fieldObservationRecoveryDigest(id), sequence: 0})))};
   fieldObservationRecoveryResolved = new Set();
   const memory = fieldObservationArtifacts(state.fieldObservationLock);
   const disk = fieldObservationArtifacts(persistedInventoryFieldObservationLock(pendingFieldObservationInventory()));
-  // Tombstones prevent a stale live page from resurrecting an explicitly resolved entry.
-  const keep = entry => !fieldObservationRecoveryJournal.resolved.includes(fieldObservationEntryId(entry))
-    || [...disk.entries, ...disk.corruptions].some(candidate => sameFieldObservationArtifact(candidate, entry));
+  const digests = new Map(await Promise.all([...memory.entries, ...memory.corruptions, ...disk.entries, ...disk.corruptions]
+    .map(async entry => [fieldObservationEntryId(entry), await fieldObservationRecoveryDigest(fieldObservationEntryId(entry))])));
+  const compacted = entry => entry.pending?.recovery_sequence !== undefined
+    && entry.pending.recovery_sequence <= fieldObservationRecoveryJournal.resolved_watermark;
+  const retired = entry => compacted(entry)
+    || fieldObservationRecoveryJournal.resolved.some(item => item.digest === digests.get(fieldObservationEntryId(entry)));
+  fieldObservationRecoveryRetired = new Set([...memory.entries, ...memory.corruptions, ...disk.entries, ...disk.corruptions]
+    .filter(retired).map(fieldObservationEntryId));
+  // Remove only exact retired disk artefacts, under the mandatory Web Lock.
+  // A stale page cannot promote its old envelope to a new sequence.
+  for (const entry of [...disk.entries, ...disk.corruptions]) {
+    const raw = entry.pending ? JSON.stringify(entry.pending) : entry.raw;
+    if (retired(entry) && localStorage.getItem(entry.key) === raw) localStorage.removeItem(entry.key);
+  }
+  const persisted = persistedFieldObservationLock();
+  if (persisted.lock) {
+    const items = fieldObservationArtifacts(persisted.lock);
+    const remaining = {entries: items.entries.filter(keepEntry => !retired(keepEntry)),
+      corruptions: items.corruptions.filter(keepEntry => !retired(keepEntry))};
+    if (remaining.entries.length !== items.entries.length || remaining.corruptions.length !== items.corruptions.length) {
+      if (localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY) !== persisted.raw) throw new Error("recovery_context_changed");
+      if (!remaining.entries.length && !remaining.corruptions.length) localStorage.removeItem(FIELD_OBSERVATION_LOCK_KEY);
+      else {
+        const lock = remaining.entries.length === 1 && !remaining.corruptions.length
+          ? {...remaining.entries[0], version: FIELD_OBSERVATION_LOCK_VERSION,
+            generation: fieldObservationLockGeneration(remaining.entries[0].pending), status: remaining.entries[0].status || "pending"}
+          : {...persisted.lock, ...remaining, status: remaining.entries.length > 1 ? "multiple_pending" : "corrupt_pending"};
+        localStorage.setItem(FIELD_OBSERVATION_LOCK_KEY, JSON.stringify(storedFieldObservationLockValue(lock)));
+      }
+    }
+  }
+  const keep = entry => !retired(entry);
   const entries = memory.entries.filter(keep);
   const corruptions = memory.corruptions.filter(keep);
   for (const entry of fieldObservationRecoveryJournal.entries) {
@@ -1124,17 +1176,31 @@ async function saveFieldObservationRecoveryUnlocked() {
   const now = new Date().toISOString();
   const entries = new Map(fieldObservationRecoveryJournal.entries.map(entry => [entry.entry_id, entry]));
   for (const entry of recoveryFieldObservationArtifacts()) {
+    if (entry.pending?.recovery_sequence !== undefined
+        && entry.pending.recovery_sequence <= fieldObservationRecoveryJournal.resolved_watermark) continue;
     const entry_id = fieldObservationEntryId(entry);
+    if (fieldObservationRecoveryRetired.has(entry_id)) continue;
     entries.set(entry_id, {...entry, origin: entry.origin || "pending_storage",
       generation: entry.generation || (entry.pending ? fieldObservationLockGeneration(entry.pending) : null),
       entry_id, created_at: entries.get(entry_id)?.created_at || now, updated_at: now});
   }
   for (const id of fieldObservationRecoveryResolved) entries.delete(id);
-  const journal = {version: 1, entries: [...entries.values()],
-    resolved: [...new Set([...fieldObservationRecoveryJournal.resolved, ...fieldObservationRecoveryResolved])]};
+  const epoch = Math.max(fieldObservationRecoveryJournal.epoch,
+    ...[...entries.values()].map(entry => entry.pending?.recovery_sequence || 0));
+  const sequences = [...entries.values()].map(entry => entry.pending?.recovery_sequence).filter(Number.isSafeInteger);
+  const resolved_watermark = Math.max(fieldObservationRecoveryJournal.resolved_watermark,
+    sequences.length ? Math.min(...sequences) - 1 : epoch);
+  // Retain only unsequenced migration identities, or resolutions above a live gap.
+  const resolvedByDigest = new Map(fieldObservationRecoveryJournal.resolved.map(item => [item.digest, item]));
+  for (const id of fieldObservationRecoveryResolved) {
+    const entry = [...fieldObservationRecoveryJournal.entries, ...recoveryFieldObservationArtifacts()]
+      .find(entry => fieldObservationEntryId(entry) === id);
+    const digest = await fieldObservationRecoveryDigest(id);
+    resolvedByDigest.set(digest, {digest, sequence: entry?.pending?.recovery_sequence || 0});
+  }
+  const resolved = [...resolvedByDigest.values()].filter(item => item.sequence === 0 || item.sequence > resolved_watermark);
+  const journal = {version: 2, entries: [...entries.values()], resolved, epoch, resolved_watermark};
   if (!validFieldObservationRecoveryJournal(journal)) throw new Error("recovery_invalid_write");
-  // Never evict tombstones without a durable epoch protocol understood by stale pages.
-  // Bound serialized storage instead; failure preserves the previous durable journal.
   if (JSON.stringify(journal).length > 512 * 1024) throw new Error("recovery_quota");
   await fieldObservationRecoveryTransaction(journal);
   fieldObservationRecoveryJournal = journal;
@@ -1154,10 +1220,14 @@ async function withFieldObservationWebLock(callback, operation = null) {
         if (operation?.abortController?.signal.aborted) throw staleFieldObservationOperationError();
         executed = true;
         try { return await callback(); }
-        finally { await saveFieldObservationRecoveryUnlocked(); }
+        finally {
+          await saveFieldObservationRecoveryUnlocked();
+          if (operation?.results?.network_result === "confirmed") operation.results.recovery_cleanup_result = "complete";
+        }
       },
     );
-    return {executed, reason: executed ? null : "web_lock_denied", value};
+    return {executed, reason: executed ? null : "web_lock_denied", value,
+      network_result: operation?.results?.network_result, recovery_cleanup_result: operation?.results?.recovery_cleanup_result};
   } catch (error) {
     if (error?.message?.startsWith("recovery_")) {
       adoptFieldObservationLock({...state.fieldObservationLock, status: "unreadable", recovery_error: error.message});
@@ -1165,7 +1235,12 @@ async function withFieldObservationWebLock(callback, operation = null) {
       updateFieldObservationSubmitState();
       observationMessage(`Journal de récupération bloqué : ${error.message}. Toute publication reste bloquée.`, {error: true});
     }
-    return {executed: false, reason: error?.message?.startsWith("recovery_") ? error.message : "web_lock_failed", value: false, error};
+    if (operation?.results?.network_result === "confirmed" && error?.message?.startsWith("recovery_")) {
+      operation.results.recovery_cleanup_result = "pending";
+      observationMessage(FIELD_OBSERVATION_CONFIRMED_RECOVERY_PENDING, {error: true});
+    }
+    return {executed, reason: error?.message?.startsWith("recovery_") ? error.message : "web_lock_failed", value: false, error,
+      network_result: operation?.results?.network_result, recovery_cleanup_result: operation?.results?.recovery_cleanup_result};
   }
 }
 
@@ -1427,6 +1502,11 @@ function installInventoriedFieldObservationLockUnlocked(lock) {
 }
 
 function acquireFieldObservationLockUnlocked(candidate) {
+  // The candidate may have been captured before this lock reloaded the journal.
+  // Never reacquire or assign a new epoch to a compacted/resolved identity.
+  if (fieldObservationRecoveryRetired.has(fieldObservationEntryId(candidate))
+      || (candidate.pending?.recovery_sequence !== undefined
+        && candidate.pending.recovery_sequence <= fieldObservationRecoveryJournal.resolved_watermark)) return false;
   const candidateRaw = JSON.stringify(storedFieldObservationLockValue(candidate));
   const pendingRaw = JSON.stringify(candidate.pending);
   try {
@@ -1766,6 +1846,7 @@ function beginFieldObservationOperation(kind, lock = state.fieldObservationLock)
     lockKey: lock?.key || null,
     observationId: lock?.pending?.payload?.observation_id || null,
     abortController,
+    results: {network_result: null, recovery_cleanup_result: null},
   });
   activeFieldObservationOperation = operation;
   state.observationBusy = true;
@@ -1869,12 +1950,15 @@ async function finishFieldObservationSubmission(key, submittedSnapshot, message,
   if (operation && !fieldObservationOperationCurrent(operation)) return false;
   const lock = state.fieldObservationLock?.key === key ? state.fieldObservationLock : null;
   if (!lock || (operation && lock.generation !== operation.lockGeneration)) return false;
+  if (operation) operation.results.network_result = "confirmed";
   const result = await withFieldObservationWebLock(() => {
     if (operation && !fieldObservationOperationCurrent(operation)) return false;
     if (!clearFieldObservationLockUnlocked(lock)) return false;
     return rebuildPendingFieldObservationInventoryUnlocked();
   }, operation);
+  if (result.recovery_cleanup_result === "pending") return false;
   const removed = result.executed && result.value === true;
+  if (operation) operation.results.recovery_cleanup_result = removed ? "complete" : "pending";
   if (fieldObservationSnapshot() === submittedSnapshot) resetFieldObservationForm();
   else message += " Vos modifications en cours sont conservées.";
   if (!removed) message += " Le brouillon local n’a pas pu être nettoyé.";
@@ -1907,7 +1991,8 @@ function validatedFieldObservationPublicationLockUnlocked(expectedLock) {
   return persisted.lock;
 }
 
-function finishFieldObservationSubmissionUnlocked(lock, submittedSnapshot, message) {
+function finishFieldObservationSubmissionUnlocked(lock, submittedSnapshot, message, operation) {
+  if (operation) operation.results.network_result = "confirmed";
   const removed = clearFieldObservationLockUnlocked(lock)
     && rebuildPendingFieldObservationInventoryUnlocked();
   if (fieldObservationSnapshot() === submittedSnapshot) resetFieldObservationForm();
@@ -1930,7 +2015,7 @@ async function publishFieldObservationUnlocked(lock, key, payload, submittedSnap
       if (stored) {
         if (!storedObservationMatchesPayload(stored, payload)) throw observationConflictError();
         return finishFieldObservationSubmissionUnlocked(
-          canonicalLock, submittedSnapshot, "Observation déjà enregistrée — aucune duplication.",
+          canonicalLock, submittedSnapshot, "Observation déjà enregistrée — aucune duplication.", operation,
         );
       }
     }
@@ -1943,7 +2028,7 @@ async function publishFieldObservationUnlocked(lock, key, payload, submittedSnap
     });
     if (!fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
     return finishFieldObservationSubmissionUnlocked(canonicalLock, submittedSnapshot, response.status === 201
-      ? "Observation enregistrée." : "Observation déjà enregistrée — aucune duplication.");
+      ? "Observation enregistrée." : "Observation déjà enregistrée — aucune duplication.", operation);
   } catch (error) {
     if (error?.staleFieldObservationOperation || !fieldObservationOperationCurrent(operation)) return false;
     if (error?.networkTimeout) {
@@ -1957,7 +2042,7 @@ async function publishFieldObservationUnlocked(lock, key, payload, submittedSnap
           if (!storedObservationMatchesPayload(stored, payload)) throw observationConflictError();
           return finishFieldObservationSubmissionUnlocked(
             canonicalLock, submittedSnapshot,
-            "Observation enregistrée. La confirmation réseau avait été interrompue.",
+            "Observation enregistrée. La confirmation réseau avait été interrompue.", operation,
           );
         }
       } catch (lookupError) {
@@ -2103,10 +2188,23 @@ async function submitFieldObservation(event) {
         return null;
       }
       if (state.fieldObservationLock) return null;
+      // Reserve capacity before UUID allocation or any localStorage mutation.
+      const sequence = fieldObservationRecoveryJournal.epoch + 1;
+      if (!Number.isSafeInteger(sequence)) throw new Error("recovery_quota");
+      const previewPayload = buildFieldObservationPayload(draft, new Date().toISOString(), "00000000-0000-0000-0000-000000000000");
+      const previewPending = {version: PENDING_FIELD_OBSERVATION_VERSION, payload: previewPayload,
+        snapshot: submittedSnapshot, observed_at_local: draft.observed_at_local, timezone: draft.timezone,
+        recovery_sequence: sequence};
+      const previewEntry = {key, pending: previewPending, context, origin: "pending_storage",
+        generation: fieldObservationLockGeneration(previewPending), created_at: new Date().toISOString(), updated_at: new Date().toISOString()};
+      previewEntry.entry_id = fieldObservationEntryId(previewEntry);
+      if (JSON.stringify({...fieldObservationRecoveryJournal,
+          entries: [...fieldObservationRecoveryJournal.entries, previewEntry]}).length + 4096 > 512 * 1024) throw new Error("recovery_quota");
       const acquiredPayload = buildFieldObservationPayload(draft);
       const envelope = {
         version: PENDING_FIELD_OBSERVATION_VERSION,
         payload: acquiredPayload,
+        recovery_sequence: sequence,
         snapshot: submittedSnapshot,
         observed_at_local: draft.observed_at_local,
         timezone: draft.timezone,
@@ -2191,14 +2289,9 @@ async function canonicalFieldObservationContextAvailable(context, operation = nu
   // Preview only: no setter, navigation, or temporary editor context changes.
   const execution = context.execution_id;
   const mission = context.source === "mission";
-  if (!execution && !mission && !state.availability) return false;
   const url = execution ? `/v1/executions/${encodeURIComponent(execution)}/session`
-    : mission ? "/v1/accepted-mission/current" : "/v1/tonight";
+    : mission ? "/v1/accepted-mission/current" : `/v1/decisions/${encodeURIComponent(context.decision_id)}/context`;
   const options = {signal: operation?.abortController?.signal};
-  if (!execution && !mission) Object.assign(options, {
-    method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({availability: state.availability}),
-  });
   const canonical = await fieldObservationNetworkRequest(url, options, async response =>
     response.ok ? response.json() : null);
   if (operation && !fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
@@ -2207,8 +2300,7 @@ async function canonicalFieldObservationContextAvailable(context, operation = nu
   if (mission) return canonical?.status === "accepted"
     && canonical?.decision_id === context.decision_id
     && (!context.mission_id || canonical?.mission_id === context.mission_id);
-  return canonical?.decision_id === context.decision_id
-    && canonical?.night_date === context.night_date;
+  return canonical?.decision_id === context.decision_id;
 }
 
 async function refreshInvalidFieldObservationContext() {
@@ -2376,9 +2468,10 @@ async function reconcileFieldObservationEntry(entryId) {
         return null;
       }
       if (!fieldObservationOperationCurrent(operation)) return false;
+      operation.results.network_result = "confirmed";
       return removeFieldObservationEntryUnlocked(entry);
     }, operation);
-    if (result.executed && result.value === null) return;
+    if (result.recovery_cleanup_result === "pending" || (result.executed && result.value === null)) return;
     observationMessage(result.executed && result.value
       ? "Entrée ciblée réconciliée ; l’inventaire local a été reconstruit."
       : "L’artefact ciblé a changé ou Web Locks est indisponible ; réactualisez l’inventaire avant de réessayer.",
