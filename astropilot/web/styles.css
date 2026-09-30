@@ -233,8 +233,8 @@ button { color: inherit; }
 .observation-advanced-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding-top: 10px; }
 .observation-advanced-grid label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
 .observation-advanced-grid input, .observation-advanced-grid select { min-width: 0; padding: 9px; color: var(--ink); background: var(--panel-strong); border: 1px solid var(--line-bright); border-radius: 6px; }
-.observation-actions { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 18px; }
-.observation-actions p { margin: 0; color: var(--muted); font-size: 12px; }
+.observation-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 18px; }
+.observation-actions p { flex: 1 1 100%; margin: 0; color: var(--muted); font-size: 12px; }
 .observation-actions p.observation-error { color: var(--danger, #f4938b); }
 @media (max-width: 760px) {
   .observation-quick-grid, .observation-advanced-grid { grid-template-columns: 1fr; }
