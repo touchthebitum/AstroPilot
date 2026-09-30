@@ -164,6 +164,16 @@ Chaque ré-inventorisation fusionne les artefacts persistants avec les artefacts
 mémoire non résolus, y compris après `clear()` et un retour bfcache. Un artefact
 absent reste diagnostiqué et bloquant jusqu’à résolution ciblée explicite ou
 réconciliation canonique ; il n’est pas réécrit automatiquement dans le stockage.
+Les diagnostics de migration (`migration_failed`, `migration_requires_web_locks`)
+s’ajoutent à cet inventaire fusionné : les entrées et corruptions mémoire restent
+présentes même lorsqu’un autre pending legacy ne peut pas être migré.
+La résolution mémoire cible chaque artefact indépendamment du statut global.
+Sous Web Lock, elle exige son identité mémoire exacte, l’absence persistante de
+sa clé et l’absence de remplacement divergent. La réconciliation vérifie le GET
+canonique du même UUID, puis revalide la cible avant son retrait ; l’abandon ou
+la suppression d’une corruption exige une confirmation explicite. Seule la cible
+est oubliée, puis l’inventaire restant est reconstruit (0/1/N), sans retirer les
+autres pending. Un brut réapparu ou remplacé impose une ré-inventorisation bloquante.
 Un `clear()` sans artefact dans la mémoire ni la persistance laisse l’éditeur libre.
 Un verrou global illisible est une corruption distincte (`global_lock`, brut et
 identifiant immuable), affichée à côté des pending valides. Sa suppression confirmée

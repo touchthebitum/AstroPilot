@@ -1699,6 +1699,129 @@ const projection = payload => ({...structuredClone(payload),
     assert.equal(run(changed, 'state.fieldObservationLock.corruptions.some(e => e.raw === "{new-global")'), true);
   }
 
+  // Exact review regressions, repeated with independent contexts and delayed/reordered events.
+  const ids = tab => run(tab, 'fieldObservationArtifacts(state.fieldObservationLock).entries.map(e => e.pending.payload.observation_id).sort().join(",")');
+  const prepareMemory = async (name, corruption = false) => {
+    shared.clear(); contexts.length = 0; storageEvents.length = 0;
+    const source = makeContext(`${name}-source`); const target = makeContext(name);
+    shared.set(corruption ? 'astropilot.fieldObservationLock' : first.key,
+      corruption ? '{memory-global' : JSON.stringify(first.pending));
+    await run(target, 'restorePendingFieldObservationInventory()');
+    await deliverStorage(); await lockTail;
+    source.sandbox.localStorage.clear();
+    await deliverStorage({reverse: true, duplicate: true});
+    await run(target, 'handleFieldObservationPageShow({persisted: true})');
+    return {source, target};
+  };
+  const targetId = tab => run(tab, 'fieldObservationEntryId(fieldObservationArtifacts(state.fieldObservationLock).entries[0])');
+  const resolve = (tab, method, id) => run(tab, `${method}(${JSON.stringify(id)})`);
+  for (let repeat = 0; repeat < 3; repeat++) {
+    for (const unavailable of [true, false]) {
+      const {source, target} = await prepareMemory('migration-memory');
+      const legacyB = {payload: second.pending.payload,
+        snapshot: run(target, `legacySnapshotFromObservationPayload(${JSON.stringify(second.pending.payload)})`)};
+      const setItem = target.sandbox.localStorage.setItem;
+      if (unavailable) target.sandbox.navigator = {};
+      else target.sandbox.localStorage.setItem = () => { throw new Error('migration-write-denied'); };
+      source.sandbox.localStorage.setItem(second.key, JSON.stringify(legacyB));
+      await deliverStorage({reverse: true, duplicate: true});
+      for (let reload = 0; reload < 3; reload++) {
+        await run(target, 'handleFieldObservationPageShow({persisted: true})');
+        await run(target, 'restorePendingFieldObservationInventory()');
+        assert.equal(ids(target), [first.pending.payload.observation_id, second.pending.payload.observation_id].sort().join(','));
+        assert.equal(run(target, 'state.fieldObservationLock.migration_diagnostic'),
+          unavailable ? 'migration_requires_web_locks' : 'migration_failed');
+        await run(target, 'submitFieldObservation({preventDefault(){}})');
+        assert.equal(target.sandbox.posts.length, 0);
+      }
+      target.sandbox.navigator = {locks: controlledLocks}; target.sandbox.localStorage.setItem = setItem;
+      await run(target, 'restorePendingFieldObservationInventory()');
+      const bId = run(target, 'fieldObservationEntryId(state.fieldObservationLock.entries.find(e => e.key === ' + JSON.stringify(second.key) + '))');
+      await resolve(target, 'abandonFieldObservationEntry', bId);
+      assert.equal(ids(target), first.pending.payload.observation_id);
+      assert.equal(shared.has(first.key), false);
+      assert.equal(run(target, 'document.querySelector("#observation-save").disabled'), true);
+      await resolve(target, 'abandonFieldObservationEntry', targetId(target));
+      assert.equal(run(target, 'state.fieldObservationLock'), null);
+    }
+    for (const withB of [false, true]) {
+      const {source, target} = await prepareMemory('global-memory', true);
+      const id = run(target, 'fieldObservationEntryId(state.fieldObservationLock.corruptions[0])');
+      if (withB) source.sandbox.localStorage.setItem(second.key, JSON.stringify(second.pending));
+      await deliverStorage({reverse: true, duplicate: true});
+      await run(target, 'handleFieldObservationPageShow({persisted: true})');
+      await resolve(target, 'removeCorruptFieldObservationEntry', id);
+      assert.equal(run(target, 'fieldObservationArtifacts(state.fieldObservationLock).corruptions.length'), 0);
+      if (withB) {
+        assert.equal(shared.get(second.key), JSON.stringify(second.pending));
+        assert.equal(run(target, 'state.fieldObservationLock.status'), 'pending');
+        assert.equal(ids(target), second.pending.payload.observation_id);
+      } else assert.equal(run(target, 'state.fieldObservationLock'), null);
+    }
+    {
+      const {source, target} = await prepareMemory('global-memory-divergent', true);
+      const id = run(target, 'fieldObservationEntryId(state.fieldObservationLock.corruptions[0])');
+      // Replacement has not delivered its event when the user acts.
+      source.sandbox.localStorage.setItem('astropilot.fieldObservationLock', '{replacement');
+      await resolve(target, 'removeCorruptFieldObservationEntry', id);
+      assert.equal(shared.get('astropilot.fieldObservationLock'), '{replacement');
+      assert.equal(run(target, 'state.fieldObservationLock.corruptions.length'), 2);
+    }
+    for (const method of ['reconcileFieldObservationEntry', 'abandonFieldObservationEntry']) {
+      const {source, target} = await prepareMemory('pending-memory');
+      const id = targetId(target);
+      source.sandbox.localStorage.setItem(second.key, JSON.stringify(second.pending));
+      await deliverStorage({reverse: true, duplicate: true});
+      await run(target, 'handleFieldObservationPageShow({persisted: true})');
+      target.sandbox.canonical = {[first.pending.payload.observation_id]: projection(first.pending.payload)};
+      await resolve(target, method, id);
+      assert.equal(ids(target), second.pending.payload.observation_id);
+      assert.equal(shared.get(second.key), JSON.stringify(second.pending));
+      assert.equal(run(target, 'state.fieldObservationLock.status'), 'pending');
+      assert.equal(target.sandbox.posts.length, 0);
+      const reload = makeContext('remaining-reload');
+      await run(reload, 'restorePendingFieldObservationInventory()');
+      assert.equal(ids(reload), second.pending.payload.observation_id);
+    }
+    for (const method of ['reconcileFieldObservationEntry', 'abandonFieldObservationEntry']) {
+      const {source, target} = await prepareMemory('pending-memory-divergent');
+      const id = targetId(target);
+      const divergent = structuredClone(first.pending);
+      divergent.payload.observation_id = 'replacement-uuid';
+      source.sandbox.localStorage.setItem(first.key, JSON.stringify(divergent));
+      target.sandbox.canonical = {[first.pending.payload.observation_id]: projection(first.pending.payload)};
+      await resolve(target, method, id);
+      assert.equal(shared.get(first.key), JSON.stringify(divergent));
+      assert.ok(ids(target).includes(first.pending.payload.observation_id));
+      assert.equal(target.sandbox.posts.length, 0);
+    }
+    {
+      const {source, target} = await prepareMemory('memory-get-race');
+      const id = targetId(target);
+      let finishGet;
+      target.sandbox.fetch = () => new Promise(resolve => { finishGet = resolve; });
+      const reconciliation = resolve(target, 'reconcileFieldObservationEntry', id);
+      await drainMicrotasks();
+      assert.equal(typeof finishGet, 'function');
+      const divergent = structuredClone(first.pending); divergent.payload.observation_id = 'during-get-uuid';
+      source.sandbox.localStorage.setItem(first.key, JSON.stringify(divergent));
+      finishGet({ok: true, status: 200, json: async () => projection(first.pending.payload)});
+      await reconciliation;
+      assert.equal(shared.get(first.key), JSON.stringify(divergent));
+      assert.ok(ids(target).includes(first.pending.payload.observation_id));
+    }
+    // N -> 1 -> 0 reconstruction, with two memory-only UUIDs and no disk artifacts.
+    const {source, target} = await prepareMemory('memory-many');
+    source.sandbox.localStorage.setItem(second.key, JSON.stringify(second.pending));
+    await run(target, 'restorePendingFieldObservationInventory()');
+    source.sandbox.localStorage.clear();
+    await deliverStorage({reverse: true, duplicate: true});
+    await resolve(target, 'abandonFieldObservationEntry', targetId(target));
+    assert.equal(run(target, 'fieldObservationArtifacts(state.fieldObservationLock).entries.length'), 1);
+    await resolve(target, 'abandonFieldObservationEntry', targetId(target));
+    assert.equal(run(target, 'state.fieldObservationLock'), null);
+  }
+
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''.replace("HELPERS_SOURCE", json.dumps(helpers))
     result = subprocess.run([engine, "-e", program], capture_output=True, text=True, check=False)

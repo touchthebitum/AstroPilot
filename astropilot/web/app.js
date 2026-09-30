@@ -1443,6 +1443,15 @@ function persistedInventoryFieldObservationLock(inventory) {
   return null;
 }
 
+// Migration diagnostics decorate the merged inventory; they never replace its artifacts.
+function fieldObservationMigrationDiagnostic(inventory, status) {
+  const merged = inventoriedFieldObservationLock(inventory);
+  const artifacts = fieldObservationArtifacts(merged);
+  return {...merged, key: undefined, pending: undefined, status,
+    entries: artifacts.entries, corruptions: artifacts.corruptions,
+    migration_diagnostic: status, migrations: inventory.migrations};
+}
+
 function rebuildPendingFieldObservationInventoryUnlocked() {
   let inventory = pendingFieldObservationInventory();
   if (!inventory.available) {
@@ -1451,8 +1460,7 @@ function rebuildPendingFieldObservationInventoryUnlocked() {
   }
   if (inventory.migrations.length > 0) {
     if (!migrateLegacyFieldObservationsUnlocked(inventory)) {
-      adoptFieldObservationLock({status: "migration_failed", entries: inventory.entries,
-        corruptions: inventory.corruptions});
+      adoptFieldObservationLock(fieldObservationMigrationDiagnostic(inventory, "migration_failed"));
       return false;
     }
     inventory = pendingFieldObservationInventory();
@@ -1481,8 +1489,7 @@ async function restorePendingFieldObservationInventory() {
   const inventory = pendingFieldObservationInventory();
   let diagnostic = inventoriedFieldObservationLock(inventory);
   if (inventory.migrations?.length > 0 && !webLocksAvailable()) {
-    diagnostic = {status: "migration_requires_web_locks", entries: inventory.entries,
-      corruptions: inventory.corruptions, migrations: inventory.migrations};
+    diagnostic = fieldObservationMigrationDiagnostic(inventory, "migration_requires_web_locks");
   }
   if (diagnostic) adoptFieldObservationLock(diagnostic);
   else if (inventory.available) adoptFieldObservationLock(null);
@@ -2102,14 +2109,29 @@ function fieldObservationEntryForId(entryId, lock = state.fieldObservationLock) 
   return entries.find((entry) => fieldObservationEntryId(entry) === entryId) || null;
 }
 
+// Presence is checked per artifact, independently of the aggregate diagnostic status.
+function memoryOnlyFieldObservationEntryUnlocked(entry, disk) {
+  const id = fieldObservationEntryId(entry);
+  const memory = fieldObservationArtifacts(state.fieldObservationLock);
+  const siblings = [...memory.entries, ...memory.corruptions];
+  if (!siblings.some(candidate => fieldObservationEntryId(candidate) === id)) return false;
+  if (siblings.some(candidate => candidate.key === entry.key
+      && (candidate.origin || "pending_storage") === (entry.origin || "pending_storage")
+      && fieldObservationEntryId(candidate) !== id)) return false;
+  if (localStorage.getItem(entry.key) !== null) return false;
+  const persisted = fieldObservationArtifacts(disk);
+  return ![...persisted.entries, ...persisted.corruptions].some(candidate => candidate.key === entry.key);
+}
+
 function revalidatedFieldObservationEntryUnlocked(entry) {
-  if (state.fieldObservationLock?.status === "persistence_missing"
-      && localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY) === null && localStorage.getItem(entry.key) === null) {
+  const inventory = pendingFieldObservationInventory();
+  const disk = persistedInventoryFieldObservationLock(inventory);
+  if (inventory.available && disk?.status !== "unreadable"
+      && memoryOnlyFieldObservationEntryUnlocked(entry, disk)) {
     return fieldObservationEntryForId(fieldObservationEntryId(entry));
   }
-  const lock = inventoriedFieldObservationLock(pendingFieldObservationInventory());
-  const exact = fieldObservationEntryForId(fieldObservationEntryId(entry), lock);
-  if (!exact) adoptFieldObservationLock(lock);
+  const exact = fieldObservationEntryForId(fieldObservationEntryId(entry), disk);
+  if (!exact) adoptFieldObservationLock(inventoriedFieldObservationLock(inventory));
   return exact;
 }
 
@@ -2132,6 +2154,13 @@ function persistRemainingFieldObservationArtifactsUnlocked(persisted, entries, c
 
 function removeFieldObservationEntryUnlocked(entry) {
   try {
+    if (!revalidatedFieldObservationEntryUnlocked(entry)) return false;
+    const disk = persistedInventoryFieldObservationLock(pendingFieldObservationInventory());
+    if (memoryOnlyFieldObservationEntryUnlocked(entry, disk)) {
+      forgetResolvedFieldObservationArtifact(entry);
+      rebuildPendingFieldObservationInventoryUnlocked();
+      return true;
+    }
     if (entry.reason === "invalid_global_lock") {
       if (localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY) !== entry.raw) {
         adoptFieldObservationLock(inventoriedFieldObservationLock(pendingFieldObservationInventory()));
@@ -2141,19 +2170,9 @@ function removeFieldObservationEntryUnlocked(entry) {
       forgetResolvedFieldObservationArtifact(entry);
       return rebuildPendingFieldObservationInventoryUnlocked();
     }
-    if (!revalidatedFieldObservationEntryUnlocked(entry)) return false;
     const persisted = persistedFieldObservationLock();
     if (!persisted.available) return false;
     const currentRaw = localStorage.getItem(entry.key);
-    if (state.fieldObservationLock?.status === "persistence_missing" && !persisted.lock && currentRaw === null) {
-      const remaining = (state.fieldObservationLock.entries || []).filter((candidate) =>
-        fieldObservationEntryId(candidate) !== fieldObservationEntryId(entry));
-      const corruptions = (state.fieldObservationLock.corruptions || []).filter((candidate) =>
-        fieldObservationEntryId(candidate) !== fieldObservationEntryId(entry));
-      adoptFieldObservationLock(remaining.length || corruptions.length
-        ? {...state.fieldObservationLock, entries: remaining, corruptions} : null);
-      return true;
-    }
     const expectedRaw = entry.pending ? JSON.stringify(entry.pending) : entry.raw;
     if (entry.origin !== "global_lock" && currentRaw !== expectedRaw) return false;
     // A global artifact may have a divergent local sibling. Never remove that sibling.
