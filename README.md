@@ -144,6 +144,29 @@ refuse peut consulter l’application, mais la saisie et la publication terrain
 sont bloquées avec un diagnostic visible. Le repli `localStorage` n’est pas
 présenté comme une exclusion multi-onglets sûre.
 
+
+Chaque phase réseau de publication (GET de retry, POST et GET de confirmation)
+est limitée à 15 secondes (`FIELD_OBSERVATION_NETWORK_TIMEOUT_MS`), décodage de
+réponse compris. Le contrôleur réseau est lié à l’annulation de l’opération ;
+une échéance libère le Web Lock même si le transport ne répond pas à l’abort.
+Le pending et le verrou d’origine restent conservés en cas de statut incertain.
+La prochaine tentative commence par le GET canonique du même UUID.
+
+Un agrégat dont une entrée manque ou diverge devient `inconsistent_persistence` :
+le verrou global original reste intact et ses artefacts sont affichés avec
+l’inventaire courant. Les actions ciblent un identifiant déterministe composé de
+la source, clé, génération, UUID et contenu complet immuable (valeur brute pour
+une corruption). Cet identifiant est revalidé sous Web Lock avant tout GET ou
+suppression. Résoudre un artefact global ne supprime jamais son voisin divergent
+portant la même clé ; les autres artefacts globaux sont conservés.
+
+Le harness multi-contexte est un simulateur contrôlé de globals JavaScript
+séparés, pas un navigateur réel. Le stockage partagé et la file Web Locks sont
+indépendants d’une file d’événements `storage`. Les écritures identiques ne
+produisent aucun événement ; la livraison se fait dans une tâche ultérieure et
+peut être retardée, dupliquée ou réordonnée. Les échéances réseau sont déclenchées
+explicitement dans les scénarios suspendus, sans réduire la constante de production.
+
 Start the API and bundled UI after synchronizing the runtime environment:
 
 ```bash
