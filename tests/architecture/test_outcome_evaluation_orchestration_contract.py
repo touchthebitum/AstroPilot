@@ -1,10 +1,15 @@
 import ast
+import errno
 import multiprocessing
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+if os.name != "nt":
+    import fcntl
 
 import pytest
 
@@ -144,29 +149,35 @@ class TickingClock:
 
 
 class MultiprocessBlockingOutcomeStore:
-    def __init__(self, directory, entered_save, release_save, save_completed):
+    def __init__(
+        self,
+        directory,
+        aggregate_published,
+        release_save_wrapper,
+        save_wrapper_returned,
+    ):
         self.delegate = FileOutcomeEvaluationStore(Path(directory))
-        self.entered_save = entered_save
-        self.release_save = release_save
-        self.save_completed = save_completed
+        self.aggregate_published = aggregate_published
+        self.release_save_wrapper = release_save_wrapper
+        self.save_wrapper_returned = save_wrapper_returned
 
     def list_by_observation(self, **kwargs):
         return self.delegate.list_by_observation(**kwargs)
 
     def save(self, *, evaluation):
-        self.entered_save.set()
-        if not self.release_save.wait(timeout=10):
-            raise TimeoutError("outcome_save_release_timeout")
         created = self.delegate.save(evaluation=evaluation)
-        self.save_completed.set()
+        self.aggregate_published.set()
+        if not self.release_save_wrapper.wait(timeout=10):
+            raise TimeoutError("outcome_save_release_timeout")
+        self.save_wrapper_returned.set()
         return created
 
 
 def _multiprocess_evaluate_with_blocked_publication(
     root,
-    entered_save,
-    release_save,
-    save_completed,
+    aggregate_published,
+    release_save_wrapper,
+    save_wrapper_returned,
     results,
 ):
     root = Path(root)
@@ -177,9 +188,9 @@ def _multiprocess_evaluate_with_blocked_publication(
         ),
         outcome_evaluation_store=MultiprocessBlockingOutcomeStore(
             root / "outcomes",
-            entered_save,
-            release_save,
-            save_completed,
+            aggregate_published,
+            release_save_wrapper,
+            save_wrapper_returned,
         ),
         context_resolver=ContextResolver(),
         clock=lambda: FIRST_COMPUTED_AT,
@@ -193,20 +204,34 @@ def _multiprocess_evaluate_with_blocked_publication(
 
 def _multiprocess_supersede_observation(
     root,
-    save_attempted,
-    save_completed,
+    supersession_lock_blocked,
+    supersession_completed,
     results,
 ):
     store = FileFieldObservationStore(Path(root) / "observations")
-    save_attempted.set()
+    lock_path = Path(root) / "observations" / ".field_observations.lock"
     try:
+        with lock_path.open("a+b") as handle:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as error:
+                if error.errno not in (
+                    errno.EACCES,
+                    errno.EAGAIN,
+                    errno.EWOULDBLOCK,
+                ):
+                    raise
+                supersession_lock_blocked.set()
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                raise AssertionError("field_observation_lock_was_not_held")
         created = store.save(
             observation=observation(
                 observation_id="observation-2",
                 supersedes_observation_id="observation-1",
             )
         )
-        save_completed.set()
+        supersession_completed.set()
         results.put(("supersession", created))
     except Exception as error:
         results.put(("supersession_error", type(error).__name__, str(error)))
@@ -708,22 +733,28 @@ def test_field_observation_lease_remains_held_through_outcome_save(tmp_path):
 
 
 def test_interprocess_supersession_waits_for_outcome_publication(tmp_path):
+    if os.name == "nt":
+        pytest.skip(
+            "causal lock-contention proof uses POSIX flock LOCK_NB; "
+            "the Windows backend has no equivalent non-blocking probe"
+        )
+
     observation_store = FileFieldObservationStore(tmp_path / "observations")
     observation_store.save(observation=observation())
     context = multiprocessing.get_context("spawn")
-    outcome_save_entered = context.Event()
-    release_outcome_save = context.Event()
-    outcome_save_completed = context.Event()
-    supersession_attempted = context.Event()
+    aggregate_published = context.Event()
+    release_save_wrapper = context.Event()
+    save_wrapper_returned = context.Event()
+    supersession_lock_blocked = context.Event()
     supersession_completed = context.Event()
     results = context.Queue()
     evaluator = context.Process(
         target=_multiprocess_evaluate_with_blocked_publication,
         args=(
             str(tmp_path),
-            outcome_save_entered,
-            release_outcome_save,
-            outcome_save_completed,
+            aggregate_published,
+            release_save_wrapper,
+            save_wrapper_returned,
             results,
         ),
     )
@@ -731,7 +762,7 @@ def test_interprocess_supersession_waits_for_outcome_publication(tmp_path):
         target=_multiprocess_supersede_observation,
         args=(
             str(tmp_path),
-            supersession_attempted,
+            supersession_lock_blocked,
             supersession_completed,
             results,
         ),
@@ -739,21 +770,28 @@ def test_interprocess_supersession_waits_for_outcome_publication(tmp_path):
 
     evaluator.start()
     try:
-        assert outcome_save_entered.wait(timeout=10)
+        assert aggregate_published.wait(timeout=10)
+        published = FileOutcomeEvaluationStore(
+            tmp_path / "outcomes"
+        ).list_by_observation(observation_id="observation-1")
+        assert len(published) == 1
+        assert not save_wrapper_returned.is_set()
+
         superseder.start()
-        assert supersession_attempted.wait(timeout=10)
-        assert not supersession_completed.wait(timeout=0.3)
+        assert supersession_lock_blocked.wait(timeout=10)
+        assert not save_wrapper_returned.is_set()
+        assert not supersession_completed.is_set()
         assert not (tmp_path / "observations" / "observation-2.json").exists()
 
-        release_outcome_save.set()
-        assert outcome_save_completed.wait(timeout=10)
+        release_save_wrapper.set()
+        assert save_wrapper_returned.wait(timeout=10)
         assert supersession_completed.wait(timeout=10)
         evaluator.join(timeout=10)
         superseder.join(timeout=10)
         assert evaluator.exitcode == 0
         assert superseder.exitcode == 0
     finally:
-        release_outcome_save.set()
+        release_save_wrapper.set()
         for process in (evaluator, superseder):
             if process.pid is not None and process.is_alive():
                 process.terminate()
