@@ -73,6 +73,7 @@ const state = {
   progressEditorBaseline: null,
   sessions: [],
   activeSessionId: null,
+  fieldObservationSelectedExecutionId: null,
   sessionEvidenceInputExecutionId: null,
   sessionBusy: false,
   sessionWriteAttempted: false,
@@ -81,6 +82,7 @@ const state = {
   fieldObservationDraftContext: null,
   fieldObservationContextInvalid: false,
   invalidFieldObservationContextKey: null,
+  conflictingFieldObservationContextKey: null,
 };
 
 const SESSION_PENDING_KEY = "astropilot.pendingSession";
@@ -183,6 +185,13 @@ async function reloadSessions({ selectId = null } = {}) {
   state.activeSessionId = sessions.some((item) => item.execution.execution_id === candidate)
     ? candidate : sessions.some((item) => item.execution.execution_id === state.activeSessionId)
       ? state.activeSessionId : sessions[0]?.execution.execution_id || null;
+  if (selectId && sessions.some((item) => item.execution.execution_id === selectId)) {
+    state.fieldObservationSelectedExecutionId = selectId;
+  } else if (!sessions.some((item) => (
+    item.execution.execution_id === state.fieldObservationSelectedExecutionId
+  ))) {
+    state.fieldObservationSelectedExecutionId = null;
+  }
   if (pending?.mission_id === missionId && sessions.some((item) => item.execution.execution_id === pending.execution_id)) {
     localStorage.removeItem(SESSION_PENDING_KEY);
   }
@@ -352,9 +361,12 @@ function observationContext(source) {
   const decision = source === "mission" ? state.acceptedMission : state.currentDecision;
   const decisionId = decision?.decision_id;
   if (!decisionId) return null;
+  const selectedExecution = source === "mission"
+    && currentSession()?.execution.execution_id === state.fieldObservationSelectedExecutionId
+    ? state.fieldObservationSelectedExecutionId : null;
   return {
     decision_id: decisionId,
-    execution_id: source === "mission" ? currentSession()?.execution.execution_id || null : null,
+    execution_id: selectedExecution,
     night_date: decision?.night_date || decision?.mission?.night_date || state.currentDecision?.night_date || null,
     source,
     timezone: siteTimezone(),
@@ -863,6 +875,10 @@ async function submitFieldObservation(event) {
     observationMessage("Ce contexte est périmé. Rechargez puis re-sélectionnez la mission et la session avant tout nouvel envoi.", { error: true });
     return;
   }
+  if (state.conflictingFieldObservationContextKey === key) {
+    observationMessage("Ce relevé est bloqué par un conflit d’identifiant. Rechargez les données avant toute nouvelle tentative.", { error: true });
+    return;
+  }
   if (unreadablePendingObservationBlocked(key)) {
     observationMessage(unreadablePendingObservationMessage(), { error: true });
     return;
@@ -944,11 +960,16 @@ async function submitFieldObservation(event) {
         if (lookupError?.status === 409) error = lookupError;
       }
     }
-    if (error?.status >= 400 && error.status < 500) invalidatePendingFieldObservation(key);
+    if (error?.status >= 400 && error.status < 500 && error.status !== 409) {
+      invalidatePendingFieldObservation(key);
+    }
     if (error?.status === 404) {
       state.invalidFieldObservationContextKey = key;
       state.fieldObservationContextInvalid = true;
       setFieldObservationEditorDisabled(true);
+    }
+    if (error?.status === 409) {
+      state.conflictingFieldObservationContextKey = key;
     }
     const validationMessage = ["recorded_at_precedes_observed_at", "observed_at_in_future"].includes(error?.code)
       ? "L’heure observée est dans le futur par rapport à l’enregistrement. Vérifiez la date, l’heure et le fuseau du site."
@@ -1163,6 +1184,7 @@ function setList(selector, items, fallback) {
 function renderMission(mission) {
   state.sessions = [];
   state.activeSessionId = null;
+  state.fieldObservationSelectedExecutionId = null;
   const start = clock(mission.window_start);
   const end = clock(mission.window_end);
   text("#mission-title", mission.target || "Mission de cette nuit");
@@ -2812,6 +2834,13 @@ function showMessage(title, body, { kicker = "Décision indisponible", retry = t
   show("message");
 }
 
+function setCurrentFieldObservationDecision(decision) {
+  state.currentDecision = decision?.decision_id ? decision : null;
+  ui.addObservationMessage.hidden = true;
+  ui.addObservationDecision.hidden = true;
+  syncFieldObservationContext();
+}
+
 function normalizeError(response, payload) {
   const detail = payload?.detail;
   if (payload?.error === "user_profile_unavailable") {
@@ -3082,10 +3111,7 @@ async function loadTonight(availability) {
   showAvailabilityError("");
   show("loading");
   ui.refresh.disabled = true;
-  state.currentDecision = null;
-  ui.addObservationMessage.hidden = true;
-  ui.addObservationDecision.hidden = true;
-  syncFieldObservationContext();
+  setCurrentFieldObservationDecision(null);
 
   try {
     const response = await fetch("/v1/tonight", {
@@ -3127,8 +3153,7 @@ async function loadTonight(availability) {
     }
 
     clearAcceptedMission();
-    state.currentDecision = payload?.decision_id ? payload : null;
-    syncFieldObservationContext();
+    setCurrentFieldObservationDecision(payload);
     if (payload.status === "weather_refused") {
       showMessage(
         payload.weather_decision.presentation.label,
@@ -3287,6 +3312,7 @@ ui.openSavedMission.addEventListener("click", () => {
 });
 document.querySelector("#session-choice").addEventListener("change", (event) => {
   state.activeSessionId = event.target.value;
+  state.fieldObservationSelectedExecutionId = event.target.value || null;
   state.invalidFieldObservationContextKey = null;
   renderSession();
 });

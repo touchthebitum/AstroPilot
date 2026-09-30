@@ -80,9 +80,10 @@ const crypto = {randomUUID: () => `observation-${++uuid}`};
 const state = {configuration: {site: {timezone: 'Europe/Zurich'}},
   currentDecision: {decision_id: 'decision-1', night_date: '2026-09-29'},
   acceptedMission: {decision_id: 'decision-1', mission: {night_date: '2026-09-29'}},
-  sessions: [], activeSessionId: null, observationBusy: false,
+  sessions: [], activeSessionId: null, fieldObservationSelectedExecutionId: null,
+  observationBusy: false,
   fieldObservationDraftContext: null, fieldObservationContextInvalid: false,
-  invalidFieldObservationContextKey: null};
+  invalidFieldObservationContextKey: null, conflictingFieldObservationContextKey: null};
 function currentSession() { return state.sessions.find(item => item.execution.execution_id === state.activeSessionId) || null; }
 async function sessionHttpError(response) {
   const error = new Error('request_refused'); error.status = response.status;
@@ -105,10 +106,12 @@ function clearHarness() {
   storage.clear(); state.observationBusy = false; uuid = 0;
   storageFailures.get = false; storageFailures.set = false; storageFailures.remove = false;
   state.sessions = []; state.activeSessionId = null;
+  state.fieldObservationSelectedExecutionId = null;
   state.currentDecision = {decision_id: 'decision-1', night_date: '2026-09-29'};
   state.acceptedMission = {decision_id: 'decision-1', mission: {night_date: '2026-09-29'}};
   state.fieldObservationContextInvalid = false;
   state.invalidFieldObservationContextKey = null;
+  state.conflictingFieldObservationContextKey = null;
   if (state.unreadableFieldObservationContextKeys instanceof Set) state.unreadableFieldObservationContextKeys.clear();
   resetFieldObservationForm();
   element('#observation-observed-at').value = '2026-09-29T22:14';
@@ -204,6 +207,14 @@ async function check() {
   assert.match(pendingObservationKey('a.b_c-d', null), /decision:a\.b_c-d\.decision-only$/);
   assert.match(pendingObservationKey('a.b_c-d', 'decision'), /execution:decision$/);
 
+  // Merely loading a mission session does not link it to an observation.
+  clearHarness();
+  state.sessions = [{execution: {execution_id: 'session-a'}}];
+  state.activeSessionId = 'session-a';
+  assert.equal(observationContext('mission').execution_id, null);
+  state.fieldObservationSelectedExecutionId = 'session-a';
+  assert.equal(observationContext('mission').execution_id, 'session-a');
+
   // Switching from session A to B preserves the frozen draft and blocks submission.
   clearHarness();
   state.sessions = [
@@ -211,10 +222,13 @@ async function check() {
     {execution: {execution_id: 'session-b'}},
   ];
   state.activeSessionId = 'session-a';
+  state.fieldObservationSelectedExecutionId = 'session-a';
   state.fieldObservationDraftContext = Object.freeze({decision_id: 'decision-1', execution_id: 'session-a',
     night_date: '2026-09-29', source: 'mission', timezone: 'Europe/Zurich'});
   setQuick({cloud: 'overcast', transparency: 'poor', wind: '12'});
-  state.activeSessionId = 'session-b'; syncFieldObservationContext();
+  state.activeSessionId = 'session-b';
+  state.fieldObservationSelectedExecutionId = 'session-b';
+  syncFieldObservationContext();
   assert.equal(element('#observation-clouds').value, 'overcast');
   assert.equal(element('#observation-transparency').value, 'poor');
   assert.equal(element('#observation-wind').value, '12');
@@ -227,6 +241,7 @@ async function check() {
   resetFieldObservationForm();
   element('#observation-observed-at').value = '2026-09-29T22:14';
   state.fieldObservationContextInvalid = false;
+  state.fieldObservationSelectedExecutionId = 'session-b';
   state.fieldObservationDraftContext = Object.freeze({decision_id: 'decision-1', execution_id: 'session-b',
     night_date: '2026-09-29', source: 'mission', timezone: 'Europe/Zurich'});
   setQuick({cloud: 'clear'});
@@ -251,10 +266,18 @@ async function check() {
 
   // A server-declared conflict is never reconciled into success and keeps input.
   clearHarness(); setQuick({cloud: 'overcast'});
-  fetch = async () => response(409, {detail: {code: 'field_observation_conflict'}});
+  let conflictRequests = 0;
+  fetch = async () => {
+    conflictRequests += 1;
+    return response(409, {detail: {code: 'field_observation_conflict'}});
+  };
   await submitFieldObservation(event);
   assert.match(element('#observation-status').textContent, /Conflit/);
   assert.equal(element('#observation-clouds').value, 'overcast');
+  assert.equal(storage.has(pendingObservationKey('decision-1', null)), true);
+  await submitFieldObservation(event);
+  assert.equal(conflictRequests, 1);
+  assert.match(element('#observation-status').textContent, /bloqué par un conflit/);
 
   // A lookup that finds the same id with different content is also a conflict.
   clearHarness(); setQuick({cloud: 'few'});

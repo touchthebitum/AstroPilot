@@ -1339,7 +1339,10 @@ function run() {
     assert not results['recommended']['disabled']
 
 
-def test_field_observation_entry_points_require_a_persisted_decision():
+def test_field_observation_entry_points_require_a_persisted_decision(tmp_path):
+    import shutil
+    import subprocess
+
     response = make_client().get('/')
     script = make_client().get('/ui/app.js').text
 
@@ -1347,11 +1350,48 @@ def test_field_observation_entry_points_require_a_persisted_decision():
     assert 'id="add-field-observation-message"' in response.text
     assert 'id="add-field-observation-decision"' in response.text
     assert 'id="add-field-observation-mission"' in response.text
-    assert 'state.currentDecision = payload?.decision_id ? payload : null' in script
     assert 'ui.addObservationMessage.hidden = !state.currentDecision?.decision_id' in script
     assert 'ui.addObservationDecision.hidden = !decision.decision_id' in script
     assert 'openFieldObservation("decision")' in script
     assert 'openFieldObservation("mission")' in script
     assert 'payload.status === "no_productive_window"' in script
-    assert 'state.currentDecision = null' in script
-    assert 'ui.addObservationMessage.hidden = true' in script
+    assert 'setCurrentFieldObservationDecision(payload)' in script
+    assert 'setCurrentFieldObservationDecision(null)' in script
+
+    engine = shutil.which('node') or shutil.which('osascript')
+    if engine is None:
+        import pytest
+        pytest.skip('A JavaScript runtime is required for the entry-point test')
+    renderers = script[
+        script.index('function showMessage('):
+        script.index('function normalizeError(')
+    ]
+    harness = '''
+const state = {currentDecision: null};
+const ui = {
+  retry: {hidden: false},
+  addObservationMessage: {hidden: true},
+  addObservationDecision: {hidden: true},
+};
+const rendered = {};
+function text(selector, value) { rendered[selector] = value; }
+function show(view) { rendered.view = view; }
+function syncFieldObservationContext() {}
+''' + renderers + '''
+setCurrentFieldObservationDecision({
+  status: "no_productive_window",
+  decision_id: "decision-no-window",
+});
+showMessage("Aucune tranche productive", "Refus terrain", {kicker: "Analyse terminée"});
+if (ui.addObservationMessage.hidden) throw new Error("decision button hidden");
+setCurrentFieldObservationDecision(null);
+showMessage("Connexion impossible", "Erreur réseau");
+if (!ui.addObservationMessage.hidden) throw new Error("error button visible");
+'''
+    path = tmp_path / 'field-observation-entry-points.js'
+    path.write_text(harness)
+    command = [engine, str(path)] if Path(engine).name == 'node' else [
+        engine, '-l', 'JavaScript', str(path)
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stderr
