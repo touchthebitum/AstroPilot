@@ -170,6 +170,47 @@ def test_create_only_replay_is_idempotent_and_changed_payload_conflicts(tmp_path
     assert (tmp_path / "observation-123.json").read_bytes() == original
 
 
+def test_active_lease_returns_head_and_rejects_superseded_parent(tmp_path):
+    store = FileFieldObservationStore(tmp_path)
+    first = observation(observation_id="observation-a")
+    second = observation(
+        observation_id="observation-b",
+        supersedes_observation_id="observation-a",
+    )
+    store.save(observation=first)
+    store.save(observation=second)
+
+    with pytest.raises(
+        FieldObservationPersistenceError,
+        match="field_observation_superseded",
+    ):
+        with store.active_observation_lease(observation_id="observation-a"):
+            pass
+    with store.active_observation_lease(observation_id="observation-b") as active:
+        assert active == second
+
+
+def test_second_direct_successor_is_rejected_with_dedicated_error(tmp_path):
+    store = FileFieldObservationStore(tmp_path)
+    store.save(observation=observation(observation_id="observation-a"))
+    store.save(
+        observation=observation(
+            observation_id="observation-b",
+            supersedes_observation_id="observation-a",
+        )
+    )
+    with pytest.raises(
+        FieldObservationPersistenceError,
+        match="observation_already_superseded",
+    ):
+        store.save(
+            observation=observation(
+                observation_id="observation-c",
+                supersedes_observation_id="observation-a",
+            )
+        )
+
+
 def test_concurrent_identical_writers_create_once_and_replay_once(tmp_path):
     store = FileFieldObservationStore(tmp_path)
     source = observation()

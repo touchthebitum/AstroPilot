@@ -27,6 +27,9 @@ from decision.services.field_observation_context import (
 from decision.services.field_observation_recording_service import (
     FieldObservationRecordingService,
 )
+from decision.services.outcome_evaluation_orchestration import (
+    OutcomeEvaluationOrchestrationService,
+)
 from decision.weather.decision_forecast_evidence_persistence import (
     DecisionForecastEvidenceStore,
 )
@@ -54,6 +57,8 @@ class DurableTonightApplicationService:
         profile_loader: Callable | None = None,
         profile_saver: Callable | None = None,
         field_observation_store=None,
+        outcome_evaluation_store=None,
+        outcome_evaluation_clock: Callable | None = None,
     ) -> None:
         self.application_service = application_service
         self.evidence_store = evidence_store
@@ -68,6 +73,9 @@ class DurableTonightApplicationService:
         self._portfolio_credit_service = None
         self.field_observation_store = field_observation_store
         self._field_observation_service = None
+        self.outcome_evaluation_store = outcome_evaluation_store
+        self.outcome_evaluation_clock = outcome_evaluation_clock
+        self._outcome_evaluation_service = None
 
     def evaluate(self, **kwargs) -> TonightResult:
         result = self.application_service.evaluate(**kwargs)
@@ -208,9 +216,50 @@ class DurableTonightApplicationService:
             )
         return self._field_observation_service
 
+    def _outcome_evaluation_orchestration_service(
+        self,
+    ) -> OutcomeEvaluationOrchestrationService:
+        if self.field_observation_store is None:
+            raise RuntimeError("field_observation_persistence_unavailable")
+        if self.outcome_evaluation_store is None:
+            raise RuntimeError("outcome_evaluation_persistence_unavailable")
+        if self.outcome_evaluation_clock is None:
+            raise RuntimeError("outcome_evaluation_clock_unavailable")
+        if self._outcome_evaluation_service is None:
+            acceptance = self._decision_acceptance_service()
+            resolver = FieldObservationContextResolver(
+                decision_evidence_loader=lambda decision_id: (
+                    self.evidence_store.load(decision_id=decision_id)
+                ),
+                execution_loader=self.load_execution,
+                mission_loader=lambda mission_id: self._optional_lineage_load(
+                    acceptance.load_mission,
+                    mission_id,
+                ),
+                selection_loader=lambda selection_id: self._optional_lineage_load(
+                    acceptance.load_selection,
+                    selection_id,
+                ),
+            )
+            self._outcome_evaluation_service = (
+                OutcomeEvaluationOrchestrationService(
+                    observation_store=self.field_observation_store,
+                    forecast_evidence_store=self.evidence_store,
+                    outcome_evaluation_store=self.outcome_evaluation_store,
+                    context_resolver=resolver,
+                    clock=self.outcome_evaluation_clock,
+                )
+            )
+        return self._outcome_evaluation_service
+
     def record_field_observation(self, observation):
         return self._field_observation_recording_service().record_observation(
             observation
+        )
+
+    def evaluate_outcome_observation(self, observation_id: str):
+        return self._outcome_evaluation_orchestration_service().evaluate(
+            observation_id
         )
 
     def load_field_observation(self, observation_id: str):
