@@ -82,7 +82,7 @@ const state = {
   fieldObservationDraftContext: null,
   fieldObservationContextInvalid: false,
   invalidFieldObservationContextKey: null,
-  conflictingFieldObservationContextKey: null,
+  fieldObservationConflict: null,
 };
 
 const SESSION_PENDING_KEY = "astropilot.pendingSession";
@@ -383,6 +383,31 @@ function setFieldObservationEditorDisabled(disabled) {
   }
 }
 
+function fieldObservationContextKey(context) {
+  return context?.decision_id
+    ? pendingObservationKey(context.decision_id, context.execution_id || null) : null;
+}
+
+function fieldObservationEditorBlocked() {
+  const context = state.fieldObservationDraftContext;
+  const key = fieldObservationContextKey(context);
+  return !context
+    || state.fieldObservationContextInvalid
+    || !sameFieldObservationContext(context, activeObservationContext())
+    || (key !== null && state.invalidFieldObservationContextKey === key)
+    || Boolean(state.fieldObservationConflict);
+}
+
+function updateFieldObservationSubmitState() {
+  const blocked = fieldObservationEditorBlocked();
+  setFieldObservationEditorDisabled(blocked);
+  document.querySelector("#observation-save").disabled = blocked || state.observationBusy;
+}
+
+function fieldObservationConflictMessage() {
+  return "Un conflit d’observation précédent doit être résolu avant tout nouvel envoi. Le brouillon et son identifiant d’origine sont conservés ; rechargez les données pour le réconcilier.";
+}
+
 function openFieldObservation(source) {
   const context = observationContext(source);
   if (!context?.decision_id) return;
@@ -390,16 +415,35 @@ function openFieldObservation(source) {
   state.fieldObservationDraftContext = Object.freeze(context);
   state.fieldObservationContextInvalid = false;
   state.invalidFieldObservationContextKey = null;
-  setFieldObservationEditorDisabled(false);
   renderObservationLinkage();
   text("#observation-timezone", context.timezone
     ? `Fuseau du site : ${context.timezone}` : "Fuseau du site indisponible");
   const observedAt = document.querySelector("#observation-observed-at");
-  observedAt.value = context.timezone ? formatDateTimeLocalInZone(new Date(), context.timezone) : "";
+  let openingError = null;
+  try {
+    if (!context.timezone) throw new Error("timezone_unavailable");
+    observedAt.value = formatDateTimeLocalInZone(new Date(), context.timezone);
+  } catch (error) {
+    observedAt.value = "";
+    openingError = error?.message === "unsupported_site_timezone"
+      ? "Le fuseau du site configuré n’est pas reconnu. Corrigez la configuration du site avant d’enregistrer une observation."
+      : "La conversion du fuseau du site est indisponible sur cet appareil. Utilisez un navigateur compatible avant d’enregistrer une observation.";
+    state.fieldObservationContextInvalid = true;
+  }
   observationMessage("Choisissez les catégories observées, indiquez le vent mesuré en km/h ou précisez l’état de la surface.");
   ui.observation.showModal();
+  if (openingError) {
+    updateFieldObservationSubmitState();
+    observationMessage(state.fieldObservationConflict
+      ? `${openingError} ${fieldObservationConflictMessage()}` : openingError, { error: true });
+    return;
+  }
   syncFieldObservationContext();
   restorePendingFieldObservation();
+  updateFieldObservationSubmitState();
+  if (state.fieldObservationConflict) {
+    observationMessage(fieldObservationConflictMessage(), { error: true });
+  }
 }
 
 function observationMessage(message, { error = false } = {}) {
@@ -429,7 +473,9 @@ function localDateTimeParts(value) {
   if (!match) throw new Error("invalid_local_datetime");
   const parts = match.slice(1).map(Number);
   const [year, month, day, hour, minute] = parts;
-  const check = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  const check = new Date(0);
+  check.setUTCHours(hour, minute, 0, 0);
+  check.setUTCFullYear(year, month - 1, day);
   if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1
       || check.getUTCDate() !== day || check.getUTCHours() !== hour
       || check.getUTCMinutes() !== minute) throw new Error("invalid_local_datetime");
@@ -472,18 +518,36 @@ function zonedDateTimeParts(date, timezone) {
 function formatDateTimeLocalInZone(date, timezone) {
   const parts = zonedDateTimeParts(date, timezone);
   const pad = (value) => String(value).padStart(2, "0");
-  return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
+  return `${String(parts.year).padStart(4, "0")}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
+}
+
+function utcMilliseconds(year, month, day, hour = 0, minute = 0, second = 0, millisecond = 0) {
+  const date = new Date(0);
+  date.setUTCHours(hour, minute, second, millisecond);
+  date.setUTCFullYear(year, month - 1, day);
+  return date.getTime();
 }
 
 function localDateTimeToUtc(value, timezone) {
   if (!timezone) throw new Error("timezone_unavailable");
   const wanted = localDateTimeParts(value);
-  const wallClockAsUtc = Date.UTC(wanted.year, wanted.month - 1, wanted.day, wanted.hour, wanted.minute);
+  const wallClockAsUtc = utcMilliseconds(
+    wanted.year, wanted.month, wanted.day, wanted.hour, wanted.minute,
+  );
+  const minimumSupportedInstant = utcMilliseconds(1, 1, 1);
+  const maximumSupportedInstant = utcMilliseconds(9999, 12, 31, 23, 59, 59);
   const offsets = new Set();
+  const sampledInstants = new Set();
   for (let hours = -48; hours <= 48; hours += 6) {
-    const instant = wallClockAsUtc + hours * 3600000;
+    const instant = Math.max(minimumSupportedInstant, Math.min(
+      maximumSupportedInstant, wallClockAsUtc + hours * 3600000,
+    ));
+    if (sampledInstants.has(instant)) continue;
+    sampledInstants.add(instant);
     const parts = zonedDateTimeParts(new Date(instant), timezone);
-    offsets.add(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - instant);
+    offsets.add(utcMilliseconds(
+      parts.year, parts.month, parts.day, parts.hour, parts.minute, parts.second,
+    ) - instant);
   }
   const matches = [];
   for (const offset of offsets) {
@@ -783,7 +847,7 @@ function syncFieldObservationContext() {
   if (!dialog.open || !state.fieldObservationDraftContext) return;
   if (sameFieldObservationContext(state.fieldObservationDraftContext, activeObservationContext())) return;
   state.fieldObservationContextInvalid = true;
-  setFieldObservationEditorDisabled(true);
+  updateFieldObservationSubmitState();
   observationMessage(
     "La décision ou la session a changé. Cet éditeur est bloqué pour éviter un rattachement incorrect. Fermez-le puis rouvrez-le.",
     { error: true },
@@ -865,6 +929,7 @@ function observationConflictError() {
 
 function finishFieldObservationSubmission(key, submittedSnapshot, message) {
   const removed = removePendingFieldObservation(key);
+  if (state.fieldObservationConflict?.key === key) state.fieldObservationConflict = null;
   if (fieldObservationSnapshot() === submittedSnapshot) resetFieldObservationForm();
   else message += " Vos modifications en cours sont conservées.";
   if (!removed) message += " Le brouillon local n’a pas pu être nettoyé.";
@@ -891,8 +956,9 @@ async function submitFieldObservation(event) {
     observationMessage("Ce contexte est périmé. Rechargez puis re-sélectionnez la mission et la session avant tout nouvel envoi.", { error: true });
     return;
   }
-  if (state.conflictingFieldObservationContextKey === key) {
-    observationMessage("Ce relevé est bloqué par un conflit d’identifiant. Rechargez les données avant toute nouvelle tentative.", { error: true });
+  if (state.fieldObservationConflict) {
+    updateFieldObservationSubmitState();
+    observationMessage(fieldObservationConflictMessage(), { error: true });
     return;
   }
   if (unreadablePendingObservationBlocked(key)) {
@@ -945,7 +1011,7 @@ async function submitFieldObservation(event) {
     return;
   }
   state.observationBusy = true;
-  document.querySelector("#observation-save").disabled = true;
+  updateFieldObservationSubmitState();
   observationMessage("Enregistrement en cours…");
   try {
     if (reusingPending) {
@@ -983,10 +1049,9 @@ async function submitFieldObservation(event) {
     if (error?.status === 404) {
       state.invalidFieldObservationContextKey = key;
       state.fieldObservationContextInvalid = true;
-      setFieldObservationEditorDisabled(true);
     }
     if (error?.status === 409) {
-      state.conflictingFieldObservationContextKey = key;
+      state.fieldObservationConflict = Object.freeze({ key, pending: envelope });
     }
     const validationMessage = ["recorded_at_precedes_observed_at", "observed_at_in_future"].includes(error?.code)
       ? "L’heure observée est dans le futur par rapport à l’enregistrement. Vérifiez la date, l’heure et le fuseau du site."
@@ -1002,7 +1067,7 @@ async function submitFieldObservation(event) {
     observationMessage(messages[error?.status] || "Confirmation impossible. Réessayez : la même observation sera reprise sans doublon.", { error: true });
   } finally {
     state.observationBusy = false;
-    document.querySelector("#observation-save").disabled = false;
+    updateFieldObservationSubmitState();
   }
 }
 

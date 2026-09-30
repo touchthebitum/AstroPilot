@@ -66,6 +66,7 @@ function text(selector, value) { document.querySelector(selector).textContent = 
 function renderObservationLinkage() {}
 function siteTimezone() { return 'Europe/Zurich'; }
 function observationMessage(message) { document.querySelector('#observation-status').textContent = message; }
+function pendingObservationKey(decisionId, executionId) { return `${decisionId}:${executionId || 'none'}`; }
 const storage = new Map();
 const localStorage = {
   getItem(key) { return storage.get(key) || null; },
@@ -190,13 +191,15 @@ class Element {
     this.classList = {toggle: (_name, _enabled) => {}};
   }
   addEventListener(name, callback) { this.listeners[name] = callback; }
+  showModal() { this.open = true; }
+  close() { this.open = false; }
   querySelectorAll(selector) {
     if (selector === '[data-observation-choice]') return [element('#observation-clouds'), element('#observation-transparency')];
     if (selector === 'input[type="number"]') return numberIds.map(element);
     if (selector === 'input[type="radio"]') return radioIds.map(element);
     if (selector === 'select') return selectIds.map(element);
     if (selector === 'input, select, button') return [...numberIds, ...radioIds, ...selectIds,
-      '#observation-observed-at', '#observation-submit'].map(element);
+      '#observation-observed-at', '#observation-save'].map(element);
     return [];
   }
   set selectedIndex(value) { if (value === 0) this.value = ''; }
@@ -223,9 +226,11 @@ const document = {
     return element(selector);
   },
 };
+function text(selector, value) { element(selector).textContent = value; }
 radioIds.forEach((selector, index) => { element(selector).value = ['dry', 'damp', 'dew_present'][index]; });
 element('#field-observation-form');
 element('.observation-advanced');
+const ui = {observation: element('#field-observation-dialog')};
 const storage = new Map();
 const storageFailures = {get: false, set: false, remove: false};
 const localStorage = {
@@ -241,7 +246,7 @@ const state = {configuration: {site: {timezone: 'Europe/Zurich'}},
   sessions: [], activeSessionId: null, fieldObservationSelectedExecutionId: null,
   observationBusy: false,
   fieldObservationDraftContext: null, fieldObservationContextInvalid: false,
-  invalidFieldObservationContextKey: null, conflictingFieldObservationContextKey: null};
+  invalidFieldObservationContextKey: null, fieldObservationConflict: null};
 function currentSession() { return state.sessions.find(item => item.execution.execution_id === state.activeSessionId) || null; }
 async function sessionHttpError(response) {
   const error = new Error('request_refused'); error.status = response.status;
@@ -269,7 +274,7 @@ function clearHarness() {
   state.acceptedMission = {decision_id: 'decision-1', mission: {night_date: '2026-09-29'}};
   state.fieldObservationContextInvalid = false;
   state.invalidFieldObservationContextKey = null;
-  state.conflictingFieldObservationContextKey = null;
+  state.fieldObservationConflict = null;
   if (state.unreadableFieldObservationContextKeys instanceof Set) state.unreadableFieldObservationContextKeys.clear();
   resetFieldObservationForm();
   element('#observation-observed-at').value = '2026-09-29T22:14';
@@ -277,6 +282,7 @@ function clearHarness() {
   state.fieldObservationDraftContext = Object.freeze({decision_id: 'decision-1', execution_id: null,
     night_date: '2026-09-29', source: 'mission', timezone: 'Europe/Zurich'});
   element('#observation-status').textContent = '';
+  updateFieldObservationSubmitState();
 }
 '''
     checks = r'''
@@ -321,6 +327,9 @@ async function check() {
   assert.equal(localDateTimeToUtc('2026-07-15T12:00', 'Asia/Kathmandu'), '2026-07-15T06:15:00.000Z');
   assert.equal(localDateTimeToUtc('2026-07-15T12:00', 'Australia/Eucla'), '2026-07-15T03:15:00.000Z');
   assert.equal(localDateTimeToUtc('1985-07-15T12:00', 'Asia/Kathmandu'), '1985-07-15T06:30:00.000Z');
+  assert.equal(localDateTimeToUtc('0001-01-01T00:00', 'UTC'), '0001-01-01T00:00:00.000Z');
+  assert.equal(localDateTimeToUtc('9999-12-31T23:59', 'UTC'), '9999-12-31T23:59:00.000Z');
+  assert.equal(formatDateTimeLocalInZone(new Date('0001-01-01T00:00:00.000Z'), 'UTC'), '0001-01-01T00:00');
   let timezoneError = null;
   try { localDateTimeToUtc('2026-03-29T02:30', 'Europe/Zurich'); } catch (error) { timezoneError = error.message; }
   assert.equal(timezoneError, 'nonexistent_local_datetime');
@@ -349,6 +358,49 @@ async function check() {
   } finally {
     Intl.DateTimeFormat = nativeDateTimeFormat;
   }
+
+  // Opening through the real handler always shows a blocked diagnostic when site-time conversion is unavailable.
+  const assertBlockedOpening = (pattern) => {
+    assert.equal(element('#field-observation-dialog').open, true);
+    assert.equal(element('#observation-observed-at').value, '');
+    assert.equal(state.fieldObservationContextInvalid, true);
+    assert.match(element('#observation-status').textContent, pattern);
+    for (const control of element('#field-observation-form').querySelectorAll('input, select, button')) {
+      assert.equal(control.disabled, true);
+    }
+    assert.equal(element('#observation-save').disabled, true);
+    element('#field-observation-dialog').close();
+  };
+  const nativeIntl = Intl;
+  try {
+    Intl = undefined;
+    openFieldObservation('mission');
+    assertBlockedOpening(/indisponible sur cet appareil/);
+  } finally {
+    Intl = nativeIntl;
+  }
+  try {
+    Intl.DateTimeFormat = function DateTimeFormatWithoutParts() { return {}; };
+    openFieldObservation('mission');
+    assertBlockedOpening(/indisponible sur cet appareil/);
+    Intl.DateTimeFormat = function DateTimeFormatThrowingParts() {
+      return {formatToParts() { throw new Error('runtime unavailable'); }};
+    };
+    openFieldObservation('mission');
+    assertBlockedOpening(/indisponible sur cet appareil/);
+    Intl.DateTimeFormat = function DateTimeFormatMissingParts() {
+      return {formatToParts() { return [{type: 'year', value: '2026'}]; }};
+    };
+    openFieldObservation('mission');
+    assertBlockedOpening(/indisponible sur cet appareil/);
+  } finally {
+    Intl.DateTimeFormat = nativeDateTimeFormat;
+  }
+  state.configuration.site.timezone = 'Not/A_Timezone';
+  openFieldObservation('mission');
+  assertBlockedOpening(/fuseau du site configuré n’est pas reconnu/);
+  state.configuration.site.timezone = 'Europe/Zurich';
+  clearHarness(); setQuick({cloud: 'clear'});
   timezoneError = null;
   try { buildFieldObservationPayload(fieldObservationDraft(), '2026-09-29T20:13:00.000Z'); } catch (error) { timezoneError = error.message; }
   assert.equal(timezoneError, 'observed_at_in_future');
@@ -461,10 +513,32 @@ async function check() {
   await submitFieldObservation(event);
   assert.match(element('#observation-status').textContent, /Conflit/);
   assert.equal(element('#observation-clouds').value, 'overcast');
-  assert.equal(storage.has(pendingObservationKey('decision-1', null)), true);
+  assert.equal(element('#observation-save').disabled, true);
+  const originalConflictKey = pendingObservationKey('decision-1', null);
+  const originalConflictPending = storage.get(originalConflictKey);
+  const originalConflictId = JSON.parse(originalConflictPending).payload.observation_id;
+  assert.equal(storage.has(originalConflictKey), true);
+  assert.equal(state.fieldObservationConflict.key, originalConflictKey);
+  assert.equal(state.fieldObservationConflict.pending.payload.observation_id, originalConflictId);
   await submitFieldObservation(event);
   assert.equal(conflictRequests, 1);
-  assert.match(element('#observation-status').textContent, /bloqué par un conflit/);
+  assert.match(element('#observation-status').textContent, /conflit d’observation précédent doit être résolu/);
+
+  // Closing, changing session and reopening cannot bypass the page-wide conflict lock.
+  element('#field-observation-dialog').close();
+  state.sessions = [{execution: {execution_id: 'session-b'}}];
+  state.activeSessionId = 'session-b';
+  state.fieldObservationSelectedExecutionId = 'session-b';
+  openFieldObservation('mission');
+  assert.equal(state.fieldObservationDraftContext.execution_id, 'session-b');
+  assert.equal(element('#observation-save').disabled, true);
+  assert.match(element('#observation-status').textContent, /conflit d’observation précédent doit être résolu/);
+  setQuick({cloud: 'clear'});
+  await submitFieldObservation(event);
+  assert.equal(conflictRequests, 1);
+  assert.equal(uuid, 1);
+  assert.equal(storage.get(originalConflictKey), originalConflictPending);
+  assert.equal(JSON.parse(storage.get(originalConflictKey)).payload.observation_id, originalConflictId);
 
   // A lookup that finds the same id with different content is also a conflict.
   clearHarness(); setQuick({cloud: 'few'});
@@ -497,8 +571,16 @@ async function check() {
   assert.equal(element('#observation-clouds').value, 'few');
   assert.match(element('#observation-status').textContent, /introuvable ou périmée/);
   assert.match(element('#observation-status').textContent, /formulaire est conservé mais bloqué/);
+  for (const control of element('#field-observation-form').querySelectorAll('input, select, button')) {
+    assert.equal(control.disabled, true);
+  }
+  assert.equal(element('#observation-save').disabled, true);
   await submitFieldObservation(event);
   assert.match(element('#observation-status').textContent, /contexte du relevé a changé/);
+  assert.equal(element('#observation-save').disabled, true);
+  element('#field-observation-dialog').close();
+  openFieldObservation('mission');
+  assert.equal(element('#observation-save').disabled, false);
 
   // A failing removeItem during 404 invalidation falls back to a safe tombstone.
   clearHarness(); setQuick({cloud: 'few'});
@@ -639,6 +721,48 @@ async function check() {
   assert.equal(element('#observation-clouds').value, 'overcast');
   assert.match(element('#observation-status').textContent, /modifications en cours sont conservées/);
 
+  // A decision change during a successful request remains disabled after finally.
+  clearHarness(); setQuick({cloud: 'clear'});
+  let resolveStalePost;
+  fetch = (_url, options) => {
+    assert.ok(options);
+    return new Promise(resolve => { resolveStalePost = resolve; });
+  };
+  const staleSuccess = submitFieldObservation(event);
+  state.acceptedMission = {decision_id: 'decision-2', mission: {night_date: '2026-09-30'}};
+  syncFieldObservationContext();
+  resolveStalePost(response(201, {created: true}));
+  await staleSuccess;
+  assert.equal(state.fieldObservationContextInvalid, true);
+  for (const control of element('#field-observation-form').querySelectorAll('input, select, button')) {
+    assert.equal(control.disabled, true);
+  }
+  assert.equal(element('#observation-save').disabled, true);
+
+  // A session change during a rejected request also remains disabled after lookup and finally.
+  clearHarness();
+  state.sessions = [{execution: {execution_id: 'session-a'}}, {execution: {execution_id: 'session-b'}}];
+  state.activeSessionId = 'session-a';
+  state.fieldObservationSelectedExecutionId = 'session-a';
+  state.fieldObservationDraftContext = Object.freeze({decision_id: 'decision-1', execution_id: 'session-a',
+    night_date: '2026-09-29', source: 'mission', timezone: 'Europe/Zurich'});
+  setQuick({cloud: 'few'});
+  let rejectStalePost;
+  fetch = (_url, options) => options
+    ? new Promise((_resolve, reject) => { rejectStalePost = reject; })
+    : response(404, {detail: {code: 'field_observation_not_found'}});
+  const staleFailure = submitFieldObservation(event);
+  state.activeSessionId = 'session-b';
+  state.fieldObservationSelectedExecutionId = 'session-b';
+  syncFieldObservationContext();
+  rejectStalePost(new TypeError('network timeout'));
+  await staleFailure;
+  assert.equal(state.fieldObservationContextInvalid, true);
+  for (const control of element('#field-observation-form').querySelectorAll('input, select, button')) {
+    assert.equal(control.disabled, true);
+  }
+  assert.equal(element('#observation-save').disabled, true);
+
   // An uncertain request is rehydrated from local storage after a page/form reset.
   clearHarness(); setQuick({cloud: 'partly_cloudy', transparency: 'poor', wind: '4.2'});
   fetch = async (url, options) => options ? Promise.reject(new TypeError('offline')) : response(404, {});
@@ -676,6 +800,14 @@ async function check() {
         synchronous_checks = synchronous_checks.replace(
             "  let resolvePost;\n  fetch = (_url, options) => {\n    assert.ok(options);\n    return new Promise(resolve => { resolvePost = resolve; });\n  };\n  const submitting = submitFieldObservation(event);\n  setQuick({cloud: 'overcast'});\n  resolvePost(response(201, {created: true}));\n  await submitting;",
             "  fetch = (_url, options) => {\n    assert.ok(options);\n    setQuick({cloud: 'overcast'});\n    return response(201, {created: true});\n  };\n  submitFieldObservation(event);",
+        )
+        synchronous_checks = synchronous_checks.replace(
+            "  let resolveStalePost;\n  fetch = (_url, options) => {\n    assert.ok(options);\n    return new Promise(resolve => { resolveStalePost = resolve; });\n  };\n  const staleSuccess = submitFieldObservation(event);\n  state.acceptedMission = {decision_id: 'decision-2', mission: {night_date: '2026-09-30'}};\n  syncFieldObservationContext();\n  resolveStalePost(response(201, {created: true}));\n  await staleSuccess;",
+            "  fetch = (_url, options) => {\n    assert.ok(options);\n    state.acceptedMission = {decision_id: 'decision-2', mission: {night_date: '2026-09-30'}};\n    syncFieldObservationContext();\n    return response(201, {created: true});\n  };\n  submitFieldObservation(event);",
+        )
+        synchronous_checks = synchronous_checks.replace(
+            "  let rejectStalePost;\n  fetch = (_url, options) => options\n    ? new Promise((_resolve, reject) => { rejectStalePost = reject; })\n    : response(404, {detail: {code: 'field_observation_not_found'}});\n  const staleFailure = submitFieldObservation(event);\n  state.activeSessionId = 'session-b';\n  state.fieldObservationSelectedExecutionId = 'session-b';\n  syncFieldObservationContext();\n  rejectStalePost(new TypeError('network timeout'));\n  await staleFailure;",
+            "  fetch = (_url, options) => {\n    if (!options) return response(404, {detail: {code: 'field_observation_not_found'}});\n    state.activeSessionId = 'session-b';\n    state.fieldObservationSelectedExecutionId = 'session-b';\n    syncFieldObservationContext();\n    throw new TypeError('network timeout');\n  };\n  submitFieldObservation(event);",
         )
         synchronous_checks = synchronous_checks.replace(
             "fetch = (url, options) => options ? Promise.reject(new TypeError('offline')) : response(404, {});",
