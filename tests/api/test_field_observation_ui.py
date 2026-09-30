@@ -1987,6 +1987,112 @@ const projection = payload => ({...structuredClone(payload),
     }
   }
 
+  // Exact refresh regressions, repeated with independent page contexts.
+  for (let repeat = 0; repeat < 3; repeat++) {
+    for (const kind of ['decision', 'mission', 'session']) {
+      shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
+      const tab = makeContext(`refresh-${kind}-${repeat}`);
+      if (kind === 'decision') run(tab, `state.acceptedMission = null; state.availability = {start: '22:00'};
+        state.fieldObservationDraftContext = Object.freeze({...state.fieldObservationDraftContext, source: 'decision'});`);
+      if (kind === 'session') tab.sandbox.currentSession = () => ({execution: {execution_id: 'execution-1'}});
+      if (kind === 'session') run(tab, `state.fieldObservationSelectedExecutionId = 'execution-1';
+        state.sessions = [{execution: {execution_id: 'execution-1'}, mission: {decision_id: 'decision-1', night_date: '2026-09-29'}}];
+        state.fieldObservationDraftContext = Object.freeze({...state.fieldObservationDraftContext, execution_id: 'execution-1'});`);
+      tab.sandbox.fetch = async () => ({ok: false, status: 404, json: async () => ({})});
+      await run(tab, 'submitFieldObservation({preventDefault(){}})');
+      assert.equal(run(tab, 'state.fieldObservationLock?.status'), 'invalid', kind + ': ' + run(tab, 'document.querySelector("#observation-status").textContent'));
+      const envelope = run(tab, 'JSON.stringify(state.fieldObservationLock.pending)');
+      const decision = tab.sandbox.state.currentDecision;
+      tab.sandbox.manualDeadlines = true;
+      let late, signal;
+      tab.sandbox.fetch = async (url, options) => {
+        if (url.includes('/field-observations/')) return {ok: false, status: 404};
+        signal = options.signal;
+        return new Promise(resolve => { late = resolve; });
+      };
+      const refreshing = run(tab, 'refreshInvalidFieldObservationContext()');
+      await expireNetwork(tab); await refreshing;
+      assert.ok(signal.aborted);
+      assert.equal(run(tab, 'state.observationBusy'), false);
+      assert.equal(run(tab, 'state.fieldObservationLock.status'), 'invalid');
+      assert.equal(run(tab, 'JSON.stringify(state.fieldObservationLock.pending)'), envelope);
+      assert.match(run(tab, 'document.querySelector("#observation-status").textContent'), /context_refresh_timeout/);
+      late({ok: true, json: async () => ({decision_id: 'decision-1', night_date: '2026-09-29'})});
+      await drainMicrotasks();
+      assert.equal(run(tab, 'state.fieldObservationLock.status'), 'invalid');
+      assert.equal(tab.sandbox.state.currentDecision, decision);
+      // Body decoding belongs to the same deadline, even after headers arrive.
+      tab.sandbox.fetch = async url => url.includes('/field-observations/')
+        ? {ok: false, status: 404}
+        : {ok: true, json: () => new Promise(() => {})};
+      const bodyRefresh = run(tab, 'refreshInvalidFieldObservationContext()');
+      await expireNetwork(tab); await bodyRefresh;
+      assert.equal(run(tab, 'state.observationBusy'), false);
+      assert.equal(run(tab, 'state.fieldObservationLock.status'), 'invalid');
+      // Closing cancels the operation and ignores a transport that completes later.
+      tab.sandbox.fetch = async (url, options) => {
+        if (url.includes('/field-observations/')) return {ok: false, status: 404};
+        signal = options.signal; return new Promise(resolve => {late = resolve;});
+      };
+      const closingRefresh = run(tab, 'refreshInvalidFieldObservationContext()');
+      await drainMicrotasks();
+      run(tab, 'invalidateFieldObservationOperation()');
+      await closingRefresh;
+      assert.ok(signal.aborted);
+      late({ok: true, json: async () => ({decision_id: 'decision-1'})});
+      await drainMicrotasks();
+      assert.equal(run(tab, 'state.fieldObservationLock.status'), 'invalid');
+      if (kind === 'decision') {
+        tab.sandbox.manualDeadlines = false;
+        tab.sandbox.fetch = async url => url.includes('/field-observations/')
+          ? {ok: false, status: 404}
+          : {ok: true, json: async () => ({decision_id: 'decision-1', night_date: '2026-09-29'})};
+        await run(tab, 'refreshInvalidFieldObservationContext()');
+        assert.equal(run(tab, 'state.fieldObservationLock.status'), 'pending');
+        assert.equal(run(tab, 'state.fieldObservationContextInvalid'), false);
+        assert.equal(run(tab, 'document.querySelector("#observation-save").disabled'), false);
+        assert.equal(tab.sandbox.state.currentDecision, decision);
+      }
+    }
+    // Native exceptions are classified, retain cause, and fail before UUID/POST.
+    for (const stage of ['open', 'open-event', 'schema', 'transaction', 'put', 'put-event', 'blocked', 'upgrade']) {
+      shared.clear(); recoveryRecords.clear(); contexts.length = 0;
+      const tab = makeContext(`diagnostic-${stage}`);
+      const cause = new Error(stage); if (stage === 'schema') cause.name = 'NotFoundError';
+      tab.sandbox.indexedDB = {open() {
+        if (stage === 'open') throw cause;
+        const request = {error: cause};
+        Promise.resolve().then(() => {
+          if (stage === 'blocked') { Object.defineProperty(request, 'error', {get() {throw new Error('InvalidStateError');}}); return request.onblocked(); }
+          if (stage === 'open-event') return request.onerror();
+          if (stage === 'upgrade') { request.result = {createObjectStore() {throw cause;}}; return request.onupgradeneeded(); }
+          request.result = {close() {}, transaction() {
+            if (stage === 'schema') throw cause;
+            const tx = {error: cause, abort() {}, objectStore() {return {
+              get() {const op = {}; Promise.resolve().then(() => stage === 'transaction' ? tx.onabort() : (op.onsuccess(), tx.oncomplete())); return op;},
+              put() {if (stage !== 'put-event') throw cause; const op = {error: cause}; Promise.resolve().then(() => op.onerror()); return op;},
+            };}}; return tx;
+          }};
+          request.onsuccess();
+        }); return request;
+      }};
+      await run(tab, 'submitFieldObservation({preventDefault(){}})');
+      assert.equal(tab.sandbox.uuidCount(), 0); assert.equal(tab.sandbox.posts.length, 0);
+      assert.match(run(tab, 'state.fieldObservationLock.recovery_error'), /^recovery_/);
+      assert.match(run(tab, 'document.querySelector("#observation-status").textContent'), /recovery_/);
+      assert.equal(run(tab, 'fieldObservationRecoveryError("recovery_transaction", new Error("native")).cause.message'), 'native');
+    }
+    // A full journal fails closed instead of discarding stale-page protection.
+    shared.clear(); recoveryRecords.clear(); contexts.length = 0;
+    const tab = makeContext('quota');
+    recoveryRecords.set('inventory', {version: 1, entries: [], resolved: Array.from({length: 110}, (_, i) => `${i}:` + 'x'.repeat(5000))});
+    const original = JSON.stringify(recoveryRecords.get('inventory'));
+    await run(tab, 'submitFieldObservation({preventDefault(){}})');
+    assert.equal(run(tab, 'state.fieldObservationLock.recovery_error'), 'recovery_quota');
+    assert.equal(tab.sandbox.uuidCount(), 0); assert.equal(tab.sandbox.posts.length, 0);
+    assert.equal(JSON.stringify(recoveryRecords.get('inventory')), original);
+  }
+
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''.replace("HELPERS_SOURCE", json.dumps(helpers)).replace("RECOVERY_IDB_SOURCE", RECOVERY_IDB_HARNESS)
     result = subprocess.run([engine, "-e", program], capture_output=True, text=True, check=False)

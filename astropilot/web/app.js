@@ -1037,6 +1037,11 @@ function validFieldObservationRecoveryJournal(value) {
     });
 }
 
+function fieldObservationRecoveryError(code, cause) {
+  if (cause?.message?.startsWith("recovery_")) return cause;
+  return new Error(code, {cause});
+}
+
 function fieldObservationRecoveryTransaction(value = undefined) {
   return new Promise((resolve, reject) => {
     let db = null;
@@ -1054,9 +1059,12 @@ function fieldObservationRecoveryTransaction(value = undefined) {
     try {
       if (typeof indexedDB === "undefined") throw new Error("recovery_unavailable");
       const request = indexedDB.open(FIELD_OBSERVATION_RECOVERY_DB, 1);
-      request.onblocked = () => finish(new Error("recovery_blocked"));
-      request.onerror = () => finish(new Error("recovery_open_failed"));
-      request.onupgradeneeded = () => request.result.createObjectStore("journal");
+      request.onblocked = () => finish(fieldObservationRecoveryError("recovery_unavailable", new Error("indexeddb_upgrade_blocked")));
+      request.onerror = () => finish(fieldObservationRecoveryError("recovery_unavailable", request.error));
+      request.onupgradeneeded = () => {
+        try { request.result.createObjectStore("journal"); }
+        catch (error) { finish(fieldObservationRecoveryError("recovery_schema", error)); }
+      };
       request.onsuccess = () => {
         db = request.result;
         if (settled) { db.close(); return; }
@@ -1064,13 +1072,15 @@ function fieldObservationRecoveryTransaction(value = undefined) {
           transaction = db.transaction("journal", value === undefined ? "readonly" : "readwrite");
           const store = transaction.objectStore("journal");
           const operation = value === undefined ? store.get("inventory") : store.put(value, "inventory");
+          operation.onerror = () => finish(fieldObservationRecoveryError("recovery_transaction", operation.error));
           let result;
           operation.onsuccess = () => { result = operation.result; };
           transaction.oncomplete = () => finish(null, result);
-          transaction.onerror = transaction.onabort = () => finish(new Error("recovery_transaction_failed"));
-        } catch (error) { finish(error); }
+          transaction.onerror = transaction.onabort = () => finish(fieldObservationRecoveryError("recovery_transaction", transaction.error));
+        } catch (error) { finish(fieldObservationRecoveryError(
+          error?.name === "NotFoundError" ? "recovery_schema" : "recovery_transaction", error)); }
       };
-    } catch (error) { finish(error); }
+    } catch (error) { finish(fieldObservationRecoveryError("recovery_unavailable", error)); }
   });
 }
 
@@ -1123,6 +1133,9 @@ async function saveFieldObservationRecoveryUnlocked() {
   const journal = {version: 1, entries: [...entries.values()],
     resolved: [...new Set([...fieldObservationRecoveryJournal.resolved, ...fieldObservationRecoveryResolved])]};
   if (!validFieldObservationRecoveryJournal(journal)) throw new Error("recovery_invalid_write");
+  // Never evict tombstones without a durable epoch protocol understood by stale pages.
+  // Bound serialized storage instead; failure preserves the previous durable journal.
+  if (JSON.stringify(journal).length > 512 * 1024) throw new Error("recovery_quota");
   await fieldObservationRecoveryTransaction(journal);
   fieldObservationRecoveryJournal = journal;
 }
@@ -1150,9 +1163,9 @@ async function withFieldObservationWebLock(callback, operation = null) {
       adoptFieldObservationLock({...state.fieldObservationLock, status: "unreadable", recovery_error: error.message});
       state.fieldObservationInventoryReady = false;
       updateFieldObservationSubmitState();
-      observationMessage("Le journal de récupération est indisponible ou illisible. Toute publication reste bloquée.", {error: true});
+      observationMessage(`Journal de récupération bloqué : ${error.message}. Toute publication reste bloquée.`, {error: true});
     }
-    return {executed: false, reason: "web_lock_failed", value: false, error};
+    return {executed: false, reason: error?.message?.startsWith("recovery_") ? error.message : "web_lock_failed", value: false, error};
   }
 }
 
@@ -1245,6 +1258,7 @@ function clearFieldObservationLockUnlocked(lock = state.fieldObservationLock) {
 
 function fieldObservationLockMessage(lock = state.fieldObservationLock) {
   if (!lock) return "";
+  if (lock.recovery_error) return `Journal de récupération bloqué : ${lock.recovery_error}. Les données sont conservées et toute publication reste bloquée.`;
   if (lock.status === "multiple_pending") {
     return `${lock.entries.length} observations locales non résolues ont été détectées. Résolvez chaque entrée séparément ; aucun nouvel envoi n’est autorisé.`;
   }
@@ -2110,6 +2124,7 @@ async function submitFieldObservation(event) {
       finishFieldObservationOperation(acquisitionOperation);
       const validationMessage = payloadErrorMessages[acquisition.error?.message];
       observationMessage(validationMessage
+        || (acquisition.reason?.startsWith("recovery_") ? `Journal de récupération bloqué : ${acquisition.reason}. Aucun UUID ni POST créé.` : null)
         || "Envoi bloqué : Web Locks est indisponible ou a refusé la demande. Aucun UUID ni POST n’a été créé ; utilisez un navigateur compatible pour une nouvelle observation.",
       { error: true });
       updateFieldObservationSubmitState();
@@ -2130,7 +2145,9 @@ async function submitFieldObservation(event) {
       operation,
     );
     if (!publication.executed && activeFieldObservationOperation?.token === operation.token) {
-      observationMessage("Envoi bloqué : Web Locks est indisponible, refusé ou interrompu. Aucun POST n’a été envoyé.", {error: true});
+      observationMessage(publication.reason?.startsWith("recovery_")
+        ? `Journal de récupération bloqué : ${publication.reason}. Aucun POST envoyé.`
+        : "Envoi bloqué : Web Locks est indisponible, refusé ou interrompu. Aucun POST n’a été envoyé.", {error: true});
     }
   } finally {
     finishFieldObservationOperation(operation);
@@ -2171,29 +2188,27 @@ async function reconcileFieldObservationLock() {
 }
 
 async function canonicalFieldObservationContextAvailable(context, operation = null) {
-  if (context.execution_id) {
-    const response = await fetch(`/v1/executions/${encodeURIComponent(context.execution_id)}/session`);
-    if (operation && !fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
-    if (!response.ok) return false;
-    const canonical = await response.json();
-    if (operation && !fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
-    return canonical?.execution?.execution_id === context.execution_id
-      && canonical?.mission?.decision_id === context.decision_id;
-  }
-  if (context.source === "mission") {
-    const response = await fetch("/v1/accepted-mission/current");
-    if (operation && !fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
-    if (!response.ok) return false;
-    const canonical = await response.json();
-    if (operation && !fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
-    return canonical?.status === "accepted"
-      && canonical?.decision_id === context.decision_id
-      && (!context.mission_id || canonical?.mission_id === context.mission_id);
-  }
-  if (!state.availability) return false;
-  await loadTonight(state.availability);
+  // Preview only: no setter, navigation, or temporary editor context changes.
+  const execution = context.execution_id;
+  const mission = context.source === "mission";
+  if (!execution && !mission && !state.availability) return false;
+  const url = execution ? `/v1/executions/${encodeURIComponent(execution)}/session`
+    : mission ? "/v1/accepted-mission/current" : "/v1/tonight";
+  const options = {signal: operation?.abortController?.signal};
+  if (!execution && !mission) Object.assign(options, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({availability: state.availability}),
+  });
+  const canonical = await fieldObservationNetworkRequest(url, options, async response =>
+    response.ok ? response.json() : null);
   if (operation && !fieldObservationOperationCurrent(operation)) throw staleFieldObservationOperationError();
-  return sameFieldObservationContext(context, observationContext("decision"));
+  if (execution) return canonical?.execution?.execution_id === execution
+    && canonical?.mission?.decision_id === context.decision_id;
+  if (mission) return canonical?.status === "accepted"
+    && canonical?.decision_id === context.decision_id
+    && (!context.mission_id || canonical?.mission_id === context.mission_id);
+  return canonical?.decision_id === context.decision_id
+    && canonical?.night_date === context.night_date;
 }
 
 async function refreshInvalidFieldObservationContext() {
@@ -2223,17 +2238,23 @@ async function refreshInvalidFieldObservationContext() {
       return;
     }
     if (!fieldObservationOperationCurrent(operation)) return;
-    state.invalidFieldObservationContextKey = null;
-    state.fieldObservationContextInvalid = !sameFieldObservationContext(
-      state.fieldObservationDraftContext, activeObservationContext(),
-    );
-    await transitionFieldObservationLockStatus(lock, "pending", operation);
+    const refreshed = await withFieldObservationWebLock(() => {
+      if (!fieldObservationOperationCurrent(operation)
+          || !sameFieldObservationContext(lock.context, activeObservationContext())) return false;
+      if (!writeFieldObservationLockUnlocked({...storedFieldObservationLockValue(lock), status: "pending"}, lock)) return false;
+      state.invalidFieldObservationContextKey = null;
+      state.fieldObservationContextInvalid = false;
+      return true;
+    }, operation);
+    if (!refreshed.executed || !refreshed.value || !fieldObservationOperationCurrent(operation)) return;
     observationMessage(
       "Le contexte canonique est de nouveau disponible. La prochaine tentative réutilisera strictement l’UUID et le contenu d’origine.",
     );
   } catch (error) {
     if (error?.staleFieldObservationOperation || !fieldObservationOperationCurrent(operation)) return;
-    observationMessage("L’actualisation canonique a échoué. Le contexte reste bloqué.", { error: true });
+    observationMessage(error?.networkTimeout
+      ? "context_refresh_timeout : délai de 15 s dépassé. Le contexte et l’UUID restent conservés ; réessayez."
+      : "L’actualisation canonique a échoué. Le contexte reste bloqué.", { error: true });
   } finally {
     finishFieldObservationOperation(operation);
   }

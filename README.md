@@ -174,6 +174,22 @@ la transaction de sauvegarde doit être terminée avant toute publication.
 Un journal inaccessible, bloqué ou corrompu bloque toute publication, sans repli
 vers la seule mémoire. Chaque résolution explicite retire son entrée du journal ;
 des identités résolues empêchent une page ancienne de la réintroduire.
+L’actualisation canonique lit le contexte sans mutation intermédiaire de l’UI,
+puis revalide le token et la génération avant de repasser le verrou en pending.
+Chaque requête de récupération (observation, mission, session et décision) utilise
+la même limite de 15 secondes, décodage compris, et le signal de l’opération.
+Un timeout `context_refresh_timeout` libère busy et conserve le pending.
+Les erreurs IndexedDB sont classées `recovery_unavailable`, `recovery_schema`,
+`recovery_transaction` ou `recovery_corrupt`, avec leur cause native si disponible.
+
+Limite explicite : les tombstones ne sont pas compactés, car les pages anciennes
+ne disposent pas d’un protocole d’epoch durable permettant une éviction sûre.
+Le document sérialisé est plafonné à 512 Ki unités UTF-16 (au plus 1 Mio en UTF-16).
+Un dépassement `recovery_quota` bloque toute nouvelle mutation/publication avant
+écriture et conserve le journal précédent ; aucune identité résolue n’est évincée.
+Cette garde borne la croissance persistée mais peut nécessiter une récupération
+assistée après un grand nombre de résolutions ; ce n’est pas une compaction.
+
 Ce stockage est propre à l’origine navigateur ; effacer aussi IndexedDB ou toutes
 les données du site supprime cette preuve locale de récupération.
 
