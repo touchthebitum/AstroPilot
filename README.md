@@ -160,6 +160,15 @@ une corruption). Cet identifiant est revalidé sous Web Lock avant tout GET ou
 suppression. Résoudre un artefact global ne supprime jamais son voisin divergent
 portant la même clé ; les autres artefacts globaux sont conservés.
 
+Chaque ré-inventorisation fusionne les artefacts persistants avec les artefacts
+mémoire non résolus, y compris après `clear()` et un retour bfcache. Un artefact
+absent reste diagnostiqué et bloquant jusqu’à résolution ciblée explicite ou
+réconciliation canonique ; il n’est pas réécrit automatiquement dans le stockage.
+Un `clear()` sans artefact dans la mémoire ni la persistance laisse l’éditeur libre.
+Un verrou global illisible est une corruption distincte (`global_lock`, brut et
+identifiant immuable), affichée à côté des pending valides. Sa suppression confirmée
+revalide exactement le brut sous Web Lock et ne supprime aucun pending valide.
+
 Le harness multi-contexte est un simulateur contrôlé de globals JavaScript
 séparés, pas un navigateur réel. Le stockage partagé et la file Web Locks sont
 indépendants d’une file d’événements `storage`. Les écritures identiques ne

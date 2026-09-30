@@ -1637,6 +1637,68 @@ const projection = payload => ({...structuredClone(payload),
   await deliverStorage({duplicate: true});
   assert.equal(run(cleared, 'state.fieldObservationLock.status'), 'persistence_missing');
   assert.equal(run(cleared, 'state.fieldObservationLock.entries[0].pending.payload.observation_id'), first.pending.payload.observation_id);
+  const clearUuidCount = cleared.sandbox.uuidCount();
+  for (let repeat = 0; repeat < 3; repeat++) {
+    await run(cleared, 'handleFieldObservationPageShow({persisted: true})');
+    await run(cleared, 'restorePendingFieldObservationInventory()');
+    run(cleared, 'handleFieldObservationStorageEvent({key: null, newValue: null})');
+    assert.equal(run(cleared, 'state.fieldObservationLock.entries[0].pending.payload.observation_id'), first.pending.payload.observation_id);
+    await run(cleared, 'submitFieldObservation({preventDefault(){}})');
+    assert.equal(cleared.sandbox.uuidCount(), clearUuidCount);
+    assert.equal(cleared.sandbox.posts.length, 0);
+    assert.equal(shared.size, 0);
+  }
+  await run(cleared, 'abandonFieldObservationEntry(fieldObservationEntryId(state.fieldObservationLock.entries[0]))');
+  assert.equal(run(cleared, 'state.fieldObservationLock'), null);
+
+  for (let repeat = 0; repeat < 3; repeat++) {
+    shared.clear(); contexts.length = 0; storageEvents.length = 0;
+    const source = makeContext('foreign-source'); const empty = makeContext('empty-target');
+    await run(empty, 'restorePendingFieldObservationInventory()');
+    source.sandbox.localStorage.setItem('foreign', 'value'); source.sandbox.localStorage.clear();
+    await deliverStorage({reverse: true, duplicate: true});
+    run(empty, 'handleFieldObservationStorageEvent({key: null, newValue: null})');
+    await run(empty, 'handleFieldObservationPageShow({persisted: true})');
+    assert.equal(run(empty, 'state.fieldObservationLock'), null);
+    assert.equal(run(empty, 'document.querySelector("#observation-save").disabled'), false);
+
+    for (const withPending of [false, true]) {
+      shared.clear(); contexts.length = 0; storageEvents.length = 0;
+      const broken = makeContext('broken-global');
+      shared.set('astropilot.fieldObservationLock', '{broken-global');
+      if (withPending) shared.set(first.key, JSON.stringify(first.pending));
+      await run(broken, 'restorePendingFieldObservationInventory()');
+      assert.equal(run(broken, 'state.fieldObservationLock.corruptions[0].reason'), 'invalid_global_lock');
+      assert.equal(run(broken, 'state.fieldObservationLock.corruptions[0].origin'), 'global_lock');
+      assert.equal(run(broken, 'state.fieldObservationLock.entries.length'), withPending ? 1 : 0);
+      assert.equal(run(broken, 'document.querySelector("#observation-pending-diagnostics").hidden'), false);
+      assert.equal(run(broken, 'document.querySelector("#observation-pending-diagnostics").children.length'), withPending ? 2 : 1);
+      assert.equal(run(broken, 'state.fieldObservationLock.corruptions[0].entry_id'), run(broken, 'fieldObservationEntryId(state.fieldObservationLock.corruptions[0])'));
+      broken.sandbox.window.confirm = message => {
+        assert.match(message, /verrou global illisible/); assert.match(message, /conservées/); return false;
+      };
+      await run(broken, 'removeCorruptFieldObservationEntry(fieldObservationEntryId(state.fieldObservationLock.corruptions[0]))');
+      assert.equal(shared.get('astropilot.fieldObservationLock'), '{broken-global');
+      broken.sandbox.window.confirm = () => true;
+      await run(broken, 'document.querySelector("#observation-pending-diagnostics").children.at(-1).children[1].children[0].listeners.click()');
+      if (withPending) {
+        assert.equal(shared.get(first.key), JSON.stringify(first.pending));
+        assert.equal(run(broken, 'state.fieldObservationLock.status'), 'pending');
+      } else {
+        assert.equal(shared.size, 0); assert.equal(run(broken, 'state.fieldObservationLock'), null);
+      }
+    }
+    shared.clear(); contexts.length = 0; storageEvents.length = 0;
+    const changed = makeContext('changed-global');
+    shared.set('astropilot.fieldObservationLock', '{old-global');
+    await run(changed, 'restorePendingFieldObservationInventory()');
+    const oldId = run(changed, 'fieldObservationEntryId(state.fieldObservationLock.corruptions[0])');
+    shared.set('astropilot.fieldObservationLock', '{new-global');
+    await run(changed, `removeCorruptFieldObservationEntry(${JSON.stringify(oldId)})`);
+    assert.equal(shared.get('astropilot.fieldObservationLock'), '{new-global');
+    assert.equal(run(changed, 'state.fieldObservationLock.corruptions.some(e => e.raw === "{new-global")'), true);
+  }
+
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''.replace("HELPERS_SOURCE", json.dumps(helpers))
     result = subprocess.run([engine, "-e", program], capture_output=True, text=True, check=False)

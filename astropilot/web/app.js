@@ -1338,12 +1338,50 @@ function sameFieldObservationArtifact(left, right) {
       : left.raw === right.raw);
 }
 
+function fieldObservationArtifacts(lock) {
+  return {entries: lock?.pending ? [lock] : lock?.entries || [],
+    corruptions: lock?.corruptions || []};
+}
+
+function forgetResolvedFieldObservationArtifact(entry) {
+  const lock = state.fieldObservationLock;
+  const artifacts = fieldObservationArtifacts(lock);
+  const keep = candidate => !sameFieldObservationArtifact(candidate, entry);
+  const entries = artifacts.entries.filter(keep);
+  const corruptions = artifacts.corruptions.filter(keep);
+  adoptFieldObservationLock(entries.length || corruptions.length
+    ? {...lock, key: undefined, pending: undefined, entries, corruptions} : null);
+}
+
 function inventoriedFieldObservationLock(inventory) {
+  const current = persistedInventoryFieldObservationLock(inventory);
+  const memory = fieldObservationArtifacts(state.fieldObservationLock);
+  const disk = fieldObservationArtifacts(current);
+  const missingEntries = memory.entries.filter(entry =>
+    !disk.entries.some(candidate => sameFieldObservationArtifact(entry, candidate)));
+  const missingCorruptions = memory.corruptions.filter(entry =>
+    !disk.corruptions.some(candidate => sameFieldObservationArtifact(entry, candidate)));
+  if (!missingEntries.length && !missingCorruptions.length) return current;
+  return {version: FIELD_OBSERVATION_LOCK_VERSION,
+    generation: current?.generation || state.fieldObservationLock?.generation || "memory-inventory",
+    status: current ? "inconsistent_persistence" : "persistence_missing",
+    persistence_missing: !current,
+    entries: [...disk.entries, ...missingEntries],
+    corruptions: [...disk.corruptions, ...missingCorruptions],
+    diagnostic: "unresolved_memory_artifacts"};
+}
+
+function persistedInventoryFieldObservationLock(inventory) {
   if (!inventory.available) return {status: "unreadable", persistence_missing: true};
   const persisted = persistedFieldObservationLock();
   if (!persisted.available) {
-    return {status: "unreadable", persistence_missing: true,
-      persisted_raw: persisted.raw, corruptions: inventory.corruptions};
+    if (typeof persisted.raw !== "string") return {status: "unreadable", persistence_missing: true};
+    const artifact = {origin: "global_lock", key: FIELD_OBSERVATION_LOCK_KEY,
+      raw: persisted.raw, reason: "invalid_global_lock"};
+    const corruption = Object.freeze({...artifact, entry_id: fieldObservationEntryId(artifact)});
+    return {version: FIELD_OBSERVATION_LOCK_VERSION, generation: "invalid-global-lock",
+      status: "inconsistent_persistence", entries: inventory.entries,
+      corruptions: [...inventory.corruptions, corruption]};
   }
   const entries = inventory.entries.map((entry) => {
     const persistedEntry = persisted.lock?.entries?.find((candidate) => sameFieldObservationArtifact(candidate, entry));
@@ -1408,7 +1446,7 @@ function inventoriedFieldObservationLock(inventory) {
 function rebuildPendingFieldObservationInventoryUnlocked() {
   let inventory = pendingFieldObservationInventory();
   if (!inventory.available) {
-    adoptFieldObservationLock({status: "unreadable", persistence_missing: true});
+    adoptFieldObservationLock(inventoriedFieldObservationLock(inventory));
     return false;
   }
   if (inventory.migrations.length > 0) {
@@ -1420,7 +1458,7 @@ function rebuildPendingFieldObservationInventoryUnlocked() {
     inventory = pendingFieldObservationInventory();
   }
   const lock = inventoriedFieldObservationLock(inventory);
-  if (["inconsistent_persistence", "unreadable", "migration_failed"].includes(lock?.status)) {
+  if (["inconsistent_persistence", "persistence_missing", "unreadable", "migration_failed"].includes(lock?.status)) {
     adoptFieldObservationLock(lock);
     return false;
   }
@@ -2094,6 +2132,15 @@ function persistRemainingFieldObservationArtifactsUnlocked(persisted, entries, c
 
 function removeFieldObservationEntryUnlocked(entry) {
   try {
+    if (entry.reason === "invalid_global_lock") {
+      if (localStorage.getItem(FIELD_OBSERVATION_LOCK_KEY) !== entry.raw) {
+        adoptFieldObservationLock(inventoriedFieldObservationLock(pendingFieldObservationInventory()));
+        return false;
+      }
+      localStorage.removeItem(FIELD_OBSERVATION_LOCK_KEY);
+      forgetResolvedFieldObservationArtifact(entry);
+      return rebuildPendingFieldObservationInventoryUnlocked();
+    }
     if (!revalidatedFieldObservationEntryUnlocked(entry)) return false;
     const persisted = persistedFieldObservationLock();
     if (!persisted.available) return false;
@@ -2111,6 +2158,7 @@ function removeFieldObservationEntryUnlocked(entry) {
     if (entry.origin !== "global_lock" && currentRaw !== expectedRaw) return false;
     // A global artifact may have a divergent local sibling. Never remove that sibling.
     if (currentRaw === expectedRaw) localStorage.removeItem(entry.key);
+    forgetResolvedFieldObservationArtifact(entry);
     if (!persisted.lock) return rebuildPendingFieldObservationInventoryUnlocked();
     const originals = persisted.lock.entries || [persisted.lock];
     const entries = originals.filter((candidate) => !entry.pending || !sameFieldObservationArtifact(candidate, entry));
@@ -2194,7 +2242,9 @@ async function removeCorruptFieldObservationEntry(entryId) {
   const corruption = fieldObservationEntryForId(entryId);
   if (!corruption || corruption.pending) { await restorePendingFieldObservationInventory(); return; }
   if (typeof window !== "undefined" && typeof window.confirm === "function"
-      && !window.confirm(`Supprimer uniquement la clé locale corrompue ${corruption.key} ?`)) return;
+      && !window.confirm(corruption.reason === "invalid_global_lock"
+        ? "Supprimer uniquement le verrou global illisible ? Les observations en attente seront conservées."
+        : `Supprimer uniquement la clé locale corrompue ${corruption.key} ?`)) return;
   const operation = beginFieldObservationOperation("remove_corrupt", null);
   const result = await withFieldObservationWebLock(() => {
     if (!fieldObservationOperationCurrent(operation)) return false;
@@ -2241,21 +2291,7 @@ function handleFieldObservationStorageEvent(event) {
   const lock = state.fieldObservationLock;
   if (event.key === null) {
     invalidateFieldObservationOperation();
-    const inventory = pendingFieldObservationInventory();
-    const rebuilt = inventoriedFieldObservationLock(inventory);
-    if (rebuilt) adoptFieldObservationLock(rebuilt);
-    else if (lock) {
-      const entries = lock.entries || (lock.pending
-        ? [{key: lock.key, pending: lock.pending, context: lock.context, status: lock.status}] : []);
-      adoptFieldObservationLock({
-        version: FIELD_OBSERVATION_LOCK_VERSION,
-        generation: lock.generation || "persistence-missing",
-        status: "persistence_missing", persistence_missing: true, entries,
-        corruptions: lock.corruptions || [],
-      });
-    } else {
-      adoptFieldObservationLock({status: "persistence_missing", persistence_missing: true, entries: [], corruptions: []});
-    }
+    adoptFieldObservationLock(inventoriedFieldObservationLock(pendingFieldObservationInventory()));
     updateFieldObservationSubmitState();
     if (document.querySelector("#field-observation-dialog").open) {
       observationMessage(fieldObservationLockMessage(state.fieldObservationLock), {error: true});
