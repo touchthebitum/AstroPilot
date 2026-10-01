@@ -769,3 +769,118 @@ def test_cloud_observed_category_must_match_source(tmp_path):
     value = client(tmp_path).get(URL).json()
     assert value['statistics'] is None
     assert any(d['code'] == 'outcome_history_observed_source_mismatch' for d in value['diagnostics'])
+
+
+def persist_altered(root, evaluation, comparison):
+    write(root, 'outcome_evaluations', evaluation.evaluation_id,
+          serialize_outcome_evaluation(replace(evaluation, comparison=comparison)))
+
+
+def assert_suspended(root, code):
+    response = client(root).get(URL)
+    assert response.status_code == 200
+    value = response.json()
+    assert len(value['rows']) == 1 and value['statistics'] is None
+    assert value['certification'] == 'statistics_suspended' and value['completeness'] == 'degraded'
+    assert any(d['code'] == code for d in value['diagnostics'])
+
+
+def test_cloud_predicted_category_source_mismatch(tmp_path):
+    from decision.models.forecast_observation_comparison import CloudComparisonOutcome
+    evaluation = seed(tmp_path, evidence=B['evidence'](WeatherVariable.CLOUD_COVER_PERCENT),
+        source=B['observation'](execution_id=None, conditions=ObservedConditions(cloud_state=CloudState.FEW)))
+    changed = replace(evaluation.comparison.results[0], predicted_condition=CloudState.OVERCAST,
+        confusion_cell=(CloudState.OVERCAST, CloudState.FEW), outcome=CloudComparisonOutcome.MISMATCH)
+    persist_altered(tmp_path, evaluation, replace(evaluation.comparison, results=(changed,)))
+    assert_suspended(tmp_path, 'outcome_history_cloud_category_source_mismatch')
+
+
+@pytest.mark.parametrize('percent,category', [(b + d, c) for b, low, high in
+    [(10, 'clear', 'few'), (25, 'few', 'partly_cloudy'),
+     (50, 'partly_cloudy', 'mostly_cloudy'), (80, 'mostly_cloudy', 'overcast')]
+    for d, c in [(-0.000001, low), (0, high), (0.000001, high)]])
+def test_cloud_thresholds_certified(tmp_path, percent, category):
+    evidence = B['evidence'](WeatherVariable.CLOUD_COVER_PERCENT)
+    point = evidence.forecast_points[0]
+    evidence = DecisionForecastEvidence((replace(point, values=(replace(point.values[0], value=percent),)),))
+    seed(tmp_path, evidence=evidence,
+         source=B['observation'](execution_id=None, conditions=ObservedConditions(cloud_state=CloudState.FEW)))
+    value = client(tmp_path).get(URL).json()
+    assert value['certification'] == 'certified'
+    assert value['rows'][0]['results'][0]['predicted_condition'] == category
+
+
+def test_noncomparable_cloud_without_percent(tmp_path):
+    seed(tmp_path, evidence=B['evidence'](WeatherVariable.TEMPERATURE_C),
+         source=B['observation'](execution_id=None, conditions=ObservedConditions(cloud_state=CloudState.FEW)))
+    value = client(tmp_path).get(URL).json()
+    assert value['certification'] == 'certified'
+    result = value['rows'][0]['results'][0]
+    assert result['forecast_coverage_percent'] is None and result['status'] == 'not_comparable'
+
+
+@pytest.mark.parametrize('field', ['source_id', 'confidence', 'quality_flags', 'flags_order', 'capture_method', 'source_type', 'exact'])
+def test_observation_provenance_source_match(tmp_path, field):
+    from decision.field_observation import QualityFlag, Confidence, CaptureMethod, ObservationSourceType
+    source = B['observation'](execution_id=None)
+    source = replace(source, quality=replace(source.quality, flags=(QualityFlag.ESTIMATED, QualityFlag.PARTIAL)))
+    evaluation = seed(tmp_path, source=source)
+    changes = {'source_id': {'source_id': 'foreign-sensor'}, 'confidence': {'confidence': Confidence.LOW},
+        'quality_flags': {'quality_flags': (QualityFlag.IMPORTED,)},
+        'flags_order': {'quality_flags': tuple(reversed(source.quality.flags))},
+        'capture_method': {'capture_method': CaptureMethod.MANUAL},
+        'source_type': {'source_type': ObservationSourceType.USER}, 'exact': {}}
+    provenance = replace(evaluation.comparison.observation_provenance, **changes[field])
+    persist_altered(tmp_path, evaluation, replace(evaluation.comparison, observation_provenance=provenance))
+    if field == 'exact':
+        assert client(tmp_path).get(URL).json()['certification'] == 'certified'
+    else:
+        assert_suspended(tmp_path, 'outcome_history_observation_provenance_mismatch')
+
+
+@pytest.mark.parametrize('offset_us,stored_delta,certified', [
+    (3600000000, 0, False), (1800000000, 0, True), (-1800000000, 0, True),
+    (1800000001, 0, False), (0, 1, False)])
+def test_temporal_policy_source_match(tmp_path, offset_us, stored_delta, certified):
+    evidence = B['evidence'](WeatherVariable.TEMPERATURE_C)
+    point = evidence.forecast_points[0]
+    evidence = DecisionForecastEvidence((replace(point, forecast_for_utc=B['OBSERVED_AT'] + timedelta(microseconds=offset_us)),))
+    # Build a comparable result inside the window, then persist the canonical out-of-window point.
+    evaluation = seed(tmp_path)
+    write(tmp_path, 'decision_forecast_evidence', 'decision-1',
+          serialize_decision_forecast_evidence(decision_id='decision-1', evidence=evidence))
+    from decision.services.forecast_observation_comparison import _inspect_evidence, _source_digest, _validated_field_observation
+    _, canonical = _inspect_evidence(evidence)
+    source = B['observation'](execution_id=None)
+    digest = _source_digest(canonical, _validated_field_observation(source), identity_persistable=True)
+    result = evaluation.comparison.results[0]
+    result = replace(result, forecast_point=replace(result.forecast_point,
+        forecast_for_utc=evidence.forecast_points[0].forecast_for_utc,
+        temporal_offset=timedelta(microseconds=offset_us + stored_delta)))
+    persist_altered(tmp_path, evaluation, replace(evaluation.comparison, source_digest=digest, results=(result,)))
+    if certified:
+        assert client(tmp_path).get(URL).json()['certification'] == 'certified'
+    else:
+        assert_suspended(tmp_path, 'outcome_history_temporal_policy_mismatch')
+
+
+@pytest.mark.parametrize('kind', ['missing', 'file', 'denied', 'valid'])
+def test_storage_root_availability(tmp_path, monkeypatch, kind):
+    root = tmp_path / 'storage'
+    if kind == 'file': root.write_text('not a directory')
+    if kind in ('denied', 'valid'): root.mkdir()
+    if kind == 'denied':
+        original = os.open
+        def denied(path, *args, **kwargs):
+            if Path(path) == root: raise PermissionError('denied')
+            return original(path, *args, **kwargs)
+        monkeypatch.setattr(os, 'open', denied)
+    before = sorted(tmp_path.rglob('*'))
+    response = client(root).get(URL)
+    if kind == 'valid':
+        assert response.status_code == 200 and response.json()['certification'] == 'certified'
+        assert response.json()['rows'] == []
+    else:
+        assert response.status_code == 503
+        assert response.json()['detail']['code'] == 'outcome_history_storage_unavailable'
+    assert sorted(tmp_path.rglob('*')) == before

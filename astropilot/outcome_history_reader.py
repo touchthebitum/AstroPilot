@@ -41,7 +41,10 @@ class FileOutcomeHistoryReader:
 
     def _directory_fd(self, kind):
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-        root = os.open(self.directory, flags)
+        try:
+            root = os.open(self.directory, flags)
+        except OSError as error:
+            raise OutcomeHistoryUnavailable('outcome_history_storage_unavailable') from error
         try:
             return os.open(kind, flags, dir_fd=root)
         finally:

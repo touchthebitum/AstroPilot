@@ -62,3 +62,13 @@ Only individually evaluated observations contribute. No reconstructed nights or 
 The assessment is only expandable detail labeled “Suffisance des éléments d’évaluation”. There is no ranking, global score, provider score, recommendation, threshold change, calibration or learning. The known PR #294 Compare-button P3 is unchanged.
 
 UI: independent request generation invalidates responses on filter input, navigation, close/cancel and reload. A dataset conflict clears continuation and asks for reload. Unknown context/site/provider/model is explicit; output uses text nodes, including persisted strings.
+
+## Additional persisted-result certification checks
+
+For comparable cloud results under the allowlisted cloud_mapping.v1 policy, the persisted percentage must map to the persisted predicted category: [0,10) clear, [10,25) few, [25,50) partly_cloudy, [50,80) mostly_cloudy, [80,100] overcast. A divergence emits outcome_history_cloud_category_source_mismatch. Non-comparable results with no percentage remain outside this check. The existing model enforces category/confusion/outcome consistency.
+
+Comparison observation provenance must exactly match canonical FieldObservation source_type, source_id, capture_method, confidence and quality_flags. Flags retain the model's tuple order; reordered flags are a divergence. A divergence emits outcome_history_observation_provenance_mismatch. Comparable forecast offsets must be within the persisted temporal policy (allowlisted v1: inclusive ±30 minutes) and equal forecast_for_utc minus canonical observed_at_utc, including sign and microseconds. A divergence emits outcome_history_temporal_policy_mismatch. These checks retain rows and suspend certification/statistics without selecting a forecast or invoking the comparison engine.
+
+The configured global storage root must exist and be an accessible directory opened without following symlinks. Missing, non-directory or inaccessible roots raise HTTP 503 outcome_history_storage_unavailable; no directories are created. Missing optional document families inside a valid root can remain empty. Existing family-level unavailability retains HTTP 503 outcome_history_unavailable.
+
+The two documented P3 issues remain deferred: cursor offsets are editable but dataset and filters are revalidated; shared evidence canonicalization is repeated per evaluation, with no snapshot cache added in this blocker correction.

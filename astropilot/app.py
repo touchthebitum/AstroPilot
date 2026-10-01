@@ -3379,7 +3379,10 @@ def create_app(
         except OutcomeHistoryDatasetChanged as error:
             raise HTTPException(status_code=409, detail={"code": "outcome_history_dataset_changed"}) from error
         except OutcomeHistoryUnavailable as error:
-            raise HTTPException(status_code=503, detail={"code": "outcome_history_unavailable"}) from error
+            code = ("outcome_history_storage_unavailable"
+                    if str(error) == "outcome_history_storage_unavailable"
+                    else "outcome_history_unavailable")
+            raise HTTPException(status_code=503, detail={"code": code}) from error
 
     @application.post("/v1/field-observations/{observation_id}/outcome-evaluation")
     def evaluate_field_observation_outcome(

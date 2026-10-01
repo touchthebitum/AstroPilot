@@ -9,6 +9,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
 from decision.models.forecast_observation_comparison import ForecastObservationParameters
+from decision.weather.cloud_mapping_policy import map_cloud_cover_to_condition
 from decision.outcome_evaluation_persistence import serialize_outcome_evaluation
 from decision.services.outcome_history_statistics import UNITS, statistics, OutcomeHistoryStatisticsUnavailable
 from decision.services.forecast_observation_comparison import (
@@ -138,7 +139,18 @@ def result_source_mismatches(evaluation, observation, evidence):
         actual = result.observed_condition if cloud else result.observed_value
         if expected is None or actual != expected:
             codes.append('outcome_history_observed_source_mismatch')
+        if (cloud and evaluation.comparison.parameters.cloud_mapping_policy ==
+                ForecastObservationParameters().cloud_mapping_policy and
+                (result.forecast_coverage_percent is None or
+                 map_cloud_cover_to_condition(result.forecast_coverage_percent) != result.predicted_condition)):
+            codes.append('outcome_history_cloud_category_source_mismatch')
         provenance = result.forecast_point
+        if provenance is not None:
+            offset = provenance.temporal_offset
+            if (abs(offset) > evaluation.comparison.parameters.temporal_policy.maximum_absolute_offset or
+                    observation is not None and
+                    provenance.forecast_for_utc - observation.observed_at_utc != offset):
+                codes.append('outcome_history_temporal_policy_mismatch')
         value = result.forecast_coverage_percent if cloud else result.forecast_value
         matches = evidence is not None and observation is not None and provenance is not None and any(
             point.provider_id == provenance.provider_id and point.model_id == provenance.model_id and
@@ -177,6 +189,17 @@ def project(evaluation, snapshot, states):
         reasons = reasons + ['comparison_sources_unknown_or_mismatched']
         unknown['observed_at_utc'] = 'comparison_sources_unknown_or_mismatched'
         unknown['site'] = 'comparison_sources_unknown_or_mismatched'
+    persisted = evaluation.comparison.observation_provenance
+    if obs is not None and (
+            persisted.source_type != obs.provenance.source_type or
+            persisted.source_id != obs.provenance.source_id or
+            persisted.capture_method != obs.provenance.capture_method or
+            persisted.confidence != obs.quality.confidence or
+            persisted.quality_flags != obs.quality.flags):
+        sources_coherent = False
+        reasons = reasons + ['outcome_history_observation_provenance_mismatch']
+        unknown['observed_at_utc'] = 'outcome_history_observation_provenance_mismatch'
+        unknown['site'] = 'outcome_history_observation_provenance_mismatch'
     mismatches = result_source_mismatches(evaluation, obs, evidence)
     if mismatches:
         sources_coherent = False
