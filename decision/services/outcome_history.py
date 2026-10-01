@@ -140,10 +140,13 @@ def result_source_mismatches(evaluation, observation, evidence):
         if expected is None or actual != expected:
             codes.append('outcome_history_observed_source_mismatch')
         if (cloud and evaluation.comparison.parameters.cloud_mapping_policy ==
-                ForecastObservationParameters().cloud_mapping_policy and
-                (result.forecast_coverage_percent is None or
-                 map_cloud_cover_to_condition(result.forecast_coverage_percent) != result.predicted_condition)):
-            codes.append('outcome_history_cloud_category_source_mismatch')
+                ForecastObservationParameters().cloud_mapping_policy):
+            percent = result.forecast_coverage_percent
+            if (type(percent) is not float or not math.isfinite(percent) or
+                    not 0.0 <= percent <= 100.0):
+                codes.append('outcome_history_cloud_coverage_out_of_range')
+            elif map_cloud_cover_to_condition(percent) != result.predicted_condition:
+                codes.append('outcome_history_cloud_category_source_mismatch')
         provenance = result.forecast_point
         if provenance is not None:
             offset = provenance.temporal_offset

@@ -795,7 +795,36 @@ def test_cloud_predicted_category_source_mismatch(tmp_path):
     assert_suspended(tmp_path, 'outcome_history_cloud_category_source_mismatch')
 
 
-@pytest.mark.parametrize('percent,category', [(b + d, c) for b, low, high in
+@pytest.mark.parametrize('percent', [101.0, -0.1])
+@pytest.mark.parametrize('mixed', [False, True])
+@pytest.mark.parametrize('transport', ['service', 'api'])
+def test_cloud_out_of_range_degrades_without_losing_rows(tmp_path, monkeypatch, percent, mixed, transport):
+    evaluation = seed(tmp_path, evidence=B['evidence'](WeatherVariable.CLOUD_COVER_PERCENT),
+        source=B['observation'](execution_id=None, conditions=ObservedConditions(cloud_state=CloudState.FEW)))
+    changed = replace(evaluation.comparison.results[0], forecast_coverage_percent=percent)
+    persist_altered(tmp_path, evaluation, replace(evaluation.comparison, results=(changed,)))
+    valid = seed(tmp_path, identity='valid') if mixed else None
+    monkeypatch.setattr('decision.services.outcome_history.map_cloud_cover_to_condition',
+                        lambda *_: pytest.fail('mapper called before domain validation'))
+    if transport == 'api':
+        response = client(tmp_path).get(URL)
+        assert response.status_code == 200
+        value = response.json()
+    else:
+        value = OutcomeHistoryService(FileOutcomeHistoryReader(tmp_path)).history()
+    assert value['completeness'] == 'degraded'
+    assert value['certification'] == 'statistics_suspended'
+    assert value['statistics'] is None
+    assert len(value['rows']) == (2 if mixed else 1)
+    assert any(d['code'] == 'outcome_history_cloud_coverage_out_of_range' for d in value['diagnostics'])
+    corrupt = next(r for r in value['rows'] if r['evaluation_id'] == evaluation.evaluation_id)
+    assert not corrupt['sources_coherent']
+    assert corrupt['results'][0]['forecast_coverage_percent'] == percent
+    if valid:
+        assert next(r for r in value['rows'] if r['evaluation_id'] == valid.evaluation_id)['sources_coherent']
+
+
+@pytest.mark.parametrize('percent,category', [(0.0, 'clear'), (100.0, 'overcast')] + [(b + d, c) for b, low, high in
     [(10, 'clear', 'few'), (25, 'few', 'partly_cloudy'),
      (50, 'partly_cloudy', 'mostly_cloudy'), (80, 'mostly_cloudy', 'overcast')]
     for d, c in [(-0.000001, low), (0, high), (0.000001, high)]])
