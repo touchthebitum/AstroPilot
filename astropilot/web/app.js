@@ -87,6 +87,8 @@ const state = {
   fieldObservationInventoryReady: false,
 };
 
+const historyState = {generation: 0, cursor: null, open: false};
+
 const SESSION_PENDING_KEY = "astropilot.pendingSession";
 
 function sessionMessage(message) {
@@ -2957,6 +2959,7 @@ const PENDING_ACCEPTANCE_STORAGE_VERSION = 2;
 const wizardStates = Object.freeze(["site", "equipment", "projects", "review"]);
 
 function setView(view) {
+  invalidateOutcomeHistory();
   state.view = view;
   const wizardVisible = wizardStates.includes(view);
   ui.configurationLoading.hidden = view !== "loading_configuration";
@@ -5326,6 +5329,127 @@ document.querySelector("#outcome-observation").addEventListener("change", event 
   renderSavedFieldObservations();
   document.querySelector("#outcome-result").textContent = "Observation enregistrée sélectionnée. Consultez ou comparez explicitement.";
 });
+// Outcome History: independent read-only view and request generation.
+function invalidateOutcomeHistory() {
+  historyState.generation += 1;
+  historyState.cursor = null;
+}
+function historyParameters() {
+  const parameters = new URLSearchParams();
+  const form = document.querySelector("#history-filters");
+  for (const name of ["observed_from", "observed_to", "latitude", "longitude", "provider", "variable", "mode", "status"]) {
+    const value = form.elements.namedItem(name).value;
+    if (value) parameters.set(name, name.startsWith("observed_") ? `${value}Z` : value);
+  }
+  parameters.set("include_superseded", String(form.elements.namedItem("include_superseded").checked));
+  return parameters;
+}
+function historyText(parent, tag, value) {
+  const node = document.createElement(tag);
+  node.textContent = value;
+  parent.appendChild(node);
+  return node;
+}
+function renderOutcomeHistory(data) {
+  const summary = document.querySelector("#history-statistics");
+  summary.replaceChildren();
+  const stats = data.statistics;
+  if (stats) {
+    historyText(summary, "p", `N évaluations = ${stats.n_evaluations} · N observations = ${stats.n_observations} · N décisions = ${stats.n_decisions} · N exécutions = ${stats.n_executions}`);
+    historyText(summary, "p", `Couverture : comparable ${stats.coverage.comparable}, partielle ${stats.coverage.partial}, non comparable ${stats.coverage.not_comparable} (N = ${stats.n_evaluations}).`);
+    for (const [name, value] of Object.entries(stats.variables)) {
+      const unit = value.error_unit === "percentage_points" ? "points de pourcentage" : value.error_unit;
+      const means = name === "cloud_cover_percent" ? "" : ` · erreur signée moyenne ${value.mean_signed_error ?? "absente"} ${unit} · erreur absolue moyenne ${value.mean_absolute_error ?? "absente"} ${unit}`;
+      historyText(summary, "p", `${name} : N comparable = ${value.n_comparable}, non comparable = ${value.n_not_comparable}, absent = ${value.n_absent}${means} · N décisions = ${value.n_decisions}, N exécutions = ${value.n_executions}`);
+    }
+    historyText(summary, "p", `Nuages : N = ${stats.clouds.n} · match ${stats.clouds.match} · mismatch ${stats.clouds.mismatch}`);
+    const matrix = historyText(summary, "table", "");
+    matrix.className = "history-matrix";
+    historyText(matrix, "caption", "Nuages : prévu × observé (effectifs)");
+    const categories = ["clear", "few", "partly_cloudy", "mostly_cloudy", "overcast"];
+    const header = historyText(matrix, "tr", "");
+    historyText(header, "th", "Prévu / observé");
+    for (const category of categories) historyText(header, "th", category);
+    for (const forecast of categories) {
+      const row = historyText(matrix, "tr", "");
+      historyText(row, "th", forecast);
+      for (const observed of categories) historyText(row, "td", String(stats.clouds.forecast_x_observed[forecast]?.[observed] ?? 0));
+    }
+    for (const [code, n] of Object.entries(stats.reason_observation_counts)) historyText(summary, "p", `${code} : N observations distinctes = ${n}`);
+  } else {
+    historyText(summary, "p", "Statistiques suspendues : la population active ne peut pas être certifiée.");
+  }
+  const container = document.querySelector("#history-table");
+  container.replaceChildren();
+  if (!data.rows.length) historyText(container, "p", "Aucune validation lisible pour ces filtres.");
+  const table = historyText(container, "table", "");
+  const head = historyText(table, "tr", "");
+  for (const label of ["Date observée UTC", "Site exact", "Contexte", "Mode", "Couverture", "Valeurs et écarts", "Détail"]) historyText(head, "th", label);
+  for (const item of data.rows) {
+    const row = historyText(table, "tr", "");
+    historyText(row, "td", item.observed_at_utc ?? "Inconnue");
+    historyText(row, "td", item.site ? `${item.site.latitude}, ${item.site.longitude}` : "Inconnu");
+    historyText(row, "td", [item.context.site_name, item.context.target, item.context.imaging_field_id, item.context.acquisition_intent_id].filter(Boolean).join(" · ") || "Inconnu");
+    historyText(row, "td", item.mode === "execution" ? "Exécution" : "Décision seule");
+    historyText(row, "td", `${item.status} · ${item.supersession}`);
+    historyText(row, "td", item.results.map(v => v.status === "comparable" ?
+      `${v.variable} : prévu ${v.forecast_value ?? v.predicted_condition}, observé ${v.observed_value ?? v.observed_condition} ${v.unit}${v.signed_error == null ? ` · ${v.outcome}` : ` · écart signé ${v.signed_error}, absolu ${v.absolute_error} ${v.variable === "relative_humidity_percent" ? "points de pourcentage" : v.unit}`}` : `${v.variable} : non comparable`).join(" ; "));
+    const cell = historyText(row, "td", "");
+    const detail = historyText(cell, "details", "");
+    historyText(detail, "summary", "Provenance, éléments, raisons et versions");
+    historyText(detail, "p", `Providers comparés : ${item.compared_providers.join(", ") || "inconnus"} · Providers de l’evidence : ${item.evidence_providers.join(", ") || "inconnus"}`);
+    if (item.assessment) historyText(detail, "p", `Suffisance des éléments d’évaluation : ${item.assessment.status}`);
+    historyText(detail, "pre", JSON.stringify({observation_id: item.observation_id, evaluation_id: item.evaluation_id, decision_id: item.decision_id, execution_id: item.execution_id,
+      provenance: item.observation_provenance, results: item.results, context: item.context, unknown_dimensions: item.unknown_dimensions,
+      reasons: item.reasons, exclusions: item.exclusion_reasons, version: item.evaluation_algorithm_version,
+      comparison_version: item.algorithm_version, scope: item.forecast_scope, policies: item.parameters}, null, 2));
+  }
+  historyState.cursor = data.next_cursor;
+  document.querySelector("#history-next").hidden = !data.next_cursor;
+  const degraded = data.completeness !== "complete" || data.certification !== "certified";
+  const message = document.querySelector("#history-message");
+  message.classList.toggle("history-degraded", degraded);
+  message.textContent = degraded ? `Lecture incomplète ou non certifiée. ${data.readable_filtered_rows} lignes lisibles ; statistiques suspendues. Diagnostics : ${data.diagnostics.map(d => d.code).join(", ")}` :
+    `${data.readable_filtered_rows} lignes lisibles. ${data.diagnostics.length ? `Diagnostics : ${data.diagnostics.map(d => d.code).join(", ")}` : ""}`;
+}
+async function loadOutcomeHistory(next = false) {
+  const cursor = next ? historyState.cursor : null;
+  invalidateOutcomeHistory();
+  const generation = historyState.generation;
+  const parameters = historyParameters();
+  if (cursor) parameters.set("cursor", cursor);
+  document.querySelector("#history-message").textContent = "Lecture de l’historique…";
+  document.querySelector("#history-next").hidden = true;
+  document.querySelector("#history-statistics").replaceChildren();
+  document.querySelector("#history-table").replaceChildren();
+  try {
+    const response = await fetch(`/v1/outcome-evaluations/history?${parameters}`, {method: "GET"});
+    const data = await response.json();
+    if (generation !== historyState.generation || !historyState.open) return;
+    if (!response.ok) {
+      document.querySelector("#history-message").textContent = response.status === 409 ? "Les données ont changé. Rechargez l’historique pour reprendre la pagination." :
+        response.status === 422 ? "Filtres ou curseur invalides. Vérifiez la période UTC et les coordonnées exactes." : "Historique indisponible. Rechargez pour réessayer.";
+      return;
+    }
+    renderOutcomeHistory(data);
+  } catch (error) {
+    if (generation === historyState.generation && historyState.open) document.querySelector("#history-message").textContent = "Lecture impossible. Rechargez pour réessayer.";
+  }
+}
+document.querySelector("#history-open").addEventListener("click", () => {
+  historyState.open = true;
+  document.querySelector("#history-dialog").showModal();
+  loadOutcomeHistory();
+});
+document.querySelector("#history-close").addEventListener("click", () => document.querySelector("#history-dialog").close());
+document.querySelector("#history-dialog").addEventListener("close", () => {historyState.open = false; invalidateOutcomeHistory();});
+document.querySelector("#history-dialog").addEventListener("cancel", () => {historyState.open = false; invalidateOutcomeHistory();});
+document.querySelector("#history-filters").addEventListener("submit", event => {event.preventDefault(); loadOutcomeHistory();});
+document.querySelector("#history-filters").addEventListener("input", () => {invalidateOutcomeHistory(); document.querySelector("#history-next").hidden = true; document.querySelector("#history-statistics").replaceChildren(); document.querySelector("#history-table").replaceChildren(); document.querySelector("#history-message").textContent = "Filtres modifiés. Rechargez l’historique.";});
+document.querySelector("#history-filters").addEventListener("change", () => loadOutcomeHistory());
+document.querySelector("#history-next").addEventListener("click", () => loadOutcomeHistory(true));
+
+// End Outcome History.
 restoreFieldObservationLock();
 restorePendingFieldObservationInventory();
 if (restorePendingAcceptanceAttempt()) showUnresolvedAcceptance();

@@ -3358,6 +3358,32 @@ def create_app(
             status, public_code = 503, "outcome_evaluation_unavailable"
         raise HTTPException(status_code=status, detail={"code": public_code}) from exc
 
+    @application.get("/v1/outcome-evaluations/history")
+    def read_outcome_history(
+        observed_from: str | None = None, observed_to: str | None = None,
+        latitude: float | None = None, longitude: float | None = None,
+        provider: str | None = None, variable: str | None = None,
+        mode: str | None = None, status: str | None = None,
+        include_superseded: bool = False, limit: int = 50, cursor: str | None = None,
+    ):
+        from astropilot.outcome_history_reader import OutcomeHistoryUnavailable
+        from decision.services.outcome_history import OutcomeHistoryInvalidFilter, OutcomeHistoryDatasetChanged
+        try:
+            return application_service().read_outcome_history(
+                observed_from=observed_from, observed_to=observed_to,
+                latitude=latitude, longitude=longitude, provider=provider, variable=variable,
+                mode=mode, status=status, include_superseded=include_superseded, limit=limit, cursor=cursor,
+            )
+        except OutcomeHistoryInvalidFilter as error:
+            raise HTTPException(status_code=422, detail={"code": str(error)}) from error
+        except OutcomeHistoryDatasetChanged as error:
+            raise HTTPException(status_code=409, detail={"code": "outcome_history_dataset_changed"}) from error
+        except OutcomeHistoryUnavailable as error:
+            code = ("outcome_history_storage_unavailable"
+                    if str(error) == "outcome_history_storage_unavailable"
+                    else "outcome_history_unavailable")
+            raise HTTPException(status_code=503, detail={"code": code}) from error
+
     @application.post("/v1/field-observations/{observation_id}/outcome-evaluation")
     def evaluate_field_observation_outcome(
         observation_id: str, response: Response,

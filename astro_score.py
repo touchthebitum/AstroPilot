@@ -2229,6 +2229,8 @@ def build_durable_tonight_application_service(
     from astropilot.execution_lineage_store import FileExecutionLineageStore
     from astropilot.field_observation_store import FileFieldObservationStore
     from astropilot.outcome_evaluation_store import FileOutcomeEvaluationStore
+    from astropilot.outcome_history_reader import FileOutcomeHistoryReader
+    from decision.services.outcome_history import OutcomeHistoryService
 
     return DurableTonightApplicationService(
         application_service=build_tonight_application_service(),
@@ -2249,6 +2251,7 @@ def build_durable_tonight_application_service(
         ),
         decision_id_factory=generate_decision_id,
         outcome_evaluation_clock=lambda: datetime.now(timezone.utc),
+        outcome_history_service=OutcomeHistoryService(FileOutcomeHistoryReader(get_user_data_dir())),
         profile_loader=load_user_profile,
         profile_saver=save_user_profile,
     )
