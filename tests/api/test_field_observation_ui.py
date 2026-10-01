@@ -1250,6 +1250,14 @@ function makeContext(name, locks = controlledLocks) {
 }
 const run = (tab, code) => vm.runInContext(code, tab.context);
 const drainMicrotasks = async () => { for (let i = 0; i < 10; i++) await new Promise(resolve => setImmediate(resolve)); };
+// Native crypto work may finish after any fixed number of event-loop turns.
+const waitForRequest = async (started) => {
+  const deadline = Date.now() + 5000;
+  while (!started()) {
+    assert.ok(Date.now() < deadline, 'reconciliation request did not start');
+    await new Promise(resolve => setTimeout(resolve, 1));
+  }
+};
 const expireNetwork = async tab => {
   await drainMicrotasks();
   assert.equal(tab.sandbox.networkTimers.size, 1);
@@ -1841,7 +1849,7 @@ const projection = payload => ({...structuredClone(payload),
       let finishGet;
       target.sandbox.fetch = () => new Promise(resolve => { finishGet = resolve; });
       const reconciliation = resolve(target, 'reconcileFieldObservationEntry', id);
-      await drainMicrotasks();
+      await waitForRequest(() => typeof finishGet === 'function');
       assert.equal(typeof finishGet, 'function');
       const divergent = structuredClone(first.pending); divergent.payload.observation_id = 'during-get-uuid';
       source.sandbox.localStorage.setItem(first.key, JSON.stringify(divergent));
@@ -1944,7 +1952,7 @@ const projection = payload => ({...structuredClone(payload),
         let finishGet;
         target.sandbox.fetch = () => new Promise(resolve => { finishGet = resolve; });
         action = resolve(target, 'reconcileFieldObservationEntry', aId);
-        await drainMicrotasks();
+        await waitForRequest(() => typeof finishGet === 'function');
         assert.equal(typeof finishGet, 'function');
         source.sandbox.localStorage.setItem(first.key, JSON.stringify(replacement));
         finishGet({ok: true, status: 200, json: async () => projection(first.pending.payload)});
