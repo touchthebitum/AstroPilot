@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,23 +39,98 @@ class FileOutcomeHistoryReader:
     def __init__(self, directory: Path):
         self.directory = Path(directory)
 
+    def _directory_fd(self, kind):
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        root = os.open(self.directory, flags)
+        try:
+            return os.open(kind, flags, dir_fd=root)
+        finally:
+            os.close(root)
+
     def _inventory(self, kind):
         try:
-            with os.scandir(self.directory / kind) as entries:
-                return sorted(entry.name for entry in entries if entry.name.endswith('.json'))
+            fd = self._directory_fd(kind)
+            try:
+                with os.scandir(fd) as entries:
+                    return sorted(entry.name for entry in entries if entry.name.endswith('.json'))
+            finally:
+                os.close(fd)
         except FileNotFoundError:
             return []
         except OSError as error:
             raise OutcomeHistoryUnavailable('outcome_history_unavailable') from error
 
+    def _read_bytes(self, kind, name):
+        # Fingerprint reads obey the same identity rules as decoded documents.
+        identity = name[:-5]
+        if kind == 'decision_forecast_evidence':
+            validate_decision_id(identity)
+        elif kind in ('execution_lineage', 'decision_lineage'):
+            validate_lineage_identity(identity, field='document_id')
+        else:
+            validate_observation_identity(identity, field='document_id')
+        directory = self._directory_fd(kind)
+        try:
+            expected = os.stat(name, dir_fd=directory, follow_symlinks=False)
+            if not stat.S_ISREG(expected.st_mode):
+                raise OSError('unsafe_document')
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+            try:
+                opened = os.fstat(fd)
+                if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (expected.st_dev, expected.st_ino):
+                    raise OSError('unsafe_document')
+                with os.fdopen(fd, 'rb', closefd=False) as stream:
+                    return stream.read()
+            finally:
+                os.close(fd)
+        finally:
+            os.close(directory)
+
+    def _digest(self, kind, name):
+        try:
+            return hashlib.sha256(self._read_bytes(kind, name)).hexdigest()
+        except FileNotFoundError:
+            return 'missing'
+        except ValueError:
+            return 'invalid_identity'
+        except OSError:
+            return 'unreadable'
+
+    def _metadata(self, inventories):
+        result = {}
+        for kind, names in inventories.items():
+            if not names:
+                continue
+            try:
+                fd = self._directory_fd(kind)
+                try:
+                    for name in names:
+                        try:
+                            info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                            result[kind + '/' + name] = (info.st_dev, info.st_ino, info.st_mode,
+                                info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+                        except OSError:
+                            result[kind + '/' + name] = None
+                finally:
+                    os.close(fd)
+            except OSError:
+                result[kind] = None
+        return result
+
     def read(self):
         manifest = {}
         diagnostics = []
+        content_changed = False
         values = {key: {} for key in ('outcome_evaluations', 'field_observations',
                   'decision_forecast_evidence', 'execution_lineage', 'decision_lineage')}
-        inventories = {}
+        inventories = {kind: self._inventory(kind) for kind in values}
+        initial_metadata = self._metadata(inventories)
+        for kind, names in inventories.items():
+            for name in names:
+                manifest[kind + '/' + name] = self._digest(kind, name)
 
         def load(kind, identity, decoder, keyword):
+            nonlocal content_changed
             # Domain decoders do not all enforce filesystem-safe join identities.
             try:
                 if kind == 'decision_forecast_evidence':
@@ -67,10 +143,9 @@ class FileOutcomeHistoryReader:
                 diagnostics.append({'code': 'invalid_document_identity', 'kind': kind})
                 return
             name = identity + '.json'
-            path = self.directory / kind / name
             key = kind + '/' + name
             try:
-                raw = path.read_bytes()
+                raw = self._read_bytes(kind, name)
             except FileNotFoundError:
                 manifest[key] = 'missing'
                 diagnostics.append({'code': 'missing_join', 'kind': kind, 'id': identity})
@@ -79,7 +154,9 @@ class FileOutcomeHistoryReader:
                 manifest[key] = 'unreadable'
                 diagnostics.append({'code': 'unreadable_document', 'kind': kind, 'id': identity})
                 return
-            manifest[key] = hashlib.sha256(raw).hexdigest()
+            digest = hashlib.sha256(raw).hexdigest()
+            content_changed = content_changed or (key in manifest and manifest[key] != digest)
+            manifest.setdefault(key, digest)
             try:
                 text = raw.decode('utf-8')
                 if kind == 'outcome_evaluations':
@@ -99,7 +176,6 @@ class FileOutcomeHistoryReader:
             ('outcome_evaluations', deserialize_outcome_evaluation, 'evaluation_id'),
             ('field_observations', deserialize_field_observation, 'observation_id'),
         ):
-            inventories[kind] = self._inventory(kind)
             for name in inventories[kind]:
                 load(kind, name[:-5], decoder, keyword)
         evaluations = tuple(values['outcome_evaluations'].values())
@@ -114,16 +190,15 @@ class FileOutcomeHistoryReader:
             self._inventory(kind)
             for identity in sorted(identities):
                 load(kind, identity, decoder, keyword)
-        # Verify content and membership again: no durable snapshot or lock required.
-        stable = all(self._inventory(kind) == names for kind, names in inventories.items())
+        # Content validation follows all decoding/join reads. Membership and metadata
+        # are checked last, including files hashed early in this final pass.
+        stable = not content_changed
         for key, digest in list(manifest.items()):
-            try:
-                current = hashlib.sha256((self.directory / key).read_bytes()).hexdigest()
-            except FileNotFoundError:
-                current = 'missing'
-            except OSError:
-                current = 'unreadable'
-            stable = stable and current == digest
+            kind, name = key.split('/')
+            stable = self._digest(kind, name) == digest and stable
+        final_inventories = {kind: self._inventory(kind) for kind in values}
+        stable = (stable and final_inventories == inventories and
+                  self._metadata(final_inventories) == initial_metadata)
         if not stable:
             diagnostics.append({'code': 'dataset_changed_during_read'})
         fingerprint = hashlib.sha256(json.dumps({'files': manifest, 'inventory': inventories},

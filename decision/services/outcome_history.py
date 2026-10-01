@@ -124,6 +124,36 @@ def admissible(evaluation):
             all(r.unit == UNITS[r.variable.value] for r in c.results))
 
 
+def result_source_mismatches(evaluation, observation, evidence):
+    """Validate persisted facts only; never select forecasts or recompute comparisons."""
+    failures = {}
+    for result in evaluation.comparison.results:
+        if result.status.value != 'comparable':
+            continue
+        variable = result.variable.value
+        codes = []
+        cloud = variable == 'cloud_cover_percent'
+        expected = (observation.conditions.cloud_state if cloud else
+                    getattr(observation.conditions, variable)) if observation else None
+        actual = result.observed_condition if cloud else result.observed_value
+        if expected is None or actual != expected:
+            codes.append('outcome_history_observed_source_mismatch')
+        provenance = result.forecast_point
+        value = result.forecast_coverage_percent if cloud else result.forecast_value
+        matches = evidence is not None and observation is not None and provenance is not None and any(
+            point.provider_id == provenance.provider_id and point.model_id == provenance.model_id and
+            point.retrieved_at_utc == provenance.retrieved_at_utc and
+            point.forecast_for_utc == provenance.forecast_for_utc and
+            point.forecast_for_utc - observation.observed_at_utc == provenance.temporal_offset and
+            any(v.variable == result.variable and v.unit == result.unit and v.value == value for v in point.values)
+            for point in evidence.forecast_points)
+        if not matches:
+            codes.append('outcome_history_forecast_source_mismatch')
+        if codes:
+            failures[variable] = codes
+    return failures
+
+
 def project(evaluation, snapshot, states):
     raw = json.loads(serialize_outcome_evaluation(evaluation))['outcome_evaluation']
     comparison = raw.pop('comparison')
@@ -147,6 +177,12 @@ def project(evaluation, snapshot, states):
         reasons = reasons + ['comparison_sources_unknown_or_mismatched']
         unknown['observed_at_utc'] = 'comparison_sources_unknown_or_mismatched'
         unknown['site'] = 'comparison_sources_unknown_or_mismatched'
+    mismatches = result_source_mismatches(evaluation, obs, evidence)
+    if mismatches:
+        sources_coherent = False
+        reasons = reasons + sorted({code for codes in mismatches.values() for code in codes})
+        unknown['observed_at_utc'] = 'result_sources_mismatched'
+        unknown['site'] = 'result_sources_mismatched'
     points = () if evidence is None else evidence.forecast_points
     locations = {(p.requested_location.latitude, p.requested_location.longitude) for p in points}
     site = None
@@ -182,10 +218,16 @@ def project(evaluation, snapshot, states):
         provider = point['provider_id'] if result['status'] == 'comparable' and point else None
         result['compared_provider'] = provider
         result['unknown_dimensions'] = {}
+        for code in mismatches.get(result['variable'], []):
+            result['unknown_dimensions']['source'] = code
+        if 'outcome_history_forecast_source_mismatch' in mismatches.get(result['variable'], []):
+            provider = None
+            result['compared_provider'] = None
+            result['unknown_dimensions']['provider'] = 'outcome_history_forecast_source_mismatch'
         if provider:
             providers.add(provider)
         else:
-            result['unknown_dimensions']['provider'] = 'result_not_comparable'
+            result['unknown_dimensions'].setdefault('provider', 'result_not_comparable')
         if not point or point['model_id'] is None:
             result['unknown_dimensions']['model'] = 'model_not_recorded'
     if not providers:
@@ -210,7 +252,7 @@ class OutcomeHistoryService:
     def history(self, *, cursor=None, **kwargs):
         selected = filters(**kwargs)
         snapshot = self.reader.read()
-        if not snapshot.stable and cursor:
+        if not snapshot.stable:
             raise OutcomeHistoryDatasetChanged('outcome_history_dataset_changed')
         diagnostics = list(snapshot.diagnostics)
         states = lineage_states(snapshot.observations)

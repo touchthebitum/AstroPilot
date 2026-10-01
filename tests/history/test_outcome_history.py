@@ -17,7 +17,7 @@ from decision.field_observation_persistence import serialize_field_observation
 from decision.models.forecast_observation_comparison import ForecastObservationParameters, TemporalComparisonPolicy
 from decision.models.outcome_evaluation import derive_outcome_evaluation_id
 from decision.outcome_evaluation_persistence import serialize_outcome_evaluation
-from decision.services.outcome_history import OutcomeHistoryService, filters, lineage_states
+from decision.services.outcome_history import OutcomeHistoryService, OutcomeHistoryDatasetChanged, filters, lineage_states
 from decision.services.outcome_history_statistics import statistics
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 from decision.weather.decision_forecast_evidence_persistence import serialize_decision_forecast_evidence
@@ -197,11 +197,11 @@ def test_missing_join_and_global_unavailable(tmp_path, monkeypatch):
     (tmp_path / 'decision_forecast_evidence/decision-1.json').unlink()
     c = client(tmp_path)
     assert c.get(URL).json()['statistics'] is None
-    original = os.scandir
-    def blocked(path):
+    original = FileOutcomeHistoryReader._directory_fd
+    def blocked(self, path):
         if Path(path).name == 'outcome_evaluations': raise PermissionError()
-        return original(path)
-    monkeypatch.setattr(os, 'scandir', blocked)
+        return original(self, path)
+    monkeypatch.setattr(FileOutcomeHistoryReader, '_directory_fd', blocked)
     response = c.get(URL)
     assert response.status_code == 503 and response.json()['detail']['code'] == 'outcome_history_unavailable'
 
@@ -258,8 +258,8 @@ def test_unstable_scan_suspends_statistics(tmp_path, monkeypatch):
             write(tmp_path, kind, 'child', serialize_field_observation(B['observation'](observation_id='child', execution_id=None, supersedes_observation_id='observation-1')))
         return original(kind)
     monkeypatch.setattr(reader, '_inventory', inventory)
-    value = OutcomeHistoryService(reader).history()
-    assert value['statistics'] is None and any(d['code'] == 'dataset_changed_during_read' for d in value['diagnostics'])
+    with pytest.raises(OutcomeHistoryDatasetChanged):
+        OutcomeHistoryService(reader).history()
 
 
 def test_architecture_no_commands_or_forbidden_dependencies():
@@ -430,7 +430,7 @@ def test_certification_requires_exact_comparison_sources(tmp_path, source_change
     row = value['rows'][0]
     assert row['site'] is None and row['observed_at_utc'] is None
     assert row['results'][0]['observed_value'] == 7.0
-    assert row['results'][0]['compared_provider'] == 'provider'
+    assert row['results'][0]['compared_provider'] == ('provider' if source_change == 'evidence' else None)
     assert not row['statistics_eligible'] and not row['sources_coherent']
     assert any(d['code'] == 'comparison_sources_unknown_or_mismatched' for d in value['diagnostics'])
     assert c.get(URL, params={'latitude': 0, 'longitude': 0}).json()['rows'] == []
@@ -441,23 +441,24 @@ def test_unstable_scan_rejects_existing_cursor_and_emits_no_continuation(tmp_pat
     seed(tmp_path, 'a'); seed(tmp_path, 'b')
     c = client(tmp_path)
     page = c.get(URL, params={'limit': 1}).json()
-    original = Path.read_bytes
+    original = FileOutcomeHistoryReader._read_bytes
     target = tmp_path / 'field_observations/b.json'
     reads = 0
-    def unstable(path):
+    def unstable(self, kind, name):
+        path = self.directory / kind / name
         nonlocal reads
         if path == target:
             reads += 1
             if reads % 2 == 0:
-                return original(path) + b' '
-        return original(path)
-    monkeypatch.setattr(Path, 'read_bytes', unstable)
+                return original(self, kind, name) + b' '
+        return original(self, kind, name)
+    monkeypatch.setattr(FileOutcomeHistoryReader, '_read_bytes', unstable)
     response = c.get(URL, params={'limit': 1, 'cursor': page['next_cursor']})
     assert response.status_code == 409
     assert response.json()['detail']['code'] == 'outcome_history_dataset_changed'
-    value = c.get(URL, params={'limit': 1}).json()
-    assert value['next_cursor'] is None and value['statistics'] is None
-    assert any(d['code'] == 'dataset_changed_during_read' for d in value['diagnostics'])
+    response = c.get(URL, params={'limit': 1})
+    assert response.status_code == 409
+    assert set(response.json()) == {'detail'}
 
 
 @pytest.mark.parametrize('field', ['decision_id', 'execution_id'])
@@ -478,17 +479,18 @@ def test_join_ids_validated_before_any_path_read(tmp_path, monkeypatch, field, i
         evaluation = replace(evaluation, comparison=comparison)
     payload = json.loads(serialize_outcome_evaluation(evaluation))
     write(tmp_path, 'outcome_evaluations', evaluation.evaluation_id, json.dumps(payload))
-    original = Path.read_bytes
+    original = FileOutcomeHistoryReader._read_bytes
     paths = []
-    def record(path):
+    def record(self, kind, name):
+        path = self.directory / kind / name
         paths.append(path)
         assert '\x00' not in str(path)
         assert path.is_relative_to(tmp_path)
         assert path.parent.name in ('outcome_evaluations', 'field_observations', 'decision_forecast_evidence',
                                     'execution_lineage', 'decision_lineage')
         assert identity + '.json' != path.name
-        return original(path)
-    monkeypatch.setattr(Path, 'read_bytes', record)
+        return original(self, kind, name)
+    monkeypatch.setattr(FileOutcomeHistoryReader, '_read_bytes', record)
     response = client(tmp_path).get(URL)
     assert response.status_code == 200
     value = response.json()
@@ -597,3 +599,173 @@ def test_statistics_failure_preserves_consultation_with_diagnostic(tmp_path, mon
     assert len(value['rows']) == 1 and value['statistics'] is None
     assert value['certification'] == 'statistics_suspended'
     assert any(d['code'] == 'nonfinite_statistics' for d in value['diagnostics'])
+
+
+@pytest.mark.parametrize('change', ['observed', 'provider', 'forecast', 'model', 'retrieved', 'offset'])
+def test_persisted_result_must_match_canonical_sources(tmp_path, change):
+    evidence = B['evidence'](WeatherVariable.TEMPERATURE_C, WeatherVariable.WIND_SPEED_KMH)
+    evaluation = seed(tmp_path, evidence=evidence,
+        source=B['observation'](execution_id=None, conditions=ObservedConditions(temperature_c=7, wind_speed_kmh=3)))
+    results = list(evaluation.comparison.results)
+    index = next(i for i, r in enumerate(results) if r.variable == WeatherVariable.TEMPERATURE_C)
+    result = results[index]
+    if change == 'observed':
+        result = replace(result, observed_value=99.0, signed_error=-91.0, absolute_error=91.0)
+    elif change == 'forecast':
+        result = replace(result, forecast_value=9.0, signed_error=2.0, absolute_error=2.0)
+    else:
+        changes = {'provider': {'provider_id': 'foreign'}, 'model': {'model_id': 'foreign'},
+            'retrieved': {'retrieved_at_utc': result.forecast_point.retrieved_at_utc - timedelta(seconds=1)},
+            'offset': {'temporal_offset': timedelta(seconds=1)}}
+        result = replace(result, forecast_point=replace(result.forecast_point, **changes[change]))
+    results[index] = result
+    altered = replace(evaluation, comparison=replace(evaluation.comparison, results=tuple(results)))
+    write(tmp_path, 'outcome_evaluations', evaluation.evaluation_id, serialize_outcome_evaluation(altered))
+    c = client(tmp_path)
+    response = c.get(URL)
+    assert response.status_code == 200
+    value = response.json()
+    assert len(value['rows']) == 1 and len(value['rows'][0]['results']) == 2
+    assert value['statistics'] is None and value['completeness'] == 'degraded'
+    code = 'outcome_history_observed_source_mismatch' if change == 'observed' else 'outcome_history_forecast_source_mismatch'
+    assert any(d['code'] == code for d in value['diagnostics'])
+    assert c.get(URL, params={'provider': 'foreign'}).json()['certification'] != 'certified'
+
+
+@pytest.mark.parametrize('mutation', ['child', 'content', 'delete', 'foreign_add', 'foreign_delete'])
+@pytest.mark.parametrize('with_cursor', [False, True])
+def test_mutation_during_second_evidence_read_is_rejected(tmp_path, monkeypatch, mutation, with_cursor):
+    seed(tmp_path, 'a'); seed(tmp_path, 'b')
+    foreign = tmp_path / 'field_observations/foreign.json'
+    if mutation == 'foreign_delete':
+        foreign.write_text('{broken')
+    c = client(tmp_path)
+    page = c.get(URL, params={'limit': 1}).json()
+    original = FileOutcomeHistoryReader._read_bytes
+    reads = 0
+    def mutate(self, kind, name):
+        nonlocal reads
+        raw = original(self, kind, name)
+        if kind == 'decision_forecast_evidence':
+            reads += 1
+            if reads == 2:
+                path = tmp_path / 'field_observations/a.json'
+                if mutation == 'child':
+                    write(tmp_path, 'field_observations', 'child', serialize_field_observation(
+                        B['observation'](observation_id='child', execution_id=None, supersedes_observation_id='a')))
+                elif mutation == 'content':
+                    path.write_text(path.read_text() + ' ')
+                elif mutation == 'delete':
+                    path.unlink()
+                elif mutation == 'foreign_add':
+                    foreign.write_text('{broken')
+                else:
+                    foreign.unlink()
+        return raw
+    monkeypatch.setattr(FileOutcomeHistoryReader, '_read_bytes', mutate)
+    params = {'limit': 1}
+    if with_cursor:
+        params['cursor'] = page['next_cursor']
+    response = c.get(URL, params=params)
+    assert response.status_code == 409
+    assert response.json() == {'detail': {'code': 'outcome_history_dataset_changed'}}
+
+
+@pytest.mark.parametrize('kind', ['field_observations', 'outcome_evaluations', 'decision_forecast_evidence',
+    'execution_lineage', 'decision_lineage'])
+@pytest.mark.parametrize('object_type', ['symlink', 'directory', 'fifo'])
+def test_unsafe_documents_never_opened(tmp_path, monkeypatch, kind, object_type):
+    evaluation = seed(tmp_path, source=B['observation']())
+    seed_execution_joins(tmp_path)
+    names = {'field_observations': 'observation-1', 'outcome_evaluations': evaluation.evaluation_id,
+        'decision_forecast_evidence': 'decision-1', 'execution_lineage': 'execution-1', 'decision_lineage': 'decision-1'}
+    path = tmp_path / kind / (names[kind] + '.json')
+    external = tmp_path / 'external.json'
+    external.write_bytes(path.read_bytes())
+    path.unlink()
+    if object_type == 'symlink':
+        path.symlink_to(external)
+    elif object_type == 'directory':
+        path.mkdir()
+    else:
+        os.mkfifo(path)
+    original = os.open
+    def guarded(name, flags, *args, **kwargs):
+        assert str(name) != str(external)
+        if 'dir_fd' in kwargs:
+            parent = os.fstat(kwargs['dir_fd'])
+            target_parent = path.parent.stat()
+            if (parent.st_dev, parent.st_ino) == (target_parent.st_dev, target_parent.st_ino):
+                assert str(name) != path.name  # rejection must precede document open
+        return original(name, flags, *args, **kwargs)
+    monkeypatch.setattr(os, 'open', guarded)
+    response = client(tmp_path).get(URL)
+    assert response.status_code == 200
+    value = response.json()
+    assert value['certification'] == 'statistics_suspended' and value['statistics'] is None
+    assert any(d['code'] == 'unreadable_document' and d['kind'] == kind for d in value['diagnostics'])
+
+
+def test_cursor_offset_tampering_cannot_bypass_filters(tmp_path):
+    import base64
+    seed(tmp_path, 'a'); seed(tmp_path, 'b')
+    c = client(tmp_path)
+    page = c.get(URL, params={'limit': 1, 'provider': 'provider'}).json()
+    token = json.loads(base64.urlsafe_b64decode(page['next_cursor'] + '=='))
+    token['offset'] = 0
+    cursor = base64.urlsafe_b64encode(json.dumps(token).encode()).decode()
+    assert c.get(URL, params={'limit': 1, 'provider': 'foreign', 'cursor': cursor}).status_code == 422
+    assert c.get(URL, params={'limit': 1, 'provider': 'provider', 'cursor': cursor}).json()['rows'][0]['observation_id'] == 'a'
+
+
+def test_change_to_already_rehashed_observation_detected_at_final_membership(tmp_path, monkeypatch):
+    seed(tmp_path)
+    original = FileOutcomeHistoryReader._read_bytes
+    reads = 0
+    def mutate(self, kind, name):
+        nonlocal reads
+        raw = original(self, kind, name)
+        if kind == 'decision_forecast_evidence':
+            reads += 1
+            if reads == 3:  # initial manifest, decode, final hash (observations already hashed)
+                path = tmp_path / 'field_observations/observation-1.json'
+                path.write_text(path.read_text() + ' ')
+        return raw
+    monkeypatch.setattr(FileOutcomeHistoryReader, '_read_bytes', mutate)
+    assert client(tmp_path).get(URL).status_code == 409
+
+
+def test_document_replaced_with_symlink_between_stat_and_open(tmp_path, monkeypatch):
+    seed(tmp_path)
+    target = tmp_path / 'field_observations/observation-1.json'
+    external = tmp_path / 'outside.json'
+    external.write_bytes(target.read_bytes())
+    original = os.open
+    swapped = False
+    def swap(name, flags, *args, **kwargs):
+        nonlocal swapped
+        if str(name) == target.name and not swapped:
+            swapped = True
+            target.unlink()
+            target.symlink_to(external)
+        return original(name, flags, *args, **kwargs)
+    monkeypatch.setattr(os, 'open', swap)
+    response = client(tmp_path).get(URL)
+    assert swapped and response.status_code == 409
+    # Stable subsequent scan isolates the unsafe document and never loads the observation.
+    snapshot = FileOutcomeHistoryReader(tmp_path).read()
+    assert not snapshot.observations and not snapshot.complete and snapshot.stable
+
+
+def test_cloud_observed_category_must_match_source(tmp_path):
+    from decision.models.forecast_observation_comparison import CloudComparisonOutcome
+    evaluation = seed(tmp_path, evidence=B['evidence'](WeatherVariable.CLOUD_COVER_PERCENT),
+        source=B['observation'](execution_id=None, conditions=ObservedConditions(cloud_state=CloudState.FEW)))
+    result = evaluation.comparison.results[0]
+    changed = replace(result, observed_condition=CloudState.OVERCAST,
+        confusion_cell=(result.predicted_condition, CloudState.OVERCAST), outcome=CloudComparisonOutcome.MISMATCH)
+    altered = replace(evaluation, comparison=replace(evaluation.comparison, results=(changed,)))
+    write(tmp_path, 'outcome_evaluations', evaluation.evaluation_id, serialize_outcome_evaluation(altered))
+    value = client(tmp_path).get(URL).json()
+    assert value['statistics'] is None
+    assert any(d['code'] == 'outcome_history_observed_source_mismatch' for d in value['diagnostics'])
