@@ -136,6 +136,103 @@ it separately before committing changes.
 
 ## API and UI
 
+La publication des observations terrain exige l’API navigateur Web Locks :
+Chrome/Chromium 69+, Edge 79+, Firefox 96+ ou Safari 15.4+. AstroPilot s’ouvre
+dans le navigateur par défaut et vérifie cette capacité à l’usage ; un navigateur
+plus ancien, un mode de sécurité qui désactive Web Locks ou un contexte qui la
+refuse peut consulter l’application, mais la saisie et la publication terrain
+sont bloquées avec un diagnostic visible. Le repli `localStorage` n’est pas
+présenté comme une exclusion multi-onglets sûre.
+
+
+Chaque phase réseau de publication (GET de retry, POST et GET de confirmation)
+est limitée à 15 secondes (`FIELD_OBSERVATION_NETWORK_TIMEOUT_MS`), décodage de
+réponse compris. Le contrôleur réseau est lié à l’annulation de l’opération ;
+une échéance libère le Web Lock même si le transport ne répond pas à l’abort.
+Le pending et le verrou d’origine restent conservés en cas de statut incertain.
+La prochaine tentative commence par le GET canonique du même UUID.
+
+Un agrégat dont une entrée manque ou diverge devient `inconsistent_persistence` :
+le verrou global original reste intact et ses artefacts sont affichés avec
+l’inventaire courant. Les actions ciblent un identifiant déterministe composé de
+la source, clé, génération, UUID et contenu complet immuable (valeur brute pour
+une corruption). Cet identifiant est revalidé sous Web Lock avant tout GET ou
+suppression. Résoudre un artefact global ne supprime jamais son voisin divergent
+portant la même clé ; les autres artefacts globaux sont conservés.
+
+Chaque ré-inventorisation fusionne les artefacts persistants avec les artefacts
+mémoire non résolus, y compris après `clear()` et un retour bfcache. Un artefact
+absent reste diagnostiqué et bloquant jusqu’à résolution ciblée explicite ou
+réconciliation canonique ; il n’est pas réécrit automatiquement dans le stockage.
+Le journal typé IndexedDB `fieldObservationRecovery` conserve séparément les
+artefacts non résolus (identité complète, UUID, pending canonique, contexte,
+origine, clé, génération, statut/raison et dates de création/mise à jour).
+Il survit à `localStorage.clear()` et à un rechargement complet : le démarrage
+fusionne ce journal avec l’inventaire local avant d’autoriser un nouvel UUID.
+Les lectures et transactions atomiques sont sérialisées sous le même Web Lock ;
+la transaction de sauvegarde doit être terminée avant toute publication.
+Un journal inaccessible, bloqué ou corrompu bloque toute publication, sans repli
+vers la seule mémoire. Chaque résolution explicite retire son entrée du journal ;
+des identités résolues empêchent une page ancienne de la réintroduire.
+L’actualisation canonique lit le contexte sans mutation intermédiaire de l’UI,
+puis revalide le token et la génération avant de repasser le verrou en pending.
+Chaque requête de récupération (observation, mission, session et décision) utilise
+la même limite de 15 secondes, décodage compris, et le signal de l’opération.
+Un timeout `context_refresh_timeout` libère busy et conserve le pending.
+Les erreurs IndexedDB sont classées `recovery_unavailable`, `recovery_schema`,
+`recovery_transaction` ou `recovery_corrupt`, avec leur cause native si disponible.
+
+Le journal v2 utilise un `epoch` monotone et un `resolved_watermark` persistant.
+Chaque nouvelle enveloppe pending porte sa `recovery_sequence`, sans changer le
+payload envoyé au serveur. Après résolution, le watermark avance jusqu’à la plus
+ancienne séquence encore non résolue moins un (ou l’epoch si aucune ne reste).
+Les tombstones sous ce watermark sont compactés ; une ancienne page ré-inventorie
+sous Web Lock avant toute mutation et écarte les enveloppes mémoire/localStorage
+ayant une séquence inférieure ou égale au watermark, sans leur attribuer un nouvel
+epoch. Les identités legacy non séquencées sont conservées sous forme de digests
+SHA-256 complets ; la migration v1 compacte donc aussi les anciennes tombstones
+sans perdre leur identité exacte. Les artefacts legacy résolus réapparus à l’identique sont écartés ; les versions
+divergentes restent soumises aux règles de réconciliation ciblée déjà établies.
+Le plafond reste 512 Ki unités UTF-16. La capacité est vérifiée après compaction,
+avant UUID et localStorage ; une capacité réellement insuffisante bloque sans POST.
+Le refresh décision seule appelle `GET /v1/decisions/{decision_id}/context`, qui
+relit uniquement l’evidence immuable persistée et retourne l’ID exact : aucun
+recompute météo ni nouvelle décision. Cette evidence ne contient pas de fingerprint
+site/config canonique ; le fingerprint local reste revalidé sous Web Lock.
+Le résultat réseau et le nettoyage recovery sont distincts. Si le serveur a confirmé
+l’observation mais que l’écriture recovery terminale échoue : « Observation confirmée
+côté serveur. Le nettoyage local durable doit être réconcilié ; l’UUID d’origine
+reste conservé dans la recovery pending. » Le journal antérieur conserve le pending,
+qu’un reload peut retrouver puis nettoyer par GET canonique sans nouvel UUID/POST.
+
+Ce stockage est propre à l’origine navigateur ; effacer aussi IndexedDB ou toutes
+les données du site supprime cette preuve locale de récupération.
+
+Les diagnostics de migration (`migration_failed`, `migration_requires_web_locks`)
+s’ajoutent à cet inventaire fusionné : les entrées et corruptions mémoire restent
+présentes même lorsqu’un autre pending legacy ne peut pas être migré.
+La résolution mémoire cible chaque artefact indépendamment du statut global.
+Sous Web Lock, elle exige son identité mémoire exacte, l’absence persistante de
+sa clé et l’absence de remplacement divergent dans la persistance actuelle.
+Un voisin historique uniquement mémoire de même clé et même origine ne bloque
+pas la résolution : chaque `entry_id` distinct est résolu indépendamment.
+La réconciliation vérifie le GET canonique du même UUID, puis revalide la cible avant son retrait ; l’abandon ou
+la suppression d’une corruption exige une confirmation explicite. Seule la cible
+est oubliée, puis l’inventaire restant est reconstruit (0/1/N), sans retirer les
+autres pending. Un brut réapparu ou remplacé impose une ré-inventorisation bloquante.
+Un `clear()` sans artefact dans la mémoire ni la persistance laisse l’éditeur libre.
+Un verrou global illisible est une corruption distincte (`global_lock`, brut et
+identifiant immuable), affichée à côté des pending valides. Sa suppression confirmée
+revalide exactement le brut sous Web Lock et ne supprime aucun pending valide.
+
+Le harness multi-contexte est un simulateur contrôlé de globals JavaScript
+séparés, pas un navigateur réel. Les stockages localStorage et IndexedDB sont
+distincts ; un vrai reload du test crée un nouveau contexte JS et conserve
+uniquement ces stockages. La file Web Locks est indépendante de la file
+d’événements `storage`. Les écritures identiques ne produisent aucun événement ; la livraison se fait dans une tâche ultérieure et
+peut être retardée, dupliquée ou réordonnée. Les échéances réseau sont déclenchées
+explicitement dans les scénarios suspendus, sans réduire la constante de production.
+
 Start the API and bundled UI after synchronizing the runtime environment:
 
 ```bash

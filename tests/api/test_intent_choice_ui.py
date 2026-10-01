@@ -213,6 +213,8 @@ function draftFromConfiguration(value) { return value; }
 function hideRecoveryConfirmation() {}
 function prefillConfiguration() {}
 function renderAvailabilityTimezone() {}
+function syncFieldObservationContext() {}
+function restorePendingFieldObservationInventory() {}
 function text() {}
 function showFormError() {}
 function setView(view) { state.view = view; }
@@ -254,6 +256,8 @@ function showAvailabilityError() {}
 function setView(view) { state.view = view; }
 function show(view) { state.view = view; }
 function clearAcceptedMission() { invalidations++; state.acceptedMission = null; entry.hidden = true; }
+function setCurrentFieldObservationDecision(decision) { state.currentDecision = decision; }
+function syncFieldObservationContext() {}
 function normalizeError() { return ['Erreur', 'Réessayez.']; }
 function renderDecision(decision) { clearAcceptedMission(); state.currentDecision = decision; state.view = 'decision'; }
 async function fetch() { return response; }

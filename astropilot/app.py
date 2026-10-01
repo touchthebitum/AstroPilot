@@ -3068,6 +3068,7 @@ def create_app(
             "invalid_decision_id",
             "invalid_execution_id",
             "invalid_observed_at_utc",
+            "observed_at_in_future",
             "invalid_recorded_at_utc",
             "invalid_supersedes_observation_id",
             "observation_cannot_supersede_itself",
@@ -3210,12 +3211,35 @@ def create_app(
                 ) from exc
             raise_field_observation_internal_error(exc)
 
+    @application.get("/v1/decisions/{decision_id}/context")
+    def get_persisted_decision_context(decision_id: str):
+        decision_id = validated_field_observation_route_identity(
+            decision_id, field="decision_id",
+        )
+        try:
+            # Immutable evidence is the existing canonical durable identity source.
+            # Reading it never evaluates tonight or allocates a decision ID.
+            evidence = application_service().evidence_store.load(
+                decision_id=decision_id,
+            )
+        except Exception as exc:
+            raise_field_observation_read_error(exc)
+        if evidence is None:
+            raise HTTPException(
+                status_code=404, detail={"code": "decision_not_found"},
+            )
+        return {"decision_id": decision_id}
+
     @application.post("/v1/field-observations", status_code=201)
     def create_field_observation(
         request: FieldObservationCreateRequest,
         response: Response,
     ):
         try:
+            if request.observed_at_utc.astimezone(
+                timezone.utc
+            ) > clock().astimezone(timezone.utc):
+                raise ValueError("observed_at_in_future")
             observation = request.to_domain()
         except Exception as exc:
             raise_field_observation_domain_error(exc)
