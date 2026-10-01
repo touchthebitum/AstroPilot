@@ -1770,6 +1770,7 @@ function syncFieldObservationContext() {
   state.outcomeToken = (state.outcomeToken || 0) + 1;
   state.outcomeLineageGeneration = (state.outcomeLineageGeneration || 0) + 1;
   state.outcomeLineageStatus = "pending";
+  renderSavedFieldObservations();
   invalidateFieldObservationOperation();
   state.fieldObservationContextInvalid = true;
   updateFieldObservationSubmitState();

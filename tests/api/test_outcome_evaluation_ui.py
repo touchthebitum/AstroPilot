@@ -208,6 +208,12 @@ const projection=(id='o',execution=null)=>({observation_id:id,decision_id:'d',ex
 HELPERS
 (async()=>{BODY})().catch(e=>{console.error(e);process.exitCode=1;});
 '''.replace('HELPERS', helpers).replace('BODY', body)
+    context_helpers = '\n'.join(source[source.index(start):source.index(end)] for start, end in [
+        ('function observationContext(', 'function setFieldObservationEditorDisabled('),
+        ('function sameFieldObservationContext(', 'function localDateTimeParts('),
+        ('function syncFieldObservationContext(', 'function restorePendingFieldObservation('),
+    ])
+    program = program.replace('(async()=>{', context_helpers + '\n' + CONTEXT_FIXTURE + '(async()=>{', 1)
     program = 'const fixtures=' + json.dumps(fixtures) + ';\n' + program
     result = subprocess.run([engine, '-'], input=program, text=True, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
@@ -435,3 +441,111 @@ await consultOutcomeEvaluation(true);assert.equal(posts,0);
 fetch=async()=>response(200,[obs('parent')]);await loadSavedFieldObservations({decision_id:'d'});
 assert.equal(state.outcomeLineageStatus,'ready');assert.equal(outcomeCanCreate('parent'),true);
 ''', failure)
+
+
+CONTEXT_FIXTURE = r'''
+let executionId=null;
+function currentSession(){return {execution:{execution_id:executionId}};}
+function siteTimezone(){return 'Europe/Zurich';}
+function siteConfigurationIdentity(){return 'site';}
+function invalidateFieldObservationOperation(){}
+function updateFieldObservationSubmitState(){}
+function observationMessage(message){element('#observation-message').textContent=message;}
+function openContext(){
+ state.acceptedMission={decision_id:'d'};
+ state.fieldObservationSelectedExecutionId=executionId;
+ state.fieldObservationDraftContext=observationContext('mission');
+ element('#field-observation-dialog').open=true;
+}
+function changeContext(kind){
+ if(kind==='decision')state.acceptedMission={decision_id:'other'};
+ else {executionId='other-execution';state.fieldObservationSelectedExecutionId=executionId;}
+ syncFieldObservationContext();
+}
+'''
+
+
+@pytest.mark.parametrize('kind', ['decision', 'execution'])
+def test_sync_context_immediately_refreshes_compare_and_selection(kind):
+    run_outcome_ui(r'''
+openContext();rememberConfirmedFieldObservation(obs('o'));
+assert.equal(element('#outcome-compare').disabled,false);
+const token=state.outcomeToken||0,generation=state.outcomeLineageGeneration||0;
+element('#outcome-result').textContent='historical result';
+changeContext(fixtures);
+assert.equal(state.outcomeLineageStatus,'pending');
+assert.equal(state.outcomeToken,token+1);
+assert.equal(state.outcomeLineageGeneration,generation+1);
+assert.equal(state.fieldObservationContextInvalid,true);
+assert.equal(element('#outcome-compare').disabled,true);
+assert.equal(element('#outcome-observation').value,'o');
+assert.match(element('#outcome-observation').children[0].textContent,/supersession inconnue/);
+assert.equal(element('#outcome-result').textContent,'historical result');
+assert.match(element('#observation-message').textContent,/éditeur est bloqué/);
+''', kind)
+
+
+@pytest.mark.parametrize('reply', ['missing', 'found'])
+def test_sync_context_ignores_inflight_outcome_get(reply):
+    run_outcome_ui(r'''
+openContext();rememberConfirmedFieldObservation(obs('o'));
+let resolveGet,calls=[];
+fetch=(_url,options)=>{calls.push(options.method);return new Promise(resolve=>resolveGet=resolve);};
+const pending=consultOutcomeEvaluation(true);
+changeContext('decision');element('#outcome-result').textContent='current display';
+resolveGet(fixtures==='missing'?missing():response(200,projection()));await pending;
+assert.deepEqual(calls,['GET']);
+assert.equal(element('#outcome-result').textContent,'current display');
+assert.equal(state.outcomeLineageStatus,'pending');
+assert.equal(element('#outcome-compare').disabled,true);
+''', reply)
+
+
+def test_sync_context_ignores_inflight_canonical_list():
+    run_outcome_ui(r'''
+openContext();let resolveList;fetch=()=>new Promise(resolve=>resolveList=resolve);
+const pending=loadSavedFieldObservations({decision_id:'d'});
+rememberConfirmedFieldObservation(obs('o'));
+const inventory=JSON.stringify(state.allObservationsForDecision);
+changeContext('execution');element('#outcome-result').textContent='current display';
+resolveList(response(200,[obs('obsolete')]));await pending;
+assert.equal(state.outcomeLineageStatus,'pending');
+assert.equal(JSON.stringify(state.allObservationsForDecision),inventory);
+assert.equal(state.outcomeObservationId,'o');
+assert.equal(element('#outcome-compare').disabled,true);
+assert.match(element('#outcome-observation').children[0].textContent,/supersession inconnue/);
+assert.equal(element('#outcome-result').textContent,'current display');
+''')
+
+
+def test_sync_context_stale_compare_handler_never_posts():
+    run_outcome_ui(r'''
+openContext();rememberConfirmedFieldObservation(obs('o'));changeContext('decision');
+let calls=[];fetch=async(_url,options)=>{calls.push(options.method);return missing();};
+await consultOutcomeEvaluation(true);assert.deepEqual(calls,['GET']);
+assert.match(element('#outcome-result').textContent,/Supersession inconnue/);
+assert.equal(element('#outcome-compare').disabled,true);
+''')
+
+
+def test_sync_unchanged_context_preserves_nominal_get_then_post():
+    run_outcome_ui(r'''
+openContext();rememberConfirmedFieldObservation(obs('o'));
+const token=state.outcomeToken,generation=state.outcomeLineageGeneration;
+const labels=element('#outcome-observation').children.map(c=>c.textContent);
+syncFieldObservationContext();
+assert.equal(state.outcomeToken,token);assert.equal(state.outcomeLineageGeneration,generation);
+assert.equal(state.outcomeLineageStatus,'ready');
+assert.notEqual(state.fieldObservationContextInvalid,true);
+assert.equal(element('#outcome-compare').disabled,false);
+assert.deepEqual(element('#outcome-observation').children.map(c=>c.textContent),labels);
+let resolveGet,calls=[];
+fetch=(_url,options)=>{calls.push(options.method);return options.method==='GET'
+ ?new Promise(resolve=>resolveGet=resolve):Promise.resolve(response(201,{...projection(),created:true}));};
+const pending=consultOutcomeEvaluation(true),inflightToken=state.outcomeToken;
+syncFieldObservationContext();assert.equal(state.outcomeToken,inflightToken);
+resolveGet(missing());await pending;
+assert.deepEqual(calls,['GET','POST']);
+assert.match(element('#outcome-result').textContent,/erreur signée/);
+assert.equal(element('#outcome-compare').disabled,false);
+''')

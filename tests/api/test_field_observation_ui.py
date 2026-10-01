@@ -108,6 +108,7 @@ const document = {
 };
 function text(selector, value) { document.querySelector(selector).textContent = value; }
 function renderObservationLinkage() {}
+function renderSavedFieldObservations() {}
 function siteTimezone() { return 'Europe/Zurich'; }
 function siteConfigurationIdentity() { return null; }
 function observationMessage(message) { document.querySelector('#observation-status').textContent = message; }
