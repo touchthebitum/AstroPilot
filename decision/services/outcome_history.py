@@ -10,7 +10,10 @@ from datetime import datetime, timedelta, timezone
 
 from decision.models.forecast_observation_comparison import ForecastObservationParameters
 from decision.outcome_evaluation_persistence import serialize_outcome_evaluation
-from decision.services.outcome_history_statistics import UNITS, statistics
+from decision.services.outcome_history_statistics import UNITS, statistics, OutcomeHistoryStatisticsUnavailable
+from decision.services.forecast_observation_comparison import (
+    _inspect_evidence, _source_digest, _validated_field_observation,
+)
 
 
 class OutcomeHistoryInvalidFilter(ValueError):
@@ -86,6 +89,7 @@ def lineage_states(observations):
             component.add(node)
             pending.extend(neighbors[node] - component)
         reasons = set()
+        checked = set()
         for node in component:
             obs = observations.get(node)
             if obs is None:
@@ -100,12 +104,13 @@ def lineage_states(observations):
                 reasons.add('lineage_execution_mismatch')
             visited = set()
             current = obs
-            while current:
+            while current and current.observation_id not in checked:
                 if current.observation_id in visited:
                     reasons.add('lineage_cycle')
                     break
                 visited.add(current.observation_id)
                 current = observations.get(current.supersedes_observation_id)
+            checked.update(visited)
         for node in component & observations.keys():
             states[node] = ('indeterminate' if reasons else 'superseded' if children[node] else 'active', sorted(reasons))
     return states
@@ -129,14 +134,29 @@ def project(evaluation, snapshot, states):
     if obs is not None and (obs.decision_id != comparison['decision_id'] or obs.execution_id != comparison['execution_id']):
         state, reasons = 'indeterminate', reasons + ['evaluation_observation_lineage_mismatch']
     evidence = snapshot.evidence.get(comparison['decision_id'])
+    sources_coherent = False
+    if obs is not None and evidence is not None:
+        valid_evidence, canonical_evidence = _inspect_evidence(evidence)
+        try:
+            sources_coherent = (valid_evidence and evaluation.comparison.identity_persistable and
+                _source_digest(canonical_evidence, _validated_field_observation(obs), identity_persistable=True)
+                == evaluation.comparison.source_digest)
+        except (ValueError, TypeError, RecursionError):
+            sources_coherent = False
+    if not sources_coherent:
+        reasons = reasons + ['comparison_sources_unknown_or_mismatched']
+        unknown['observed_at_utc'] = 'comparison_sources_unknown_or_mismatched'
+        unknown['site'] = 'comparison_sources_unknown_or_mismatched'
     points = () if evidence is None else evidence.forecast_points
     locations = {(p.requested_location.latitude, p.requested_location.longitude) for p in points}
     site = None
-    if len(locations) == 1:
+    if sources_coherent and len(locations) == 1:
         lat, lon = next(iter(locations))
         site = {'latitude': lat, 'longitude': lon}
-    else:
+    elif sources_coherent:
         unknown['site'] = 'evidence_missing_or_empty' if not locations else 'incoherent_requested_coordinates'
+    if site is None and sources_coherent:
+        reasons = reasons + [unknown['site']]
     context = dict.fromkeys(('site_name', 'target', 'catalog_key', 'imaging_field_id', 'acquisition_intent_id', 'mission_id'))
     execution_id = comparison['execution_id']
     execution = snapshot.executions.get(execution_id)
@@ -173,11 +193,12 @@ def project(evaluation, snapshot, states):
     if obs is None:
         unknown['observed_at_utc'] = 'observation_missing_or_corrupt'
     compatible = admissible(evaluation)
-    return {**raw, **comparison, 'observed_at_utc': obs.observed_at_utc.isoformat() if obs else None,
+    return {**raw, **comparison, 'observed_at_utc': obs.observed_at_utc.isoformat() if obs and sources_coherent else None,
             'mode': 'execution' if execution_id else 'decision_only', 'site': site, 'context': context,
             'compared_providers': sorted(providers), 'evidence_providers': sorted({p.provider_id for p in points}),
             'supersession': state, 'lineage_reasons': reasons, 'unknown_dimensions': unknown,
-            'admissible': compatible, 'statistics_eligible': compatible and state == 'active',
+            'admissible': compatible, 'sources_coherent': sources_coherent,
+            'statistics_eligible': compatible and state == 'active' and sources_coherent and site is not None,
             'exclusion_reasons': ([] if compatible else ['incompatible_version_or_policy']) + reasons +
                                  (['superseded'] if state == 'superseded' else [])}
 
@@ -189,6 +210,8 @@ class OutcomeHistoryService:
     def history(self, *, cursor=None, **kwargs):
         selected = filters(**kwargs)
         snapshot = self.reader.read()
+        if not snapshot.stable and cursor:
+            raise OutcomeHistoryDatasetChanged('outcome_history_dataset_changed')
         diagnostics = list(snapshot.diagnostics)
         states = lineage_states(snapshot.observations)
         rows = [project(e, snapshot, states) for e in snapshot.evaluations]
@@ -256,13 +279,23 @@ class OutcomeHistoryService:
             offset = token['offset']
         end = offset + selected['limit']
         next_cursor = None
-        if end < len(filtered):
+        if snapshot.stable and end < len(filtered):
             next_cursor = base64.urlsafe_b64encode(json.dumps({'dataset': snapshot.fingerprint, 'view': view, 'offset': end},
                 separators=(',', ':')).encode()).decode().rstrip('=')
-        certified = snapshot.complete and not missing_context and not any(r['supersession'] == 'indeterminate' or
+        certified = snapshot.complete and not missing_context and not any(not r['sources_coherent'] or
+            r['site'] is None or r['supersession'] == 'indeterminate' or
             'duplicate_admissible_evaluations' in r['exclusion_reasons'] for r in rows)
+        computed_statistics = None
+        if certified:
+            try:
+                computed_statistics = statistics([r for r in filtered if r['statistics_eligible']])
+            except (OutcomeHistoryStatisticsUnavailable, OverflowError):
+                certified = False
+                diagnostics.append({'code': 'nonfinite_statistics'})
+        projection_complete = snapshot.complete and not missing_context and all(
+            r['sources_coherent'] and r['site'] is not None for r in rows)
         return {'rows': filtered[offset:end], 'next_cursor': next_cursor, 'dataset_fingerprint': snapshot.fingerprint,
-                'view_token': view, 'statistics': statistics([r for r in filtered if r['statistics_eligible']]) if certified else None,
-                'diagnostics': diagnostics, 'completeness': 'complete' if snapshot.complete and not missing_context else 'degraded',
+                'view_token': view, 'statistics': computed_statistics,
+                'diagnostics': diagnostics, 'completeness': 'complete' if projection_complete else 'degraded',
                 'certification': 'certified' if certified else 'statistics_suspended',
                 'readable_filtered_rows': len(filtered), 'policy': POLICY, 'filters': selected}

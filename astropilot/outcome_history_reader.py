@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from decision.outcome_evaluation_persistence import deserialize_outcome_evaluation
+from decision.field_observation import validate_observation_identity
+from decision.execution_lineage_persistence import validate_lineage_identity
+from decision.weather.decision_forecast_evidence_persistence import validate_decision_id
 from decision.field_observation_persistence import deserialize_field_observation
 from decision.weather.decision_forecast_evidence_persistence import deserialize_decision_forecast_evidence
 from decision.execution_lineage_persistence import deserialize_execution_lineage_aggregate
@@ -28,6 +31,7 @@ class OutcomeHistorySnapshot:
     fingerprint: str
     diagnostics: tuple
     complete: bool
+    stable: bool = True
 
 
 class FileOutcomeHistoryReader:
@@ -51,7 +55,17 @@ class FileOutcomeHistoryReader:
         inventories = {}
 
         def load(kind, identity, decoder, keyword):
-            # Identifiers from validated canonical documents only; no user path input.
+            # Domain decoders do not all enforce filesystem-safe join identities.
+            try:
+                if kind == 'decision_forecast_evidence':
+                    validate_decision_id(identity)
+                elif kind in ('execution_lineage', 'decision_lineage'):
+                    validate_lineage_identity(identity, field=keyword)
+                else:
+                    validate_observation_identity(identity, field=keyword)
+            except ValueError:
+                diagnostics.append({'code': 'invalid_document_identity', 'kind': kind})
+                return
             name = identity + '.json'
             path = self.directory / kind / name
             key = kind + '/' + name
@@ -78,7 +92,7 @@ class FileOutcomeHistoryReader:
                         diagnostics.append({'code': 'incompatible_version', 'kind': kind, 'id': identity})
                         return
                 values[kind][identity] = decoder(text, **{keyword: identity})
-            except (ValueError, TypeError, UnicodeError):
+            except (ValueError, TypeError, UnicodeError, RecursionError):
                 diagnostics.append({'code': 'corrupt_document', 'kind': kind, 'id': identity})
 
         for kind, decoder, keyword in (
@@ -117,4 +131,4 @@ class FileOutcomeHistoryReader:
         complete = stable and not any(d['code'] != 'incompatible_version' for d in diagnostics)
         return OutcomeHistorySnapshot(evaluations, values['field_observations'],
             values['decision_forecast_evidence'], values['execution_lineage'],
-            values['decision_lineage'], fingerprint, tuple(diagnostics), complete)
+            values['decision_lineage'], fingerprint, tuple(diagnostics), complete, stable)

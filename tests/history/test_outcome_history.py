@@ -108,7 +108,7 @@ def test_provenance_exact_multi_provider_missing_model(tmp_path):
     bad = DecisionForecastEvidence((evidence.forecast_points[0], replace(evidence.forecast_points[1], requested_location=WeatherLocation(46.751, 6.55))))
     write(tmp_path, 'decision_forecast_evidence', 'decision-1', serialize_decision_forecast_evidence(decision_id='decision-1', evidence=bad))
     row = c.get(URL).json()['rows'][0]
-    assert row['site'] is None and row['unknown_dimensions']['site'] == 'incoherent_requested_coordinates'
+    assert row['site'] is None and row['unknown_dimensions']['site'] == 'comparison_sources_unknown_or_mismatched'
 
 
 def test_noncomparable_provider_unknown(tmp_path):
@@ -382,7 +382,10 @@ def test_default_fifty_and_maximum_hundred_pages(tmp_path):
     for number in range(105):
         identity = f'observation-{number:03}'
         comparison_id = hashlib.sha256(identity.encode()).hexdigest()
-        comparison = replace(evaluation.comparison, comparison_id=comparison_id, observation_id=identity)
+        from decision.services.forecast_observation_comparison import _canonical_evidence, _source_digest
+        observation = B['observation'](observation_id=identity, execution_id=None)
+        digest = _source_digest(_canonical_evidence(snapshot.evidence['decision-1']), observation, identity_persistable=True)
+        comparison = replace(evaluation.comparison, comparison_id=comparison_id, observation_id=identity, source_digest=digest)
         evaluations.append(replace(evaluation, comparison=comparison,
             evaluation_id=derive_outcome_evaluation_id(comparison_id=comparison_id)))
         observations[identity] = B['observation'](observation_id=identity, execution_id=None)
@@ -404,3 +407,193 @@ def test_referenced_observation_corrupt_preserves_outcome(tmp_path):
     assert value['rows'][0]['observed_at_utc'] is None
     assert value['statistics'] is None and value['completeness'] == 'degraded'
     assert any(d['kind'] == 'field_observations' and d['code'] == 'corrupt_document' for d in value['diagnostics'])
+
+
+@pytest.mark.parametrize('source_change', ['observation', 'evidence', 'empty_evidence'])
+def test_certification_requires_exact_comparison_sources(tmp_path, source_change):
+    seed(tmp_path)
+    if source_change == 'observation':
+        changed = B['observation'](execution_id=None, observed_at_utc=B['OBSERVED_AT'] + timedelta(days=100),
+            recorded_at_utc=B['OBSERVED_AT'] + timedelta(days=100, minutes=1),
+            conditions=ObservedConditions(temperature_c=99.0))
+        write(tmp_path, 'field_observations', 'observation-1', serialize_field_observation(changed))
+    else:
+        original = B['evidence'](WeatherVariable.TEMPERATURE_C)
+        changed = DecisionForecastEvidence(tuple(replace(p, requested_location=WeatherLocation(0, 0))
+            for p in original.forecast_points) if source_change == 'evidence' else ())
+        write(tmp_path, 'decision_forecast_evidence', 'decision-1',
+            serialize_decision_forecast_evidence(decision_id='decision-1', evidence=changed))
+    c = client(tmp_path)
+    value = c.get(URL).json()
+    assert value['statistics'] is None and value['certification'] == 'statistics_suspended'
+    assert value['completeness'] == 'degraded'
+    row = value['rows'][0]
+    assert row['site'] is None and row['observed_at_utc'] is None
+    assert row['results'][0]['observed_value'] == 7.0
+    assert row['results'][0]['compared_provider'] == 'provider'
+    assert not row['statistics_eligible'] and not row['sources_coherent']
+    assert any(d['code'] == 'comparison_sources_unknown_or_mismatched' for d in value['diagnostics'])
+    assert c.get(URL, params={'latitude': 0, 'longitude': 0}).json()['rows'] == []
+    assert c.get(URL, params={'observed_from': '2026-12-01T00:00:00Z'}).json()['rows'] == []
+
+
+def test_unstable_scan_rejects_existing_cursor_and_emits_no_continuation(tmp_path, monkeypatch):
+    seed(tmp_path, 'a'); seed(tmp_path, 'b')
+    c = client(tmp_path)
+    page = c.get(URL, params={'limit': 1}).json()
+    original = Path.read_bytes
+    target = tmp_path / 'field_observations/b.json'
+    reads = 0
+    def unstable(path):
+        nonlocal reads
+        if path == target:
+            reads += 1
+            if reads % 2 == 0:
+                return original(path) + b' '
+        return original(path)
+    monkeypatch.setattr(Path, 'read_bytes', unstable)
+    response = c.get(URL, params={'limit': 1, 'cursor': page['next_cursor']})
+    assert response.status_code == 409
+    assert response.json()['detail']['code'] == 'outcome_history_dataset_changed'
+    value = c.get(URL, params={'limit': 1}).json()
+    assert value['next_cursor'] is None and value['statistics'] is None
+    assert any(d['code'] == 'dataset_changed_during_read' for d in value['diagnostics'])
+
+
+@pytest.mark.parametrize('field', ['decision_id', 'execution_id'])
+@pytest.mark.parametrize('identity', ['invalid\x00id', '../escape', '/absolute', 'sub/path', 'sub\\path'])
+def test_join_ids_validated_before_any_path_read(tmp_path, monkeypatch, field, identity):
+    evaluation = seed(tmp_path, source=B['observation']()) if field == 'execution_id' else seed(tmp_path)
+    comparison = replace(evaluation.comparison, **{field: identity})
+    if field == 'execution_id':
+        from decision.models.outcome_evaluation import derive_forecast_comparison_outcome_evidence_id
+        evidence_id = derive_forecast_comparison_outcome_evidence_id(evaluation_id=evaluation.evaluation_id,
+            comparison_id=comparison.comparison_id, decision_id=comparison.decision_id,
+            observation_id=comparison.observation_id, execution_id=identity)
+        evaluation = replace(evaluation, comparison=comparison,
+            outcome_evidence=replace(evaluation.outcome_evidence, execution_id=identity, evidence_id=evidence_id),
+            assessment=replace(evaluation.assessment, execution_id=identity, evidence_ids=(evidence_id,),
+                findings=tuple(replace(f, evidence_ids=(evidence_id,)) for f in evaluation.assessment.findings)))
+    else:
+        evaluation = replace(evaluation, comparison=comparison)
+    payload = json.loads(serialize_outcome_evaluation(evaluation))
+    write(tmp_path, 'outcome_evaluations', evaluation.evaluation_id, json.dumps(payload))
+    original = Path.read_bytes
+    paths = []
+    def record(path):
+        paths.append(path)
+        assert '\x00' not in str(path)
+        assert path.is_relative_to(tmp_path)
+        assert path.parent.name in ('outcome_evaluations', 'field_observations', 'decision_forecast_evidence',
+                                    'execution_lineage', 'decision_lineage')
+        assert identity + '.json' != path.name
+        return original(path)
+    monkeypatch.setattr(Path, 'read_bytes', record)
+    response = client(tmp_path).get(URL)
+    assert response.status_code == 200
+    value = response.json()
+    assert value['completeness'] == 'degraded' and value['statistics'] is None
+    assert any(d['code'] == 'invalid_document_identity' for d in value['diagnostics'])
+    assert paths
+
+
+@pytest.mark.parametrize('kind', ['outcome_evaluations', 'field_observations', 'decision_forecast_evidence'])
+def test_deeply_nested_corruption_is_isolated(tmp_path, kind):
+    seed(tmp_path)
+    identity = 'decision-1' if kind == 'decision_forecast_evidence' else 'bad'
+    write(tmp_path, kind, identity, '[' * 100000 + ']' * 100000)
+    response = client(tmp_path).get(URL)
+    assert response.status_code == 200
+    value = response.json()
+    assert len(value['rows']) == 1 and value['statistics'] is None
+    assert value['completeness'] == 'degraded'
+    assert any(d['code'] == 'corrupt_document' and d['kind'] == kind for d in value['diagnostics'])
+
+
+def test_finite_extreme_errors_do_not_overflow_http_means(tmp_path):
+    for identity in ('a', 'b'):
+        seed(tmp_path, identity, source=B['observation'](observation_id=identity, execution_id=None,
+            conditions=ObservedConditions(temperature_c=-1e308)))
+    response = client(tmp_path).get(URL)
+    assert response.status_code == 200
+    value = response.json()
+    assert value['certification'] == 'certified' and len(value['rows']) == 2
+    stats = value['statistics']['variables']['temperature_c']
+    assert stats['n_comparable'] == 2
+    assert stats['mean_signed_error'] == stats['mean_absolute_error'] == 1e308
+    from decision.services.outcome_history_statistics import finite_mean
+    assert finite_mean([1e308, -1e308]) == 0
+    assert finite_mean([1e-308, 1e-308]) == 1e-308
+
+
+def test_lineage_long_chain_has_linear_ancestor_lookups():
+    class Counted(dict):
+        lookups = 0
+        def get(self, key, *args):
+            self.lookups += 1
+            return super().get(key, *args)
+    items = Counted({str(i): B['observation'](observation_id=str(i), execution_id=None,
+        supersedes_observation_id=str(i - 1) if i else None) for i in range(6000)})
+    states = lineage_states(items)
+    assert states['5999'][0] == 'active'
+    assert all(states[str(i)][0] == 'superseded' for i in range(5999))
+    assert items.lookups < 4 * len(items)
+    items['0'] = replace(items['0'], supersedes_observation_id='5999')
+    assert all(state[0] == 'indeterminate' for state in lineage_states(items).values())
+
+
+def test_canonical_source_digest_ignores_evidence_order_and_duplicates(tmp_path):
+    evidence = B['evidence'](WeatherVariable.TEMPERATURE_C, WeatherVariable.WIND_SPEED_KMH)
+    seed(tmp_path, evidence=evidence)
+    changed = DecisionForecastEvidence(tuple(reversed(evidence.forecast_points)) + evidence.forecast_points)
+    write(tmp_path, 'decision_forecast_evidence', 'decision-1',
+        serialize_decision_forecast_evidence(decision_id='decision-1', evidence=changed))
+    value = client(tmp_path).get(URL).json()
+    assert value['certification'] == 'certified' and value['rows'][0]['sources_coherent']
+
+
+def test_coherent_evidence_with_unknown_site_suspends_certification(tmp_path):
+    evidence = B['evidence'](WeatherVariable.TEMPERATURE_C, WeatherVariable.WIND_SPEED_KMH)
+    changed = DecisionForecastEvidence((evidence.forecast_points[0],
+        replace(evidence.forecast_points[0], requested_location=WeatherLocation(0, 0))))
+    seed(tmp_path, evidence=changed)
+    value = client(tmp_path).get(URL).json()
+    assert value['rows'][0]['sources_coherent'] and value['rows'][0]['site'] is None
+    assert value['statistics'] is None and value['completeness'] == 'degraded'
+    assert any(d['code'] == 'incoherent_requested_coordinates' for d in value['diagnostics'])
+
+
+@pytest.mark.parametrize('kind,identity', [('field_observations', 'outside-filter'),
+    ('decision_forecast_evidence', 'decision-1'), ('outcome_evaluations', 'foreign-corrupt')])
+def test_fingerprint_covers_outside_filter_observations_joins_and_corrupt_files(tmp_path, kind, identity):
+    seed(tmp_path, 'a'); seed(tmp_path, 'b')
+    c = client(tmp_path)
+    page = c.get(URL, params={'limit': 1}).json()
+    if kind == 'field_observations':
+        write(tmp_path, kind, identity, serialize_field_observation(B['observation'](observation_id=identity,
+            execution_id=None, supersedes_observation_id='a', observed_at_utc=B['OBSERVED_AT'] + timedelta(days=5),
+            recorded_at_utc=B['OBSERVED_AT'] + timedelta(days=5, minutes=1))))
+    elif kind == 'decision_forecast_evidence':
+        path = tmp_path / kind / (identity + '.json')
+        path.write_text(path.read_text() + ' ')
+    else:
+        write(tmp_path, kind, identity, '{broken')
+    response = c.get(URL, params={'limit': 1, 'cursor': page['next_cursor']})
+    assert response.status_code == 409
+    if kind == 'outcome_evaluations':
+        page = c.get(URL, params={'limit': 1}).json()
+        (tmp_path / kind / (identity + '.json')).unlink()
+        assert c.get(URL, params={'limit': 1, 'cursor': page['next_cursor']}).status_code == 409
+
+
+def test_statistics_failure_preserves_consultation_with_diagnostic(tmp_path, monkeypatch):
+    import decision.services.outcome_history as module
+    from decision.services.outcome_history_statistics import OutcomeHistoryStatisticsUnavailable
+    seed(tmp_path)
+    def unavailable(rows):
+        raise OutcomeHistoryStatisticsUnavailable('nonfinite_statistics')
+    monkeypatch.setattr(module, 'statistics', unavailable)
+    value = client(tmp_path).get(URL).json()
+    assert len(value['rows']) == 1 and value['statistics'] is None
+    assert value['certification'] == 'statistics_suspended'
+    assert any(d['code'] == 'nonfinite_statistics' for d in value['diagnostics'])
