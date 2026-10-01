@@ -121,3 +121,9 @@ def test_explicit_click_and_confirmation_precedes_cleanup():
         assert body.index('rememberConfirmedFieldObservation(') < min(i for i in
             [body.find('clearFieldObservationLockUnlocked('),body.find('removeFieldObservationEntryUnlocked(')] if i>=0)
         assert 'consultOutcomeEvaluation' not in body
+
+
+def test_unchanged_context_does_not_discard_outcome_response():
+    source = (ROOT/'astropilot/web/app.js').read_text()
+    body = source[source.index('function syncFieldObservationContext('):source.index('function restorePendingFieldObservation(')]
+    assert body.index('sameFieldObservationContext(') < body.index('state.outcomeToken =')

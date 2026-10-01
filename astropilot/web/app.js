@@ -1762,10 +1762,10 @@ function unreadablePendingObservationBlocked(key) {
 }
 
 function syncFieldObservationContext() {
-  state.outcomeToken = (state.outcomeToken || 0) + 1;
   const dialog = document.querySelector("#field-observation-dialog");
   if (!dialog.open || !state.fieldObservationDraftContext) return;
   if (sameFieldObservationContext(state.fieldObservationDraftContext, activeObservationContext())) return;
+  state.outcomeToken = (state.outcomeToken || 0) + 1;
   invalidateFieldObservationOperation();
   state.fieldObservationContextInvalid = true;
   updateFieldObservationSubmitState();
