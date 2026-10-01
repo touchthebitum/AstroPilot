@@ -64,6 +64,7 @@ class DurableTonightApplicationService:
         field_observation_store=None,
         outcome_evaluation_store=None,
         outcome_evaluation_clock: Callable | None = None,
+        outcome_history_service=None,
     ) -> None:
         self.application_service = application_service
         self.evidence_store = evidence_store
@@ -81,6 +82,13 @@ class DurableTonightApplicationService:
         self.outcome_evaluation_store = outcome_evaluation_store
         self.outcome_evaluation_clock = outcome_evaluation_clock
         self._outcome_evaluation_service = None
+        self.outcome_history_service = outcome_history_service
+
+    def read_outcome_history(self, **filters):
+        if self.outcome_history_service is None:
+            from astropilot.outcome_history_reader import OutcomeHistoryUnavailable
+            raise OutcomeHistoryUnavailable("outcome_history_unavailable")
+        return self.outcome_history_service.history(**filters)
 
     def evaluate(self, **kwargs) -> TonightResult:
         result = self.application_service.evaluate(**kwargs)
