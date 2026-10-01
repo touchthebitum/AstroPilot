@@ -496,3 +496,7 @@ button { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+.outcome-panel { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border-color, #667); }
+.outcome-panel select { display: block; width: 100%; margin: .5rem 0; }
+#outcome-result { white-space: pre-line; margin-top: 1rem; overflow-wrap: anywhere; }

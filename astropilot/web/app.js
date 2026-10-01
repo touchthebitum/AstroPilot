@@ -541,6 +541,7 @@ function openFieldObservation(source) {
   }
   observationMessage("Choisissez les catégories observées, indiquez le vent mesuré en km/h ou précisez l’état de la surface.");
   ui.observation.showModal();
+  loadSavedFieldObservations(context);
   if (!webLocksAvailable()) {
     updateFieldObservationSubmitState();
     observationMessage("Publication indisponible sur ce navigateur : cette fonction exige Web Locks. La consultation et la réconciliation en lecture seule restent possibles.", {error: true});
@@ -1761,6 +1762,7 @@ function unreadablePendingObservationBlocked(key) {
 }
 
 function syncFieldObservationContext() {
+  state.outcomeToken = (state.outcomeToken || 0) + 1;
   const dialog = document.querySelector("#field-observation-dialog");
   if (!dialog.open || !state.fieldObservationDraftContext) return;
   if (sameFieldObservationContext(state.fieldObservationDraftContext, activeObservationContext())) return;
@@ -1946,10 +1948,169 @@ function observationConflictError() {
   return error;
 }
 
+// Outcome state is independent of observation publication and pending recovery.
+function rememberConfirmedFieldObservation(observation) {
+  if (!observation?.observation_id) return;
+  state.confirmedFieldObservations ||= [];
+  state.confirmedFieldObservations = [observation, ...state.confirmedFieldObservations
+    .filter(item => item.observation_id !== observation.observation_id)];
+  state.outcomeObservationId = observation.observation_id;
+  // A convenience pointer only: reload must read the server list before enabling Outcome.
+  try { localStorage.setItem("astropilot.recent-observation-context.v1", JSON.stringify({
+    decision_id: observation.decision_id, execution_id: observation.execution_id || null,
+  })); } catch (_error) { /* confirmation does not depend on local storage */ }
+  state.outcomeToken = (state.outcomeToken || 0) + 1;
+  renderSavedFieldObservations();
+  document.querySelector("#outcome-result").textContent = "Observation enregistrée. Consultez la comparaison ou cliquez sur « Comparer avec la prévision ».";
+}
+
+function renderSavedFieldObservations() {
+  const select = document.querySelector("#outcome-observation");
+  if (!select) return;
+  select.innerHTML = "";
+  for (const item of state.confirmedFieldObservations || []) {
+    const option = document.createElement("option");
+    option.value = item.observation_id;
+    option.textContent = `${item.observed_at_utc || "Observation"} — ${item.observation_id}`;
+    select.appendChild(option);
+  }
+  select.value = state.outcomeObservationId || "";
+  document.querySelector("#outcome-compare").disabled = !state.outcomeObservationId;
+}
+
+async function loadSavedFieldObservations(context) {
+  const token = state.outcomeToken = (state.outcomeToken || 0) + 1;
+  state.confirmedFieldObservations = [];
+  state.outcomeObservationId = null;
+  renderSavedFieldObservations();
+  document.querySelector("#outcome-result").textContent = "Lecture des observations enregistrées…";
+  const url = context.execution_id
+    ? `/v1/executions/${encodeURIComponent(context.execution_id)}/field-observations`
+    : `/v1/decisions/${encodeURIComponent(context.decision_id)}/field-observations`;
+  try {
+    const observations = await fieldObservationNetworkRequest(url, {}, async response => {
+      if (!response.ok) throw await sessionHttpError(response);
+      return response.json();
+    });
+    if (state.outcomeToken !== token) return;
+    state.confirmedFieldObservations = observations;
+    state.outcomeObservationId = observations[0]?.observation_id || null;
+    renderSavedFieldObservations();
+    document.querySelector("#outcome-result").textContent = observations.length
+      ? "Observations confirmées par le serveur. Choisissez une observation pour consulter ou comparer."
+      : "Aucune observation enregistrée dans ce contexte.";
+  } catch (_error) {
+    if (state.outcomeToken !== token) return;
+    document.querySelector("#outcome-result").textContent = "Lecture des observations indisponible. Rouvrez cet éditeur pour réessayer.";
+  }
+}
+
+async function reopenRecentFieldObservations() {
+  let context;
+  try { context = JSON.parse(localStorage.getItem("astropilot.recent-observation-context.v1")); }
+  catch (_error) { return; }
+  if (typeof context?.decision_id !== "string" || !context.decision_id) return;
+  if (state.observationBusy) return;
+  invalidateFieldObservationOperation();
+  state.fieldObservationDraftContext = Object.freeze(context);
+  state.fieldObservationContextInvalid = true;
+  setFieldObservationEditorDisabled(true);
+  observationMessage("Consultation des observations enregistrées. Pour un nouveau relevé, rouvrez l’éditeur depuis une décision ou une mission.");
+  ui.observation.showModal();
+  await loadSavedFieldObservations(context);
+}
+
+const OUTCOME_REASON_TEXT = {
+  decision_forecast_evidence_missing: "Prévision liée à la décision absente.",
+  decision_forecast_evidence_invalid: "Prévision liée à la décision non exploitable.",
+  decision_forecast_evidence_empty: "Prévision liée à la décision sans mesure disponible.",
+  legacy_lineage_incomplete: "Lien avec la décision incomplet.",
+  observation_time_uncertain: "Heure observée incertaine.",
+  observation_location_uncertain: "Lieu observé incertain.",
+  no_supported_observed_variables: "Aucune variable observée prise en charge.",
+  observed_cloud_unknown: "Catégorie de nuages inconnue.",
+  forecast_variable_unavailable: "Prévision absente pour cette variable.",
+  ambiguous_nearest_forecast: "Plusieurs prévisions également proches dans le temps.",
+  forecast_outside_temporal_tolerance: "Prévision trop éloignée de l’heure observée.",
+};
+
+function renderOutcomeEvaluation(evaluation) {
+  const labels = {temperature_c: "Température", relative_humidity_percent: "Humidité relative",
+    wind_speed_kmh: "Vent", cloud_cover_percent: "Nuages"};
+  const statuses = {comparable: "Comparable", partial: "Partiellement comparable", not_comparable: "Non comparable"};
+  const cloud = {clear: "Ciel clair", few: "Peu de nuages", partly_cloudy: "Partiellement nuageux",
+    mostly_cloudy: "Très nuageux", overcast: "Couvert", unknown: "Inconnu"};
+  const lines = [`Observation enregistrée : ${evaluation.observation_id}`, statuses[evaluation.status] || "Résultat disponible"];
+  const reasonText = reason => OUTCOME_REASON_TEXT[reason.code] || "Éléments indisponibles pour cette comparaison.";
+  for (const item of evaluation.results) {
+    const name = labels[item.variable] || "Variable";
+    if (item.status !== "comparable") {
+      lines.push(`${name} : non comparable. ${item.reasons.map(reasonText).join(" ")}`);
+    } else if (item.variable === "cloud_cover_percent") {
+      lines.push(`${name} : prévision ${cloud[item.forecast] || item.forecast}, observation ${cloud[item.observed] || item.observed} — ${item.outcome === "match" ? "catégories identiques" : "catégories différentes"}.`);
+    } else {
+      lines.push(`${name} : prévision ${item.forecast} ${item.unit}, observation ${item.observed} ${item.unit} ; erreur signée (prévision − observation) ${item.signed_error} ${item.unit} ; erreur absolue ${item.absolute_error} ${item.unit}.`);
+    }
+  }
+  lines.push(...evaluation.reasons.map(reasonText));
+  if (evaluation.assessment) {
+    const sufficiency = {sufficient: "suffisants", partial: "partiels", insufficient_evidence: "insuffisants"};
+    lines.push(`Suffisance des éléments comparables : ${sufficiency[evaluation.assessment.status] || "indéterminée"}. Ce statut ne mesure pas la qualité globale de la prévision.`);
+  }
+  document.querySelector("#outcome-result").textContent = lines.join("\n");
+}
+
+async function consultOutcomeEvaluation(createIfMissing = false) {
+  const observationId = state.outcomeObservationId;
+  if (!observationId) return;
+  const token = state.outcomeToken = (state.outcomeToken || 0) + 1;
+  const current = () => state.outcomeToken === token && state.outcomeObservationId === observationId;
+  const output = document.querySelector("#outcome-result");
+  const url = `/v1/field-observations/${encodeURIComponent(observationId)}/outcome-evaluation`;
+  const request = method => fieldObservationNetworkRequest(url, {method}, async response => {
+    if (!response.ok) throw await sessionHttpError(response);
+    return response.json();
+  });
+  const read = async () => {
+    try { return await request("GET"); }
+    catch (error) {
+      if (error.status === 404 && error.code === "outcome_evaluation_not_found") return null;
+      throw error;
+    }
+  };
+  output.textContent = "Lecture de la comparaison…";
+  try {
+    let evaluation = await read();
+    if (!current()) return;
+    if (!evaluation && createIfMissing) {
+      output.textContent = "Comparaison en cours…";
+      try { evaluation = await request("POST"); }
+      catch (error) {
+        if (!current()) return;
+        if (error.status && error.status < 500) throw error;
+        // Lost response or timeout: only a canonical GET resolves uncertainty.
+        evaluation = await read();
+        if (!current()) return;
+        if (!evaluation) {
+          output.textContent = "Comparaison non retrouvée. Cliquez à nouveau pour reprendre la même observation.";
+          return;
+        }
+      }
+    }
+    if (!current()) return;
+    if (evaluation) renderOutcomeEvaluation(evaluation);
+    else output.textContent = "Aucune comparaison enregistrée. Cliquez sur « Comparer avec la prévision ».";
+  } catch (_error) {
+    if (!current()) return;
+    output.textContent = "Comparaison indisponible. L’observation reste enregistrée. Vous pouvez réessayer la consultation ou la comparaison.";
+  }
+}
+
 async function finishFieldObservationSubmission(key, submittedSnapshot, message, operation = null) {
   if (operation && !fieldObservationOperationCurrent(operation)) return false;
   const lock = state.fieldObservationLock?.key === key ? state.fieldObservationLock : null;
   if (!lock || (operation && lock.generation !== operation.lockGeneration)) return false;
+  rememberConfirmedFieldObservation(lock.pending.payload);
   if (operation) operation.results.network_result = "confirmed";
   const result = await withFieldObservationWebLock(() => {
     if (operation && !fieldObservationOperationCurrent(operation)) return false;
@@ -1992,6 +2153,7 @@ function validatedFieldObservationPublicationLockUnlocked(expectedLock) {
 }
 
 function finishFieldObservationSubmissionUnlocked(lock, submittedSnapshot, message, operation) {
+  rememberConfirmedFieldObservation(lock.pending.payload);
   if (operation) operation.results.network_result = "confirmed";
   const removed = clearFieldObservationLockUnlocked(lock)
     && rebuildPendingFieldObservationInventoryUnlocked();
@@ -2468,6 +2630,7 @@ async function reconcileFieldObservationEntry(entryId) {
         return null;
       }
       if (!fieldObservationOperationCurrent(operation)) return false;
+      rememberConfirmedFieldObservation(stored);
       operation.results.network_result = "confirmed";
       return removeFieldObservationEntryUnlocked(entry);
     }, operation);
@@ -4975,7 +5138,18 @@ ui.missionBack.addEventListener("click", () => ui.mission.close());
 ui.mission.addEventListener("click", (event) => {
   if (event.target === ui.mission) ui.mission.close();
 });
-ui.observation.addEventListener("close", invalidateFieldObservationOperation);
+ui.observation.addEventListener("close", () => {
+  invalidateFieldObservationOperation();
+  state.outcomeToken = (state.outcomeToken || 0) + 1;
+});
+document.querySelector("#outcome-reopen").addEventListener("click", reopenRecentFieldObservations);
+document.querySelector("#outcome-compare").addEventListener("click", () => consultOutcomeEvaluation(true));
+document.querySelector("#outcome-read").addEventListener("click", () => consultOutcomeEvaluation(false));
+document.querySelector("#outcome-observation").addEventListener("change", event => {
+  state.outcomeObservationId = event.target.value || null;
+  state.outcomeToken = (state.outcomeToken || 0) + 1;
+  document.querySelector("#outcome-result").textContent = "Observation enregistrée sélectionnée. Consultez ou comparez explicitement.";
+});
 restoreFieldObservationLock();
 restorePendingFieldObservationInventory();
 if (restorePendingAcceptanceAttempt()) showUnresolvedAcceptance();
