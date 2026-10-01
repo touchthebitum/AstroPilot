@@ -1766,6 +1766,8 @@ function syncFieldObservationContext() {
   if (!dialog.open || !state.fieldObservationDraftContext) return;
   if (sameFieldObservationContext(state.fieldObservationDraftContext, activeObservationContext())) return;
   state.outcomeToken = (state.outcomeToken || 0) + 1;
+  state.outcomeLineageGeneration = (state.outcomeLineageGeneration || 0) + 1;
+  state.outcomeLineageStatus = "pending";
   invalidateFieldObservationOperation();
   state.fieldObservationContextInvalid = true;
   updateFieldObservationSubmitState();
@@ -1977,13 +1979,13 @@ function outcomeObservationHistory() {
 
 function outcomeCanCreate(observationId) {
   const history = outcomeObservationHistory();
-  return history.coherent && !history.replacements.has(observationId)
+  return state.outcomeLineageStatus === "ready" && history.coherent && !history.replacements.has(observationId)
     && (state.visibleObservationsForContext || []).some(item => item.observation_id === observationId);
 }
 
 function outcomeActiveObservations() {
   const history = outcomeObservationHistory();
-  return history.coherent ? (state.visibleObservationsForContext || [])
+  return state.outcomeLineageStatus === "ready" && history.coherent ? (state.visibleObservationsForContext || [])
     .filter(item => !history.replacements.has(item.observation_id))
     .sort((a, b) => {
       const time = item => Number.isFinite(Date.parse(item.observed_at_utc)) ? Date.parse(item.observed_at_utc) : 0;
@@ -2003,23 +2005,31 @@ function selectDefaultOutcomeObservation() {
 
 function rememberConfirmedFieldObservation(observation) {
   if (!observation?.observation_id) return;
+  state.fieldObservationConfirmationGeneration = (state.fieldObservationConfirmationGeneration || 0) + 1;
   state.recentFieldObservationConfirmations ||= [];
   state.recentFieldObservationConfirmations = [observation, ...state.recentFieldObservationConfirmations
     .filter(item => item.observation_id !== observation.observation_id)];
   if (!outcomeContextMatches(observation)) return;
+  if (state.outcomeLineageStatus === "pending") {
+    state.outcomeLineageConfirmations ||= [];
+    state.outcomeLineageConfirmations.push(observation);
+  }
   state.allObservationsForDecision = [observation, ...(state.allObservationsForDecision || [])
     .filter(item => item.observation_id !== observation.observation_id)];
   state.visibleObservationsForContext ||= [];
   state.visibleObservationsForContext = [observation, ...state.visibleObservationsForContext
     .filter(item => item.observation_id !== observation.observation_id)];
-  selectDefaultOutcomeObservation();
+  if (state.outcomeLineageStatus === "ready") selectDefaultOutcomeObservation();
+  else state.outcomeObservationId ||= observation.observation_id;
   // A convenience pointer only: reload must read the server list before enabling Outcome.
   try { localStorage.setItem("astropilot.recent-observation-context.v1", JSON.stringify({
     decision_id: observation.decision_id, execution_id: observation.execution_id || null,
   })); } catch (_error) { /* confirmation does not depend on local storage */ }
   state.outcomeToken = (state.outcomeToken || 0) + 1;
   renderSavedFieldObservations();
-  document.querySelector("#outcome-result").textContent = "Observation enregistrée. Consultez la comparaison ou cliquez sur « Comparer avec la prévision ».";
+  document.querySelector("#outcome-result").textContent = state.outcomeLineageStatus === "ready"
+    ? "Observation enregistrée. Consultez la comparaison ou cliquez sur « Comparer avec la prévision »."
+    : "Observation récemment confirmée. Supersession inconnue : attendez la lecture canonique ou rouvrez cet éditeur pour réessayer.";
 }
 
 function renderSavedFieldObservations() {
@@ -2032,12 +2042,14 @@ function renderSavedFieldObservations() {
     const option = document.createElement("option");
     option.value = item.observation_id;
     option.textContent = `${item.observed_at_utc || "Observation"} — ${item.observation_id}`;
-    if (history.replacements.has(item.observation_id)) {
+    if (state.outcomeLineageStatus !== "ready") {
+      option.textContent += " — Récemment confirmée / supersession inconnue";
+    } else if (history.replacements.has(item.observation_id)) {
       const replacementId = history.replacements.get(item.observation_id);
       const replacement = state.allObservationsForDecision.find(item => item.observation_id === replacementId);
       option.textContent += ` — Historique / remplacée par ${replacementId} (contexte ${replacement.execution_id ?? "decision-only"})`;
     } else if (activeCount > 1) option.textContent += " — Plusieurs observations actives";
-    if (!history.coherent) option.textContent += " — Chaîne de corrections incohérente";
+    if (state.outcomeLineageStatus === "ready" && !history.coherent) option.textContent += " — Chaîne de corrections incohérente";
     select.appendChild(option);
   }
   select.value = state.outcomeObservationId || "";
@@ -2050,7 +2062,13 @@ async function loadSavedFieldObservations(context) {
     && state.outcomeContext?.execution_id === context.execution_id;
   if (!sameContext) state.outcomeManualObservationId = null;
   state.outcomeContext = context;
-  const token = state.outcomeToken = (state.outcomeToken || 0) + 1;
+  state.outcomeToken = (state.outcomeToken || 0) + 1;
+  const generation = state.outcomeLineageGeneration = (state.outcomeLineageGeneration || 0) + 1;
+  const current = () => state.outcomeLineageGeneration === generation
+    && state.outcomeContext?.decision_id === context.decision_id
+    && state.outcomeContext?.execution_id === context.execution_id;
+  state.outcomeLineageStatus = "pending";
+  state.outcomeLineageConfirmations = [];
   state.allObservationsForDecision = [];
   state.visibleObservationsForContext = [];
   state.outcomeObservationId = null;
@@ -2063,18 +2081,36 @@ async function loadSavedFieldObservations(context) {
       if (!response.ok) throw await sessionHttpError(response);
       return response.json();
     });
-    if (state.outcomeToken !== token) return;
+    if (!current()) return;
     if (!Array.isArray(observations)) throw new Error("invalid_observation_list");
-    state.allObservationsForDecision = observations.filter(item => item && item.decision_id === context.decision_id);
+    // Server records take precedence; confirmations supplement by UUID, never replace the list.
+    const canonical = observations.filter(item => item && item.decision_id === context.decision_id);
+    const byId = new Map(canonical.map(item => [item.observation_id, item]));
+    const supplements = [];
+    let confirmationsValidated = true;
+    for (const item of state.outcomeLineageConfirmations || []) {
+      if (outcomeContextMatches(item, context) && !byId.has(item.observation_id)) {
+        byId.set(item.observation_id, item);
+        supplements.push(item);
+        confirmationsValidated = false;
+      }
+    }
+    state.allObservationsForDecision = [...canonical, ...supplements];
+    state.outcomeLineageStatus = confirmationsValidated ? "ready" : "error";
+    state.outcomeToken = (state.outcomeToken || 0) + 1;
     state.visibleObservationsForContext = state.allObservationsForDecision.filter(item => item && outcomeContextMatches(item, context));
     selectDefaultOutcomeObservation();
     renderSavedFieldObservations();
-    document.querySelector("#outcome-result").textContent = state.visibleObservationsForContext.length
+    document.querySelector("#outcome-result").textContent = !confirmationsValidated
+      ? "Confirmation absente de la lecture canonique. Supersession inconnue : création bloquée. Rouvrez cet éditeur pour réessayer."
+      : state.visibleObservationsForContext.length
       ? "Observations confirmées par le serveur. Choisissez une observation pour consulter ou comparer."
       : "Aucune observation enregistrée dans ce contexte.";
   } catch (_error) {
-    if (state.outcomeToken !== token) return;
-    document.querySelector("#outcome-result").textContent = "Lecture des observations indisponible. Rouvrez cet éditeur pour réessayer.";
+    if (!current()) return;
+    state.outcomeLineageStatus = "error";
+    renderSavedFieldObservations();
+    document.querySelector("#outcome-result").textContent = "Lecture canonique indisponible. Supersession inconnue : création bloquée. Rouvrez cet éditeur pour réessayer.";
   }
 }
 
@@ -2221,7 +2257,10 @@ async function consultOutcomeEvaluation(createIfMissing = false) {
     if (!current()) return;
     if (result.kind === "found") {
       renderOutcomeEvaluation(result.evaluation);
-      if (!outcomeCanCreate(observationId)) output.textContent = "Historique / remplacée (ou chaîne incohérente).\n" + output.textContent;
+      if (state.outcomeLineageStatus !== "ready") output.textContent = "Supersession inconnue : création bloquée.\n" + output.textContent;
+      else if (!outcomeCanCreate(observationId)) output.textContent = "Historique / remplacée (ou chaîne incohérente).\n" + output.textContent;
+    } else if (state.outcomeLineageStatus !== "ready") {
+      output.textContent = "Supersession inconnue : création bloquée. Rouvrez cet éditeur pour réessayer la lecture canonique.";
     } else if (!outcomeCanCreate(observationId)) {
       output.textContent = "Observation remplacée ou chaîne de corrections incohérente : aucune nouvelle évaluation autorisée. La consultation historique reste disponible.";
     } else output.textContent = "Aucune comparaison enregistrée. Cliquez sur « Comparer avec la prévision ».";
@@ -5272,6 +5311,8 @@ ui.mission.addEventListener("click", (event) => {
   if (event.target === ui.mission) ui.mission.close();
 });
 ui.observation.addEventListener("close", () => {
+  state.outcomeLineageGeneration = (state.outcomeLineageGeneration || 0) + 1;
+  state.outcomeLineageStatus = "pending";
   invalidateFieldObservationOperation();
   state.outcomeToken = (state.outcomeToken || 0) + 1;
 });

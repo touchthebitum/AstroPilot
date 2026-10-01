@@ -16,7 +16,7 @@ def test_outcome_click_recovery_stale_and_readback():
     helpers = source[source.index('// Outcome state is independent'):source.index('async function finishFieldObservationSubmission(')]
     program = r'''
 const assert = require('assert').strict;
-const state = {outcomeContext:{decision_id:'d',execution_id:null}};
+const state = {outcomeLineageStatus:'ready',outcomeContext:{decision_id:'d',execution_id:null}};
 const elements = new Map();
 function element(id) { if (!elements.has(id)) elements.set(id, {textContent:'', value:'', disabled:false,
   children:[], set innerHTML(value) { this.children=[]; }, appendChild(child) {this.children.push(child);}}); return elements.get(id); }
@@ -192,7 +192,7 @@ def run_outcome_ui(body, fixtures=None):
     helpers = source[source.index('// Outcome state is independent'):source.index('async function finishFieldObservationSubmission(')]
     program = r'''
 const assert=require('assert').strict;
-const state={outcomeContext:{decision_id:'d',execution_id:null}};
+const state={outcomeLineageStatus:'ready',outcomeContext:{decision_id:'d',execution_id:null}};
 const elements=new Map();
 function element(id) {if(!elements.has(id)) elements.set(id,{textContent:'',value:'',disabled:false,children:[],
  set innerHTML(v){this.children=[];},appendChild(c){this.children.push(c);}});return elements.get(id);}
@@ -324,6 +324,16 @@ def test_cross_context_lineage_with_real_store_and_historical_outcome(tmp_path):
     child = client.post(child_url)
     assert child.status_code == 201
     run_outcome_ui(r'''
+let resolveCanonical;
+fetch=()=>new Promise(resolve=>resolveCanonical=resolve);
+const pending=loadSavedFieldObservations({decision_id:'decision-1',execution_id:null});
+rememberConfirmedFieldObservation(fixtures.inventory.find(o=>o.observation_id==='observation-1'));
+assert.equal(element('#outcome-compare').disabled,true);
+assert.equal(outcomeCanCreate('observation-1'),false);
+resolveCanonical(response(200,fixtures.inventory));await pending;
+assert.equal(state.allObservationsForDecision.length,2);
+assert.match(element('#outcome-observation').children[0].textContent,/Historique.*child.*execution-1/);
+assert.equal(element('#outcome-compare').disabled,true);
 fetch=async(url,options)=>{assert.equal(url,'/v1/decisions/decision-1/field-observations');return response(200,fixtures.inventory);};
 await loadSavedFieldObservations({decision_id:'decision-1',execution_id:null});
 assert.deepEqual(state.visibleObservationsForContext.map(o=>o.observation_id),['observation-1']);
@@ -347,3 +357,81 @@ await consultOutcomeEvaluation(true);assert.deepEqual(calls,['GET','POST']);
 assert.match(element('#outcome-result').textContent,/erreur signée/);
 assert.doesNotMatch(element('#outcome-result').textContent,/Historique|incohérente/);
 ''', {'inventory': inventory, 'historical': historical, 'child': child.json()})
+
+
+@pytest.mark.parametrize('foreign', [False, True])
+def test_recovery_confirmation_does_not_cancel_pending_canonical_lineage(foreign):
+    run_outcome_ui(r'''
+const parent=obs('parent'),child=obs('child','2026-01-02T00:00:00Z','execution-1','parent');
+let resolveList,posts=0;
+fetch=(url,options)=>{assert.notEqual(options.method,'POST');return new Promise(resolve=>resolveList=resolve);};
+const loading=loadSavedFieldObservations({decision_id:'d'});
+const generation=state.outcomeLineageGeneration;
+rememberConfirmedFieldObservation(fixtures ? {...parent,execution_id:'other'} : parent);
+assert.equal(state.outcomeLineageGeneration,generation);
+assert.equal(state.outcomeLineageStatus,'pending');
+assert.equal(element('#outcome-compare').disabled,true);
+if(!fixtures) {
+ assert.match(element('#outcome-observation').children[0].textContent,/supersession inconnue/);
+ const listResolver=resolveList;
+ fetch=async(_url,options)=>{if(options.method==='POST')posts++;return missing();};
+ await consultOutcomeEvaluation(true);assert.equal(posts,0);
+ resolveList=listResolver;
+}
+resolveList(response(200,[parent,child]));await loading;
+assert.equal(state.outcomeLineageStatus,'ready');
+assert.deepEqual(state.allObservationsForDecision.map(o=>o.observation_id),['parent','child']);
+assert.equal(state.visibleObservationsForContext.length,1);
+assert.equal(state.outcomeObservationId,null);
+state.outcomeManualObservationId=state.outcomeObservationId='parent';renderSavedFieldObservations();
+assert.match(element('#outcome-observation').children[0].textContent,/Historique.*child.*execution-1/);
+assert.equal(element('#outcome-compare').disabled,true);
+fetch=async(_url,options)=>{if(options.method==='POST')posts++;return missing();};
+await consultOutcomeEvaluation(true);assert.equal(posts,0);
+''', foreign)
+
+
+def test_canonical_loader_context_change_ignores_old_response():
+    run_outcome_ui(r'''
+let oldResolve;fetch=()=>new Promise(resolve=>oldResolve=resolve);
+const old=loadSavedFieldObservations({decision_id:'d'});
+fetch=async()=>response(200,[obs('current',undefined,'new-context')]);
+await loadSavedFieldObservations({decision_id:'d',execution_id:'new-context'});
+oldResolve(response(200,[obs('obsolete')]));await old;
+assert.equal(state.outcomeObservationId,'current');
+assert.deepEqual(state.allObservationsForDecision.map(o=>o.observation_id),['current']);
+assert.equal(state.outcomeLineageStatus,'ready');
+''')
+
+
+def test_confirmed_identity_merges_without_duplicate_or_lineage_loss():
+    run_outcome_ui(r'''
+state.outcomeLineageStatus=undefined;
+const parent=obs('parent'),child=obs('child',undefined,'execution-1','parent');
+rememberConfirmedFieldObservation(parent);
+assert.equal(outcomeCanCreate('parent'),false);
+fetch=async()=>response(200,[parent,child]);
+await loadSavedFieldObservations({decision_id:'d'});
+assert.deepEqual(state.allObservationsForDecision.map(o=>o.observation_id),['parent','child']);
+assert.equal(outcomeCanCreate('parent'),false);
+''')
+
+
+@pytest.mark.parametrize('failure', ['http', 'timeout', 'invalid', 'missing_confirmation'])
+def test_canonical_loader_failure_blocks_creation_and_allows_retry(failure):
+    run_outcome_ui(r'''
+let settle,posts=0;fetch=()=>new Promise((resolve,reject)=>settle={resolve,reject});
+const loading=loadSavedFieldObservations({decision_id:'d'});
+rememberConfirmedFieldObservation(obs('parent'));
+if(fixtures==='http')settle.resolve(response(503,{detail:{code:'unavailable'}}));
+else if(fixtures==='timeout')settle.reject(Object.assign(new Error('timeout'),{networkTimeout:true}));
+else settle.resolve(response(200,fixtures==='invalid'?{}:[]));
+await loading;
+assert.equal(state.outcomeLineageStatus,'error');
+assert.equal(element('#outcome-compare').disabled,true);
+assert.match(element('#outcome-result').textContent,/Supersession inconnue.*Rouvrez/);
+fetch=async(_url,options)=>{if(options.method==='POST')posts++;return missing();};
+await consultOutcomeEvaluation(true);assert.equal(posts,0);
+fetch=async()=>response(200,[obs('parent')]);await loadSavedFieldObservations({decision_id:'d'});
+assert.equal(state.outcomeLineageStatus,'ready');assert.equal(outcomeCanCreate('parent'),true);
+''', failure)
