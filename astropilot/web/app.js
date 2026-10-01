@@ -1955,7 +1955,7 @@ function outcomeContextMatches(observation, context = state.outcomeContext) {
 }
 
 function outcomeObservationHistory() {
-  const items = state.confirmedFieldObservations || [];
+  const items = state.allObservationsForDecision || [];
   const byId = new Map(items.map(item => [item.observation_id, item]));
   const replacements = new Map();
   let coherent = byId.size === items.length;
@@ -1978,14 +1978,27 @@ function outcomeObservationHistory() {
 function outcomeCanCreate(observationId) {
   const history = outcomeObservationHistory();
   return history.coherent && !history.replacements.has(observationId)
-    && (state.confirmedFieldObservations || []).some(item => item.observation_id === observationId);
+    && (state.visibleObservationsForContext || []).some(item => item.observation_id === observationId);
+}
+
+function outcomeActiveObservations() {
+  const history = outcomeObservationHistory();
+  return history.coherent ? (state.visibleObservationsForContext || [])
+    .filter(item => !history.replacements.has(item.observation_id))
+    .sort((a, b) => {
+      const time = item => Number.isFinite(Date.parse(item.observed_at_utc)) ? Date.parse(item.observed_at_utc) : 0;
+      return time(b) - time(a) || (a.observation_id < b.observation_id ? 1 : a.observation_id > b.observation_id ? -1 : 0);
+    }) : [];
 }
 
 function selectDefaultOutcomeObservation() {
-  const history = outcomeObservationHistory();
-  state.outcomeObservationId = history.coherent
-    ? state.confirmedFieldObservations.find(item => !history.replacements.has(item.observation_id))?.observation_id || null
-    : null;
+  if (state.outcomeManualObservationId && (state.visibleObservationsForContext || [])
+      .some(item => item.observation_id === state.outcomeManualObservationId)) {
+    state.outcomeObservationId = state.outcomeManualObservationId;
+    return;
+  }
+  state.outcomeManualObservationId = null;
+  state.outcomeObservationId = outcomeActiveObservations()[0]?.observation_id || null;
 }
 
 function rememberConfirmedFieldObservation(observation) {
@@ -1994,8 +2007,10 @@ function rememberConfirmedFieldObservation(observation) {
   state.recentFieldObservationConfirmations = [observation, ...state.recentFieldObservationConfirmations
     .filter(item => item.observation_id !== observation.observation_id)];
   if (!outcomeContextMatches(observation)) return;
-  state.confirmedFieldObservations ||= [];
-  state.confirmedFieldObservations = [observation, ...state.confirmedFieldObservations
+  state.allObservationsForDecision = [observation, ...(state.allObservationsForDecision || [])
+    .filter(item => item.observation_id !== observation.observation_id)];
+  state.visibleObservationsForContext ||= [];
+  state.visibleObservationsForContext = [observation, ...state.visibleObservationsForContext
     .filter(item => item.observation_id !== observation.observation_id)];
   selectDefaultOutcomeObservation();
   // A convenience pointer only: reload must read the server list before enabling Outcome.
@@ -2012,11 +2027,16 @@ function renderSavedFieldObservations() {
   if (!select) return;
   select.innerHTML = "";
   const history = outcomeObservationHistory();
-  for (const item of state.confirmedFieldObservations || []) {
+  const activeCount = outcomeActiveObservations().length;
+  for (const item of state.visibleObservationsForContext || []) {
     const option = document.createElement("option");
     option.value = item.observation_id;
     option.textContent = `${item.observed_at_utc || "Observation"} — ${item.observation_id}`;
-    if (history.replacements.has(item.observation_id)) option.textContent += ` — Historique / remplacée par ${history.replacements.get(item.observation_id)}`;
+    if (history.replacements.has(item.observation_id)) {
+      const replacementId = history.replacements.get(item.observation_id);
+      const replacement = state.allObservationsForDecision.find(item => item.observation_id === replacementId);
+      option.textContent += ` — Historique / remplacée par ${replacementId} (contexte ${replacement.execution_id ?? "decision-only"})`;
+    } else if (activeCount > 1) option.textContent += " — Plusieurs observations actives";
     if (!history.coherent) option.textContent += " — Chaîne de corrections incohérente";
     select.appendChild(option);
   }
@@ -2026,15 +2046,18 @@ function renderSavedFieldObservations() {
 
 async function loadSavedFieldObservations(context) {
   context = Object.freeze({decision_id: context.decision_id, execution_id: context.execution_id ?? null});
+  const sameContext = state.outcomeContext?.decision_id === context.decision_id
+    && state.outcomeContext?.execution_id === context.execution_id;
+  if (!sameContext) state.outcomeManualObservationId = null;
   state.outcomeContext = context;
   const token = state.outcomeToken = (state.outcomeToken || 0) + 1;
-  state.confirmedFieldObservations = [];
+  state.allObservationsForDecision = [];
+  state.visibleObservationsForContext = [];
   state.outcomeObservationId = null;
   renderSavedFieldObservations();
   document.querySelector("#outcome-result").textContent = "Lecture des observations enregistrées…";
-  const url = context.execution_id
-    ? `/v1/executions/${encodeURIComponent(context.execution_id)}/field-observations`
-    : `/v1/decisions/${encodeURIComponent(context.decision_id)}/field-observations`;
+  // The decision endpoint includes parents and corrections across execution contexts.
+  const url = `/v1/decisions/${encodeURIComponent(context.decision_id)}/field-observations`;
   try {
     const observations = await fieldObservationNetworkRequest(url, {}, async response => {
       if (!response.ok) throw await sessionHttpError(response);
@@ -2042,10 +2065,11 @@ async function loadSavedFieldObservations(context) {
     });
     if (state.outcomeToken !== token) return;
     if (!Array.isArray(observations)) throw new Error("invalid_observation_list");
-    state.confirmedFieldObservations = observations.filter(item => item && outcomeContextMatches(item, context));
+    state.allObservationsForDecision = observations.filter(item => item && item.decision_id === context.decision_id);
+    state.visibleObservationsForContext = state.allObservationsForDecision.filter(item => item && outcomeContextMatches(item, context));
     selectDefaultOutcomeObservation();
     renderSavedFieldObservations();
-    document.querySelector("#outcome-result").textContent = state.confirmedFieldObservations.length
+    document.querySelector("#outcome-result").textContent = state.visibleObservationsForContext.length
       ? "Observations confirmées par le serveur. Choisissez une observation pour consulter ou comparer."
       : "Aucune observation enregistrée dans ce contexte.";
   } catch (_error) {
@@ -2089,9 +2113,10 @@ function renderOutcomeEvaluation(evaluation) {
   const statuses = {comparable: "Comparable", partial: "Partiellement comparable", not_comparable: "Non comparable"};
   const cloud = {clear: "Ciel clair", few: "Peu de nuages", partly_cloudy: "Partiellement nuageux",
     mostly_cloudy: "Très nuageux", overcast: "Couvert", unknown: "Inconnu"};
-  const lines = [`Observation enregistrée : ${evaluation.observation_id}`, statuses[evaluation.status] || "Résultat disponible"];
-  const reasonText = reason => OUTCOME_REASON_TEXT[reason.code] || "Éléments indisponibles pour cette comparaison.";
-  for (const item of evaluation.results) {
+  const knownStatus = Object.hasOwn(statuses, evaluation.status);
+  const lines = [`Observation enregistrée : ${evaluation.observation_id}`, knownStatus ? statuses[evaluation.status] : "Statut non reconnu"];
+  const reasonText = reason => Object.hasOwn(OUTCOME_REASON_TEXT, reason.code) ? OUTCOME_REASON_TEXT[reason.code] : "Raison non reconnue.";
+  for (const item of knownStatus ? evaluation.results : []) {
     const name = labels[item.variable] || "Variable";
     if (item.status !== "comparable") {
       lines.push(`${name} : non comparable. ${item.reasons.map(reasonText).join(" ")}`);
@@ -2102,14 +2127,16 @@ function renderOutcomeEvaluation(evaluation) {
     }
   }
   lines.push(...evaluation.reasons.map(reasonText));
-  if (evaluation.assessment) {
+  if (evaluation.assessment && knownStatus) {
     const sufficiency = {sufficient: "suffisants", partial: "partiels", insufficient_evidence: "insuffisants"};
-    lines.push(`Suffisance des éléments comparables : ${sufficiency[evaluation.assessment.status] || "indéterminée"}. Ce statut ne mesure pas la qualité globale de la prévision.`);
+    lines.push(Object.hasOwn(sufficiency, evaluation.assessment.status)
+      ? `Suffisance des éléments comparables : ${sufficiency[evaluation.assessment.status]}. Ce statut ne mesure pas la qualité globale de la prévision.`
+      : "Statut non reconnu");
   }
   document.querySelector("#outcome-result").textContent = lines.join("\n");
 }
 
-function validateOutcomeProjection(value, observationId, method) {
+function validateOutcomeProjection(value, target, method) {
   const object = item => item !== null && typeof item === "object" && !Array.isArray(item);
   const text = item => typeof item === "string" && item.length > 0;
   const date = item => text(item) && Number.isFinite(Date.parse(item));
@@ -2117,10 +2144,11 @@ function validateOutcomeProjection(value, observationId, method) {
   const reasons = items => Array.isArray(items) && items.every(item => object(item) && text(item.code)
     && (item.variable === null || variables.includes(item.variable)));
   const clouds = ["clear", "few", "partly_cloudy", "mostly_cloudy", "overcast", "unknown"];
-  const valid = object(value) && value.observation_id === observationId && text(value.evaluation_id)
+  const valid = object(value) && value.observation_id === target.observation_id && text(value.evaluation_id)
     && value.version === "outcome_evaluation.v1" && text(value.decision_id)
+    && value.decision_id === target.decision_id && value.execution_id === target.execution_id
     && (value.execution_id === null || text(value.execution_id)) && text(value.comparison_id)
-    && date(value.computed_at_utc) && ["comparable", "partial", "not_comparable"].includes(value.status)
+    && date(value.computed_at_utc) && text(value.status)
     && (method === "GET" ? !Object.hasOwn(value, "created") : typeof value.created === "boolean")
     && reasons(value.reasons) && Array.isArray(value.results)
     && new Set(value.results.map(item => item?.variable)).size === value.results.length
@@ -2131,7 +2159,7 @@ function validateOutcomeProjection(value, observationId, method) {
         : [item.forecast, item.observed, item.signed_error, item.absolute_error].every(Number.isFinite)
           && item.absolute_error >= 0)))
     && (value.assessment === null || object(value.assessment) && text(value.assessment.id)
-      && ["sufficient", "partial", "insufficient_evidence"].includes(value.assessment.status) && date(value.assessment.assessed_at))
+      && text(value.assessment.status) && date(value.assessment.assessed_at))
     && (value.evidence_reference === null || object(value.evidence_reference)
       && text(value.evidence_reference.id) && text(value.evidence_reference.source_type));
   if (!valid) {
@@ -2145,6 +2173,10 @@ function validateOutcomeProjection(value, observationId, method) {
 async function consultOutcomeEvaluation(createIfMissing = false) {
   const observationId = state.outcomeObservationId;
   if (!observationId) return;
+  const observation = (state.visibleObservationsForContext || []).find(item => item.observation_id === observationId);
+  if (!observation || !outcomeContextMatches(observation)) return;
+  const target = Object.freeze({observation_id: observationId, decision_id: observation.decision_id,
+    execution_id: observation.execution_id ?? null});
   const token = state.outcomeToken = (state.outcomeToken || 0) + 1;
   const current = () => state.outcomeToken === token && state.outcomeObservationId === observationId;
   const output = document.querySelector("#outcome-result");
@@ -2158,7 +2190,7 @@ async function consultOutcomeEvaluation(createIfMissing = false) {
       error.outcomeProtocolError = true;
       throw error;
     }
-    return validateOutcomeProjection(projection, observationId, method);
+    return validateOutcomeProjection(projection, target, method);
   });
   const read = async () => {
     try { return {kind: "found", evaluation: await request("GET")}; }
@@ -2197,6 +2229,10 @@ async function consultOutcomeEvaluation(createIfMissing = false) {
     if (!current()) return;
     if (_error.outcomeProtocolError) {
       output.textContent = "Erreur de protocole : projection Outcome invalide. L’observation reste enregistrée ; aucune nouvelle comparaison envoyée.";
+      return;
+    }
+    if (_error.code === "field_observation_superseded") {
+      output.textContent = "Observation remplacée : aucune nouvelle évaluation autorisée. La consultation historique reste disponible.";
       return;
     }
     output.textContent = "Comparaison indisponible. L’observation reste enregistrée. Vous pouvez réessayer la consultation ou la comparaison.";
@@ -5244,6 +5280,7 @@ document.querySelector("#outcome-compare").addEventListener("click", () => consu
 document.querySelector("#outcome-read").addEventListener("click", () => consultOutcomeEvaluation(false));
 document.querySelector("#outcome-observation").addEventListener("change", event => {
   state.outcomeObservationId = event.target.value || null;
+  state.outcomeManualObservationId = state.outcomeObservationId;
   state.outcomeToken = (state.outcomeToken || 0) + 1;
   renderSavedFieldObservations();
   document.querySelector("#outcome-result").textContent = "Observation enregistrée sélectionnée. Consultez ou comparez explicitement.";
