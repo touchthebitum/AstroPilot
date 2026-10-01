@@ -513,6 +513,7 @@
         </div>
       </dialog>
 
+      <button class="secondary-button" id="outcome-reopen" type="button">Retrouver les observations enregistrées récentes</button>
       <dialog class="observation-dialog" id="field-observation-dialog" aria-labelledby="observation-title">
         <div class="observation-surface observation-panel">
           <header class="observation-heading">
@@ -610,6 +611,14 @@
                 <button class="primary-button" id="observation-save" type="submit">Enregistrer l’observation</button>
               </div>
             </form>
+            <section class="outcome-panel" aria-labelledby="outcome-title">
+              <h3 id="outcome-title">Comparer une observation enregistrée</h3>
+              <label for="outcome-observation">Observations confirmées par le serveur</label>
+              <select id="outcome-observation"></select>
+              <button class="secondary-button" id="outcome-read" type="button">Consulter la comparaison enregistrée</button>
+              <button class="secondary-button" id="outcome-compare" type="button" disabled>Comparer avec la prévision</button>
+              <div id="outcome-result" role="status" aria-live="polite"></div>
+            </section>
         </div>
       </dialog>
     </main>

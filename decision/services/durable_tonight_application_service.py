@@ -5,6 +5,10 @@ from dataclasses import replace
 from uuid import uuid4
 
 from decision.models.user_selection import UserSelection
+from decision.models.outcome_evaluation import (
+    OUTCOME_EVALUATION_ALGORITHM_VERSION,
+    OutcomeEvaluation,
+)
 from decision.services.decision_acceptance_application import (
     DecisionAcceptanceApplicationService,
     InMemoryDecisionAcceptanceContextStore,
@@ -29,6 +33,7 @@ from decision.services.field_observation_recording_service import (
 )
 from decision.services.outcome_evaluation_orchestration import (
     OutcomeEvaluationOrchestrationService,
+    OutcomeEvaluationOrchestrationError,
 )
 from decision.weather.decision_forecast_evidence_persistence import (
     DecisionForecastEvidenceStore,
@@ -261,6 +266,22 @@ class DurableTonightApplicationService:
         return self._outcome_evaluation_orchestration_service().evaluate(
             observation_id
         )
+
+    def load_outcome_evaluation_by_observation(
+        self, observation_id: str,
+    ) -> OutcomeEvaluation | None:
+        """Read the unique persisted v1 aggregate, including historical observations."""
+        if self.outcome_evaluation_store is None:
+            raise RuntimeError("outcome_evaluation_persistence_unavailable")
+        candidates = tuple(
+            item for item in self.outcome_evaluation_store.list_by_observation(
+                observation_id=observation_id
+            )
+            if item.evaluation_algorithm_version == OUTCOME_EVALUATION_ALGORITHM_VERSION
+        )
+        if len(candidates) > 1:
+            raise OutcomeEvaluationOrchestrationError("outcome_evaluation_conflict")
+        return candidates[0] if candidates else None
 
     def load_field_observation(self, observation_id: str):
         if self.field_observation_store is None:

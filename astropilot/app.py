@@ -145,6 +145,11 @@ from decision.field_observation import (
     Transparency,
     validate_observation_identity,
 )
+from decision.models.forecast_observation_comparison import NumericVariableComparison
+from decision.outcome_evaluation_persistence import OutcomeEvaluationPersistenceError
+from decision.services.outcome_evaluation_orchestration import OutcomeEvaluationOrchestrationError
+from decision.services.field_observation_context import FieldObservationContextError
+from decision.weather.decision_forecast_evidence_persistence import DecisionForecastEvidencePersistenceError
 from decision.field_observation_persistence import (
     FieldObservationPersistenceError,
 )
@@ -820,6 +825,10 @@ class FieldObservationTechnicalRequest(BaseModel):
 
     def to_domain(self) -> ObservedTechnical:
         return ObservedTechnical(**self.model_dump())
+
+
+class OutcomeEvaluationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
 
 class FieldObservationCreateRequest(BaseModel):
@@ -1929,6 +1938,8 @@ def create_app(
         request: Request,
         exc: RequestValidationError,
     ):
+        if request.url.path.endswith("/outcome-evaluation"):
+            return JSONResponse(status_code=422, content={"detail": {"code": "invalid_outcome_evaluation_request"}})
         if request.url.path != "/v1/configuration":
             return await request_validation_exception_handler(request, exc)
         locations = [tuple(error.get("loc", ())) for error in exc.errors()]
@@ -3273,6 +3284,109 @@ def create_app(
                 ),
             },
         }
+
+    def outcome_evaluation_projection(evaluation):
+        comparison = evaluation.comparison
+        def reason(item):
+            return {"code": item.code, "variable": None if item.variable is None else item.variable.value}
+        results = []
+        for item in comparison.results:
+            projected = {"variable": item.variable.value, "status": item.status.value,
+                         "unit": item.unit, "reasons": [reason(r) for r in item.reasons]}
+            if isinstance(item, NumericVariableComparison):
+                projected.update(forecast=item.forecast_value, observed=item.observed_value,
+                                 signed_error=item.signed_error, absolute_error=item.absolute_error)
+            else:
+                projected.update(
+                    forecast=None if item.predicted_condition is None else item.predicted_condition.value,
+                    observed=None if item.observed_condition is None else item.observed_condition.value,
+                    outcome=None if item.outcome is None else item.outcome.value,
+                )
+            results.append(projected)
+        assessment = evaluation.assessment
+        evidence = evaluation.outcome_evidence
+        return {
+            "evaluation_id": evaluation.evaluation_id,
+            "version": evaluation.evaluation_algorithm_version,
+            "observation_id": comparison.observation_id, "decision_id": comparison.decision_id,
+            "execution_id": comparison.execution_id, "comparison_id": comparison.comparison_id,
+            "computed_at_utc": comparison.computed_at_utc.isoformat(),
+            "status": comparison.status.value, "results": results,
+            "reasons": [reason(r) for r in comparison.reasons],
+            "assessment": None if assessment is None else {
+                "id": assessment.assessment_id, "status": assessment.status.value,
+                "assessed_at": assessment.assessed_at.isoformat()},
+            "evidence_reference": None if evidence is None else {
+                "id": evidence.evidence_id, "source_type": evidence.source_type.value},
+        }
+
+    def raise_outcome_evaluation_error(exc):
+        # Only exact types and known codes cross the HTTP boundary. A wrapped
+        # filesystem failure is unavailable; malformed persisted data is internal.
+        code = exc.args[0] if len(exc.args) == 1 and type(exc.args[0]) is str else None
+        status = 500
+        public_code = "outcome_evaluation_internal_error"
+        conflicts = {
+            "outcome_evaluation_conflict", "field_observation_superseded",
+            "decision_forecast_evidence_missing", "decision_not_found",
+            "execution_not_found", "mission_not_found", "selection_not_found",
+            "legacy_lineage_incomplete", "execution_decision_mismatch",
+            "execution_identity_mismatch", "mission_identity_mismatch",
+            "selection_decision_mismatch",
+        }
+        if type(exc) in (OutcomeEvaluationOrchestrationError, OutcomeEvaluationPersistenceError,
+                         FieldObservationPersistenceError, FieldObservationContextError):
+            if code in conflicts:
+                status, public_code = 409, code
+            elif type(exc) is FieldObservationPersistenceError and code == "field_observation_missing":
+                status, public_code = 404, "field_observation_not_found"
+        unavailable_codes = {
+            "field_observation_persistence_unavailable", "outcome_evaluation_persistence_unavailable",
+            "outcome_evaluation_clock_unavailable",
+        }
+        if type(exc) is RuntimeError and code in unavailable_codes:
+            status, public_code = 503, "outcome_evaluation_unavailable"
+        persistence_wrappers = {
+            OutcomeEvaluationPersistenceError: {"outcome_evaluation_corrupt"},
+            FieldObservationPersistenceError: {"field_observation_corrupt"},
+            DecisionForecastEvidencePersistenceError: {"decision_forecast_evidence_corrupt"},
+        }
+        cause = exc.__cause__
+        if isinstance(exc, OSError) or (
+            code in persistence_wrappers.get(type(exc), set()) and isinstance(cause, OSError)
+        ):
+            status, public_code = 503, "outcome_evaluation_unavailable"
+        raise HTTPException(status_code=status, detail={"code": public_code}) from exc
+
+    @application.post("/v1/field-observations/{observation_id}/outcome-evaluation")
+    def evaluate_field_observation_outcome(
+        observation_id: str, response: Response,
+        request: OutcomeEvaluationRequest | None = None,
+    ):
+        observation_id = validated_field_observation_route_identity(observation_id, field="observation_id")
+        try:
+            result = application_service().evaluate_outcome_observation(observation_id)
+            projection = outcome_evaluation_projection(result.evaluation)
+        except Exception as exc:
+            raise_outcome_evaluation_error(exc)
+        response.status_code = 201 if result.created else 200
+        return {"created": result.created, **projection}
+
+    @application.get("/v1/field-observations/{observation_id}/outcome-evaluation")
+    def read_field_observation_outcome(observation_id: str):
+        observation_id = validated_field_observation_route_identity(observation_id, field="observation_id")
+        try:
+            service = application_service()
+            if service.load_field_observation(observation_id) is None:
+                raise HTTPException(status_code=404, detail={"code": "field_observation_not_found"})
+            evaluation = service.load_outcome_evaluation_by_observation(observation_id)
+            if evaluation is None:
+                raise HTTPException(status_code=404, detail={"code": "outcome_evaluation_not_found"})
+            return outcome_evaluation_projection(evaluation)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise_outcome_evaluation_error(exc)
 
     @application.get("/v1/field-observations/{observation_id}")
     def get_field_observation(observation_id: str):

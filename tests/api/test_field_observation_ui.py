@@ -231,6 +231,7 @@ def test_field_observation_retry_conflict_and_form_state_are_dynamic(tmp_path):
         source.index("const OBSERVATION_CHOICES ="):
         source.index("const PENDING_ACCEPTANCE_STORAGE_KEY =")
     ]
+    helpers += "\nloadSavedFieldObservations = async () => {}; renderSavedFieldObservations = () => {};\n"
     harness = r'''
 const assert = {
   equal(actual, expected, message = '') { if (actual !== expected) throw new Error(message || `${actual} !== ${expected}`); },
@@ -843,6 +844,7 @@ async function check() {
   await submitFieldObservation(event);
   assert.equal(posted.length, 2);
   assert.equal(posted[0], posted[1]);
+  assert.equal(state.recentFieldObservationConfirmations[0].observation_id, firstOfflinePayload.observation_id);
   assert.equal(element('#observation-clouds').value, '');
 
   // Editing after a committed/lost response never replaces the original UUID or issues another POST.
@@ -990,6 +992,7 @@ async function check() {
     return response(200, storedProjection(originalUncertainAfterRaces.payload));
   };
   await reconcileFieldObservationEntry(fieldObservationEntryId(replacementLock));
+  assert.equal(state.recentFieldObservationConfirmations[0].observation_id, originalUncertainAfterRaces.payload.observation_id);
   assert.equal(state.fieldObservationLock, null);
 
   // Edits made while the request is in flight survive the successful response.
@@ -1123,12 +1126,15 @@ def _field_observation_multicontext_program():
         source.index("const OBSERVATION_CHOICES ="):
         source.index("const PENDING_ACCEPTANCE_STORAGE_KEY =")
     ]
+    helpers += "\nloadSavedFieldObservations = async () => {}; renderSavedFieldObservations = () => {};\n"
     program = r'''
 const vm = require('vm');
 const assert = require('assert').strict;
 const helpers = HELPERS_SOURCE;
 const shared = new Map();
 const recoveryRecords = new Map();
+// The recent context pointer is a convenience, separate from recovery artifacts.
+const recoveryStorageSize = () => [...shared.keys()].filter(key => key !== 'astropilot.recent-observation-context.v1').length;
 RECOVERY_IDB_SOURCE
 const contexts = [];
 // Controlled simulator of separate JS contexts, not a real browser. Delivery is
@@ -1274,6 +1280,8 @@ const projection = payload => ({...structuredClone(payload),
           am: run(a, 'document.querySelector("#observation-status").textContent'),
           bm: run(b, 'document.querySelector("#observation-status").textContent'), keys: [...shared.keys()]}));
       assert.equal([...shared.keys()].filter(key => key.startsWith('astropilot.pendingFieldObservation.')).length, 0);
+  const savedTab = a.sandbox.posts.length ? a : b;
+  assert.equal(run(savedTab, 'state.recentFieldObservationConfirmations[0].observation_id'), savedTab.sandbox.posts[0].observation_id);
   assert.ok(storageEvents.length > 0); // Both acquisitions completed before any events.
   const queued = storageEvents.length;
   const unchanged = a.sandbox.localStorage.getItem('unchanged');
@@ -1540,7 +1548,7 @@ const projection = payload => ({...structuredClone(payload),
       assert.equal(run(exact, 'state.fieldObservationLock.pending.payload.observation_id'), 'same-key-B');
       // Old inventory button must still identify B exactly after promotion to simple lock.
       await rows[1].children[1].children[0].listeners.click();
-      assert.deepEqual(gets, ['same-key-B']); assert.equal(shared.size, 0);
+      assert.deepEqual(gets, ['same-key-B']); assert.equal(recoveryStorageSize(), 0);
     } else {
       await rows[1].children[1].children[0].listeners.click();
       assert.deepEqual(gets, ['same-key-B']);
@@ -1548,7 +1556,7 @@ const projection = payload => ({...structuredClone(payload),
       assert.equal(JSON.parse(shared.get('astropilot.fieldObservationLock')).pending.payload.observation_id,
         first.pending.payload.observation_id);
       await run(exact, `abandonFieldObservationEntry(${JSON.stringify(ids[0])})`);
-      assert.equal(shared.size, 0);
+      assert.equal(recoveryStorageSize(), 0);
     }
   }
 
@@ -1610,7 +1618,7 @@ const projection = payload => ({...structuredClone(payload),
     assert.equal(run(many, '(state.fieldObservationLock.entries || [state.fieldObservationLock]).length'), size);
     await run(many, 'abandonFieldObservationEntry(fieldObservationEntryId(state.fieldObservationLock.entries?.[0] || state.fieldObservationLock))');
   }
-  assert.equal(shared.size, 0);
+  assert.equal(recoveryStorageSize(), 0);
 
   // Non-cooperative hung fetch: controlled deadlines release the real lock queue.
   // Repeat before POST, after POST, and during confirmation. Late replies cannot clean storage.
@@ -1647,11 +1655,11 @@ const projection = payload => ({...structuredClone(payload),
     assert.match(run(hung, 'document.querySelector("#observation-status").textContent'), /Réseau trop lent/);
     await run(successor, 'restorePendingFieldObservation()');
     await run(successor, 'submitFieldObservation({preventDefault(){}})');
-    assert.equal(successor.sandbox.posts.length, 0); assert.equal(shared.size, 0);
+    assert.equal(successor.sandbox.posts.length, 0); assert.equal(recoveryStorageSize(), 0);
     lateResolve({ok: true, status: 201, json: async () => projection(first.pending.payload)});
     await drainMicrotasks();
     await deliverStorage({reverse: true, duplicate: true}); await lockTail;
-    assert.equal(shared.size, 0); assert.equal(successor.sandbox.posts.length, 0);
+    assert.equal(recoveryStorageSize(), 0); assert.equal(successor.sandbox.posts.length, 0);
   }
 
 
@@ -1672,7 +1680,7 @@ const projection = payload => ({...structuredClone(payload),
   freshRetry.sandbox.canonical = {[newPayload.observation_id]: projection(newPayload)};
   await run(freshRetry, 'restorePendingFieldObservationInventory(); restorePendingFieldObservation()');
   await run(freshRetry, 'submitFieldObservation({preventDefault(){}})');
-  assert.equal(freshRetry.sandbox.posts.length, 0); assert.equal(shared.size, 0);
+  assert.equal(freshRetry.sandbox.posts.length, 0); assert.equal(recoveryStorageSize(), 0);
 
   // clear() delivers asynchronously; captured artifacts survive until explicit resolution.
   shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
@@ -1694,7 +1702,7 @@ const projection = payload => ({...structuredClone(payload),
     await run(cleared, 'submitFieldObservation({preventDefault(){}})');
     assert.equal(cleared.sandbox.uuidCount(), clearUuidCount);
     assert.equal(cleared.sandbox.posts.length, 0);
-    assert.equal(shared.size, 0);
+    assert.equal(recoveryStorageSize(), 0);
   }
   await run(cleared, 'abandonFieldObservationEntry(fieldObservationEntryId(state.fieldObservationLock.entries[0]))');
   assert.equal(run(cleared, 'state.fieldObservationLock'), null);
@@ -1733,7 +1741,7 @@ const projection = payload => ({...structuredClone(payload),
         assert.equal(shared.get(first.key), JSON.stringify(first.pending));
         assert.equal(run(broken, 'state.fieldObservationLock.status'), 'pending');
       } else {
-        assert.equal(shared.size, 0); assert.equal(run(broken, 'state.fieldObservationLock'), null);
+        assert.equal(recoveryStorageSize(), 0); assert.equal(run(broken, 'state.fieldObservationLock'), null);
       }
     }
     shared.clear(); recoveryRecords.clear(); contexts.length = 0; storageEvents.length = 0;
@@ -1876,7 +1884,7 @@ const projection = payload => ({...structuredClone(payload),
       const {target} = await prepareMemory('durable-reload');
       const originalId = targetId(target);
       assert.equal(recoveryRecords.get('inventory').entries.length, 1);
-      assert.equal(shared.size, 0);
+      assert.equal(recoveryStorageSize(), 0);
       contexts.length = 0; storageEvents.length = 0; // Destroy the old page, no pageshow reuse.
       const fresh = makeContext('fresh-page');
       await run(fresh, 'restorePendingFieldObservationInventory()');
@@ -2192,7 +2200,7 @@ const projection = payload => ({...structuredClone(payload),
   run(migrated, 'adoptFieldObservationLock(__legacy)');
   await run(migrated, 'withFieldObservationWebLock(() => true)');
   assert.equal(run(migrated, 'state.fieldObservationLock'), null);
-  assert.equal(shared.size, 0);
+  assert.equal(recoveryStorageSize(), 0);
   assert.equal(recoveryRecords.get('inventory').resolved[0].digest.length, 64);
   assert.equal(recoveryRecords.get('inventory').entries.length, 0);
   // Restore captured before recovery load cannot reacquire the compacted legacy UUID.
@@ -2200,7 +2208,7 @@ const projection = payload => ({...structuredClone(payload),
   run(migrated, 'state.fieldObservationInventoryReady = true');
   await run(migrated, 'submitFieldObservation({preventDefault(){}})');
   assert.equal(migrated.sandbox.uuidCount(), 0); assert.equal(migrated.sandbox.posts.length, 0);
-  assert.equal(shared.size, 0);
+  assert.equal(recoveryStorageSize(), 0);
   assert.equal(recoveryRecords.get('inventory').entries.length, 0);
 
   // Real remaining capacity exhaustion, after compaction, precedes UUID/storage/POST.
@@ -2214,7 +2222,7 @@ const projection = payload => ({...structuredClone(payload),
   const fullBefore = JSON.stringify(journal);
   await run(full, 'submitFieldObservation({preventDefault(){}})');
   assert.equal(full.sandbox.uuidCount(), 0); assert.equal(full.sandbox.posts.length, 0);
-  assert.equal(shared.size, 0);
+  assert.equal(recoveryStorageSize(), 0);
   assert.equal(JSON.stringify(recoveryRecords.get('inventory')), fullBefore);
   assert.match(run(full, 'document.querySelector("#observation-status").textContent'), /recovery_quota.*Aucun UUID ni POST créé/);
 
@@ -2252,6 +2260,7 @@ const projection = payload => ({...structuredClone(payload),
     await run(reload, `reconcileFieldObservationEntry(${JSON.stringify(entry)})`);
     assert.equal(recoveryRecords.get('inventory').entries.length, 0);
     assert.equal(recoveryRecords.get('inventory').resolved.length, 0);
+    assert.equal(run(reload, 'state.recentFieldObservationConfirmations[0].observation_id'), confirmedPayload.observation_id);
     assert.equal(reload.sandbox.posts.length, 0);
     const lastReload = makeContext('cleanup-stable');
     await run(lastReload, 'restorePendingFieldObservationInventory()');
