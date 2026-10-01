@@ -16,10 +16,10 @@ def test_outcome_click_recovery_stale_and_readback():
     helpers = source[source.index('// Outcome state is independent'):source.index('async function finishFieldObservationSubmission(')]
     program = r'''
 const assert = require('assert').strict;
-const state = {};
+const state = {outcomeContext:{decision_id:'d',execution_id:null}};
 const elements = new Map();
 function element(id) { if (!elements.has(id)) elements.set(id, {textContent:'', value:'', disabled:false,
-  innerHTML:'', appendChild() {}}); return elements.get(id); }
+  children:[], set innerHTML(value) { this.children=[]; }, appendChild(child) {this.children.push(child);}}); return elements.get(id); }
 const document = {querySelector: element, createElement: () => ({})};
 const values = new Map();
 const localStorage = {getItem:key => values.get(key) || null, setItem:(key,value) => values.set(key,value)};
@@ -32,11 +32,11 @@ async function sessionHttpError(response) { const error = new Error(); error.sta
 async function fieldObservationNetworkRequest(url, options, consume) { return consume(await fetch(url,options)); }
 let fetch;
 HELPERS
-const result = id => ({evaluation_id:'e', observation_id:id, status:'partial', reasons:[],
-  results:[{variable:'temperature_c', status:'comparable', forecast:8, observed:7, signed_error:1, absolute_error:1,unit:'°C'},
-    {variable:'wind_speed_kmh',status:'not_comparable',reasons:[{code:'forecast_variable_unavailable',variable:'wind_speed_kmh'}]},
-    {variable:'cloud_cover_percent',status:'comparable',forecast:'clear',observed:'overcast',outcome:'mismatch',unit:'%'}],
-  assessment:{status:'partial'}});
+const result = id => ({evaluation_id:'e', observation_id:id, status:'partial', reasons:[], version:'outcome_evaluation.v1', decision_id:'d',execution_id:null, comparison_id:'c',computed_at_utc:'2026-01-01T00:00:00Z',evidence_reference:null,
+  results:[{variable:'temperature_c', status:'comparable', forecast:8, observed:7, signed_error:1, absolute_error:1,unit:'°C',reasons:[]},
+    {variable:'wind_speed_kmh',status:'not_comparable',unit:'km/h',reasons:[{code:'forecast_variable_unavailable',variable:'wind_speed_kmh'}]},
+    {variable:'cloud_cover_percent',status:'comparable',forecast:'clear',observed:'overcast',outcome:'mismatch',unit:'%',reasons:[]}],
+  assessment:{id:'a',status:'partial',assessed_at:'2026-01-01T00:00:00Z'}});
 const response = (status,value) => ({ok:status>=200 && status<300,status,json:async()=>value});
 const missing = () => response(404,{detail:{code:'outcome_evaluation_not_found'}});
 (async () => {
@@ -65,7 +65,7 @@ const missing = () => response(404,{detail:{code:'outcome_evaluation_not_found'}
   assert.match(element('#outcome-result').textContent,/Cliquez à nouveau/);
   fetch=async(url,options)=> {
     assert.match(url,/obs-1\/outcome-evaluation$/);
-    if(options.method==='POST') { posts++; stored=result('obs-1'); return response(200,stored); }
+    if(options.method==='POST') { posts++; stored=result('obs-1'); return response(200,{...stored,created:false}); }
     return stored?response(200,stored):missing();
   };
   await consultOutcomeEvaluation(true);
@@ -89,6 +89,53 @@ const missing = () => response(404,{detail:{code:'outcome_evaluation_not_found'}
   assert.equal(posts,3);
   assert.equal(element('#outcome-result').textContent,'new selection');
 
+
+  // Exact context snapshots: global confirmations never contaminate another editor.
+  const obs = (id,d='d',e=null,parent=null) => ({observation_id:id,decision_id:d,execution_id:e,supersedes_observation_id:parent});
+  const inventory=[obs('old'),obs('new','d',null,'old'),obs('exec','d','e'),obs('foreign','B')];
+  fetch=async()=>response(200,inventory);
+  await loadSavedFieldObservations({decision_id:'d',execution_id:null});
+  assert.deepEqual(state.confirmedFieldObservations.map(o=>o.observation_id),['old','new']);
+  assert.equal(state.outcomeObservationId,'new');
+  assert.match(element('#outcome-observation').children[0].textContent,/Historique \/ remplacée par new/);
+  rememberConfirmedFieldObservation(obs('B-confirmed','B'));
+  assert.equal(state.outcomeObservationId,'new');
+  assert.equal(state.confirmedFieldObservations.length,2);
+  await loadSavedFieldObservations({decision_id:'d',execution_id:'e'});
+  assert.deepEqual(state.confirmedFieldObservations.map(o=>o.observation_id),['exec']);
+  await loadSavedFieldObservations({decision_id:'d'});
+  state.outcomeObservationId='old'; renderSavedFieldObservations();
+  assert.equal(element('#outcome-compare').disabled,true);
+  fetch=async()=>response(200,result('old'));
+  await consultOutcomeEvaluation(true);
+  assert.match(element('#outcome-result').textContent,/Historique/);
+  fetch=async()=>missing();
+  await consultOutcomeEvaluation(true);
+  assert.match(element('#outcome-result').textContent,/Observation remplacée/);
+  assert.equal(posts,3);
+  state.confirmedFieldObservations.push(obs('newest','d',null,'new'));
+  selectDefaultOutcomeObservation();
+  assert.equal(state.outcomeObservationId,'newest');
+  state.confirmedFieldObservations.push(obs('fork','d',null,'old'));
+  selectDefaultOutcomeObservation();
+  assert.equal(state.outcomeObservationId,null);
+  assert.equal(outcomeCanCreate('fork'),false);
+  state.confirmedFieldObservations=[obs('cycle1','d',null,'cycle2'),obs('cycle2','d',null,'cycle1')];
+  assert.equal(outcomeCanCreate('cycle1'),false);
+  state.confirmedFieldObservations=[obs('obs-1')]; state.outcomeObservationId='obs-1';
+  for (const invalid of [null,7,{}, {...result('wrong')}, {...result('obs-1'),created:false},
+    {...result('obs-1'),assessment:{}}, {...result('obs-1'),results:[{}]}]) {
+    fetch=async(_url,options)=>{assert.equal(options.method,'GET');return response(200,invalid);};
+    await consultOutcomeEvaluation(true);
+    assert.match(element('#outcome-result').textContent,/Erreur de protocole/);
+    assert.equal(posts,3);
+  }
+  fetch=async(_url,options)=>{assert.equal(options.method,'GET');return response(404,{detail:{code:'field_observation_not_found'}});};
+  await consultOutcomeEvaluation(true);
+  assert.equal(posts,3);
+  // Exact absence authorizes POST; valid POST projection includes created.
+  fetch=async(_url,options)=>{if(options.method==='POST'){posts++;return response(201,{...result('obs-1'),created:true});}return missing();};
+  await consultOutcomeEvaluation(true); assert.equal(posts,4);
   // A local pointer is never persistence proof after reload.
   state.confirmedFieldObservations=[]; state.outcomeObservationId=null;
   fetch=async(url,options)=> {

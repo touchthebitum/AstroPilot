@@ -1949,12 +1949,55 @@ function observationConflictError() {
 }
 
 // Outcome state is independent of observation publication and pending recovery.
+function outcomeContextMatches(observation, context = state.outcomeContext) {
+  return Boolean(context && observation.decision_id === context.decision_id
+    && (observation.execution_id ?? null) === (context.execution_id ?? null));
+}
+
+function outcomeObservationHistory() {
+  const items = state.confirmedFieldObservations || [];
+  const byId = new Map(items.map(item => [item.observation_id, item]));
+  const replacements = new Map();
+  let coherent = byId.size === items.length;
+  for (const item of items) {
+    const parent = item.supersedes_observation_id;
+    if (!parent) continue;
+    if (!byId.has(parent) || replacements.has(parent)) coherent = false;
+    replacements.set(parent, item.observation_id);
+    const seen = new Set([item.observation_id]);
+    let cursor = parent;
+    while (cursor && byId.has(cursor)) {
+      if (seen.has(cursor)) { coherent = false; break; }
+      seen.add(cursor);
+      cursor = byId.get(cursor).supersedes_observation_id;
+    }
+  }
+  return {replacements, coherent};
+}
+
+function outcomeCanCreate(observationId) {
+  const history = outcomeObservationHistory();
+  return history.coherent && !history.replacements.has(observationId)
+    && (state.confirmedFieldObservations || []).some(item => item.observation_id === observationId);
+}
+
+function selectDefaultOutcomeObservation() {
+  const history = outcomeObservationHistory();
+  state.outcomeObservationId = history.coherent
+    ? state.confirmedFieldObservations.find(item => !history.replacements.has(item.observation_id))?.observation_id || null
+    : null;
+}
+
 function rememberConfirmedFieldObservation(observation) {
   if (!observation?.observation_id) return;
+  state.recentFieldObservationConfirmations ||= [];
+  state.recentFieldObservationConfirmations = [observation, ...state.recentFieldObservationConfirmations
+    .filter(item => item.observation_id !== observation.observation_id)];
+  if (!outcomeContextMatches(observation)) return;
   state.confirmedFieldObservations ||= [];
   state.confirmedFieldObservations = [observation, ...state.confirmedFieldObservations
     .filter(item => item.observation_id !== observation.observation_id)];
-  state.outcomeObservationId = observation.observation_id;
+  selectDefaultOutcomeObservation();
   // A convenience pointer only: reload must read the server list before enabling Outcome.
   try { localStorage.setItem("astropilot.recent-observation-context.v1", JSON.stringify({
     decision_id: observation.decision_id, execution_id: observation.execution_id || null,
@@ -1968,17 +2011,22 @@ function renderSavedFieldObservations() {
   const select = document.querySelector("#outcome-observation");
   if (!select) return;
   select.innerHTML = "";
+  const history = outcomeObservationHistory();
   for (const item of state.confirmedFieldObservations || []) {
     const option = document.createElement("option");
     option.value = item.observation_id;
     option.textContent = `${item.observed_at_utc || "Observation"} — ${item.observation_id}`;
+    if (history.replacements.has(item.observation_id)) option.textContent += ` — Historique / remplacée par ${history.replacements.get(item.observation_id)}`;
+    if (!history.coherent) option.textContent += " — Chaîne de corrections incohérente";
     select.appendChild(option);
   }
   select.value = state.outcomeObservationId || "";
-  document.querySelector("#outcome-compare").disabled = !state.outcomeObservationId;
+  document.querySelector("#outcome-compare").disabled = !state.outcomeObservationId || !outcomeCanCreate(state.outcomeObservationId);
 }
 
 async function loadSavedFieldObservations(context) {
+  context = Object.freeze({decision_id: context.decision_id, execution_id: context.execution_id ?? null});
+  state.outcomeContext = context;
   const token = state.outcomeToken = (state.outcomeToken || 0) + 1;
   state.confirmedFieldObservations = [];
   state.outcomeObservationId = null;
@@ -1993,10 +2041,11 @@ async function loadSavedFieldObservations(context) {
       return response.json();
     });
     if (state.outcomeToken !== token) return;
-    state.confirmedFieldObservations = observations;
-    state.outcomeObservationId = observations[0]?.observation_id || null;
+    if (!Array.isArray(observations)) throw new Error("invalid_observation_list");
+    state.confirmedFieldObservations = observations.filter(item => item && outcomeContextMatches(item, context));
+    selectDefaultOutcomeObservation();
     renderSavedFieldObservations();
-    document.querySelector("#outcome-result").textContent = observations.length
+    document.querySelector("#outcome-result").textContent = state.confirmedFieldObservations.length
       ? "Observations confirmées par le serveur. Choisissez une observation pour consulter ou comparer."
       : "Aucune observation enregistrée dans ce contexte.";
   } catch (_error) {
@@ -2060,6 +2109,39 @@ function renderOutcomeEvaluation(evaluation) {
   document.querySelector("#outcome-result").textContent = lines.join("\n");
 }
 
+function validateOutcomeProjection(value, observationId, method) {
+  const object = item => item !== null && typeof item === "object" && !Array.isArray(item);
+  const text = item => typeof item === "string" && item.length > 0;
+  const date = item => text(item) && Number.isFinite(Date.parse(item));
+  const variables = ["temperature_c", "relative_humidity_percent", "wind_speed_kmh", "cloud_cover_percent"];
+  const reasons = items => Array.isArray(items) && items.every(item => object(item) && text(item.code)
+    && (item.variable === null || variables.includes(item.variable)));
+  const clouds = ["clear", "few", "partly_cloudy", "mostly_cloudy", "overcast", "unknown"];
+  const valid = object(value) && value.observation_id === observationId && text(value.evaluation_id)
+    && value.version === "outcome_evaluation.v1" && text(value.decision_id)
+    && (value.execution_id === null || text(value.execution_id)) && text(value.comparison_id)
+    && date(value.computed_at_utc) && ["comparable", "partial", "not_comparable"].includes(value.status)
+    && (method === "GET" ? !Object.hasOwn(value, "created") : typeof value.created === "boolean")
+    && reasons(value.reasons) && Array.isArray(value.results)
+    && new Set(value.results.map(item => item?.variable)).size === value.results.length
+    && value.results.every(item => object(item) && variables.includes(item.variable)
+      && ["comparable", "not_comparable"].includes(item.status) && text(item.unit) && reasons(item.reasons)
+      && (item.status !== "comparable" || (item.variable === "cloud_cover_percent"
+        ? clouds.includes(item.forecast) && clouds.includes(item.observed) && ["match", "mismatch"].includes(item.outcome)
+        : [item.forecast, item.observed, item.signed_error, item.absolute_error].every(Number.isFinite)
+          && item.absolute_error >= 0)))
+    && (value.assessment === null || object(value.assessment) && text(value.assessment.id)
+      && ["sufficient", "partial", "insufficient_evidence"].includes(value.assessment.status) && date(value.assessment.assessed_at))
+    && (value.evidence_reference === null || object(value.evidence_reference)
+      && text(value.evidence_reference.id) && text(value.evidence_reference.source_type));
+  if (!valid) {
+    const error = new Error("outcome_projection_protocol_error");
+    error.outcomeProtocolError = true;
+    throw error;
+  }
+  return value;
+}
+
 async function consultOutcomeEvaluation(createIfMissing = false) {
   const observationId = state.outcomeObservationId;
   if (!observationId) return;
@@ -2069,39 +2151,54 @@ async function consultOutcomeEvaluation(createIfMissing = false) {
   const url = `/v1/field-observations/${encodeURIComponent(observationId)}/outcome-evaluation`;
   const request = method => fieldObservationNetworkRequest(url, {method}, async response => {
     if (!response.ok) throw await sessionHttpError(response);
-    return response.json();
+    let projection;
+    try { projection = await response.json(); }
+    catch (_error) {
+      const error = new Error("outcome_projection_protocol_error");
+      error.outcomeProtocolError = true;
+      throw error;
+    }
+    return validateOutcomeProjection(projection, observationId, method);
   });
   const read = async () => {
-    try { return await request("GET"); }
+    try { return {kind: "found", evaluation: await request("GET")}; }
     catch (error) {
-      if (error.status === 404 && error.code === "outcome_evaluation_not_found") return null;
+      if (error.status === 404 && error.code === "outcome_evaluation_not_found") return {kind: "not_found"};
       throw error;
     }
   };
   output.textContent = "Lecture de la comparaison…";
   try {
-    let evaluation = await read();
+    let result = await read();
     if (!current()) return;
-    if (!evaluation && createIfMissing) {
+    if (result.kind === "not_found" && createIfMissing && outcomeCanCreate(observationId)) {
       output.textContent = "Comparaison en cours…";
-      try { evaluation = await request("POST"); }
+      try { result = {kind: "found", evaluation: await request("POST")}; }
       catch (error) {
         if (!current()) return;
-        if (error.status && error.status < 500) throw error;
+        if (error.outcomeProtocolError || error.status && error.status < 500) throw error;
         // Lost response or timeout: only a canonical GET resolves uncertainty.
-        evaluation = await read();
+        result = await read();
         if (!current()) return;
-        if (!evaluation) {
+        if (result.kind === "not_found") {
           output.textContent = "Comparaison non retrouvée. Cliquez à nouveau pour reprendre la même observation.";
           return;
         }
       }
     }
     if (!current()) return;
-    if (evaluation) renderOutcomeEvaluation(evaluation);
-    else output.textContent = "Aucune comparaison enregistrée. Cliquez sur « Comparer avec la prévision ».";
+    if (result.kind === "found") {
+      renderOutcomeEvaluation(result.evaluation);
+      if (!outcomeCanCreate(observationId)) output.textContent = "Historique / remplacée (ou chaîne incohérente).\n" + output.textContent;
+    } else if (!outcomeCanCreate(observationId)) {
+      output.textContent = "Observation remplacée ou chaîne de corrections incohérente : aucune nouvelle évaluation autorisée. La consultation historique reste disponible.";
+    } else output.textContent = "Aucune comparaison enregistrée. Cliquez sur « Comparer avec la prévision ».";
   } catch (_error) {
     if (!current()) return;
+    if (_error.outcomeProtocolError) {
+      output.textContent = "Erreur de protocole : projection Outcome invalide. L’observation reste enregistrée ; aucune nouvelle comparaison envoyée.";
+      return;
+    }
     output.textContent = "Comparaison indisponible. L’observation reste enregistrée. Vous pouvez réessayer la consultation ou la comparaison.";
   }
 }
@@ -5148,6 +5245,7 @@ document.querySelector("#outcome-read").addEventListener("click", () => consultO
 document.querySelector("#outcome-observation").addEventListener("change", event => {
   state.outcomeObservationId = event.target.value || null;
   state.outcomeToken = (state.outcomeToken || 0) + 1;
+  renderSavedFieldObservations();
   document.querySelector("#outcome-result").textContent = "Observation enregistrée sélectionnée. Consultez ou comparez explicitement.";
 });
 restoreFieldObservationLock();

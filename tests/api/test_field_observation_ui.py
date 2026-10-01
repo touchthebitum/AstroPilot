@@ -844,7 +844,7 @@ async function check() {
   await submitFieldObservation(event);
   assert.equal(posted.length, 2);
   assert.equal(posted[0], posted[1]);
-  assert.equal(state.outcomeObservationId, firstOfflinePayload.observation_id);
+  assert.equal(state.recentFieldObservationConfirmations[0].observation_id, firstOfflinePayload.observation_id);
   assert.equal(element('#observation-clouds').value, '');
 
   // Editing after a committed/lost response never replaces the original UUID or issues another POST.
@@ -992,7 +992,7 @@ async function check() {
     return response(200, storedProjection(originalUncertainAfterRaces.payload));
   };
   await reconcileFieldObservationEntry(fieldObservationEntryId(replacementLock));
-  assert.equal(state.outcomeObservationId, originalUncertainAfterRaces.payload.observation_id);
+  assert.equal(state.recentFieldObservationConfirmations[0].observation_id, originalUncertainAfterRaces.payload.observation_id);
   assert.equal(state.fieldObservationLock, null);
 
   // Edits made while the request is in flight survive the successful response.
@@ -1281,7 +1281,7 @@ const projection = payload => ({...structuredClone(payload),
           bm: run(b, 'document.querySelector("#observation-status").textContent'), keys: [...shared.keys()]}));
       assert.equal([...shared.keys()].filter(key => key.startsWith('astropilot.pendingFieldObservation.')).length, 0);
   const savedTab = a.sandbox.posts.length ? a : b;
-  assert.equal(run(savedTab, 'state.outcomeObservationId'), savedTab.sandbox.posts[0].observation_id);
+  assert.equal(run(savedTab, 'state.recentFieldObservationConfirmations[0].observation_id'), savedTab.sandbox.posts[0].observation_id);
   assert.ok(storageEvents.length > 0); // Both acquisitions completed before any events.
   const queued = storageEvents.length;
   const unchanged = a.sandbox.localStorage.getItem('unchanged');
@@ -2260,7 +2260,7 @@ const projection = payload => ({...structuredClone(payload),
     await run(reload, `reconcileFieldObservationEntry(${JSON.stringify(entry)})`);
     assert.equal(recoveryRecords.get('inventory').entries.length, 0);
     assert.equal(recoveryRecords.get('inventory').resolved.length, 0);
-    assert.equal(run(reload, 'state.outcomeObservationId'), confirmedPayload.observation_id);
+    assert.equal(run(reload, 'state.recentFieldObservationConfirmations[0].observation_id'), confirmedPayload.observation_id);
     assert.equal(reload.sandbox.posts.length, 0);
     const lastReload = makeContext('cleanup-stable');
     await run(lastReload, 'restorePendingFieldObservationInventory()');
