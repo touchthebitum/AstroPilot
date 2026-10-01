@@ -621,6 +621,28 @@
             </section>
         </div>
       </dialog>
+      <button class="secondary-button" id="history-open" type="button">Historique des validations</button>
+      <dialog id="history-dialog" aria-labelledby="history-title">
+        <h2 id="history-title">Historique des validations</h2>
+        <p>Lecture seule · une observation par évaluation · statistiques descriptives, sans conclusion de suffisance.</p>
+        <button class="secondary-button" id="history-close" type="button">Fermer</button>
+        <form id="history-filters" class="history-filters">
+          <label>Depuis (UTC)<input name="observed_from" type="datetime-local" step="1"></label>
+          <label>Jusqu’au (UTC)<input name="observed_to" type="datetime-local" step="1"></label>
+          <label>Latitude exacte<input name="latitude" type="number" step="any" min="-90" max="90"></label>
+          <label>Longitude exacte<input name="longitude" type="number" step="any" min="-180" max="180"></label>
+          <label>Provider comparé<input name="provider" type="text"></label>
+          <label>Variable<select name="variable"><option value="">Toutes</option><option value="temperature_c">Température</option><option value="relative_humidity_percent">Humidité</option><option value="wind_speed_kmh">Vent</option><option value="cloud_cover_percent">Nuages</option></select></label>
+          <label>Mode<select name="mode"><option value="">Tous</option><option value="decision_only">Décision seule</option><option value="execution">Exécution</option></select></label>
+          <label>Couverture<select name="status"><option value="">Toutes</option><option value="comparable">Comparable</option><option value="partial">Partielle</option><option value="not_comparable">Non comparable</option></select></label>
+          <label><input name="include_superseded" type="checkbox">Consulter les observations remplacées (exclues des statistiques)</label>
+          <button class="secondary-button" type="submit">Recharger</button>
+        </form>
+        <p id="history-message" role="status" aria-live="polite"></p>
+        <div id="history-statistics"></div>
+        <div id="history-table" class="history-table"></div>
+        <button class="secondary-button" id="history-next" type="button" hidden>Page suivante</button>
+      </dialog>
     </main>
 
     <footer class="page-footer">

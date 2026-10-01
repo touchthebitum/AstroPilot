@@ -500,3 +500,14 @@ button { color: inherit; }
 .outcome-panel { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border-color, #667); }
 .outcome-panel select { display: block; width: 100%; margin: .5rem 0; }
 #outcome-result { white-space: pre-line; margin-top: 1rem; overflow-wrap: anywhere; }
+
+#history-dialog { width: min(96vw, 1400px); max-height: 90vh; overflow: auto; padding: 1.5rem; color: var(--ink); background: var(--night-soft); border: 1px solid var(--line-bright); border-radius: var(--radius); }
+#history-dialog::backdrop { background: rgba(1, 6, 12, .82); backdrop-filter: blur(9px); }
+.history-filters input, .history-filters select { min-width: 0; padding: .6rem; color: var(--ink); font: inherit; background: var(--panel-strong); border: 1px solid var(--line-bright); border-radius: 6px; }
+.history-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin: 1rem 0; }
+.history-filters label { display: flex; flex-direction: column; gap: .4rem; }
+.history-table { overflow-x: auto; }
+.history-table table, .history-matrix { border-collapse: collapse; width: 100%; }
+.history-table td, .history-table th, .history-matrix td, .history-matrix th { padding: .65rem; border: 1px solid var(--border, #596273); text-align: left; vertical-align: top; }
+.history-table pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 30rem; }
+.history-degraded { border: 1px solid currentColor; padding: 1rem; }
