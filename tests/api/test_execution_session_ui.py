@@ -65,7 +65,7 @@ assert.equal(document.querySelector('#session-hours').value, '0');
 assert.equal(document.querySelector('#session-minutes').value, '30');
 assert.equal(observationLinkageRenderCount, 3);
 '''
-    result = subprocess.run([node, "-e", harness + helpers + checks], capture_output=True, text=True)
+    result = subprocess.run([node, "-"], input=harness + helpers + checks, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 
@@ -144,7 +144,7 @@ async function fetch(url, options) {
   assert.equal(posts, 1, 'reopen must not submit a second credit');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    result = subprocess.run([node, "-e", harness + helpers + checks], capture_output=True, text=True)
+    result = subprocess.run([node, "-"], input=harness + helpers + checks, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 
@@ -228,7 +228,7 @@ async function fetch(url, options) {
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    result = subprocess.run([node, "-e", harness + helpers + checks], capture_output=True, text=True)
+    result = subprocess.run([node, "-"], input=harness + helpers + checks, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 
@@ -272,7 +272,7 @@ async function fetch(_url, options) {
   assert.doesNotMatch(message, /réponse incertaine/);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    result = subprocess.run([node, "-e", harness + helpers + checks], capture_output=True, text=True)
+    result = subprocess.run([node, "-"], input=harness + helpers + checks, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 
@@ -322,5 +322,5 @@ async function fetch(url) {
   assert.equal(opened, true);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    result = subprocess.run([node, "-e", harness + restore + open_handler + checks], capture_output=True, text=True)
+    result = subprocess.run([node, "-"], input=harness + restore + open_handler + checks, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

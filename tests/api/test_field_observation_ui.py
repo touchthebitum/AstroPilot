@@ -1070,7 +1070,7 @@ async function check() {
 '''
     if Path(engine).name == "node":
         program = harness + helpers + checks + "\ncheck().catch(error => { console.error(error); process.exitCode = 1; });\n"
-        command = [engine, "-e", program]
+        command = [engine, "-"]
     else:
         synchronous_harness = harness.replace(
             "async function sessionHttpError(response)",
@@ -1108,7 +1108,8 @@ async function check() {
         file = tmp_path / "field_observation_ui.js"
         file.write_text(program, encoding="utf-8")
         command = [engine, "-l", "JavaScript", str(file)]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    result = subprocess.run(command, input=program if Path(engine).name == "node" else None,
+        capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
 
 
@@ -2256,7 +2257,7 @@ const projection = payload => ({...structuredClone(payload),
 
 def test_field_observation_two_context_web_locks_inventory_and_clear():
     program = _field_observation_multicontext_program()
-    result = subprocess.run([javascript_engine(), "-e", program], capture_output=True, text=True, check=False, timeout=90)
+    result = subprocess.run([javascript_engine(), "-"], input=program, capture_output=True, text=True, check=False, timeout=90)
     assert result.returncode == 0, result.stderr
 
 
@@ -2336,7 +2337,10 @@ function replyFromPython(url, options) {
   assert.equal(tab.sandbox.uuidCount(), 1);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''.replace("DECISION_ID", json.dumps(decision_id))
-    process = subprocess.Popen([javascript_engine(), "-e", prefix + checks],
+    # Keep stdin available for the Python/Node request-response transport.
+    script = tmp_path / "decision_context_refresh.cjs"
+    script.write_text(prefix + checks, encoding="utf-8")
+    process = subprocess.Popen([javascript_engine(), str(script)],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     requests = []
     try:
