@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
+import re
 import json
 import math
 from collections import Counter, OrderedDict, defaultdict
@@ -35,6 +37,53 @@ POLICY = {'version': 'outcome_history.v1', 'unit': 'individual_observation',
                               'interpolation_enabled': False, 'averaging_enabled': False},
           'cloud_mapping_policy': {'version': 'cloud_mapping.v1', 'boundaries_percent': [10.0, 25.0, 50.0, 80.0]},
           'superseded_statistics': 'excluded', 'interpretation': 'descriptive_only'}
+
+
+_CURSOR_ORDER = 'observed_at_desc.observation_id_asc.evaluation_id_asc.unknown_last'
+_CURSOR_DOMAIN = b'astropilot.outcome_history.cursor.v2\x00'
+
+
+def _encode_cursor(payload, key):
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode('utf-8')
+    signature = hmac.digest(key, _CURSOR_DOMAIN + raw, 'sha256')
+    return '.'.join(base64.urlsafe_b64encode(part).decode('ascii').rstrip('=') for part in (raw, signature))
+
+
+def _unique_object(pairs):
+    result = {}
+    for name, value in pairs:
+        if name in result:
+            raise ValueError('duplicate cursor field')
+        result[name] = value
+    return result
+
+
+def _decode_cursor(cursor, key):
+    try:
+        if type(cursor) is not str or len(cursor) > 2048 or cursor.count('.') != 1:
+            raise ValueError()
+        parts = cursor.split('.')
+        decoded = []
+        for part in parts:
+            if not re.fullmatch(r'[A-Za-z0-9_-]+', part):
+                raise ValueError()
+            raw = base64.b64decode(part + '=' * (-len(part) % 4), altchars=b'-_', validate=True)
+            if base64.urlsafe_b64encode(raw).decode('ascii').rstrip('=') != part:
+                raise ValueError()
+            decoded.append(raw)
+        raw, signature = decoded
+        if len(signature) != 32 or not hmac.compare_digest(signature, hmac.digest(key, _CURSOR_DOMAIN + raw, 'sha256')):
+            raise ValueError()
+        token = json.loads(raw.decode('utf-8'), object_pairs_hook=_unique_object)
+        if (type(token) is not dict or set(token) != {'v', 'dataset', 'view', 'offset', 'order'} or
+                type(token['v']) is not int or token['v'] != 2 or token['order'] != _CURSOR_ORDER or
+                type(token['offset']) is not int or token['offset'] < 0 or
+                any(type(token[name]) is not str or re.fullmatch(r'[0-9a-f]{64}', token[name]) is None
+                    for name in ('dataset', 'view'))):
+            raise ValueError()
+        return token
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        raise OutcomeHistoryInvalidFilter('invalid_outcome_history_cursor') from None
 
 
 def filters(*, observed_from=None, observed_to=None, latitude=None, longitude=None,
@@ -297,8 +346,11 @@ def _project(evaluation, snapshot, states, inspection_cache=None):
 
 
 class OutcomeHistoryService:
-    def __init__(self, reader):
+    def __init__(self, reader, *, cursor_key: bytes):
+        if type(cursor_key) is not bytes or len(cursor_key) != 32:
+            raise ValueError("outcome_history_cursor_key_must_be_32_bytes")
         self.reader = reader
+        self._cursor_key = cursor_key
 
     def history(self, *, cursor=None, **kwargs):
         selected = filters(**kwargs)
@@ -357,17 +409,8 @@ class OutcomeHistoryService:
         view = hashlib.sha256(json.dumps({'policy': POLICY, 'filters': selected, 'dataset': snapshot.fingerprint},
                             sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         offset = 0
-        if cursor:
-            try:
-                if len(cursor) > 2048:
-                    raise ValueError()
-                token = json.loads(base64.b64decode(cursor + '=' * (-len(cursor) % 4), altchars=b'-_', validate=True))
-                if (set(token) != {'dataset', 'view', 'offset'} or type(token['offset']) is not int or token['offset'] < 0 or
-                        any(type(token[key]) is not str or len(token[key]) != 64 or
-                            any(c not in '0123456789abcdef' for c in token[key]) for key in ('dataset', 'view'))):
-                    raise ValueError()
-            except (ValueError, TypeError, UnicodeError):
-                raise OutcomeHistoryInvalidFilter('invalid_outcome_history_cursor') from None
+        if cursor is not None:
+            token = _decode_cursor(cursor, self._cursor_key)
             if token['dataset'] != snapshot.fingerprint:
                 raise OutcomeHistoryDatasetChanged('outcome_history_dataset_changed')
             if token['view'] != view or token['offset'] > len(filtered):
@@ -376,8 +419,8 @@ class OutcomeHistoryService:
         end = offset + selected['limit']
         next_cursor = None
         if snapshot.stable and end < len(filtered):
-            next_cursor = base64.urlsafe_b64encode(json.dumps({'dataset': snapshot.fingerprint, 'view': view, 'offset': end},
-                separators=(',', ':')).encode()).decode().rstrip('=')
+            next_cursor = _encode_cursor({'v': 2, 'dataset': snapshot.fingerprint, 'view': view,
+                                          'offset': end, 'order': _CURSOR_ORDER}, self._cursor_key)
         certified = snapshot.complete and not missing_context and not any(not r['sources_coherent'] or
             r['site'] is None or r['supersession'] == 'indeterminate' or
             'duplicate_admissible_evaluations' in r['exclusion_reasons'] for r in rows)
