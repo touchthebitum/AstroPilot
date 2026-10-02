@@ -58,3 +58,20 @@ jobs:
             "from decision.filtering.target_semantics_resolver import TargetSemanticsResolver; assert TargetSemanticsResolver.resolve('IC1396', {'type': 'nebula'}) == ('nebula', 'emission')"
           uv run --isolated --no-project --with "$wheel" \
             python "$smoke_test"
+
+  history-windows-capabilities:
+    name: Outcome History Windows fail-closed
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: "3.12"
+          version: "0.12.5"
+          enable-cache: true
+      - name: Install project and test dependencies
+        run: uv sync --locked --extra test
+      - name: Run only capability and fail-closed tests
+        run: uv run --locked --no-sync python -m pytest -q tests/history/test_outcome_history_secure_fs.py

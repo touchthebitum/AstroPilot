@@ -74,3 +74,20 @@ Comparison observation provenance must exactly match canonical FieldObservation 
 The configured global storage root must exist and be an accessible directory opened without following symlinks. Missing, non-directory or inaccessible roots raise HTTP 503 outcome_history_storage_unavailable; no directories are created. Missing optional document families inside a valid root can remain empty. Existing family-level unavailability retains HTTP 503 outcome_history_unavailable.
 
 Cursor continuation integrity is protected by signed v2 tokens. Evidence inspection uses a bounded cache scoped to each history call.
+
+## Platform support
+
+Outcome History is temporarily unavailable on standard Windows. Before any
+history document filesystem access, the reader requires POSIX, `O_DIRECTORY`,
+`O_NOFOLLOW`, `O_NONBLOCK`, declared `dir_fd` support for `os.open` and `os.stat`
+in `os.supports_dir_fd`, and declared descriptor support for `os.scandir` in
+`os.supports_fd`. Missing capability declarations also fail closed. No filesystem
+probe or path-based fallback is used. Unsupported capabilities return HTTP 503
+`outcome_history_unavailable` instead of an internal HTTP 500, including when the
+storage root is missing. On supported platforms the existing root/storage 503,
+missing-family behavior, isolated unsafe/corrupt-document diagnostics and dataset
+mutation 409 remain unchanged.
+
+A future functional Windows backend will require handles/WinAPI confinement and
+native tests for junctions, reparse points and parent swaps. Cursor key support on
+Windows does not imply support for the history document reader.

@@ -22,6 +22,23 @@ class OutcomeHistoryUnavailable(RuntimeError):
     pass
 
 
+# Keep stdlib identities for capability membership even when callers instrument
+# the operations (for example, to exercise directory/document swap races).
+_DIR_FD_OPERATIONS = (os.open, os.stat)
+_SCANDIR_OPERATION = os.scandir
+
+
+def _require_secure_fs_capabilities():
+    """Reject unsupported readers without probing or touching document storage."""
+    supports_dir_fd = getattr(os, 'supports_dir_fd', ())
+    supports_fd = getattr(os, 'supports_fd', ())
+    if (os.name != 'posix' or
+            not all(hasattr(os, flag) for flag in ('O_DIRECTORY', 'O_NOFOLLOW', 'O_NONBLOCK')) or
+            not all(operation in supports_dir_fd for operation in _DIR_FD_OPERATIONS) or
+            _SCANDIR_OPERATION not in supports_fd):
+        raise OutcomeHistoryUnavailable('outcome_history_unavailable')
+
+
 @dataclass(frozen=True)
 class OutcomeHistorySnapshot:
     evaluations: tuple
@@ -40,6 +57,7 @@ class FileOutcomeHistoryReader:
         self.directory = Path(directory)
 
     def _directory_fd(self, kind):
+        _require_secure_fs_capabilities()
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         try:
             root = os.open(self.directory, flags)
@@ -121,6 +139,7 @@ class FileOutcomeHistoryReader:
         return result
 
     def read(self):
+        _require_secure_fs_capabilities()
         manifest = {}
         diagnostics = []
         content_changed = False
