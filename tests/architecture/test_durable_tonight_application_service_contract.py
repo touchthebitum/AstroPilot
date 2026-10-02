@@ -664,7 +664,8 @@ def test_composed_credit_never_calls_legacy_record_session(
     assert persisted["projects"]["M31"]["hours"] == 3.25
 
 
-def test_production_factory_supplies_canonical_profile_callbacks():
+def test_production_factory_supplies_canonical_profile_callbacks(monkeypatch, tmp_path):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
     import astro_score
 
     service = astro_score.build_durable_tonight_application_service()

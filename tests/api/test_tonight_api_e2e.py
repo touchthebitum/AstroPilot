@@ -34,6 +34,7 @@ from decision.services.tonight_application_service import TonightApplicationServ
 
 
 def test_http_request_runs_real_application_composition_once(
+    request,
     monkeypatch,
     tmp_path,
 ):
@@ -295,6 +296,8 @@ def test_http_request_runs_real_application_composition_once(
     monkeypatch.setattr(acceptance_module, "_utc_now", lambda: reference_time)
 
     client = TestClient(create_app(clock=lambda: reference_time))
+    client.__enter__()
+    request.addfinalizer(lambda: client.__exit__(None, None, None))
     response = client.post(
         "/v1/tonight",
         json={

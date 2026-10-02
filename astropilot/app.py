@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 import importlib.metadata
 import math
@@ -1930,8 +1931,16 @@ def create_app(
     selection_id_factory: Callable[[], str] = _generate_selection_id,
 ) -> FastAPI:
     application_version = canonical_version()
-    application = FastAPI(title="AstroPilot API", version=application_version)
     resolved_service = None
+
+    @asynccontextmanager
+    async def lifespan(application):
+        nonlocal resolved_service
+        if service_factory is _production_service_factory and resolved_service is None:
+            resolved_service = service_factory()
+        yield
+
+    application = FastAPI(title="AstroPilot API", version=application_version, lifespan=lifespan)
 
     @application.exception_handler(RequestValidationError)
     async def configuration_request_validation_error(
@@ -1968,6 +1977,8 @@ def create_app(
     def application_service():
         nonlocal resolved_service
         if resolved_service is None:
+            if service_factory is _production_service_factory:
+                raise RuntimeError("Production application must complete startup before serving requests")
             resolved_service = service_factory()
         return resolved_service
 

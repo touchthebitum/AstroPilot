@@ -46,7 +46,7 @@ def seed(root, identity='observation-1', *, source=None, evidence=None):
 
 
 def client(root):
-    service = OutcomeHistoryService(FileOutcomeHistoryReader(root))
+    service = OutcomeHistoryService(FileOutcomeHistoryReader(root), cursor_key=b"0123456789abcdef0123456789abcdef")
     return TestClient(create_app(service_factory=lambda: SimpleNamespace(read_outcome_history=service.history)))
 
 
@@ -259,7 +259,7 @@ def test_unstable_scan_suspends_statistics(tmp_path, monkeypatch):
         return original(kind)
     monkeypatch.setattr(reader, '_inventory', inventory)
     with pytest.raises(OutcomeHistoryDatasetChanged):
-        OutcomeHistoryService(reader).history()
+        OutcomeHistoryService(reader, cursor_key=b"0123456789abcdef0123456789abcdef").history()
 
 
 def test_architecture_no_commands_or_forbidden_dependencies():
@@ -309,7 +309,7 @@ def test_execution_canonical_context_and_join_fingerprint(tmp_path):
 def test_facade_does_not_evaluate_or_save(tmp_path, monkeypatch):
     from decision.services.durable_tonight_application_service import DurableTonightApplicationService
     seed(tmp_path)
-    reader_service = OutcomeHistoryService(FileOutcomeHistoryReader(tmp_path))
+    reader_service = OutcomeHistoryService(FileOutcomeHistoryReader(tmp_path), cursor_key=b"0123456789abcdef0123456789abcdef")
     forbidden = lambda *args, **kwargs: pytest.fail('write or evaluate')
     app = DurableTonightApplicationService(application_service=SimpleNamespace(evaluate=forbidden),
         evidence_store=SimpleNamespace(save=forbidden), decision_id_factory=forbidden,
@@ -390,7 +390,7 @@ def test_default_fifty_and_maximum_hundred_pages(tmp_path):
             evaluation_id=derive_outcome_evaluation_id(comparison_id=comparison_id)))
         observations[identity] = B['observation'](observation_id=identity, execution_id=None)
     reader = SimpleNamespace(read=lambda: replace(snapshot, evaluations=tuple(evaluations), observations=observations))
-    service = OutcomeHistoryService(reader)
+    service = OutcomeHistoryService(reader, cursor_key=b"0123456789abcdef0123456789abcdef")
     page = service.history()
     assert len(page['rows']) == 50 and page['statistics']['n_evaluations'] == 105
     second = service.history(cursor=page['next_cursor'])
@@ -711,11 +711,11 @@ def test_cursor_offset_tampering_cannot_bypass_filters(tmp_path):
     seed(tmp_path, 'a'); seed(tmp_path, 'b')
     c = client(tmp_path)
     page = c.get(URL, params={'limit': 1, 'provider': 'provider'}).json()
-    token = json.loads(base64.urlsafe_b64decode(page['next_cursor'] + '=='))
+    token = json.loads(base64.urlsafe_b64decode(page['next_cursor'].split('.')[0] + '=='))
     token['offset'] = 0
     cursor = base64.urlsafe_b64encode(json.dumps(token).encode()).decode()
     assert c.get(URL, params={'limit': 1, 'provider': 'foreign', 'cursor': cursor}).status_code == 422
-    assert c.get(URL, params={'limit': 1, 'provider': 'provider', 'cursor': cursor}).json()['rows'][0]['observation_id'] == 'a'
+    assert c.get(URL, params={'limit': 1, 'provider': 'provider', 'cursor': cursor}).status_code == 422
 
 
 def test_change_to_already_rehashed_observation_detected_at_final_membership(tmp_path, monkeypatch):
@@ -811,7 +811,7 @@ def test_cloud_out_of_range_degrades_without_losing_rows(tmp_path, monkeypatch, 
         assert response.status_code == 200
         value = response.json()
     else:
-        value = OutcomeHistoryService(FileOutcomeHistoryReader(tmp_path)).history()
+        value = OutcomeHistoryService(FileOutcomeHistoryReader(tmp_path), cursor_key=b"0123456789abcdef0123456789abcdef").history()
     assert value['completeness'] == 'degraded'
     assert value['certification'] == 'statistics_suspended'
     assert value['statistics'] is None
@@ -922,7 +922,7 @@ def test_inspection_cache_shared_digest_and_cross_call(tmp_path, monkeypatch):
     for identity in ('first', 'second', 'third'):
         seed(tmp_path, identity)
     snapshot = FileOutcomeHistoryReader(tmp_path).read()
-    service = OutcomeHistoryService(SimpleNamespace(read=lambda: snapshot))
+    service = OutcomeHistoryService(SimpleNamespace(read=lambda: snapshot), cursor_key=b"0123456789abcdef0123456789abcdef")
     inspect = Mock(wraps=module._inspect_evidence)
     digest = Mock(wraps=module._source_digest)
     monkeypatch.setattr(module, '_inspect_evidence', inspect)
@@ -996,7 +996,7 @@ def test_complete_history_identical_without_inspection_cache(tmp_path, monkeypat
     elif corpus == 'corrupt':
         write(tmp_path, 'decision_forecast_evidence', 'decision-1', '{broken')
     snapshot = FileOutcomeHistoryReader(tmp_path).read()
-    service = OutcomeHistoryService(SimpleNamespace(read=lambda: snapshot))
+    service = OutcomeHistoryService(SimpleNamespace(read=lambda: snapshot), cursor_key=b"0123456789abcdef0123456789abcdef")
     cached = service.history(limit=1)
     cached_next = service.history(limit=1, cursor=cached['next_cursor'])
     monkeypatch.setattr(module._EvidenceInspectionCache, 'inspect',
@@ -1035,10 +1035,178 @@ def test_shared_cache_keeps_source_consistency_strict(tmp_path, monkeypatch, cha
             result = replace(result, forecast_point=replace(result.forecast_point, **changes[change]))
         comparison = replace(comparison, results=(result,))
     snapshot = replace(snapshot, evaluations=(replace(evaluation, comparison=comparison), snapshot.evaluations[1]))
-    service = OutcomeHistoryService(SimpleNamespace(read=lambda: snapshot))
+    service = OutcomeHistoryService(SimpleNamespace(read=lambda: snapshot), cursor_key=b"0123456789abcdef0123456789abcdef")
     cached = service.history()
     assert cached['certification'] == 'statistics_suspended'
     assert not next(row for row in cached['rows'] if row['evaluation_id'] == evaluation.evaluation_id)['sources_coherent']
     monkeypatch.setattr(module._EvidenceInspectionCache, 'inspect',
                         lambda self, decision_id, evidence: module._inspect_evidence(evidence))
     assert service.history() == cached
+
+
+KEY = b'0123456789abcdef0123456789abcdef'
+
+
+def signed_raw(raw, key=KEY):
+    import base64
+    import hmac
+    from decision.services.outcome_history import _CURSOR_DOMAIN
+    return '.'.join(base64.urlsafe_b64encode(part).decode().rstrip('=') for part in
+                    (raw, hmac.digest(key, _CURSOR_DOMAIN + raw, 'sha256')))
+
+
+@pytest.fixture
+def signed_page(tmp_path):
+    from decision.services.outcome_history import _decode_cursor
+    seed(tmp_path, 'a'); seed(tmp_path, 'b')
+    c = client(tmp_path)
+    page = c.get(URL, params={'limit': 1}).json()
+    return c, page, _decode_cursor(page['next_cursor'], KEY)
+
+
+@pytest.mark.parametrize('field,value', [('offset', 0), ('view', '0' * 64), ('dataset', '0' * 64),
+    ('order', 'other'), ('v', 3), ('extra', 1)])
+def test_signed_cursor_tampering_is_422(signed_page, field, value):
+    import base64
+    c, page, payload = signed_page
+    payload[field] = value
+    raw = json.dumps(payload).encode()
+    cursor = base64.urlsafe_b64encode(raw).decode().rstrip('=') + '.' + page['next_cursor'].split('.')[1]
+    response = c.get(URL, params={'limit': 1, 'cursor': cursor})
+    assert response.status_code == 422
+    assert response.json()['detail']['code'] == 'invalid_outcome_history_cursor'
+
+
+@pytest.mark.parametrize('mutation', ['missing', 'extra', 'bool', 'version', 'order', 'hex', 'negative', 'float'])
+def test_authenticated_invalid_payload_is_422(signed_page, mutation):
+    c, page, payload = signed_page
+    if mutation == 'missing':
+        del payload['dataset']
+    elif mutation == 'extra':
+        payload['extra'] = 1
+    else:
+        field, value = {'bool': ('offset', True), 'version': ('v', True), 'order': ('order', 'other'),
+                       'hex': ('dataset', 'A' * 64), 'negative': ('offset', -1), 'float': ('offset', 1.0)}[mutation]
+        payload[field] = value
+    assert c.get(URL, params={'limit': 1, 'cursor': signed_raw(json.dumps(payload).encode())}).status_code == 422
+
+
+@pytest.mark.parametrize('raw', [b'{', b'[]', b'null', b'\xff', b'{"v":2,"v":2}', b'{"offset":NaN}'])
+def test_signed_malformed_json_is_422(signed_page, raw):
+    c, _, _ = signed_page
+    assert c.get(URL, params={'limit': 1, 'cursor': signed_raw(raw)}).status_code == 422
+
+
+@pytest.mark.parametrize('kind', ['legacy', 'signature', 'truncated', 'secret', 'base64', 'long', 'empty'])
+def test_invalid_token_is_422(signed_page, kind):
+    c, page, payload = signed_page
+    token = page['next_cursor']
+    cursor = {'legacy': token.split('.')[0], 'signature': token.split('.')[0] + '.' + 'A' * 43,
+              'truncated': token[:-4], 'secret': signed_raw(json.dumps(payload).encode(), b'x' * 32),
+              'base64': '@@.@@', 'long': 'a' * 2049, 'empty': ''}[kind]
+    assert c.get(URL, params={'limit': 1, 'cursor': cursor}).status_code == 422
+
+
+def test_signed_roundtrip_restart_offsets_and_population(signed_page, tmp_path):
+    from decision.services.outcome_history import _encode_cursor
+    c, page, payload = signed_page
+    assert _encode_cursor(payload, KEY) == page['next_cursor']
+    assert c.get(URL, params={'limit': 1}).json() == page
+    restarted = OutcomeHistoryService(FileOutcomeHistoryReader(tmp_path), cursor_key=KEY)
+    next_page = restarted.history(limit=1, cursor=page['next_cursor'])
+    assert next_page['rows'][0]['observation_id'] == 'b'
+    for field in ('statistics', 'dataset_fingerprint', 'view_token', 'readable_filtered_rows'):
+        assert next_page[field] == page[field]
+    for offset, status in [(2, 200), (3, 422)]:
+        payload['offset'] = offset
+        response = c.get(URL, params={'limit': 1, 'cursor': _encode_cursor(payload, KEY)})
+        assert response.status_code == status
+        if status == 200:
+            assert response.json()['rows'] == []
+    for kwargs in ({'limit': 2}, {'limit': 1, 'provider': 'foreign'}):
+        assert c.get(URL, params={**kwargs, 'cursor': page['next_cursor']}).status_code == 422
+
+
+def test_composed_get_never_writes_even_after_key_loss(tmp_path, monkeypatch):
+    from astropilot.outcome_history_cursor_key import load_or_create_cursor_key
+    key = load_or_create_cursor_key(tmp_path)
+    service = OutcomeHistoryService(FileOutcomeHistoryReader(tmp_path), cursor_key=key)
+    (tmp_path / '.outcome_history_cursor.key').unlink()
+    c = TestClient(create_app(service_factory=lambda: SimpleNamespace(read_outcome_history=service.history)))
+    def forbidden(*args, **kwargs):
+        pytest.fail('GET attempted filesystem mutation')
+    monkeypatch.setattr(Path, 'mkdir', forbidden)
+    original_open = os.open
+    def readonly_open(path, flags, *args, **kwargs):
+        if flags & (os.O_CREAT | os.O_WRONLY | os.O_RDWR | os.O_TRUNC):
+            forbidden()
+        return original_open(path, flags, *args, **kwargs)
+    monkeypatch.setattr(os, 'open', readonly_open)
+    monkeypatch.setattr(Path, 'write_bytes', forbidden)
+    # Reader opens directories read-only; key/lock are never written.
+    assert c.get(URL).status_code == 200
+
+
+@pytest.mark.parametrize('change', [dict(observed_from='2020-01-01T00:00:00Z'),
+    dict(observed_to='2030-01-01T00:00:00Z'), dict(latitude=0, longitude=0), dict(provider='other'),
+    dict(variable='wind_speed_kmh'), dict(mode='execution'), dict(status='partial'),
+    dict(include_superseded=True), dict(limit=2)])
+def test_valid_cursor_rejects_each_changed_filter(signed_page, change):
+    c, page, _ = signed_page
+    assert c.get(URL, params={'limit': 1, 'cursor': page['next_cursor'], **change}).status_code == 422
+
+
+@pytest.mark.parametrize('failure,status', [('unavailable', 503), ('unstable', 409)])
+def test_reader_failure_precedes_invalid_cursor(tmp_path, failure, status):
+    if failure == 'unavailable':
+        def read():
+            raise OutcomeHistoryUnavailable('outcome_history_unavailable')
+    else:
+        snapshot = FileOutcomeHistoryReader(tmp_path).read()
+        read = lambda: replace(snapshot, stable=False)
+    service = OutcomeHistoryService(SimpleNamespace(read=read), cursor_key=KEY)
+    c = TestClient(create_app(service_factory=lambda: SimpleNamespace(read_outcome_history=service.history)))
+    assert c.get(URL, params={'cursor': 'invalid'}).status_code == status
+
+
+def test_key_change_only_changes_cursor_and_invalidates_old_continuation(tmp_path):
+    from decision.services.outcome_history import OutcomeHistoryInvalidFilter
+    seed(tmp_path, 'a'); seed(tmp_path, 'b')
+    reader = FileOutcomeHistoryReader(tmp_path)
+    first = OutcomeHistoryService(reader, cursor_key=KEY)
+    rotated = OutcomeHistoryService(reader, cursor_key=b'x' * 32)
+    before, after = first.history(limit=1), rotated.history(limit=1)
+    assert before['next_cursor'] != after['next_cursor']
+    assert {k: v for k, v in before.items() if k != 'next_cursor'} == {
+        k: v for k, v in after.items() if k != 'next_cursor'}
+    with pytest.raises(OutcomeHistoryInvalidFilter, match='invalid_outcome_history_cursor'):
+        rotated.history(limit=1, cursor=before['next_cursor'])
+
+
+@pytest.mark.parametrize('loss', ['delete', 'corrupt'])
+def test_initialized_service_keeps_key_in_memory(tmp_path, loss):
+    from astropilot.outcome_history_cursor_key import load_or_create_cursor_key
+    seed(tmp_path, 'a'); seed(tmp_path, 'b')
+    key = load_or_create_cursor_key(tmp_path)
+    service = OutcomeHistoryService(FileOutcomeHistoryReader(tmp_path), cursor_key=key)
+    first = service.history(limit=1)
+    path = tmp_path / '.outcome_history_cursor.key'
+    if loss == 'delete':
+        path.unlink()
+    else:
+        path.write_bytes(b'corrupt')
+    assert service.history(limit=1, cursor=first['next_cursor'])['rows'][0]['observation_id'] == 'b'
+    assert not path.exists() if loss == 'delete' else path.read_bytes() == b'corrupt'
+
+
+@pytest.mark.parametrize('field', ['v', 'dataset', 'view', 'offset', 'order'])
+def test_each_missing_signed_field_is_rejected(signed_page, field):
+    c, _, payload = signed_page
+    del payload[field]
+    assert c.get(URL, params={'limit': 1, 'cursor': signed_raw(json.dumps(payload).encode())}).status_code == 422
+
+
+def test_duplicate_key_in_otherwise_valid_signed_payload_is_rejected(signed_page):
+    c, _, payload = signed_page
+    raw = json.dumps(payload)[:-1] + ', "offset": 1}'
+    assert c.get(URL, params={'limit': 1, 'cursor': signed_raw(raw.encode())}).status_code == 422

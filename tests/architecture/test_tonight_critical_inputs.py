@@ -138,7 +138,8 @@ def test_invalid_local_input_stops_before_weather_and_durable_service(
         ({"bortle": 2}, "bortle"),
     ],
 )
-def test_http_resolves_effective_values_without_mutating_profile(monkeypatch, overrides, missing):
+def test_http_resolves_effective_values_without_mutating_profile(monkeypatch, tmp_path, request, overrides, missing):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
     persisted = profile()
     if missing == "location":
         persisted.pop("location")
@@ -155,6 +156,8 @@ def test_http_resolves_effective_values_without_mutating_profile(monkeypatch, ov
         clock=lambda: WEATHER_REFERENCE_TIME,
     ))
 
+    client.__enter__()
+    request.addfinalizer(lambda: client.__exit__(None, None, None))
     response = client.post("/v1/tonight", json=overrides)
 
     assert response.status_code == 200
@@ -172,7 +175,8 @@ def test_http_resolves_effective_values_without_mutating_profile(monkeypatch, ov
 
 
 @pytest.mark.parametrize("equipment", [None, "fra400_2600"])
-def test_cli_resolves_persisted_inputs_without_mutation(monkeypatch, equipment):
+def test_cli_resolves_persisted_inputs_without_mutation(monkeypatch, tmp_path, equipment):
+    monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
     persisted = profile()
     before = deepcopy(persisted)
     weather = Mock(return_value=object())
