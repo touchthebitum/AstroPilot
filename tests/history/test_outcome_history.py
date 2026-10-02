@@ -913,3 +913,132 @@ def test_storage_root_availability(tmp_path, monkeypatch, kind):
         assert response.status_code == 503
         assert response.json()['detail']['code'] == 'outcome_history_storage_unavailable'
     assert sorted(tmp_path.rglob('*')) == before
+
+
+def test_inspection_cache_shared_digest_and_cross_call(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+    import decision.services.outcome_history as module
+
+    for identity in ('first', 'second', 'third'):
+        seed(tmp_path, identity)
+    snapshot = FileOutcomeHistoryReader(tmp_path).read()
+    service = OutcomeHistoryService(SimpleNamespace(read=lambda: snapshot))
+    inspect = Mock(wraps=module._inspect_evidence)
+    digest = Mock(wraps=module._source_digest)
+    monkeypatch.setattr(module, '_inspect_evidence', inspect)
+    monkeypatch.setattr(module, '_source_digest', digest)
+    first = service.history(limit=1)
+    assert inspect.call_count == 1
+    assert digest.call_count == 3
+    assert service.history(limit=1) == first
+    assert inspect.call_count == 2
+    assert digest.call_count == 6
+    evidence = snapshot.evidence['decision-1']
+    snapshot.evidence['decision-1'] = DecisionForecastEvidence(())
+    changed = service.history(limit=1)
+    assert inspect.call_count == 3
+    assert changed['certification'] == 'statistics_suspended'
+    snapshot.evidence['decision-1'] = evidence
+
+
+def test_inspection_cache_identity_valid_only_and_lru(monkeypatch):
+    from unittest.mock import Mock
+    import decision.services.outcome_history as module
+
+    inspect = Mock(wraps=module._inspect_evidence)
+    monkeypatch.setattr(module, '_inspect_evidence', inspect)
+    cache = module._EvidenceInspectionCache()
+    evidence = B['evidence'](WeatherVariable.TEMPERATURE_C)
+    other = replace(evidence)
+    expected = cache.inspect('first', evidence)
+    assert cache.inspect('first', evidence) == expected
+    cache.inspect('second', evidence)
+    cache.inspect('first', other)
+    assert inspect.call_count == 3
+    assert cache._entries[('first', id(evidence))][0] is evidence
+    for _ in range(2):
+        assert cache.inspect('invalid', None)[0] is False
+    assert inspect.call_count == 5
+    assert len(cache._entries) == 3
+    cache = module._EvidenceInspectionCache()
+    for index in range(16):
+        assert cache.inspect(str(index), evidence) == expected
+        assert len(cache._entries) <= 16
+    cache.inspect('0', evidence)  # Refresh the oldest entry.
+    cache.inspect('16', evidence)
+    assert len(cache._entries) == 16
+    assert ('0', id(evidence)) in cache._entries
+    assert ('1', id(evidence)) not in cache._entries
+    before = inspect.call_count
+    assert cache.inspect('1', evidence) == expected
+    assert inspect.call_count == before + 1
+    assert len(cache._entries) == 16
+
+
+@pytest.mark.parametrize('corpus', ['shared', 'canonical', 'missing', 'corrupt', 'incompatible', 'eviction'])
+def test_complete_history_identical_without_inspection_cache(tmp_path, monkeypatch, corpus):
+    import decision.services.outcome_history as module
+
+    evidence = B['evidence'](WeatherVariable.TEMPERATURE_C, WeatherVariable.WIND_SPEED_KMH)
+    if corpus == 'canonical':
+        evidence = DecisionForecastEvidence(tuple(reversed(evidence.forecast_points)) + evidence.forecast_points)
+    if corpus == 'eviction':
+        monkeypatch.setattr(B['MutableEvidenceStore'], 'load', lambda self, **kwargs: evidence)
+    count = 18 if corpus == 'eviction' else 3
+    for index in range(count):
+        decision_id = 'decision-' + str(index % 17) if corpus == 'eviction' else 'decision-1'
+        source = B['observation'](observation_id='obs-' + str(index), execution_id=None, decision_id=decision_id)
+        evaluation = seed(tmp_path, source.observation_id, source=source, evidence=evidence)
+        if corpus == 'incompatible':
+            persist_altered(tmp_path, evaluation, replace(evaluation.comparison, algorithm_version='v2'))
+    if corpus == 'missing':
+        (tmp_path / 'decision_forecast_evidence/decision-1.json').unlink()
+    elif corpus == 'corrupt':
+        write(tmp_path, 'decision_forecast_evidence', 'decision-1', '{broken')
+    snapshot = FileOutcomeHistoryReader(tmp_path).read()
+    service = OutcomeHistoryService(SimpleNamespace(read=lambda: snapshot))
+    cached = service.history(limit=1)
+    cached_next = service.history(limit=1, cursor=cached['next_cursor'])
+    monkeypatch.setattr(module._EvidenceInspectionCache, 'inspect',
+                        lambda self, decision_id, evidence: module._inspect_evidence(evidence))
+    assert service.history(limit=1) == cached
+    assert service.history(limit=1, cursor=cached['next_cursor']) == cached_next
+
+
+@pytest.mark.parametrize('change', ['provider', 'model', 'retrieved', 'value', 'unit', 'site', 'offset', 'provenance'])
+def test_shared_cache_keeps_source_consistency_strict(tmp_path, monkeypatch, change):
+    import decision.services.outcome_history as module
+
+    for identity in ('first', 'second'):
+        seed(tmp_path, identity)
+    snapshot = FileOutcomeHistoryReader(tmp_path).read()
+    evaluation = snapshot.evaluations[0]
+    comparison = evaluation.comparison
+    result = comparison.results[0]
+    if change == 'provenance':
+        comparison = replace(comparison, observation_provenance=replace(
+            comparison.observation_provenance, source_id='foreign'))
+    elif change == 'site':
+        evidence = snapshot.evidence['decision-1']
+        snapshot.evidence['decision-1'] = DecisionForecastEvidence(tuple(
+            replace(point, requested_location=WeatherLocation(47.0, 7.0)) for point in evidence.forecast_points))
+    else:
+        if change == 'value':
+            result = replace(result, forecast_value=99.0, signed_error=99.0 - result.observed_value,
+                             absolute_error=abs(99.0 - result.observed_value))
+        elif change == 'unit':
+            result = replace(result, unit='%')
+        else:
+            changes = {'provider': {'provider_id': 'foreign'}, 'model': {'model_id': 'foreign'},
+                       'retrieved': {'retrieved_at_utc': result.forecast_point.retrieved_at_utc - timedelta(seconds=1)},
+                       'offset': {'temporal_offset': timedelta(seconds=1)}}
+            result = replace(result, forecast_point=replace(result.forecast_point, **changes[change]))
+        comparison = replace(comparison, results=(result,))
+    snapshot = replace(snapshot, evaluations=(replace(evaluation, comparison=comparison), snapshot.evaluations[1]))
+    service = OutcomeHistoryService(SimpleNamespace(read=lambda: snapshot))
+    cached = service.history()
+    assert cached['certification'] == 'statistics_suspended'
+    assert not next(row for row in cached['rows'] if row['evaluation_id'] == evaluation.evaluation_id)['sources_coherent']
+    monkeypatch.setattr(module._EvidenceInspectionCache, 'inspect',
+                        lambda self, decision_id, evidence: module._inspect_evidence(evidence))
+    assert service.history() == cached

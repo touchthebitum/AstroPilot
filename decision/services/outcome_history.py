@@ -5,7 +5,7 @@ import base64
 import hashlib
 import json
 import math
-from collections import Counter, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 from datetime import datetime, timedelta, timezone
 
 from decision.models.forecast_observation_comparison import ForecastObservationParameters
@@ -169,7 +169,30 @@ def result_source_mismatches(evaluation, observation, evidence):
     return failures
 
 
+class _EvidenceInspectionCache:
+    """Valid inspections only, with source references and a bounded LRU."""
+
+    def __init__(self):
+        self._entries = OrderedDict()
+
+    def inspect(self, decision_id, evidence):
+        key = (decision_id, id(evidence))
+        if key in self._entries:
+            self._entries.move_to_end(key)
+            return True, self._entries[key][1]
+        valid, canonical = _inspect_evidence(evidence)
+        if valid:
+            self._entries[key] = (evidence, canonical)
+            if len(self._entries) > 16:
+                self._entries.popitem(last=False)
+        return valid, canonical
+
+
 def project(evaluation, snapshot, states):
+    return _project(evaluation, snapshot, states)
+
+
+def _project(evaluation, snapshot, states, inspection_cache=None):
     raw = json.loads(serialize_outcome_evaluation(evaluation))['outcome_evaluation']
     comparison = raw.pop('comparison')
     observation_id = comparison['observation_id']
@@ -181,7 +204,9 @@ def project(evaluation, snapshot, states):
     evidence = snapshot.evidence.get(comparison['decision_id'])
     sources_coherent = False
     if obs is not None and evidence is not None:
-        valid_evidence, canonical_evidence = _inspect_evidence(evidence)
+        valid_evidence, canonical_evidence = (
+            _inspect_evidence(evidence) if inspection_cache is None else
+            inspection_cache.inspect(comparison['decision_id'], evidence))
         try:
             sources_coherent = (valid_evidence and evaluation.comparison.identity_persistable and
                 _source_digest(canonical_evidence, _validated_field_observation(obs), identity_persistable=True)
@@ -282,7 +307,10 @@ class OutcomeHistoryService:
             raise OutcomeHistoryDatasetChanged('outcome_history_dataset_changed')
         diagnostics = list(snapshot.diagnostics)
         states = lineage_states(snapshot.observations)
-        rows = [project(e, snapshot, states) for e in snapshot.evaluations]
+        # The snapshot reader reconstructs local evidence objects; projection does
+        # not mutate them. Keep strong source references only for this call.
+        inspection_cache = _EvidenceInspectionCache()
+        rows = [_project(e, snapshot, states, inspection_cache) for e in snapshot.evaluations]
         counts = Counter(r['observation_id'] for r in rows if r['admissible'])
         missing_context = False
         for row in rows:
