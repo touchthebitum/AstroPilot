@@ -211,3 +211,42 @@ def test_bounded_read_handles_short_reads(tmp_path, monkeypatch):
     monkeypatch.setattr(module.os, 'read', short_read)
     assert load_or_create_cursor_key(tmp_path) == b'x' * 32
     assert sizes == [33, 26, 19, 12, 5, 1]
+
+
+@pytest.mark.parametrize('content', [
+    pytest.param(b'a' * 15 + b'\x1a' + b'b' * 16, id='ctrl-z'),
+    pytest.param(b'a' * 15 + b'\r\n' + b'b' * 15, id='crlf'),
+    pytest.param(b'a' * 14 + b'\x1a\r\n' + b'b' * 15, id='ctrl-z-and-crlf'),
+])
+def test_existing_key_preserves_binary_bytes(tmp_path, content):
+    path = tmp_path / '.outcome_history_cursor.key'
+    assert len(content) == 32
+    path.write_bytes(content)
+    path.chmod(0o600)
+    assert load_or_create_cursor_key(tmp_path) == content
+
+
+def test_key_open_includes_binary_flag(tmp_path, monkeypatch):
+    import astropilot.outcome_history_cursor_key as module
+    path = tmp_path / '.outcome_history_cursor.key'
+    content = b'a' * 14 + b'\x1a\r\n' + b'b' * 15
+    path.write_bytes(content)
+    path.chmod(0o600)
+    original = os.open
+    native_binary = getattr(os, 'O_BINARY', 0)
+    # Use a synthetic bit on POSIX; remove only that bit before the real open.
+    binary = native_binary or (1 << 30)
+    monkeypatch.setattr(module.os, 'O_BINARY', binary, raising=False)
+    key_flags = []
+    def binary_open(name, flags, *args, **kwargs):
+        if Path(name) == path:
+            key_flags.append(flags)
+            assert flags & binary == binary
+            assert flags & getattr(os, 'O_NOFOLLOW', 0) == getattr(os, 'O_NOFOLLOW', 0)
+            assert flags & getattr(os, 'O_NONBLOCK', 0) == getattr(os, 'O_NONBLOCK', 0)
+            if not native_binary:
+                flags &= ~binary
+        return original(name, flags, *args, **kwargs)
+    monkeypatch.setattr(module.os, 'open', binary_open)
+    assert load_or_create_cursor_key(tmp_path) == content
+    assert len(key_flags) == 1
