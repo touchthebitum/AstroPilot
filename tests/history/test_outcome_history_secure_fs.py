@@ -106,10 +106,13 @@ def test_native_platform_get_contract(monkeypatch, tmp_path):
     app = create_app(service_factory=lambda: SimpleNamespace(read_outcome_history=service.history))
     with TestClient(app) as client:
         with monkeypatch.context() as patch:
+            # Copy native declarations unchanged; instrument only the reader.
+            proxy = SimpleNamespace(**vars(reader_module.os))
+            patch.setattr(reader_module, 'os', proxy)
             operations = []
             for name in ('open', 'stat', 'scandir', 'fstat', 'fdopen', 'close'):
                 operation = Mock(side_effect=AssertionError('native Windows document filesystem access'))
-                patch.setattr(reader_module.os, name, operation)
+                patch.setattr(proxy, name, operation)
                 operations.append(operation)
             response = client.get('/v1/outcome-evaluations/history')
             assert response.status_code == 503
