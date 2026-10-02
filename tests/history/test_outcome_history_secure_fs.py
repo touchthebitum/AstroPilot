@@ -119,3 +119,118 @@ def test_native_platform_get_contract(monkeypatch, tmp_path):
             assert response.json()['detail']['code'] == 'outcome_history_unavailable'
             for operation in operations:
                 operation.assert_not_called()
+
+
+@pytest.mark.skipif(reader_module.os.name != 'posix', reason='secure POSIX reader')
+@pytest.mark.parametrize('size', (0, 32, 33))
+def test_document_read_budget(monkeypatch, tmp_path, size):
+    import hashlib
+    monkeypatch.setattr(reader_module, '_MAX_DOCUMENT_BYTES', 32)
+    directory = tmp_path / 'field_observations'
+    directory.mkdir()
+    (directory / 'safe-id.json').write_bytes(b'x' * size)
+    reader = reader_module.FileOutcomeHistoryReader(tmp_path)
+    if size > 32:
+        with pytest.raises(reader_module.OutcomeHistoryDocumentTooLarge):
+            reader._read_bytes('field_observations', 'safe-id.json')
+        assert reader._digest('field_observations', 'safe-id.json').startswith('too_large:')
+    else:
+        assert reader._read_bytes('field_observations', 'safe-id.json') == b'x' * size
+        assert reader._digest('field_observations', 'safe-id.json') == hashlib.sha256(b'x' * size).hexdigest()
+
+
+@pytest.mark.skipif(reader_module.os.name != 'posix', reason='secure POSIX reader')
+def test_sparse_oversize_never_opens_stream(monkeypatch, tmp_path):
+    directory = tmp_path / 'field_observations'
+    directory.mkdir()
+    with (directory / 'safe-id.json').open('wb') as stream:
+        stream.truncate(1024 ** 3)
+    reader = reader_module.FileOutcomeHistoryReader(tmp_path)
+    monkeypatch.setattr(reader_module.os, 'fdopen', Mock(side_effect=AssertionError('content read')))
+    with pytest.raises(reader_module.OutcomeHistoryDocumentTooLarge):
+        reader._read_bytes('field_observations', 'safe-id.json')
+
+
+@pytest.mark.skipif(reader_module.os.name != 'posix', reason='secure POSIX reader')
+@pytest.mark.parametrize('size', (32, 33))
+def test_short_reads_eintr_and_misleading_size(monkeypatch, tmp_path, size):
+    from contextlib import contextmanager
+    directory = tmp_path / 'field_observations'
+    directory.mkdir()
+    (directory / 'safe-id.json').write_bytes(b'x' * size)
+    monkeypatch.setattr(reader_module, '_MAX_DOCUMENT_BYTES', 32)
+    native_fstat = reader_module.os.fstat
+    native_fdopen = reader_module.os.fdopen
+    calls = []
+    def misleading(fd):
+        info = native_fstat(fd)
+        return SimpleNamespace(**{name: (0 if name == 'st_size' else getattr(info, name))
+            for name in ('st_size', 'st_mode', 'st_dev', 'st_ino', 'st_mtime_ns', 'st_ctime_ns')})
+    @contextmanager
+    def short_stream(*args, **kwargs):
+        with native_fdopen(*args, **kwargs) as stream:
+            class Short:
+                def read(self, budget):
+                    calls.append(budget)
+                    if len(calls) == 1:
+                        raise InterruptedError()
+                    return stream.read(min(3, budget))
+            yield Short()
+    monkeypatch.setattr(reader_module.os, 'fstat', misleading)
+    monkeypatch.setattr(reader_module.os, 'fdopen', short_stream)
+    reader = reader_module.FileOutcomeHistoryReader(tmp_path)
+    if size == 32:
+        assert reader._read_bytes('field_observations', 'safe-id.json') == b'x' * size
+    else:
+        with pytest.raises(reader_module.OutcomeHistoryDocumentTooLarge):
+            reader._read_bytes('field_observations', 'safe-id.json')
+    assert all(0 < budget <= 33 for budget in calls)
+
+
+@pytest.mark.skipif(reader_module.os.name != 'posix', reason='secure POSIX reader')
+@pytest.mark.parametrize('mutation', ('grow', 'shrink', 'error'))
+def test_mutation_during_bounded_read_and_descriptor_cleanup(monkeypatch, tmp_path, mutation):
+    from contextlib import contextmanager
+    directory = tmp_path / 'field_observations'
+    directory.mkdir()
+    path = directory / 'safe-id.json'
+    path.write_bytes(b'x' * 16)
+    monkeypatch.setattr(reader_module, '_MAX_DOCUMENT_BYTES', 32)
+    monkeypatch.setattr(reader_module, '_READ_CHUNK_BYTES', 4)
+    native_fdopen = reader_module.os.fdopen
+    native_close = reader_module.os.close
+    descriptors = []
+    returned = []
+    @contextmanager
+    def changing_stream(fd, *args, **kwargs):
+        descriptors.append(fd)
+        assert kwargs['buffering'] == 0
+        with native_fdopen(fd, *args, **kwargs) as stream:
+            class Changing:
+                def read(self, budget):
+                    chunk = stream.read(budget)
+                    returned.append(len(chunk))
+                    if len(returned) == 1:
+                        if mutation == 'error':
+                            raise OSError('read failed')
+                        with path.open('r+b') as writer:
+                            writer.truncate(40 if mutation == 'grow' else 4)
+                    return chunk
+            yield Changing()
+    closes = []
+    def close(fd):
+        closes.append(fd)
+        native_close(fd)
+    monkeypatch.setattr(reader_module.os, 'fdopen', changing_stream)
+    monkeypatch.setattr(reader_module.os, 'close', close)
+    reader = reader_module.FileOutcomeHistoryReader(tmp_path)
+    if mutation == 'grow':
+        with pytest.raises(reader_module.OutcomeHistoryDocumentTooLarge):
+            reader._read_bytes('field_observations', 'safe-id.json')
+        assert sum(returned) == 33
+    elif mutation == 'shrink':
+        assert reader._read_bytes('field_observations', 'safe-id.json') == b'x' * 4
+    else:
+        with pytest.raises(OSError):
+            reader._read_bytes('field_observations', 'safe-id.json')
+    assert descriptors and all(fd in closes for fd in descriptors)

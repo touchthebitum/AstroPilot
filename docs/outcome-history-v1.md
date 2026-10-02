@@ -91,3 +91,25 @@ mutation 409 remain unchanged.
 A future functional Windows backend will require handles/WinAPI confinement and
 native tests for junctions, reparse points and parent swaps. Cursor key support on
 Windows does not imply support for the history document reader.
+
+## Bounded document reads
+
+History accepts at most 16 MiB (16,777,216 bytes) per document, including exactly
+that size. The reader checks descriptor size after secure opening, then reads in
+64 KiB chunks with a total budget of the limit plus one byte. Metadata alone is
+never the read budget. Oversize documents are not decoded or fully hashed.
+A loaded oversize document emits `document_too_large` with kind/id, preserves
+other readable rows (HTTP 200 degraded), and suspends statistics. Foreign,
+unreferenced evidence/lineage documents retain the existing corruption scope:
+they participate in the manifest without becoming active-source diagnostics.
+
+Admissible documents retain their exact SHA-256 hashes and cursor v2 semantics.
+Oversize manifest entries use a deterministic `too_large` marker containing the
+limit and descriptor device, inode, mode, logical size, mtime_ns and ctime_ns.
+This is a metadata identity, not a content hash. Transitions between admissible
+and oversize states, and observed metadata changes, invalidate continuation.
+Manifest/load comparisons, final rehash, membership and metadata validation
+remain in place; detected mutation returns HTTP 409. Changes preserving all
+observed oversize metadata cannot be guaranteed detectable without full reads.
+The budget limits per-document input, not total corpus memory, parser expansion,
+or wall-clock duration on slow storage. Windows capability rejection is unchanged.

@@ -1210,3 +1210,138 @@ def test_duplicate_key_in_otherwise_valid_signed_payload_is_rejected(signed_page
     c, _, payload = signed_page
     raw = json.dumps(payload)[:-1] + ', "offset": 1}'
     assert c.get(URL, params={'limit': 1, 'cursor': signed_raw(raw.encode())}).status_code == 422
+
+
+@pytest.mark.parametrize('kind', ['outcome_evaluations', 'field_observations',
+    'decision_forecast_evidence', 'execution_lineage', 'decision_lineage'])
+def test_oversize_isolated_with_other_readable_row(tmp_path, monkeypatch, kind):
+    from astropilot import outcome_history_reader as module
+    seed(tmp_path, 'other')
+    evaluation = seed(tmp_path, source=B['observation']())
+    seed_execution_joins(tmp_path)
+    monkeypatch.setattr(module, '_MAX_DOCUMENT_BYTES', 65536)
+    identity = {'outcome_evaluations': evaluation.evaluation_id,
+        'field_observations': 'observation-1', 'decision_forecast_evidence': 'decision-1',
+        'execution_lineage': 'execution-1', 'decision_lineage': 'decision-1'}[kind]
+    write(tmp_path, kind, identity, ' ' * 65537)
+    response = client(tmp_path).get(URL)
+    assert response.status_code == 200
+    value = response.json()
+    assert value['rows']
+    assert value['statistics'] is None
+    assert value['certification'] == 'statistics_suspended'
+    assert value['completeness'] == 'degraded'
+    assert {'code': 'document_too_large', 'kind': kind, 'id': identity} in value['diagnostics']
+
+
+def test_oversize_foreign_lineage_fingerprint_and_cursor(tmp_path, monkeypatch):
+    from astropilot import outcome_history_reader as module
+    seed(tmp_path, 'a'); seed(tmp_path, 'b')
+    monkeypatch.setattr(module, '_MAX_DOCUMENT_BYTES', 65536)
+    write(tmp_path, 'decision_lineage', 'foreign', ' ' * 65537)
+    c = client(tmp_path)
+    first = c.get(URL, params={'limit': 1}).json()
+    repeat = c.get(URL, params={'limit': 1}).json()
+    assert first == repeat
+    assert first['certification'] == 'certified'
+    assert not any(d['code'] == 'document_too_large' for d in first['diagnostics'])
+    write(tmp_path, 'decision_lineage', 'foreign', ' ' * 65538)
+    assert c.get(URL, params={'limit': 1, 'cursor': first['next_cursor']}).status_code == 409
+    changed = c.get(URL, params={'limit': 1}).json()
+    assert changed['dataset_fingerprint'] != first['dataset_fingerprint']
+    write(tmp_path, 'decision_lineage', 'foreign', '{}')
+    assert c.get(URL, params={'limit': 1, 'cursor': changed['next_cursor']}).status_code == 409
+
+
+@pytest.mark.parametrize('initial_oversize', (False, True))
+@pytest.mark.parametrize('with_cursor', (False, True))
+def test_oversize_transition_during_load_is_unstable(tmp_path, monkeypatch, initial_oversize, with_cursor):
+    from astropilot import outcome_history_reader as module
+    seed(tmp_path, 'a'); seed(tmp_path, 'b')
+    monkeypatch.setattr(module, '_MAX_DOCUMENT_BYTES', 65536)
+    path = tmp_path / 'field_observations/a.json'
+    original_content = path.read_bytes()
+    if initial_oversize:
+        path.write_bytes(b' ' * 65537)
+    c = client(tmp_path)
+    page = c.get(URL, params={'limit': 1}).json()
+    native = FileOutcomeHistoryReader._read_bytes
+    calls = 0
+    def transition(self, kind, name):
+        nonlocal calls
+        if kind == 'field_observations' and name == 'a.json':
+            calls += 1
+            if calls == 2:
+                path.write_bytes(original_content if initial_oversize else b' ' * 65537)
+        return native(self, kind, name)
+    monkeypatch.setattr(FileOutcomeHistoryReader, '_read_bytes', transition)
+    params = {'limit': 1}
+    if with_cursor:
+        params['cursor'] = page['next_cursor']
+    assert c.get(URL, params=params).status_code == 409
+
+
+def test_oversize_unjoined_observation_suspends_supersession(tmp_path, monkeypatch):
+    from astropilot import outcome_history_reader as module
+    seed(tmp_path)
+    monkeypatch.setattr(module, '_MAX_DOCUMENT_BYTES', 65536)
+    write(tmp_path, 'field_observations', 'hidden-child', ' ' * 65537)
+    value = client(tmp_path).get(URL).json()
+    assert value['rows'] and value['statistics'] is None
+    assert value['certification'] == 'statistics_suspended'
+    assert any(d['code'] == 'document_too_large' and d['id'] == 'hidden-child'
+        for d in value['diagnostics'])
+
+
+@pytest.mark.parametrize('replacement', (b'', b'\xff', b'[' * 1000 + b']' * 1000))
+def test_bounded_corruption_remains_isolated(tmp_path, monkeypatch, replacement):
+    from astropilot import outcome_history_reader as module
+    seed(tmp_path)
+    monkeypatch.setattr(module, '_MAX_DOCUMENT_BYTES', 65536)
+    (tmp_path / 'field_observations/observation-1.json').write_bytes(replacement)
+    response = client(tmp_path).get(URL)
+    assert response.status_code == 200
+    value = response.json()
+    assert value['rows'] and value['statistics'] is None
+    assert any(d['code'] == 'corrupt_document' for d in value['diagnostics'])
+
+
+def test_admissible_manifest_keeps_exact_content_fingerprint(tmp_path):
+    import hashlib
+    seed(tmp_path, source=B['observation']())
+    seed_execution_joins(tmp_path)
+    reader = FileOutcomeHistoryReader(tmp_path)
+    kinds = ('outcome_evaluations', 'field_observations', 'decision_forecast_evidence',
+             'execution_lineage', 'decision_lineage')
+    inventory = {kind: sorted(p.name for p in (tmp_path / kind).glob('*.json')) for kind in kinds}
+    manifest = {kind + '/' + name: hashlib.sha256((tmp_path / kind / name).read_bytes()).hexdigest()
+        for kind, names in inventory.items() for name in names}
+    expected = hashlib.sha256(json.dumps({'files': manifest, 'inventory': inventory},
+        sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    snapshot = reader.read()
+    assert snapshot.stable and snapshot.complete
+    assert snapshot.fingerprint == expected
+
+
+@pytest.mark.parametrize('mutation', ('modify', 'delete', 'replace'))
+def test_oversize_mutation_after_final_hash_is_detected(tmp_path, monkeypatch, mutation):
+    from astropilot import outcome_history_reader as module
+    seed(tmp_path)
+    monkeypatch.setattr(module, '_MAX_DOCUMENT_BYTES', 65536)
+    write(tmp_path, 'field_observations', 'foreign', ' ' * 65537)
+    path = tmp_path / 'field_observations/foreign.json'
+    native = FileOutcomeHistoryReader._digest
+    calls = 0
+    def mutate(self, kind, name):
+        nonlocal calls
+        digest = native(self, kind, name)
+        if kind == 'field_observations' and name == 'foreign.json':
+            calls += 1
+            if calls == 2:
+                if mutation in ('delete', 'replace'):
+                    path.unlink()
+                if mutation != 'delete':
+                    path.write_bytes(b' ' * 65538)
+        return digest
+    monkeypatch.setattr(FileOutcomeHistoryReader, '_digest', mutate)
+    assert client(tmp_path).get(URL).status_code == 409
