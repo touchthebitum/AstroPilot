@@ -30,9 +30,13 @@ _SCANDIR_OPERATION = os.scandir
 
 def _require_secure_fs_capabilities():
     """Reject unsupported readers without probing or touching document storage."""
-    supports_dir_fd = getattr(os, 'supports_dir_fd', ())
-    supports_fd = getattr(os, 'supports_fd', ())
+    supports_dir_fd = getattr(os, 'supports_dir_fd', None)
+    supports_fd = getattr(os, 'supports_fd', None)
+    # stdlib declares these capabilities as sets. Reject malformed declarations
+    # explicitly, without catching exceptions from operations or membership.
     if (os.name != 'posix' or
+            type(supports_dir_fd) not in (set, frozenset) or
+            type(supports_fd) not in (set, frozenset) or
             not all(hasattr(os, flag) for flag in ('O_DIRECTORY', 'O_NOFOLLOW', 'O_NONBLOCK')) or
             not all(operation in supports_dir_fd for operation in _DIR_FD_OPERATIONS) or
             _SCANDIR_OPERATION not in supports_fd):

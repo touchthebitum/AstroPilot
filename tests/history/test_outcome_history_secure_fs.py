@@ -13,7 +13,10 @@ FAMILIES = ('outcome_evaluations', 'field_observations',
             'decision_forecast_evidence', 'execution_lineage', 'decision_lineage')
 FAILURES = ('windows', 'O_DIRECTORY', 'O_NOFOLLOW', 'O_NONBLOCK',
             'open_dir_fd', 'stat_dir_fd', 'scandir_fd',
-            'missing_supports_dir_fd', 'missing_supports_fd')
+            'missing_supports_dir_fd', 'missing_supports_fd',
+            'null_supports_dir_fd', 'null_supports_fd',
+            'integer_supports_dir_fd', 'integer_supports_fd',
+            'list_supports_dir_fd', 'list_supports_fd')
 
 
 def capabilities(monkeypatch, failure=None):
@@ -32,6 +35,10 @@ def capabilities(monkeypatch, failure=None):
         proxy.supports_dir_fd.remove(reader_module._DIR_FD_OPERATIONS[failure == 'stat_dir_fd'])
     elif failure == 'scandir_fd':
         proxy.supports_fd.clear()
+    elif failure and failure.startswith(('null_', 'integer_', 'list_')):
+        kind, attribute = failure.split('_', 1)
+        value = {'null': None, 'integer': 42, 'list': list(getattr(proxy, attribute))}[kind]
+        setattr(proxy, attribute, value)
     elif failure:
         delattr(proxy, failure.removeprefix('missing_'))
     for operation in ('open', 'stat', 'scandir', 'fstat', 'fdopen', 'close'):
@@ -72,8 +79,11 @@ def test_api_capability_rejection_is_503(monkeypatch, tmp_path, failure):
     assert_no_fs(proxy)
 
 
-def test_declared_posix_capabilities_require_no_probe(monkeypatch):
+@pytest.mark.parametrize('container', (set, frozenset))
+def test_declared_posix_capabilities_require_no_probe(monkeypatch, container):
     proxy = capabilities(monkeypatch)
+    proxy.supports_dir_fd = container(proxy.supports_dir_fd)
+    proxy.supports_fd = container(proxy.supports_fd)
     reader_module._require_secure_fs_capabilities()
     assert_no_fs(proxy)
 
@@ -84,3 +94,25 @@ def test_native_platform_contract():
             reader_module._require_secure_fs_capabilities()
     else:
         reader_module._require_secure_fs_capabilities()
+
+
+def test_native_platform_get_contract(monkeypatch, tmp_path):
+    # Use the real platform declarations; never reconstruct POSIX capabilities.
+    if reader_module.os.name != 'nt':
+        reader_module._require_secure_fs_capabilities()
+        return
+    reader = reader_module.FileOutcomeHistoryReader(tmp_path / 'missing-root')
+    service = OutcomeHistoryService(reader, cursor_key=b'0123456789abcdef0123456789abcdef')
+    app = create_app(service_factory=lambda: SimpleNamespace(read_outcome_history=service.history))
+    with TestClient(app) as client:
+        with monkeypatch.context() as patch:
+            operations = []
+            for name in ('open', 'stat', 'scandir', 'fstat', 'fdopen', 'close'):
+                operation = Mock(side_effect=AssertionError('native Windows document filesystem access'))
+                patch.setattr(reader_module.os, name, operation)
+                operations.append(operation)
+            response = client.get('/v1/outcome-evaluations/history')
+            assert response.status_code == 503
+            assert response.json()['detail']['code'] == 'outcome_history_unavailable'
+            for operation in operations:
+                operation.assert_not_called()

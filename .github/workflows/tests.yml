@@ -73,5 +73,14 @@ jobs:
           enable-cache: true
       - name: Install project and test dependencies
         run: uv sync --locked --extra test
-      - name: Run only capability and fail-closed tests
-        run: uv run --locked --no-sync python -m pytest -q tests/history/test_outcome_history_secure_fs.py
+      - name: Run capability, native GET, key and signed cursor tests
+        run: >-
+          uv run --locked --no-sync python -m pytest -q
+          tests/history/test_outcome_history_secure_fs.py
+          tests/history/test_outcome_history_cursor_codec.py
+          tests/history/test_outcome_history_cursor_key.py::test_concurrent_initialization_and_restart
+          tests/history/test_outcome_history_cursor_key.py::test_concurrent_process_initialization
+          tests/history/test_outcome_history_cursor_key.py::test_corrupt_key_fails_without_rotation
+          tests/history/test_outcome_history_cursor_key.py::test_regular_existing_key_loads
+          tests/history/test_outcome_history_cursor_key.py::test_existing_key_preserves_binary_bytes
+          tests/history/test_outcome_history_cursor_key.py::test_key_open_includes_binary_flag
