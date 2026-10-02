@@ -86,3 +86,128 @@ def test_insecure_existing_key_permissions_fail(tmp_path):
     path.chmod(0o644)
     with pytest.raises(OutcomeHistoryCursorKeyError, match='permissions'):
         load_or_create_cursor_key(tmp_path)
+
+
+def test_regular_existing_key_loads(tmp_path):
+    path = tmp_path / '.outcome_history_cursor.key'
+    path.write_bytes(bytes(range(32)))
+    path.chmod(0o600)
+    assert load_or_create_cursor_key(tmp_path) == bytes(range(32))
+
+
+def test_symlink_key_is_rejected(tmp_path):
+    external = tmp_path / 'external'
+    external.write_bytes(b'x' * 32)
+    external.chmod(0o600)
+    path = tmp_path / '.outcome_history_cursor.key'
+    try:
+        path.symlink_to(external)
+    except (OSError, NotImplementedError):
+        pytest.skip('symlink creation unavailable')
+    with pytest.raises(OutcomeHistoryCursorKeyError, match='type'):
+        load_or_create_cursor_key(tmp_path)
+    assert path.is_symlink()
+    assert external.read_bytes() == b'x' * 32
+
+
+def test_directory_key_is_rejected(tmp_path):
+    (tmp_path / '.outcome_history_cursor.key').mkdir()
+    with pytest.raises(OutcomeHistoryCursorKeyError, match='type'):
+        load_or_create_cursor_key(tmp_path)
+
+
+@pytest.mark.skipif(not hasattr(os, 'mkfifo'), reason='FIFO unavailable')
+def test_fifo_key_is_rejected_without_blocking(tmp_path):
+    import subprocess
+    import sys
+    os.mkfifo(tmp_path / '.outcome_history_cursor.key', 0o600)
+    script = (
+        'from pathlib import Path; import sys; '
+        'from astropilot.outcome_history_cursor_key import load_or_create_cursor_key; '
+        'load_or_create_cursor_key(Path(sys.argv[1]))'
+    )
+    result = subprocess.run([sys.executable, '-c', script, str(tmp_path)],
+                            capture_output=True, timeout=5)
+    assert result.returncode != 0
+    assert b'invalid_outcome_history_cursor_key_type' in result.stderr
+
+
+def test_oversized_key_read_is_bounded(tmp_path, monkeypatch):
+    import astropilot.outcome_history_cursor_key as module
+    path = tmp_path / '.outcome_history_cursor.key'
+    path.write_bytes(b'x' * (1024 * 1024))
+    path.chmod(0o600)
+    original = os.read
+    reads = []
+    def read(descriptor, size):
+        chunk = original(descriptor, size)
+        reads.append((size, len(chunk)))
+        return chunk
+    monkeypatch.setattr(module.os, 'read', read)
+    with pytest.raises(OutcomeHistoryCursorKeyError, match='invalid'):
+        load_or_create_cursor_key(tmp_path)
+    assert reads == [(33, 33)]
+    assert path.stat().st_size == 1024 * 1024
+
+
+@pytest.mark.parametrize('nofollow', [True, False])
+def test_symlink_swap_between_precheck_and_open_is_rejected(tmp_path, monkeypatch, nofollow):
+    import astropilot.outcome_history_cursor_key as module
+    path = tmp_path / '.outcome_history_cursor.key'
+    path.write_bytes(b'x' * 32)
+    path.chmod(0o600)
+    # Target the very same inode to exercise the post-open symlink check.
+    external = tmp_path / 'external'
+    os.link(path, external)
+    probe = tmp_path / 'probe'
+    try:
+        probe.symlink_to(external)
+    except (OSError, NotImplementedError):
+        pytest.skip('symlink creation unavailable')
+    probe.unlink()
+    if not nofollow:
+        monkeypatch.delattr(module.os, 'O_NOFOLLOW', raising=False)
+    original = os.open
+    def swapped_open(name, flags, *args, **kwargs):
+        if Path(name) == path:
+            path.unlink()
+            path.symlink_to(external)
+        return original(name, flags, *args, **kwargs)
+    monkeypatch.setattr(module.os, 'open', swapped_open)
+    with pytest.raises(OutcomeHistoryCursorKeyError):
+        load_or_create_cursor_key(tmp_path)
+    assert path.is_symlink()
+    assert external.read_bytes() == b'x' * 32
+
+
+def test_replaced_regular_file_between_precheck_and_open_is_rejected(tmp_path, monkeypatch):
+    import astropilot.outcome_history_cursor_key as module
+    path = tmp_path / '.outcome_history_cursor.key'
+    path.write_bytes(b'x' * 32)
+    path.chmod(0o600)
+    replacement = tmp_path / 'replacement'
+    replacement.write_bytes(b'y' * 32)
+    replacement.chmod(0o600)
+    original = os.open
+    def swapped_open(name, flags, *args, **kwargs):
+        if Path(name) == path:
+            replacement.replace(path)
+        return original(name, flags, *args, **kwargs)
+    monkeypatch.setattr(module.os, 'open', swapped_open)
+    with pytest.raises(OutcomeHistoryCursorKeyError, match='changed'):
+        load_or_create_cursor_key(tmp_path)
+
+
+def test_bounded_read_handles_short_reads(tmp_path, monkeypatch):
+    import astropilot.outcome_history_cursor_key as module
+    path = tmp_path / '.outcome_history_cursor.key'
+    path.write_bytes(b'x' * 32)
+    path.chmod(0o600)
+    original = os.read
+    sizes = []
+    def short_read(descriptor, size):
+        sizes.append(size)
+        return original(descriptor, min(size, 7))
+    monkeypatch.setattr(module.os, 'read', short_read)
+    assert load_or_create_cursor_key(tmp_path) == b'x' * 32
+    assert sizes == [33, 26, 19, 12, 5, 1]

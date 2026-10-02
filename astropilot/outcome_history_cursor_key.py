@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import secrets
+import stat
 import sys
 import tempfile
 
@@ -21,12 +22,42 @@ class OutcomeHistoryCursorKeyError(RuntimeError):
 
 
 def _load(path: Path) -> bytes:
-    key = path.read_bytes()
-    if len(key) != 32:
-        raise OutcomeHistoryCursorKeyError('invalid_outcome_history_cursor_key')
-    if os.name != 'nt' and path.stat().st_mode & 0o777 != 0o600:
-        raise OutcomeHistoryCursorKeyError('invalid_outcome_history_cursor_key_permissions')
-    return key
+    # Reject special files before opening, including on platforms without
+    # O_NOFOLLOW/O_NONBLOCK. Only a missing initial path permits initialization.
+    expected = path.lstat()
+    if not stat.S_ISREG(expected.st_mode):
+        raise OutcomeHistoryCursorKeyError('invalid_outcome_history_cursor_key_type')
+    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise OutcomeHistoryCursorKeyError('outcome_history_cursor_key_unavailable') from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise OutcomeHistoryCursorKeyError('invalid_outcome_history_cursor_key_type')
+        # Check both the fd and the path after opening: the portable fallback
+        # must reject a symlink swapped in after lstat, even to the same inode.
+        current = path.lstat()
+        if (not stat.S_ISREG(current.st_mode)
+                or not os.path.samestat(expected, opened)
+                or not os.path.samestat(current, opened)):
+            raise OutcomeHistoryCursorKeyError('invalid_outcome_history_cursor_key_changed')
+        if os.name != 'nt' and stat.S_IMODE(opened.st_mode) != 0o600:
+            raise OutcomeHistoryCursorKeyError('invalid_outcome_history_cursor_key_permissions')
+        key = bytearray()
+        while len(key) < 33:
+            chunk = os.read(descriptor, 33 - len(key))
+            if not chunk:
+                break
+            key.extend(chunk)
+        if len(key) != 32:
+            raise OutcomeHistoryCursorKeyError('invalid_outcome_history_cursor_key')
+        return bytes(key)
+    except OSError as exc:
+        raise OutcomeHistoryCursorKeyError('outcome_history_cursor_key_unavailable') from exc
+    finally:
+        os.close(descriptor)
 
 
 def load_or_create_cursor_key(data_dir: Path | None = None) -> bytes:
