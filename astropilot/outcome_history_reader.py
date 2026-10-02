@@ -18,6 +18,19 @@ from decision.execution_lineage_persistence import deserialize_execution_lineage
 from decision.acceptance_lineage_persistence import deserialize_decision_acceptance_aggregate
 
 
+# Per-document input budget; this does not bound total snapshot memory.
+_MAX_DOCUMENT_BYTES = 16 * 1024 * 1024
+_READ_CHUNK_BYTES = 64 * 1024
+
+
+class OutcomeHistoryDocumentTooLarge(RuntimeError):
+    def __init__(self, info):
+        self.marker = 'too_large:' + json.dumps(
+            [_MAX_DOCUMENT_BYTES, info.st_dev, info.st_ino, info.st_mode,
+             info.st_size, info.st_mtime_ns, info.st_ctime_ns], separators=(',', ':'))
+        super().__init__('outcome_history_document_too_large')
+
+
 class OutcomeHistoryUnavailable(RuntimeError):
     pass
 
@@ -104,8 +117,21 @@ class FileOutcomeHistoryReader:
                 opened = os.fstat(fd)
                 if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (expected.st_dev, expected.st_ino):
                     raise OSError('unsafe_document')
-                with os.fdopen(fd, 'rb', closefd=False) as stream:
-                    return stream.read()
+                if opened.st_size > _MAX_DOCUMENT_BYTES:
+                    raise OutcomeHistoryDocumentTooLarge(opened)
+                with os.fdopen(fd, 'rb', buffering=0, closefd=False) as stream:
+                    raw = bytearray()
+                    while len(raw) <= _MAX_DOCUMENT_BYTES:
+                        budget = _MAX_DOCUMENT_BYTES + 1 - len(raw)
+                        try:
+                            chunk = stream.read(min(_READ_CHUNK_BYTES, budget))
+                        except InterruptedError:
+                            continue
+                        if not chunk:
+                            return bytes(raw)
+                        raw.extend(chunk)
+                    # Use current descriptor metadata when growth crossed the budget.
+                    raise OutcomeHistoryDocumentTooLarge(os.fstat(fd))
             finally:
                 os.close(fd)
         finally:
@@ -114,6 +140,8 @@ class FileOutcomeHistoryReader:
     def _digest(self, kind, name):
         try:
             return hashlib.sha256(self._read_bytes(kind, name)).hexdigest()
+        except OutcomeHistoryDocumentTooLarge as error:
+            return error.marker
         except FileNotFoundError:
             return 'missing'
         except ValueError:
@@ -172,6 +200,11 @@ class FileOutcomeHistoryReader:
             key = kind + '/' + name
             try:
                 raw = self._read_bytes(kind, name)
+            except OutcomeHistoryDocumentTooLarge as error:
+                content_changed = content_changed or (key in manifest and manifest[key] != error.marker)
+                manifest.setdefault(key, error.marker)
+                diagnostics.append({'code': 'document_too_large', 'kind': kind, 'id': identity})
+                return
             except FileNotFoundError:
                 manifest[key] = 'missing'
                 diagnostics.append({'code': 'missing_join', 'kind': kind, 'id': identity})
