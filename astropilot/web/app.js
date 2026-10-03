@@ -59,6 +59,9 @@ const state = {
   },
   availability: null,
   currentDecision: null,
+  currentDecisionSiteFingerprint: null,
+  decisionSiteGeneration: 0,
+  decisionSiteReloadRequired: false,
   acceptedMission: null,
   savedMissions: [],
   pendingAcceptanceAttempt: null,
@@ -389,10 +392,10 @@ function renderRecentDecisions() {
   const catalogue = state.recentDecisions;
   document.querySelector("#observation-decision-catalogue").hidden = !catalogue?.open;
   const keep = document.querySelector("#observation-keep-decision");
-  keep.disabled = blocked;
+  keep.disabled = blocked || !context?.decision_id;
   keep.textContent = "Conserver cette décision";
   const back = document.querySelector("#observation-return-current-decision");
-  back.hidden = !context || context.decision_id === state.fieldObservationAnchorContext?.decision_id;
+  back.hidden = !state.fieldObservationAnchorContext?.decision_id || !context || context.decision_id === state.fieldObservationAnchorContext.decision_id;
   back.disabled = blocked;
   const list = document.querySelector("#observation-decision-candidates");
   list.replaceChildren();
@@ -499,7 +502,7 @@ function confirmFieldObservationDecision() {
 function returnToCurrentFieldObservationDecision() {
   if (state.fieldObservationLock || state.fieldObservationDraftContext?.execution_id || state.fieldObservationContextInvalid || state.observationBusy) return;
   const anchor = state.fieldObservationAnchorContext;
-  if (!anchor || !sameFieldObservationContext(anchor, observationContext(anchor.source))) return;
+  if (!anchor?.decision_id || !sameFieldObservationContext(anchor, observationContext(anchor.source))) return;
   state.fieldObservationDraftContext = Object.freeze({...anchor, historical: false});
   confirmFieldObservationDecision();
   renderObservationLinkage();
@@ -557,7 +560,54 @@ function siteConfigurationIdentity() {
   });
 }
 
+const DECISION_SITE_STORAGE_KEY = "astropilot.decisionSite";
+function decisionSiteFingerprint(site = state.configuration?.site) {
+  if (!Number.isFinite(site?.latitude) || !Number.isFinite(site?.longitude)) return null;
+  return JSON.stringify([site.latitude, site.longitude,
+    typeof site.timezone === "string" && site.timezone.trim() ? site.timezone.trim() : null]);
+}
+function currentDecisionMatchesSite() {
+  const fingerprint = decisionSiteFingerprint();
+  if (state.decisionSiteReloadRequired || !fingerprint || state.currentDecisionSiteFingerprint !== fingerprint) return false;
+  const trust = state.currentDecision?.weather_trust;
+  if (!trust) return true; // The locally captured Tonight fingerprint is authoritative without evidence.
+  return trust.requested_latitude === state.configuration.site.latitude
+    && trust.requested_longitude === state.configuration.site.longitude
+    && (!trust.timezone || trust.timezone === siteTimezone());
+}
+function invalidateCurrentDecisionForSiteChange() {
+  state.decisionSiteGeneration = (state.decisionSiteGeneration || 0) + 1;
+  state.currentDecision = null;
+  state.currentDecisionSiteFingerprint = null;
+  state.fieldObservationSelectedExecutionId = null;
+  invalidateRecentDecisions();
+  if (state.recentDecisions) state.recentDecisions = {open: false, items: [], cursor: null, extension: 1};
+  ui.addObservationMessage.hidden = true;
+  ui.addObservationDecision.hidden = true;
+  text("#current-decision-site-warning", "Le site ou son fuseau a changé. Préparez à nouveau votre nuit avant une observation immédiate, ou choisissez explicitement une décision récente.");
+  syncFieldObservationContext(); // Preserve draft, pending payload and UUID; block the old editor.
+}
+async function handleDecisionSiteStorageEvent(event) {
+  if (event.key !== DECISION_SITE_STORAGE_KEY && event.key !== null) return;
+  if (!state.configuration) return;
+  if (event.key !== null && event.newValue === decisionSiteFingerprint()) return;
+  state.decisionSiteReloadRequired = true;
+  clearAcceptedMission();
+  invalidateCurrentDecisionForSiteChange();
+  const generation = state.decisionSiteGeneration;
+  try {
+    const response = await fetch("/v1/configuration");
+    if (!response.ok) return;
+    const payload = await response.json();
+    if (generation === state.decisionSiteGeneration) initializeConfiguration(payload);
+  } catch (_) { /* Keep the current decision invalid on unavailable configuration. */ }
+}
+
 function observationContext(source) {
+  if (state.decisionSiteReloadRequired) return null;
+  if (source === "catalogue") return {decision_id: null, execution_id: null, night_date: null,
+    source, timezone: siteTimezone(), site_identity: siteConfigurationIdentity(), mission_id: null};
+  if (source !== "mission" && !currentDecisionMatchesSite()) return null;
   const decision = source === "mission" ? state.acceptedMission : state.currentDecision;
   const decisionId = decision?.decision_id;
   if (!decisionId) return null;
@@ -624,7 +674,8 @@ function updateFieldObservationSubmitState() {
     || !sameFieldObservationContext(state.fieldObservationDraftContext, activeObservationContext())
     || lock.status !== "pending" || lock.persistence_missing);
   setFieldObservationEditorDisabled(hardBlocked);
-  document.querySelector("#observation-save").disabled = blocked || state.observationBusy || historicalTimeNeedsConfirmation();
+  document.querySelector("#observation-save").disabled = blocked || !state.fieldObservationDraftContext?.decision_id
+    || state.observationBusy || historicalTimeNeedsConfirmation();
   const reconcile = document.querySelector("#observation-reconcile");
   const refresh = document.querySelector("#observation-refresh-context");
   const abandon = document.querySelector("#observation-abandon-pending");
@@ -701,7 +752,11 @@ function fieldObservationConflictMessage() {
 
 function openFieldObservation(source) {
   const context = observationContext(source);
-  if (!context?.decision_id) return;
+  if (!context || (!context.decision_id && source !== "catalogue")) {
+    showAvailabilityError("La décision courante n’est plus valide pour ce site. Préparez à nouveau votre nuit ou choisissez explicitement une décision récente.");
+    setView("availability");
+    return;
+  }
   resetFieldObservationForm();
   state.fieldObservationAnchorContext = Object.freeze({...context});
   state.fieldObservationDraftContext = Object.freeze(context);
@@ -729,14 +784,15 @@ function openFieldObservation(source) {
   state.fieldObservationInitialObservedAt = observedAt.value;
   // Restore the exact historical envelope, never migrate its UUID or payload.
   const pendingContext = state.fieldObservationLock?.context;
-  if (pendingContext?.decision_id && pendingContext.decision_id !== context.decision_id && !context.execution_id && !pendingContext.execution_id
+  if (source !== "catalogue" && pendingContext?.decision_id && pendingContext.decision_id !== context.decision_id && !context.execution_id && !pendingContext.execution_id
       && pendingContext.site_identity === context.site_identity && pendingContext.timezone === context.timezone) {
     state.fieldObservationDraftContext = Object.freeze({...pendingContext, historical: true});
   }
   ui.observation.showModal();
   renderRecentDecisions();
   renderObservationLinkage();
-  loadSavedFieldObservations(state.fieldObservationDraftContext);
+  if (context.decision_id) loadSavedFieldObservations(state.fieldObservationDraftContext);
+  if (source === "catalogue") openRecentDecisions();
   if (!webLocksAvailable()) {
     updateFieldObservationSubmitState();
     observationMessage("Publication indisponible sur ce navigateur : cette fonction exige Web Locks. La consultation et la réconciliation en lecture seule restent possibles.", {error: true});
@@ -3916,7 +3972,7 @@ function clearAcceptedMission() {
 
 function renderDecision(decision) {
   clearAcceptedMission();
-  state.currentDecision = decision;
+  setCurrentFieldObservationDecision(decision);
 
   const productivity = decision.productivity;
   const actionableHours = decision.recommended_hours;
@@ -4511,6 +4567,9 @@ function showConfigurationError(message, { code = null } = {}) {
 }
 
 function initializeConfiguration(payload) {
+  if (state.configuration && decisionSiteFingerprint() !== decisionSiteFingerprint(payload.site)) {
+    invalidateCurrentDecisionForSiteChange();
+  }
   if (state.configuration && (
     state.configuration.profile_revision !== payload.profile_revision
     || JSON.stringify(state.configuration.site) !== JSON.stringify(payload.site)
@@ -4518,6 +4577,8 @@ function initializeConfiguration(payload) {
   )) clearAcceptedMission();
   invalidateAvailabilityForSiteChange(state.configuration?.site, payload.site);
   state.configuration = payload;
+  state.decisionSiteReloadRequired = false;
+  try { localStorage.setItem(DECISION_SITE_STORAGE_KEY, decisionSiteFingerprint()); } catch (_) {}
   syncFieldObservationContext();
   state.configurationDraft = draftFromConfiguration(payload);
   document.querySelector("#legacy-bortle-note").hidden = !payload.needs_configuration_confirmation;
@@ -5037,6 +5098,8 @@ function showMessage(title, body, { kicker = "Décision indisponible", retry = t
 
 function setCurrentFieldObservationDecision(decision) {
   state.currentDecision = decision?.decision_id ? decision : null;
+  state.currentDecisionSiteFingerprint = state.currentDecision ? decisionSiteFingerprint() : null;
+  if (state.currentDecision) text("#current-decision-site-warning", "");
   ui.addObservationMessage.hidden = true;
   ui.addObservationDecision.hidden = true;
   syncFieldObservationContext();
@@ -5300,12 +5363,19 @@ async function acceptRecommendation({
 
 async function loadTonight(availability) {
   if (guardUnresolvedAcceptance()) return;
+  if (state.decisionSiteReloadRequired) {
+    showAvailabilityError("La configuration a changé dans un autre onglet. Rechargez la configuration avant de préparer votre nuit.");
+    setView("availability");
+    return;
+  }
   if (!availability) {
     showAvailabilityError("Choisissez votre disponibilité avant de préparer la nuit.");
     setView("availability");
     return;
   }
   if (state.requestingRecommendation) return;
+  const siteGeneration = state.decisionSiteGeneration;
+  const siteFingerprint = decisionSiteFingerprint();
   state.requestingRecommendation = true;
   state.availability = { ...availability };
   ui.recommendationSubmit.disabled = true;
@@ -5321,6 +5391,11 @@ async function loadTonight(availability) {
       body: JSON.stringify({ availability }),
     });
     const payload = await response.json().catch(() => ({}));
+    if (siteGeneration !== state.decisionSiteGeneration || siteFingerprint !== decisionSiteFingerprint()) {
+      showAvailabilityError("Le site a changé pendant le calcul. Préparez à nouveau votre nuit.");
+      setView("availability");
+      return;
+    }
 
     if (!response.ok) {
       if (payload?.error === "user_profile_unavailable") {
@@ -5537,6 +5612,8 @@ document.querySelector("#observation-reconcile").addEventListener("click", recon
 document.querySelector("#observation-refresh-context").addEventListener("click", refreshInvalidFieldObservationContext);
 document.querySelector("#observation-abandon-pending").addEventListener("click", abandonFieldObservationLock);
 window.addEventListener("storage", handleFieldObservationStorageEvent);
+window.addEventListener("storage", handleDecisionSiteStorageEvent);
+document.querySelector("#open-observation-catalogue").addEventListener("click", () => openFieldObservation("catalogue"));
 window.addEventListener("pageshow", handleFieldObservationPageShow);
 ui.addObservationMessage.addEventListener("click", () => openFieldObservation("decision"));
 ui.addObservationDecision.addEventListener("click", () => openFieldObservation("decision"));

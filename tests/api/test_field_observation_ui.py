@@ -133,6 +133,7 @@ const session = (id) => ({
 const state = {
   acceptedMission: {mission_id: 'mission-1', decision_id: 'decision-1', acquisitionIntentId: 'ha',
     mission: {night_date: '2026-09-29'}},
+  currentDecisionSiteFingerprint: JSON.stringify([47.1, 6.8, 'Europe/Zurich']),
   currentDecision: {decision_id: 'decision-1', night_date: '2026-09-29'},
   sessions: [], activeSessionId: null, fieldObservationSelectedExecutionId: null,
   sessionEvidenceInputExecutionId: null, fieldObservationDraftContext: null,
@@ -314,6 +315,7 @@ const navigator = {locks: {request(name, options, callback) {
   return callback();
 }}};
 const state = {configuration: {site: {name: 'Site A', latitude: 47.1, longitude: 6.8, bortle: 4, timezone: 'Europe/Zurich'}},
+  currentDecisionSiteFingerprint: JSON.stringify([47.1, 6.8, 'Europe/Zurich']),
   currentDecision: {decision_id: 'decision-1', night_date: '2026-09-29'},
   acceptedMission: {decision_id: 'decision-1', mission: {night_date: '2026-09-29'}},
   sessions: [], activeSessionId: null, fieldObservationSelectedExecutionId: null,
@@ -1406,6 +1408,7 @@ function makeContext(name, locks = controlledLocks) {
     TextEncoder, document, indexedDB: recoveryIndexedDB(recoveryRecords), window: {confirm: () => true}, navigator: locks ? {locks} : {},
     crypto: {subtle: require("crypto").webcrypto.subtle, randomUUID: () => `${name}-uuid-${++uuid}`}, posts: [], uuidCount: () => uuid};
   sandbox.state = {configuration: {site: {name: 'Site A', latitude: 47.1, longitude: 6.8, bortle: 4, timezone: 'Europe/Zurich'}},
+    currentDecisionSiteFingerprint: JSON.stringify([47.1, 6.8, 'Europe/Zurich']),
     currentDecision: {decision_id: 'decision-1', night_date: '2026-09-29'},
     acceptedMission: {decision_id: 'decision-1', mission: {night_date: '2026-09-29'}},
     sessions: [], activeSessionId: null, fieldObservationSelectedExecutionId: null, observationBusy: false,
@@ -2580,3 +2583,174 @@ function replyFromPython(url, options) {
     assert after == before
     assert len(list((tmp_path / "decisions").glob("*.json"))) == 1
     assert store.load(decision_id=decision_id) == decision.forecast_evidence
+
+
+def test_site_change_invalidates_immediate_decision_preserves_recovery_and_catalogue(tmp_path):
+    engine = javascript_engine()
+    if engine is None or Path(engine).name != "node":
+        pytest.skip("Node is required for the configuration/observation integration harness")
+    source = SCRIPT.read_text(encoding="utf-8")
+    prefix = _field_observation_multicontext_program().split("(async () => {\n  // Two distinct states")[0]
+    configuration = source[source.index("function initializeConfiguration("):source.index("async function restoreSavedMission(")]
+    setter = source[source.index("function setCurrentFieldObservationDecision("):source.index("function normalizeError(")]
+    tonight = source[source.index("async function loadTonight("):source.index('document.querySelector("#site-next").addEventListener')]
+    additions = r'''
+function clearAcceptedMission() { state.acceptedMission = null; }
+function invalidateAvailabilityForSiteChange() {}
+function draftFromConfiguration(payload) { return structuredClone(payload); }
+function hideRecoveryConfirmation() {}
+function prefillConfiguration() {}
+function renderAvailabilityTimezone() {}
+function guardUnresolvedAcceptance() { return false; }
+function showAvailabilityError(message) { state.error = message; }
+function setView(view) { state.view = view; }
+function show() {}
+'''
+    checks = r'''
+(async () => {
+  const tab = makeContext();
+  tab.sandbox.URLSearchParams = URLSearchParams;
+  vm.runInContext(additions, tab.context);
+  for (const key of ['addObservationMessage', 'addObservationDecision', 'configurationRecover',
+      'onboarding', 'recommendationSubmit', 'refresh']) tab.sandbox.ui[key] = tab.sandbox.document.querySelector('#' + key);
+  tab.sandbox.ui.onboarding.querySelector = selector => tab.sandbox.document.querySelector(selector);
+  tab.sandbox.ui.observation.showModal = () => { tab.sandbox.ui.observation.open = true; };
+  run(tab, `loadSavedFieldObservations = async () => {};
+    state.configuration = {configured: true, profile_revision: 1, equipment: {},
+      site: {name: 'Buttes', latitude: 47.1, longitude: 6.8, timezone: 'Europe/Zurich'}};
+    state.fieldObservationInventoryReady = true;
+    state.acceptedMission = null;
+    setCurrentFieldObservationDecision({decision_id: 'decision-A', night_date: '2026-09-29'});`);
+  const A = structuredClone(tab.sandbox.state.configuration);
+  tab.sandbox.A = A;
+  run(tab, `initializeConfiguration({...A, profile_revision: 2, equipment: {camera: 'other'},
+    site: {...A.site, bortle: 5}})`);
+  assert.equal(run(tab, 'state.currentDecision.decision_id'), 'decision-A');
+  assert.equal(run(tab, "observationContext('decision').decision_id"), 'decision-A');
+
+  // Same name, different exact coordinates: the open editor and POST are blocked.
+  run(tab, `openFieldObservation('decision');
+    document.querySelector('#observation-observed-at').value = '2026-09-29T22:14';
+    document.querySelector('#observation-clouds').value = 'few';`);
+  const draft = run(tab, 'JSON.stringify(state.fieldObservationDraftContext)');
+  run(tab, `initializeConfiguration({...A, site: {...A.site, latitude: 46.2}})`);
+  assert.equal(run(tab, 'state.currentDecision'), null);
+  assert.equal(run(tab, "observationContext('decision')"), null);
+  assert.equal(run(tab, 'state.fieldObservationContextInvalid'), true);
+  assert.equal(run(tab, 'JSON.stringify(state.fieldObservationDraftContext)'), draft);
+  await run(tab, 'submitFieldObservation({preventDefault(){}})');
+  assert.equal(tab.sandbox.posts.length, 0);
+  run(tab, `openFieldObservation('decision')`);
+  assert.match(tab.sandbox.state.error, /Préparez à nouveau/);
+  run(tab, 'initializeConfiguration(A)');
+  assert.equal(run(tab, 'state.currentDecision'), null); // A -> B -> A never resurrects A.
+
+  // Effective timezone changes and defensive evidence mismatches fail closed.
+  run(tab, `setCurrentFieldObservationDecision({decision_id: 'decision-A'});
+    initializeConfiguration({...A, site: {...A.site, timezone: 'Europe/Paris'}})`);
+  assert.equal(run(tab, 'state.currentDecision'), null);
+  run(tab, `initializeConfiguration(A);
+    setCurrentFieldObservationDecision({decision_id: 'decision-A', weather_trust:
+      {requested_latitude: 46.2, requested_longitude: 6.8, timezone: 'Europe/Zurich'}})`);
+  assert.equal(run(tab, "observationContext('decision')"), null);
+  run(tab, 'state.currentDecisionSiteFingerprint = null; state.currentDecision.weather_trust = null');
+  assert.equal(run(tab, "observationContext('decision')"), null);
+
+  // Explicit retrospective entry has no implicit ID; query is for B exactly.
+  run(tab, `initializeConfiguration({...A, site: {...A.site, latitude: 46.2}});
+    document.querySelector('#field-observation-dialog').open = false;`);
+  const requests = [];
+  tab.sandbox.fetch = async (url, options) => {
+    requests.push({url, options});
+    return {ok: true, json: async () => url.startsWith('/v1/decisions/recent?')
+      ? {items: [{decision_id: 'persisted-B'}], complete: true} : {decision_id: 'persisted-B'}};
+  };
+  await drainMicrotasks();
+  run(tab, "openFieldObservation('catalogue')");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(run(tab, 'state.fieldObservationDraftContext.decision_id'), null);
+  assert.equal(run(tab, 'buildFieldObservationPayload()'), null);
+  assert.equal(run(tab, "document.querySelector('#observation-save').disabled"), true);
+  const query = new URL(requests[0].url, 'http://local').searchParams;
+  assert.equal(query.get('latitude'), '46.2'); assert.equal(query.get('longitude'), '6.8');
+  await run(tab, "selectRecentDecision(state.recentDecisions.items[0])");
+  assert.equal(run(tab, 'state.fieldObservationDraftContext.decision_id'), 'persisted-B');
+  assert.equal(run(tab, 'state.currentDecision'), null);
+  run(tab, `document.querySelector('#observation-observed-at').value = '2026-09-29T22:14';
+    state.fieldObservationDecisionConfirmedAt = '2026-09-29T22:14';
+    document.querySelector('#observation-clouds').value = 'few'`);
+  assert.equal(run(tab, 'buildFieldObservationPayload().decision_id'), 'persisted-B');
+
+  // Durable uncertain pending remains byte-for-byte intact across configuration change.
+  tab.sandbox.fetch = async (_url, options) => {
+    if (options?.method === 'POST') throw new TypeError('offline');
+    return {ok: false, status: 404};
+  };
+  await run(tab, 'submitFieldObservation({preventDefault(){}})');
+  const lock = run(tab, 'JSON.stringify(state.fieldObservationLock)');
+  const envelope = run(tab, 'JSON.stringify(state.fieldObservationLock.pending)');
+  const stored = [...shared.entries()].filter(([key]) => key.startsWith('astropilot.pendingFieldObservation.'));
+  const uuid = tab.sandbox.uuidCount();
+  run(tab, 'initializeConfiguration(A)');
+  await drainMicrotasks();
+  assert.equal(run(tab, 'JSON.stringify(state.fieldObservationLock)'), lock);
+  assert.equal(run(tab, 'JSON.stringify(state.fieldObservationLock.pending)'), envelope);
+  assert.deepEqual([...shared.entries()].filter(([key]) => key.startsWith('astropilot.pendingFieldObservation.')), stored);
+  assert.equal(run(tab, 'state.fieldObservationContextInvalid'), true);
+  await run(tab, 'submitFieldObservation({preventDefault(){}})');
+  assert.equal(tab.sandbox.uuidCount(), uuid);
+
+  // Two VM tabs share storage: the emitted site signal is consumed by the other tab.
+  const other = makeContext();
+  other.sandbox.URLSearchParams = URLSearchParams;
+  vm.runInContext(additions, other.context);
+  for (const key of ['addObservationMessage', 'addObservationDecision', 'configurationRecover', 'onboarding']) {
+    other.sandbox.ui[key] = other.sandbox.document.querySelector('#' + key);
+  }
+  other.sandbox.ui.onboarding.querySelector = selector => other.sandbox.document.querySelector(selector);
+  other.sandbox.A = A;
+  run(tab, "setCurrentFieldObservationDecision({decision_id: 'decision-A'})");
+  const B = {...A, site: {...A.site, latitude: 46.2}};
+  other.sandbox.B = B;
+  storageEvents.length = 0;
+  run(other, 'initializeConfiguration(B)');
+  const siteEvent = storageEvents.find(({item, event}) => item.sandbox === tab.sandbox
+    && event.key === 'astropilot.decisionSite');
+  assert.ok(siteEvent);
+  tab.sandbox.notification = siteEvent.event;
+  tab.sandbox.fetch = async () => ({ok: true, json: async () => B});
+  await run(tab, 'handleDecisionSiteStorageEvent(notification)');
+  assert.equal(run(tab, 'state.currentDecision'), null);
+  assert.equal(run(tab, 'state.configuration.site.latitude'), 46.2);
+  assert.equal(run(tab, 'JSON.stringify(state.fieldObservationLock.pending)'), envelope);
+  run(tab, 'initializeConfiguration(A)');
+
+  // Other-tab notification invalidates synchronously, including when reload fails.
+  run(tab, "setCurrentFieldObservationDecision({decision_id: 'decision-A'})");
+  tab.sandbox.fetch = async () => { throw new TypeError('offline'); };
+  await run(tab, "handleDecisionSiteStorageEvent({key: 'astropilot.decisionSite', newValue: '[46.2,6.8,\"Europe/Zurich\"]'})");
+  assert.equal(run(tab, 'state.currentDecision'), null);
+  assert.equal(run(tab, 'JSON.stringify(state.fieldObservationLock.pending)'), envelope);
+  assert.equal(run(tab, 'state.decisionSiteReloadRequired'), true);
+  assert.equal(run(tab, "observationContext('catalogue')"), null);
+  await run(tab, "loadTonight({mode: 'all_night'})");
+  assert.match(tab.sandbox.state.error, /Rechargez la configuration/);
+
+  // An in-flight Tonight from A cannot repopulate the current decision after A -> B -> A.
+  run(tab, `state.fieldObservationLock = null; state.requestingRecommendation = false;
+    initializeConfiguration(A); state.decisionSiteGeneration = 0;`);
+  let release;
+  tab.sandbox.fetch = () => new Promise(resolve => { release = resolve; });
+  const pendingTonight = run(tab, "loadTonight({mode: 'all_night'})");
+  run(tab, 'initializeConfiguration({...A, site: {...A.site, latitude: 46.2}}); initializeConfiguration(A)');
+  release({ok: true, json: async () => ({decision_id: 'stale-A', status: 'available'})});
+  await pendingTonight;
+  assert.equal(run(tab, 'state.currentDecision'), null);
+  assert.match(tab.sandbox.state.error, /site a changé pendant le calcul/);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''
+    additions += configuration + setter + tonight
+    script = tmp_path / "site_invalidation.cjs"
+    script.write_text(prefix + "\nconst additions = " + json.dumps(additions) + ";\n" + checks)
+    result = subprocess.run([engine, str(script)], capture_output=True, text=True, timeout=45)
+    assert result.returncode == 0, result.stderr

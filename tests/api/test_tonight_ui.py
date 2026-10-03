@@ -1279,6 +1279,7 @@ const labels = {actions: {
   continue_project: "Continuer ce projet",
 }, quality: {}, factors: {}};
 function clearAcceptedMission() {}
+function setCurrentFieldObservationDecision(decision) { state.currentDecision = decision; }
 function clock(value) {return value || null;}
 function duration(value) {return value ? String(value) : "Non précisée";}
 function dateLabel(value) {return value;}
@@ -1366,8 +1367,9 @@ def test_field_observation_entry_points_require_a_persisted_decision(tmp_path):
         script.index('function showMessage('):
         script.index('function normalizeError(')
     ]
-    harness = '''
-const state = {currentDecision: null};
+    fingerprint = script[script.index('function decisionSiteFingerprint('):script.index('function currentDecisionMatchesSite(')]
+    harness = fingerprint + '''
+const state = {currentDecision: null, configuration: {site: {latitude: 47.1, longitude: 6.8, timezone: 'Europe/Zurich'}}};
 const ui = {
   retry: {hidden: false},
   addObservationMessage: {hidden: true},
@@ -1384,6 +1386,7 @@ setCurrentFieldObservationDecision({
 });
 showMessage("Aucune tranche productive", "Refus terrain", {kicker: "Analyse terminée"});
 if (ui.addObservationMessage.hidden) throw new Error("decision button hidden");
+if (state.currentDecisionSiteFingerprint !== JSON.stringify([47.1, 6.8, "Europe/Zurich"])) throw new Error("site fingerprint missing");
 setCurrentFieldObservationDecision(null);
 showMessage("Connexion impossible", "Erreur réseau");
 if (!ui.addObservationMessage.hidden) throw new Error("error button visible");
