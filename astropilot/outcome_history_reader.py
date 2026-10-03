@@ -98,7 +98,11 @@ class FileOutcomeHistoryReader:
         except OSError as error:
             raise OutcomeHistoryUnavailable('outcome_history_unavailable') from error
 
-    def _read_bytes(self, kind, name):
+    def _read_bytes(self, kind, name, *, remaining_total_budget=None):
+        read_limit = (_MAX_DOCUMENT_BYTES if remaining_total_budget is None
+                      else min(_MAX_DOCUMENT_BYTES, remaining_total_budget))
+        if read_limit < 0:
+            raise ValueError("negative_read_budget")
         # Fingerprint reads obey the same identity rules as decoded documents.
         identity = name[:-5]
         if kind == 'decision_forecast_evidence':
@@ -121,8 +125,8 @@ class FileOutcomeHistoryReader:
                     raise OutcomeHistoryDocumentTooLarge(opened)
                 with os.fdopen(fd, 'rb', buffering=0, closefd=False) as stream:
                     raw = bytearray()
-                    while len(raw) <= _MAX_DOCUMENT_BYTES:
-                        budget = _MAX_DOCUMENT_BYTES + 1 - len(raw)
+                    while len(raw) <= read_limit:
+                        budget = read_limit + 1 - len(raw)
                         try:
                             chunk = stream.read(min(_READ_CHUNK_BYTES, budget))
                         except InterruptedError:

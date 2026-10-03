@@ -125,8 +125,8 @@ def test_inventory_change_during_read_is_rejected(tmp_path, monkeypatch):
     write(tmp_path, 'a')
     reader = FileRecentDecisionReader(tmp_path, cursor_key=b"k" * 32)
     original = reader._files._read_bytes
-    def read(*args):
-        result = original(*args)
+    def read(*args, **kwargs):
+        result = original(*args, **kwargs)
         write(tmp_path, 'b')
         return result
     monkeypatch.setattr(reader._files, '_read_bytes', read)
@@ -221,3 +221,166 @@ def test_platform_rejection_is_redacted_api_503(tmp_path, monkeypatch):
         response = client.get('/v1/decisions/recent', params=FILTERS)
     assert response.status_code == 503
     assert response.json() == {'detail': {'code': 'recent_decisions_unavailable'}}
+
+
+@pytest.mark.parametrize('corruption', ['deep', 'time', 'number'])
+def test_api_isolated_decode_overflow_preserves_valid_candidate(tmp_path, corruption):
+    write(tmp_path, 'valid')
+    write(tmp_path, 'broken')
+    path = tmp_path / 'decision_forecast_evidence' / 'broken.json'
+    raw = path.read_text()
+    if corruption == 'deep':
+        raw = '[' * 20000 + '0' + ']' * 20000
+    elif corruption == 'time':
+        raw = raw.replace(AT.isoformat(), '0001-01-01T00:00:00+01:00')
+    else:
+        raw = raw.replace('46.9', '1' + '0' * 400)
+    path.write_text(raw)
+    reader = FileRecentDecisionReader(tmp_path, cursor_key=b'k' * 32)
+    before = snapshot(tmp_path)
+    service = SimpleNamespace(read_recent_decisions=reader.list_recent,
+                              evaluate=lambda **kw: pytest.fail('recompute'))
+    with TestClient(create_app(service_factory=lambda: service)) as client:
+        response = client.get('/v1/decisions/recent', params=FILTERS)
+    assert response.status_code == 200
+    result = response.json()
+    assert [item['decision_id'] for item in result['items']] == ['valid']
+    assert result['complete'] is False
+    assert result['diagnostics'] == [{'decision_id': 'broken', 'code': 'decision_evidence_invalid'}]
+    assert snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize('case', ['three', 'exact', 'extra', 'growth'])
+def test_actual_read_budget(tmp_path, monkeypatch, case):
+    import astropilot.outcome_history_reader as module
+    size = 16 * 1024 * 1024
+    directory = tmp_path / 'decision_forecast_evidence'
+    directory.mkdir()
+    sizes = [size, size] if case == 'exact' else [size, size, 1 if case in ('extra', 'growth') else size]
+    for index, length in enumerate(sizes):
+        (directory / f'{index}.json').write_bytes(b' ' * length)
+    original = module.os.fdopen
+    reads = []
+    def instrument(fd, *args, **kwargs):
+        stream = original(fd, *args, **kwargs)
+        counts = []
+        reads.append(counts)
+        class Meter:
+            def __enter__(self):
+                if case == 'growth' and len(reads) == 3:
+                    with (directory / '2.json').open('ab') as writer:
+                        writer.write(b' ' * size)
+                return self
+            def __exit__(self, *exc):
+                stream.close()
+            def read(self, amount):
+                chunk = stream.read(amount)
+                counts.append(len(chunk))
+                return chunk
+        return Meter()
+    monkeypatch.setattr(module.os, 'fdopen', instrument)
+    reader = FileRecentDecisionReader(tmp_path, cursor_key=b'k' * 32)
+    with TestClient(create_app(service_factory=lambda: SimpleNamespace(read_recent_decisions=reader.list_recent))) as client:
+        response = client.get('/v1/decisions/recent', params=FILTERS)
+    if case == 'exact':
+        assert response.status_code == 200
+        assert sum(map(sum, reads)) == 32 * 1024 * 1024
+    else:
+        assert response.status_code == 503
+        assert response.json()['detail']['code'] == 'recent_decisions_scan_limit'
+        assert list(map(sum, reads)) == [size, size, 1]
+
+
+@pytest.mark.parametrize('remaining,length,accepted,read_count', [
+    (0, 0, True, 0), (0, 1, False, 1), (7, 7, True, 7), (7, 8, False, 8),
+    (32 * 1024 * 1024, 16 * 1024 * 1024 + 1, False, 16 * 1024 * 1024 + 1),
+])
+def test_secure_reader_remaining_budget_and_growth(tmp_path, monkeypatch, remaining, length, accepted, read_count):
+    import astropilot.outcome_history_reader as module
+    directory = tmp_path / 'decision_forecast_evidence'
+    directory.mkdir()
+    path = directory / 'a.json'
+    path.write_bytes(b'')
+    original = module.os.fdopen
+    counts = []
+    def instrument(fd, *args, **kwargs):
+        stream = original(fd, *args, **kwargs)
+        class Meter:
+            def __enter__(self):
+                path.write_bytes(b'x' * length)
+                return self
+            def __exit__(self, *exc):
+                stream.close()
+            def read(self, amount):
+                raw = stream.read(amount)
+                counts.append(len(raw))
+                return raw
+        return Meter()
+    monkeypatch.setattr(module.os, 'fdopen', instrument)
+    reader = module.FileOutcomeHistoryReader(tmp_path)
+    if accepted:
+        assert len(reader._read_bytes('decision_forecast_evidence', 'a.json', remaining_total_budget=remaining)) == length
+    else:
+        with pytest.raises(module.OutcomeHistoryDocumentTooLarge):
+            reader._read_bytes('decision_forecast_evidence', 'a.json', remaining_total_budget=remaining)
+    assert sum(counts) == read_count
+
+
+@pytest.mark.parametrize('change', ['bool', 'duplicate', 'nonhex', 'extra', 'uppercase'])
+def test_signed_cursor_strict_schema(tmp_path, change):
+    import base64
+    import hashlib
+    import hmac
+    import json
+    write(tmp_path, 'a')
+    write(tmp_path, 'b')
+    reader = FileRecentDecisionReader(tmp_path, cursor_key=b'k' * 32)
+    cursor = reader.list_recent(**FILTERS, limit=1)['next_cursor']
+    value = json.loads(base64.urlsafe_b64decode(cursor.split('.')[0]))
+    if change == 'bool':
+        value['version'] = True
+    elif change in ('nonhex', 'uppercase'):
+        value['fingerprint'] = ('g' if change == 'nonhex' else 'A') * 64
+    elif change == 'extra':
+        value['extra'] = 1
+    raw = json.dumps(value)
+    if change == 'duplicate':
+        raw = raw[:-1] + ', "version": 1}'
+    encoded = base64.urlsafe_b64encode(raw.encode()).decode()
+    signed = encoded + '.' + hmac.new(b'k' * 32, b'recent-decisions-v1\0' + encoded.encode(), hashlib.sha256).hexdigest()
+    with TestClient(create_app(service_factory=lambda: SimpleNamespace(read_recent_decisions=reader.list_recent))) as client:
+        assert client.get('/v1/decisions/recent', params={**FILTERS, 'limit': 1, 'cursor': signed}).status_code == 422
+
+
+def test_zero_coordinate_continuation(tmp_path):
+    for identity in ('a', 'b'):
+        write(tmp_path, identity, (point(requested_location=WeatherLocation(0.0, 0.0)),))
+    reader = FileRecentDecisionReader(tmp_path, cursor_key=b'k' * 32)
+    filters = {**FILTERS, 'latitude': -0.0, 'longitude': -0.0, 'limit': 1}
+    first = reader.list_recent(**filters)
+    assert reader.list_recent(**{**filters, 'latitude': 0.0, 'longitude': 0.0}, cursor=first['next_cursor'])['items'][0]['decision_id'] == 'a'
+
+
+def test_api_real_reader_continuation_and_unavailable_storage(tmp_path):
+    write(tmp_path, 'a')
+    write(tmp_path, 'b')
+    reader = FileRecentDecisionReader(tmp_path, cursor_key=b'k' * 32)
+    service = SimpleNamespace(read_recent_decisions=reader.list_recent)
+    with TestClient(create_app(service_factory=lambda: service)) as client:
+        params = {**FILTERS, 'limit': 1}
+        cursor = client.get('/v1/decisions/recent', params=params).json()['next_cursor']
+        assert client.get('/v1/decisions/recent', params={**params, 'cursor': cursor + 'x'}).status_code == 422
+        write(tmp_path, 'c')
+        assert client.get('/v1/decisions/recent', params={**params, 'cursor': cursor}).status_code == 409
+        (tmp_path / 'decision_forecast_evidence' / 'unsafe.json').symlink_to(tmp_path / 'absent')
+        assert client.get('/v1/decisions/recent', params=params).status_code == 503
+
+
+def test_unexpected_decoder_error_is_not_swallowed(tmp_path, monkeypatch):
+    import astropilot.recent_decision_reader as module
+    write(tmp_path, 'a')
+    def fail(*args, **kwargs):
+        raise RuntimeError('unexpected internal failure')
+    monkeypatch.setattr(module, 'deserialize_decision_forecast_evidence', fail)
+    with pytest.raises(RuntimeError, match='unexpected internal failure'):
+        FileRecentDecisionReader(tmp_path, cursor_key=b'k' * 32).list_recent(**FILTERS)

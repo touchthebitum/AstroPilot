@@ -11,11 +11,12 @@ import hmac
 import json
 import math
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from astropilot.outcome_history_reader import (
-    FileOutcomeHistoryReader, OutcomeHistoryUnavailable,
+    FileOutcomeHistoryReader, OutcomeHistoryUnavailable, _MAX_DOCUMENT_BYTES,
     OutcomeHistoryDocumentTooLarge, _require_secure_fs_capabilities,
 )
 from decision.weather.decision_forecast_evidence_persistence import (
@@ -70,7 +71,14 @@ class FileRecentDecisionReader:
         digest = hashlib.sha256()
         total = 0
         for name in names:
-            raw = self._files._read_bytes(self.KIND, name)
+            remaining = self.MAX_TOTAL_BYTES - total
+            try:
+                raw = self._files._read_bytes(
+                    self.KIND, name, remaining_total_budget=remaining)
+            except OutcomeHistoryDocumentTooLarge as error:
+                if remaining <= _MAX_DOCUMENT_BYTES:
+                    raise RecentDecisionsUnavailable("recent_decisions_scan_limit") from error
+                raise
             total += len(raw)
             if total > self.MAX_TOTAL_BYTES:
                 raise RecentDecisionsUnavailable("recent_decisions_scan_limit")
@@ -81,6 +89,15 @@ class FileRecentDecisionReader:
         if names != self._inventory():
             raise RecentDecisionsDatasetChanged("recent_decisions_dataset_changed")
         return digest.hexdigest(), documents
+
+    @staticmethod
+    def _unique_fields(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate_cursor_field")
+            value[key] = item
+        return value
 
     @staticmethod
     def _instant(value):
@@ -100,6 +117,8 @@ class FileRecentDecisionReader:
                 or not math.isfinite(latitude) or not math.isfinite(longitude)
                 or not -90 <= latitude <= 90 or not -180 <= longitude <= 180):
             raise RecentDecisionsInvalidFilter("invalid_recent_decisions_site")
+        latitude = 0.0 if latitude == 0.0 else float(latitude)
+        longitude = 0.0 if longitude == 0.0 else float(longitude)
         start, end = self._instant(retrieved_from), self._instant(retrieved_to)
         if start > end or end - start > timedelta(days=31):
             raise RecentDecisionsInvalidFilter("invalid_recent_decisions_time_range")
@@ -116,14 +135,15 @@ class FileRecentDecisionReader:
                 if not isinstance(cursor, str) or len(cursor) > 512:
                     raise ValueError()
                 encoded, signature = cursor.split(".")
-                expected_signature = hmac.new(self._cursor_key, encoded.encode(), hashlib.sha256).hexdigest()
+                expected_signature = hmac.new(self._cursor_key, b"recent-decisions-v1\0" + encoded.encode(), hashlib.sha256).hexdigest()
                 if not hmac.compare_digest(signature, expected_signature):
                     raise ValueError()
-                value = json.loads(base64.b64decode(encoded, altchars=b"-_", validate=True))
+                value = json.loads(base64.b64decode(encoded, altchars=b"-_", validate=True),
+                                   object_pairs_hook=self._unique_fields)
                 if (type(value) is not dict or set(value) != {"version", "query", "fingerprint", "offset"}
-                        or value["version"] != 1 or value["query"] != query
+                        or type(value["version"]) is not int or value["version"] != 1 or value["query"] != query
                         or type(value["offset"]) is not int or not 1 <= value["offset"] <= self.MAX_DOCUMENTS
-                        or type(value["fingerprint"]) is not str or len(value["fingerprint"]) != 64):
+                        or type(value["fingerprint"]) is not str or re.fullmatch(r"[0-9a-f]{64}", value["fingerprint"]) is None):
                     raise ValueError()
                 offset, expected_fingerprint = value["offset"], value["fingerprint"]
             except (ValueError, TypeError, KeyError, UnicodeError):
@@ -140,7 +160,7 @@ class FileRecentDecisionReader:
         for decision_id, raw in documents:
             try:
                 evidence = deserialize_decision_forecast_evidence(raw.decode("utf-8"), decision_id=decision_id)
-            except (ValueError, UnicodeError):
+            except (ValueError, UnicodeError, RecursionError, OverflowError):
                 diagnostics.append({"decision_id": decision_id, "code": "decision_evidence_invalid"})
                 continue
             points = evidence.forecast_points
@@ -176,7 +196,7 @@ class FileRecentDecisionReader:
             next_cursor = base64.urlsafe_b64encode(json.dumps({
                 "version": 1, "query": query, "fingerprint": fingerprint, "offset": next_offset,
             }, separators=(",", ":")).encode()).decode()
-            next_cursor += "." + hmac.new(self._cursor_key, next_cursor.encode(), hashlib.sha256).hexdigest()
+            next_cursor += "." + hmac.new(self._cursor_key, b"recent-decisions-v1\0" + next_cursor.encode(), hashlib.sha256).hexdigest()
         return {"items": items[offset:next_offset], "next_cursor": next_cursor,
                 "time_basis": "forecast_retrieved_at_utc", "site_match": "exact_requested_coordinates",
                 "comparability_guaranteed": False, "complete": not diagnostics,
