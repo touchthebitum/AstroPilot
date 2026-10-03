@@ -149,7 +149,7 @@ assert.deepEqual(filterCardCopy({selected_filter: null}), {
 
 
 def test_saved_mission_restores_only_from_server_without_acceptance():
-    helpers = _javascript_between("async function restoreSavedMission() {", "function invalidateAvailabilityForSiteChange(")
+    helpers = _javascript_between("function beginConfigurationOperation()", "function currentDecisionMatchesSite()") + _javascript_between("async function restoreSavedMission() {", "function invalidateAvailabilityForSiteChange(")
     _run_javascript("""
 const assert = require('node:assert/strict');
 const state = {acceptedMission: null};
@@ -196,7 +196,7 @@ def test_configuration_changes_invalidate_restored_mission():
 const assert = require('node:assert/strict');
 const entry = {hidden: false};
 const button = {disabled: false};
-const ui = {savedMissionEntry: entry, configurationRecover: {hidden: true},
+const ui = {savedMissionEntry: entry, addObservationMessage: {hidden: true}, addObservationDecision: {hidden: true}, configurationRecover: {hidden: true},
   onboarding: {querySelector: () => ({textContent: ''})}};
 const document = {querySelector: selector => selector === '#save-configuration'
   ? button : {hidden: false}};
@@ -209,6 +209,7 @@ let next;
 let invalidations = 0;
 function clearAcceptedMission() { invalidations++; state.acceptedMission = null; entry.hidden = true; }
 function invalidateAvailabilityForSiteChange() {}
+function invalidateRecentDecisions() {}
 function draftFromConfiguration(value) { return value; }
 function hideRecoveryConfirmation() {}
 function prefillConfiguration() {}
@@ -220,7 +221,7 @@ function showFormError() {}
 function setView(view) { state.view = view; }
 function configurationPayload() { return {}; }
 async function fetch() { return {ok: true, json: async () => next}; }
-""" + initialize + save + """
+""" + _javascript_between("function decisionSiteFingerprint(", "async function handleDecisionSiteStorageEvent(") + initialize + save + """
 (async () => {
   for (const changed of [
     {...baseline, site: {...baseline.site, latitude: 3}},
@@ -248,7 +249,8 @@ const assert = require('node:assert/strict');
 const entry = {hidden: false};
 const ui = {savedMissionEntry: entry, recommendationSubmit: {disabled: false}, refresh: {disabled: false}};
 const saved = {source: 'persisted', mission: {target: 'M31'}};
-const state = {acceptedMission: saved, requestingRecommendation: false, currentDecision: null};
+const state = {acceptedMission: saved, requestingRecommendation: false, currentDecision: null,
+  configuration: {site: {latitude: 1, longitude: 2, timezone: "UTC"}}};
 let response;
 let invalidations = 0;
 function guardUnresolvedAcceptance() { return false; }
@@ -261,7 +263,7 @@ function syncFieldObservationContext() {}
 function normalizeError() { return ['Erreur', 'Réessayez.']; }
 function renderDecision(decision) { clearAcceptedMission(); state.currentDecision = decision; state.view = 'decision'; }
 async function fetch() { return response; }
-""" + load + """
+""" + _javascript_between("function decisionSiteFingerprint(", "function currentDecisionMatchesSite(") + load + """
 (async () => {
   response = {ok: false, status: 503, json: async () => ({})};
   await loadTonight({mode: 'all_night'});
@@ -373,7 +375,7 @@ assert.equal(chosenIntent(legacy, container), null);
 
 
 def test_acceptance_request_keeps_exact_choice_and_blocks_missing_choice():
-    helpers = _javascript_between("async function acceptRecommendation({", "async function loadTonight(availability) {")
+    helpers = _javascript_between("function decisionSiteFingerprint(", "function currentDecisionMatchesSite()") + _javascript_between("async function acceptRecommendation({", "async function loadTonight(availability) {")
     _run_javascript("""
 const assert = require('node:assert/strict');
 let chosen = undefined;
@@ -459,6 +461,7 @@ const ui = {openMission: {dataset: {}}, primaryIntentChoice: {}, recommendationC
 const document = {querySelector: () => ({style: {}})};
 const labels = {actions: {start_project: 'Commencer ce projet'}, quality: {}, factors: {}};
 function clearAcceptedMission() {}
+function setCurrentFieldObservationDecision(decision) { state.currentDecision = decision; }
 function clock() { return null; }
 function duration() { return 'Non précisée'; }
 function dateLabel() { return 'Ce soir'; }
@@ -530,7 +533,7 @@ assert.equal(card.children[1].hidden, false);
 def test_accepted_intent_locks_primary_and_alternative_and_uses_canonical_replay():
     choice = _javascript_between("function intentMode(subject) {", "function renderAlternatives(decision) {")
     controls = _javascript_between("function acceptanceControls() {", "function sameAcceptanceIntent(attempt, intent) {")
-    accept = _javascript_between("async function acceptRecommendation({", "async function loadTonight(availability) {")
+    accept = _javascript_between("function decisionSiteFingerprint(", "function currentDecisionMatchesSite()") + _javascript_between("async function acceptRecommendation({", "async function loadTonight(availability) {")
     _run_javascript("""
 const assert = require('node:assert/strict');
 class Element {
@@ -558,7 +561,7 @@ const multi = {acquisition_intent_selection_status: 'no_clear_preference',
   acquisition_intent_options: options};
 const ui = {openMission: new Element('button'), primaryIntentChoice: new Element(),
   alternativesList: new Element(), mission: {showModal() { opened++; }}};
-const state = {currentDecision: null, acceptedMission: null, acceptingRecommendation: false,
+const state = {decisionSiteGeneration: 0, configuration: {site: {latitude: 47.1, longitude: 6.8, timezone: 'Europe/Zurich'}}, currentDecision: null, acceptedMission: null, acceptingRecommendation: false,
   acceptanceBlocked: false, pendingAcceptanceAttempt: null};
 let sent = [], canonical = 'A', opened = 0, status = '';
 function showAcceptanceStatus(message) { status = message; }

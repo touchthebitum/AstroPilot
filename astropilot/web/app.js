@@ -51,6 +51,7 @@ const ui = Object.freeze({
 
 const state = {
   view: "loading_configuration",
+  viewRevision: 0,
   configuration: null,
   configurationDraft: {
     site: null,
@@ -59,11 +60,19 @@ const state = {
   },
   availability: null,
   currentDecision: null,
+  currentDecisionSiteFingerprint: null,
+  configurationGeneration: 0,
+  configurationInFlightGeneration: null,
+  configurationNavigationOwner: null,
+  decisionSiteGeneration: 0,
+  decisionSiteReloadRequired: false,
   acceptedMission: null,
   savedMissions: [],
   pendingAcceptanceAttempt: null,
   pendingAcceptanceStorageInvalid: false,
   acceptingRecommendation: false,
+  acceptanceRequestOwner: null,
+  acceptanceRecoveryNavigationOwner: null,
   acceptanceBlocked: false,
   savingConfiguration: false,
   requestingRecommendation: false,
@@ -389,10 +398,10 @@ function renderRecentDecisions() {
   const catalogue = state.recentDecisions;
   document.querySelector("#observation-decision-catalogue").hidden = !catalogue?.open;
   const keep = document.querySelector("#observation-keep-decision");
-  keep.disabled = blocked;
+  keep.disabled = blocked || !context?.decision_id;
   keep.textContent = "Conserver cette décision";
   const back = document.querySelector("#observation-return-current-decision");
-  back.hidden = !context || context.decision_id === state.fieldObservationAnchorContext?.decision_id;
+  back.hidden = !state.fieldObservationAnchorContext?.decision_id || !context || context.decision_id === state.fieldObservationAnchorContext.decision_id;
   back.disabled = blocked;
   const list = document.querySelector("#observation-decision-candidates");
   list.replaceChildren();
@@ -499,7 +508,7 @@ function confirmFieldObservationDecision() {
 function returnToCurrentFieldObservationDecision() {
   if (state.fieldObservationLock || state.fieldObservationDraftContext?.execution_id || state.fieldObservationContextInvalid || state.observationBusy) return;
   const anchor = state.fieldObservationAnchorContext;
-  if (!anchor || !sameFieldObservationContext(anchor, observationContext(anchor.source))) return;
+  if (!anchor?.decision_id || !sameFieldObservationContext(anchor, observationContext(anchor.source))) return;
   state.fieldObservationDraftContext = Object.freeze({...anchor, historical: false});
   confirmFieldObservationDecision();
   renderObservationLinkage();
@@ -557,7 +566,111 @@ function siteConfigurationIdentity() {
   });
 }
 
+const DECISION_SITE_STORAGE_KEY = "astropilot.decisionSite";
+function decisionSiteFingerprint(site = state.configuration?.site) {
+  if (!Number.isFinite(site?.latitude) || !Number.isFinite(site?.longitude)) return null;
+  return JSON.stringify([site.latitude, site.longitude,
+    typeof site.timezone === "string" && site.timezone.trim() ? site.timezone.trim() : null]);
+}
+// Every configuration request supersedes older reads, writes and recovery responses.
+// View revision revokes navigation ownership even after leaving and returning to a view.
+function beginConfigurationOperation() {
+  state.configurationGeneration = (state.configurationGeneration || 0) + 1;
+  state.configurationInFlightGeneration = state.configurationGeneration;
+  state.configurationNavigationOwner = {generation: state.configurationGeneration,
+    view: state.view, revision: state.viewRevision || 0};
+  return state.configurationGeneration;
+}
+function configurationOwnsNavigation(generation) {
+  const owner = state.configurationNavigationOwner;
+  return owner?.generation === generation && owner.view === state.view
+    && owner.revision === (state.viewRevision || 0);
+}
+function completeConfigurationLoading(payload) {
+  showFormError("");
+  if (payload.needs_configuration_confirmation) {
+    showFormError("Votre profil historique est conservé. Confirmez la qualité du ciel (Bortle) pour activer les recommandations ; aucune réinitialisation n’est nécessaire.");
+    setView("site");
+  } else setView(payload.configured ? "availability" : "site");
+}
+function finishConfigurationOperation(generation) {
+  if (state.configurationInFlightGeneration === generation) state.configurationInFlightGeneration = null;
+}
+function configurationOperationIsCurrent(generation) {
+  return generation === state.configurationGeneration;
+}
+function installCurrentConfiguration(payload, generation) {
+  if (!configurationOperationIsCurrent(generation)) return false;
+  initializeConfiguration(payload);
+  state.decisionSiteReloadRequired = false;
+  state.configurationInFlightGeneration = null;
+  syncFieldObservationContext();
+  return true;
+}
+function acceptedMissionMatchesSite() {
+  const mission = state.acceptedMission;
+  return !state.decisionSiteReloadRequired && !!decisionSiteFingerprint()
+    && Number.isInteger(mission?.acceptedSiteGeneration)
+    && mission.acceptedSiteGeneration === state.decisionSiteGeneration
+    && mission?.acceptedSiteFingerprint === decisionSiteFingerprint();
+}
+function currentDecisionMatchesSite() {
+  const fingerprint = decisionSiteFingerprint();
+  if (state.decisionSiteReloadRequired || !fingerprint || state.currentDecisionSiteFingerprint !== fingerprint) return false;
+  const trust = state.currentDecision?.weather_trust;
+  if (!trust) return true; // The locally captured Tonight fingerprint is authoritative without evidence.
+  return trust.requested_latitude === state.configuration.site.latitude
+    && trust.requested_longitude === state.configuration.site.longitude
+    && (!trust.timezone || trust.timezone === siteTimezone());
+}
+function invalidateCurrentDecisionForSiteChange() {
+  beginConfigurationOperation();
+  state.configurationInFlightGeneration = null;
+  state.decisionSiteGeneration = (state.decisionSiteGeneration || 0) + 1;
+  state.currentDecision = null;
+  state.currentDecisionSiteFingerprint = null;
+  state.fieldObservationSelectedExecutionId = null;
+  invalidateRecentDecisions();
+  if (state.recentDecisions) state.recentDecisions = {open: false, items: [], cursor: null, extension: 1};
+  ui.addObservationMessage.hidden = true;
+  ui.addObservationDecision.hidden = true;
+  text("#current-decision-site-warning", "Le site ou son fuseau a changé. Préparez à nouveau votre nuit avant une observation immédiate, ou choisissez explicitement une décision récente.");
+  syncFieldObservationContext(); // Preserve draft, pending payload and UUID; block the old editor.
+}
+async function handleDecisionSiteStorageEvent(event) {
+  if (event.key !== DECISION_SITE_STORAGE_KEY && event.key !== null) return;
+  if (state.configuration && event.key !== null && event.newValue === decisionSiteFingerprint()
+      && !state.decisionSiteReloadRequired
+      && state.configurationInFlightGeneration == null) return; // No superseding reload can still install another site.
+  state.decisionSiteReloadRequired = true;
+  clearAcceptedMission();
+  invalidateCurrentDecisionForSiteChange();
+  const generation = beginConfigurationOperation();
+  try {
+    const response = await fetch("/v1/configuration");
+    if (!response.ok) throw new Error("configuration_reload_unavailable");
+    const payload = await response.json();
+    if (!configurationOperationIsCurrent(generation)) return;
+    const ownsLoading = configurationOwnsNavigation(generation) && state.view === "loading_configuration";
+    installCurrentConfiguration(payload, generation);
+    if (ownsLoading) {
+      completeConfigurationLoading(payload);
+      if (payload.configured && !payload.needs_configuration_confirmation) await restoreSavedMission();
+    }
+  } catch (_) {
+    if (configurationOperationIsCurrent(generation) && configurationOwnsNavigation(generation)
+        && state.view === "loading_configuration") {
+      showConfigurationError("La configuration est temporairement inaccessible. Réessayez dans un instant.");
+    }
+  }
+  finally { finishConfigurationOperation(generation); }
+}
+
 function observationContext(source) {
+  if (state.decisionSiteReloadRequired) return null;
+  if (source === "catalogue") return {decision_id: null, execution_id: null, night_date: null,
+    source, timezone: siteTimezone(), site_identity: siteConfigurationIdentity(), mission_id: null};
+  if (source === "mission" ? !acceptedMissionMatchesSite() : !currentDecisionMatchesSite()) return null;
   const decision = source === "mission" ? state.acceptedMission : state.currentDecision;
   const decisionId = decision?.decision_id;
   if (!decisionId) return null;
@@ -624,7 +737,8 @@ function updateFieldObservationSubmitState() {
     || !sameFieldObservationContext(state.fieldObservationDraftContext, activeObservationContext())
     || lock.status !== "pending" || lock.persistence_missing);
   setFieldObservationEditorDisabled(hardBlocked);
-  document.querySelector("#observation-save").disabled = blocked || state.observationBusy || historicalTimeNeedsConfirmation();
+  document.querySelector("#observation-save").disabled = blocked || !state.fieldObservationDraftContext?.decision_id
+    || state.observationBusy || historicalTimeNeedsConfirmation();
   const reconcile = document.querySelector("#observation-reconcile");
   const refresh = document.querySelector("#observation-refresh-context");
   const abandon = document.querySelector("#observation-abandon-pending");
@@ -701,7 +815,11 @@ function fieldObservationConflictMessage() {
 
 function openFieldObservation(source) {
   const context = observationContext(source);
-  if (!context?.decision_id) return;
+  if (!context || (!context.decision_id && source !== "catalogue")) {
+    showAvailabilityError("La décision courante n’est plus valide pour ce site. Préparez à nouveau votre nuit ou choisissez explicitement une décision récente.");
+    setView("availability");
+    return;
+  }
   resetFieldObservationForm();
   state.fieldObservationAnchorContext = Object.freeze({...context});
   state.fieldObservationDraftContext = Object.freeze(context);
@@ -729,14 +847,15 @@ function openFieldObservation(source) {
   state.fieldObservationInitialObservedAt = observedAt.value;
   // Restore the exact historical envelope, never migrate its UUID or payload.
   const pendingContext = state.fieldObservationLock?.context;
-  if (pendingContext?.decision_id && pendingContext.decision_id !== context.decision_id && !context.execution_id && !pendingContext.execution_id
+  if (source !== "catalogue" && pendingContext?.decision_id && pendingContext.decision_id !== context.decision_id && !context.execution_id && !pendingContext.execution_id
       && pendingContext.site_identity === context.site_identity && pendingContext.timezone === context.timezone) {
     state.fieldObservationDraftContext = Object.freeze({...pendingContext, historical: true});
   }
   ui.observation.showModal();
   renderRecentDecisions();
   renderObservationLinkage();
-  loadSavedFieldObservations(state.fieldObservationDraftContext);
+  if (context.decision_id) loadSavedFieldObservations(state.fieldObservationDraftContext);
+  if (source === "catalogue") openRecentDecisions();
   if (!webLocksAvailable()) {
     updateFieldObservationSubmitState();
     observationMessage("Publication indisponible sur ce navigateur : cette fonction exige Web Locks. La consultation et la réconciliation en lecture seule restent possibles.", {error: true});
@@ -1225,7 +1344,8 @@ function validFieldObservationRecoveryJournal(value) {
         && value.resolved_watermark <= value.epoch)
      && Array.isArray(value.entries) && Array.isArray(value.resolved)
     && value.resolved.every(id => value.version === 1 ? typeof id === "string"
-      : exactObservationKeys(id, ["digest", "sequence"]) && /^[a-f0-9]{64}$/.test(id.digest)
+      : exactObservationKeys(id, ["digest", "sequence"]) && typeof id.digest === "string"
+        && /^[a-f0-9]{64}$/.test(id.digest)
         && Number.isSafeInteger(id.sequence) && id.sequence >= 0 && id.sequence <= value.epoch)
     && new Set(value.entries.map(item => item?.entry_id)).size === value.entries.length
     && value.entries.every(item => {
@@ -3193,6 +3313,7 @@ const wizardStates = Object.freeze(["site", "equipment", "projects", "review"]);
 
 function setView(view) {
   invalidateOutcomeHistory();
+  state.viewRevision = (state.viewRevision || 0) + 1;
   state.view = view;
   const wizardVisible = wizardStates.includes(view);
   ui.configurationLoading.hidden = view !== "loading_configuration";
@@ -3799,7 +3920,9 @@ function parsePendingAcceptance(raw) {
   const identityPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
   const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
   if (
-    !identityPattern.test(request.acceptance_request_id)
+    typeof request.acceptance_request_id !== "string"
+    || !identityPattern.test(request.acceptance_request_id)
+    || typeof request.decision_id !== "string"
     || !identityPattern.test(request.decision_id)
     || !["primary_recommendation", "alternative"].includes(request.source)
     || typeof request.selected_catalog_key !== "string"
@@ -3851,7 +3974,8 @@ function showUnresolvedAcceptance({ malformed = state.pendingAcceptanceStorageIn
     ? "La sélection en attente ne peut pas être relue de façon sûre. NightMerit bloque toute nouvelle sélection pour éviter un doublon."
     : "Le résultat de votre sélection n’a pas pu être confirmé. NightMerit doit vérifier cette sélection avant de poursuivre.";
   ui.retryPendingAcceptance.disabled = malformed || state.acceptingRecommendation;
-  setView("unresolved_acceptance");
+  // Refreshing the active recovery screen is not a navigation.
+  if (state.view !== "unresolved_acceptance") setView("unresolved_acceptance");
 }
 
 function hasUnresolvedAcceptance() {
@@ -3885,10 +4009,14 @@ function acceptanceAttempt(intent) {
   return attempt;
 }
 
-function clearPendingAcceptanceAttempt() {
+function clearPendingAcceptanceAttempt(attempt) {
+  if (!attempt || state.pendingAcceptanceAttempt?.acceptance_request_id !== attempt.acceptance_request_id) return false;
+  const stored = localStorage.getItem(PENDING_ACCEPTANCE_STORAGE_KEY);
+  if (stored !== null && parsePendingAcceptance(stored)?.acceptance_request_id !== attempt.acceptance_request_id) return false;
   localStorage.removeItem(PENDING_ACCEPTANCE_STORAGE_KEY);
   state.pendingAcceptanceAttempt = null;
   state.pendingAcceptanceStorageInvalid = false;
+  return true;
 }
 
 function resetMissionPresentation() {
@@ -3907,6 +4035,7 @@ function clearAcceptedMission() {
   state.acceptedMission = null;
   ui.savedMissionEntry.hidden = true;
   state.acceptingRecommendation = false;
+  state.acceptanceRequestOwner = null;
   state.acceptanceBlocked = false;
   showAcceptanceStatus("");
   if (ui.mission.open) ui.mission.close();
@@ -3916,7 +4045,7 @@ function clearAcceptedMission() {
 
 function renderDecision(decision) {
   clearAcceptedMission();
-  state.currentDecision = decision;
+  setCurrentFieldObservationDecision(decision);
 
   const productivity = decision.productivity;
   const actionableHours = decision.recommended_hours;
@@ -4511,6 +4640,9 @@ function showConfigurationError(message, { code = null } = {}) {
 }
 
 function initializeConfiguration(payload) {
+  if (state.configuration && decisionSiteFingerprint() !== decisionSiteFingerprint(payload.site)) {
+    invalidateCurrentDecisionForSiteChange();
+  }
   if (state.configuration && (
     state.configuration.profile_revision !== payload.profile_revision
     || JSON.stringify(state.configuration.site) !== JSON.stringify(payload.site)
@@ -4518,6 +4650,7 @@ function initializeConfiguration(payload) {
   )) clearAcceptedMission();
   invalidateAvailabilityForSiteChange(state.configuration?.site, payload.site);
   state.configuration = payload;
+  try { localStorage.setItem(DECISION_SITE_STORAGE_KEY, decisionSiteFingerprint()); } catch (_) {}
   syncFieldObservationContext();
   state.configurationDraft = draftFromConfiguration(payload);
   document.querySelector("#legacy-bortle-note").hidden = !payload.needs_configuration_confirmation;
@@ -4537,6 +4670,10 @@ function initializeConfiguration(payload) {
 
 async function restoreSavedMission() {
   const configuration = state.configuration;
+  const generation = state.configurationGeneration;
+  const isCurrent = () => configurationOperationIsCurrent(generation)
+    && state.configuration === configuration && !state.decisionSiteReloadRequired;
+  const savedMissions = [];
   state.acceptedMission = null;
   state.savedMissions = [];
   ui.savedMissionEntry.hidden = true;
@@ -4546,7 +4683,7 @@ async function restoreSavedMission() {
     if (!response.ok) throw new Error("mission_read_unavailable");
     const payload = await response.json();
     const mission = payload?.mission;
-    if (state.configuration === configuration && payload?.status === "accepted" && mission
+    if (isCurrent() && payload?.status === "accepted" && mission
         && payload.mission_id === mission.mission_id
         && payload.selection_id === mission.selection_id
         && payload.decision_id === mission.decision_id) {
@@ -4565,13 +4702,14 @@ async function restoreSavedMission() {
   }
   try {
     const response = await fetch("/v1/execution-sessions");
-    if (response.ok && state.configuration === configuration) {
+    if (response.ok && isCurrent()) {
       const sessions = await response.json();
+      if (!isCurrent()) return;
       const seen = new Set();
       for (const item of sessions) {
         if (seen.has(item.mission_id)) continue;
         seen.add(item.mission_id);
-        state.savedMissions.push({
+        savedMissions.push({
           decision_id: item.mission.decision_id, selection_id: item.mission.selection_id,
           mission_id: item.mission_id, selectedCatalogKey: item.project_id,
           acquisitionIntentId: item.acquisition_intent_id, source: "persisted",
@@ -4582,6 +4720,8 @@ async function restoreSavedMission() {
   } catch (_error) {
     // The current mission can still be opened if session discovery is unavailable.
   }
+  if (!isCurrent()) return;
+  state.savedMissions = savedMissions;
   if (current && !state.savedMissions.some((item) => item.mission_id === current.mission_id)) {
     state.savedMissions.unshift(current);
   }
@@ -4614,10 +4754,13 @@ function invalidateAvailabilityForSiteChange(previousSite, nextSite) {
 async function loadConfiguration({ afterConflict = false } = {}) {
   if (guardUnresolvedAcceptance()) return;
   setView("loading_configuration");
+  const generation = beginConfigurationOperation();
   try {
     const response = await fetch("/v1/configuration");
     const payload = await response.json().catch(() => ({}));
+    if (!configurationOperationIsCurrent(generation)) return;
     if (!response.ok) {
+      if (!configurationOwnsNavigation(generation)) return;
       const code = payload?.detail?.code;
       const message = code === "configuration_corrupt"
         ? "La configuration enregistrée ne peut pas être relue. Réessayez dans un instant."
@@ -4625,7 +4768,9 @@ async function loadConfiguration({ afterConflict = false } = {}) {
       showConfigurationError(message, { code });
       return;
     }
-    initializeConfiguration(payload);
+    const ownsNavigation = configurationOwnsNavigation(generation);
+    installCurrentConfiguration(payload, generation);
+    if (!ownsNavigation) return;
     if (afterConflict) {
       showFormError("La configuration a changé. Vérifiez les dernières valeurs avant de l’enregistrer à nouveau.");
       renderReview();
@@ -4642,7 +4787,11 @@ async function loadConfiguration({ afterConflict = false } = {}) {
       setView("site");
     }
   } catch (_error) {
+    if (!configurationOperationIsCurrent(generation)) return;
+    if (!configurationOwnsNavigation(generation)) return;
     showConfigurationError("NightMerit ne parvient pas à charger la configuration. La saisie pourra reprendre après reconnexion.");
+  } finally {
+    finishConfigurationOperation(generation);
   }
 }
 
@@ -4651,17 +4800,22 @@ async function recoverConfiguration() {
   if (state.recoveringConfiguration) return;
   state.recoveringConfiguration = true;
   ui.configurationRecoveryConfirm.disabled = true;
+  const generation = beginConfigurationOperation();
   try {
     const response = await fetch("/v1/configuration/recover", {
       method: "POST",
     });
     const payload = await response.json().catch(() => ({}));
+    if (!configurationOperationIsCurrent(generation)) return;
     if (response.ok && payload.configured === false) {
-      initializeConfiguration(payload);
+      const ownsNavigation = configurationOwnsNavigation(generation);
+      installCurrentConfiguration(payload, generation);
+      if (!ownsNavigation) return;
       showFormError("");
       setView("site");
       return;
     }
+    if (!configurationOwnsNavigation(generation)) return;
     const detail = payload?.detail;
     if (detail?.code === "configuration_recovery_conflict") {
       hideRecoveryConfirmation();
@@ -4673,11 +4827,14 @@ async function recoverConfiguration() {
       : "La réinitialisation n’a pas pu être confirmée. Vous pouvez réessayer.";
     showConfigurationError(message, { code: "configuration_corrupt" });
   } catch (_error) {
+    if (!configurationOperationIsCurrent(generation)) return;
+    if (!configurationOwnsNavigation(generation)) return;
     showConfigurationError(
       "Le résultat de la réinitialisation n’a pas pu être confirmé. Vérifiez votre connexion puis réessayez.",
       { code: "configuration_corrupt" },
     );
   } finally {
+    finishConfigurationOperation(generation);
     state.recoveringConfiguration = false;
     ui.configurationRecoveryConfirm.disabled = false;
   }
@@ -4689,6 +4846,7 @@ async function saveConfiguration() {
   const button = document.querySelector("#save-configuration");
   button.disabled = true;
   showFormError("");
+  const generation = beginConfigurationOperation();
   try {
     const response = await fetch("/v1/configuration", {
       method: "PUT",
@@ -4696,8 +4854,10 @@ async function saveConfiguration() {
       body: JSON.stringify(configurationPayload()),
     });
     const payload = await response.json().catch(() => ({}));
+    if (!configurationOperationIsCurrent(generation)) return;
     const detail = payload?.detail;
     if (!response.ok) {
+      if (!configurationOwnsNavigation(generation)) return;
       if (response.status === 409 && detail?.code === "configuration_revision_conflict") {
         await loadConfiguration({ afterConflict: true });
         return;
@@ -4720,12 +4880,17 @@ async function saveConfiguration() {
       setView("review");
       return;
     }
-    initializeConfiguration(payload);
+    const ownsNavigation = configurationOwnsNavigation(generation);
+    installCurrentConfiguration(payload, generation);
+    if (!ownsNavigation) return;
     setView("availability");
   } catch (_error) {
+    if (!configurationOperationIsCurrent(generation)) return;
+    if (!configurationOwnsNavigation(generation)) return;
     showFormError("Connexion impossible pendant l’enregistrement. Vérifiez vos informations puis réessayez.");
     setView("review");
   } finally {
+    finishConfigurationOperation(generation);
     state.savingConfiguration = false;
     button.disabled = false;
   }
@@ -5037,6 +5202,8 @@ function showMessage(title, body, { kicker = "Décision indisponible", retry = t
 
 function setCurrentFieldObservationDecision(decision) {
   state.currentDecision = decision?.decision_id ? decision : null;
+  state.currentDecisionSiteFingerprint = state.currentDecision ? decisionSiteFingerprint() : null;
+  if (state.currentDecision) text("#current-decision-site-warning", "");
   ui.addObservationMessage.hidden = true;
   ui.addObservationDecision.hidden = true;
   syncFieldObservationContext();
@@ -5120,7 +5287,18 @@ async function retryPendingAcceptance() {
     showUnresolvedAcceptance();
     return;
   }
+  if (state.acceptingRecommendation) return;
+  const recoveryNavigationOwner = {attemptId: attempt.acceptance_request_id,
+    view: state.view, revision: state.viewRevision || 0};
+  state.acceptanceRecoveryNavigationOwner = recoveryNavigationOwner;
+  const ownsNavigation = () => state.acceptanceRecoveryNavigationOwner === recoveryNavigationOwner
+    && recoveryNavigationOwner.view === "unresolved_acceptance"
+    && recoveryNavigationOwner.view === state.view
+    && recoveryNavigationOwner.revision === (state.viewRevision || 0)
+    && !state.pendingAcceptanceAttempt && !state.pendingAcceptanceStorageInvalid
+    && !state.acceptanceRequestOwner;
   await acceptRecommendation({
+    recoveryNavigationOwner,
     source: attempt.source,
     selectedCatalogKey: attempt.selected_catalog_key,
     expectedDecisionId: attempt.decision_id,
@@ -5129,6 +5307,8 @@ async function retryPendingAcceptance() {
     acquisitionIntentId: attempt.acquisition_intent_id,
     attemptOverride: attempt,
   });
+  // A resolved historical retry returns through the normal configuration cycle.
+  if (ownsNavigation()) await loadConfiguration();
 }
 
 async function acceptRecommendation({
@@ -5139,12 +5319,27 @@ async function acceptRecommendation({
   selectedTarget,
   acquisitionIntentId,
   attemptOverride = null,
+  recoveryNavigationOwner = null,
 }) {
   if (state.acceptingRecommendation) return;
+  if (!recoveryNavigationOwner) state.acceptanceRecoveryNavigationOwner = null;
+  const ownsRecoveryNavigation = () => !recoveryNavigationOwner
+    || (state.acceptanceRecoveryNavigationOwner === recoveryNavigationOwner
+      && recoveryNavigationOwner.attemptId === state.pendingAcceptanceAttempt?.acceptance_request_id
+      && recoveryNavigationOwner.view === state.view
+      && recoveryNavigationOwner.revision === (state.viewRevision || 0));
   const decision = state.currentDecision;
+  const configurationGeneration = state.configurationGeneration;
+  const siteGeneration = state.decisionSiteGeneration;
+  const siteFingerprint = decisionSiteFingerprint();
+  const isCurrent = () => configurationGeneration === state.configurationGeneration
+    && siteGeneration === state.decisionSiteGeneration
+    && siteFingerprint === decisionSiteFingerprint() && !state.decisionSiteReloadRequired
+    && state.currentDecision === decision && decision?.decision_id === expectedDecisionId;
   if (!attemptOverride && state.acceptedMission) {
     if (
-      state.acceptedMission.decision_id === expectedDecisionId
+      acceptedMissionMatchesSite()
+      && state.acceptedMission.decision_id === expectedDecisionId
       && state.acceptedMission.source === source
       && state.acceptedMission.selectedCatalogKey === selectedCatalogKey
     ) {
@@ -5207,6 +5402,10 @@ async function acceptRecommendation({
     restoreAcceptanceControls();
     return;
   }
+  // Exact retries share the tentative UUID; a later tentative owns a different lock.
+  const requestOwner = attempt.acceptance_request_id;
+  state.acceptanceRequestOwner = requestOwner;
+  const ownsRequest = () => state.acceptanceRequestOwner === requestOwner;
   state.acceptingRecommendation = true;
   disableAcceptanceControls(true);
   triggerButton?.setAttribute("aria-busy", "true");
@@ -5221,7 +5420,12 @@ async function acceptRecommendation({
     const payload = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      clearPendingAcceptanceAttempt();
+      if (attemptOverride) {
+        if (ownsRequest() && ownsRecoveryNavigation()) ui.retryPendingAcceptance.disabled = false;
+        return;
+      }
+      clearPendingAcceptanceAttempt(attempt);
+      if (!isCurrent() || !ownsRequest()) return;
       const [message, blocked] = acceptanceError(payload?.detail?.code, response.status);
       state.acceptanceBlocked = blocked;
       if (decision?.decision_id === expectedDecisionId) {
@@ -5242,7 +5446,17 @@ async function acceptRecommendation({
       && payload.selection_id === mission.selection_id
       && payload.decision_id === mission.decision_id;
     if (!validAcceptedMission) {
-      showUnresolvedAcceptance();
+      if (ownsRequest() && ownsRecoveryNavigation()) {
+        if (recoveryNavigationOwner) ui.retryPendingAcceptance.disabled = false;
+        else showUnresolvedAcceptance();
+      }
+      return;
+    }
+    if (!isCurrent() || !ownsRequest() || !ownsRecoveryNavigation()) {
+      // The server owns this successful confirmation; keep it available as history.
+      state.lastHistoricalAcceptance = payload;
+      const cleared = clearPendingAcceptanceAttempt(attempt);
+      if (cleared && ownsRequest()) showAcceptanceStatus("Mission enregistrée pour la décision précédente. Recalculez la nuit du site courant avant une observation immédiate.");
       return;
     }
     if (decision?.decision_id === expectedDecisionId) {
@@ -5255,12 +5469,15 @@ async function acceptRecommendation({
         : acceptedButton?.closest(".alternative-card")?.querySelector(".intent-choice");
       if (!acceptedSubject || (intentMode(acceptedSubject) !== "legacy" && !acceptedContainer)
           || !showAcceptedIntent(acceptedSubject, acceptedContainer, payload.selected_acquisition_intent_id)) {
-        showUnresolvedAcceptance();
+        if (recoveryNavigationOwner) ui.retryPendingAcceptance.disabled = false;
+        else showUnresolvedAcceptance();
         return;
       }
     }
-    clearPendingAcceptanceAttempt();
+    clearPendingAcceptanceAttempt(attempt);
     state.acceptedMission = {
+      acceptedSiteGeneration: siteGeneration,
+      acceptedSiteFingerprint: siteFingerprint,
       decision_id: payload.decision_id,
       selection_id: payload.selection_id,
       mission_id: payload.mission_id,
@@ -5286,31 +5503,49 @@ async function acceptRecommendation({
     renderMission(mission);
     ui.mission.showModal();
   } catch (_error) {
-    showUnresolvedAcceptance();
+    if (!recoveryNavigationOwner && isCurrent() && ownsRequest()) showUnresolvedAcceptance();
   } finally {
-    state.acceptingRecommendation = false;
-    triggerButton?.removeAttribute("aria-busy");
-    if (hasUnresolvedAcceptance()) {
-      showUnresolvedAcceptance();
-    } else if (state.currentDecision?.decision_id === expectedDecisionId) {
-      restoreAcceptanceControls();
+    if (ownsRequest()) {
+      state.acceptanceRequestOwner = null;
+      state.acceptingRecommendation = false;
+      triggerButton?.removeAttribute("aria-busy");
+      if ((isCurrent() || recoveryNavigationOwner) && ownsRecoveryNavigation() && hasUnresolvedAcceptance()) {
+        if (recoveryNavigationOwner) ui.retryPendingAcceptance.disabled = false;
+        else showUnresolvedAcceptance();
+      } else if (isCurrent()) {
+        restoreAcceptanceControls();
+      }
     }
   }
 }
 
 async function loadTonight(availability) {
   if (guardUnresolvedAcceptance()) return;
+  if (state.decisionSiteReloadRequired) {
+    showAvailabilityError("La configuration a changé dans un autre onglet. Rechargez la configuration avant de préparer votre nuit.");
+    setView("availability");
+    return;
+  }
   if (!availability) {
     showAvailabilityError("Choisissez votre disponibilité avant de préparer la nuit.");
     setView("availability");
     return;
   }
   if (state.requestingRecommendation) return;
+  const configurationGeneration = state.configurationGeneration;
+  const siteGeneration = state.decisionSiteGeneration;
+  const siteFingerprint = decisionSiteFingerprint();
   state.requestingRecommendation = true;
   state.availability = { ...availability };
   ui.recommendationSubmit.disabled = true;
   showAvailabilityError("");
   show("loading");
+  const navigationOwner = {view: state.view, revision: state.viewRevision || 0};
+  const isCurrent = () => configurationGeneration === state.configurationGeneration
+    && siteGeneration === state.decisionSiteGeneration
+    && siteFingerprint === decisionSiteFingerprint() && !state.decisionSiteReloadRequired
+    && navigationOwner.view === state.view
+    && navigationOwner.revision === (state.viewRevision || 0);
   ui.refresh.disabled = true;
   setCurrentFieldObservationDecision(null);
 
@@ -5321,6 +5556,7 @@ async function loadTonight(availability) {
       body: JSON.stringify({ availability }),
     });
     const payload = await response.json().catch(() => ({}));
+    if (!isCurrent()) return;
 
     if (!response.ok) {
       if (payload?.error === "user_profile_unavailable") {
@@ -5374,6 +5610,7 @@ async function loadTonight(availability) {
 
     renderDecision(payload);
   } catch (_error) {
+    if (!isCurrent()) return;
     showAvailabilityError("Connexion impossible. Vos horaires sont conservés; réessayez dans un instant.");
     setView("availability");
   } finally {
@@ -5537,6 +5774,8 @@ document.querySelector("#observation-reconcile").addEventListener("click", recon
 document.querySelector("#observation-refresh-context").addEventListener("click", refreshInvalidFieldObservationContext);
 document.querySelector("#observation-abandon-pending").addEventListener("click", abandonFieldObservationLock);
 window.addEventListener("storage", handleFieldObservationStorageEvent);
+window.addEventListener("storage", handleDecisionSiteStorageEvent);
+document.querySelector("#open-observation-catalogue").addEventListener("click", () => openFieldObservation("catalogue"));
 window.addEventListener("pageshow", handleFieldObservationPageShow);
 ui.addObservationMessage.addEventListener("click", () => openFieldObservation("decision"));
 ui.addObservationDecision.addEventListener("click", () => openFieldObservation("decision"));

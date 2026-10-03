@@ -444,7 +444,7 @@ def test_uncertain_acceptance_retry_reuses_exact_pending_payload():
     assert "source," in acceptance
     assert "selected_catalog_key: selectedCatalogKey" in acceptance
     assert "body: JSON.stringify(attempt)" in acceptance
-    assert "clearPendingAcceptanceAttempt()" not in uncertain
+    assert "clearPendingAcceptanceAttempt(attempt)" not in uncertain
     assert "showUnresolvedAcceptance()" in uncertain
     assert "Le résultat de votre sélection n’a pas pu être confirmé" in script
     assert "restoreAcceptanceControls()" in acceptance
@@ -465,9 +465,9 @@ def test_acceptance_attempt_clears_only_after_definite_outcome():
     uncertain_success, success = after_validation.split("return;\n    }", 1)
     success = success.split("state.acceptedMission = {", 1)[0]
 
-    assert "clearPendingAcceptanceAttempt()" in definite_failure
-    assert "clearPendingAcceptanceAttempt()" in success
-    assert "clearPendingAcceptanceAttempt()" not in uncertain_success
+    assert "clearPendingAcceptanceAttempt(attempt)" in definite_failure
+    assert "clearPendingAcceptanceAttempt(attempt)" in success
+    assert "clearPendingAcceptanceAttempt(attempt)" not in uncertain_success
     assert 'code === "acceptance_request_conflict"' in script
     assert "pendingAcceptanceAttempt" in script
     assert "button.dataset.acceptanceSource === pending.source" in script
@@ -542,7 +542,8 @@ def test_restored_retry_reuses_exact_persisted_payload_and_timestamp():
 
     assert "const attempt = state.pendingAcceptanceAttempt" in retry
     assert "attemptOverride: attempt" in retry
-    assert "acceptance_request_id" not in retry
+    assert "crypto.randomUUID" not in retry
+    assert "attemptId: attempt.acceptance_request_id" in retry
     assert "crypto.randomUUID" not in retry
     assert "new Date" not in retry
     assert "attempt = attemptOverride" in acceptance
@@ -593,10 +594,10 @@ def test_pending_storage_clears_only_after_definite_result():
         "} finally {", 1
     )[0]
 
-    assert "clearPendingAcceptanceAttempt()" in definite_failure
-    assert "clearPendingAcceptanceAttempt()" in success
-    assert "clearPendingAcceptanceAttempt()" not in incomplete
-    assert "clearPendingAcceptanceAttempt()" not in uncertain
+    assert "clearPendingAcceptanceAttempt(attempt)" in definite_failure
+    assert "clearPendingAcceptanceAttempt(attempt)" in success
+    assert "clearPendingAcceptanceAttempt(attempt)" not in incomplete
+    assert "clearPendingAcceptanceAttempt(attempt)" not in uncertain
     assert "showUnresolvedAcceptance" in incomplete
     assert "showUnresolvedAcceptance" in uncertain
     assert 'code === "acceptance_request_conflict"' in script
@@ -776,7 +777,7 @@ def test_site_change_invalidates_only_stale_site_time_assumptions():
     assert "if (sameSite) return" in invalidation
     assert script.count("invalidateAvailabilityForSiteChange(") >= 2
     save = script.split("async function saveConfiguration()", 1)[1].split("const availabilityFieldsByMode", 1)[0]
-    assert "initializeConfiguration(payload)" in save
+    assert "installCurrentConfiguration(payload, generation)" in save
 
 
 def test_site_timezone_and_dst_errors_have_controlled_french_messages():
@@ -853,7 +854,7 @@ def test_existing_projects_are_preserved_by_the_configuration_wizard():
         "async function loadConfiguration({ afterConflict = false } = {})",
         1,
     )[1].split("async function recoverConfiguration()", 1)[0]
-    assert "initializeConfiguration(payload)" in conflict
+    assert "installCurrentConfiguration(payload, generation)" in conflict
     assert "renderReview()" in conflict
 
 
@@ -971,7 +972,7 @@ def test_recovery_responses_preserve_authoritative_state_and_fail_closed():
     )[1].split("async function saveConfiguration()", 1)[0]
 
     assert "response.ok && payload.configured === false" in recovery
-    assert "initializeConfiguration(payload)" in recovery
+    assert "installCurrentConfiguration(payload, generation)" in recovery
     assert 'setView("site")' in recovery
     assert 'detail?.code === "configuration_recovery_conflict"' in recovery
     assert "await loadConfiguration()" in recovery
@@ -1003,8 +1004,8 @@ def test_recovered_projection_reuses_first_run_initialization():
     assert "state.configurationDraft = draftFromConfiguration(payload)" in initializer
     assert "prefillConfiguration()" in initializer
     assert "renderAvailabilityTimezone()" in initializer
-    assert "initializeConfiguration(payload)" in loader
-    assert "initializeConfiguration(payload)" in recovery
+    assert "installCurrentConfiguration(payload, generation)" in loader
+    assert "installCurrentConfiguration(payload, generation)" in recovery
     assert 'setView("site")' in recovery
 
 
@@ -1279,6 +1280,7 @@ const labels = {actions: {
   continue_project: "Continuer ce projet",
 }, quality: {}, factors: {}};
 function clearAcceptedMission() {}
+function setCurrentFieldObservationDecision(decision) { state.currentDecision = decision; }
 function clock(value) {return value || null;}
 function duration(value) {return value ? String(value) : "Non précisée";}
 function dateLabel(value) {return value;}
@@ -1366,8 +1368,9 @@ def test_field_observation_entry_points_require_a_persisted_decision(tmp_path):
         script.index('function showMessage('):
         script.index('function normalizeError(')
     ]
-    harness = '''
-const state = {currentDecision: null};
+    fingerprint = script[script.index('function decisionSiteFingerprint('):script.index('function currentDecisionMatchesSite(')]
+    harness = fingerprint + '''
+const state = {currentDecision: null, configuration: {site: {latitude: 47.1, longitude: 6.8, timezone: 'Europe/Zurich'}}};
 const ui = {
   retry: {hidden: false},
   addObservationMessage: {hidden: true},
@@ -1384,6 +1387,7 @@ setCurrentFieldObservationDecision({
 });
 showMessage("Aucune tranche productive", "Refus terrain", {kicker: "Analyse terminée"});
 if (ui.addObservationMessage.hidden) throw new Error("decision button hidden");
+if (state.currentDecisionSiteFingerprint !== JSON.stringify([47.1, 6.8, "Europe/Zurich"])) throw new Error("site fingerprint missing");
 setCurrentFieldObservationDecision(null);
 showMessage("Connexion impossible", "Erreur réseau");
 if (!ui.addObservationMessage.hidden) throw new Error("error button visible");
