@@ -776,7 +776,7 @@ def test_site_change_invalidates_only_stale_site_time_assumptions():
     assert "if (sameSite) return" in invalidation
     assert script.count("invalidateAvailabilityForSiteChange(") >= 2
     save = script.split("async function saveConfiguration()", 1)[1].split("const availabilityFieldsByMode", 1)[0]
-    assert "initializeConfiguration(payload)" in save
+    assert "installCurrentConfiguration(payload, generation)" in save
 
 
 def test_site_timezone_and_dst_errors_have_controlled_french_messages():
@@ -853,7 +853,7 @@ def test_existing_projects_are_preserved_by_the_configuration_wizard():
         "async function loadConfiguration({ afterConflict = false } = {})",
         1,
     )[1].split("async function recoverConfiguration()", 1)[0]
-    assert "initializeConfiguration(payload)" in conflict
+    assert "installCurrentConfiguration(payload, generation)" in conflict
     assert "renderReview()" in conflict
 
 
@@ -971,7 +971,7 @@ def test_recovery_responses_preserve_authoritative_state_and_fail_closed():
     )[1].split("async function saveConfiguration()", 1)[0]
 
     assert "response.ok && payload.configured === false" in recovery
-    assert "initializeConfiguration(payload)" in recovery
+    assert "installCurrentConfiguration(payload, generation)" in recovery
     assert 'setView("site")' in recovery
     assert 'detail?.code === "configuration_recovery_conflict"' in recovery
     assert "await loadConfiguration()" in recovery
@@ -1003,8 +1003,8 @@ def test_recovered_projection_reuses_first_run_initialization():
     assert "state.configurationDraft = draftFromConfiguration(payload)" in initializer
     assert "prefillConfiguration()" in initializer
     assert "renderAvailabilityTimezone()" in initializer
-    assert "initializeConfiguration(payload)" in loader
-    assert "initializeConfiguration(payload)" in recovery
+    assert "installCurrentConfiguration(payload, generation)" in loader
+    assert "installCurrentConfiguration(payload, generation)" in recovery
     assert 'setView("site")' in recovery
 
 

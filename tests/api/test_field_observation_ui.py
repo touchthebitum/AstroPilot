@@ -130,8 +130,8 @@ const session = (id) => ({
   acquired_before_seconds: 0, session_credit_seconds: 0, acquired_after_seconds: 0,
   current_acquired_seconds: 0, target_hours: null, remaining_hours: null,
 });
-const state = {
-  acceptedMission: {mission_id: 'mission-1', decision_id: 'decision-1', acquisitionIntentId: 'ha',
+const state = {decisionSiteGeneration: 0, configuration: {site: {latitude: 47.1, longitude: 6.8, timezone: 'Europe/Zurich'}},
+  acceptedMission: {acceptedSiteGeneration: 0, acceptedSiteFingerprint: JSON.stringify([47.1, 6.8, 'Europe/Zurich']), mission_id: 'mission-1', decision_id: 'decision-1', acquisitionIntentId: 'ha',
     mission: {night_date: '2026-09-29'}},
   currentDecisionSiteFingerprint: JSON.stringify([47.1, 6.8, 'Europe/Zurich']),
   currentDecision: {decision_id: 'decision-1', night_date: '2026-09-29'},
@@ -216,7 +216,7 @@ async function fetch() { return {ok: true, json: async () => clone(serverSession
   assert.equal(state.fieldObservationDraftContext.execution_id, 'session-a');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    program = harness + session_helpers + context_helpers + same_context + sync_context + choice_listener + checks
+    program = harness + source[source.index("function decisionSiteFingerprint("):source.index("function currentDecisionMatchesSite(")] + session_helpers + context_helpers + same_context + sync_context + choice_listener + checks
     command = [engine, "-e", program] if Path(engine).name == "node" else [engine, "-l", "JavaScript", "-e", program]
     result = subprocess.run(
         command,
@@ -314,10 +314,10 @@ const navigator = {locks: {request(name, options, callback) {
   webLockRequests += 1;
   return callback();
 }}};
-const state = {configuration: {site: {name: 'Site A', latitude: 47.1, longitude: 6.8, bortle: 4, timezone: 'Europe/Zurich'}},
+const state = {decisionSiteGeneration: 0, configuration: {site: {name: 'Site A', latitude: 47.1, longitude: 6.8, bortle: 4, timezone: 'Europe/Zurich'}},
   currentDecisionSiteFingerprint: JSON.stringify([47.1, 6.8, 'Europe/Zurich']),
   currentDecision: {decision_id: 'decision-1', night_date: '2026-09-29'},
-  acceptedMission: {decision_id: 'decision-1', mission: {night_date: '2026-09-29'}},
+  acceptedMission: {acceptedSiteGeneration: 0, acceptedSiteFingerprint: JSON.stringify([47.1, 6.8, 'Europe/Zurich']), decision_id: 'decision-1', mission: {night_date: '2026-09-29'}},
   sessions: [], activeSessionId: null, fieldObservationSelectedExecutionId: null,
   observationBusy: false,
   fieldObservationDraftContext: null, fieldObservationContextInvalid: false,
@@ -353,8 +353,8 @@ function clearHarness() {
   state.sessions = []; state.activeSessionId = null;
   state.fieldObservationSelectedExecutionId = null;
   state.currentDecision = {decision_id: 'decision-1', night_date: '2026-09-29'};
-  state.acceptedMission = {decision_id: 'decision-1', mission: {night_date: '2026-09-29'}};
   state.configuration.site = {name: 'Site A', latitude: 47.1, longitude: 6.8, bortle: 4, timezone: 'Europe/Zurich'};
+  state.acceptedMission = {acceptedSiteGeneration: state.decisionSiteGeneration, acceptedSiteFingerprint: decisionSiteFingerprint(), decision_id: 'decision-1', mission: {night_date: '2026-09-29'}};
   state.fieldObservationContextInvalid = false;
   state.invalidFieldObservationContextKey = null;
   state.fieldObservationConflict = null;
@@ -674,6 +674,7 @@ async function check() {
     Intl.DateTimeFormat = nativeDateTimeFormat;
   }
   state.configuration.site.timezone = 'Not/A_Timezone';
+  state.acceptedMission.acceptedSiteFingerprint = decisionSiteFingerprint(); // Accept under this fixture's invalid timezone to test formatting errors.
   openFieldObservation('mission');
   assertBlockedOpening(/fuseau du site configuré n’est pas reconnu/);
   state.configuration.site.timezone = 'Europe/Zurich';
@@ -1217,7 +1218,7 @@ async function check() {
   };
   const staleSuccess = submitFieldObservation(event);
   while (!resolveStalePost) await new Promise(resolve => setImmediate(resolve));
-  state.acceptedMission = {decision_id: 'decision-2', mission: {night_date: '2026-09-30'}};
+  state.acceptedMission = {acceptedSiteGeneration: state.decisionSiteGeneration, acceptedSiteFingerprint: decisionSiteFingerprint(), decision_id: 'decision-2', mission: {night_date: '2026-09-30'}};
   syncFieldObservationContext();
   resolveStalePost(response(201, {created: true}));
   await staleSuccess;
@@ -1294,8 +1295,8 @@ async function check() {
             "  fetch = (_url, options) => {\n    assert.ok(options);\n    setQuick({cloud: 'overcast'});\n    return response(201, {created: true});\n  };\n  submitFieldObservation(event);",
         )
         synchronous_checks = synchronous_checks.replace(
-            "  let resolveStalePost;\n  fetch = (_url, options) => {\n    assert.ok(options);\n    return new Promise(resolve => { resolveStalePost = resolve; });\n  };\n  const staleSuccess = submitFieldObservation(event);\n  state.acceptedMission = {decision_id: 'decision-2', mission: {night_date: '2026-09-30'}};\n  syncFieldObservationContext();\n  resolveStalePost(response(201, {created: true}));\n  await staleSuccess;",
-            "  fetch = (_url, options) => {\n    assert.ok(options);\n    state.acceptedMission = {decision_id: 'decision-2', mission: {night_date: '2026-09-30'}};\n    syncFieldObservationContext();\n    return response(201, {created: true});\n  };\n  submitFieldObservation(event);",
+            "  let resolveStalePost;\n  fetch = (_url, options) => {\n    assert.ok(options);\n    return new Promise(resolve => { resolveStalePost = resolve; });\n  };\n  const staleSuccess = submitFieldObservation(event);\n  state.acceptedMission = {acceptedSiteGeneration: state.decisionSiteGeneration, acceptedSiteFingerprint: decisionSiteFingerprint(), decision_id: 'decision-2', mission: {night_date: '2026-09-30'}};\n  syncFieldObservationContext();\n  resolveStalePost(response(201, {created: true}));\n  await staleSuccess;",
+            "  fetch = (_url, options) => {\n    assert.ok(options);\n    state.acceptedMission = {acceptedSiteGeneration: state.decisionSiteGeneration, acceptedSiteFingerprint: decisionSiteFingerprint(), decision_id: 'decision-2', mission: {night_date: '2026-09-30'}};\n    syncFieldObservationContext();\n    return response(201, {created: true});\n  };\n  submitFieldObservation(event);",
         )
         synchronous_checks = synchronous_checks.replace(
             "  let rejectStalePost;\n  fetch = (_url, options) => options\n    ? new Promise((_resolve, reject) => { rejectStalePost = reject; })\n    : response(404, {detail: {code: 'field_observation_not_found'}});\n  const staleFailure = submitFieldObservation(event);\n  state.activeSessionId = 'session-b';\n  state.fieldObservationSelectedExecutionId = 'session-b';\n  syncFieldObservationContext();\n  rejectStalePost(new TypeError('network timeout'));\n  await staleFailure;",
@@ -1407,10 +1408,10 @@ function makeContext(name, locks = controlledLocks) {
     String, Number, Boolean, RegExp, Error, TypeError, Promise, encodeURIComponent, setTimeout, clearTimeout,
     TextEncoder, document, indexedDB: recoveryIndexedDB(recoveryRecords), window: {confirm: () => true}, navigator: locks ? {locks} : {},
     crypto: {subtle: require("crypto").webcrypto.subtle, randomUUID: () => `${name}-uuid-${++uuid}`}, posts: [], uuidCount: () => uuid};
-  sandbox.state = {configuration: {site: {name: 'Site A', latitude: 47.1, longitude: 6.8, bortle: 4, timezone: 'Europe/Zurich'}},
+  sandbox.state = {decisionSiteGeneration: 0, configuration: {site: {name: 'Site A', latitude: 47.1, longitude: 6.8, bortle: 4, timezone: 'Europe/Zurich'}},
     currentDecisionSiteFingerprint: JSON.stringify([47.1, 6.8, 'Europe/Zurich']),
     currentDecision: {decision_id: 'decision-1', night_date: '2026-09-29'},
-    acceptedMission: {decision_id: 'decision-1', mission: {night_date: '2026-09-29'}},
+    acceptedMission: {acceptedSiteGeneration: 0, acceptedSiteFingerprint: JSON.stringify([47.1, 6.8, 'Europe/Zurich']), decision_id: 'decision-1', mission: {night_date: '2026-09-29'}},
     sessions: [], activeSessionId: null, fieldObservationSelectedExecutionId: null, observationBusy: false,
     fieldObservationDraftContext: null, fieldObservationContextInvalid: false,
     invalidFieldObservationContextKey: null, fieldObservationConflict: null, fieldObservationLock: null};
@@ -2738,7 +2739,7 @@ function show() {}
 
   // An in-flight Tonight from A cannot repopulate the current decision after A -> B -> A.
   run(tab, `state.fieldObservationLock = null; state.requestingRecommendation = false;
-    initializeConfiguration(A); state.decisionSiteGeneration = 0;`);
+    installCurrentConfiguration(A, beginConfigurationOperation()); state.decisionSiteGeneration = 0;`);
   let release;
   tab.sandbox.fetch = () => new Promise(resolve => { release = resolve; });
   const pendingTonight = run(tab, "loadTonight({mode: 'all_night'})");

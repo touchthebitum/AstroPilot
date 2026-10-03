@@ -149,7 +149,7 @@ assert.deepEqual(filterCardCopy({selected_filter: null}), {
 
 
 def test_saved_mission_restores_only_from_server_without_acceptance():
-    helpers = _javascript_between("async function restoreSavedMission() {", "function invalidateAvailabilityForSiteChange(")
+    helpers = _javascript_between("function beginConfigurationOperation()", "function currentDecisionMatchesSite()") + _javascript_between("async function restoreSavedMission() {", "function invalidateAvailabilityForSiteChange(")
     _run_javascript("""
 const assert = require('node:assert/strict');
 const state = {acceptedMission: null};
@@ -375,7 +375,7 @@ assert.equal(chosenIntent(legacy, container), null);
 
 
 def test_acceptance_request_keeps_exact_choice_and_blocks_missing_choice():
-    helpers = _javascript_between("async function acceptRecommendation({", "async function loadTonight(availability) {")
+    helpers = _javascript_between("function decisionSiteFingerprint(", "function currentDecisionMatchesSite()") + _javascript_between("async function acceptRecommendation({", "async function loadTonight(availability) {")
     _run_javascript("""
 const assert = require('node:assert/strict');
 let chosen = undefined;
@@ -533,7 +533,7 @@ assert.equal(card.children[1].hidden, false);
 def test_accepted_intent_locks_primary_and_alternative_and_uses_canonical_replay():
     choice = _javascript_between("function intentMode(subject) {", "function renderAlternatives(decision) {")
     controls = _javascript_between("function acceptanceControls() {", "function sameAcceptanceIntent(attempt, intent) {")
-    accept = _javascript_between("async function acceptRecommendation({", "async function loadTonight(availability) {")
+    accept = _javascript_between("function decisionSiteFingerprint(", "function currentDecisionMatchesSite()") + _javascript_between("async function acceptRecommendation({", "async function loadTonight(availability) {")
     _run_javascript("""
 const assert = require('node:assert/strict');
 class Element {
@@ -561,7 +561,7 @@ const multi = {acquisition_intent_selection_status: 'no_clear_preference',
   acquisition_intent_options: options};
 const ui = {openMission: new Element('button'), primaryIntentChoice: new Element(),
   alternativesList: new Element(), mission: {showModal() { opened++; }}};
-const state = {currentDecision: null, acceptedMission: null, acceptingRecommendation: false,
+const state = {decisionSiteGeneration: 0, configuration: {site: {latitude: 47.1, longitude: 6.8, timezone: 'Europe/Zurich'}}, currentDecision: null, acceptedMission: null, acceptingRecommendation: false,
   acceptanceBlocked: false, pendingAcceptanceAttempt: null};
 let sent = [], canonical = 'A', opened = 0, status = '';
 function showAcceptanceStatus(message) { status = message; }

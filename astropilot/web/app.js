@@ -60,6 +60,8 @@ const state = {
   availability: null,
   currentDecision: null,
   currentDecisionSiteFingerprint: null,
+  configurationGeneration: 0,
+  configurationInFlightGeneration: null,
   decisionSiteGeneration: 0,
   decisionSiteReloadRequired: false,
   acceptedMission: null,
@@ -566,6 +568,33 @@ function decisionSiteFingerprint(site = state.configuration?.site) {
   return JSON.stringify([site.latitude, site.longitude,
     typeof site.timezone === "string" && site.timezone.trim() ? site.timezone.trim() : null]);
 }
+// Every configuration request supersedes older reads, writes and recovery responses.
+function beginConfigurationOperation() {
+  state.configurationGeneration = (state.configurationGeneration || 0) + 1;
+  state.configurationInFlightGeneration = state.configurationGeneration;
+  return state.configurationGeneration;
+}
+function finishConfigurationOperation(generation) {
+  if (state.configurationInFlightGeneration === generation) state.configurationInFlightGeneration = null;
+}
+function configurationOperationIsCurrent(generation) {
+  return generation === state.configurationGeneration;
+}
+function installCurrentConfiguration(payload, generation) {
+  if (!configurationOperationIsCurrent(generation)) return false;
+  initializeConfiguration(payload);
+  state.decisionSiteReloadRequired = false;
+  state.configurationInFlightGeneration = null;
+  syncFieldObservationContext();
+  return true;
+}
+function acceptedMissionMatchesSite() {
+  const mission = state.acceptedMission;
+  return !state.decisionSiteReloadRequired && !!decisionSiteFingerprint()
+    && Number.isInteger(mission?.acceptedSiteGeneration)
+    && mission.acceptedSiteGeneration === state.decisionSiteGeneration
+    && mission?.acceptedSiteFingerprint === decisionSiteFingerprint();
+}
 function currentDecisionMatchesSite() {
   const fingerprint = decisionSiteFingerprint();
   if (state.decisionSiteReloadRequired || !fingerprint || state.currentDecisionSiteFingerprint !== fingerprint) return false;
@@ -576,6 +605,8 @@ function currentDecisionMatchesSite() {
     && (!trust.timezone || trust.timezone === siteTimezone());
 }
 function invalidateCurrentDecisionForSiteChange() {
+  beginConfigurationOperation();
+  state.configurationInFlightGeneration = null;
   state.decisionSiteGeneration = (state.decisionSiteGeneration || 0) + 1;
   state.currentDecision = null;
   state.currentDecisionSiteFingerprint = null;
@@ -590,24 +621,27 @@ function invalidateCurrentDecisionForSiteChange() {
 async function handleDecisionSiteStorageEvent(event) {
   if (event.key !== DECISION_SITE_STORAGE_KEY && event.key !== null) return;
   if (!state.configuration) return;
-  if (event.key !== null && event.newValue === decisionSiteFingerprint()) return;
+  if (event.key !== null && event.newValue === decisionSiteFingerprint()
+      && !state.decisionSiteReloadRequired
+      && state.configurationInFlightGeneration == null) return; // No superseding reload can still install another site.
   state.decisionSiteReloadRequired = true;
   clearAcceptedMission();
   invalidateCurrentDecisionForSiteChange();
-  const generation = state.decisionSiteGeneration;
+  const generation = beginConfigurationOperation();
   try {
     const response = await fetch("/v1/configuration");
     if (!response.ok) return;
     const payload = await response.json();
-    if (generation === state.decisionSiteGeneration) initializeConfiguration(payload);
+    installCurrentConfiguration(payload, generation);
   } catch (_) { /* Keep the current decision invalid on unavailable configuration. */ }
+  finally { finishConfigurationOperation(generation); }
 }
 
 function observationContext(source) {
   if (state.decisionSiteReloadRequired) return null;
   if (source === "catalogue") return {decision_id: null, execution_id: null, night_date: null,
     source, timezone: siteTimezone(), site_identity: siteConfigurationIdentity(), mission_id: null};
-  if (source !== "mission" && !currentDecisionMatchesSite()) return null;
+  if (source === "mission" ? !acceptedMissionMatchesSite() : !currentDecisionMatchesSite()) return null;
   const decision = source === "mission" ? state.acceptedMission : state.currentDecision;
   const decisionId = decision?.decision_id;
   if (!decisionId) return null;
@@ -4577,7 +4611,6 @@ function initializeConfiguration(payload) {
   )) clearAcceptedMission();
   invalidateAvailabilityForSiteChange(state.configuration?.site, payload.site);
   state.configuration = payload;
-  state.decisionSiteReloadRequired = false;
   try { localStorage.setItem(DECISION_SITE_STORAGE_KEY, decisionSiteFingerprint()); } catch (_) {}
   syncFieldObservationContext();
   state.configurationDraft = draftFromConfiguration(payload);
@@ -4598,6 +4631,10 @@ function initializeConfiguration(payload) {
 
 async function restoreSavedMission() {
   const configuration = state.configuration;
+  const generation = state.configurationGeneration;
+  const isCurrent = () => configurationOperationIsCurrent(generation)
+    && state.configuration === configuration && !state.decisionSiteReloadRequired;
+  const savedMissions = [];
   state.acceptedMission = null;
   state.savedMissions = [];
   ui.savedMissionEntry.hidden = true;
@@ -4607,7 +4644,7 @@ async function restoreSavedMission() {
     if (!response.ok) throw new Error("mission_read_unavailable");
     const payload = await response.json();
     const mission = payload?.mission;
-    if (state.configuration === configuration && payload?.status === "accepted" && mission
+    if (isCurrent() && payload?.status === "accepted" && mission
         && payload.mission_id === mission.mission_id
         && payload.selection_id === mission.selection_id
         && payload.decision_id === mission.decision_id) {
@@ -4626,13 +4663,14 @@ async function restoreSavedMission() {
   }
   try {
     const response = await fetch("/v1/execution-sessions");
-    if (response.ok && state.configuration === configuration) {
+    if (response.ok && isCurrent()) {
       const sessions = await response.json();
+      if (!isCurrent()) return;
       const seen = new Set();
       for (const item of sessions) {
         if (seen.has(item.mission_id)) continue;
         seen.add(item.mission_id);
-        state.savedMissions.push({
+        savedMissions.push({
           decision_id: item.mission.decision_id, selection_id: item.mission.selection_id,
           mission_id: item.mission_id, selectedCatalogKey: item.project_id,
           acquisitionIntentId: item.acquisition_intent_id, source: "persisted",
@@ -4643,6 +4681,8 @@ async function restoreSavedMission() {
   } catch (_error) {
     // The current mission can still be opened if session discovery is unavailable.
   }
+  if (!isCurrent()) return;
+  state.savedMissions = savedMissions;
   if (current && !state.savedMissions.some((item) => item.mission_id === current.mission_id)) {
     state.savedMissions.unshift(current);
   }
@@ -4675,9 +4715,11 @@ function invalidateAvailabilityForSiteChange(previousSite, nextSite) {
 async function loadConfiguration({ afterConflict = false } = {}) {
   if (guardUnresolvedAcceptance()) return;
   setView("loading_configuration");
+  const generation = beginConfigurationOperation();
   try {
     const response = await fetch("/v1/configuration");
     const payload = await response.json().catch(() => ({}));
+    if (!configurationOperationIsCurrent(generation)) return;
     if (!response.ok) {
       const code = payload?.detail?.code;
       const message = code === "configuration_corrupt"
@@ -4686,7 +4728,7 @@ async function loadConfiguration({ afterConflict = false } = {}) {
       showConfigurationError(message, { code });
       return;
     }
-    initializeConfiguration(payload);
+    installCurrentConfiguration(payload, generation);
     if (afterConflict) {
       showFormError("La configuration a changé. Vérifiez les dernières valeurs avant de l’enregistrer à nouveau.");
       renderReview();
@@ -4703,7 +4745,10 @@ async function loadConfiguration({ afterConflict = false } = {}) {
       setView("site");
     }
   } catch (_error) {
+    if (!configurationOperationIsCurrent(generation)) return;
     showConfigurationError("NightMerit ne parvient pas à charger la configuration. La saisie pourra reprendre après reconnexion.");
+  } finally {
+    finishConfigurationOperation(generation);
   }
 }
 
@@ -4712,13 +4757,15 @@ async function recoverConfiguration() {
   if (state.recoveringConfiguration) return;
   state.recoveringConfiguration = true;
   ui.configurationRecoveryConfirm.disabled = true;
+  const generation = beginConfigurationOperation();
   try {
     const response = await fetch("/v1/configuration/recover", {
       method: "POST",
     });
     const payload = await response.json().catch(() => ({}));
+    if (!configurationOperationIsCurrent(generation)) return;
     if (response.ok && payload.configured === false) {
-      initializeConfiguration(payload);
+      installCurrentConfiguration(payload, generation);
       showFormError("");
       setView("site");
       return;
@@ -4734,11 +4781,13 @@ async function recoverConfiguration() {
       : "La réinitialisation n’a pas pu être confirmée. Vous pouvez réessayer.";
     showConfigurationError(message, { code: "configuration_corrupt" });
   } catch (_error) {
+    if (!configurationOperationIsCurrent(generation)) return;
     showConfigurationError(
       "Le résultat de la réinitialisation n’a pas pu être confirmé. Vérifiez votre connexion puis réessayez.",
       { code: "configuration_corrupt" },
     );
   } finally {
+    finishConfigurationOperation(generation);
     state.recoveringConfiguration = false;
     ui.configurationRecoveryConfirm.disabled = false;
   }
@@ -4750,6 +4799,7 @@ async function saveConfiguration() {
   const button = document.querySelector("#save-configuration");
   button.disabled = true;
   showFormError("");
+  const generation = beginConfigurationOperation();
   try {
     const response = await fetch("/v1/configuration", {
       method: "PUT",
@@ -4757,6 +4807,7 @@ async function saveConfiguration() {
       body: JSON.stringify(configurationPayload()),
     });
     const payload = await response.json().catch(() => ({}));
+    if (!configurationOperationIsCurrent(generation)) return;
     const detail = payload?.detail;
     if (!response.ok) {
       if (response.status === 409 && detail?.code === "configuration_revision_conflict") {
@@ -4781,12 +4832,14 @@ async function saveConfiguration() {
       setView("review");
       return;
     }
-    initializeConfiguration(payload);
+    installCurrentConfiguration(payload, generation);
     setView("availability");
   } catch (_error) {
+    if (!configurationOperationIsCurrent(generation)) return;
     showFormError("Connexion impossible pendant l’enregistrement. Vérifiez vos informations puis réessayez.");
     setView("review");
   } finally {
+    finishConfigurationOperation(generation);
     state.savingConfiguration = false;
     button.disabled = false;
   }
@@ -5205,9 +5258,17 @@ async function acceptRecommendation({
 }) {
   if (state.acceptingRecommendation) return;
   const decision = state.currentDecision;
+  const configurationGeneration = state.configurationGeneration;
+  const siteGeneration = state.decisionSiteGeneration;
+  const siteFingerprint = decisionSiteFingerprint();
+  const isCurrent = () => configurationGeneration === state.configurationGeneration
+    && siteGeneration === state.decisionSiteGeneration
+    && siteFingerprint === decisionSiteFingerprint() && !state.decisionSiteReloadRequired
+    && state.currentDecision === decision && decision?.decision_id === expectedDecisionId;
   if (!attemptOverride && state.acceptedMission) {
     if (
-      state.acceptedMission.decision_id === expectedDecisionId
+      acceptedMissionMatchesSite()
+      && state.acceptedMission.decision_id === expectedDecisionId
       && state.acceptedMission.source === source
       && state.acceptedMission.selectedCatalogKey === selectedCatalogKey
     ) {
@@ -5285,6 +5346,7 @@ async function acceptRecommendation({
 
     if (!response.ok) {
       clearPendingAcceptanceAttempt();
+      if (!isCurrent()) return;
       const [message, blocked] = acceptanceError(payload?.detail?.code, response.status);
       state.acceptanceBlocked = blocked;
       if (decision?.decision_id === expectedDecisionId) {
@@ -5308,6 +5370,13 @@ async function acceptRecommendation({
       showUnresolvedAcceptance();
       return;
     }
+    if (!isCurrent()) {
+      // The server owns this successful confirmation; keep it available as history.
+      state.lastHistoricalAcceptance = payload;
+      clearPendingAcceptanceAttempt();
+      showAcceptanceStatus("Mission enregistrée pour la décision précédente. Recalculez la nuit du site courant avant une observation immédiate.");
+      return;
+    }
     if (decision?.decision_id === expectedDecisionId) {
       const acceptedSubject = source === "primary_recommendation" ? decision
         : (decision.alternatives || []).find((item) => item.catalog_key === selectedCatalogKey);
@@ -5324,6 +5393,8 @@ async function acceptRecommendation({
     }
     clearPendingAcceptanceAttempt();
     state.acceptedMission = {
+      acceptedSiteGeneration: siteGeneration,
+      acceptedSiteFingerprint: siteFingerprint,
       decision_id: payload.decision_id,
       selection_id: payload.selection_id,
       mission_id: payload.mission_id,
@@ -5349,13 +5420,13 @@ async function acceptRecommendation({
     renderMission(mission);
     ui.mission.showModal();
   } catch (_error) {
-    showUnresolvedAcceptance();
+    if (isCurrent()) showUnresolvedAcceptance();
   } finally {
     state.acceptingRecommendation = false;
     triggerButton?.removeAttribute("aria-busy");
-    if (hasUnresolvedAcceptance()) {
+    if (isCurrent() && hasUnresolvedAcceptance()) {
       showUnresolvedAcceptance();
-    } else if (state.currentDecision?.decision_id === expectedDecisionId) {
+    } else if (isCurrent()) {
       restoreAcceptanceControls();
     }
   }

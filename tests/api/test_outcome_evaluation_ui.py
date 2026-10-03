@@ -256,7 +256,7 @@ const projection=(id='o',execution=null)=>({observation_id:id,decision_id:'d',ex
 HELPERS
 (async()=>{BODY})().catch(e=>{console.error(e);process.exitCode=1;});
 '''.replace('HELPERS', helpers).replace('BODY', body)
-    context_helpers = '\n'.join(source[source.index(start):source.index(end)] for start, end in [
+    context_helpers = source[source.index('function decisionSiteFingerprint('):source.index('function currentDecisionMatchesSite(')] + '\n'.join(source[source.index(start):source.index(end)] for start, end in [
         ('function observationContext(', 'function setFieldObservationEditorDisabled('),
         ('function sameFieldObservationContext(', 'function localDateTimeParts('),
         ('function syncFieldObservationContext(', 'function restorePendingFieldObservation('),
@@ -500,13 +500,15 @@ function invalidateFieldObservationOperation(){}
 function updateFieldObservationSubmitState(){}
 function observationMessage(message){element('#observation-message').textContent=message;}
 function openContext(){
- state.acceptedMission={decision_id:'d'};
+ state.decisionSiteGeneration=0;
+ state.configuration={site:{latitude:47.1,longitude:6.8,timezone:'Europe/Zurich'}};
+ state.acceptedMission={decision_id:'d',acceptedSiteGeneration:0,acceptedSiteFingerprint:decisionSiteFingerprint()};
  state.fieldObservationSelectedExecutionId=executionId;
  state.fieldObservationDraftContext=observationContext('mission');
  element('#field-observation-dialog').open=true;
 }
 function changeContext(kind){
- if(kind==='decision')state.acceptedMission={decision_id:'other'};
+ if(kind==='decision')state.acceptedMission={decision_id:'other',acceptedSiteGeneration:0,acceptedSiteFingerprint:decisionSiteFingerprint()};
  else {executionId='other-execution';state.fieldObservationSelectedExecutionId=executionId;}
  syncFieldObservationContext();
 }
