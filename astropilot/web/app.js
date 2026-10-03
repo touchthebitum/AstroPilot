@@ -79,7 +79,13 @@ const state = {
   sessionWriteAttempted: false,
   sessionWriteUncertain: false,
   observationBusy: false,
+  // Opening anchor detects external changes; draft context is the effective payload lineage.
+  fieldObservationAnchorContext: null,
   fieldObservationDraftContext: null,
+  fieldObservationInitialObservedAt: null,
+  fieldObservationDecisionConfirmedAt: null,
+  fieldObservationDecisionConfirmationRequired: false,
+  recentDecisions: null,
   fieldObservationContextInvalid: false,
   invalidFieldObservationContextKey: null,
   fieldObservationConflict: null,
@@ -353,6 +359,171 @@ const FIELD_OBSERVATION_WEB_LOCK_NAME = "astropilot.fieldObservationLock.acquire
 let fieldObservationOperationGeneration = 0;
 let activeFieldObservationOperation = null;
 
+
+let recentDecisionsGeneration = 0;
+function invalidateRecentDecisions() { recentDecisionsGeneration += 1; }
+function recentDecisionsFingerprint() {
+  return JSON.stringify([state.fieldObservationAnchorContext, observationContext(state.fieldObservationAnchorContext?.source),
+    siteConfigurationIdentity(), siteTimezone(), document.querySelector("#observation-observed-at").value,
+    state.currentDecision?.decision_id, state.fieldObservationSelectedExecutionId,
+    state.fieldObservationDraftContext, state.fieldObservationLock]);
+}
+function historicalTimeNeedsConfirmation() {
+  if (state.fieldObservationDraftContext?.execution_id || state.fieldObservationLock) return false;
+  if (!state.fieldObservationDecisionConfirmationRequired) return false;
+  if (!state.fieldObservationDecisionConfirmedAt) return true;
+  try {
+    const timezone = state.fieldObservationDraftContext.timezone;
+    return Math.abs(Date.parse(localDateTimeToUtc(document.querySelector("#observation-observed-at").value, timezone))
+      - Date.parse(localDateTimeToUtc(state.fieldObservationDecisionConfirmedAt, timezone))) > 30 * 60 * 1000;
+  } catch (_) { return true; }
+}
+function renderRecentDecisions() {
+  const section = document.querySelector("#observation-associated-decision");
+  if (!section) return;
+  const context = state.fieldObservationDraftContext;
+  const blocked = Boolean(context?.execution_id || state.fieldObservationLock || state.observationBusy || state.fieldObservationContextInvalid);
+  document.querySelector("#observation-choose-decision").disabled = blocked;
+  document.querySelector("#observation-associated-label").textContent = context?.execution_id
+    ? "Décision imposée par la session" : `Décision associée : …${context?.decision_id?.slice(-6) || "—"}`;
+  const catalogue = state.recentDecisions;
+  document.querySelector("#observation-decision-catalogue").hidden = !catalogue?.open;
+  const keep = document.querySelector("#observation-keep-decision");
+  keep.disabled = blocked;
+  keep.textContent = "Conserver cette décision";
+  const back = document.querySelector("#observation-return-current-decision");
+  back.hidden = !context || context.decision_id === state.fieldObservationAnchorContext?.decision_id;
+  back.disabled = blocked;
+  const list = document.querySelector("#observation-decision-candidates");
+  list.replaceChildren();
+  for (const candidate of catalogue?.items || []) {
+    const button = document.createElement("button");
+    button.type = "button";
+    let date = "inconnue";
+    try { if (candidate.retrieved_at_utc != null) date = new Intl.DateTimeFormat("fr-CH", {timeZone: context.timezone, dateStyle: "short", timeStyle: "short"}).format(new Date(candidate.retrieved_at_utc)); } catch (_) {}
+    button.textContent = `Prévision récupérée le ${date} · Site configuré`
+      + (candidate.decision_status != null ? ` · ${candidate.decision_status}` : "")
+      + (candidate.target != null ? ` · ${candidate.target}` : "") + ` · …${candidate.decision_id.slice(-6)}`;
+    button.disabled = blocked;
+    button.addEventListener("click", () => selectRecentDecision(candidate));
+    list.appendChild(button);
+  }
+  document.querySelector("#observation-more-decisions").hidden = !catalogue?.cursor;
+  for (const id of ["observation-more-decisions", "observation-retry-decisions", "observation-extend-decisions"]) {
+    document.querySelector(`#${id}`).disabled = blocked;
+  }
+}
+async function loadRecentDecisions(more = false) {
+  const catalogue = state.recentDecisions;
+  if (!catalogue?.open || state.fieldObservationDraftContext?.execution_id || state.fieldObservationLock
+      || state.fieldObservationContextInvalid || state.observationBusy) return;
+  const generation = ++recentDecisionsGeneration;
+  const fingerprint = recentDecisionsFingerprint();
+  const current = () => generation === recentDecisionsGeneration && ui.observation.open
+    && catalogue === state.recentDecisions && catalogue.open && fingerprint === recentDecisionsFingerprint();
+  if (!more) { catalogue.items = []; catalogue.cursor = null; catalogue.complete = true; }
+  renderRecentDecisions();
+  const message = document.querySelector("#observation-catalogue-status");
+  message.textContent = "Chargement des décisions…";
+  try {
+    const observed = Date.parse(localDateTimeToUtc(document.querySelector("#observation-observed-at").value, siteTimezone()));
+    const site = state.configuration.site;
+    const query = new URLSearchParams({latitude: site.latitude, longitude: site.longitude,
+      retrieved_from: new Date(observed - 24 * 3600000 * catalogue.extension).toISOString(),
+      retrieved_to: new Date(observed + 12 * 3600000 * catalogue.extension).toISOString(), limit: 20});
+    if (more && catalogue.cursor) query.set("cursor", catalogue.cursor);
+    const result = await fieldObservationNetworkRequest(`/v1/decisions/recent?${query}`, {}, async response => {
+      if (!response.ok) { const error = new Error("catalogue"); error.status = response.status; throw error; }
+      return response.json();
+    });
+    if (!current()) return;
+    if (!Array.isArray(result.items) || result.items.some(item => typeof item?.decision_id !== "string" || !item.decision_id)) throw new Error("invalid_catalogue");
+    catalogue.items = [...(more ? catalogue.items : []), ...result.items]
+      .filter((item, index, all) => all.findIndex(other => other.decision_id === item.decision_id) === index);
+    catalogue.cursor = result.next_cursor || null;
+    catalogue.complete = catalogue.complete !== false && result.complete !== false;
+    message.textContent = (!catalogue.items.length ? "Aucune décision trouvée dans cette période. " : "")
+      + (catalogue.complete === false ? "Catalogue incomplet : certains documents n’ont pas pu être lus."
+        : catalogue.items.length ? "Choisissez explicitement une décision ou conservez celle associée." : "");
+    renderRecentDecisions();
+  } catch (error) {
+    if (!current()) return;
+    message.textContent = {503: "Catalogue indisponible sur cet appareil ou momentanément indisponible",
+      409: "La liste a changé. Rechargez les décisions", 422: "La période ou les critères de recherche sont invalides"}[error.status]
+      || "Impossible de charger les décisions. Vérifiez l’heure et le fuseau du site puis réessayez.";
+    catalogue.cursor = null;
+    renderRecentDecisions();
+  }
+}
+function openRecentDecisions() {
+  if (state.fieldObservationDraftContext?.execution_id || state.fieldObservationLock || state.fieldObservationContextInvalid) return;
+  state.recentDecisions.open = true;
+  state.fieldObservationDecisionConfirmationRequired = true;
+  updateFieldObservationSubmitState();
+  loadRecentDecisions();
+}
+async function selectRecentDecision(candidate) {
+  if (state.fieldObservationLock || state.fieldObservationDraftContext?.execution_id || state.fieldObservationContextInvalid || state.observationBusy) return;
+  const generation = ++recentDecisionsGeneration;
+  const fingerprint = recentDecisionsFingerprint();
+  const context = Object.freeze({...state.fieldObservationDraftContext, decision_id: candidate.decision_id,
+    execution_id: null, mission_id: null, historical: true, night_date: candidate.night_date ?? null});
+  try {
+    const valid = await canonicalFieldObservationContextAvailable(context);
+    if (generation !== recentDecisionsGeneration || !ui.observation.open || fingerprint !== recentDecisionsFingerprint()) return;
+    if (!valid) throw new Error("invalid_context");
+    state.fieldObservationDraftContext = context;
+    state.fieldObservationDecisionConfirmationRequired = true;
+    state.fieldObservationDecisionConfirmedAt = document.querySelector("#observation-observed-at").value;
+    invalidateRecentDecisions();
+    renderObservationLinkage();
+    renderRecentDecisions();
+    loadSavedFieldObservations(context);
+    updateFieldObservationSubmitState();
+  } catch (_) {
+    if (generation === recentDecisionsGeneration && ui.observation.open && fingerprint === recentDecisionsFingerprint()) {
+      document.querySelector("#observation-catalogue-status").textContent = "Décision indisponible. Votre saisie est conservée. Réessayez.";
+    }
+  }
+}
+function confirmFieldObservationDecision() {
+  if (state.fieldObservationLock || state.fieldObservationDraftContext?.execution_id || state.fieldObservationContextInvalid || state.observationBusy) return;
+  state.fieldObservationDecisionConfirmedAt = document.querySelector("#observation-observed-at").value;
+  state.recentDecisions.open = false;
+  invalidateRecentDecisions();
+  updateFieldObservationSubmitState();
+}
+function returnToCurrentFieldObservationDecision() {
+  if (state.fieldObservationLock || state.fieldObservationDraftContext?.execution_id || state.fieldObservationContextInvalid || state.observationBusy) return;
+  const anchor = state.fieldObservationAnchorContext;
+  if (!anchor || !sameFieldObservationContext(anchor, observationContext(anchor.source))) return;
+  state.fieldObservationDraftContext = Object.freeze({...anchor, historical: false});
+  confirmFieldObservationDecision();
+  renderObservationLinkage();
+  loadSavedFieldObservations(state.fieldObservationDraftContext);
+}
+function observedAtChanged() {
+  invalidateRecentDecisions();
+  if (!state.recentDecisions) return;
+  state.recentDecisions.cursor = null;
+  state.recentDecisions.extension = 1;
+  try {
+    if (Math.abs(Date.parse(localDateTimeToUtc(document.querySelector("#observation-observed-at").value, siteTimezone()))
+        - Date.parse(localDateTimeToUtc(state.fieldObservationInitialObservedAt, siteTimezone()))) > 30 * 60000
+        && !state.fieldObservationDraftContext?.execution_id && !state.fieldObservationLock) {
+      state.recentDecisions.open = true;
+      state.fieldObservationDecisionConfirmationRequired = true;
+    }
+  } catch (_) {}
+  if (historicalTimeNeedsConfirmation() && !state.fieldObservationLock) {
+    state.fieldObservationDecisionConfirmedAt = null;
+    state.recentDecisions.open = true;
+  }
+  updateFieldObservationSubmitState();
+  renderRecentDecisions();
+  if (state.recentDecisions.open) loadRecentDecisions();
+}
+
 function renderObservationLinkage() {
   const element = document.querySelector("#observation-linkage");
   if (!element) return;
@@ -402,8 +573,12 @@ function observationContext(source) {
 }
 
 function activeObservationContext() {
-  const source = state.fieldObservationDraftContext?.source;
-  return source ? observationContext(source) : null;
+  const source = state.fieldObservationAnchorContext?.source || state.fieldObservationDraftContext?.source;
+  const active = source ? observationContext(source) : null;
+  if (state.fieldObservationAnchorContext && sameFieldObservationContext(state.fieldObservationAnchorContext, active)) {
+    return state.fieldObservationDraftContext;
+  }
+  return state.fieldObservationAnchorContext ? null : active;
 }
 
 function setFieldObservationEditorDisabled(disabled) {
@@ -446,7 +621,7 @@ function updateFieldObservationSubmitState() {
     || !sameFieldObservationContext(state.fieldObservationDraftContext, activeObservationContext())
     || lock.status !== "pending" || lock.persistence_missing);
   setFieldObservationEditorDisabled(hardBlocked);
-  document.querySelector("#observation-save").disabled = blocked || state.observationBusy;
+  document.querySelector("#observation-save").disabled = blocked || state.observationBusy || historicalTimeNeedsConfirmation();
   const reconcile = document.querySelector("#observation-reconcile");
   const refresh = document.querySelector("#observation-refresh-context");
   const abandon = document.querySelector("#observation-abandon-pending");
@@ -457,6 +632,7 @@ function updateFieldObservationSubmitState() {
   if (refresh) refresh.disabled = state.observationBusy || refresh.hidden;
   if (abandon) abandon.disabled = state.observationBusy || abandon.hidden;
   renderFieldObservationPendingDiagnostics();
+  renderRecentDecisions();
 }
 
 function fieldObservationEntryDescription(entry) {
@@ -524,7 +700,12 @@ function openFieldObservation(source) {
   const context = observationContext(source);
   if (!context?.decision_id) return;
   resetFieldObservationForm();
+  state.fieldObservationAnchorContext = Object.freeze({...context});
   state.fieldObservationDraftContext = Object.freeze(context);
+  state.recentDecisions = {open: false, items: [], cursor: null, extension: 1};
+  invalidateRecentDecisions();
+  state.fieldObservationDecisionConfirmedAt = null;
+  state.fieldObservationDecisionConfirmationRequired = false;
   state.fieldObservationContextInvalid = false;
   renderObservationLinkage();
   text("#observation-timezone", context.timezone
@@ -542,8 +723,17 @@ function openFieldObservation(source) {
     state.fieldObservationContextInvalid = true;
   }
   observationMessage("Choisissez les catégories observées, indiquez le vent mesuré en km/h ou précisez l’état de la surface.");
+  state.fieldObservationInitialObservedAt = observedAt.value;
+  // Restore the exact historical envelope, never migrate its UUID or payload.
+  const pendingContext = state.fieldObservationLock?.context;
+  if (pendingContext?.decision_id && pendingContext.decision_id !== context.decision_id && !context.execution_id && !pendingContext.execution_id
+      && pendingContext.site_identity === context.site_identity && pendingContext.timezone === context.timezone) {
+    state.fieldObservationDraftContext = Object.freeze({...pendingContext, historical: true});
+  }
   ui.observation.showModal();
-  loadSavedFieldObservations(context);
+  renderRecentDecisions();
+  renderObservationLinkage();
+  loadSavedFieldObservations(state.fieldObservationDraftContext);
   if (!webLocksAvailable()) {
     updateFieldObservationSubmitState();
     observationMessage("Publication indisponible sur ce navigateur : cette fonction exige Web Locks. La consultation et la réconciliation en lecture seule restent possibles.", {error: true});
@@ -967,6 +1157,7 @@ function sameFieldObservationLock(left, right) {
 }
 
 function adoptFieldObservationLock(lock) {
+  invalidateRecentDecisions();
   state.fieldObservationLock = lock ? Object.freeze(lock) : null;
   state.fieldObservationConflict = lock?.status === "conflict"
     ? Object.freeze({key: lock.key, pending: lock.pending}) : null;
@@ -1843,6 +2034,7 @@ function restorePendingFieldObservation() {
 }
 
 function beginFieldObservationOperation(kind, lock = state.fieldObservationLock) {
+  invalidateRecentDecisions();
   const abortController = typeof AbortController === "function" ? new AbortController() : null;
   const operation = Object.freeze({
     token: ++fieldObservationOperationGeneration,
@@ -1871,6 +2063,7 @@ function fieldObservationOperationCurrent(operation) {
 }
 
 function invalidateFieldObservationOperation() {
+  invalidateRecentDecisions();
   activeFieldObservationOperation?.abortController?.abort();
   fieldObservationOperationGeneration += 1;
   activeFieldObservationOperation = null;
@@ -2416,6 +2609,11 @@ async function publishFieldObservationUnlocked(lock, key, payload, submittedSnap
 async function submitFieldObservation(event) {
   event.preventDefault();
   if (state.observationBusy) return;
+  if (historicalTimeNeedsConfirmation()) {
+    observationMessage("L’heure a changé. Confirmez explicitement la décision associée avant d’enregistrer.", {error: true});
+    renderRecentDecisions();
+    return;
+  }
   const context = state.fieldObservationDraftContext;
   const pageLock = state.fieldObservationLock;
   if (pageLock?.status === "invalid") {
@@ -2625,7 +2823,7 @@ async function reconcileFieldObservationLock() {
 async function canonicalFieldObservationContextAvailable(context, operation = null) {
   // Preview only: no setter, navigation, or temporary editor context changes.
   const execution = context.execution_id;
-  const mission = context.source === "mission";
+  const mission = context.source === "mission" && !context.historical;
   const url = execution ? `/v1/executions/${encodeURIComponent(execution)}/session`
     : mission ? "/v1/accepted-mission/current" : `/v1/decisions/${encodeURIComponent(context.decision_id)}/context`;
   const options = {signal: operation?.abortController?.signal};
@@ -2891,6 +3089,7 @@ async function abandonFieldObservationLock() {
 }
 
 function handleFieldObservationStorageEvent(event) {
+  invalidateRecentDecisions();
   const lock = state.fieldObservationLock;
   if (event.key === null) {
     invalidateFieldObservationOperation();
@@ -5290,6 +5489,16 @@ document.querySelector("#session-complete").addEventListener("click", () => sess
 document.querySelector("#session-interrupt").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "interrupted")));
 document.querySelector("#session-record-evidence").addEventListener("click", () => sessionCommand(recordSessionEvidence));
 document.querySelector("#session-apply-credit").addEventListener("click", () => sessionCommand(creditSession));
+document.querySelector("#observation-choose-decision").addEventListener("click", openRecentDecisions);
+document.querySelector("#observation-observed-at").addEventListener("input", observedAtChanged);
+document.querySelector("#observation-retry-decisions").addEventListener("click", () => loadRecentDecisions());
+document.querySelector("#observation-more-decisions").addEventListener("click", () => loadRecentDecisions(true));
+document.querySelector("#observation-extend-decisions").addEventListener("click", () => {
+  state.recentDecisions.extension += 1;
+  loadRecentDecisions();
+});
+document.querySelector("#observation-keep-decision").addEventListener("click", confirmFieldObservationDecision);
+document.querySelector("#observation-return-current-decision").addEventListener("click", returnToCurrentFieldObservationDecision);
 document.querySelector("#field-observation-form").addEventListener("submit", submitFieldObservation);
 document.querySelector("#observation-reconcile").addEventListener("click", reconcileFieldObservationLock);
 document.querySelector("#observation-refresh-context").addEventListener("click", refreshInvalidFieldObservationContext);

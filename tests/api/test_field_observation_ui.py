@@ -93,7 +93,8 @@ class Element {
     this.classList = {toggle() {}};
   }
   replaceChildren() { this.children = []; this.value = ''; }
-  append(child) { this.children.push(child); }
+  append(...children) { (this.children ||= []).push(...children); }
+  appendChild(child) { (this.children ||= []).push(child); }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   querySelectorAll(selector) { return selector === 'input, select, button' ? formControls : []; }
 }
@@ -108,6 +109,8 @@ const document = {
 };
 function text(selector, value) { document.querySelector(selector).textContent = value; }
 function renderObservationLinkage() {}
+function renderRecentDecisions() {}
+function invalidateRecentDecisions() {}
 function renderSavedFieldObservations() {}
 function siteTimezone() { return 'Europe/Zurich'; }
 function siteConfigurationIdentity() { return null; }
@@ -247,6 +250,9 @@ class Element {
     this.textContent = ''; this.open = false; this.options = []; this.listeners = {};
     this.classList = {toggle: (_name, _enabled) => {}};
   }
+  replaceChildren() { this.children = []; }
+  append(...children) { (this.children ||= []).push(...children); }
+  appendChild(child) { (this.children ||= []).push(child); }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   showModal() { this.open = true; }
   close() { this.open = false; }
@@ -272,6 +278,7 @@ const selectIds = ['#observation-clouds', '#observation-transparency', '#observa
   '#observation-moon-halo', '#observation-stop-reason', '#observation-hfr-unit'];
 const radioIds = ['dry', 'damp', 'dew_present'].map(value => `#surface-${value}`);
 const document = {
+  createElement() { return new Element(); },
   querySelector(selector) {
     const choice = selector.match(/^\[data-observation-choice="([^"]+)"\]$/);
     if (choice) return element(`#observation-${choice[1]}`);
@@ -335,6 +342,9 @@ function assertReadRequest(options) {
   assert.ok(options === undefined || (options.signal && options.method === undefined && options.body === undefined));
 }
 function clearHarness() {
+  state.fieldObservationAnchorContext = null;
+  state.fieldObservationDecisionConfirmationRequired = false;
+  state.fieldObservationDecisionConfirmedAt = null;
   storage.clear(); recoveryRecords.clear(); state.observationBusy = false; uuid = 0;
   activeFieldObservationOperation = null; fieldObservationOperationGeneration = 0;
   storageFailures.get = false; storageFailures.set = false; storageFailures.remove = false;
@@ -361,6 +371,166 @@ function clearHarness() {
     harness = RECOVERY_IDB_HARNESS + '\nconst recoveryRecords = new Map(); const indexedDB = recoveryIndexedDB(recoveryRecords);\n' + harness
     checks = r'''
 async function check() {
+
+  // Retroactive catalogue: explicit selection, exact site/time window, and decision-only publication.
+  clearHarness();
+  let recentCalls = [];
+  const old = {decision_id: 'historical-a93f2c', retrieved_at_utc: '2026-09-28T22:00:00Z',
+    decision_status: null, target: null, night_date: null};
+  fetch = (url) => { recentCalls.push(url); return response(200, {items: [old], complete: false, next_cursor: 'page-2'}); };
+  openFieldObservation('decision');
+  assert.equal(recentCalls.length, 0);
+  assert.equal(state.fieldObservationDraftContext.decision_id, 'decision-1');
+  element('#observation-observed-at').value = '2026-09-29T22:14';
+  state.fieldObservationInitialObservedAt = '2026-09-29T22:14';
+  openRecentDecisions();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  let query = new URL(recentCalls[0], 'http://local').searchParams;
+  assert.equal(query.get('latitude'), '47.1'); assert.equal(query.get('longitude'), '6.8');
+  assert.equal(query.get('retrieved_from'), '2026-09-28T20:14:00.000Z');
+  assert.equal(query.get('retrieved_to'), '2026-09-30T08:14:00.000Z');
+  assert.equal(query.get('limit'), '20');
+  assert.equal(state.fieldObservationDraftContext.decision_id, 'decision-1');
+  assert.match(element('#observation-catalogue-status').textContent, /Catalogue incomplet/);
+  assert.match(element('#observation-decision-candidates').children[0].textContent, /Prévision récupérée le.*Site configuré.*a93f2c/);
+  await loadRecentDecisions(true);
+  assert.equal(new URL(recentCalls[1], 'http://local').searchParams.get('cursor'), 'page-2');
+  assert.equal(state.fieldObservationDraftContext.decision_id, 'decision-1');
+  fetch = () => response(200, {decision_id: old.decision_id});
+  await selectRecentDecision(old);
+  setQuick({cloud: 'few'});
+  assert.equal(buildFieldObservationPayload().decision_id, old.decision_id);
+  assert.equal(state.currentDecision.decision_id, 'decision-1');
+  element('#observation-observed-at').value = '2026-09-29T23:15';
+  assert.equal(historicalTimeNeedsConfirmation(), true);
+  let posts = [];
+  fetch = (url, options) => options.method === 'POST'
+    ? (posts.push(JSON.parse(options.body)), Promise.reject(new TypeError('offline')))
+    : response(404, {});
+  await submitFieldObservation(event);
+  assert.equal(posts.length, 0);
+  state.fieldObservationDecisionConfirmedAt = element('#observation-observed-at').value;
+  await submitFieldObservation(event);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].decision_id, old.decision_id);
+  assert.equal(posts[0].execution_id, null);
+  const historicalEnvelope = clone(state.fieldObservationLock.pending);
+  assert.equal(element('#observation-return-current-decision').disabled, true);
+  returnToCurrentFieldObservationDecision();
+  assert.equal(state.fieldObservationDraftContext.decision_id, old.decision_id);
+  await selectRecentDecision({decision_id: 'wrong'});
+  assert.equal(state.fieldObservationDraftContext.decision_id, old.decision_id);
+  // Reconstruct from the validated pending envelope alone, without a historical flag/global lock.
+  localStorage.removeItem(FIELD_OBSERVATION_LOCK_KEY);
+  state.fieldObservationLock = null;
+  rebuildPendingFieldObservationInventoryUnlocked();
+  assert.equal(state.fieldObservationLock.context.historical, undefined);
+  openFieldObservation('decision');
+  assert.equal(state.fieldObservationDraftContext.decision_id, old.decision_id);
+  assert.equal(state.fieldObservationDraftContext.historical, true);
+  assert.equal(element('#observation-save').disabled, false);
+  assert.match(element('#observation-associated-label').textContent, /a93f2c/);
+  assert.equal(fieldObservationSnapshot(), historicalEnvelope.snapshot);
+  await submitFieldObservation(event);
+  assert.equal(JSON.stringify(posts[1]), JSON.stringify(posts[0]));
+  assert.equal(state.fieldObservationLock.pending.payload.observation_id, historicalEnvelope.payload.observation_id);
+
+  // A mission without explicit execution can choose any persisted decision; no implicit matching.
+  clearHarness(); openFieldObservation('mission');
+  fetch = () => response(200, {decision_id: old.decision_id});
+  await selectRecentDecision(old);
+  assert.equal(state.fieldObservationDraftContext.execution_id, null);
+  assert.equal(state.fieldObservationDraftContext.decision_id, old.decision_id);
+  assert.equal(state.fieldObservationDraftContext.mission_id, null);
+
+  // Significant time edits reveal the catalogue, never choose its first item.
+  clearHarness(); openFieldObservation('decision');
+  state.fieldObservationInitialObservedAt = '2026-09-29T22:14';
+  element('#observation-observed-at').value = '2026-09-29T23:00';
+  fetch = () => response(200, {items: [old], complete: true});
+  observedAtChanged(); await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(state.recentDecisions.open, true);
+  assert.equal(state.fieldObservationDraftContext.decision_id, 'decision-1');
+  setQuick({cloud: 'few', wind: '7'});
+  assert.equal(element('#observation-save').disabled, true);
+  let unconfirmedPosts = 0;
+  fetch = () => { unconfirmedPosts++; return response(200, {}); };
+  await submitFieldObservation(event);
+  assert.equal(unconfirmedPosts, 0);
+  confirmFieldObservationDecision();
+  assert.equal(element('#observation-save').disabled, false);
+  assert.equal(buildFieldObservationPayload().decision_id, 'decision-1');
+  element('#observation-observed-at').value = '2026-09-30T00:01';
+  fetch = () => response(200, {items: [old], complete: true});
+  observedAtChanged(); await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(element('#observation-save').disabled, true);
+  assert.equal(state.fieldObservationDecisionConfirmedAt, null);
+  fetch = () => response(200, {decision_id: old.decision_id});
+  await selectRecentDecision(old);
+  assert.equal(element('#observation-save').disabled, false);
+  assert.equal(element('#observation-return-current-decision').hidden, false);
+  const beforeReturn = element('#observation-observed-at').value;
+  let restoredReads = [];
+  const originalLoadSaved = loadSavedFieldObservations;
+  loadSavedFieldObservations = async context => { restoredReads.push(context.decision_id); };
+  returnToCurrentFieldObservationDecision();
+  loadSavedFieldObservations = originalLoadSaved;
+  assert.equal(restoredReads.join(), 'decision-1');
+  assert.equal(element('#field-observation-dialog').open, true);
+  assert.equal(element('#observation-observed-at').value, beforeReturn);
+  assert.equal(element('#observation-clouds').value, 'few');
+  assert.equal(element('#observation-wind').value, '7');
+  assert.equal(state.fieldObservationDraftContext.historical, false);
+  assert.equal(buildFieldObservationPayload().decision_id, 'decision-1');
+  assert.equal(element('#observation-return-current-decision').hidden, true);
+  assert.equal(element('#observation-save').disabled, false);
+  state.recentDecisions.open = true;
+  for (const partialFirst of [true, false]) {
+    fetch = () => response(200, {items: [], complete: !partialFirst, next_cursor: 'next'});
+    await loadRecentDecisions();
+    if (partialFirst) assert.match(element('#observation-catalogue-status').textContent, /Aucune décision.*Catalogue incomplet/);
+    fetch = () => response(200, {items: [old], complete: partialFirst});
+    await loadRecentDecisions(true);
+    assert.match(element('#observation-catalogue-status').textContent, /Catalogue incomplet/);
+    fetch = () => response(200, {items: [old], complete: true});
+    await loadRecentDecisions();
+    assert.equal(state.recentDecisions.complete, true);
+  }
+  for (const [status, pattern] of [[200, /Aucune décision/], [503, /Catalogue indisponible/],
+      [422, /critères.*invalides/], [409, /liste a changé/]]) {
+    fetch = () => response(status, {items: [], complete: true});
+    await loadRecentDecisions();
+    assert.match(element('#observation-catalogue-status').textContent, pattern);
+    assert.equal(element('#observation-clouds').value, 'few');
+    assert.equal(element('#observation-wind').value, '7');
+  }
+  fetch = () => response(200, {items: [old], complete: true});
+  await loadRecentDecisions(); assert.equal(state.recentDecisions.items.length, 1);
+
+  // Delayed responses cannot survive time/site/decision/session/modal/storage changes.
+  for (const change of [
+    () => { element('#observation-observed-at').value = '2026-09-29T23:01'; },
+    () => { state.configuration.site.latitude = 46; },
+    () => { state.currentDecision = {decision_id: 'changed'}; },
+    () => { state.fieldObservationAnchorContext = {...state.fieldObservationAnchorContext, execution_id: 'changed'}; },
+    () => { ui.observation.close(); invalidateRecentDecisions(); ui.observation.showModal(); },
+    () => { handleFieldObservationStorageEvent({key: 'unrelated'}); },
+  ]) {
+    clearHarness(); openFieldObservation('decision'); state.recentDecisions.open = true;
+    let resolve;
+    fetch = () => new Promise(done => { resolve = done; });
+    const pendingList = loadRecentDecisions(); change();
+    resolve(response(200, {items: [old], complete: true})); await pendingList;
+    assert.equal(state.recentDecisions.items.length, 0);
+  }
+  clearHarness(); openFieldObservation('mission');
+  state.fieldObservationDraftContext = {...state.fieldObservationDraftContext, execution_id: 'explicit'};
+  recentCalls = []; fetch = url => { recentCalls.push(url); return response(200, {}); };
+  openRecentDecisions(); await selectRecentDecision(old); renderRecentDecisions();
+  assert.equal(recentCalls.length, 0);
+  assert.equal(element('#observation-choose-decision').disabled, true);
+  assert.equal(element('#observation-associated-label').textContent, 'Décision imposée par la session');
+
   clearHarness();
   setQuick({cloud: 'mostly_cloudy', transparency: 'excellent', wind: '8.5'});
   element('#surface-damp').checked = true;
@@ -1170,6 +1340,9 @@ class Element {
   constructor(id = '') { this.id = id; this.value = ''; this.checked = false; this.disabled = false;
     this.hidden = false; this.textContent = ''; this.open = true; this.children = []; this.listeners = {};
     this.classList = {toggle() {}}; }
+  replaceChildren() { this.children = []; }
+  append(...children) { (this.children ||= []).push(...children); }
+  appendChild(child) { (this.children ||= []).push(child); }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   querySelectorAll(selector) {
     if (selector === '[data-observation-choice]') return [this.owner('#observation-clouds'), this.owner('#observation-transparency')];

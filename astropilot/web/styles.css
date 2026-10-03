@@ -516,3 +516,8 @@ button { color: inherit; }
 .history-table td, .history-table th, .history-matrix td, .history-matrix th { padding: .65rem; border: 1px solid var(--border, #596273); text-align: left; vertical-align: top; }
 .history-table pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 30rem; }
 .history-degraded { border: 1px solid currentColor; padding: 1rem; }
+
+#observation-associated-decision { margin: 1rem 0; padding: 1rem; border: 1px solid var(--border-color, #64748b); border-radius: .5rem; }
+#observation-decision-candidates { display: grid; gap: .5rem; margin-block: .75rem; }
+#observation-decision-candidates button { text-align: left; }
+#observation-decision-catalogue > button { margin: .25rem; }
