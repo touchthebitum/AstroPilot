@@ -540,6 +540,19 @@
                 <input id="observation-observed-at" type="datetime-local" required>
                 <small id="observation-timezone">Fuseau du site : —</small>
               </label>
+              <section id="observation-associated-decision" aria-label="Décision associée">
+                <strong>Décision associée</strong>
+                <p id="observation-associated-label"></p>
+                <button id="observation-choose-decision" type="button">Choisir une autre décision</button>
+                <div id="observation-decision-catalogue" hidden>
+                  <p id="observation-catalogue-status" role="status" aria-live="polite"></p>
+                  <div id="observation-decision-candidates"></div>
+                  <button id="observation-keep-decision" type="button">Conserver cette décision</button>
+                  <button id="observation-more-decisions" type="button" hidden>Charger davantage</button>
+                  <button id="observation-retry-decisions" type="button">Recharger les décisions</button>
+                  <button id="observation-extend-decisions" type="button">Étendre explicitement la période</button>
+                </div>
+              </section>
               <div class="observation-quick-grid">
                 <label class="observation-choice" for="observation-clouds">
                   <span><strong>Nuages</strong><small>Catégorie observée</small></span>
