@@ -542,7 +542,8 @@ def test_restored_retry_reuses_exact_persisted_payload_and_timestamp():
 
     assert "const attempt = state.pendingAcceptanceAttempt" in retry
     assert "attemptOverride: attempt" in retry
-    assert "acceptance_request_id" not in retry
+    assert "crypto.randomUUID" not in retry
+    assert "attemptId: attempt.acceptance_request_id" in retry
     assert "crypto.randomUUID" not in retry
     assert "new Date" not in retry
     assert "attempt = attemptOverride" in acceptance

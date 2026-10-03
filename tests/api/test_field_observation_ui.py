@@ -2747,7 +2747,7 @@ function show() {}
   release({ok: true, json: async () => ({decision_id: 'stale-A', status: 'available'})});
   await pendingTonight;
   assert.equal(run(tab, 'state.currentDecision'), null);
-  assert.match(tab.sandbox.state.error, /site a changé pendant le calcul/);
+  assert.equal(tab.sandbox.state.error, ''); // stale Tonight leaves the current error/navigation untouched
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
     additions += configuration + setter + tonight

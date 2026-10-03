@@ -120,3 +120,32 @@ persistence, restoration, clearing and mission invalidation, without stubbing th
 pending or lock functions. It exercises first-load repeated/ABC notifications,
 loading replacement success/failure/retry and user navigation, and overlapping
 A/exact-retry-A/B confirmations with B success, failure and timeout/recovery.
+
+
+Acceptance recovery has a dedicated navigation owner: an object identifying the
+attempt UUID, the captured view and its navigation revision. Each recovery replaces
+that owner; a new ordinary acceptance revokes it. After a valid historical
+confirmation clears its own pending and releases its own lock, recovery may restart
+loadConfiguration only while it still owns unresolved_acceptance, with no newer
+pending or lock. This closes the recovery screen after storage-only reopening or a
+site switch without activating the historical mission. Any navigation (including
+away/back) or newer attempt prevents the old recovery from redirecting. Network,
+HTTP and malformed-confirmation failures retain the exact pending envelope and
+allow retry while the recovery still owns its screen.
+
+Tonight captures configuration generation, site generation/fingerprint, and the
+loading view plus navigation revision. Success and catch check all these guards
+before changing data, error messages or navigation. A stale response cannot hide a
+configuration error/retry or replace a user-selected view. Finally only releases
+request/UI controls and never changes the view. Nominal success/refusal/error routes
+remain unchanged.
+
+The pending acceptance parser requires string types before testing both
+acceptance_request_id and decision_id against their identity pattern, in both
+supported envelope versions. Missing, null, numeric, boolean, object, empty,
+whitespace and invalid-string identities are rejected without implicit conversion;
+existing valid envelopes and exact retry UUID/payload remain readable.
+
+These UI ownership checks do not cancel server writes already started. The Node
+harness exercises production recovery, pending parsing/persistence and Tonight with
+delayed promises; it does not establish real-browser concurrency coverage.

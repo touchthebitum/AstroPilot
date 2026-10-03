@@ -19,9 +19,12 @@ def test_configuration_and_acceptance_generation_races():
         return source[source.index(start):source.index(end)]
 
     helpers = between('const DECISION_SITE_STORAGE_KEY', 'function activeObservationContext(')
+    helpers += between('function setView(', 'const labels = Object.freeze')
+    helpers += between('function show(view)', 'function duration(')
+    helpers += between('function setCurrentFieldObservationDecision(', 'function normalizeError(')
     helpers += between('function initializeConfiguration(', 'async function restoreSavedMission(')
     helpers += between('async function loadConfiguration(', 'const availabilityFieldsByMode')
-    helpers += between('async function acceptRecommendation(', 'async function loadTonight(')
+    helpers += between('async function retryPendingAcceptance(', 'document.querySelector("#site-next")')
     helpers += between('function sameAcceptanceIntent(', 'function resetMissionPresentation(')
     helpers += between('function resetMissionPresentation(', 'function renderDecision(')
     helpers += between('async function restoreSavedMission(', 'function invalidateAvailabilityForSiteChange(')
@@ -31,14 +34,19 @@ const A = {configured: true, profile_revision: 1, equipment: {}, site: {latitude
 const B = {...A, site: {...A.site, latitude: 46}};
 const C = {...A, site: {...A.site, latitude: 45}};
 const element = () => ({hidden: true, disabled: false, querySelector: element,
-  replaceChildren() {}, append() {}, focus() {}});
+  setAttribute() {}, removeAttribute() {}, replaceChildren() {}, append() {}, focus() {}});
 const crypto = require("node:crypto");
 const PENDING_ACCEPTANCE_STORAGE_KEY = "astropilot.pendingAcceptance";
 const PENDING_ACCEPTANCE_STORAGE_VERSION = 2;
-const document = {querySelector: element, createElement: element};
+const document = {querySelector: element, querySelectorAll: () => [], createElement: element};
+const wizardStates = ["site", "equipment", "projects", "review"];
+function requestAnimationFrame(callback) {callback();}
+function invalidateOutcomeHistory() {}
 let opened = 0, rendered = 0, queue = [];
 const ui = {addObservationMessage: element(), addObservationDecision: element(),
-  configurationRecover: element(), configurationRecoveryConfirm: element(),
+  configurationLoading: element(), configurationError: element(), availability: element(),
+  loading: element(), message: element(), pendingAcceptance: element(), decision: element(),
+  editAvailability: element(), editConfiguration: element(), recommendationSubmit: element(), refresh: element(), configurationRecover: element(), configurationRecoveryConfirm: element(),
   configurationRecoveryConfirmation: element(), onboarding: element(),
   savedMissionEntry: element(), savedMissionChoice: element(), savedMissionTarget: element(),
   primaryIntentChoice: element(), retryPendingAcceptance: element(), pendingAcceptanceMessage: element(), mission: {close() {}, showModal() { opened++; }}};
@@ -65,7 +73,7 @@ function prefillConfiguration() {}
 function renderAvailabilityTimezone() {}
 function restorePendingFieldObservationInventory() {}
 
-function setView(view) { state.viewRevision = (state.viewRevision || 0) + 1; state.view = view; }
+
 function showFormError() {}
 function renderReview() {}
 function restoreAcceptanceControls() {}
@@ -83,7 +91,9 @@ function showAcceptedIntent() { return true; }
 
 
 function renderMission() { rendered++; }
-function show() {}
+
+function showAvailabilityError(message) { state.availabilityError = message; }
+function renderDecision() { setView("recommendation"); }
 function showMessage() {}
 '''
     checks = r'''
@@ -242,6 +252,91 @@ function showMessage() {}
   }
   clearAcceptedMission();
   opened = 0; rendered = 0;
+  // Strict production parser: both identity fields reject implicit coercion, in v1/v2.
+  const request = {acceptance_request_id: 'request-A', decision_id: 'decision-A', source: 'primary_recommendation',
+    selected_catalog_key: 'M31', acquisition_intent_id: null, selected_at: '2026-10-03T10:00:00.000Z'};
+  for (const version of [1, 2]) {
+    for (const key of ['acceptance_request_id', 'decision_id']) {
+      for (const value of [undefined, null, 123, true, {}, '', '   ', 'bad/id']) {
+        const invalid = {...request, [key]: value}; if (version === 1) delete invalid.acquisition_intent_id;
+        assert.equal(parsePendingAcceptance(JSON.stringify({version, state: 'unresolved', request: invalid})), null);
+      }
+    }
+    const valid = {...request}; if (version === 1) delete valid.acquisition_intent_id;
+    assert.equal(parsePendingAcceptance(JSON.stringify({version, state: 'unresolved', request: valid})).decision_id, 'decision-A');
+  }
+  // Storage-only reopen, site switch, superseding navigation/B, and real retry failures.
+  for (const outcome of ['reopen', 'site', 'navigation', 'B', 'network', 'http', 'malformed']) {
+    state.pendingAcceptanceAttempt = null; state.acceptedMission = null; state.acceptingRecommendation = false;
+    let recoveredAttempt = request;
+    if (outcome === 'reopen') {
+      installCurrentConfiguration(A, beginConfigurationOperation()); state.currentDecision = decision;
+      const initial = acceptRecommendation(args); queue.shift().reject(new Error('timeout')); await initial;
+      recoveredAttempt = state.pendingAcceptanceAttempt;
+      state.pendingAcceptanceAttempt = null; // restart: only localStorage survives
+    } else persistPendingAcceptanceAttempt(request);
+    state.configuration = null; state.currentDecision = null;
+    assert.equal(restorePendingAcceptanceAttempt(), true); showUnresolvedAcceptance();
+    const recovery = retryPendingAcceptance(); const retry = queue.shift();
+    assert.deepEqual(JSON.parse(retry.options.body), recoveredAttempt);
+    if (outcome === 'site') installCurrentConfiguration(B, beginConfigurationOperation());
+    if (outcome === 'navigation') { setView('review'); setView('unresolved_acceptance'); }
+    let attemptB, currentB, requestB;
+    if (outcome === 'B') {
+      installCurrentConfiguration(B, beginConfigurationOperation());
+      clearPendingAcceptanceAttempt(state.pendingAcceptanceAttempt);
+      clearAcceptedMission(); state.currentDecision = {...decision, decision_id: 'decision-B'};
+      setView('review');
+      currentB = acceptRecommendation({...args, expectedDecisionId: 'decision-B'});
+      requestB = queue.shift(); attemptB = state.pendingAcceptanceAttempt;
+    }
+    if (outcome === 'network') retry.reject(new Error('offline'));
+    else reply(retry, outcome === 'malformed' ? {} : accepted, outcome !== 'http');
+    await flush();
+    if (['reopen', 'site'].includes(outcome)) {
+      assert.equal(state.view, 'loading_configuration');
+      const config = queue.shift(); assert.equal(config.url, '/v1/configuration'); reply(config, B); await flush();
+      reply(queue.shift(), {}); await flush(); reply(queue.shift(), []);
+    }
+    await recovery;
+    assert.equal(state.acceptedMission, null);
+    if (['reopen', 'site'].includes(outcome)) assert.equal(state.view, 'availability');
+    if (['reopen', 'site'].includes(outcome)) assert.equal(ui.pendingAcceptance.hidden, true);
+    if (outcome === 'navigation') assert.equal(state.view, 'unresolved_acceptance');
+    if (outcome === 'B') {
+      assert.equal(state.view, 'review'); assert.equal(state.pendingAcceptanceAttempt, attemptB);
+      assert.equal(state.acceptanceRequestOwner, attemptB.acceptance_request_id);
+      assert.equal(state.acceptingRecommendation, true);
+      assert.deepEqual(parsePendingAcceptance(storage.get(PENDING_ACCEPTANCE_STORAGE_KEY)), attemptB);
+      requestB.reject(new Error('timeout-B')); await currentB;
+    }
+    if (['network', 'http', 'malformed'].includes(outcome)) {
+      assert.equal(state.view, 'unresolved_acceptance'); assert.deepEqual(state.pendingAcceptanceAttempt, request);
+      assert.equal(ui.retryPendingAcceptance.disabled, false);
+      assert.deepEqual(parsePendingAcceptance(storage.get(PENDING_ACCEPTANCE_STORAGE_KEY)), request);
+    }
+    state.pendingAcceptanceAttempt = null; storage.delete(PENDING_ACCEPTANCE_STORAGE_KEY);
+  }
+  // Delayed Tonight success/catch preserves configuration error, and away/back revokes navigation.
+  for (const outcome of ['stale-success', 'stale-network', 'navigation', 'nominal', 'nominal-network']) {
+    installCurrentConfiguration(A, beginConfigurationOperation()); setView('availability');
+    const tonight = loadTonight({mode: 'tonight'}); const tonightRequest = queue.shift();
+    if (outcome.startsWith('stale')) {
+      const load = loadConfiguration(); const old = queue.shift();
+      const reload = handleDecisionSiteStorageEvent({key: DECISION_SITE_STORAGE_KEY, newValue: decisionSiteFingerprint(B.site)});
+      queue.shift().reject(new Error('offline')); await reload; reply(old, A); await load;
+      assert.equal(state.view, 'configuration_error');
+    }
+    if (outcome === 'navigation') {setView('review'); setView('loading_recommendation');}
+    if (outcome.endsWith('network')) tonightRequest.reject(new Error('offline'));
+    else reply(tonightRequest, {...decision, status: 'available'});
+    await tonight;
+    assert.equal(state.view, outcome.startsWith('stale') ? 'configuration_error'
+      : outcome === 'navigation' ? 'loading_recommendation'
+      : outcome === 'nominal' ? 'recommendation' : 'availability');
+    if (outcome.startsWith('stale')) {assert.equal(state.decisionSiteReloadRequired, true); assert.equal(state.currentDecision, null); assert.equal(ui.configurationError.hidden, false);}
+    assert.equal(state.requestingRecommendation, false);
+  }
   // Nominal acceptance retains its presentation and mission observation context.
   installCurrentConfiguration(A, beginConfigurationOperation()); state.currentDecision = decision;
   const nominal = acceptRecommendation(args); reply(queue.shift(), accepted); await nominal;

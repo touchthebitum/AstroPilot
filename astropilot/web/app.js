@@ -72,6 +72,7 @@ const state = {
   pendingAcceptanceStorageInvalid: false,
   acceptingRecommendation: false,
   acceptanceRequestOwner: null,
+  acceptanceRecoveryNavigationOwner: null,
   acceptanceBlocked: false,
   savingConfiguration: false,
   requestingRecommendation: false,
@@ -3918,7 +3919,9 @@ function parsePendingAcceptance(raw) {
   const identityPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
   const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
   if (
-    !identityPattern.test(request.acceptance_request_id)
+    typeof request.acceptance_request_id !== "string"
+    || !identityPattern.test(request.acceptance_request_id)
+    || typeof request.decision_id !== "string"
     || !identityPattern.test(request.decision_id)
     || !["primary_recommendation", "alternative"].includes(request.source)
     || typeof request.selected_catalog_key !== "string"
@@ -5282,7 +5285,18 @@ async function retryPendingAcceptance() {
     showUnresolvedAcceptance();
     return;
   }
+  if (state.acceptingRecommendation) return;
+  const recoveryNavigationOwner = {attemptId: attempt.acceptance_request_id,
+    view: state.view, revision: state.viewRevision || 0};
+  state.acceptanceRecoveryNavigationOwner = recoveryNavigationOwner;
+  const ownsNavigation = () => state.acceptanceRecoveryNavigationOwner === recoveryNavigationOwner
+    && recoveryNavigationOwner.view === "unresolved_acceptance"
+    && recoveryNavigationOwner.view === state.view
+    && recoveryNavigationOwner.revision === (state.viewRevision || 0)
+    && !state.pendingAcceptanceAttempt && !state.pendingAcceptanceStorageInvalid
+    && !state.acceptanceRequestOwner;
   await acceptRecommendation({
+    recoveryNavigationOwner,
     source: attempt.source,
     selectedCatalogKey: attempt.selected_catalog_key,
     expectedDecisionId: attempt.decision_id,
@@ -5291,6 +5305,8 @@ async function retryPendingAcceptance() {
     acquisitionIntentId: attempt.acquisition_intent_id,
     attemptOverride: attempt,
   });
+  // A resolved historical retry returns through the normal configuration cycle.
+  if (ownsNavigation()) await loadConfiguration();
 }
 
 async function acceptRecommendation({
@@ -5301,8 +5317,15 @@ async function acceptRecommendation({
   selectedTarget,
   acquisitionIntentId,
   attemptOverride = null,
+  recoveryNavigationOwner = null,
 }) {
   if (state.acceptingRecommendation) return;
+  if (!recoveryNavigationOwner) state.acceptanceRecoveryNavigationOwner = null;
+  const ownsRecoveryNavigation = () => !recoveryNavigationOwner
+    || (state.acceptanceRecoveryNavigationOwner === recoveryNavigationOwner
+      && recoveryNavigationOwner.attemptId === state.pendingAcceptanceAttempt?.acceptance_request_id
+      && recoveryNavigationOwner.view === state.view
+      && recoveryNavigationOwner.revision === (state.viewRevision || 0));
   const decision = state.currentDecision;
   const configurationGeneration = state.configurationGeneration;
   const siteGeneration = state.decisionSiteGeneration;
@@ -5395,6 +5418,10 @@ async function acceptRecommendation({
     const payload = await response.json().catch(() => ({}));
 
     if (!response.ok) {
+      if (attemptOverride) {
+        if (ownsRequest() && ownsRecoveryNavigation()) ui.retryPendingAcceptance.disabled = false;
+        return;
+      }
       clearPendingAcceptanceAttempt(attempt);
       if (!isCurrent() || !ownsRequest()) return;
       const [message, blocked] = acceptanceError(payload?.detail?.code, response.status);
@@ -5417,10 +5444,13 @@ async function acceptRecommendation({
       && payload.selection_id === mission.selection_id
       && payload.decision_id === mission.decision_id;
     if (!validAcceptedMission) {
-      if (ownsRequest()) showUnresolvedAcceptance();
+      if (ownsRequest() && ownsRecoveryNavigation()) {
+        if (recoveryNavigationOwner) ui.retryPendingAcceptance.disabled = false;
+        else showUnresolvedAcceptance();
+      }
       return;
     }
-    if (!isCurrent() || !ownsRequest()) {
+    if (!isCurrent() || !ownsRequest() || !ownsRecoveryNavigation()) {
       // The server owns this successful confirmation; keep it available as history.
       state.lastHistoricalAcceptance = payload;
       const cleared = clearPendingAcceptanceAttempt(attempt);
@@ -5437,7 +5467,8 @@ async function acceptRecommendation({
         : acceptedButton?.closest(".alternative-card")?.querySelector(".intent-choice");
       if (!acceptedSubject || (intentMode(acceptedSubject) !== "legacy" && !acceptedContainer)
           || !showAcceptedIntent(acceptedSubject, acceptedContainer, payload.selected_acquisition_intent_id)) {
-        showUnresolvedAcceptance();
+        if (recoveryNavigationOwner) ui.retryPendingAcceptance.disabled = false;
+        else showUnresolvedAcceptance();
         return;
       }
     }
@@ -5470,14 +5501,15 @@ async function acceptRecommendation({
     renderMission(mission);
     ui.mission.showModal();
   } catch (_error) {
-    if (isCurrent() && ownsRequest()) showUnresolvedAcceptance();
+    if (!recoveryNavigationOwner && isCurrent() && ownsRequest()) showUnresolvedAcceptance();
   } finally {
     if (ownsRequest()) {
       state.acceptanceRequestOwner = null;
       state.acceptingRecommendation = false;
       triggerButton?.removeAttribute("aria-busy");
-      if (isCurrent() && hasUnresolvedAcceptance()) {
-        showUnresolvedAcceptance();
+      if ((isCurrent() || recoveryNavigationOwner) && ownsRecoveryNavigation() && hasUnresolvedAcceptance()) {
+        if (recoveryNavigationOwner) ui.retryPendingAcceptance.disabled = false;
+        else showUnresolvedAcceptance();
       } else if (isCurrent()) {
         restoreAcceptanceControls();
       }
@@ -5498,6 +5530,7 @@ async function loadTonight(availability) {
     return;
   }
   if (state.requestingRecommendation) return;
+  const configurationGeneration = state.configurationGeneration;
   const siteGeneration = state.decisionSiteGeneration;
   const siteFingerprint = decisionSiteFingerprint();
   state.requestingRecommendation = true;
@@ -5505,6 +5538,12 @@ async function loadTonight(availability) {
   ui.recommendationSubmit.disabled = true;
   showAvailabilityError("");
   show("loading");
+  const navigationOwner = {view: state.view, revision: state.viewRevision || 0};
+  const isCurrent = () => configurationGeneration === state.configurationGeneration
+    && siteGeneration === state.decisionSiteGeneration
+    && siteFingerprint === decisionSiteFingerprint() && !state.decisionSiteReloadRequired
+    && navigationOwner.view === state.view
+    && navigationOwner.revision === (state.viewRevision || 0);
   ui.refresh.disabled = true;
   setCurrentFieldObservationDecision(null);
 
@@ -5515,11 +5554,7 @@ async function loadTonight(availability) {
       body: JSON.stringify({ availability }),
     });
     const payload = await response.json().catch(() => ({}));
-    if (siteGeneration !== state.decisionSiteGeneration || siteFingerprint !== decisionSiteFingerprint()) {
-      showAvailabilityError("Le site a changé pendant le calcul. Préparez à nouveau votre nuit.");
-      setView("availability");
-      return;
-    }
+    if (!isCurrent()) return;
 
     if (!response.ok) {
       if (payload?.error === "user_profile_unavailable") {
@@ -5573,6 +5608,7 @@ async function loadTonight(availability) {
 
     renderDecision(payload);
   } catch (_error) {
+    if (!isCurrent()) return;
     showAvailabilityError("Connexion impossible. Vos horaires sont conservés; réessayez dans un instant.");
     setView("availability");
   } finally {
