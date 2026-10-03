@@ -8,6 +8,54 @@ ROOT = Path(__file__).resolve().parents[2]
 UTIL = runpy.run_path(str(Path(__file__).with_name('test_field_observation_ui.py')))
 
 
+def test_outcome_layout_keeps_result_below_controls_at_all_widths():
+    from html.parser import HTMLParser
+    import re
+
+    class OutcomeParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.in_panel = False
+            self.children = []
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == 'section' and 'outcome-panel' in attrs.get('class', '').split():
+                self.in_panel = True
+            elif self.in_panel:
+                self.children.append((tag, attrs))
+
+        def handle_endtag(self, tag):
+            if tag == 'section':
+                self.in_panel = False
+
+    parser = OutcomeParser()
+    parser.feed((ROOT / 'astropilot/web/index.html').read_text())
+    assert [tag for tag, _ in parser.children] == ['h3', 'label', 'select', 'button', 'button', 'div']
+    result = parser.children[-1][1]
+    assert result['id'] == 'outcome-result'
+    assert result['role'] == 'status' and result['aria-live'] == 'polite'
+    css = (ROOT / 'astropilot/web/styles.css').read_text()
+    rules = re.findall(r'([^{}]+)\{([^{}]*)\}', css)
+
+    def declarations(selector):
+        return [dict(re.findall(r'([\w-]+)\s*:\s*([^;]+)', body))
+                for selectors, body in rules if selector in selectors.strip().split(', ')]
+
+    panels = declarations('.observation-surface > .outcome-panel')
+    assert panels[0]['display'] == 'grid'
+    assert panels[0]['grid-template-columns'] == 'repeat(2, minmax(0, 1fr))'
+    assert panels[0]['align-items'] == 'stretch'
+    assert panels[-1]['grid-template-columns'] == 'minmax(0, 1fr)'
+    assert re.search(r'@media\s*\(max-width:\s*760px\)\s*\{\s*\.observation-surface > \.outcome-panel', css)
+    assert declarations('.outcome-panel > *')[0]['min-width'] == '0'
+    for selector in ['.outcome-panel > h3', '.outcome-panel > label', '.outcome-panel > select', '#outcome-result']:
+        assert any(rule.get('grid-column') == '1 / -1' for rule in declarations(selector))
+    output = declarations('#outcome-result')[-1]
+    assert output['white-space'] == 'pre-line'
+    assert output['overflow-wrap'] == 'break-word'
+
+
 def test_outcome_click_recovery_stale_and_readback():
     engine = UTIL['javascript_engine']()
     if not engine or engine.endswith('osascript'):
