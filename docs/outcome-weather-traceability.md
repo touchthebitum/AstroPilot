@@ -21,11 +21,21 @@ OutcomeEvaluation/DecisionForecastEvidence documents.
 
 The persisted comparison already contains provider, model, retrieval timestamp,
 selected forecast timestamp and offset. The prior API omitted all of them.
-Coordinates remain in DecisionForecastEvidence and are recovered by exact
+Coordinates and altitude remain in DecisionForecastEvidence. Before exposing
+them, the projection requires a valid reloaded evidence and source observation,
+a persistable identity, and a recalculated source digest matching the persisted
+`comparison.source_digest`. The digest covers the complete canonical evidence
+(including coordinates and altitude) and source observation.
+
+Only after this integrity check are coordinates recovered by exact
 provider/model/retrieval/valid-time/variable/unit/value matching. This is a lookup,
-not nearest-point selection. Missing evidence, no match, or multiple distinct
-coordinate pairs yields null coordinates. No provider/model/location is invented.
-Unreadable/corrupt evidence follows the existing API error handling.
+not nearest-point selection. Absent, invalid, or divergent integrity proof masks
+requested/grid locations and altitude (`null`); no match or multiple distinct
+coordinate pairs also yields null locations. Safe persisted metadata remains
+available according to the API contract: selected forecast point/timestamp, signed
+offset, provider, model, and retrieval timestamp. No provider/model/location is
+invented. The historical source is linked to the `decision_id`; no current weather
+fetch is performed.
 
 ## UI and compatibility
 
@@ -33,7 +43,9 @@ The existing primary comparison remains followed by a separate text section,
 “Traçabilité de la prévision”. Dates use the observation editor's site timezone
 when available and also show UTC; otherwise UTC is shown. No historical site
 timezone is inferred from coordinates. Unknown values show “Non disponible”.
-Old persisted evaluations require no migration. The UI still accepts older API
+Valid old persisted evaluations use their already-existing source digest for this
+check; no schema migration is required. Without usable integrity proof, geography
+and altitude remain null. The UI still accepts older API
 projections lacking the additive fields. Persistence contract tests cover the
 existing serialized format.
 
