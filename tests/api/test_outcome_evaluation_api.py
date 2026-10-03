@@ -145,5 +145,67 @@ def test_cloud_categories_and_units(tmp_path):
     response = client.post(URL)
     assert response.status_code == 201
     cloud = response.json()['results'][0]
+    assert cloud.pop('forecast_point')['temporal_offset_minutes'] == 0.0
     assert cloud == {'variable': 'cloud_cover_percent', 'status': 'comparable', 'unit': '%',
                      'forecast': 'few', 'observed': 'overcast', 'outcome': 'mismatch', 'reasons': []}
+
+
+def test_humidity_weather_traceability_roundtrip_and_ui(tmp_path):
+    from dataclasses import replace
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+    import json
+    import subprocess
+    from astropilot.field_observation_store import FileFieldObservationStore
+
+    observed = datetime(2026, 10, 3, 0, 10, tzinfo=ZoneInfo("Europe/Zurich")).astimezone(timezone.utc)
+    assert observed.isoformat() == "2026-10-02T22:10:00+00:00"
+    app, orchestration, client = setup(tmp_path)
+    source = builders['observation'](execution_id=None, observed_at_utc=observed,
+        recorded_at_utc=observed + timedelta(minutes=1),
+        conditions=builders['ObservedConditions'](relative_humidity_percent=73.0))
+    store = FileFieldObservationStore(tmp_path / 'humidity-observations')
+    store.save(observation=source)
+    app.field_observation_store = orchestration.observation_store = store
+    variable = builders['WeatherVariable'].RELATIVE_HUMIDITY_PERCENT
+    point = builders['evidence'](variable).forecast_points[0]
+    point = replace(point, provider_id="Open-Meteo", model_id=None,
+        retrieved_at_utc=observed - timedelta(hours=4),
+        forecast_for_utc=observed - timedelta(minutes=10),
+        grid_location=builders['WeatherLocation'](46.76, 6.56, altitude_m=1200.0),
+        values=(builders['WeatherValue'](variable=variable, value=91.0, unit="%"),))
+    orchestration.forecast_evidence_store.value = builders['DecisionForecastEvidence']((point,))
+    result = client.post(URL)
+    assert result.status_code == 201
+    payload = result.json()
+    humidity = next(r for r in payload['results'] if r['variable'] == variable.value)
+    assert (humidity['forecast'], humidity['observed'], humidity['signed_error']) == (91, 73, 18)
+    assert humidity['forecast_point'] == {
+        'selected_forecast_for_utc': '2026-10-02T22:00:00+00:00', 'temporal_offset_minutes': -10.0}
+    trace = payload['weather_traceability']
+    assert trace['provider_id'] == 'Open-Meteo' and trace['model_id'] is None
+    assert trace['retrieved_at_utc'] == point.retrieved_at_utc.isoformat()
+    assert trace['requested_location']['latitude'] == 46.75
+    assert trace['grid_location'] == {'latitude': 46.76, 'longitude': 6.56, 'altitude_m': 1200.0}
+    # Existing serialized evaluations are untouched; GET reads persisted comparison provenance.
+    orchestration.clock = lambda: pytest.fail('read must not evaluate')
+    readback = client.get(URL).json()
+    assert readback == {k: v for k, v in payload.items() if k != 'created'}
+    js = (Path(__file__).parents[2] / 'astropilot/web/app.js').read_text()
+    render = js[js.index('function renderOutcomeEvaluation('):js.index('function validateOutcomeProjection(')]
+    program = "const state={fieldObservationDraftContext:{timezone:'Europe/Zurich'}}; const output={}; const document={querySelector:()=>output}; const OUTCOME_REASON_TEXT={};\n" + render
+    program += "\nrenderOutcomeEvaluation(" + json.dumps(readback) + "); console.log(output.textContent);"
+    node = runpy.run_path(str(Path(__file__).with_name('test_field_observation_ui.py')))['javascript_engine']()
+    if node is None or Path(node).name != 'node':
+        pytest.skip('Node required for UI rendering')
+    text = subprocess.check_output([node, '-e', program], text=True)
+    assert '00:00' in text and '2026-10-02T22:00:00.000Z' in text
+    assert '-10 min' in text and 'Open-Meteo' in text and '1200 m' in text
+    assert 'prévision 91 %, observation 73 %' in text and '18 %' in text
+    ambiguous = replace(point, grid_location=builders['WeatherLocation'](46.77, 6.57))
+    orchestration.forecast_evidence_store.value = builders['DecisionForecastEvidence']((point, ambiguous))
+    assert client.get(URL).json()['weather_traceability']['grid_location'] is None
+    orchestration.forecast_evidence_store.value = None
+    missing = client.get(URL).json()
+    assert missing['weather_traceability']['grid_location'] is None
+    assert missing['results'] == readback['results']
