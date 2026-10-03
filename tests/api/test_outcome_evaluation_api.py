@@ -150,7 +150,8 @@ def test_cloud_categories_and_units(tmp_path):
                      'forecast': 'few', 'observed': 'overcast', 'outcome': 'mismatch', 'reasons': []}
 
 
-def test_humidity_weather_traceability_roundtrip_and_ui(tmp_path):
+@pytest.mark.parametrize("real_evidence_store", [False, True])
+def test_humidity_weather_traceability_roundtrip_and_ui(tmp_path, real_evidence_store):
     from dataclasses import replace
     from datetime import datetime, timedelta, timezone
     from zoneinfo import ZoneInfo
@@ -174,7 +175,27 @@ def test_humidity_weather_traceability_roundtrip_and_ui(tmp_path):
         forecast_for_utc=observed - timedelta(minutes=10),
         grid_location=builders['WeatherLocation'](46.76, 6.56, altitude_m=1200.0),
         values=(builders['WeatherValue'](variable=variable, value=91.0, unit="%"),))
-    orchestration.forecast_evidence_store.value = builders['DecisionForecastEvidence']((point,))
+    original = builders['DecisionForecastEvidence']((point,))
+    if real_evidence_store:
+        from astropilot.decision_forecast_evidence_store import FileDecisionForecastEvidenceStore
+        from decision.weather.decision_forecast_evidence_persistence import serialize_decision_forecast_evidence
+        evidence_store = FileDecisionForecastEvidenceStore(tmp_path / 'real-evidence')
+        evidence_store.save(decision_id=source.decision_id, evidence=original)
+        app.evidence_store = orchestration.forecast_evidence_store = evidence_store
+    else:
+        orchestration.forecast_evidence_store.value = original
+
+    def replace_evidence(value):
+        if real_evidence_store:
+            path = tmp_path / 'real-evidence' / f'{source.decision_id}.json'
+            if value is None:
+                path.unlink()
+            else:
+                path.write_text(serialize_decision_forecast_evidence(
+                    decision_id=source.decision_id, evidence=value))
+        else:
+            orchestration.forecast_evidence_store.value = value
+
     result = client.post(URL)
     assert result.status_code == 201
     payload = result.json()
@@ -202,10 +223,79 @@ def test_humidity_weather_traceability_roundtrip_and_ui(tmp_path):
     assert '00:00' in text and '2026-10-02T22:00:00.000Z' in text
     assert '-10 min' in text and 'Open-Meteo' in text and '1200 m' in text
     assert 'prévision 91 %, observation 73 %' in text and '18 %' in text
+    # Replace only geography after comparison has been persisted: all matching
+    # business fields remain identical, but the historical digest must reject it.
+    replaced = replace(point, grid_location=builders['WeatherLocation'](47.0, 7.0, altitude_m=999.0))
+    replace_evidence(builders['DecisionForecastEvidence']((replaced,)))
+    tampered = client.get(URL).json()
+    assert tampered['weather_traceability']['requested_location'] is None
+    assert tampered['weather_traceability']['grid_location'] is None
+    assert tampered['results'] == readback['results']
+    for key in ('provider_id', 'model_id', 'retrieved_at_utc'):
+        assert tampered['weather_traceability'][key] == trace[key]
+    replace_evidence(original)
+    assert client.get(URL).json() == readback
+    # The pre-fix persisted format already has a strong source_digest; no schema
+    # migration or new fingerprint is necessary to read these old evaluations.
+    from astropilot.outcome_weather_traceability import weather_traceability
+    evaluation = app.load_outcome_evaluation_by_observation('observation-1')
+    legacy = SimpleNamespace(comparison=SimpleNamespace(**{
+        name: getattr(evaluation.comparison, name) for name in
+        ('decision_id', 'observation_id', 'results')}, identity_persistable=False,
+        source_digest=None))
+    unproven = weather_traceability(legacy, orchestration.forecast_evidence_store, store)
+    assert unproven['summary']['grid_location'] is None
+    assert unproven['summary']['requested_location'] is None
+    assert unproven['points'][variable.value]['temporal_offset_minutes'] == -10
+    assert unproven['summary']['provider_id'] == 'Open-Meteo'
+    # Heterogeneous per-variable geography has no applicable common row.
+    heterogeneous = json.loads(json.dumps(readback))
+    heterogeneous['weather_traceability']['requested_location'] = None
+    heterogeneous['weather_traceability']['grid_location'] = None
+    heterogeneous['results'][0]['forecast_point']['requested_location'] = trace['requested_location']
+    heterogeneous['results'][0]['forecast_point']['grid_location'] = trace['grid_location']
+    base = program[:program.index('\nrenderOutcomeEvaluation(')]
+    rendered = subprocess.check_output([node, '-e', base + '\nrenderOutcomeEvaluation(' +
+        json.dumps(heterogeneous) + '); console.log(output.textContent);'], text=True)
+    assert rendered.count('Coordonnées demandées :') == 1
+    assert 'Coordonnées demandées : Non disponible' not in rendered
+    absent = json.loads(json.dumps(readback))
+    absent['weather_traceability']['requested_location'] = None
+    absent['weather_traceability']['grid_location'] = None
+    rendered = subprocess.check_output([node, '-e', base + '\nrenderOutcomeEvaluation(' +
+        json.dumps(absent) + '); console.log(output.textContent);'], text=True)
+    assert 'Coordonnées demandées : Non disponible' in rendered
     ambiguous = replace(point, grid_location=builders['WeatherLocation'](46.77, 6.57))
-    orchestration.forecast_evidence_store.value = builders['DecisionForecastEvidence']((point, ambiguous))
+    replace_evidence(builders['DecisionForecastEvidence']((point, ambiguous)))
     assert client.get(URL).json()['weather_traceability']['grid_location'] is None
-    orchestration.forecast_evidence_store.value = None
+    replace_evidence(None)
     missing = client.get(URL).json()
     assert missing['weather_traceability']['grid_location'] is None
     assert missing['results'] == readback['results']
+
+
+def test_integrity_checked_heterogeneous_provider_locations(tmp_path):
+    from dataclasses import replace
+    from astropilot.field_observation_store import FileFieldObservationStore
+    app, orchestration, client = setup(tmp_path)
+    source = builders['observation'](execution_id=None,
+        conditions=builders['ObservedConditions'](temperature_c=7.0, relative_humidity_percent=73.0))
+    store = FileFieldObservationStore(tmp_path / 'multi-observations')
+    store.save(observation=source)
+    app.field_observation_store = orchestration.observation_store = store
+    temperature = builders['evidence'](builders['WeatherVariable'].TEMPERATURE_C).forecast_points[0]
+    humidity = replace(builders['evidence'](builders['WeatherVariable'].RELATIVE_HUMIDITY_PERCENT).forecast_points[0],
+        provider_id='other-provider', model_id='other-model',
+        grid_location=builders['WeatherLocation'](46.76, 6.56, altitude_m=1200.0))
+    orchestration.forecast_evidence_store.value = builders['DecisionForecastEvidence']((temperature, humidity))
+    response = client.post(URL)
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload['weather_traceability']['grid_location'] is None
+    assert payload['weather_traceability']['provider_id'] is None
+    points = {r['variable']: r['forecast_point'] for r in payload['results'] if r['forecast_point']}
+    assert points['relative_humidity_percent']['provider_id'] == 'other-provider'
+    assert points['relative_humidity_percent']['model_id'] == 'other-model'
+    assert points['relative_humidity_percent']['grid_location']['altitude_m'] == 1200.0
+    assert points['temperature_c']['grid_location']['latitude'] == temperature.grid_location.latitude
+    assert client.get(URL).json() == {k: v for k, v in payload.items() if k != 'created'}

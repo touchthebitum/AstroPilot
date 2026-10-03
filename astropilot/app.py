@@ -3328,7 +3328,8 @@ def create_app(
         def reason(item):
             return {"code": item.code, "variable": None if item.variable is None else item.variable.value}
         from astropilot.outcome_weather_traceability import weather_traceability
-        traceability = weather_traceability(evaluation, application_service().evidence_store)
+        traceability = weather_traceability(evaluation, application_service().evidence_store,
+            application_service().field_observation_store)
         results = []
         for item in comparison.results:
             projected = {"variable": item.variable.value, "status": item.status.value,

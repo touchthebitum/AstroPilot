@@ -1,9 +1,27 @@
 """Read-only provenance projection; never selects or recomputes forecast points."""
 
 
-def weather_traceability(evaluation, evidence_store):
+from decision.services.forecast_observation_comparison import (
+    _inspect_evidence, _source_digest, _validated_field_observation,
+)
+
+
+def weather_traceability(evaluation, evidence_store, observation_store=None):
     comparison = evaluation.comparison
     evidence = evidence_store.load(decision_id=comparison.decision_id)
+    # The persisted source digest binds the entire evidence (including locations)
+    # and observation. Business-value matching alone cannot establish integrity.
+    coherent = False
+    if evidence is not None and observation_store is not None:
+        observation = observation_store.load(observation_id=comparison.observation_id)
+        if observation is not None:
+            try:
+                valid, canonical = _inspect_evidence(evidence)
+                coherent = (valid and getattr(comparison, "identity_persistable", False) and
+                    _source_digest(canonical, _validated_field_observation(observation),
+                                   identity_persistable=True) == getattr(comparison, "source_digest", None))
+            except (ValueError, TypeError, RecursionError):
+                coherent = False
     points = {}
     locations = {}
     for result in comparison.results:
@@ -12,7 +30,7 @@ def weather_traceability(evaluation, evidence_store):
             continue
         value = (result.forecast_value if hasattr(result, "forecast_value")
                  else result.forecast_coverage_percent)
-        matches = [] if evidence is None else [p for p in evidence.forecast_points
+        matches = [] if not coherent else [p for p in evidence.forecast_points
             if p.provider_id == source.provider_id and p.model_id == source.model_id
             and p.retrieved_at_utc == source.retrieved_at_utc
             and p.forecast_for_utc == source.forecast_for_utc

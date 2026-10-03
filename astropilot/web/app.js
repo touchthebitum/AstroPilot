@@ -2392,7 +2392,12 @@ function renderOutcomeEvaluation(evaluation) {
   }
   const coords = value => value ? `${value.latitude}, ${value.longitude}` : unavailable;
   const trace = evaluation.weather_traceability;
-  lines.push(`Coordonnées demandées : ${coords(trace?.requested_location)} · grille : ${coords(trace?.grid_location)} · altitude grille : ${trace?.grid_location?.altitude_m == null ? unavailable : `${trace.grid_location.altitude_m} m`}.`);
+  const perVariableCoordinates = (knownStatus ? evaluation.results : []).some(item =>
+    item.forecast_point && (item.forecast_point.requested_location
+      || item.forecast_point.grid_location));
+  if (!(perVariableCoordinates && trace?.requested_location == null && trace?.grid_location == null)) {
+    lines.push(`Coordonnées demandées : ${coords(trace?.requested_location)} · grille : ${coords(trace?.grid_location)} · altitude grille : ${trace?.grid_location?.altitude_m == null ? unavailable : `${trace.grid_location.altitude_m} m`}.`);
+  }
   document.querySelector("#outcome-result").textContent = lines.join("\n");
 }
 
