@@ -65,6 +65,7 @@ class DurableTonightApplicationService:
         outcome_evaluation_store=None,
         outcome_evaluation_clock: Callable | None = None,
         outcome_history_service=None,
+        recent_decision_reader=None,
     ) -> None:
         self.application_service = application_service
         self.evidence_store = evidence_store
@@ -83,6 +84,13 @@ class DurableTonightApplicationService:
         self.outcome_evaluation_clock = outcome_evaluation_clock
         self._outcome_evaluation_service = None
         self.outcome_history_service = outcome_history_service
+        self.recent_decision_reader = recent_decision_reader
+
+    def read_recent_decisions(self, **filters):
+        if self.recent_decision_reader is None:
+            from astropilot.recent_decision_reader import RecentDecisionsUnavailable
+            raise RecentDecisionsUnavailable("recent_decisions_unavailable")
+        return self.recent_decision_reader.list_recent(**filters)
 
     def read_outcome_history(self, **filters):
         if self.outcome_history_service is None:
