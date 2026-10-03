@@ -496,6 +496,31 @@ async function check() {
     await loadRecentDecisions();
     assert.equal(state.recentDecisions.complete, true);
   }
+  // An empty partial catalogue stays incomplete during and after a failed reload.
+  fetch = () => response(200, {items: [], complete: false});
+  await loadRecentDecisions();
+  assert.equal(state.recentDecisions.complete, false);
+  assert.match(element('#observation-catalogue-status').textContent, /Aucune décision.*Catalogue incomplet/);
+  const beforeReloadDecision = state.fieldObservationDraftContext.decision_id;
+  const beforeReloadTime = element('#observation-observed-at').value;
+  let resolveReload;
+  fetch = () => new Promise(resolve => { resolveReload = resolve; });
+  const failedReload = loadRecentDecisions();
+  assert.equal(state.recentDecisions.complete, false);
+  resolveReload(response(503));
+  await failedReload;
+  assert.equal(state.recentDecisions.complete, false);
+  assert.equal(state.recentDecisions.items.length, 0);
+  assert.match(element('#observation-catalogue-status').textContent, /Catalogue indisponible.*Catalogue incomplet/);
+  assert.equal(state.fieldObservationDraftContext.decision_id, beforeReloadDecision);
+  assert.equal(element('#observation-observed-at').value, beforeReloadTime);
+  assert.equal(element('#observation-clouds').value, 'few');
+  assert.equal(element('#observation-wind').value, '7');
+  fetch = () => response(200, {items: [], complete: true});
+  await loadRecentDecisions();
+  assert.equal(state.recentDecisions.complete, true);
+  assert.match(element('#observation-catalogue-status').textContent, /Aucune décision/);
+  assert.equal(/Catalogue incomplet|Catalogue indisponible/.test(element('#observation-catalogue-status').textContent), false);
   for (const [status, pattern] of [[200, /Aucune décision/], [503, /Catalogue indisponible/],
       [422, /critères.*invalides/], [409, /liste a changé/]]) {
     fetch = () => response(status, {items: [], complete: true});

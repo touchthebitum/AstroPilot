@@ -421,7 +421,7 @@ async function loadRecentDecisions(more = false) {
   const fingerprint = recentDecisionsFingerprint();
   const current = () => generation === recentDecisionsGeneration && ui.observation.open
     && catalogue === state.recentDecisions && catalogue.open && fingerprint === recentDecisionsFingerprint();
-  if (!more) { catalogue.items = []; catalogue.cursor = null; catalogue.complete = true; }
+  if (!more) { catalogue.items = []; catalogue.cursor = null; }
   renderRecentDecisions();
   const message = document.querySelector("#observation-catalogue-status");
   message.textContent = "Chargement des décisions…";
@@ -441,7 +441,7 @@ async function loadRecentDecisions(more = false) {
     catalogue.items = [...(more ? catalogue.items : []), ...result.items]
       .filter((item, index, all) => all.findIndex(other => other.decision_id === item.decision_id) === index);
     catalogue.cursor = result.next_cursor || null;
-    catalogue.complete = catalogue.complete !== false && result.complete !== false;
+    catalogue.complete = (!more || catalogue.complete !== false) && result.complete !== false;
     message.textContent = (!catalogue.items.length ? "Aucune décision trouvée dans cette période. " : "")
       + (catalogue.complete === false ? "Catalogue incomplet : certains documents n’ont pas pu être lus."
         : catalogue.items.length ? "Choisissez explicitement une décision ou conservez celle associée." : "");
@@ -451,6 +451,9 @@ async function loadRecentDecisions(more = false) {
     message.textContent = {503: "Catalogue indisponible sur cet appareil ou momentanément indisponible",
       409: "La liste a changé. Rechargez les décisions", 422: "La période ou les critères de recherche sont invalides"}[error.status]
       || "Impossible de charger les décisions. Vérifiez l’heure et le fuseau du site puis réessayez.";
+    if (catalogue.complete === false) {
+      message.textContent += " · Catalogue incomplet : certains documents n’ont pas pu être lus.";
+    }
     catalogue.cursor = null;
     renderRecentDecisions();
   }
