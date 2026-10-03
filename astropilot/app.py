@@ -3233,6 +3233,33 @@ def create_app(
                 ) from exc
             raise_field_observation_internal_error(exc)
 
+    @application.get("/v1/decisions/recent", summary="Read persisted decisions by exact site and forecast retrieval time")
+    def get_recent_decisions(
+        latitude: float, longitude: float, retrieved_from: str, retrieved_to: str,
+        limit: int = 10, cursor: str | None = None,
+    ):
+        """No Tonight evaluation. Time bounds are inclusive, at most 31 days.
+
+        Unknown historical metadata remains null. Forecast extent does not
+        guarantee comparability; execution lineage is still validated on POST.
+        """
+        from astropilot.recent_decision_reader import (
+            RecentDecisionsInvalidFilter, RecentDecisionsDatasetChanged,
+            RecentDecisionsUnavailable,
+        )
+        try:
+            return application_service().read_recent_decisions(
+                latitude=latitude, longitude=longitude, retrieved_from=retrieved_from,
+                retrieved_to=retrieved_to, limit=limit, cursor=cursor,
+            )
+        except RecentDecisionsInvalidFilter as error:
+            raise HTTPException(status_code=422, detail={"code": str(error)}) from error
+        except RecentDecisionsDatasetChanged as error:
+            raise HTTPException(status_code=409, detail={"code": "recent_decisions_dataset_changed"}) from error
+        except RecentDecisionsUnavailable as error:
+            code = "recent_decisions_scan_limit" if str(error) == "recent_decisions_scan_limit" else "recent_decisions_unavailable"
+            raise HTTPException(status_code=503, detail={"code": code}) from error
+
     @application.get("/v1/decisions/{decision_id}/context")
     def get_persisted_decision_context(decision_id: str):
         decision_id = validated_field_observation_route_identity(
