@@ -343,6 +343,8 @@ function assertReadRequest(options) {
 }
 function clearHarness() {
   state.fieldObservationAnchorContext = null;
+  state.fieldObservationDecisionConfirmationRequired = false;
+  state.fieldObservationDecisionConfirmedAt = null;
   storage.clear(); recoveryRecords.clear(); state.observationBusy = false; uuid = 0;
   activeFieldObservationOperation = null; fieldObservationOperationGeneration = 0;
   storageFailures.get = false; storageFailures.set = false; storageFailures.remove = false;
@@ -389,7 +391,7 @@ async function check() {
   assert.equal(query.get('retrieved_to'), '2026-09-30T08:14:00.000Z');
   assert.equal(query.get('limit'), '20');
   assert.equal(state.fieldObservationDraftContext.decision_id, 'decision-1');
-  assert.match(element('#observation-catalogue-status').textContent, /complete:false/);
+  assert.match(element('#observation-catalogue-status').textContent, /Catalogue incomplet/);
   assert.match(element('#observation-decision-candidates').children[0].textContent, /Prévision récupérée le.*Site configuré.*a93f2c/);
   await loadRecentDecisions(true);
   assert.equal(new URL(recentCalls[1], 'http://local').searchParams.get('cursor'), 'page-2');
@@ -413,10 +415,21 @@ async function check() {
   assert.equal(posts[0].decision_id, old.decision_id);
   assert.equal(posts[0].execution_id, null);
   const historicalEnvelope = clone(state.fieldObservationLock.pending);
+  assert.equal(element('#observation-return-current-decision').disabled, true);
+  returnToCurrentFieldObservationDecision();
+  assert.equal(state.fieldObservationDraftContext.decision_id, old.decision_id);
   await selectRecentDecision({decision_id: 'wrong'});
   assert.equal(state.fieldObservationDraftContext.decision_id, old.decision_id);
+  // Reconstruct from the validated pending envelope alone, without a historical flag/global lock.
+  localStorage.removeItem(FIELD_OBSERVATION_LOCK_KEY);
+  state.fieldObservationLock = null;
+  rebuildPendingFieldObservationInventoryUnlocked();
+  assert.equal(state.fieldObservationLock.context.historical, undefined);
   openFieldObservation('decision');
   assert.equal(state.fieldObservationDraftContext.decision_id, old.decision_id);
+  assert.equal(state.fieldObservationDraftContext.historical, true);
+  assert.equal(element('#observation-save').disabled, false);
+  assert.match(element('#observation-associated-label').textContent, /a93f2c/);
   assert.equal(fieldObservationSnapshot(), historicalEnvelope.snapshot);
   await submitFieldObservation(event);
   assert.equal(JSON.stringify(posts[1]), JSON.stringify(posts[0]));
@@ -439,6 +452,50 @@ async function check() {
   assert.equal(state.recentDecisions.open, true);
   assert.equal(state.fieldObservationDraftContext.decision_id, 'decision-1');
   setQuick({cloud: 'few', wind: '7'});
+  assert.equal(element('#observation-save').disabled, true);
+  let unconfirmedPosts = 0;
+  fetch = () => { unconfirmedPosts++; return response(200, {}); };
+  await submitFieldObservation(event);
+  assert.equal(unconfirmedPosts, 0);
+  confirmFieldObservationDecision();
+  assert.equal(element('#observation-save').disabled, false);
+  assert.equal(buildFieldObservationPayload().decision_id, 'decision-1');
+  element('#observation-observed-at').value = '2026-09-30T00:01';
+  fetch = () => response(200, {items: [old], complete: true});
+  observedAtChanged(); await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(element('#observation-save').disabled, true);
+  assert.equal(state.fieldObservationDecisionConfirmedAt, null);
+  fetch = () => response(200, {decision_id: old.decision_id});
+  await selectRecentDecision(old);
+  assert.equal(element('#observation-save').disabled, false);
+  assert.equal(element('#observation-return-current-decision').hidden, false);
+  const beforeReturn = element('#observation-observed-at').value;
+  let restoredReads = [];
+  const originalLoadSaved = loadSavedFieldObservations;
+  loadSavedFieldObservations = async context => { restoredReads.push(context.decision_id); };
+  returnToCurrentFieldObservationDecision();
+  loadSavedFieldObservations = originalLoadSaved;
+  assert.equal(restoredReads.join(), 'decision-1');
+  assert.equal(element('#field-observation-dialog').open, true);
+  assert.equal(element('#observation-observed-at').value, beforeReturn);
+  assert.equal(element('#observation-clouds').value, 'few');
+  assert.equal(element('#observation-wind').value, '7');
+  assert.equal(state.fieldObservationDraftContext.historical, false);
+  assert.equal(buildFieldObservationPayload().decision_id, 'decision-1');
+  assert.equal(element('#observation-return-current-decision').hidden, true);
+  assert.equal(element('#observation-save').disabled, false);
+  state.recentDecisions.open = true;
+  for (const partialFirst of [true, false]) {
+    fetch = () => response(200, {items: [], complete: !partialFirst, next_cursor: 'next'});
+    await loadRecentDecisions();
+    if (partialFirst) assert.match(element('#observation-catalogue-status').textContent, /Aucune décision.*Catalogue incomplet/);
+    fetch = () => response(200, {items: [old], complete: partialFirst});
+    await loadRecentDecisions(true);
+    assert.match(element('#observation-catalogue-status').textContent, /Catalogue incomplet/);
+    fetch = () => response(200, {items: [old], complete: true});
+    await loadRecentDecisions();
+    assert.equal(state.recentDecisions.complete, true);
+  }
   for (const [status, pattern] of [[200, /Aucune décision/], [503, /Catalogue indisponible/],
       [422, /critères.*invalides/], [409, /liste a changé/]]) {
     fetch = () => response(status, {items: [], complete: true});
