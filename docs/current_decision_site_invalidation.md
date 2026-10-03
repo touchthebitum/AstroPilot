@@ -52,7 +52,7 @@ tracks the latest request; stale finally callbacks cannot clear a newer request.
 Acceptance captures the common configuration generation, the site generation and
 fingerprint, and the originating decision object/ID before sending. A valid server
 confirmation received after any of these changes is retained in
-`lastHistoricalAcceptance`, and its resolved acceptance attempt is cleared normally;
+`lastHistoricalAcceptance`, and its resolved acceptance attempt is cleared only if its UUID still owns the pending state and stored envelope;
 it does not assign an active mission, render it or open its modal. The backend's
 canonical acceptance remains unchanged and can be discovered through saved missions.
 A nominal acceptance stamps `acceptedSiteGeneration` and `acceptedSiteFingerprint`;
@@ -85,3 +85,38 @@ reload, acceptance and saved-mission functions with deferred responses, includin
 failure followed by stale success, ABA/ABC/repeated notifications, a JSON await race,
 nominal acceptance and stale/missing mission provenance. These are controlled Node
 harnesses, not a claim of real-browser or server transaction ordering coverage.
+
+
+Storage notifications are processed before the first configuration installation too.
+An initial load A followed by event B cannot install A; repeated B and B -> C
+notifications each supersede preceding reads. The blockade remains until a current
+successful initialization, including when no configuration has ever been installed.
+
+Configuration navigation has an explicit owner: the operation generation plus the
+view and its monotonically increasing revision when the operation starts. A storage
+read replacing an ordinary loading view inherits that loading cycle. On current
+success it follows the normal configured/confirmation/first-configuration routing;
+on current failure it shows the existing configuration error screen with retry,
+while retaining the site blockade. A user navigation revokes that owner's right to
+change the view, including leaving and returning to the same view. Load, save and
+recovery results use the same navigation guard. Current data installation remains
+separate from navigation; stale responses can do neither.
+
+Acceptance pending and lock ownership use the unchanged acceptance_request_id.
+The same tentative retry keeps exactly the same UUID and serialized payload. Clear
+checks the in-memory pending UUID and the persisted envelope UUID before deleting;
+a different or unreadable stored envelope is preserved. Async presentation and
+finally callbacks also require the attempt's UUID to own the active request lock.
+Site invalidation detaches that lock while preserving the unresolved attempt, so
+an exact retry remains possible. A first confirmation A may resolve pending A while
+another exact A request is in flight. Once B owns pending/storage/lock, that later A
+response (success or definite failure) cannot clear B or release its lock, change
+its status, or activate an old mission. A B timeout preserves B for browser recovery;
+a definite B response retains the existing success/failure policy. These guards do
+not cancel server writes or provide a distributed browser/server transaction lock.
+
+The deferred-response harness now uses real acceptance attempt creation, parsing,
+persistence, restoration, clearing and mission invalidation, without stubbing the
+pending or lock functions. It exercises first-load repeated/ABC notifications,
+loading replacement success/failure/retry and user navigation, and overlapping
+A/exact-retry-A/B confirmations with B success, failure and timeout/recovery.

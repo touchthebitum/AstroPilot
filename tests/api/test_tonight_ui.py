@@ -444,7 +444,7 @@ def test_uncertain_acceptance_retry_reuses_exact_pending_payload():
     assert "source," in acceptance
     assert "selected_catalog_key: selectedCatalogKey" in acceptance
     assert "body: JSON.stringify(attempt)" in acceptance
-    assert "clearPendingAcceptanceAttempt()" not in uncertain
+    assert "clearPendingAcceptanceAttempt(attempt)" not in uncertain
     assert "showUnresolvedAcceptance()" in uncertain
     assert "Le résultat de votre sélection n’a pas pu être confirmé" in script
     assert "restoreAcceptanceControls()" in acceptance
@@ -465,9 +465,9 @@ def test_acceptance_attempt_clears_only_after_definite_outcome():
     uncertain_success, success = after_validation.split("return;\n    }", 1)
     success = success.split("state.acceptedMission = {", 1)[0]
 
-    assert "clearPendingAcceptanceAttempt()" in definite_failure
-    assert "clearPendingAcceptanceAttempt()" in success
-    assert "clearPendingAcceptanceAttempt()" not in uncertain_success
+    assert "clearPendingAcceptanceAttempt(attempt)" in definite_failure
+    assert "clearPendingAcceptanceAttempt(attempt)" in success
+    assert "clearPendingAcceptanceAttempt(attempt)" not in uncertain_success
     assert 'code === "acceptance_request_conflict"' in script
     assert "pendingAcceptanceAttempt" in script
     assert "button.dataset.acceptanceSource === pending.source" in script
@@ -593,10 +593,10 @@ def test_pending_storage_clears_only_after_definite_result():
         "} finally {", 1
     )[0]
 
-    assert "clearPendingAcceptanceAttempt()" in definite_failure
-    assert "clearPendingAcceptanceAttempt()" in success
-    assert "clearPendingAcceptanceAttempt()" not in incomplete
-    assert "clearPendingAcceptanceAttempt()" not in uncertain
+    assert "clearPendingAcceptanceAttempt(attempt)" in definite_failure
+    assert "clearPendingAcceptanceAttempt(attempt)" in success
+    assert "clearPendingAcceptanceAttempt(attempt)" not in incomplete
+    assert "clearPendingAcceptanceAttempt(attempt)" not in uncertain
     assert "showUnresolvedAcceptance" in incomplete
     assert "showUnresolvedAcceptance" in uncertain
     assert 'code === "acceptance_request_conflict"' in script

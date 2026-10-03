@@ -22,6 +22,8 @@ def test_configuration_and_acceptance_generation_races():
     helpers += between('function initializeConfiguration(', 'async function restoreSavedMission(')
     helpers += between('async function loadConfiguration(', 'const availabilityFieldsByMode')
     helpers += between('async function acceptRecommendation(', 'async function loadTonight(')
+    helpers += between('function sameAcceptanceIntent(', 'function resetMissionPresentation(')
+    helpers += between('function resetMissionPresentation(', 'function renderDecision(')
     helpers += between('async function restoreSavedMission(', 'function invalidateAvailabilityForSiteChange(')
     harness = r'''
 const assert = require('node:assert/strict');
@@ -30,25 +32,29 @@ const B = {...A, site: {...A.site, latitude: 46}};
 const C = {...A, site: {...A.site, latitude: 45}};
 const element = () => ({hidden: true, disabled: false, querySelector: element,
   replaceChildren() {}, append() {}, focus() {}});
+const crypto = require("node:crypto");
+const PENDING_ACCEPTANCE_STORAGE_KEY = "astropilot.pendingAcceptance";
+const PENDING_ACCEPTANCE_STORAGE_VERSION = 2;
 const document = {querySelector: element, createElement: element};
 let opened = 0, rendered = 0, queue = [];
 const ui = {addObservationMessage: element(), addObservationDecision: element(),
   configurationRecover: element(), configurationRecoveryConfirm: element(),
   configurationRecoveryConfirmation: element(), onboarding: element(),
   savedMissionEntry: element(), savedMissionChoice: element(), savedMissionTarget: element(),
-  primaryIntentChoice: element(), mission: {showModal() { opened++; }}};
+  primaryIntentChoice: element(), retryPendingAcceptance: element(), pendingAcceptanceMessage: element(), mission: {close() {}, showModal() { opened++; }}};
 const state = {configuration: A, configurationGeneration: 0, decisionSiteGeneration: 0,
   acceptedMission: null, currentDecision: null, savedMissions: [], configurationDraft: A};
 const pending = {uuid: 'unchanged', decision_id: 'decision-A', payload: {clouds: 'few'}};
 state.fieldObservationLock = pending;
-const localStorage = {setItem() {}};
+const storage = new Map();
+const localStorage = {setItem(k,v) {storage.set(k,v);}, getItem(k) {return storage.get(k) ?? null;}, removeItem(k) {storage.delete(k);}};
 function fetch(url, options) { return new Promise((resolve, reject) => queue.push({url, options, resolve, reject})); }
 const reply = (request, payload, ok = true) => request.resolve({ok, status: ok ? 200 : 503, json: async () => payload});
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 function text() {}
 function syncFieldObservationContext() {}
 function invalidateRecentDecisions() {}
-function clearAcceptedMission() { state.acceptedMission = null; }
+
 function invalidateAvailabilityForSiteChange() {}
 function siteTimezone() { return state.configuration.site.timezone; }
 function siteConfigurationIdentity() { return JSON.stringify(state.configuration.site); }
@@ -58,23 +64,24 @@ function hideRecoveryConfirmation() {}
 function prefillConfiguration() {}
 function renderAvailabilityTimezone() {}
 function restorePendingFieldObservationInventory() {}
-function guardUnresolvedAcceptance() { return false; }
-function setView(view) { state.view = view; }
+
+function setView(view) { state.viewRevision = (state.viewRevision || 0) + 1; state.view = view; }
 function showFormError() {}
 function renderReview() {}
 function restoreAcceptanceControls() {}
 function disableAcceptanceControls() {}
-function showConfigurationError() { state.error = true; }
+function showConfigurationError(message) { state.error = message; setView("configuration_error"); }
+function clearAlternatives() {}
 function configurationPayload() { return state.configurationDraft; }
 function chosenIntent() { return null; }
-function acceptanceAttempt(intent) { return {...intent, acceptance_request_id: 'canonical-uuid'}; }
-function clearPendingAcceptanceAttempt() { state.pendingAcceptanceAttempt = null; }
+
+
 function showAcceptanceStatus(message) { state.status = message; }
 function intentMode() { return 'legacy'; }
 function acceptanceControls() { return []; }
 function showAcceptedIntent() { return true; }
-function showUnresolvedAcceptance() { state.unresolved = true; }
-function hasUnresolvedAcceptance() { return !!state.pendingAcceptanceAttempt; }
+
+
 function renderMission() { rendered++; }
 function show() {}
 function showMessage() {}
@@ -90,7 +97,55 @@ function showMessage() {}
   assert.equal(state.decisionSiteReloadRequired, true);
   assert.equal(observationContext('catalogue'), null);
   assert.equal(currentDecisionMatchesSite(), false);
-  assert.equal(state.view, 'loading_configuration'); // obsolete response did not navigate
+  assert.equal(state.view, 'configuration_error'); // current failure owns the loading view
+
+  // First load, repeated identical events and B -> C before first install.
+  for (const final of [B, C]) {
+    state.configuration = null;
+    const firstLoad = loadConfiguration(); const staleLoad = queue.shift();
+    const firstEvent = handleDecisionSiteStorageEvent({key: DECISION_SITE_STORAGE_KEY, newValue: decisionSiteFingerprint(B.site)});
+    const staleReload = queue.shift();
+    const lastEvent = handleDecisionSiteStorageEvent({key: DECISION_SITE_STORAGE_KEY, newValue: decisionSiteFingerprint(final.site)});
+    const currentReload = queue.shift();
+    reply(staleLoad, A); await firstLoad;
+    reply(staleReload, B); await firstEvent;
+    assert.equal(state.configuration, null); assert.equal(state.decisionSiteReloadRequired, true);
+    reply(currentReload, final); await flush();
+    reply(queue.shift(), {}); await flush(); reply(queue.shift(), []); await lastEvent;
+    assert.equal(state.configuration, final); assert.equal(state.view, 'availability');
+  }
+  // Storage takes ownership of loading; stale success cannot navigate, errors allow retry.
+  for (const fail of [false, true]) {
+    installCurrentConfiguration(A, beginConfigurationOperation());
+    const old = loadConfiguration(); const stale = queue.shift();
+    const reload = handleDecisionSiteStorageEvent({key: DECISION_SITE_STORAGE_KEY, newValue: decisionSiteFingerprint(B.site)});
+    const latest = queue.shift();
+    if (fail) latest.reject(new Error('offline'));
+    else {reply(latest, B); await flush(); reply(queue.shift(), {}); await flush(); reply(queue.shift(), []);}
+    await reload; reply(stale, A); await old;
+    assert.equal(state.view, fail ? 'configuration_error' : 'availability');
+    assert.equal(state.decisionSiteReloadRequired, fail);
+    if (fail) {
+      const retry = loadConfiguration(); reply(queue.shift(), B); await flush();
+      reply(queue.shift(), {}); await flush(); reply(queue.shift(), []); await retry;
+      assert.equal(state.view, 'availability');
+    }
+  }
+  // Normal post-configuration routes also apply to a replacement storage read.
+  for (const payload of [{...B, configured: false}, {...B, needs_configuration_confirmation: true}]) {
+    const load = loadConfiguration(); const old = queue.shift();
+    const reload = handleDecisionSiteStorageEvent({key: DECISION_SITE_STORAGE_KEY, newValue: decisionSiteFingerprint(B.site)});
+    reply(queue.shift(), payload); await reload; reply(old, A); await load;
+    assert.equal(state.view, 'site'); assert.equal(state.decisionSiteReloadRequired, false);
+  }
+  // A user navigation, even away and back to the same view, revokes the owner.
+  const awayLoad = loadConfiguration(); const away = queue.shift();
+  setView('review'); setView('loading_configuration'); reply(away, A); await awayLoad;
+  assert.equal(state.view, 'loading_configuration');
+  const navigating = loadConfiguration(); const previous = queue.shift();
+  const storageRead = handleDecisionSiteStorageEvent({key: DECISION_SITE_STORAGE_KEY, newValue: decisionSiteFingerprint(B.site)});
+  const read = queue.shift(); setView('review'); reply(read, B); await storageRead;
+  reply(previous, A); await navigating; assert.equal(state.view, 'review');
 
   // ABA, ABC and identical notifications all supersede the older reload.
   for (const final of [A, C, B]) {
@@ -152,8 +207,41 @@ function showMessage() {}
   assert.equal(state.acceptedMission, null); assert.equal(opened, 0); assert.equal(rendered, 0);
   assert.equal(state.lastHistoricalAcceptance, accepted);
   assert.equal(observationContext('mission'), null);
-  assert.match(state.status, /décision précédente/);
+  assert.equal(state.acceptingRecommendation, false);
 
+  // Real pending persistence/clear/lock: retry A cannot erase newer B, on success, failure or timeout B.
+  for (const outcome of ['success', 'failure', 'timeout', 'stale_failure']) {
+    clearAcceptedMission(); installCurrentConfiguration(A, beginConfigurationOperation()); state.currentDecision = decision;
+    const first = acceptRecommendation(args); const firstRequest = queue.shift();
+    const attemptA = state.pendingAcceptanceAttempt;
+    installCurrentConfiguration(B, beginConfigurationOperation());
+    const retry = acceptRecommendation({...args, attemptOverride: attemptA}); const retryRequest = queue.shift();
+    assert.equal(firstRequest.options.body, retryRequest.options.body);
+    reply(firstRequest, accepted); await first;
+    assert.equal(state.pendingAcceptanceAttempt, null); assert.equal(state.acceptingRecommendation, false);
+    state.currentDecision = {...decision, decision_id: 'decision-B'};
+    const argsB = {...args, expectedDecisionId: 'decision-B'};
+    const current = acceptRecommendation(argsB); const requestB = queue.shift();
+    const attemptB = state.pendingAcceptanceAttempt; const storedB = localStorage.getItem(PENDING_ACCEPTANCE_STORAGE_KEY);
+    const ownerB = state.acceptanceRequestOwner;
+    reply(retryRequest, accepted, outcome !== 'stale_failure'); await retry;
+    assert.equal(state.pendingAcceptanceAttempt, attemptB);
+    assert.equal(localStorage.getItem(PENDING_ACCEPTANCE_STORAGE_KEY), storedB);
+    assert.equal(state.acceptanceRequestOwner, ownerB); assert.equal(state.acceptingRecommendation, true);
+    assert.equal(state.acceptedMission, null);
+    if (outcome === 'timeout') requestB.reject(new Error('timeout'));
+    else reply(requestB, {...accepted, decision_id: 'decision-B', mission: {...accepted.mission, decision_id: 'decision-B'}}, ['success', 'stale_failure'].includes(outcome));
+    await current;
+    assert.equal(state.acceptingRecommendation, false);
+    assert.equal(state.pendingAcceptanceAttempt, outcome === 'timeout' ? attemptB : null);
+    if (outcome === 'timeout') {
+      state.pendingAcceptanceAttempt = null; assert.equal(restorePendingAcceptanceAttempt(), true);
+      assert.deepEqual(state.pendingAcceptanceAttempt, attemptB);
+      clearPendingAcceptanceAttempt(attemptB);
+    }
+  }
+  clearAcceptedMission();
+  opened = 0; rendered = 0;
   // Nominal acceptance retains its presentation and mission observation context.
   installCurrentConfiguration(A, beginConfigurationOperation()); state.currentDecision = decision;
   const nominal = acceptRecommendation(args); reply(queue.shift(), accepted); await nominal;

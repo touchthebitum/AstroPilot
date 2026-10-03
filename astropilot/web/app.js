@@ -51,6 +51,7 @@ const ui = Object.freeze({
 
 const state = {
   view: "loading_configuration",
+  viewRevision: 0,
   configuration: null,
   configurationDraft: {
     site: null,
@@ -62,6 +63,7 @@ const state = {
   currentDecisionSiteFingerprint: null,
   configurationGeneration: 0,
   configurationInFlightGeneration: null,
+  configurationNavigationOwner: null,
   decisionSiteGeneration: 0,
   decisionSiteReloadRequired: false,
   acceptedMission: null,
@@ -69,6 +71,7 @@ const state = {
   pendingAcceptanceAttempt: null,
   pendingAcceptanceStorageInvalid: false,
   acceptingRecommendation: false,
+  acceptanceRequestOwner: null,
   acceptanceBlocked: false,
   savingConfiguration: false,
   requestingRecommendation: false,
@@ -569,10 +572,25 @@ function decisionSiteFingerprint(site = state.configuration?.site) {
     typeof site.timezone === "string" && site.timezone.trim() ? site.timezone.trim() : null]);
 }
 // Every configuration request supersedes older reads, writes and recovery responses.
+// View revision revokes navigation ownership even after leaving and returning to a view.
 function beginConfigurationOperation() {
   state.configurationGeneration = (state.configurationGeneration || 0) + 1;
   state.configurationInFlightGeneration = state.configurationGeneration;
+  state.configurationNavigationOwner = {generation: state.configurationGeneration,
+    view: state.view, revision: state.viewRevision || 0};
   return state.configurationGeneration;
+}
+function configurationOwnsNavigation(generation) {
+  const owner = state.configurationNavigationOwner;
+  return owner?.generation === generation && owner.view === state.view
+    && owner.revision === (state.viewRevision || 0);
+}
+function completeConfigurationLoading(payload) {
+  showFormError("");
+  if (payload.needs_configuration_confirmation) {
+    showFormError("Votre profil historique est conservé. Confirmez la qualité du ciel (Bortle) pour activer les recommandations ; aucune réinitialisation n’est nécessaire.");
+    setView("site");
+  } else setView(payload.configured ? "availability" : "site");
 }
 function finishConfigurationOperation(generation) {
   if (state.configurationInFlightGeneration === generation) state.configurationInFlightGeneration = null;
@@ -620,8 +638,7 @@ function invalidateCurrentDecisionForSiteChange() {
 }
 async function handleDecisionSiteStorageEvent(event) {
   if (event.key !== DECISION_SITE_STORAGE_KEY && event.key !== null) return;
-  if (!state.configuration) return;
-  if (event.key !== null && event.newValue === decisionSiteFingerprint()
+  if (state.configuration && event.key !== null && event.newValue === decisionSiteFingerprint()
       && !state.decisionSiteReloadRequired
       && state.configurationInFlightGeneration == null) return; // No superseding reload can still install another site.
   state.decisionSiteReloadRequired = true;
@@ -630,10 +647,21 @@ async function handleDecisionSiteStorageEvent(event) {
   const generation = beginConfigurationOperation();
   try {
     const response = await fetch("/v1/configuration");
-    if (!response.ok) return;
+    if (!response.ok) throw new Error("configuration_reload_unavailable");
     const payload = await response.json();
+    if (!configurationOperationIsCurrent(generation)) return;
+    const ownsLoading = configurationOwnsNavigation(generation) && state.view === "loading_configuration";
     installCurrentConfiguration(payload, generation);
-  } catch (_) { /* Keep the current decision invalid on unavailable configuration. */ }
+    if (ownsLoading) {
+      completeConfigurationLoading(payload);
+      if (payload.configured && !payload.needs_configuration_confirmation) await restoreSavedMission();
+    }
+  } catch (_) {
+    if (configurationOperationIsCurrent(generation) && configurationOwnsNavigation(generation)
+        && state.view === "loading_configuration") {
+      showConfigurationError("La configuration est temporairement inaccessible. Réessayez dans un instant.");
+    }
+  }
   finally { finishConfigurationOperation(generation); }
 }
 
@@ -3283,6 +3311,7 @@ const wizardStates = Object.freeze(["site", "equipment", "projects", "review"]);
 
 function setView(view) {
   invalidateOutcomeHistory();
+  state.viewRevision = (state.viewRevision || 0) + 1;
   state.view = view;
   const wizardVisible = wizardStates.includes(view);
   ui.configurationLoading.hidden = view !== "loading_configuration";
@@ -3975,10 +4004,14 @@ function acceptanceAttempt(intent) {
   return attempt;
 }
 
-function clearPendingAcceptanceAttempt() {
+function clearPendingAcceptanceAttempt(attempt) {
+  if (!attempt || state.pendingAcceptanceAttempt?.acceptance_request_id !== attempt.acceptance_request_id) return false;
+  const stored = localStorage.getItem(PENDING_ACCEPTANCE_STORAGE_KEY);
+  if (stored !== null && parsePendingAcceptance(stored)?.acceptance_request_id !== attempt.acceptance_request_id) return false;
   localStorage.removeItem(PENDING_ACCEPTANCE_STORAGE_KEY);
   state.pendingAcceptanceAttempt = null;
   state.pendingAcceptanceStorageInvalid = false;
+  return true;
 }
 
 function resetMissionPresentation() {
@@ -3997,6 +4030,7 @@ function clearAcceptedMission() {
   state.acceptedMission = null;
   ui.savedMissionEntry.hidden = true;
   state.acceptingRecommendation = false;
+  state.acceptanceRequestOwner = null;
   state.acceptanceBlocked = false;
   showAcceptanceStatus("");
   if (ui.mission.open) ui.mission.close();
@@ -4721,6 +4755,7 @@ async function loadConfiguration({ afterConflict = false } = {}) {
     const payload = await response.json().catch(() => ({}));
     if (!configurationOperationIsCurrent(generation)) return;
     if (!response.ok) {
+      if (!configurationOwnsNavigation(generation)) return;
       const code = payload?.detail?.code;
       const message = code === "configuration_corrupt"
         ? "La configuration enregistrée ne peut pas être relue. Réessayez dans un instant."
@@ -4728,7 +4763,9 @@ async function loadConfiguration({ afterConflict = false } = {}) {
       showConfigurationError(message, { code });
       return;
     }
+    const ownsNavigation = configurationOwnsNavigation(generation);
     installCurrentConfiguration(payload, generation);
+    if (!ownsNavigation) return;
     if (afterConflict) {
       showFormError("La configuration a changé. Vérifiez les dernières valeurs avant de l’enregistrer à nouveau.");
       renderReview();
@@ -4746,6 +4783,7 @@ async function loadConfiguration({ afterConflict = false } = {}) {
     }
   } catch (_error) {
     if (!configurationOperationIsCurrent(generation)) return;
+    if (!configurationOwnsNavigation(generation)) return;
     showConfigurationError("NightMerit ne parvient pas à charger la configuration. La saisie pourra reprendre après reconnexion.");
   } finally {
     finishConfigurationOperation(generation);
@@ -4765,11 +4803,14 @@ async function recoverConfiguration() {
     const payload = await response.json().catch(() => ({}));
     if (!configurationOperationIsCurrent(generation)) return;
     if (response.ok && payload.configured === false) {
+      const ownsNavigation = configurationOwnsNavigation(generation);
       installCurrentConfiguration(payload, generation);
+      if (!ownsNavigation) return;
       showFormError("");
       setView("site");
       return;
     }
+    if (!configurationOwnsNavigation(generation)) return;
     const detail = payload?.detail;
     if (detail?.code === "configuration_recovery_conflict") {
       hideRecoveryConfirmation();
@@ -4782,6 +4823,7 @@ async function recoverConfiguration() {
     showConfigurationError(message, { code: "configuration_corrupt" });
   } catch (_error) {
     if (!configurationOperationIsCurrent(generation)) return;
+    if (!configurationOwnsNavigation(generation)) return;
     showConfigurationError(
       "Le résultat de la réinitialisation n’a pas pu être confirmé. Vérifiez votre connexion puis réessayez.",
       { code: "configuration_corrupt" },
@@ -4810,6 +4852,7 @@ async function saveConfiguration() {
     if (!configurationOperationIsCurrent(generation)) return;
     const detail = payload?.detail;
     if (!response.ok) {
+      if (!configurationOwnsNavigation(generation)) return;
       if (response.status === 409 && detail?.code === "configuration_revision_conflict") {
         await loadConfiguration({ afterConflict: true });
         return;
@@ -4832,10 +4875,13 @@ async function saveConfiguration() {
       setView("review");
       return;
     }
+    const ownsNavigation = configurationOwnsNavigation(generation);
     installCurrentConfiguration(payload, generation);
+    if (!ownsNavigation) return;
     setView("availability");
   } catch (_error) {
     if (!configurationOperationIsCurrent(generation)) return;
+    if (!configurationOwnsNavigation(generation)) return;
     showFormError("Connexion impossible pendant l’enregistrement. Vérifiez vos informations puis réessayez.");
     setView("review");
   } finally {
@@ -5331,6 +5377,10 @@ async function acceptRecommendation({
     restoreAcceptanceControls();
     return;
   }
+  // Exact retries share the tentative UUID; a later tentative owns a different lock.
+  const requestOwner = attempt.acceptance_request_id;
+  state.acceptanceRequestOwner = requestOwner;
+  const ownsRequest = () => state.acceptanceRequestOwner === requestOwner;
   state.acceptingRecommendation = true;
   disableAcceptanceControls(true);
   triggerButton?.setAttribute("aria-busy", "true");
@@ -5345,8 +5395,8 @@ async function acceptRecommendation({
     const payload = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      clearPendingAcceptanceAttempt();
-      if (!isCurrent()) return;
+      clearPendingAcceptanceAttempt(attempt);
+      if (!isCurrent() || !ownsRequest()) return;
       const [message, blocked] = acceptanceError(payload?.detail?.code, response.status);
       state.acceptanceBlocked = blocked;
       if (decision?.decision_id === expectedDecisionId) {
@@ -5367,14 +5417,14 @@ async function acceptRecommendation({
       && payload.selection_id === mission.selection_id
       && payload.decision_id === mission.decision_id;
     if (!validAcceptedMission) {
-      showUnresolvedAcceptance();
+      if (ownsRequest()) showUnresolvedAcceptance();
       return;
     }
-    if (!isCurrent()) {
+    if (!isCurrent() || !ownsRequest()) {
       // The server owns this successful confirmation; keep it available as history.
       state.lastHistoricalAcceptance = payload;
-      clearPendingAcceptanceAttempt();
-      showAcceptanceStatus("Mission enregistrée pour la décision précédente. Recalculez la nuit du site courant avant une observation immédiate.");
+      const cleared = clearPendingAcceptanceAttempt(attempt);
+      if (cleared && ownsRequest()) showAcceptanceStatus("Mission enregistrée pour la décision précédente. Recalculez la nuit du site courant avant une observation immédiate.");
       return;
     }
     if (decision?.decision_id === expectedDecisionId) {
@@ -5391,7 +5441,7 @@ async function acceptRecommendation({
         return;
       }
     }
-    clearPendingAcceptanceAttempt();
+    clearPendingAcceptanceAttempt(attempt);
     state.acceptedMission = {
       acceptedSiteGeneration: siteGeneration,
       acceptedSiteFingerprint: siteFingerprint,
@@ -5420,14 +5470,17 @@ async function acceptRecommendation({
     renderMission(mission);
     ui.mission.showModal();
   } catch (_error) {
-    if (isCurrent()) showUnresolvedAcceptance();
+    if (isCurrent() && ownsRequest()) showUnresolvedAcceptance();
   } finally {
-    state.acceptingRecommendation = false;
-    triggerButton?.removeAttribute("aria-busy");
-    if (isCurrent() && hasUnresolvedAcceptance()) {
-      showUnresolvedAcceptance();
-    } else if (isCurrent()) {
-      restoreAcceptanceControls();
+    if (ownsRequest()) {
+      state.acceptanceRequestOwner = null;
+      state.acceptingRecommendation = false;
+      triggerButton?.removeAttribute("aria-busy");
+      if (isCurrent() && hasUnresolvedAcceptance()) {
+        showUnresolvedAcceptance();
+      } else if (isCurrent()) {
+        restoreAcceptanceControls();
+      }
     }
   }
 }
