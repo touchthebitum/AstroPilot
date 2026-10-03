@@ -1344,7 +1344,8 @@ function validFieldObservationRecoveryJournal(value) {
         && value.resolved_watermark <= value.epoch)
      && Array.isArray(value.entries) && Array.isArray(value.resolved)
     && value.resolved.every(id => value.version === 1 ? typeof id === "string"
-      : exactObservationKeys(id, ["digest", "sequence"]) && /^[a-f0-9]{64}$/.test(id.digest)
+      : exactObservationKeys(id, ["digest", "sequence"]) && typeof id.digest === "string"
+        && /^[a-f0-9]{64}$/.test(id.digest)
         && Number.isSafeInteger(id.sequence) && id.sequence >= 0 && id.sequence <= value.epoch)
     && new Set(value.entries.map(item => item?.entry_id)).size === value.entries.length
     && value.entries.every(item => {
@@ -3973,7 +3974,8 @@ function showUnresolvedAcceptance({ malformed = state.pendingAcceptanceStorageIn
     ? "La sélection en attente ne peut pas être relue de façon sûre. NightMerit bloque toute nouvelle sélection pour éviter un doublon."
     : "Le résultat de votre sélection n’a pas pu être confirmé. NightMerit doit vérifier cette sélection avant de poursuivre.";
   ui.retryPendingAcceptance.disabled = malformed || state.acceptingRecommendation;
-  setView("unresolved_acceptance");
+  // Refreshing the active recovery screen is not a navigation.
+  if (state.view !== "unresolved_acceptance") setView("unresolved_acceptance");
 }
 
 function hasUnresolvedAcceptance() {

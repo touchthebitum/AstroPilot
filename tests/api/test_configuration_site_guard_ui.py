@@ -25,6 +25,8 @@ def test_configuration_and_acceptance_generation_races():
     helpers += between('function initializeConfiguration(', 'async function restoreSavedMission(')
     helpers += between('async function loadConfiguration(', 'const availabilityFieldsByMode')
     helpers += between('async function retryPendingAcceptance(', 'document.querySelector("#site-next")')
+    edit_start = source.index("function editConfiguration()")
+    helpers += source[edit_start:source.index('document.querySelector("#save-configuration")', edit_start)]
     helpers += between('function sameAcceptanceIntent(', 'function resetMissionPresentation(')
     helpers += between('function resetMissionPresentation(', 'function renderDecision(')
     helpers += between('async function restoreSavedMission(', 'function invalidateAvailabilityForSiteChange(')
@@ -315,6 +317,73 @@ function showMessage() {}
       assert.equal(ui.retryPendingAcceptance.disabled, false);
       assert.deepEqual(parsePendingAcceptance(storage.get(PENDING_ACCEPTANCE_STORAGE_KEY)), request);
     }
+    state.pendingAcceptanceAttempt = null; storage.delete(PENDING_ACCEPTANCE_STORAGE_KEY);
+  }
+  // Exact P2: A times out, B is installed, then blocked edit/guards refresh
+  // the unresolved screen during the historical retry without revoking its owner.
+  for (const outcome of ['resolved', 'navigation', 'B', 'network', 'http', 'malformed']) {
+    state.pendingAcceptanceAttempt = null; state.acceptingRecommendation = false;
+    clearAcceptedMission(); installCurrentConfiguration(A, beginConfigurationOperation());
+    state.currentDecision = decision;
+    const initial = acceptRecommendation(args); const initialRequest = queue.shift();
+    initialRequest.reject(new Error('timeout-A')); await initial;
+    const attemptA = state.pendingAcceptanceAttempt;
+    const storedA = storage.get(PENDING_ACCEPTANCE_STORAGE_KEY);
+    installCurrentConfiguration(B, beginConfigurationOperation());
+    showUnresolvedAcceptance();
+    const recovery = retryPendingAcceptance(); const retry = queue.shift();
+    assert.equal(retry.options.body, initialRequest.options.body);
+    const owner = state.acceptanceRecoveryNavigationOwner;
+    const revision = state.viewRevision;
+    editConfiguration(); // actual production action, blocked by its guard
+    for (let i = 0; i < 3; i++) assert.equal(guardUnresolvedAcceptance(), true);
+    assert.equal(state.viewRevision, revision);
+    assert.equal(state.acceptanceRecoveryNavigationOwner, owner);
+    assert.equal(state.view, 'unresolved_acceptance');
+    assert.equal(ui.retryPendingAcceptance.disabled, true);
+    let currentB, requestB, attemptB;
+    if (outcome === 'navigation') {
+      setView('review'); setView('unresolved_acceptance');
+      assert.equal(state.viewRevision, revision + 2);
+    }
+    if (outcome === 'B') {
+      clearPendingAcceptanceAttempt(attemptA);
+      state.acceptingRecommendation = false;
+      state.currentDecision = {...decision, decision_id: 'decision-B'};
+      setView('review');
+      currentB = acceptRecommendation({...args, expectedDecisionId: 'decision-B'});
+      requestB = queue.shift(); attemptB = state.pendingAcceptanceAttempt;
+    }
+    if (outcome === 'network') retry.reject(new Error('offline'));
+    else reply(retry, outcome === 'malformed' ? {} : accepted, outcome !== 'http');
+    await flush();
+    if (outcome === 'resolved') {
+      assert.equal(state.pendingAcceptanceAttempt, null);
+      assert.equal(state.view, 'loading_configuration');
+      const configurationRequest = queue.shift();
+      assert.equal(configurationRequest.url, '/v1/configuration');
+      reply(configurationRequest, B); await flush();
+      reply(queue.shift(), {}); await flush(); reply(queue.shift(), []);
+    }
+    await recovery;
+    assert.equal(state.acceptedMission, null);
+    assert.equal(opened, 0); assert.equal(rendered, 0);
+    if (outcome === 'resolved') {
+      assert.equal(state.view, 'availability'); assert.equal(ui.pendingAcceptance.hidden, true);
+    } else if (outcome === 'navigation') {
+      assert.equal(state.view, 'unresolved_acceptance'); assert.equal(state.pendingAcceptanceAttempt, null);
+    } else if (outcome === 'B') {
+      assert.equal(state.view, 'review'); assert.equal(state.pendingAcceptanceAttempt, attemptB);
+      assert.equal(state.acceptanceRequestOwner, attemptB.acceptance_request_id);
+      requestB.reject(new Error('timeout-B')); await currentB;
+    } else {
+      assert.equal(state.pendingAcceptanceAttempt, attemptA);
+      assert.equal(storage.get(PENDING_ACCEPTANCE_STORAGE_KEY), storedA);
+      assert.equal(state.view, 'unresolved_acceptance');
+      assert.equal(ui.retryPendingAcceptance.disabled, false);
+      assert.equal(state.viewRevision, revision);
+    }
+    assert.equal(queue.length, 0);
     state.pendingAcceptanceAttempt = null; storage.delete(PENDING_ACCEPTANCE_STORAGE_KEY);
   }
   // Delayed Tonight success/catch preserves configuration error, and away/back revokes navigation.

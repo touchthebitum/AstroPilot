@@ -128,8 +128,10 @@ that owner; a new ordinary acceptance revokes it. After a valid historical
 confirmation clears its own pending and releases its own lock, recovery may restart
 loadConfiguration only while it still owns unresolved_acceptance, with no newer
 pending or lock. This closes the recovery screen after storage-only reopening or a
-site switch without activating the historical mission. Any navigation (including
-away/back) or newer attempt prevents the old recovery from redirecting. Network,
+site switch without activating the historical mission. A guard refreshing the
+already active unresolved_acceptance view updates its message/controls without
+incrementing the navigation revision or revoking recovery ownership. Any actual
+navigation (including away/back) or newer attempt prevents the old recovery from redirecting. Network,
 HTTP and malformed-confirmation failures retain the exact pending envelope and
 allow retry while the recovery still owns its screen.
 
@@ -145,6 +147,10 @@ acceptance_request_id and decision_id against their identity pattern, in both
 supported envelope versions. Missing, null, numeric, boolean, object, empty,
 whitespace and invalid-string identities are rejected without implicit conversion;
 existing valid envelopes and exact retry UUID/payload remain readable.
+
+The v2 FieldObservation recovery journal requires a string digest before its
+64-character lowercase hexadecimal pattern; non-text values cannot be coerced
+into a resolved-entry identity. Valid digest strings remain unchanged.
 
 These UI ownership checks do not cancel server writes already started. The Node
 harness exercises production recovery, pending parsing/persistence and Tonight with

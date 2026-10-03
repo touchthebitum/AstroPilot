@@ -2755,3 +2755,33 @@ function show() {}
     script.write_text(prefix + "\nconst additions = " + json.dumps(additions) + ";\n" + checks)
     result = subprocess.run([engine, str(script)], capture_output=True, text=True, timeout=45)
     assert result.returncode == 0, result.stderr
+
+
+
+def test_recovery_journal_v2_requires_text_digest():
+    engine = javascript_engine()
+    if engine is None or Path(engine).name != "node":
+        pytest.skip("Node.js is required for the production journal parser harness")
+    source = SCRIPT.read_text(encoding="utf-8")
+    helpers = source[source.index("const OBSERVATION_CHOICES ="):
+        source.index("const PENDING_ACCEPTANCE_STORAGE_KEY =")]
+    checks = r"""
+const assert = require('node:assert/strict');
+const digest = 'abcdef0123456789'.repeat(4);
+const journal = value => ({version: 2, entries: [], resolved: [{digest: value, sequence: 1}],
+  epoch: 1, resolved_watermark: 0});
+for (const value of [[digest], {}, {digest}, 123, null, true, false, '', ' '.repeat(64),
+  digest.slice(1), digest + '0', 'g'.repeat(64), digest.toUpperCase(), undefined]) {
+  assert.equal(validFieldObservationRecoveryJournal(journal(value)), false);
+  assert.equal(validFieldObservationRecoveryJournal(JSON.parse(JSON.stringify(journal(value)))), false);
+}
+const valid = journal(digest);
+assert.equal(validFieldObservationRecoveryJournal(valid), true);
+assert.equal(valid.resolved[0].digest, digest);
+assert.equal(validFieldObservationRecoveryJournal({version: 1, entries: [], resolved: ['legacy']}), true);
+console.log('strict-journal-parser-completed');
+"""
+    result = subprocess.run([engine, "-"], input=helpers + checks,
+        capture_output=True, text=True, check=False, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == 'strict-journal-parser-completed'
