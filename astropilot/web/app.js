@@ -2368,6 +2368,36 @@ function renderOutcomeEvaluation(evaluation) {
       ? `Suffisance des éléments comparables : ${sufficiency[evaluation.assessment.status]}. Ce statut ne mesure pas la qualité globale de la prévision.`
       : "Statut non reconnu");
   }
+  lines.push("", "Traçabilité de la prévision");
+  const unavailable = "Non disponible";
+  const timezone = state.fieldObservationDraftContext?.timezone || null;
+  const dateText = value => {
+    if (!value || !Number.isFinite(Date.parse(value))) return unavailable;
+    const utc = new Date(value).toISOString();
+    try {
+      return timezone ? `${new Intl.DateTimeFormat("fr-CH", {timeZone: timezone,
+        dateStyle: "short", timeStyle: "short"}).format(new Date(value))} (${timezone}) · ${utc}` : utc;
+    } catch (_) { return utc; }
+  };
+  for (const item of knownStatus ? evaluation.results : []) {
+    const point = item.forecast_point;
+    if (!point) continue;
+    const offset = point.temporal_offset_minutes;
+    lines.push(`${labels[item.variable] || "Variable"} · point météo : ${dateText(point.selected_forecast_for_utc)} ; écart (point − observation) : ${Number.isFinite(offset) ? `${offset > 0 ? "+" : ""}${offset} min` : unavailable}.`);
+    if (point.requested_location || point.grid_location) {
+      const coordinates = value => value ? `${value.latitude}, ${value.longitude}` : unavailable;
+      lines.push(`Coordonnées demandées : ${coordinates(point.requested_location)} · grille : ${coordinates(point.grid_location)} · altitude grille : ${point.grid_location?.altitude_m == null ? unavailable : `${point.grid_location.altitude_m} m`}.`);
+    }
+    lines.push(`Récupération : ${dateText(point.retrieved_at_utc ?? evaluation.weather_traceability?.retrieved_at_utc)} · provider : ${point.provider_id || evaluation.weather_traceability?.provider_id || unavailable} · modèle : ${point.model_id || evaluation.weather_traceability?.model_id || unavailable}.`);
+  }
+  const coords = value => value ? `${value.latitude}, ${value.longitude}` : unavailable;
+  const trace = evaluation.weather_traceability;
+  const perVariableCoordinates = (knownStatus ? evaluation.results : []).some(item =>
+    item.forecast_point && (item.forecast_point.requested_location
+      || item.forecast_point.grid_location));
+  if (!(perVariableCoordinates && trace?.requested_location == null && trace?.grid_location == null)) {
+    lines.push(`Coordonnées demandées : ${coords(trace?.requested_location)} · grille : ${coords(trace?.grid_location)} · altitude grille : ${trace?.grid_location?.altitude_m == null ? unavailable : `${trace.grid_location.altitude_m} m`}.`);
+  }
   document.querySelector("#outcome-result").textContent = lines.join("\n");
 }
 

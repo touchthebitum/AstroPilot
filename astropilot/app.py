@@ -3327,6 +3327,9 @@ def create_app(
         comparison = evaluation.comparison
         def reason(item):
             return {"code": item.code, "variable": None if item.variable is None else item.variable.value}
+        from astropilot.outcome_weather_traceability import weather_traceability
+        traceability = weather_traceability(evaluation, application_service().evidence_store,
+            application_service().field_observation_store)
         results = []
         for item in comparison.results:
             projected = {"variable": item.variable.value, "status": item.status.value,
@@ -3340,6 +3343,7 @@ def create_app(
                     observed=None if item.observed_condition is None else item.observed_condition.value,
                     outcome=None if item.outcome is None else item.outcome.value,
                 )
+            projected["forecast_point"] = traceability["points"].get(item.variable.value)
             results.append(projected)
         assessment = evaluation.assessment
         evidence = evaluation.outcome_evidence
@@ -3350,6 +3354,7 @@ def create_app(
             "execution_id": comparison.execution_id, "comparison_id": comparison.comparison_id,
             "computed_at_utc": comparison.computed_at_utc.isoformat(),
             "status": comparison.status.value, "results": results,
+            "weather_traceability": traceability["summary"],
             "reasons": [reason(r) for r in comparison.reasons],
             "assessment": None if assessment is None else {
                 "id": assessment.assessment_id, "status": assessment.status.value,
