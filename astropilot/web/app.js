@@ -394,7 +394,7 @@ function renderRecentDecisions() {
   const blocked = Boolean(context?.execution_id || state.fieldObservationLock || state.observationBusy || state.fieldObservationContextInvalid);
   document.querySelector("#observation-choose-decision").disabled = blocked;
   document.querySelector("#observation-associated-label").textContent = context?.execution_id
-    ? "Décision imposée par la session" : `Décision associée : …${context?.decision_id?.slice(-6) || "—"}`;
+    ? "Décision imposée par la session" : context?.historical ? "Décision récente choisie" : "Décision courante";
   const catalogue = state.recentDecisions;
   document.querySelector("#observation-decision-catalogue").hidden = !catalogue?.open;
   const keep = document.querySelector("#observation-keep-decision");
@@ -515,6 +515,7 @@ function returnToCurrentFieldObservationDecision() {
   loadSavedFieldObservations(state.fieldObservationDraftContext);
 }
 function observedAtChanged() {
+  if (ui.observation.open && state.fieldObservationDraftContext) renderObservationLinkage();
   invalidateRecentDecisions();
   if (!state.recentDecisions) return;
   state.recentDecisions.cursor = null;
@@ -541,10 +542,12 @@ function renderObservationLinkage() {
   if (!element) return;
   const context = state.fieldObservationDraftContext;
   element.textContent = context?.execution_id
-    ? `Session liée : ${context.execution_id}` : "Sans session";
+    ? "Session liée" : "Sans session";
   const night = context?.night_date ? ` · nuit du ${context.night_date}` : "";
   text("#observation-context-decision", context
-    ? `Décision ${context.decision_id}${night}` : "Décision indisponible");
+    ? `Décision associée${night}` : "Décision indisponible");
+  const timeSummary = document.querySelector("#observation-time-summary");
+  if (timeSummary) timeSummary.textContent = `${document.querySelector("#observation-observed-at").value.replace("T", " · ")} · ${context?.timezone || "Fuseau indisponible"}`;
 }
 
 function siteTimezone() {
@@ -845,12 +848,19 @@ function openFieldObservation(source) {
   }
   observationMessage("Choisissez les catégories observées, indiquez le vent mesuré en km/h ou précisez l’état de la surface.");
   state.fieldObservationInitialObservedAt = observedAt.value;
+  renderObservationLinkage();
   // Restore the exact historical envelope, never migrate its UUID or payload.
   const pendingContext = state.fieldObservationLock?.context;
   if (source !== "catalogue" && pendingContext?.decision_id && pendingContext.decision_id !== context.decision_id && !context.execution_id && !pendingContext.execution_id
       && pendingContext.site_identity === context.site_identity && pendingContext.timezone === context.timezone) {
     state.fieldObservationDraftContext = Object.freeze({...pendingContext, historical: true});
   }
+  const stopWrap = document.querySelector("#observation-stop-wrap");
+  const quickStop = Boolean(context.execution_id && ["completed", "interrupted"].includes(currentSession()?.execution?.status));
+  const stopParent = document.querySelector(quickStop ? "#observation-quick-stop" : ".observation-advanced-grid");
+  if (stopWrap && stopParent?.append) stopParent.append(stopWrap);
+  const contextEditor = document.querySelector(".observation-context-editor");
+  if (contextEditor) contextEditor.open = source === "catalogue" || Boolean(state.fieldObservationLock);
   ui.observation.showModal();
   renderRecentDecisions();
   renderObservationLinkage();
@@ -2132,6 +2142,7 @@ function restorePendingFieldObservation() {
     });
   }
   document.querySelector("#observation-observed-at").value = pending.observed_at_local;
+  renderObservationLinkage();
   document.querySelector("#observation-clouds").value = payload.conditions?.cloud_state || "";
   document.querySelector("#observation-transparency").value = payload.conditions?.transparency || "";
   setOptionalObservationValue("#observation-wind", payload.conditions?.wind_speed_kmh);
@@ -3319,7 +3330,16 @@ function setView(view) {
   ui.configurationLoading.hidden = view !== "loading_configuration";
   ui.configurationError.hidden = view !== "configuration_error";
   ui.onboarding.hidden = !wizardVisible;
-  ui.availability.hidden = view !== "availability";
+  ui.availability.hidden = !["availability", "review"].includes(view);
+  document.querySelector("#review-step").hidden = !["review", "availability"].includes(view) || !state.configurationDraft?.site;
+  document.querySelector("#review-configuration-actions").hidden = view !== "review";
+  if (["review", "availability"].includes(view) && state.configurationDraft?.site) renderReview();
+  ui.recommendationSubmit.disabled = view === "review";
+  document.querySelector("#configuration-projects").hidden = !state.configuration?.configured;
+  document.querySelector("#open-observation-catalogue").hidden = view === "review";
+  ui.availabilityTimezoneWarning.textContent = view === "review"
+    ? "Enregistrez votre configuration pour confirmer le fuseau du site et activer les horaires précis."
+    : "Le fuseau horaire du site ne peut pas être déterminé. Vérifiez les coordonnées du site avant de choisir une heure précise.";
   ui.loading.hidden = view !== "loading_recommendation";
   ui.message.hidden = true;
   ui.pendingAcceptance.hidden = view !== "unresolved_acceptance";
@@ -3334,7 +3354,9 @@ function setView(view) {
   for (const marker of document.querySelectorAll("[data-progress]")) {
     marker.classList.toggle("active", marker.dataset.progress === view);
   }
-  if (wizardVisible) {
+  if (view === "review") {
+    requestAnimationFrame(() => document.querySelector("#availability-title")?.focus());
+  } else if (wizardVisible) {
     requestAnimationFrame(() => {
       document.querySelector(`[data-step="${view}"] h2`)?.focus();
     });
@@ -4505,7 +4527,7 @@ async function saveProjectProgress() {
 function prefillConfiguration() {
   renderPresetChoices();
   const site = state.configurationDraft.site || {};
-  document.querySelector("#site-name").value = site.name || "";
+  document.querySelector("#site-name").value = site.name?.trim() ? site.name : "Mon site";
   document.querySelector("#site-latitude").value = site.latitude ?? "";
   document.querySelector("#site-longitude").value = site.longitude ?? "";
   document.querySelector("#site-bortle").value = site.bortle ?? "";
@@ -4524,6 +4546,13 @@ function prefillConfiguration() {
   }
   toggleEquipmentKind();
   renderProjects();
+  renderSiteSummary();
+}
+
+function renderSiteSummary() {
+  const [site] = readSite();
+  text("#site-summary", site ? `${site.name} · Position confirmée · Bortle ${site.bortle}`
+    : "Confirmez votre position et la qualité du ciel (Bortle).");
 }
 
 function readSite() {
@@ -5639,7 +5668,8 @@ document.querySelector("#equipment-next").addEventListener("click", () => {
   }
   state.configurationDraft.equipment = equipment;
   showFormError("");
-  if (renderProjects()) setView("projects");
+  renderReview();
+  setView("review");
 });
 
 document.querySelector("#projects-next").addEventListener("click", () => {
@@ -5663,13 +5693,20 @@ for (const input of document.querySelectorAll('input[name="equipment-kind"]')) {
 
 function editConfiguration() {
   if (guardUnresolvedAcceptance()) return;
-  state.configurationDraft = draftFromConfiguration(state.configuration);
-  prefillConfiguration();
+  if (state.view !== "review") {
+    state.configurationDraft = draftFromConfiguration(state.configuration);
+    prefillConfiguration();
+  }
   showFormError("");
   setView("site");
 }
 
 document.querySelector("#save-configuration").addEventListener("click", saveConfiguration);
+document.querySelector("#configuration-projects").addEventListener("click", () => {
+  if (guardUnresolvedAcceptance()) return;
+  if (renderProjects()) setView("projects");
+});
+
 ui.configurationRetry.addEventListener("click", loadConfiguration);
 ui.configurationRecover.addEventListener("click", showRecoveryConfirmation);
 ui.configurationRecoveryCancel.addEventListener("click", hideRecoveryConfirmation);
@@ -5702,6 +5739,10 @@ ui.availabilityForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (guardUnresolvedAcceptance()) return;
   if (state.requestingRecommendation) return;
+  if (state.view === "review") {
+    showAvailabilityError("Enregistrez votre configuration avant de préparer votre nuit.");
+    return;
+  }
   try {
     const availability = collectAvailabilityPayload();
     showAvailabilityError("");
@@ -5714,6 +5755,10 @@ ui.availabilityForm.addEventListener("submit", (event) => {
   }
 });
 
+for (const selector of ["#site-name", "#site-latitude", "#site-longitude", "#site-bortle"]) {
+  document.querySelector(selector).addEventListener("input", renderSiteSummary);
+}
+
 document.querySelector("#use-geolocation").addEventListener("click", () => {
   const message = document.querySelector("#geolocation-message");
   if (!navigator.geolocation) {
@@ -5725,6 +5770,7 @@ document.querySelector("#use-geolocation").addEventListener("click", () => {
     (position) => {
       document.querySelector("#site-latitude").value = position.coords.latitude.toFixed(6);
       document.querySelector("#site-longitude").value = position.coords.longitude.toFixed(6);
+      renderSiteSummary();
       message.textContent = "Coordonnées ajoutées. Vous pouvez les corriger manuellement.";
     },
     () => {
@@ -5930,6 +5976,22 @@ document.querySelector("#history-filters").addEventListener("submit", event => {
 document.querySelector("#history-filters").addEventListener("input", () => {invalidateOutcomeHistory(); document.querySelector("#history-next").hidden = true; document.querySelector("#history-statistics").replaceChildren(); document.querySelector("#history-table").replaceChildren(); document.querySelector("#history-message").textContent = "Filtres modifiés. Rechargez l’historique.";});
 document.querySelector("#history-filters").addEventListener("change", () => loadOutcomeHistory());
 document.querySelector("#history-next").addEventListener("click", () => loadOutcomeHistory(true));
+
+document.querySelector("#history-current-site").addEventListener("click", () => {
+  const site = state.configuration?.site;
+  if (!Number.isFinite(site?.latitude) || !Number.isFinite(site?.longitude)
+      || Math.abs(site.latitude) > 90 || Math.abs(site.longitude) > 180) {
+    document.querySelector("#history-message").textContent = "Coordonnées du site indisponibles.";
+    return;
+  }
+  document.querySelector('#history-filters [name="latitude"]').value = site.latitude;
+  document.querySelector('#history-filters [name="longitude"]').value = site.longitude;
+  invalidateOutcomeHistory();
+  document.querySelector("#history-next").hidden = true;
+  document.querySelector("#history-statistics").replaceChildren();
+  document.querySelector("#history-table").replaceChildren();
+  document.querySelector("#history-message").textContent = "Site sélectionné. Rechargez l’historique.";
+});
 
 // End Outcome History.
 restoreFieldObservationLock();

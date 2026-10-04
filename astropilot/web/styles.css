@@ -521,3 +521,15 @@ button { color: inherit; }
 #observation-decision-candidates { display: grid; gap: .5rem; margin-block: .75rem; }
 #observation-decision-candidates button { text-align: left; }
 #observation-decision-catalogue > button { margin: .25rem; }
+
+/* Disclosure keeps the same controls and values in both compact and detailed views. */
+.observation-context-editor, .observation-diagnostics { margin: 12px 0; }
+.observation-context-editor summary, .observation-diagnostics summary,
+#site-step details summary, #history-filters details summary { cursor: pointer; color: var(--cyan); }
+#observation-quick-stop label { display: grid; gap: 6px; margin: 12px 0; }
+#observation-quick-stop select { width: 100%; min-width: 0; }
+#site-summary, #observation-time-summary, .review-grid dd { overflow-wrap: anywhere; }
+#history-filters details { min-width: 0; }
+
+#review-step .review-grid { gap: 8px; margin-top: 12px; }
+#review-step .review-grid div { padding: 9px 12px; }
