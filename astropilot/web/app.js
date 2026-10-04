@@ -176,7 +176,8 @@ function usableEvidence(session) {
 }
 
 function sessionStatus(status) {
-  return status === "unconfirmed" ? "Session non confirmée" : status;
+  return ({unconfirmed: "Session non confirmée", completed: "Terminée", interrupted: "Interrompue",
+    in_progress: "En cours", not_started: "À démarrer"})[status] || status;
 }
 
 function restoreSessionEvidenceInputs(session) {
@@ -199,6 +200,7 @@ function renderSession() {
   const session = currentSession();
   restoreSessionEvidenceInputs(session);
   const status = session?.execution.status;
+  const knownStatus = ["not_started", "in_progress", "completed", "interrupted", "unconfirmed"].includes(status);
   const choice = document.querySelector("#session-choice");
   choice.replaceChildren();
   const noSessionOption = document.createElement("option");
@@ -215,15 +217,20 @@ function renderSession() {
   choice.value = session?.execution.execution_id || "";
   const intentId = session?.acquisition_intent_id || state.acceptedMission?.acquisitionIntentId;
   text("#session-intent", `Intent de la mission : ${intentId || "non défini"}`);
-  document.querySelector("#session-start").hidden = status === "in_progress" || status === "unconfirmed";
+  document.querySelector("#session-start").hidden = Boolean(session) && (!knownStatus || status === "in_progress" || status === "unconfirmed");
   document.querySelector("#session-start").textContent = status === "not_started"
-    ? "Démarrer cette session" : "Créer et démarrer une nouvelle session";
+    ? "Démarrer cette session" : "Démarrer une nouvelle session";
+  // Presentation only: saving usable duration and then adding progress take precedence.
+  document.querySelector("#session-start").className = status === "completed" && !session.credit
+    ? "secondary-button" : "primary-button";
   document.querySelector("#session-close-actions").hidden = status !== "in_progress";
   document.querySelector("#session-evidence").hidden = status !== "completed" || Boolean(usableEvidence(session));
   const evidence = usableEvidence(session);
-  document.querySelector("#session-credit").hidden = status === "unconfirmed" || !evidence || Boolean(session.credit);
-  if (evidence && !session.credit) {
-    text("#session-credit-preview", `Intent ${session.acquisition_intent_id} · base historique : ${sessionHours(session.historical_baseline_seconds)} · crédit proposé : ${sessionHours(Number(evidence.usable_integration_duration))}`);
+  document.querySelector("#session-credit").hidden = status !== "completed" || !evidence || Boolean(session.credit);
+  document.querySelector("#session-apply-credit").disabled = state.sessionBusy || status !== "completed";
+  if (status === "completed" && evidence && !session.credit) {
+    text("#session-credit-preview", `Base historique : ${sessionHours(session.historical_baseline_seconds)} · crédit proposé : ${sessionHours(Number(evidence.usable_integration_duration))}`);
+    text("#session-credit-intent", `Intent : ${session.acquisition_intent_id}`);
     const mustConfirm = Number(session.historical_baseline_seconds) > 0 && !session.historical_baseline_confirmed;
     document.querySelector("#session-baseline-confirm-wrap").hidden = !mustConfirm;
     document.querySelector("#session-baseline-confirm").checked = false;
@@ -237,7 +244,8 @@ function renderSession() {
     text("#session-after", sessionHours(session.acquired_after_seconds));
     text("#session-current", sessionHours(session.current_acquired_seconds));
     text("#session-remaining", session.target_hours == null ? "objectif non défini" : sessionHours(session.remaining_hours * 3600));
-    sessionMessage(status === "unconfirmed" ? "Session non confirmée : aucune action disponible."
+    sessionMessage(!knownStatus ? "État de session non reconnu. Actualisez ou resélectionnez la session."
+      : status === "unconfirmed" ? "Session non confirmée : aucune action disponible."
       : status === "interrupted" ? "Session interrompue : aucun crédit."
       : session.credit ? "Crédit enregistré." : status === "completed" ? "Session terminée."
       : status === "in_progress" ? "Session en cours." : "Session prête à démarrer.");
@@ -298,6 +306,7 @@ async function sessionCommand(command) {
     state.sessionWriteAttempted = false;
     state.sessionWriteUncertain = false;
     document.querySelectorAll(".session-panel button").forEach((button) => { button.disabled = false; });
+    document.querySelector("#session-apply-credit").disabled = currentSession()?.execution.status !== "completed";
   }
 }
 
@@ -383,6 +392,10 @@ async function recordSessionEvidence() {
 
 async function creditSession(_missionId, confirmed) {
   const session = currentSession();
+  if (session?.execution.status !== "completed") {
+    sessionMessage("Seule une session terminée peut ajouter une durée à votre avancement : aucun crédit pour cette session.");
+    return;
+  }
   const evidence = usableEvidence(session);
   if (!evidence || session.credit) return;
   const mustConfirm = Number(session.historical_baseline_seconds) > 0 && !session.historical_baseline_confirmed;
@@ -2521,8 +2534,14 @@ async function loadSavedFieldObservations(context) {
 async function reopenRecentFieldObservations() {
   let context;
   try { context = JSON.parse(localStorage.getItem("astropilot.recent-observation-context.v1")); }
-  catch (_error) { return; }
-  if (typeof context?.decision_id !== "string" || !context.decision_id) return;
+  catch (_error) { context = null; }
+  const message = document.querySelector("#recent-observations-message");
+  if (typeof context?.decision_id !== "string" || !context.decision_id) {
+    message.textContent = "Aucune observation enregistrée récemment.";
+    message.hidden = false;
+    return;
+  }
+  message.hidden = true;
   if (state.observationBusy) return;
   invalidateFieldObservationOperation();
   state.fieldObservationDraftContext = Object.freeze(context);
