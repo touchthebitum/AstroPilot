@@ -160,6 +160,76 @@ const assert = require('node:assert/strict');
   assert.equal(await page.locator('#history-filter-summary').evaluate(e=>e.scrollWidth<=e.clientWidth),true);
   if(mode==='simple') {await page.locator('#history-filters details').evaluate(e=>e.open=false);await page.locator('#history-filter-summary').click();assert.equal(await page.locator('#history-filters details').evaluate(e=>e.open),true);}
  }
+
+ // Real storage delivery from a second Chrome tab while catalogue/selection await.
+ const other = await context.newPage();
+ await other.goto('http://nightmerit.test/');
+ await page.evaluate(() => {window.lastModeEvent=undefined;window.addEventListener('storage',e=>{if(e.key===UI_MODE_KEY) window.lastModeEvent=e.newValue;});});
+ for (const [initial, value, expected] of [
+  ['simple','pro','pro'], ['pro','simple','simple'],
+  ['pro','pro','pro'], ['pro','invalid','simple'], ['simple','simple','simple']
+ ]) {
+  await page.evaluate(initial => {
+   applyUiMode(initial);
+   state.fieldObservationLock = null;
+   state.fieldObservationContextInvalid = false;
+   state.observationBusy = false;
+   state.configuration = {site:{latitude:46.12,longitude:7.34,timezone:'Europe/Zurich'}};
+   state.fieldObservationDraftContext = {source:'catalogue',decision_id:null,execution_id:null,timezone:'Europe/Zurich'};
+   state.recentDecisions = {open:true,items:[],cursor:null,extension:1};
+   document.querySelector('#observation-observed-at').value='2026-10-04T22:00';
+   if (!ui.observation.open) ui.observation.showModal();
+   fieldObservationNetworkRequest = () => new Promise(resolve => window.releaseCatalogue=resolve);
+   window.cataloguePromise = loadRecentDecisions();
+   window.businessSnapshot = {
+    generation:recentDecisionsGeneration,operation:fieldObservationOperationGeneration,
+    draft:state.fieldObservationDraftContext,catalogue:state.recentDecisions,lock:state.fieldObservationLock
+   };
+  }, initial);
+  // Force a write even for same-mode events; initial storage event is drained first.
+  await other.evaluate(initial => localStorage.setItem(UI_MODE_KEY,initial),initial);
+  await page.waitForFunction(initial => document.querySelector('#ui-mode').value===initial,initial);
+  await page.evaluate(() => window.lastModeEvent=undefined);
+  await other.evaluate(value => {localStorage.removeItem(UI_MODE_KEY);localStorage.setItem(UI_MODE_KEY,value);},value);
+  await page.waitForFunction(value => window.lastModeEvent===value,value);
+  assert.equal(await page.inputValue('#ui-mode'),expected);
+  await page.evaluate(async () => {
+   if (recentDecisionsGeneration!==businessSnapshot.generation || fieldObservationOperationGeneration!==businessSnapshot.operation
+    || state.fieldObservationDraftContext!==businessSnapshot.draft || state.recentDecisions!==businessSnapshot.catalogue
+    || state.fieldObservationLock!==businessSnapshot.lock) throw Error('UI event mutated business state');
+   if (document.querySelector('#observation-catalogue-status').textContent!=='Chargement des décisions…') throw Error('loading ownership lost');
+   releaseCatalogue({items:[{decision_id:'valid-catalogue-decision',night_date:'2026-10-04'}],complete:true});
+   await cataloguePromise;
+  });
+  assert.equal(await page.locator('#observation-decision-candidates button').count(),1);
+  assert.match(await page.locator('#observation-catalogue-status').textContent(),/Choisissez explicitement/);
+  await page.evaluate(() => {
+   canonicalFieldObservationContextAvailable = () => new Promise(resolve => window.releaseSelection=resolve);
+   window.selectionPromise = selectRecentDecision(state.recentDecisions.items[0]);
+   window.selectionGeneration = recentDecisionsGeneration;
+  });
+  await other.evaluate(expected => localStorage.setItem(UI_MODE_KEY,expected==='pro'?'simple':'pro'),expected);
+  await page.waitForFunction(expected => document.querySelector('#ui-mode').value!==(expected),expected);
+  await page.evaluate(async () => {
+   if (recentDecisionsGeneration!==selectionGeneration) throw Error('UI event invalidated selection');
+   releaseSelection(true); await selectionPromise;
+   if (state.fieldObservationDraftContext.decision_id!=='valid-catalogue-decision') throw Error('selection rejected');
+  });
+ }
+ // Unrelated keys ignored; actual pending/lock/clear still invalidate stale replies.
+ await page.evaluate(async () => {
+  for (const key of ['unrelated.preference', FIELD_OBSERVATION_PENDING_PREFIX+'negative', FIELD_OBSERVATION_LOCK_KEY, null]) {
+   state.fieldObservationLock=null; state.fieldObservationContextInvalid=false;
+   state.fieldObservationDraftContext={source:'catalogue',decision_id:null,execution_id:null,timezone:'Europe/Zurich'};
+   state.recentDecisions={open:true,items:[],cursor:null,extension:1};
+   const pending=loadRecentDecisions(); const generation=recentDecisionsGeneration;
+   window.dispatchEvent(new StorageEvent('storage',{key,newValue:null,storageArea:localStorage}));
+   if ((recentDecisionsGeneration===generation)!==(key==='unrelated.preference')) throw Error('storage key guard incorrect');
+   releaseCatalogue({items:[{decision_id:'negative'}],complete:true}); await pending;
+   if (state.recentDecisions.items.length!==(key==='unrelated.preference'?1:0)) throw Error('stale response accepted');
+  }
+ });
+ await other.close();
  assert.deepEqual(errors,[]);
  console.log('Browser checks passed: persistence, multi-tab, draft/guards/filter retention, disclosures, 390/1280px.');
  await browser.close();

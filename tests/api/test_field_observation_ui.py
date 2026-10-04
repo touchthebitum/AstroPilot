@@ -554,6 +554,26 @@ async function check() {
   fetch = () => response(200, {items: [old], complete: true});
   await loadRecentDecisions(); assert.equal(state.recentDecisions.items.length, 1);
 
+  // Non-business storage notifications cannot steal a pending catalogue response.
+  for (const key of ['nightmerit.ui-mode.v1', 'unrelated']) {
+    clearHarness(); openFieldObservation('decision'); state.recentDecisions.open = true;
+    let resolve;
+    fetch = () => new Promise(done => { resolve = done; });
+    const pendingList = loadRecentDecisions();
+    const generation = recentDecisionsGeneration;
+    const operation = fieldObservationOperationGeneration;
+    handleFieldObservationStorageEvent({key, newValue: 'pro'});
+    assert.equal(recentDecisionsGeneration, generation);
+    assert.equal(fieldObservationOperationGeneration, operation);
+    assert.equal(element('#observation-catalogue-status').textContent, 'Chargement des décisions…');
+    resolve(response(200, {items: [old], complete: true})); await pendingList;
+    assert.equal(state.recentDecisions.items.length, 1);
+    assert.match(element('#observation-catalogue-status').textContent, /Choisissez explicitement/);
+    fetch = () => response(200, {decision_id: old.decision_id});
+    await selectRecentDecision(old);
+    assert.equal(state.fieldObservationDraftContext.decision_id, old.decision_id);
+  }
+
   // Delayed responses cannot survive time/site/decision/session/modal/storage changes.
   for (const change of [
     () => { element('#observation-observed-at').value = '2026-09-29T23:01'; },
@@ -561,7 +581,7 @@ async function check() {
     () => { state.currentDecision = {decision_id: 'changed'}; },
     () => { state.fieldObservationAnchorContext = {...state.fieldObservationAnchorContext, execution_id: 'changed'}; },
     () => { ui.observation.close(); invalidateRecentDecisions(); ui.observation.showModal(); },
-    () => { handleFieldObservationStorageEvent({key: 'unrelated'}); },
+    () => { handleFieldObservationStorageEvent({key: FIELD_OBSERVATION_PENDING_PREFIX + 'external'}); },
   ]) {
     clearHarness(); openFieldObservation('decision'); state.recentDecisions.open = true;
     let resolve;

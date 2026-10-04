@@ -3343,8 +3343,15 @@ async function abandonFieldObservationLock() {
 }
 
 function handleFieldObservationStorageEvent(event) {
-  invalidateRecentDecisions();
   const lock = state.fieldObservationLock;
+  const watchedKeys = lock?.status === "multiple_pending"
+    ? lock.entries.map((entry) => entry.key) : [lock?.key];
+  // Filter unrelated preferences/signals before invalidating any business request.
+  // A clear event still invalidates all local FieldObservation artifacts.
+  if (event.key !== null && event.key !== FIELD_OBSERVATION_LOCK_KEY
+      && !(typeof event.key === "string" && event.key.startsWith(FIELD_OBSERVATION_PENDING_PREFIX))
+      && !(lock && watchedKeys.includes(event.key))) return;
+  invalidateRecentDecisions();
   if (event.key === null) {
     invalidateFieldObservationOperation();
     adoptFieldObservationLock(inventoriedFieldObservationLock(pendingFieldObservationInventory()));
@@ -3380,8 +3387,6 @@ function handleFieldObservationStorageEvent(event) {
       }
       return;
     }
-    const watchedKeys = lock?.status === "multiple_pending"
-      ? lock.entries.map((entry) => entry.key) : [lock?.key];
     if (!lock || !watchedKeys.includes(event.key)) return;
     const watchedEntry = lock.status === "multiple_pending"
       ? lock.entries.find((entry) => entry.key === event.key) : lock;

@@ -108,3 +108,29 @@ or summary horizontal overflow, and the summary still opens the filter controls.
 
 Full suite: 4803 passed, 44 existing warnings. JavaScript syntax and
 `git diff --check` passed.
+
+### Storage routing isolation (remaining multi-tab P2)
+
+`handleFieldObservationStorageEvent` first reads the current lock's watched keys.
+It returns for any non-null key outside the global FieldObservation lock key,
+the pending FieldObservation prefix, and the current lock's watched entry keys.
+Only then does it invalidate recent decisions and process clear/lock/pending/
+watched-entry notifications. Existing stale-event and pending-value guards remain
+in place. The decision-site handler independently filters its configuration signal.
+UI preference and unrelated keys therefore mutate no FieldObservation request,
+pending, or recovery state; a global storage clear remains a business invalidation.
+
+Chrome regression uses two real same-origin tabs with a deferred catalogue and
+canonical selection: both mode directions, same-mode notifications and invalid
+UI fallback preserve request ownership and accept the valid response/selection.
+Pending, lock and clear notifications still reject stale catalogue responses.
+The FieldObservation Node harness also verifies unrelated/UI keys preserve a
+pending catalogue and selection, while a real pending key invalidates it.
+
+Validation of this isolated correction: 53 focused Simple/Pro, FieldObservation
+and recent-decision tests passed; full suite with Node available passed all
+4803 tests (44 existing warnings, no skips). Chrome smoke passed with real
+multi-tab storage delivery and deferred catalogue/selection promises, together
+with the existing Outcome warnings and mobile provider checks at 390/1280 px.
+JavaScript syntax and `git diff --check` passed. Exceptional recovery wording
+remains deferred; no backend, API, schema, scoring or business persistence change.
