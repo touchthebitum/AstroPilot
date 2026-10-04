@@ -1117,8 +1117,10 @@ def test_weather_refusal_keeps_global_confidence_cartouche_off_blocked_screen():
     )[0]
 
     assert '<div id="recommendation-confidence" class="recommendation-reliability" hidden' in page
-    assert "payload.weather_decision.presentation.label" in refusal
-    assert "payload.weather_decision.presentation.summary" in refusal
+    assert "showTonightUnavailable(payload)" in refusal
+    presentation = script.split("function showTonightUnavailable(payload)", 1)[1].split("function showMessage", 1)[0]
+    assert "payload.weather_decision.presentation.label" in presentation
+    assert "payload.weather_decision.presentation.summary" in presentation
     assert "return;" in refusal
     assert "renderDecision(payload)" not in refusal
 
@@ -1274,7 +1276,8 @@ def test_primary_status_render_executes_without_fabricating_missing_values(tmp_p
 const values = {};
 const state = {};
 const ui = {openMission: {dataset: {}}, recommendationConfidencePanel: {hidden: true}, recommendationConfidence: {}, primaryIntentChoice: {}};
-const document = {querySelector: () => ({style: {}})};
+const document = {querySelector: () => ({style: {}, textContent: ""}), querySelectorAll: () => []};
+const appliedUiMode = "simple";
 const labels = {actions: {
   start_project: "Commencer ce projet",
   continue_project: "Continuer ce projet",
@@ -1377,6 +1380,7 @@ const ui = {
   addObservationDecision: {hidden: true},
 };
 const rendered = {};
+const document = {querySelector: () => null};
 function text(selector, value) { rendered[selector] = value; }
 function show(view) { rendered.view = view; }
 function syncFieldObservationContext() {}
@@ -1418,3 +1422,85 @@ def test_terrain_groups_existing_controls_outside_decision():
     for control in ("Message", "Decision"):
         assert f'ui.addObservation{control}.addEventListener("click", () => openFieldObservation("decision"));' in script
     assert 'document.querySelector("#outcome-reopen").addEventListener("click", reopenRecentFieldObservations);' in script
+
+
+def test_compact_tonight_keeps_essential_fields_and_critical_warnings_outside_details():
+    from html.parser import HTMLParser
+
+    class Elements(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack = []
+            self.by_id = {}
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if "id" in attrs:
+                self.by_id[attrs["id"]] = (attrs, list(self.stack))
+            if tag not in {"input", "meta", "link", "br", "hr", "img", "path", "circle"}:
+                self.stack.append((tag, attrs))
+
+        def handle_endtag(self, tag):
+            for index in range(len(self.stack) - 1, -1, -1):
+                if self.stack[index][0] == tag:
+                    self.stack = self.stack[:index]
+                    break
+
+    page = Elements()
+    page.feed(make_client().get("/").text)
+    for field in ("recommendation", "target-name", "window-value", "duration-value",
+                  "filter-value", "filter-note", "decision-reason", "open-mission", "decision-warning"):
+        _, ancestors = page.by_id[field]
+        assert any(attrs.get("id") == "decision-essential" for _, attrs in ancestors)
+        assert all(tag != "details" for tag, _ in ancestors)
+    assert page.by_id["decision-warning"][0]["role"] == "status"
+    for field in ("quality-score", "recommendation-confidence-value"):
+        assert any(tag == "details" and "data-mode-disclosure" in attrs
+                   for tag, attrs in page.by_id[field][1])
+    for field in ("risks-list", "classic-weather-age"):
+        assert all(tag != "details" for tag, _ in page.by_id[field][1])
+
+
+def test_unavailable_tonight_guidance_preserves_technical_evidence_and_availability():
+    import shutil
+    import subprocess
+    import pytest
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for the renderer test")
+    source = make_client().get("/ui/app.js").text
+    functions = source[source.index("const partialMessages ="):source.index("function showMessage(")]
+    harness = r'''
+const assert = require('node:assert/strict');
+const elements = {};
+const document = {querySelector: key => elements[key] ||= {hidden:true,open:false}};
+const state = {availability:{mode:'full_night'}};
+const ui = {retry:{}};
+let appliedUiMode = 'simple';
+let shown;
+function text(key,value) {document.querySelector(key).textContent=value;}
+function showMessage(title,body) {shown={title,body};}
+''' + functions + r'''
+for (const stage of ['no_productive_slice','continuous_window_too_short']) {
+ const payload={status:'no_productive_window',actionability_refusal:{
+  conclusion:'no_productive_window',status:'constraints_refusal',refusal_stage:stage,
+  best_productive_window_minutes:30,required_continuous_minutes:60,
+  productivity_breakdown:{best_slice_score:.39,productive_slice_threshold:.5,
+   best_slice_tie_count:1,evaluated_slice_count:8,losses:{cloud:.4}}}};
+ for (const mode of ['simple','pro']) {
+  appliedUiMode=mode;showTonightUnavailable(payload);
+  assert.match(shown.body,/Réessayez plus tard/);
+  assert.doesNotMatch(shown.body,/seuil|points/i);
+  assert.match(shown.body,/sans garantie|ne garantit pas/);
+  assert.equal(document.querySelector('#message-details').open,mode==='pro');
+  assert.match(document.querySelector('#message-technical').textContent,/Seuil|seuil/);
+  assert.equal(document.querySelector('#message-edit-availability').hidden,false);
+ }
+}
+state.availability=null;
+showTonightUnavailable({status:'no_recommendation'});
+assert.equal(document.querySelector('#message-edit-availability').hidden,true);
+'''
+    result = subprocess.run([node, "-e", harness], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr

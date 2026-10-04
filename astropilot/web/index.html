@@ -286,9 +286,11 @@
           <p class="state-kicker" id="message-kicker">Décision indisponible</p>
           <h2 id="message-title">Impossible de préparer la nuit.</h2>
           <p id="message-body"></p>
+          <details id="message-details" data-mode-disclosure hidden><summary>Détails de l’analyse</summary><p id="message-technical"></p></details>
         </div>
         <div class="message-actions">
           <button class="secondary-button" id="message-retry" type="button">Réessayer</button>
+          <button class="secondary-button" id="message-edit-availability" type="button" hidden>Modifier ma disponibilité</button>
         </div>
       </section>
 
@@ -307,99 +309,104 @@
       </section>
 
       <article id="decision" class="decision" hidden aria-live="polite">
-        <div class="decision-head">
-          <div>
-            <div class="recommendation-line">
-              <span class="status-dot" aria-hidden="true"></span>
-              <span id="recommendation">Session recommandée</span>
+        <section id="decision-essential" aria-label="L’essentiel pour ce soir">
+          <div class="decision-head">
+            <div>
+              <div class="recommendation-line">
+                <span class="status-dot" aria-hidden="true"></span>
+                <span id="recommendation">Session recommandée</span>
+              </div>
+              <p class="target-label" id="target-label">Cible évaluée</p>
+              <h2 id="target-name">—</h2>
+              <p class="catalog-key" id="catalog-key"></p>
             </div>
-            <p class="target-label" id="target-label">Cible évaluée</p>
-            <h2 id="target-name">—</h2>
-            <p class="catalog-key" id="catalog-key"></p>
           </div>
+
+          <div class="decision-grid">
+            <section class="metric-card window-card" aria-labelledby="window-title">
+              <div class="metric-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
+              </div>
+              <div>
+                <p class="metric-label" id="window-title">Meilleure fenêtre</p>
+                <p class="metric-value" id="window-value">—</p>
+                <p class="metric-note" id="window-note">Heure locale</p>
+              </div>
+            </section>
+
+            <section class="metric-card" aria-labelledby="duration-title">
+              <div class="metric-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 7v5l3 2M9 2h6M12 4a9 9 0 1 1-9 9"/></svg>
+              </div>
+              <div>
+                <p class="metric-label" id="duration-title">Durée productive</p>
+                <p class="metric-value" id="duration-value">—</p>
+                <p class="metric-note" id="duration-note">Temps réellement exploitable</p>
+              </div>
+            </section>
+
+            <section class="metric-card" aria-labelledby="filter-title">
+              <div class="metric-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>
+              </div>
+              <div>
+                <p class="metric-label" id="filter-title">Filtre</p>
+                <p class="metric-value compact" id="filter-value">—</p>
+                <p class="metric-note" id="filter-note">Selon la cible et le ciel</p>
+              </div>
+            </section>
+          </div>
+
+          <p id="decision-warning" class="decision-warning" role="status" hidden></p>
+          <footer class="decision-footer">
+            <div>
+              <div id="primary-intent-choice" class="intent-choice" hidden></div>
+              <p id="decision-reason">Décision calculée pour votre configuration actuelle.</p>
+              <p id="acceptance-status" class="acceptance-status" role="status" hidden></p>
+            </div>
+            <div class="decision-actions">
+              <button class="mission-button" id="open-mission" type="button">
+                Photographier cette cible
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+              </button>
+            </div>
+          </footer>
+
+        </section>
+
+        <details id="decision-metrics" class="decision-details" data-mode-disclosure>
+          <summary>Score, fiabilité et détails de prise de vue</summary>
+          <p class="metric-note" id="filter-detail"></p>
           <div id="recommendation-confidence" class="recommendation-reliability" hidden aria-labelledby="recommendation-confidence-label">
             <span id="recommendation-confidence-label">Fiabilité de la recommandation</span>
             <strong id="recommendation-confidence-value"></strong>
           </div>
-        </div>
-
-        <footer class="decision-footer">
-          <div>
-            <div id="primary-intent-choice" class="intent-choice" hidden></div>
-            <p id="decision-essential">Décision calculée pour votre configuration actuelle.</p>
-            <p id="acceptance-status" class="acceptance-status" role="status" hidden></p>
-          </div>
-          <div class="decision-actions">
-            <button class="mission-button" id="open-mission" type="button">
-              Photographier cette cible
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-            </button>
-          </div>
-        </footer>
-
-        <div class="decision-grid">
-          <section class="metric-card window-card" aria-labelledby="window-title">
-            <div class="metric-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
+          <section class="quality-panel" aria-labelledby="quality-title">
+            <div class="quality-score">
+              <svg viewBox="0 0 120 120" aria-hidden="true">
+                <circle class="quality-track" cx="60" cy="60" r="48"/>
+                <circle class="quality-progress" id="quality-progress" cx="60" cy="60" r="48"/>
+              </svg>
+              <div><strong id="quality-score">—</strong><span>/100</span></div>
             </div>
-            <div>
-              <p class="metric-label" id="window-title">Meilleure fenêtre</p>
-              <p class="metric-value" id="window-value">—</p>
-              <p class="metric-note" id="window-note">Heure locale</p>
+            <div class="quality-copy">
+              <p class="metric-label">Indice de qualité astronomique</p>
+              <h3 id="quality-title">Qualité du ciel</h3>
+              <p id="quality-summary">—</p>
+            </div>
+            <div class="limiting-factor">
+              <span>Facteur limitant</span>
+              <strong id="limiting-factor">—</strong>
             </div>
           </section>
 
-          <section class="metric-card" aria-labelledby="duration-title">
-            <div class="metric-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M12 7v5l3 2M9 2h6M12 4a9 9 0 1 1-9 9"/></svg>
-            </div>
-            <div>
-              <p class="metric-label" id="duration-title">Durée productive</p>
-              <p class="metric-value" id="duration-value">—</p>
-              <p class="metric-note" id="duration-note">Temps réellement exploitable</p>
-            </div>
-          </section>
-
-          <section class="metric-card" aria-labelledby="filter-title">
-            <div class="metric-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>
-            </div>
-            <div>
-              <p class="metric-label" id="filter-title">Filtre</p>
-              <p class="metric-value compact" id="filter-value">—</p>
-              <p class="metric-note" id="filter-note">Selon la cible et le ciel</p>
-              <p class="metric-note" id="filter-detail"></p>
-            </div>
-          </section>
-        </div>
-
-        <section class="quality-panel" aria-labelledby="quality-title">
-          <div class="quality-score">
-            <svg viewBox="0 0 120 120" aria-hidden="true">
-              <circle class="quality-track" cx="60" cy="60" r="48"/>
-              <circle class="quality-progress" id="quality-progress" cx="60" cy="60" r="48"/>
-            </svg>
-            <div><strong id="quality-score">—</strong><span>/100</span></div>
-          </div>
-          <div class="quality-copy">
-            <p class="metric-label">Indice de qualité astronomique</p>
-            <h3 id="quality-title">Qualité du ciel</h3>
-            <p id="quality-summary">—</p>
-          </div>
-          <div class="limiting-factor">
-            <span>Facteur limitant</span>
-            <strong id="limiting-factor">—</strong>
-          </div>
-        </section>
+        </details>
 
         <div class="insight-grid">
-          <section class="insights" aria-labelledby="insights-title">
-            <div class="section-heading">
-              <span class="heading-icon good" aria-hidden="true">✓</span>
-              <h3 id="insights-title">Pourquoi cette décision</h3>
-            </div>
+          <details class="insights" data-mode-disclosure>
+            <summary id="insights-title">Pourquoi cette décision — détails</summary>
             <ul id="insights-list"></ul>
-          </section>
+          </details>
           <section class="risks" aria-labelledby="risks-title">
             <div class="section-heading">
               <span class="heading-icon caution" aria-hidden="true">!</span>

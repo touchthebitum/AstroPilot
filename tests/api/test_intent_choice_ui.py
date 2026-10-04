@@ -31,9 +31,10 @@ def test_decision_hierarchy_and_visible_copy():
     page = PAGE.read_text(encoding="utf-8")
     styles = STYLES.read_text(encoding="utf-8")
     assert page.index('id="target-name"') < page.index('id="primary-intent-choice"')
-    assert page.index('id="primary-intent-choice"') < page.index('id="decision-essential"')
-    assert page.index('id="decision-essential"') < page.index('id="open-mission"')
-    assert page.index('id="open-mission"') < page.index('class="decision-grid"')
+    assert page.index('id="decision-essential"') < page.index('id="target-name"')
+    assert page.index('class="decision-grid"') < page.index('id="open-mission"')
+    assert page.index('id="primary-intent-choice"') < page.index('id="decision-reason"')
+    assert page.index('id="open-mission"') < page.index('id="decision-metrics"')
     assert "Retour à Classic" not in page
     assert "Retour à la recommandation" in page
     assert 'id="open-saved-mission"' in page
@@ -458,7 +459,8 @@ const assert = require('node:assert/strict');
 const values = {};
 const state = {};
 const ui = {openMission: {dataset: {}}, primaryIntentChoice: {}, recommendationConfidence: {}};
-const document = {querySelector: () => ({style: {}})};
+const document = {querySelector: () => ({style: {}, textContent: ""}), querySelectorAll: () => []};
+const appliedUiMode = "simple";
 const labels = {actions: {start_project: 'Commencer ce projet'}, quality: {}, factors: {}};
 function clearAcceptedMission() {}
 function setCurrentFieldObservationDecision(decision) { state.currentDecision = decision; }

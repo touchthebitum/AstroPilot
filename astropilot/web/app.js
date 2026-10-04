@@ -3532,7 +3532,7 @@ function duration(hours) {
   return `${whole} h ${String(minutes).padStart(2, "0")}`;
 }
 
-function clock(value) {
+function clock(value, timeZone) {
   if (!value) return null;
   if (/^\d{2}:\d{2}$/.test(value)) return value;
   const parsed = new Date(value);
@@ -3541,6 +3541,7 @@ function clock(value) {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    ...(timeZone ? { timeZone } : {}),
   }).format(parsed);
 }
 
@@ -4187,8 +4188,8 @@ function renderDecision(decision) {
   const actionableHours = decision.recommended_hours;
   const firstWindow = productivity?.windows?.find((window) => window.productive)
     || productivity?.windows?.[0];
-  const start = clock(decision.window_start) || firstWindow?.start_time || null;
-  const end = clock(decision.window_end) || firstWindow?.end_time || null;
+  const start = clock(decision.window_start, decision.weather_trust?.timezone) || firstWindow?.start_time || null;
+  const end = clock(decision.window_end, decision.weather_trust?.timezone) || firstWindow?.end_time || null;
   const quality = decision.astro_quality;
   const qualityScore = quality ? Math.round(Number(quality.score)) : null;
   const qualityCopy = labels.quality[quality?.label] || ["Non évaluée", "L’indice de qualité n’est pas disponible pour cette décision."];
@@ -4246,8 +4247,36 @@ function renderDecision(decision) {
     ? "NightMerit ne dispose pas d’assez d’éléments fiables pour recommander cette cible pour cette session."
     : null;
   setList("#insights-list", [...(evidenceMessage ? [evidenceMessage] : []), ...positives, ...information], "Aucune explication supplémentaire disponible.");
-  text("#decision-essential", evidenceMessage || positives.find(Boolean) || information.find(Boolean)
-    || "Décision calculée pour votre configuration actuelle.");
+  // Summarize the existing decision without repeating its detailed explanation.
+  text("#decision-reason", insufficient
+    ? "Prochain geste : actualisez les données avant de choisir une cible."
+    : noAcquisition || intentUnavailable
+    ? "Prochain geste : vérifiez votre configuration de prise de vue."
+    : limiting ? `Facteur principal : ${labels.factors[limiting] || limiting.replaceAll("_", " ")}.`
+    : recommended ? "Pourquoi : cette cible est prioritaire pour votre session et votre configuration."
+    : "Prochain geste : consultez les alternatives ou réessayez plus tard.");
+  const warningCopy = [...warnings];
+  if (weatherTrust?.freshness_status !== "fresh") warningCopy.unshift(
+    weatherTrust?.freshness_status === "stale"
+      ? "Données météo périmées : actualisez avant de démarrer."
+      : "Fraîcheur météo non confirmée : vérifiez les données avant de démarrer.",
+  );
+  if (weatherTrust?.validation_status !== "validated" || !weatherDecision?.admissibility) {
+    warningCopy.unshift("Confiance météo non confirmée : vérifiez les données avant de démarrer.");
+  }
+  if (weatherDecision?.admissibility && weatherDecision.admissibility !== "admissible") {
+    warningCopy.unshift(weatherDecision.presentation?.summary || "Conditions météo à vérifier avant de démarrer.");
+  }
+  if (decision.dew_risk && String(decision.dew_risk.level).toLowerCase() === "high") {
+    warningCopy.push("Rosée : risque élevé.");
+  }
+  if (insufficient) warningCopy.unshift(evidenceMessage);
+  const warningElement = document.querySelector("#decision-warning");
+  warningElement.textContent = [...new Set(warningCopy.filter(Boolean))].join(" ");
+  warningElement.hidden = !warningElement.textContent;
+  document.querySelectorAll("#decision [data-mode-disclosure]").forEach(element => {
+    element.open = appliedUiMode === "pro";
+  });
   setList("#risks-list", risks, "Aucun risque essentiel signalé.");
   renderIntentChoice(ui.primaryIntentChoice, decision, "primary-intent");
   const actionablePrimary = Boolean(
@@ -5334,7 +5363,34 @@ function actionabilityRefusalMessage(refusal) {
   ];
 }
 
+function showTonightUnavailable(payload) {
+  const productiveRefusal = payload.status === "no_productive_window";
+  const [title, technical] = payload.status === "weather_refused"
+    ? [payload.weather_decision.presentation.label, payload.weather_decision.presentation.summary]
+    : productiveRefusal
+    ? actionabilityRefusalMessage(payload.actionability_refusal)
+    : partialMessages[payload.status] || ["Décision indisponible", "Aucune recommandation exploitable."];
+  const shortWindow = payload.actionability_refusal?.refusal_stage === "continuous_window_too_short";
+  const body = productiveRefusal
+    ? shortWindow
+      ? "Le créneau utilisable est trop court pour lancer une mission. Réessayez plus tard si les conditions évoluent. Vous pouvez revoir votre disponibilité, sans garantie de trouver un créneau suffisant."
+      : "Aucun créneau ne permet de lancer une mission dans les conditions évaluées. Réessayez plus tard lorsque les prévisions évoluent. Modifier vos horaires ne garantit pas une fenêtre exploitable."
+    : `${technical} Réessayez plus tard lorsque les données ou les conditions évoluent.`;
+  showMessage(title, body, { kicker: "Analyse terminée" });
+  text("#message-technical", technical);
+  const details = document.querySelector("#message-details");
+  details.hidden = false;
+  details.open = appliedUiMode === "pro";
+  ui.retry.textContent = "Réessayer plus tard";
+  document.querySelector("#message-edit-availability").hidden = !state.availability;
+}
+
 function showMessage(title, body, { kicker = "Décision indisponible", retry = true } = {}) {
+  const details = document.querySelector("#message-details");
+  if (details) details.hidden = true;
+  const editAvailability = document.querySelector("#message-edit-availability");
+  if (editAvailability) editAvailability.hidden = true;
+  ui.retry.textContent = "Réessayer";
   text("#message-kicker", kicker);
   text("#message-title", title);
   text("#message-body", body);
@@ -5735,19 +5791,12 @@ async function loadTonight(availability) {
     clearAcceptedMission();
     setCurrentFieldObservationDecision(payload);
     if (payload.status === "weather_refused") {
-      showMessage(
-        payload.weather_decision.presentation.label,
-        payload.weather_decision.presentation.summary,
-        { kicker: "Analyse terminée" },
-      );
+      showTonightUnavailable(payload);
       return;
     }
 
     if (payload.status !== "available") {
-      const [title, body] = payload.status === "no_productive_window"
-        ? actionabilityRefusalMessage(payload.actionability_refusal)
-        : partialMessages[payload.status] || ["Décision indisponible", "NightMerit ne dispose pas encore d’une recommandation exploitable."];
-      showMessage(title, body, { kicker: "Analyse terminée" });
+      showTonightUnavailable(payload);
       return;
     }
 
@@ -5840,6 +5889,10 @@ ui.retry.addEventListener("click", () => {
   if (guardUnresolvedAcceptance()) return;
   if (state.availability) loadTonight(state.availability);
   else setView("availability");
+});
+document.querySelector("#message-edit-availability").addEventListener("click", () => {
+  if (guardUnresolvedAcceptance()) return;
+  setView("availability");
 });
 ui.retryPendingAcceptance.addEventListener("click", retryPendingAcceptance);
 
