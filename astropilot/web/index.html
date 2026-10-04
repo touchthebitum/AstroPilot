@@ -10,6 +10,7 @@
     >
     <title>Ce soir — NightMerit</title>
     <link rel="stylesheet" href="/ui/styles.css?v=__ASTROPILOT_ASSET_TOKEN__">
+    <script src="/ui/help.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
     <script src="/ui/app.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
   </head>
   <body>
@@ -26,6 +27,7 @@
         <time id="night-date">—</time>
       </div>
       <div class="header-actions">
+        <button class="secondary-button" id="help-open" type="button" aria-haspopup="dialog">Aide</button>
         <label class="ui-mode-control" for="ui-mode">Présentation
           <select id="ui-mode" aria-label="Mode de présentation">
             <option value="simple">Simple</option><option value="pro">Pro</option>
@@ -699,5 +701,20 @@
       <span aria-hidden="true">·</span>
       <a href="https://open-meteo.com/" rel="noreferrer">Données météo par Open-Meteo.com</a>
     </footer>
+    <dialog id="help-dialog" aria-labelledby="help-title">
+      <header class="help-heading">
+        <h2 id="help-title">Aide NightMerit</h2>
+        <button class="secondary-button" id="help-close" type="button" autofocus>Fermer l’aide</button>
+      </header>
+      <label class="ui-mode-control" for="help-mode">Présentation
+        <select id="help-mode"><option value="simple">Simple</option><option value="pro">Pro</option></select>
+      </label>
+      <nav class="help-navigation" aria-label="Guides NightMerit">
+        <button class="secondary-button" type="button" data-help-guide="start" aria-current="page">Bien démarrer</button>
+        <button class="secondary-button" type="button" data-help-guide="understand">Comprendre NightMerit</button>
+        <button class="secondary-button" type="button" data-help-guide="complete">Guide complet</button>
+      </nav>
+      <div id="help-content" tabindex="0" aria-label="Contenu du guide"></div>
+    </dialog>
   </body>
 </html>
