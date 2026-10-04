@@ -515,6 +515,7 @@ function returnToCurrentFieldObservationDecision() {
   loadSavedFieldObservations(state.fieldObservationDraftContext);
 }
 function observedAtChanged() {
+  if (ui.observation.open && state.fieldObservationDraftContext) renderObservationLinkage();
   invalidateRecentDecisions();
   if (!state.recentDecisions) return;
   state.recentDecisions.cursor = null;
@@ -2141,6 +2142,7 @@ function restorePendingFieldObservation() {
     });
   }
   document.querySelector("#observation-observed-at").value = pending.observed_at_local;
+  renderObservationLinkage();
   document.querySelector("#observation-clouds").value = payload.conditions?.cloud_state || "";
   document.querySelector("#observation-transparency").value = payload.conditions?.transparency || "";
   setOptionalObservationValue("#observation-wind", payload.conditions?.wind_speed_kmh);
@@ -4525,7 +4527,7 @@ async function saveProjectProgress() {
 function prefillConfiguration() {
   renderPresetChoices();
   const site = state.configurationDraft.site || {};
-  document.querySelector("#site-name").value = site.name || "Mon site";
+  document.querySelector("#site-name").value = site.name?.trim() ? site.name : "Mon site";
   document.querySelector("#site-latitude").value = site.latitude ?? "";
   document.querySelector("#site-longitude").value = site.longitude ?? "";
   document.querySelector("#site-bortle").value = site.bortle ?? "";
@@ -5977,7 +5979,11 @@ document.querySelector("#history-next").addEventListener("click", () => loadOutc
 
 document.querySelector("#history-current-site").addEventListener("click", () => {
   const site = state.configuration?.site;
-  if (!site) return;
+  if (!Number.isFinite(site?.latitude) || !Number.isFinite(site?.longitude)
+      || Math.abs(site.latitude) > 90 || Math.abs(site.longitude) > 180) {
+    document.querySelector("#history-message").textContent = "Coordonnées du site indisponibles.";
+    return;
+  }
   document.querySelector('#history-filters [name="latitude"]').value = site.latitude;
   document.querySelector('#history-filters [name="longitude"]').value = site.longitude;
   invalidateOutcomeHistory();

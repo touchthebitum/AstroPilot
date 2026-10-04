@@ -373,6 +373,25 @@ function clearHarness() {
     harness = RECOVERY_IDB_HARNESS + '\nconst recoveryRecords = new Map(); const indexedDB = recoveryIndexedDB(recoveryRecords);\n' + harness
     checks = r'''
 async function check() {
+  // Real open/change/payload helpers keep the compact clock aligned with the input.
+  clearHarness(); openFieldObservation('decision');
+  assert.ok(element('#observation-time-summary').textContent.startsWith(element('#observation-observed-at').value.replace('T', ' · ')));
+  state.fieldObservationDraftContext = {...state.fieldObservationDraftContext, execution_id: 'session-clock'};
+  element('#observation-observed-at').value = '2026-09-29T20:00';
+  observedAtChanged();
+  element('#observation-observed-at').value = '2026-09-29T21:00';
+  observedAtChanged();
+  element('.observation-context-editor').open = false;
+  assert.match(element('#observation-time-summary').textContent, /21:00/);
+  setQuick({cloud: 'few'});
+  const clockPayload = buildFieldObservationPayload(fieldObservationDraft(), '2026-09-29T23:00:00.000Z', 'clock-id');
+  for (const open of [true, false]) {
+    element('.observation-advanced').open = open;
+    assert.equal(element('#observation-observed-at').value, '2026-09-29T21:00');
+    assert.match(element('#observation-time-summary').textContent, /21:00/);
+    assert.equal(JSON.stringify(buildFieldObservationPayload(fieldObservationDraft(), '2026-09-29T23:00:00.000Z', 'clock-id')), JSON.stringify(clockPayload));
+  }
+  assert.equal(clockPayload.observed_at_utc, localDateTimeToUtc(element('#observation-observed-at').value, state.fieldObservationDraftContext.timezone));
 
   // Retroactive catalogue: explicit selection, exact site/time window, and decision-only publication.
   clearHarness();
@@ -480,6 +499,7 @@ async function check() {
   assert.equal(restoredReads.join(), 'decision-1');
   assert.equal(element('#field-observation-dialog').open, true);
   assert.equal(element('#observation-observed-at').value, beforeReturn);
+  assert.ok(element('#observation-time-summary').textContent.startsWith(beforeReturn.replace('T', ' · ')));
   assert.equal(element('#observation-clouds').value, 'few');
   assert.equal(element('#observation-wind').value, '7');
   assert.equal(state.fieldObservationDraftContext.historical, false);
@@ -1022,6 +1042,8 @@ async function check() {
   assert.equal(migrated.version, PENDING_FIELD_OBSERVATION_VERSION);
   assert.equal(migrated.observed_at_local, '2026-09-29T22:14');
   assert.equal(element('#observation-observed-at').value, '2026-09-29T22:14');
+  assert.match(element('#observation-time-summary').textContent, /22:14/);
+  assert.equal(buildFieldObservationPayload(fieldObservationDraft(), legacyPayload.recorded_at_utc, legacyPayload.observation_id).observed_at_utc, legacyPayload.observed_at_utc);
 
   // Corrupt JSON with a failing cleanup is equally blocking.
   clearHarness(); setQuick({cloud: 'few'});

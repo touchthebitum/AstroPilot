@@ -85,6 +85,13 @@ function showFormError(message) {state.error = message;}
 function confirmDiscardProjectProgress() {return true;}
 '''
     checks = r'''
+for (const name of [undefined, '', '   ', 'Jardin', '  Jardin  ']) {
+  state.configurationDraft.site = {name};
+  prefillConfiguration();
+  assert.equal(element('#site-name').value, name?.trim() ? name : 'Mon site');
+  assert.equal(state.configurationDraft.site.name, name);
+}
+state.configurationDraft.site = {};
 prefillConfiguration();
 assert.equal(element('#site-name').value, 'Mon site');
 element('#site-name').value = 'Jardin';
@@ -116,4 +123,54 @@ element('#custom-focal-length-mm').value = '-1';
 assert.ok(readCustomEquipment()[1]);
 '''
     result = subprocess.run([node, '-e', harness + helpers + handlers + checks], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_real_history_current_site_preserves_filters_on_invalid_coordinates():
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node is required for the history harness')
+    source = (WEB / 'app.js').read_text()
+    handler = source[source.index('document.querySelector("#history-current-site").addEventListener'):source.index('// End Outcome History.')]
+    harness = r'''
+const assert = require('node:assert/strict');
+const elements = new Map();
+function element(selector) {
+  if (!elements.has(selector)) elements.set(selector, {value: 'existing', hidden: false,
+    children: ['existing'], addEventListener(name, handler) {this[name] = handler;},
+    replaceChildren() {this.children = [];}});
+  return elements.get(selector);
+}
+const document = {querySelector: element};
+const state = {configuration: {}};
+let invalidations = 0;
+function invalidateOutcomeHistory() {invalidations++;}
+'''
+    checks = r'''
+const lat = element('#history-filters [name="latitude"]');
+const lon = element('#history-filters [name="longitude"]');
+const other = element('#history-filters [name="decision_id"]');
+for (const site of [undefined, null, {}, {latitude: null, longitude: null},
+  {latitude: undefined, longitude: 7}, {latitude: 46, longitude: undefined},
+  {latitude: NaN, longitude: 7}, {latitude: 46, longitude: Infinity},
+  {latitude: -Infinity, longitude: 7}, {latitude: 91, longitude: 7},
+  {latitude: -91, longitude: 7}, {latitude: 46, longitude: 181},
+  {latitude: 46, longitude: -181}, {latitude: '46', longitude: 7}]) {
+  state.configuration.site = site;
+  element('#history-current-site').click();
+  assert.equal(lat.value, 'existing'); assert.equal(lon.value, 'existing');
+  assert.equal(other.value, 'existing'); assert.equal(invalidations, 0);
+  assert.deepEqual(element('#history-table').children, ['existing']);
+  assert.match(element('#history-message').textContent, /Coordonnées du site indisponibles/);
+}
+for (const [latitude, longitude] of [[46.123456789, 7.987654321], [-90, -180], [90, 180], [0, 0]]) {
+  state.configuration.site = {latitude, longitude};
+  element('#history-current-site').click();
+  assert.equal(lat.value, latitude); assert.equal(lon.value, longitude);
+  assert.equal(other.value, 'existing');
+  assert.match(element('#history-message').textContent, /Site sélectionné/);
+}
+assert.equal(invalidations, 4);
+'''
+    result = subprocess.run([node, '-e', harness + handler + checks], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
