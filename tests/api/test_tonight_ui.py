@@ -112,7 +112,7 @@ def test_root_serves_tonight_classic_ui():
     assert "Site d’observation" in response.text
     assert "Votre matériel" in response.text
     assert "Aucun projet pour l’instant" in response.text
-    assert "Configuration enregistrée" in response.text
+    assert "Site, matériel et disponibilité" in response.text
     for field_id in (
         "custom-optics-manufacturer",
         "custom-optics-model",

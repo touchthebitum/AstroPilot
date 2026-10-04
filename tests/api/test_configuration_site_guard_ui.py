@@ -45,7 +45,7 @@ const wizardStates = ["site", "equipment", "projects", "review"];
 function requestAnimationFrame(callback) {callback();}
 function invalidateOutcomeHistory() {}
 let opened = 0, rendered = 0, queue = [];
-const ui = {addObservationMessage: element(), addObservationDecision: element(),
+const ui = {availabilityTimezoneWarning: element(), addObservationMessage: element(), addObservationDecision: element(),
   configurationLoading: element(), configurationError: element(), availability: element(),
   loading: element(), message: element(), pendingAcceptance: element(), decision: element(),
   editAvailability: element(), editConfiguration: element(), recommendationSubmit: element(), refresh: element(), configurationRecover: element(), configurationRecoveryConfirm: element(),

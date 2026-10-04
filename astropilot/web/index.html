@@ -101,8 +101,7 @@
           <ol class="wizard-progress" aria-label="Progression">
             <li data-progress="site">Site</li>
             <li data-progress="equipment">Matériel</li>
-            <li data-progress="projects">Projets</li>
-            <li data-progress="review">Confirmation</li>
+            <li data-progress="review">Disponibilité</li>
           </ol>
         </div>
 
@@ -112,11 +111,16 @@
           <p class="eyebrow">Étape 1</p>
           <h2 id="site-title" tabindex="-1">Site d’observation</h2>
           <p class="step-intro">Indiquez l’endroit depuis lequel vous observez habituellement.</p>
+          <div class="geolocation-row">
+            <button class="secondary-button" id="use-geolocation" type="button">Utiliser ma position</button>
+            <p id="geolocation-message" class="field-note" aria-live="polite"></p>
+          </div>
           <div class="form-grid two-columns">
             <label class="field full-width" for="site-name">
               <span>Nom du site</span>
               <input id="site-name" name="site-name" type="text" autocomplete="organization" required>
             </label>
+            <details class="full-width"><summary>Corriger les coordonnées (avancé)</summary><div class="form-grid two-columns">
             <label class="field" for="site-latitude">
               <span>Latitude</span>
               <input id="site-latitude" name="site-latitude" type="number" min="-90" max="90" step="any" inputmode="decimal" required>
@@ -125,6 +129,7 @@
               <span>Longitude</span>
               <input id="site-longitude" name="site-longitude" type="number" min="-180" max="180" step="any" inputmode="decimal" required>
             </label>
+            </div></details>
             <label class="field full-width" for="site-bortle">
               <span>Pollution lumineuse / qualité du ciel (Bortle)</span>
               <input id="site-bortle" name="site-bortle" type="number" min="1" max="9" step="1" inputmode="numeric" required>
@@ -132,10 +137,7 @@
               <small id="legacy-bortle-note" hidden>Pour ce profil historique, confirmez cette valeur avant toute recommandation.</small>
             </label>
           </div>
-          <div class="geolocation-row">
-            <button class="secondary-button" id="use-geolocation" type="button">Utiliser ma position</button>
-            <p id="geolocation-message" class="field-note" aria-live="polite"></p>
-          </div>
+          <p id="site-summary" class="field-note" aria-live="polite"></p>
           <div class="wizard-actions end">
             <button class="primary-button" id="site-next" type="button">Continuer</button>
           </div>
@@ -147,7 +149,7 @@
           <p class="step-intro">Choisissez une configuration connue ou décrivez votre optique et votre caméra.</p>
           <div class="choice-tabs" role="radiogroup" aria-label="Type de matériel">
             <label><input type="radio" name="equipment-kind" value="preset" checked> Configuration proposée</label>
-            <label><input type="radio" name="equipment-kind" value="custom"> Mon matériel</label>
+            <label><input type="radio" name="equipment-kind" value="custom"> Matériel personnalisé</label>
           </div>
           <div id="preset-equipment" class="equipment-choices"></div>
           <fieldset id="custom-equipment" class="custom-equipment" hidden>
@@ -188,33 +190,37 @@
           </div>
         </section>
 
-        <section id="review-step" class="wizard-step" data-step="review" aria-labelledby="review-title" hidden>
-          <p class="eyebrow">Étape 4</p>
-          <h2 id="review-title" tabindex="-1">Vérifiez votre configuration</h2>
-          <dl class="review-grid">
-            <div><dt>Site</dt><dd id="review-site">—</dd></div>
-            <div><dt>Coordonnées</dt><dd id="review-coordinates">—</dd></div>
-            <div><dt>Ciel</dt><dd id="review-bortle">—</dd></div>
-            <div><dt>Matériel</dt><dd id="review-equipment">—</dd></div>
-            <div><dt>Projets</dt><dd id="review-projects">—</dd></div>
-          </dl>
-          <div class="wizard-actions">
-            <button class="secondary-button" data-back="projects" type="button">Retour</button>
-            <button class="primary-button" id="save-configuration" type="button">Enregistrer ma configuration</button>
-          </div>
-        </section>
       </section>
 
       <section id="availability-step" class="availability-panel" hidden aria-labelledby="availability-title">
         <div class="availability-heading">
-          <p class="state-kicker">Configuration prête</p>
+          <p class="state-kicker">Préparer ma nuit</p>
           <h2 id="availability-title" tabindex="-1">Quand êtes-vous disponible ce soir&nbsp;?</h2>
-          <p>Configuration enregistrée. NightMerit utilisera uniquement la plage que vous indiquez pour cette recommandation.</p>
+          <p>NightMerit utilisera uniquement la plage que vous indiquez pour cette recommandation.</p>
           <p id="availability-site-timezone" class="field-note" hidden></p>
           <p id="availability-timezone-warning" class="form-error" role="alert" hidden>Le fuseau horaire du site ne peut pas être déterminé. Vérifiez les coordonnées du site avant de choisir une heure précise.</p>
         </div>
         <p id="current-decision-site-warning" class="field-note" role="status"></p>
         <button class="secondary-button" id="open-observation-catalogue" type="button">Observer avec une décision récente du site</button>
+        <section id="review-step" class="wizard-step" aria-labelledby="review-title">
+          <p class="eyebrow">Étape 3</p>
+          <h2 id="review-title" tabindex="-1">Site, matériel et disponibilité</h2>
+          <dl class="review-grid">
+            <div><dt>Site</dt><dd id="review-site">—</dd></div>
+            <div><dt>Ciel</dt><dd id="review-bortle">—</dd></div>
+            <div><dt>Matériel</dt><dd id="review-equipment">—</dd></div>
+          </dl>
+          <details class="configuration-details"><summary>Détails du site et des projets</summary>
+            <dl class="review-grid">
+              <div><dt>Coordonnées</dt><dd id="review-coordinates">—</dd></div>
+              <div><dt>Projets</dt><dd id="review-projects">—</dd></div>
+            </dl>
+          </details>
+          <div id="review-configuration-actions" class="wizard-actions">
+            <button class="secondary-button" data-back="equipment" type="button">Retour</button>
+            <button class="primary-button" id="save-configuration" type="button">Enregistrer ma configuration</button>
+          </div>
+        </section>
         <form id="availability-form" novalidate>
           <div id="saved-mission-entry" class="saved-mission-entry" hidden>
             <div><strong>Missions enregistrées</strong><p id="saved-mission-target"></p>
@@ -250,6 +256,7 @@
 
           <p id="availability-error" class="form-error availability-error" role="alert" hidden></p>
           <div class="wizard-actions availability-actions">
+            <button class="secondary-button" id="configuration-projects" type="button">Mes projets</button>
             <button class="secondary-button" id="availability-edit-configuration" type="button">Modifier ma configuration</button>
             <button class="primary-button" id="request-recommendation" type="submit">Préparer ma nuit</button>
           </div>
@@ -529,6 +536,7 @@
           </header>
           <section aria-label="Contexte de l’observation">
             <p id="observation-context-decision"></p>
+            <p id="observation-time-summary"></p>
             <span id="observation-linkage">Sans session</span>
           </section>
             <div class="observation-heading">
@@ -537,6 +545,7 @@
               </div>
             </div>
             <form id="field-observation-form">
+              <details class="observation-context-editor"><summary>Modifier l’heure ou la décision</summary>
               <label class="observation-time" for="observation-observed-at">
                 <span>Observé le</span>
                 <input id="observation-observed-at" type="datetime-local" required>
@@ -556,6 +565,7 @@
                   <button id="observation-extend-decisions" type="button">Étendre explicitement la période</button>
                 </div>
               </section>
+              </details>
               <div class="observation-quick-grid">
                 <label class="observation-choice" for="observation-clouds">
                   <span><strong>Nuages</strong><small>Catégorie observée</small></span>
@@ -566,6 +576,24 @@
                     <option value="mostly_cloudy">Très nuageux</option><option value="overcast">Couvert</option>
                   </select>
                 </label>
+              </div>
+
+              <fieldset class="surface-choice">
+                <legend>Surface</legend>
+                <label><input type="radio" name="observation-surface" value="dry"> Sèche</label>
+                <label><input type="radio" name="observation-surface" value="damp"> Humide</label>
+                <label><input type="radio" name="observation-surface" value="dew_present"> Rosée</label>
+              </fieldset>
+
+              <div id="observation-quick-stop"></div>
+              <details class="observation-advanced">
+                <summary>Ajouter des détails</summary>
+                <div class="observation-advanced-grid">                  <label id="observation-stop-wrap">Cause d’arrêt
+                    <select id="observation-stop-reason">
+                      <option value="">Non renseignée</option><option value="completed">Terminé</option><option value="clouds">Nuages</option><option value="dew">Rosée</option><option value="wind">Vent</option><option value="technical">Technique</option><option value="target_lost">Cible perdue</option><option value="user">Choix utilisateur</option><option value="daylight">Jour</option><option value="not_started">Non démarré</option><option value="other">Autre</option>
+                    </select>
+                  </label>
+
                 <label class="observation-choice" for="observation-transparency">
                   <span><strong>Transparence</strong><small>Catégorie observée</small></span>
                   <select id="observation-transparency" data-observation-choice="transparency">
@@ -578,18 +606,7 @@
                   <span><strong>Vent mesuré</strong><small>km/h · laisser vide sans mesure</small></span>
                   <input id="observation-wind" type="number" min="0" step="0.1" inputmode="decimal" placeholder="Ex. 8">
                 </label>
-              </div>
 
-              <fieldset class="surface-choice">
-                <legend>Surface</legend>
-                <label><input type="radio" name="observation-surface" value="dry"> Sèche</label>
-                <label><input type="radio" name="observation-surface" value="damp"> Humide</label>
-                <label><input type="radio" name="observation-surface" value="dew_present"> Rosée</label>
-              </fieldset>
-
-              <details class="observation-advanced">
-                <summary>Ajouter des détails</summary>
-                <div class="observation-advanced-grid">
                   <label>Température °C <input id="observation-temperature" type="number" step="0.1" inputmode="decimal"></label>
                   <label>Humidité % <input id="observation-humidity" type="number" min="0" max="100" step="1" inputmode="numeric"></label>
                   <label>Seeing
@@ -604,11 +621,6 @@
                   </label>
                   <label>Poses tentées <input id="observation-attempted-frames" type="number" min="0" step="1" inputmode="numeric"></label>
                   <label>Poses conservées <input id="observation-usable-frames" type="number" min="0" step="1" inputmode="numeric"></label>
-                  <label>Cause d’arrêt
-                    <select id="observation-stop-reason">
-                      <option value="">Non renseignée</option><option value="completed">Terminé</option><option value="clouds">Nuages</option><option value="dew">Rosée</option><option value="wind">Vent</option><option value="technical">Technique</option><option value="target_lost">Cible perdue</option><option value="user">Choix utilisateur</option><option value="daylight">Jour</option><option value="not_started">Non démarré</option><option value="other">Autre</option>
-                    </select>
-                  </label>
                   <label>HFR <input id="observation-hfr" type="number" min="0" step="0.01" inputmode="decimal"></label>
                   <label>Unité HFR
                     <select id="observation-hfr-unit"><option value="px">px</option><option value="arcsec">arcsec</option></select>
@@ -618,7 +630,7 @@
               </details>
 
               <div class="observation-actions">
-                <p class="observation-compatibility">Publication sécurisée multi-onglets : navigateur avec Web Locks requis.</p>
+                <details class="observation-diagnostics"><summary>Détails techniques</summary><p class="observation-compatibility">Publication sécurisée multi-onglets : navigateur avec Web Locks requis.</p></details>
                 <p id="observation-status" role="status">Choisissez les catégories observées, indiquez le vent mesuré en km/h ou précisez l’état de la surface.</p>
                 <section id="observation-pending-diagnostics" class="observation-pending-diagnostics" aria-label="Observations locales à résoudre" hidden></section>
                 <button class="secondary-button" id="observation-reconcile" type="button" hidden>Réconcilier l’observation précédente</button>
@@ -645,6 +657,8 @@
         <form id="history-filters" class="history-filters">
           <label>Depuis (UTC)<input name="observed_from" type="datetime-local" step="1"></label>
           <label>Jusqu’au (UTC)<input name="observed_to" type="datetime-local" step="1"></label>
+          <details class="full-width"><summary>Filtres avancés</summary>
+          <button id="history-current-site" class="secondary-button" type="button">Ce site</button>
           <label>Latitude exacte<input name="latitude" type="number" step="any" min="-90" max="90"></label>
           <label>Longitude exacte<input name="longitude" type="number" step="any" min="-180" max="180"></label>
           <label>Provider comparé<input name="provider" type="text"></label>
@@ -652,6 +666,7 @@
           <label>Mode<select name="mode"><option value="">Tous</option><option value="decision_only">Décision seule</option><option value="execution">Exécution</option></select></label>
           <label>Couverture<select name="status"><option value="">Toutes</option><option value="comparable">Comparable</option><option value="partial">Partielle</option><option value="not_comparable">Non comparable</option></select></label>
           <label><input name="include_superseded" type="checkbox">Consulter les observations remplacées (exclues des statistiques)</label>
+          </details>
           <button class="secondary-button" type="submit">Recharger</button>
         </form>
         <p id="history-message" role="status" aria-live="polite"></p>

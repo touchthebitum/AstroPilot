@@ -431,7 +431,7 @@ async function check() {
   assert.equal(state.fieldObservationDraftContext.decision_id, old.decision_id);
   assert.equal(state.fieldObservationDraftContext.historical, true);
   assert.equal(element('#observation-save').disabled, false);
-  assert.match(element('#observation-associated-label').textContent, /a93f2c/);
+  assert.equal(element('#observation-associated-label').textContent, 'Décision récente choisie');
   assert.equal(fieldObservationSnapshot(), historicalEnvelope.snapshot);
   await submitFieldObservation(event);
   assert.equal(JSON.stringify(posts[1]), JSON.stringify(posts[0]));
@@ -557,6 +557,18 @@ async function check() {
   assert.equal(recentCalls.length, 0);
   assert.equal(element('#observation-choose-decision').disabled, true);
   assert.equal(element('#observation-associated-label').textContent, 'Décision imposée par la session');
+
+  // A closed session exposes stop reason in quick mode without assuming its value.
+  clearHarness();
+  state.sessions = [{execution: {execution_id: 'closed-session', status: 'completed'}}];
+  state.activeSessionId = 'closed-session';
+  state.fieldObservationSelectedExecutionId = 'closed-session';
+  openFieldObservation('mission');
+  assert.ok(element('#observation-quick-stop').children.includes(element('#observation-stop-wrap')));
+  assert.equal(element('#observation-stop-reason').value, '');
+  clearHarness();
+  openFieldObservation('decision');
+  assert.ok(element('.observation-advanced-grid').children.includes(element('#observation-stop-wrap')));
 
   clearHarness();
   setQuick({cloud: 'mostly_cloudy', transparency: 'excellent', wind: '8.5'});
@@ -1268,6 +1280,12 @@ async function check() {
   // Native selects accept direct discrete changes (keyboard/touch behavior is browser-owned).
   element('#observation-clouds').value = 'clear';
   assert.equal(fieldObservationDraft().conditions.cloud_state, 'clear');
+  // Native disclosure does not rebuild controls or discard their values.
+  element('.observation-advanced').open = true;
+  element('#observation-temperature').value = '7.5';
+  element('.observation-advanced').open = false;
+  element('.observation-advanced').open = true;
+  assert.equal(fieldObservationDraft().conditions.temperature_c, 7.5);
 }
 '''
     if Path(engine).name == "node":
