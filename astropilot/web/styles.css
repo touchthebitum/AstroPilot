@@ -547,3 +547,16 @@ html[data-ui-mode="simple"] [data-pro-only] { display: none !important; }
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* Keep the original decision/message ancestor visibility after moving the buttons. */
+main:has(#decision[hidden]) #add-field-observation-decision,
+main:has(#message-state[hidden]) #add-field-observation-message { display: none; }
+.compact-actions-section { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); }
+.compact-actions-section h2 { margin: 0 0 12px; font-size: 1rem; }
+.terrain-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.terrain-actions button { min-width: 0; max-width: 100%; white-space: normal; }
+@media (max-width: 600px) {
+  .terrain-actions { flex-direction: column; align-items: stretch; }
+}
+
+.tonight-section-title { font-size: 1rem; margin: 20px 0 12px; }
