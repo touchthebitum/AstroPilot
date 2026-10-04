@@ -533,3 +533,11 @@ button { color: inherit; }
 
 #review-step .review-grid { gap: 8px; margin-top: 12px; }
 #review-step .review-grid div { padding: 9px 12px; }
+
+/* Presentation only; hidden controls remain enabled and retain their values. */
+html[data-ui-mode="simple"] [data-pro-only] { display: none !important; }
+.ui-mode-control { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.ui-mode-control select { max-width: 100%; }
+.header-actions { flex-wrap: wrap; }
+#outcome-trace { white-space: pre-wrap; overflow-wrap: anywhere; }
+#outcome-result details { white-space: normal; }

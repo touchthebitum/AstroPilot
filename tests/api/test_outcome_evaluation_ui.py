@@ -31,8 +31,8 @@ def test_outcome_layout_keeps_result_below_controls_at_all_widths():
 
     parser = OutcomeParser()
     parser.feed((ROOT / 'astropilot/web/index.html').read_text())
-    assert [tag for tag, _ in parser.children] == ['h3', 'label', 'select', 'button', 'button', 'div']
-    result = parser.children[-1][1]
+    assert [tag for tag, _ in parser.children] == ['h3', 'label', 'select', 'button', 'button', 'div', 'details', 'summary', 'pre']
+    result = parser.children[5][1]
     assert result['id'] == 'outcome-result'
     assert result['role'] == 'status' and result['aria-live'] == 'polite'
     css = (ROOT / 'astropilot/web/styles.css').read_text()

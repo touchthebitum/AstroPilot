@@ -214,15 +214,15 @@ def test_humidity_weather_traceability_roundtrip_and_ui(tmp_path, real_evidence_
     assert readback == {k: v for k, v in payload.items() if k != 'created'}
     js = (Path(__file__).parents[2] / 'astropilot/web/app.js').read_text()
     render = js[js.index('function renderOutcomeEvaluation('):js.index('function validateOutcomeProjection(')]
-    program = "const state={fieldObservationDraftContext:{timezone:'Europe/Zurich'}}; const output={}; const document={querySelector:()=>output}; const OUTCOME_REASON_TEXT={};\n" + render
-    program += "\nrenderOutcomeEvaluation(" + json.dumps(readback) + "); console.log(output.textContent);"
+    program = "const state={fieldObservationDraftContext:{timezone:'Europe/Zurich'}}; const output={}; const traceOutput={}; const document={querySelector:(selector)=>selector === '#outcome-trace' ? traceOutput : output}; const OUTCOME_REASON_TEXT={};\n" + render
+    program += "\nrenderOutcomeEvaluation(" + json.dumps(readback) + "); console.log(output.textContent + traceOutput.textContent);"
     node = runpy.run_path(str(Path(__file__).with_name('test_field_observation_ui.py')))['javascript_engine']()
     if node is None or Path(node).name != 'node':
         pytest.skip('Node required for UI rendering')
     text = subprocess.check_output([node, '-e', program], text=True)
     assert '00:00' in text and '2026-10-02T22:00:00.000Z' in text
     assert '-10 min' in text and 'Open-Meteo' in text and '1200 m' in text
-    assert 'prévision 91 %, observation 73 %' in text and '18 %' in text
+    assert 'Prévu 91 %, Observé 73 %' in text and '18 %' in text
     # Replace only geography after comparison has been persisted: all matching
     # business fields remain identical, but the historical digest must reject it.
     replaced = replace(point, grid_location=builders['WeatherLocation'](47.0, 7.0, altitude_m=999.0))
@@ -256,14 +256,14 @@ def test_humidity_weather_traceability_roundtrip_and_ui(tmp_path, real_evidence_
     heterogeneous['results'][0]['forecast_point']['grid_location'] = trace['grid_location']
     base = program[:program.index('\nrenderOutcomeEvaluation(')]
     rendered = subprocess.check_output([node, '-e', base + '\nrenderOutcomeEvaluation(' +
-        json.dumps(heterogeneous) + '); console.log(output.textContent);'], text=True)
+        json.dumps(heterogeneous) + '); console.log(output.textContent + traceOutput.textContent);'], text=True)
     assert rendered.count('Coordonnées demandées :') == 1
     assert 'Coordonnées demandées : Non disponible' not in rendered
     absent = json.loads(json.dumps(readback))
     absent['weather_traceability']['requested_location'] = None
     absent['weather_traceability']['grid_location'] = None
     rendered = subprocess.check_output([node, '-e', base + '\nrenderOutcomeEvaluation(' +
-        json.dumps(absent) + '); console.log(output.textContent);'], text=True)
+        json.dumps(absent) + '); console.log(output.textContent + traceOutput.textContent);'], text=True)
     assert 'Coordonnées demandées : Non disponible' in rendered
     ambiguous = replace(point, grid_location=builders['WeatherLocation'](46.77, 6.57))
     replace_evidence(builders['DecisionForecastEvidence']((point, ambiguous)))

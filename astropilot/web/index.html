@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="fr">
+<html lang="fr" data-ui-mode="simple">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -26,6 +26,11 @@
         <time id="night-date">—</time>
       </div>
       <div class="header-actions">
+        <label class="ui-mode-control" for="ui-mode">Présentation
+          <select id="ui-mode" aria-label="Mode de présentation">
+            <option value="simple">Simple</option><option value="pro">Pro</option>
+          </select>
+        </label>
         <button class="secondary-button" id="edit-availability" type="button" hidden>
           Modifier ma disponibilité
         </button>
@@ -423,9 +428,9 @@
             <span class="trust-badge" id="classic-weather-status">À confirmer</span>
           </div>
           <dl class="weather-trust-grid">
-            <div><dt>Source</dt><dd id="classic-weather-provider">—</dd></div>
+            <div data-pro-only><dt>Source</dt><dd id="classic-weather-provider">—</dd></div>
             <div><dt>Fraîcheur météo</dt><dd id="classic-weather-age">—</dd></div>
-            <div><dt>Récupération</dt><dd id="classic-weather-retrieved">—</dd></div>
+            <div data-pro-only><dt>Récupération</dt><dd id="classic-weather-retrieved">—</dd></div>
             <div><dt>Période couverte</dt><dd id="classic-weather-coverage">—</dd></div>
           </dl>
           <p class="weather-trust-note" id="classic-weather-timezone">Fuseau du site non disponible.</p>
@@ -522,7 +527,7 @@
         </div>
       </dialog>
 
-      <button class="secondary-button" id="outcome-reopen" type="button">Retrouver les observations enregistrées récentes</button>
+      <button class="secondary-button" id="outcome-reopen" type="button">Mes observations</button>
       <dialog class="observation-dialog" id="field-observation-dialog" aria-labelledby="observation-title">
         <div class="observation-surface observation-panel">
           <header class="observation-heading">
@@ -586,7 +591,7 @@
               </fieldset>
 
               <div id="observation-quick-stop"></div>
-              <details class="observation-advanced">
+              <details class="observation-advanced" data-mode-disclosure>
                 <summary>Ajouter des détails</summary>
                 <div class="observation-advanced-grid">                  <label id="observation-stop-wrap">Cause d’arrêt
                     <select id="observation-stop-reason">
@@ -630,7 +635,7 @@
               </details>
 
               <div class="observation-actions">
-                <details class="observation-diagnostics"><summary>Détails techniques</summary><p class="observation-compatibility">Publication sécurisée multi-onglets : navigateur avec Web Locks requis.</p></details>
+                <details class="observation-diagnostics" data-mode-disclosure><summary>Détails techniques</summary><p class="observation-compatibility">Publication sécurisée multi-onglets : navigateur avec Web Locks requis.</p></details>
                 <p id="observation-status" role="status">Choisissez les catégories observées, indiquez le vent mesuré en km/h ou précisez l’état de la surface.</p>
                 <section id="observation-pending-diagnostics" class="observation-pending-diagnostics" aria-label="Observations locales à résoudre" hidden></section>
                 <button class="secondary-button" id="observation-reconcile" type="button" hidden>Réconcilier l’observation précédente</button>
@@ -646,19 +651,20 @@
               <button class="secondary-button" id="outcome-read" type="button">Consulter la comparaison enregistrée</button>
               <button class="secondary-button" id="outcome-compare" type="button" disabled>Comparer avec la prévision</button>
               <div id="outcome-result" role="status" aria-live="polite"></div>
+              <details data-mode-disclosure><summary>Détails techniques</summary><pre id="outcome-trace"></pre></details>
             </section>
         </div>
       </dialog>
-      <button class="secondary-button" id="history-open" type="button">Historique des validations</button>
+      <button class="secondary-button" id="history-open" type="button">Mon historique</button>
       <dialog id="history-dialog" aria-labelledby="history-title">
-        <h2 id="history-title">Historique des validations</h2>
-        <p>Lecture seule · une observation par évaluation · statistiques descriptives, sans conclusion de suffisance.</p>
+        <h2 id="history-title">Mon historique</h2>
+        <p id="history-description">Comparez les prévisions aux conditions observées. Les statistiques ne concluent pas à la qualité globale des prévisions.</p>
         <button class="secondary-button" id="history-close" type="button">Fermer</button>
         <form id="history-filters" class="history-filters">
           <label>Depuis (UTC)<input name="observed_from" type="datetime-local" step="1"></label>
           <label>Jusqu’au (UTC)<input name="observed_to" type="datetime-local" step="1"></label>
-          <details class="full-width"><summary>Filtres avancés</summary>
           <button id="history-current-site" class="secondary-button" type="button">Ce site</button>
+          <details class="full-width" data-mode-disclosure><summary>Filtres avancés</summary>
           <label>Latitude exacte<input name="latitude" type="number" step="any" min="-90" max="90"></label>
           <label>Longitude exacte<input name="longitude" type="number" step="any" min="-180" max="180"></label>
           <label>Provider comparé<input name="provider" type="text"></label>
@@ -670,7 +676,7 @@
           <button class="secondary-button" type="submit">Recharger</button>
         </form>
         <p id="history-message" role="status" aria-live="polite"></p>
-        <div id="history-statistics"></div>
+        <details data-mode-disclosure><summary>Détails techniques des statistiques</summary><div id="history-statistics"></div></details>
         <div id="history-table" class="history-table"></div>
         <button class="secondary-button" id="history-next" type="button" hidden>Page suivante</button>
       </dialog>

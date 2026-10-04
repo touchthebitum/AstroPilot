@@ -1,5 +1,47 @@
 "use strict";
 
+// UI preference only: never read by scientific or persistence handlers.
+const UI_MODE_KEY = "nightmerit.ui-mode.v1";
+const UI_MODE_LABELS = {
+  "outcome-reopen": ["Mes observations", "Retrouver les observations enregistrées récentes"],
+  "history-open": ["Mon historique", "Historique des validations"],
+  "history-title": ["Mon historique", "Historique des validations"],
+  "add-field-observation-message": ["Ajouter une observation", "Ajouter une observation terrain"],
+  "add-field-observation-decision": ["Ajouter une observation", "Ajouter une observation terrain"],
+  "add-field-observation-mission": ["Ajouter une observation", "Ajouter une observation terrain"],
+};
+function normalizeUiMode(value) { return value === "pro" ? "pro" : "simple"; }
+function applyUiMode(value) {
+  const mode = normalizeUiMode(value);
+  document.documentElement.dataset.uiMode = mode;
+  document.querySelector("#ui-mode").value = mode;
+  for (const [id, labels] of Object.entries(UI_MODE_LABELS)) {
+    const element = document.getElementById(id);
+    if (element) element.textContent = labels[mode === "pro" ? 1 : 0];
+  }
+  document.querySelectorAll("[data-simple-text]").forEach(element => {
+    element.textContent = mode === "pro" ? element.dataset.proText : element.dataset.simpleText;
+  });
+  // Disclosure changes do not reset inputs, selections, filters, or requests.
+  document.querySelectorAll("[data-mode-disclosure]").forEach(element => { element.open = mode === "pro"; });
+}
+function initializeUiMode() {
+  let saved = null;
+  try { saved = localStorage.getItem(UI_MODE_KEY); } catch (_) {}
+  applyUiMode(saved);
+  document.querySelector("#ui-mode").addEventListener("change", event => {
+    const mode = normalizeUiMode(event.target.value);
+    applyUiMode(mode);
+    try { localStorage.setItem(UI_MODE_KEY, mode); } catch (_) {}
+  });
+  window.addEventListener("storage", event => {
+    if (event.storageArea && event.storageArea !== localStorage) return;
+    if (event.key === UI_MODE_KEY || event.key === null) applyUiMode(event.newValue);
+  });
+}
+initializeUiMode();
+
+
 const ui = Object.freeze({
   configurationLoading: document.querySelector("#configuration-loading"),
   configurationError: document.querySelector("#configuration-error"),
@@ -2064,7 +2106,7 @@ function resetFieldObservationForm() {
   for (const input of form.querySelectorAll('input[type="number"]')) input.value = "";
   for (const input of form.querySelectorAll('input[type="radio"]')) input.checked = false;
   for (const select of form.querySelectorAll("select")) select.selectedIndex = 0;
-  document.querySelector(".observation-advanced").open = false;
+  document.querySelector(".observation-advanced").open = document.documentElement?.dataset.uiMode === "pro";
 }
 
 function setOptionalObservationValue(selector, value) {
@@ -2333,6 +2375,16 @@ function selectDefaultOutcomeObservation() {
   state.outcomeObservationId = outcomeActiveObservations()[0]?.observation_id || null;
 }
 
+function clearOutcomePresentation() {
+  const trace = document.querySelector("#outcome-trace");
+  if (trace) trace.textContent = "";
+  const result = document.querySelector("#outcome-result");
+  if (result.dataset) {
+    delete result.dataset.simpleText;
+    delete result.dataset.proText;
+  }
+}
+
 function rememberConfirmedFieldObservation(observation) {
   if (!observation?.observation_id) return;
   state.fieldObservationConfirmationGeneration = (state.fieldObservationConfirmationGeneration || 0) + 1;
@@ -2357,6 +2409,7 @@ function rememberConfirmedFieldObservation(observation) {
   })); } catch (_error) { /* confirmation does not depend on local storage */ }
   state.outcomeToken = (state.outcomeToken || 0) + 1;
   renderSavedFieldObservations();
+  clearOutcomePresentation();
   document.querySelector("#outcome-result").textContent = state.outcomeLineageStatus === "ready"
     ? "Observation enregistrée. Consultez la comparaison ou cliquez sur « Comparer avec la prévision »."
     : "Observation récemment confirmée. Supersession inconnue : attendez la lecture canonique ou rouvrez cet éditeur pour réessayer.";
@@ -2380,6 +2433,16 @@ function renderSavedFieldObservations() {
       option.textContent += ` — Historique / remplacée par ${replacementId} (contexte ${replacement.execution_id ?? "decision-only"})`;
     } else if (activeCount > 1) option.textContent += " — Plusieurs observations actives";
     if (state.outcomeLineageStatus === "ready" && !history.coherent) option.textContent += " — Chaîne de corrections incohérente";
+    if (option.dataset) {
+      option.dataset.proText = option.textContent;
+      let simpleText = item.observed_at_utc || "Observation";
+      if (state.outcomeLineageStatus !== "ready") simpleText += " — Vérification en cours, comparaison bloquée";
+      else if (history.replacements.has(item.observation_id)) simpleText += " — Historique / observation remplacée";
+      else if (activeCount > 1) simpleText += " — Plusieurs observations actives";
+      if (state.outcomeLineageStatus === "ready" && !history.coherent) simpleText += " — Chaîne de corrections incohérente";
+      option.dataset.simpleText = simpleText;
+      if (document.documentElement?.dataset.uiMode !== "pro") option.textContent = simpleText;
+    }
     select.appendChild(option);
   }
   select.value = state.outcomeObservationId || "";
@@ -2403,6 +2466,7 @@ async function loadSavedFieldObservations(context) {
   state.visibleObservationsForContext = [];
   state.outcomeObservationId = null;
   renderSavedFieldObservations();
+  clearOutcomePresentation();
   document.querySelector("#outcome-result").textContent = "Lecture des observations enregistrées…";
   // The decision endpoint includes parents and corrections across execution contexts.
   const url = `/v1/decisions/${encodeURIComponent(context.decision_id)}/field-observations`;
@@ -2431,6 +2495,7 @@ async function loadSavedFieldObservations(context) {
     state.visibleObservationsForContext = state.allObservationsForDecision.filter(item => item && outcomeContextMatches(item, context));
     selectDefaultOutcomeObservation();
     renderSavedFieldObservations();
+    clearOutcomePresentation();
     document.querySelector("#outcome-result").textContent = !confirmationsValidated
       ? "Confirmation absente de la lecture canonique. Supersession inconnue : création bloquée. Rouvrez cet éditeur pour réessayer."
       : state.visibleObservationsForContext.length
@@ -2440,6 +2505,7 @@ async function loadSavedFieldObservations(context) {
     if (!current()) return;
     state.outcomeLineageStatus = "error";
     renderSavedFieldObservations();
+    clearOutcomePresentation();
     document.querySelector("#outcome-result").textContent = "Lecture canonique indisponible. Supersession inconnue : création bloquée. Rouvrez cet éditeur pour réessayer.";
   }
 }
@@ -2480,16 +2546,17 @@ function renderOutcomeEvaluation(evaluation) {
   const cloud = {clear: "Ciel clair", few: "Peu de nuages", partly_cloudy: "Partiellement nuageux",
     mostly_cloudy: "Très nuageux", overcast: "Couvert", unknown: "Inconnu"};
   const knownStatus = Object.hasOwn(statuses, evaluation.status);
-  const lines = [`Observation enregistrée : ${evaluation.observation_id}`, knownStatus ? statuses[evaluation.status] : "Statut non reconnu"];
+  const lines = [knownStatus ? statuses[evaluation.status] : "Statut non reconnu"];
+  const technicalLines = [`Observation enregistrée : ${evaluation.observation_id}`];
   const reasonText = reason => Object.hasOwn(OUTCOME_REASON_TEXT, reason.code) ? OUTCOME_REASON_TEXT[reason.code] : "Raison non reconnue.";
   for (const item of knownStatus ? evaluation.results : []) {
     const name = labels[item.variable] || "Variable";
     if (item.status !== "comparable") {
       lines.push(`${name} : non comparable. ${item.reasons.map(reasonText).join(" ")}`);
     } else if (item.variable === "cloud_cover_percent") {
-      lines.push(`${name} : prévision ${cloud[item.forecast] || item.forecast}, observation ${cloud[item.observed] || item.observed} — ${item.outcome === "match" ? "catégories identiques" : "catégories différentes"}.`);
+      lines.push(`${name} : Prévu ${cloud[item.forecast] || item.forecast}, Observé ${cloud[item.observed] || item.observed} — ${item.outcome === "match" ? "catégories identiques" : "catégories différentes"}.`);
     } else {
-      lines.push(`${name} : prévision ${item.forecast} ${item.unit}, observation ${item.observed} ${item.unit} ; erreur signée (prévision − observation) ${item.signed_error} ${item.unit} ; erreur absolue ${item.absolute_error} ${item.unit}.`);
+      lines.push(`${name} : Prévu ${item.forecast} ${item.unit}, Observé ${item.observed} ${item.unit} ; erreur signée (prévision − observation) ${item.signed_error} ${item.unit} ; erreur absolue ${item.absolute_error} ${item.unit}.`);
     }
   }
   lines.push(...evaluation.reasons.map(reasonText));
@@ -2499,7 +2566,7 @@ function renderOutcomeEvaluation(evaluation) {
       ? `Suffisance des éléments comparables : ${sufficiency[evaluation.assessment.status]}. Ce statut ne mesure pas la qualité globale de la prévision.`
       : "Statut non reconnu");
   }
-  lines.push("", "Traçabilité de la prévision");
+  technicalLines.push("", "Traçabilité de la prévision");
   const unavailable = "Non disponible";
   const timezone = state.fieldObservationDraftContext?.timezone || null;
   const dateText = value => {
@@ -2514,12 +2581,12 @@ function renderOutcomeEvaluation(evaluation) {
     const point = item.forecast_point;
     if (!point) continue;
     const offset = point.temporal_offset_minutes;
-    lines.push(`${labels[item.variable] || "Variable"} · point météo : ${dateText(point.selected_forecast_for_utc)} ; écart (point − observation) : ${Number.isFinite(offset) ? `${offset > 0 ? "+" : ""}${offset} min` : unavailable}.`);
+    technicalLines.push(`${labels[item.variable] || "Variable"} · point météo : ${dateText(point.selected_forecast_for_utc)} ; écart (point − observation) : ${Number.isFinite(offset) ? `${offset > 0 ? "+" : ""}${offset} min` : unavailable}.`);
     if (point.requested_location || point.grid_location) {
       const coordinates = value => value ? `${value.latitude}, ${value.longitude}` : unavailable;
-      lines.push(`Coordonnées demandées : ${coordinates(point.requested_location)} · grille : ${coordinates(point.grid_location)} · altitude grille : ${point.grid_location?.altitude_m == null ? unavailable : `${point.grid_location.altitude_m} m`}.`);
+      technicalLines.push(`Coordonnées demandées : ${coordinates(point.requested_location)} · grille : ${coordinates(point.grid_location)} · altitude grille : ${point.grid_location?.altitude_m == null ? unavailable : `${point.grid_location.altitude_m} m`}.`);
     }
-    lines.push(`Récupération : ${dateText(point.retrieved_at_utc ?? evaluation.weather_traceability?.retrieved_at_utc)} · provider : ${point.provider_id || evaluation.weather_traceability?.provider_id || unavailable} · modèle : ${point.model_id || evaluation.weather_traceability?.model_id || unavailable}.`);
+    technicalLines.push(`Récupération : ${dateText(point.retrieved_at_utc ?? evaluation.weather_traceability?.retrieved_at_utc)} · provider : ${point.provider_id || evaluation.weather_traceability?.provider_id || unavailable} · modèle : ${point.model_id || evaluation.weather_traceability?.model_id || unavailable}.`);
   }
   const coords = value => value ? `${value.latitude}, ${value.longitude}` : unavailable;
   const trace = evaluation.weather_traceability;
@@ -2527,9 +2594,20 @@ function renderOutcomeEvaluation(evaluation) {
     item.forecast_point && (item.forecast_point.requested_location
       || item.forecast_point.grid_location));
   if (!(perVariableCoordinates && trace?.requested_location == null && trace?.grid_location == null)) {
-    lines.push(`Coordonnées demandées : ${coords(trace?.requested_location)} · grille : ${coords(trace?.grid_location)} · altitude grille : ${trace?.grid_location?.altitude_m == null ? unavailable : `${trace.grid_location.altitude_m} m`}.`);
+    technicalLines.push(`Coordonnées demandées : ${coords(trace?.requested_location)} · grille : ${coords(trace?.grid_location)} · altitude grille : ${trace?.grid_location?.altitude_m == null ? unavailable : `${trace.grid_location.altitude_m} m`}.`);
   }
-  document.querySelector("#outcome-result").textContent = lines.join("\n");
+  const resultElement = document.querySelector("#outcome-result");
+  resultElement.textContent = lines.join("\n");
+  if (resultElement.dataset) {
+    resultElement.dataset.proText = resultElement.textContent;
+    resultElement.dataset.simpleText = resultElement.textContent
+      .replaceAll("erreur signée (prévision − observation)", "Écart (prévu − observé)")
+      .replaceAll("erreur absolue", "écart sans tenir compte du signe")
+      .replaceAll("Suffisance des éléments comparables", "Conditions pouvant être comparées");
+    if (document.documentElement?.dataset.uiMode !== "pro") resultElement.textContent = resultElement.dataset.simpleText;
+  }
+  const traceElement = document.querySelector("#outcome-trace");
+  if (traceElement) traceElement.textContent = technicalLines.join("\n");
 }
 
 function validateOutcomeProjection(value, target, method) {
@@ -2567,6 +2645,7 @@ function validateOutcomeProjection(value, target, method) {
 }
 
 async function consultOutcomeEvaluation(createIfMissing = false) {
+  clearOutcomePresentation();
   const observationId = state.outcomeObservationId;
   if (!observationId) return;
   const observation = (state.visibleObservationsForContext || []).find(item => item.observation_id === observationId);
@@ -5855,6 +5934,7 @@ document.querySelector("#outcome-observation").addEventListener("change", event 
   state.outcomeManualObservationId = state.outcomeObservationId;
   state.outcomeToken = (state.outcomeToken || 0) + 1;
   renderSavedFieldObservations();
+  clearOutcomePresentation();
   document.querySelector("#outcome-result").textContent = "Observation enregistrée sélectionnée. Consultez ou comparez explicitement.";
 });
 // Outcome History: independent read-only view and request generation.
@@ -5912,19 +5992,36 @@ function renderOutcomeHistory(data) {
   if (!data.rows.length) historyText(container, "p", "Aucune validation lisible pour ces filtres.");
   const table = historyText(container, "table", "");
   const head = historyText(table, "tr", "");
-  for (const label of ["Date observée UTC", "Site exact", "Contexte", "Mode", "Couverture", "Valeurs et écarts", "Détail"]) historyText(head, "th", label);
+  for (const label of ["Date observée UTC", "Site exact", "Contexte", "Mode", "Couverture", "Prévu / Observé / Écart", "Détail"]) {
+    const cell = historyText(head, "th", label);
+    if (["Site exact", "Mode", "Couverture"].includes(label)) cell.setAttribute?.("data-pro-only", "");
+  }
   for (const item of data.rows) {
     const row = historyText(table, "tr", "");
     historyText(row, "td", item.observed_at_utc ?? "Inconnue");
-    historyText(row, "td", item.site ? `${item.site.latitude}, ${item.site.longitude}` : "Inconnu");
-    historyText(row, "td", [item.context.site_name, item.context.target, item.context.imaging_field_id, item.context.acquisition_intent_id].filter(Boolean).join(" · ") || "Inconnu");
-    historyText(row, "td", item.mode === "execution" ? "Exécution" : "Décision seule");
-    historyText(row, "td", `${item.status} · ${item.supersession}`);
-    historyText(row, "td", item.results.map(v => v.status === "comparable" ?
+    historyText(row, "td", item.site ? `${item.site.latitude}, ${item.site.longitude}` : "Inconnu").setAttribute?.("data-pro-only", "");
+    const contextCell = historyText(row, "td", [item.context.site_name, item.context.target].filter(Boolean).join(" · ") || "Inconnu");
+    historyText(contextCell, "span", [item.context.imaging_field_id, item.context.acquisition_intent_id].filter(Boolean).join(" · ")).setAttribute?.("data-pro-only", "");
+    historyText(row, "td", item.mode === "execution" ? "Exécution" : "Décision seule").setAttribute?.("data-pro-only", "");
+    historyText(row, "td", `${item.status} · ${item.supersession}`).setAttribute?.("data-pro-only", "");
+    const valueCell = historyText(row, "td", item.results.map(v => v.status === "comparable" ?
       `${v.variable} : prévu ${v.forecast_value ?? v.predicted_condition}, observé ${v.observed_value ?? v.observed_condition} ${v.unit}${v.signed_error == null ? ` · ${v.outcome}` : ` · écart signé ${v.signed_error}, absolu ${v.absolute_error} ${v.variable === "relative_humidity_percent" ? "points de pourcentage" : v.unit}`}` : `${v.variable} : non comparable`).join(" ; "));
+    if (valueCell.dataset) {
+      const wording = {temperature_c: "Température", relative_humidity_percent: "Humidité",
+        wind_speed_kmh: "Vent", cloud_cover_percent: "Nuages", clear: "Dégagé", few: "Quelques nuages",
+        partly_cloudy: "Partiellement couvert", mostly_cloudy: "Très nuageux", overcast: "Couvert",
+        match: "conditions identiques", mismatch: "conditions différentes", unknown: "Inconnu"};
+      valueCell.dataset.proText = valueCell.textContent;
+      valueCell.dataset.simpleText = valueCell.textContent.replace(
+        /temperature_c|relative_humidity_percent|wind_speed_kmh|cloud_cover_percent|partly_cloudy|mostly_cloudy|overcast|clear|few|mismatch|match|unknown/g,
+        token => wording[token]);
+      if (document.documentElement?.dataset.uiMode !== "pro") valueCell.textContent = valueCell.dataset.simpleText;
+    }
     const cell = historyText(row, "td", "");
     const detail = historyText(cell, "details", "");
-    historyText(detail, "summary", "Provenance, éléments, raisons et versions");
+    historyText(detail, "summary", "Détails techniques");
+    detail.setAttribute?.("data-mode-disclosure", "");
+    detail.open = document.documentElement?.dataset.uiMode === "pro";
     historyText(detail, "p", `Providers comparés : ${item.compared_providers.join(", ") || "inconnus"} · Providers de l’evidence : ${item.evidence_providers.join(", ") || "inconnus"}`);
     if (item.assessment) historyText(detail, "p", `Suffisance des éléments d’évaluation : ${item.assessment.status}`);
     historyText(detail, "pre", JSON.stringify({observation_id: item.observation_id, evaluation_id: item.evaluation_id, decision_id: item.decision_id, execution_id: item.execution_id,
