@@ -3532,6 +3532,15 @@ function duration(hours) {
   return `${whole} h ${String(minutes).padStart(2, "0")}`;
 }
 
+// Decision weather trust carries the evaluated site's zone. Accepted mission DTOs
+// have no zone; retain that presentation context until the mission is reopened.
+function windowTimezone(decision) {
+  const candidate = decision?.weather_trust?.timezone ?? siteTimezone() ?? "UTC";
+  try {
+    return new Intl.DateTimeFormat("fr-CH", {timeZone: candidate}).resolvedOptions().timeZone;
+  } catch (_) { return "UTC"; }
+}
+
 function clock(value, timeZone) {
   if (!value) return null;
   if (/^\d{2}:\d{2}$/.test(value)) return value;
@@ -3642,10 +3651,13 @@ function renderMission(mission) {
   state.activeSessionId = null;
   state.fieldObservationSelectedExecutionId = null;
   syncFieldObservationContext();
-  const start = clock(mission.window_start);
-  const end = clock(mission.window_end);
+  const zone = state.acceptedMission?.mission === mission
+    ? state.acceptedMission.windowTimezone || windowTimezone(null)
+    : windowTimezone(state.currentDecision?.decision_id === mission.decision_id ? state.currentDecision : null);
+  const start = clock(mission.window_start, zone);
+  const end = clock(mission.window_end, zone);
   text("#mission-title", mission.target || "Mission de cette nuit");
-  text("#mission-summary", mission.site_name ? `Mission acceptée · ${mission.site_name}` : "Mission acceptée");
+  text("#mission-summary", `${mission.site_name ? `Mission acceptée · ${mission.site_name}` : "Mission acceptée"} · Horaires : ${zone}`);
   text("#mission-window", start && end ? `${start} — ${end}` : "À confirmer");
   text("#mission-duration", duration(mission.recommended_hours));
   text("#mission-gain", Number(mission.expected_gain) > 0 ? `+${Math.round(Number(mission.expected_gain))} %` : "Non estimé");
@@ -4188,8 +4200,9 @@ function renderDecision(decision) {
   const actionableHours = decision.recommended_hours;
   const firstWindow = productivity?.windows?.find((window) => window.productive)
     || productivity?.windows?.[0];
-  const start = clock(decision.window_start, decision.weather_trust?.timezone) || firstWindow?.start_time || null;
-  const end = clock(decision.window_end, decision.weather_trust?.timezone) || firstWindow?.end_time || null;
+  const zone = windowTimezone(decision);
+  const start = clock(decision.window_start, zone) || firstWindow?.start_time || null;
+  const end = clock(decision.window_end, zone) || firstWindow?.end_time || null;
   const quality = decision.astro_quality;
   const qualityScore = quality ? Math.round(Number(quality.score)) : null;
   const qualityCopy = labels.quality[quality?.label] || ["Non évaluée", "L’indice de qualité n’est pas disponible pour cette décision."];
@@ -4212,7 +4225,7 @@ function renderDecision(decision) {
   text("#target-name", decision.target || "Cible à confirmer");
   text("#catalog-key", decision.target_common_name || (decision.catalog_key && decision.catalog_key !== decision.target ? decision.catalog_key : ""));
   text("#window-value", start && end ? `${start} — ${end}` : "À confirmer");
-  text("#window-note", firstWindow?.reason ? "Fenêtre productive principale" : "Heure locale");
+  text("#window-note", `Horaires : ${zone}${firstWindow?.reason ? " · Fenêtre productive principale" : ""}`);
   text("#duration-value", duration(actionableHours));
   text("#duration-note", "Durée de mission exploitable");
   const filterCopy = filterCardCopy(decision);
@@ -4247,14 +4260,11 @@ function renderDecision(decision) {
     ? "NightMerit ne dispose pas d’assez d’éléments fiables pour recommander cette cible pour cette session."
     : null;
   setList("#insights-list", [...(evidenceMessage ? [evidenceMessage] : []), ...positives, ...information], "Aucune explication supplémentaire disponible.");
-  // Summarize the existing decision without repeating its detailed explanation.
-  text("#decision-reason", insufficient
-    ? "Prochain geste : actualisez les données avant de choisir une cible."
-    : noAcquisition || intentUnavailable
-    ? "Prochain geste : vérifiez votre configuration de prise de vue."
-    : limiting ? `Facteur principal : ${labels.factors[limiting] || limiting.replaceAll("_", " ")}.`
-    : recommended ? "Pourquoi : cette cible est prioritaire pour votre session et votre configuration."
-    : "Prochain geste : consultez les alternatives ou réessayez plus tard.");
+  // Copy the supplied justification, without inferring selection from weather.
+  const shortReason = [...(decision.explanation?.positives || []), ...(decision.explanation?.information || [])]
+    .filter(reason => reason && (reason.title || reason.value))
+    .map(reasonText).find(Boolean);
+  text("#decision-reason", shortReason ? `Pourquoi : ${shortReason}` : "Pourquoi : non précisé");
   const warningCopy = [...warnings];
   if (weatherTrust?.freshness_status !== "fresh") warningCopy.unshift(
     weatherTrust?.freshness_status === "stale"
@@ -5363,6 +5373,20 @@ function actionabilityRefusalMessage(refusal) {
   ];
 }
 
+// A duration cap below the explicitly required continuous time is a proven
+// user constraint. Other refusal diagnostics do not establish availability as cause.
+function canEditRefusedAvailability(payload) {
+  const refusal = payload.actionability_refusal;
+  const minutes = Number(state.availability?.duration) * 60;
+  return payload.status === "no_productive_window"
+    && state.availability?.mode === "duration"
+    && Number.isFinite(minutes) && minutes > 0
+    && refusal?.status === "constraints_refusal"
+    && refusal.refusal_stage === "continuous_window_too_short"
+    && Number.isFinite(refusal.required_continuous_minutes)
+    && minutes < refusal.required_continuous_minutes;
+}
+
 function showTonightUnavailable(payload) {
   const productiveRefusal = payload.status === "no_productive_window";
   const [title, technical] = payload.status === "weather_refused"
@@ -5371,10 +5395,11 @@ function showTonightUnavailable(payload) {
     ? actionabilityRefusalMessage(payload.actionability_refusal)
     : partialMessages[payload.status] || ["Décision indisponible", "Aucune recommandation exploitable."];
   const shortWindow = payload.actionability_refusal?.refusal_stage === "continuous_window_too_short";
+  const editAvailability = canEditRefusedAvailability(payload);
   const body = productiveRefusal
     ? shortWindow
-      ? "Le créneau utilisable est trop court pour lancer une mission. Réessayez plus tard si les conditions évoluent. Vous pouvez revoir votre disponibilité, sans garantie de trouver un créneau suffisant."
-      : "Aucun créneau ne permet de lancer une mission dans les conditions évaluées. Réessayez plus tard lorsque les prévisions évoluent. Modifier vos horaires ne garantit pas une fenêtre exploitable."
+      ? `Le créneau utilisable est trop court pour lancer une mission. Réessayez plus tard si les conditions évoluent.${editAvailability ? " Vous pouvez revoir votre disponibilité, sans garantie de trouver un créneau suffisant." : ""}`
+      : "Aucun créneau ne permet de lancer une mission dans les conditions évaluées. Réessayez plus tard lorsque les prévisions évoluent."
     : `${technical} Réessayez plus tard lorsque les données ou les conditions évoluent.`;
   showMessage(title, body, { kicker: "Analyse terminée" });
   text("#message-technical", technical);
@@ -5382,7 +5407,7 @@ function showTonightUnavailable(payload) {
   details.hidden = false;
   details.open = appliedUiMode === "pro";
   ui.retry.textContent = "Réessayer plus tard";
-  document.querySelector("#message-edit-availability").hidden = !state.availability;
+  document.querySelector("#message-edit-availability").hidden = !editAvailability;
 }
 
 function showMessage(title, body, { kicker = "Décision indisponible", retry = true } = {}) {
@@ -5683,6 +5708,7 @@ async function acceptRecommendation({
       selectedCatalogKey: payload.catalog_key,
       acquisitionIntentId: payload.selected_acquisition_intent_id,
       source,
+      windowTimezone: windowTimezone(decision),
       mission,
     };
     if (decision?.decision_id === expectedDecisionId) {

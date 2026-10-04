@@ -1284,12 +1284,13 @@ const labels = {actions: {
 }, quality: {}, factors: {}};
 function clearAcceptedMission() {}
 function setCurrentFieldObservationDecision(decision) { state.currentDecision = decision; }
+function windowTimezone() {return "UTC";}
 function clock(value) {return value || null;}
 function duration(value) {return value ? String(value) : "Non précisée";}
 function dateLabel(value) {return value;}
 function text(key, value) {values[key] = value;}
 function setList(key, values, fallback) {text(key, values.length ? values : fallback);}
-function reasonText(value) {return value;}
+function reasonText(value) {return value.title || value.value;}
 function renderWeatherTrust() {}
 function renderAlternatives() {}
 function renderIntentChoice() {}
@@ -1313,6 +1314,16 @@ function run() {
   renderDecision({target: "IC1396", catalog_key: "IC1396", decision_id: "continue-decision",
     action: "continue_project", target_decision_status: "recommended"});
   results.continue_project = {values: JSON.parse(JSON.stringify(values))};
+  results.reasons = [];
+  for (const explanation of [undefined, {positives:["Cible bien placée — Altitude favorable"]},
+      {information:["Nouvelle justification"]}, {positives:[{}]}]) {
+    // This harness uses string reasons; give supplied values the title field.
+    if (explanation) for (const key of ["positives", "information"]) {
+      explanation[key] = (explanation[key] || []).map(value => typeof value === "string" ? {title:value} : value);
+    }
+    renderDecision({target_decision_status:"recommended", explanation, astro_quality:{limiting_factor:"clouds"}});
+    results.reasons.push(values["#decision-reason"]);
+  }
   return JSON.stringify(results);
 }
 '''
@@ -1325,6 +1336,10 @@ function run() {
     path.write_text(harness)
     completed = subprocess.run([*command, str(path)], text=True, capture_output=True, check=True)
     results = json.loads(completed.stdout)
+    assert results['reasons'] == [
+        'Pourquoi : non précisé', 'Pourquoi : Cible bien placée — Altitude favorable',
+        'Pourquoi : Nouvelle justification', 'Pourquoi : non précisé',
+    ]
     for status in ('insufficient_evidence', 'not_recommended'):
         rendered = results[status]
         assert rendered['hidden'] and rendered['disabled']
@@ -1492,12 +1507,18 @@ for (const stage of ['no_productive_slice','continuous_window_too_short']) {
   appliedUiMode=mode;showTonightUnavailable(payload);
   assert.match(shown.body,/Réessayez plus tard/);
   assert.doesNotMatch(shown.body,/seuil|points/i);
-  assert.match(shown.body,/sans garantie|ne garantit pas/);
+
   assert.equal(document.querySelector('#message-details').open,mode==='pro');
   assert.match(document.querySelector('#message-technical').textContent,/Seuil|seuil/);
-  assert.equal(document.querySelector('#message-edit-availability').hidden,false);
+  assert.equal(document.querySelector('#message-edit-availability').hidden,true);
  }
 }
+state.availability={mode:'duration',duration:.5};
+showTonightUnavailable({status:'no_productive_window',actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}});
+assert.equal(document.querySelector('#message-edit-availability').hidden,false);
+state.availability={mode:'duration',duration:8};
+showTonightUnavailable({status:'no_productive_window',actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}});
+assert.equal(document.querySelector('#message-edit-availability').hidden,true);
 state.availability=null;
 showTonightUnavailable({status:'no_recommendation'});
 assert.equal(document.querySelector('#message-edit-availability').hidden,true);

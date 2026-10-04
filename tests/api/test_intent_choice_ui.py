@@ -21,6 +21,9 @@ def _run_javascript(source: str) -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js is required for the dynamic UI test")
+    source = (_javascript_between("function siteTimezone()", "function decisionSiteFingerprint(")
+              .split("function siteConfigurationIdentity", 1)[0]
+              + _javascript_between("function windowTimezone(", "function clock(") + source)
     result = subprocess.run(
         [node, "-e", source], capture_output=True, text=True, check=False,
     )

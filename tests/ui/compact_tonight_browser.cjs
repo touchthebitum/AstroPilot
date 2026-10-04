@@ -19,13 +19,13 @@ const decision={status:'available',decision_id:'d',catalog_key:'M31',target:'Gal
  // Deliberately different from the site: decision hours must use the site timezone.
  const page=await browser.newPage({timezoneId:'America/New_York'});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.route('http://nightmerit.test/**',route=>{
+ await page.route('https://nightmerit.test/**',route=>{
   const pathname=new URL(route.request().url()).pathname;
   const file=pathname==='/'?'index.html':{'/ui/app.js':'app.js','/ui/styles.css':'styles.css','/ui/help.js':'help.js'}[pathname];
   return file?route.fulfill({body:fs.readFileSync(path.join(web,file)),contentType:file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'})
    :route.fulfill({status:503,contentType:'application/json',body:'{}'});
  });
- await page.goto('http://nightmerit.test/');
+ await page.goto('https://nightmerit.test/');
  await page.waitForFunction(()=>appliedUiMode!==null);
  const positions=[];
  for(const mode of ['simple','pro'])for(const width of [390,1280]){
@@ -41,9 +41,32 @@ const decision={status:'available',decision_id:'d',catalog_key:'M31',target:'Gal
   assert.match(await essential.innerText(),/Observer cette cible/i);
   assert.match(await essential.innerText(),/Galaxie d’Andromède/);
   assert.equal(await page.locator('#window-value').innerText(),'20:00 — 22:00');
+  assert.doesNotMatch(await page.locator('#decision-reason').innerText(),/Couverture nuageuse/);
+  // Render the accepted DTO under the same browser zone, including the retained context.
+  for(const zone of ['Europe/Zurich',null,'Invalid/Zone']) {
+   await page.evaluate(({decision,zone})=>{
+    const d=structuredClone(decision);
+    state.configuration.site.timezone=zone;
+    if(zone===null) delete d.weather_trust.timezone; else d.weather_trust.timezone=zone;
+    renderDecision(d);
+    const mission={decision_id:d.decision_id,target:d.target,window_start:d.window_start,window_end:d.window_end};
+    state.acceptedMission={mission,windowTimezone:windowTimezone(d)};
+    renderMission(mission);
+   },{decision,zone});
+   assert.equal(await page.locator('#mission-window').innerText(),await page.locator('#window-value').innerText());
+   assert.equal(await page.locator('#window-value').innerText(),zone==='Europe/Zurich'?'20:00 — 22:00':'18:00 — 20:00');
+   assert.match(await page.locator('#mission-summary').textContent(),zone==='Europe/Zurich'?/Europe\/Zurich/:/UTC/);
+  }
+  for(const explanation of [undefined,{information:[{title:'Nouvelle justification',value:'Nouvelle valeur'}]}]) {
+   await page.evaluate(({decision,explanation})=>renderDecision({...decision,explanation}),{decision,explanation});
+   const copy=await page.locator('#decision-reason').innerText();
+   assert.equal(copy,explanation?'Pourquoi : Nouvelle justification — Nouvelle valeur':'Pourquoi : non précisé');
+   assert.doesNotMatch(copy,/prioritaire|Couverture nuageuse|Altitude favorable/);
+  }
+  await page.evaluate(decision=>{state.configuration.site.timezone='Europe/Zurich';renderDecision(decision)},decision);
   assert.equal(await page.locator('#duration-value').innerText(),'1 h 30');
   assert.match(await page.locator('#filter-value').innerText(),/L-Pro/);
-  assert.match(await page.locator('#decision-reason').innerText(),/Facteur principal/);
+  assert.match(await page.locator('#decision-reason').innerText(),/Pourquoi : Cible bien placée — Altitude favorable pendant votre session/);
   assert.equal(await page.locator('#open-mission').isEnabled(),true);
   assert.equal(await page.locator('#quality-score').isVisible(),mode==='pro');
   assert.equal(await page.locator('#recommendation-confidence-value').isVisible(),mode==='pro');
@@ -126,9 +149,12 @@ const decision={status:'available',decision_id:'d',catalog_key:'M31',target:'Gal
    assert.equal(await page.locator('#message-details').evaluate(e=>e.open),mode==='pro');
    assert.match(await page.locator('#message-technical').textContent(),/seuil|preuves/i);
    assert.equal(await page.locator('#message-retry').innerText(),'Réessayer plus tard');
-   assert.equal(await page.locator('#message-edit-availability').isVisible(),true);
+   assert.equal(await page.locator('#message-edit-availability').isVisible(),false);
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   }
+  await page.evaluate(()=>{state.availability={mode:'duration',duration:.5};showTonightUnavailable({status:'no_productive_window',
+   actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}})});
+  assert.equal(await page.locator('#message-edit-availability').isVisible(),true);
   await page.locator('#message-edit-availability').click();
   assert.equal(await page.evaluate(()=>state.view),'availability');
   await page.evaluate(()=>{state.availability=null;showTonightUnavailable({status:'no_recommendation'})});
@@ -136,9 +162,30 @@ const decision={status:'available',decision_id:'d',catalog_key:'M31',target:'Gal
   assert.match(await page.locator('#message-body').innerText(),/Réessayez plus tard/);
   await page.evaluate(()=>showTonightUnavailable({status:'weather_refused',weather_decision:{presentation:{label:'Conditions insuffisantes',summary:'Données météo périmées : aucune mission autorisée.'}}}));
   assert.match(await page.locator('#message-body').innerText(),/Données météo périmées.*Réessayez plus tard/);
-  await page.evaluate(()=>showMessage('Erreur réseau','Connexion impossible'));
+  assert.equal(await page.locator('#message-edit-availability').isVisible(),false);
+  await page.evaluate(()=>{state.availability={mode:'duration',duration:8};showTonightUnavailable({status:'no_productive_window',
+   actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}})});
+  assert.equal(await page.locator('#message-edit-availability').isVisible(),false);
+  await page.evaluate(()=>showMessage('Erreur réseau' ,'Connexion impossible'));
   assert.equal(await page.locator('#message-details').isVisible(),false);
   assert.equal(await page.locator('#message-retry').innerText(),'Réessayer');
+ }
+ // Exercise the real acceptance listener and retention of the evaluated zone.
+ await page.route('https://nightmerit.test/v1/decision-selections',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({
+  status:'accepted',decision_id:'d',catalog_key:'M31',selection_id:'s',mission_id:'m',selected_acquisition_intent_id:null,
+  mission:{decision_id:'d',selection_id:'s',mission_id:'m',target:decision.target,window_start:decision.window_start,window_end:decision.window_end}
+ })}));
+ for(const zone of ['Europe/Zurich',null,'Invalid/Zone']) {
+  await page.evaluate(({decision,zone})=>{
+   const d=structuredClone(decision);state.configuration.site.timezone=zone;
+   if(zone===null)delete d.weather_trust.timezone;else d.weather_trust.timezone=zone;
+   renderDecision(d);
+  },{decision,zone});
+  await page.locator('#open-mission').click();
+  await page.waitForFunction(()=>ui.mission.open);
+  assert.equal(await page.locator('#mission-window').innerText(),await page.locator('#window-value').textContent());
+  assert.equal(await page.evaluate(()=>state.acceptedMission.windowTimezone),zone==='Europe/Zurich'?'Europe/Zurich':'UTC');
+  await page.evaluate(()=>ui.mission.close());
  }
  assert.deepEqual(errors,[]);
  console.log(JSON.stringify({positions,errors},null,2));
