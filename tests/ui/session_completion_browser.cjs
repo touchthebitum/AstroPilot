@@ -33,16 +33,16 @@ const assert = require('node:assert/strict');
  for (const mode of ['simple','pro']) for (const width of [390,1280]) {
   await page.setViewportSize({width,height:900});
   await page.evaluate(mode=>applyUiMode(mode),mode);
-  for (const step of ['active','duration','credit','credited','interrupted','unconfirmed','ready','none']) {
+  for (const step of ['active','duration','credit','credited','interrupted','interruptedEvidence','unknown','unconfirmed','ready','none']) {
    await page.evaluate(step=>{
     state.activeSessionId=step==='none'?null:'execution-1';
     const s=state.sessions[0];
-    s.execution.status={active:'in_progress',interrupted:'interrupted',unconfirmed:'unconfirmed',ready:'not_started'}[step]||'completed';
-    s.evidence=['credit','credited'].includes(step)?[{category:'acquisition',usable_integration_duration:1800}]:[];
+    s.execution.status={active:'in_progress',interrupted:'interrupted',interruptedEvidence:'interrupted',unknown:'future_status',unconfirmed:'unconfirmed',ready:'not_started'}[step]||'completed';
+    s.evidence=['credit','credited','interruptedEvidence','unknown'].includes(step)?[{category:'acquisition',usable_integration_duration:1800}]:[];
     s.credit=step==='credited'?{execution_id:'execution-1'}:null;
     renderSession();
    },step);
-   const primary={active:'session-complete',duration:'session-record-evidence',credit:'session-apply-credit',credited:'session-start',interrupted:'session-start',ready:'session-start',none:'session-start'}[step];
+   const primary={active:'session-complete',duration:'session-record-evidence',credit:'session-apply-credit',credited:'session-start',interrupted:'session-start',interruptedEvidence:'session-start',ready:'session-start',none:'session-start'}[step];
    assert.deepEqual(await page.locator('.session-panel .primary-button:visible').evaluateAll(es=>es.map(e=>e.id)),primary?[primary]:[]);
    assert.equal(await page.locator('#session-intent').isVisible(),mode==='pro');
    if(mode==='simple') assert.doesNotMatch(await page.locator('.session-panel').innerText(),/private-intent-id|execution-1|intent/i);
@@ -50,6 +50,23 @@ const assert = require('node:assert/strict');
     assert.equal(await page.locator('#session-credit-intent').isVisible(),mode==='pro');
     assert.equal(await page.locator('#session-apply-credit').innerText(),'Ajouter cette durée à mon avancement');
     assert.equal(await page.locator('#session-baseline-confirm-wrap').isVisible(),true);
+   }
+   if (['interruptedEvidence','unknown'].includes(step)) {
+    assert.equal(await page.locator('#session-apply-credit').isVisible(),false);
+    assert.equal(await page.locator('#session-apply-credit').isEnabled(),false);
+    const before = requests;
+    await page.evaluate(()=>creditSession('mission-1',true));
+    assert.equal(requests,before,'defensive credit handler must not send a request');
+    assert.match(await page.locator('#session-status').innerText(),/aucun crédit/);
+    await page.evaluate(()=>renderSession());
+    assert.match(await page.locator('#session-status').innerText(),step==='unknown'?/État de session non reconnu/:/Session interrompue : aucun crédit/);
+   }
+   if (['duration','credit','credited','interrupted','none'].includes(step)) {
+    const expected = {duration:['session-record-evidence','session-start'],credit:['session-apply-credit','session-start'],credited:['session-start'],interrupted:['session-start'],none:['session-start']}[step];
+    assert.deepEqual(await page.locator('.session-panel button:visible').evaluateAll((es,expected)=>es.map(e=>e.id).filter(id=>expected.includes(id)),expected),expected);
+    await page.locator('#'+expected[0]).focus();
+    if(expected.length>1) { await page.keyboard.press('Tab'); assert.equal(await page.evaluate(()=>document.activeElement.id),expected[1]); }
+    else assert.equal(await page.evaluate(()=>document.activeElement.id),'session-start');
    }
    assert.equal(await page.locator('#mission-dialog').evaluate(e=>e.scrollWidth<=e.clientWidth),true);
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
@@ -65,5 +82,5 @@ const assert = require('node:assert/strict');
  assert.equal(requests,before);
  assert.deepEqual(errors,[]);
  await browser.close();
- console.log('Session completion: Simple/Pro, 390/1280, eight states and empty observations passed.');
+ console.log('Session completion: Simple/Pro, 390/1280, ten states, defensive credit guards and keyboard order and empty observations passed.');
 })().catch(e=>{console.error(e);process.exit(1)});

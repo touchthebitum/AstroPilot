@@ -219,6 +219,26 @@ async function fetch(url, options) {
   assert.match(document.querySelector('#session-status').textContent, /Session non confirmée/);
   assert.equal(document.querySelector('#session-choice').children[0].textContent, 'Sans session');
   assert.match(document.querySelector('#session-choice').children[1].textContent, /Session non confirmée/);
+  for (const invalidStatus of ['interrupted', 'unknown', null]) {
+    canonical.execution.status = invalidStatus;
+    await reloadSessions({selectId: 'execution-1'});
+    assert.equal(document.querySelector('#session-credit').hidden, true);
+    assert.equal(document.querySelector('#session-apply-credit').disabled, true);
+    const before = writes;
+    await creditSession('mission-1', true);
+    assert.equal(writes, before);
+    assert.match(document.querySelector('#session-status').textContent, /aucun crédit/);
+    await sessionCommand(creditSession);
+    assert.equal(writes, before);
+    assert.equal(document.querySelector('#session-apply-credit').disabled, true);
+    assert.match(document.querySelector('#session-status').textContent,
+      invalidStatus === 'interrupted' ? /Session interrompue : aucun crédit/ : /État de session non reconnu/);
+    assert.equal(document.querySelector('#session-start').hidden, invalidStatus !== 'interrupted');
+  }
+  state.activeSessionId = null;
+  renderSession();
+  assert.equal(document.querySelector('#session-start').hidden, false);
+  assert.equal(document.querySelector('#session-start').className, 'primary-button');
   canonical.execution.status = 'completed';
   for (const value of [null, 0]) {
     canonical.evidence[0].usable_integration_duration = value;
@@ -370,6 +390,8 @@ for (const [status, evidence, credit, primary] of [
   ['completed', true, false, false],
   ['completed', true, true, true],
   ['interrupted', false, false, true],
+  ['interrupted', true, false, true],
+  ['unknown', true, false, true],
   ['unconfirmed', false, false, true],
 ]) {
   selected.execution.status = status;
@@ -378,8 +400,8 @@ for (const [status, evidence, credit, primary] of [
   renderSession();
   assert.equal(document.querySelector('#session-start').className, primary ? 'primary-button' : 'secondary-button');
   assert.equal(document.querySelector('#session-evidence').hidden, status !== 'completed' || evidence);
-  assert.equal(document.querySelector('#session-credit').hidden, status === 'unconfirmed' || !evidence || credit);
-  assert.equal(document.querySelector('#session-start').hidden, ['in_progress','unconfirmed'].includes(status));
+  assert.equal(document.querySelector('#session-credit').hidden, status !== 'completed' || !evidence || credit);
+  assert.equal(document.querySelector('#session-start').hidden, ['in_progress','unconfirmed','unknown'].includes(status));
   assert.equal(document.querySelector('#session-close-actions').hidden, status !== 'in_progress');
 }
 assert.equal(sessionStatus('completed'), 'Terminée');
@@ -426,3 +448,9 @@ assert.equal(state.fieldObservationContextInvalid, true);
 '''
     result = subprocess.run([node, "-"], input=harness + helper + checks, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_completion_dom_order_follows_action_priority():
+    html = (SCRIPT.parent / "index.html").read_text(encoding="utf-8")
+    assert html.index('id="session-record-evidence"') < html.index('id="session-apply-credit"') < html.index('id="session-start"')
+    assert 'tabindex="1"' not in html
