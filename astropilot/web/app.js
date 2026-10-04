@@ -176,7 +176,8 @@ function usableEvidence(session) {
 }
 
 function sessionStatus(status) {
-  return status === "unconfirmed" ? "Session non confirmée" : status;
+  return ({unconfirmed: "Session non confirmée", completed: "Terminée", interrupted: "Interrompue",
+    in_progress: "En cours", not_started: "À démarrer"})[status] || status;
 }
 
 function restoreSessionEvidenceInputs(session) {
@@ -217,13 +218,17 @@ function renderSession() {
   text("#session-intent", `Intent de la mission : ${intentId || "non défini"}`);
   document.querySelector("#session-start").hidden = status === "in_progress" || status === "unconfirmed";
   document.querySelector("#session-start").textContent = status === "not_started"
-    ? "Démarrer cette session" : "Créer et démarrer une nouvelle session";
+    ? "Démarrer cette session" : "Démarrer une nouvelle session";
+  // Presentation only: saving usable duration and then adding progress take precedence.
+  document.querySelector("#session-start").className = status === "completed" && !session.credit
+    ? "secondary-button" : "primary-button";
   document.querySelector("#session-close-actions").hidden = status !== "in_progress";
   document.querySelector("#session-evidence").hidden = status !== "completed" || Boolean(usableEvidence(session));
   const evidence = usableEvidence(session);
   document.querySelector("#session-credit").hidden = status === "unconfirmed" || !evidence || Boolean(session.credit);
   if (evidence && !session.credit) {
-    text("#session-credit-preview", `Intent ${session.acquisition_intent_id} · base historique : ${sessionHours(session.historical_baseline_seconds)} · crédit proposé : ${sessionHours(Number(evidence.usable_integration_duration))}`);
+    text("#session-credit-preview", `Base historique : ${sessionHours(session.historical_baseline_seconds)} · crédit proposé : ${sessionHours(Number(evidence.usable_integration_duration))}`);
+    text("#session-credit-intent", `Intent : ${session.acquisition_intent_id}`);
     const mustConfirm = Number(session.historical_baseline_seconds) > 0 && !session.historical_baseline_confirmed;
     document.querySelector("#session-baseline-confirm-wrap").hidden = !mustConfirm;
     document.querySelector("#session-baseline-confirm").checked = false;
@@ -2521,8 +2526,14 @@ async function loadSavedFieldObservations(context) {
 async function reopenRecentFieldObservations() {
   let context;
   try { context = JSON.parse(localStorage.getItem("astropilot.recent-observation-context.v1")); }
-  catch (_error) { return; }
-  if (typeof context?.decision_id !== "string" || !context.decision_id) return;
+  catch (_error) { context = null; }
+  const message = document.querySelector("#recent-observations-message");
+  if (typeof context?.decision_id !== "string" || !context.decision_id) {
+    message.textContent = "Aucune observation enregistrée récemment.";
+    message.hidden = false;
+    return;
+  }
+  message.hidden = true;
   if (state.observationBusy) return;
   invalidateFieldObservationOperation();
   state.fieldObservationDraftContext = Object.freeze(context);

@@ -324,3 +324,105 @@ async function fetch(url) {
 '''
     result = subprocess.run([node, "-"], input=harness + restore + open_handler + checks, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_completion_action_hierarchy_uses_canonical_session_state():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required")
+    source = SCRIPT.read_text(encoding="utf-8")
+    helpers = source[source.index('const SESSION_PENDING_KEY ='):source.index('async function reloadSessions')]
+    harness = r'''
+
+const assert = require('node:assert/strict');
+class Element {
+  constructor() { this.hidden = false; this.checked = false; this.textContent = '';
+    this.value = ''; this.children = []; }
+  replaceChildren() { this.children = []; }
+  append(child) { this.children.push(child); }
+}
+const elements = new Map();
+const document = {
+  querySelector(selector) { if (!elements.has(selector)) elements.set(selector, new Element());
+    return elements.get(selector); },
+  createElement() { return new Element(); },
+};
+function text(selector, value) { document.querySelector(selector).textContent = value; }
+const storage = new Map();
+const localStorage = {getItem: key => storage.get(key) || null,
+  setItem: (key, value) => storage.set(key, value)};
+const session = (id) => ({execution: {execution_id: id, status: 'completed', actual_start: null},
+  acquisition_intent_id: 'ha', evidence: [], credit: null, historical_baseline_seconds: 0,
+  historical_baseline_confirmed: false, acquired_before_seconds: 0, session_credit_seconds: 0,
+  acquired_after_seconds: 0, current_acquired_seconds: 0, target_hours: null, remaining_hours: null});
+const state = {acceptedMission: {mission_id: 'mission-1', acquisitionIntentId: 'ha'},
+  sessions: [session('execution-1'), session('execution-2')], activeSessionId: 'execution-1',
+  sessionEvidenceInputExecutionId: null};
+// Keep the session test focused while preserving renderSession's Field Observation integration point.
+let observationLinkageRenderCount = 0;
+function renderObservationLinkage() { observationLinkageRenderCount++; }
+'''
+    checks = r'''
+const selected = state.sessions[0];
+for (const [status, evidence, credit, primary] of [
+  ['in_progress', false, false, true],
+  ['completed', false, false, false],
+  ['completed', true, false, false],
+  ['completed', true, true, true],
+  ['interrupted', false, false, true],
+  ['unconfirmed', false, false, true],
+]) {
+  selected.execution.status = status;
+  selected.evidence = evidence ? [{category:'acquisition', usable_integration_duration:1800}] : [];
+  selected.credit = credit ? {execution_id:'execution-1'} : null;
+  renderSession();
+  assert.equal(document.querySelector('#session-start').className, primary ? 'primary-button' : 'secondary-button');
+  assert.equal(document.querySelector('#session-evidence').hidden, status !== 'completed' || evidence);
+  assert.equal(document.querySelector('#session-credit').hidden, status === 'unconfirmed' || !evidence || credit);
+  assert.equal(document.querySelector('#session-start').hidden, ['in_progress','unconfirmed'].includes(status));
+  assert.equal(document.querySelector('#session-close-actions').hidden, status !== 'in_progress');
+}
+assert.equal(sessionStatus('completed'), 'Terminée');
+assert.equal(sessionStatus('interrupted'), 'Interrompue');
+assert.doesNotMatch(document.querySelector('#session-credit-preview').textContent, /intent|sh2|ha/i);
+'''
+    result = subprocess.run([node, "-"], input=harness + helpers + checks, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_recent_observations_without_context_reports_empty_state_without_requests():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required")
+    source = SCRIPT.read_text(encoding="utf-8")
+    helper = source[source.index('async function reopenRecentFieldObservations()'):source.index('const OUTCOME_REASON_TEXT =')]
+    harness = r'''
+const assert = require('node:assert/strict');
+const message = {hidden:true, textContent:''};
+const document = {querySelector: () => message};
+let saved = null, loads = 0, opens = 0;
+const localStorage = {getItem: () => saved};
+const state = {observationBusy:false};
+function invalidateFieldObservationOperation() {}
+function setFieldObservationEditorDisabled() {}
+function observationMessage() {}
+const ui = {observation:{showModal() { opens++; }}};
+async function loadSavedFieldObservations(context) {loads++; assert.equal(context.decision_id,'decision-1');}
+'''
+    checks = r'''
+(async () => {
+for (const value of [null, '{', '{}', '{"decision_id":""}']) {
+  saved = value; message.hidden = true;
+  await reopenRecentFieldObservations();
+  assert.equal(message.hidden, false);
+  assert.equal(message.textContent, 'Aucune observation enregistrée récemment.');
+  assert.equal(loads, 0); assert.equal(opens, 0);
+}
+saved = '{"decision_id":"decision-1"}';
+await reopenRecentFieldObservations();
+assert.equal(message.hidden, true); assert.equal(loads, 1); assert.equal(opens, 1);
+assert.equal(state.fieldObservationContextInvalid, true);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''
+    result = subprocess.run([node, "-"], input=harness + helper + checks, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
