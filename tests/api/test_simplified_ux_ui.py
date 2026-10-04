@@ -145,6 +145,7 @@ const document = {querySelector: element};
 const state = {configuration: {}};
 let invalidations = 0;
 function invalidateOutcomeHistory() {invalidations++;}
+function updateHistoryFilterSummary() {}
 '''
     checks = r'''
 const lat = element('#history-filters [name="latitude"]');

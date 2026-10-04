@@ -11,9 +11,17 @@ const UI_MODE_LABELS = {
   "add-field-observation-mission": ["Ajouter une observation", "Ajouter une observation terrain"],
 };
 function normalizeUiMode(value) { return value === "pro" ? "pro" : "simple"; }
+let appliedUiMode = null;
 function applyUiMode(value) {
   const mode = normalizeUiMode(value);
+  if (appliedUiMode === mode) {
+    updateHistoryFilterSummary();
+    return;
+  }
+  const initialized = appliedUiMode !== null;
+  appliedUiMode = mode;
   document.documentElement.dataset.uiMode = mode;
+  if (initialized) updateHistoryFilterSummary();
   document.querySelector("#ui-mode").value = mode;
   for (const [id, labels] of Object.entries(UI_MODE_LABELS)) {
     const element = document.getElementById(id);
@@ -5942,7 +5950,37 @@ function invalidateOutcomeHistory() {
   historyState.generation += 1;
   historyState.cursor = null;
 }
+function updateHistoryFilterSummary() {
+  const form = document.querySelector("#history-filters");
+  const summary = document.querySelector("#history-filter-summary");
+  if (!form || !summary) return;
+  const value = name => form.elements.namedItem(name).value;
+  const active = [];
+  const latitude = value("latitude"), longitude = value("longitude");
+  if (latitude || longitude) {
+    const site = state.configuration?.site;
+    const current = latitude !== "" && longitude !== "" && Number.isFinite(site?.latitude)
+      && Number.isFinite(site?.longitude) && Number(latitude) === site.latitude && Number(longitude) === site.longitude;
+    active.push(current ? "ce site" : "site personnalisé");
+  }
+  if (value("provider")) active.push(value("provider") === "open-meteo" ? "Open-Meteo" : `source : ${value("provider")}`);
+  const labels = {
+    variable: {temperature_c: "température", relative_humidity_percent: "humidité", wind_speed_kmh: "vent", cloud_cover_percent: "nuages"},
+    mode: {decision_only: "décision seule", execution: "exécution"},
+    status: {comparable: "couverture comparable", partial: "couverture partielle", not_comparable: "couverture non comparable"},
+  };
+  for (const name of ["variable", "mode", "status"]) {
+    if (value(name)) active.push(labels[name][value(name)] || `${name} : ${value(name)}`);
+  }
+  // The default false also restricts the population: make that scope explicit.
+  active.push(form.elements.namedItem("include_superseded").checked
+    ? "observations remplacées incluses" : "observations actuelles");
+  const text = document.documentElement?.dataset.uiMode === "pro" ? "Filtres avancés"
+    : `Filtres actifs : ${active.join(" · ")} — Modifier`;
+  if (summary.textContent !== text) summary.textContent = text;
+}
 function historyParameters() {
+  updateHistoryFilterSummary();
   const parameters = new URLSearchParams();
   const form = document.querySelector("#history-filters");
   for (const name of ["observed_from", "observed_to", "latitude", "longitude", "provider", "variable", "mode", "status"]) {
@@ -5959,6 +5997,7 @@ function historyText(parent, tag, value) {
   return node;
 }
 function renderOutcomeHistory(data) {
+  updateHistoryFilterSummary();
   const summary = document.querySelector("#history-statistics");
   summary.replaceChildren();
   const stats = data.statistics;
@@ -5989,7 +6028,14 @@ function renderOutcomeHistory(data) {
   }
   const container = document.querySelector("#history-table");
   container.replaceChildren();
-  if (!data.rows.length) historyText(container, "p", "Aucune validation lisible pour ces filtres.");
+  if (!data.rows.length) {
+    const empty = historyText(container, "p", "Aucune validation lisible pour ces filtres.");
+    if (empty.dataset) {
+      empty.dataset.proText = empty.textContent;
+      empty.dataset.simpleText = "Aucune comparaison disponible pour ces filtres.";
+    }
+    if (document.documentElement?.dataset.uiMode !== "pro") empty.textContent = "Aucune comparaison disponible pour ces filtres.";
+  }
   const table = historyText(container, "table", "");
   const head = historyText(table, "tr", "");
   for (const label of ["Date observée UTC", "Site exact", "Contexte", "Mode", "Couverture", "Prévu / Observé / Écart", "Détail"]) {
@@ -6070,7 +6116,7 @@ document.querySelector("#history-close").addEventListener("click", () => documen
 document.querySelector("#history-dialog").addEventListener("close", () => {historyState.open = false; invalidateOutcomeHistory();});
 document.querySelector("#history-dialog").addEventListener("cancel", () => {historyState.open = false; invalidateOutcomeHistory();});
 document.querySelector("#history-filters").addEventListener("submit", event => {event.preventDefault(); loadOutcomeHistory();});
-document.querySelector("#history-filters").addEventListener("input", () => {invalidateOutcomeHistory(); document.querySelector("#history-next").hidden = true; document.querySelector("#history-statistics").replaceChildren(); document.querySelector("#history-table").replaceChildren(); document.querySelector("#history-message").textContent = "Filtres modifiés. Rechargez l’historique.";});
+document.querySelector("#history-filters").addEventListener("input", () => {updateHistoryFilterSummary(); invalidateOutcomeHistory(); document.querySelector("#history-next").hidden = true; document.querySelector("#history-statistics").replaceChildren(); document.querySelector("#history-table").replaceChildren(); document.querySelector("#history-message").textContent = "Filtres modifiés. Rechargez l’historique.";});
 document.querySelector("#history-filters").addEventListener("change", () => loadOutcomeHistory());
 document.querySelector("#history-next").addEventListener("click", () => loadOutcomeHistory(true));
 
@@ -6083,6 +6129,7 @@ document.querySelector("#history-current-site").addEventListener("click", () => 
   }
   document.querySelector('#history-filters [name="latitude"]').value = site.latitude;
   document.querySelector('#history-filters [name="longitude"]').value = site.longitude;
+  updateHistoryFilterSummary();
   invalidateOutcomeHistory();
   document.querySelector("#history-next").hidden = true;
   document.querySelector("#history-statistics").replaceChildren();
@@ -6090,6 +6137,7 @@ document.querySelector("#history-current-site").addEventListener("click", () => 
   document.querySelector("#history-message").textContent = "Site sélectionné. Rechargez l’historique.";
 });
 
+updateHistoryFilterSummary();
 // End Outcome History.
 restoreFieldObservationLock();
 restorePendingFieldObservationInventory();

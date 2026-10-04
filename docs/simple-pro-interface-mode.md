@@ -25,7 +25,7 @@ statistics and provenance in disclosures; exact coordinates, mode and coverage
 columns are Pro-only. Technical IDs remain available in history detail.
 
 Next batch: broader wording audit,
-recovery diagnostic wording, advanced-filter active-state summary. This batch
+recovery diagnostic wording. This batch
 intentionally retains scientific terminology inside explicitly opened details.
 
 ## Validation
@@ -44,6 +44,38 @@ intentionally retains scientific terminology inside explicitly opened details.
 Example browser command (use available Node and Playwright installation):
 `NODE_PATH=/path/to/node_modules node tests/ui/simple_pro_browser.cjs`
 
-Limit: Simple users can explicitly expand advanced panels. Advanced filters
-remain active when the panel closes; no filter is silently reset. Recovery
+Simple shows a clickable advanced-filter summary, derived from the live form:
+`Filtres actifs : ce site · source : retained · exécution · couverture partielle · observations actuelles — Modifier`.
+Coordinate equality with the configured site identifies `ce site`; other coordinate
+filters show `site personnalisé`. Variable, mode and coverage use readable labels.
+The default exclusion of replaced observations is explicitly shown as
+`observations actuelles`; checking the box shows `observations remplacées incluses`.
+Clearing optional filters leaves that default population scope visible. Pro retains
+`Filtres avancés` and the complete controls. Input, reload, render, site selection
+and mode application refresh the summary without changing values or results.
+Repeated applications of the already applied mode preserve manually opened or
+closed disclosures, while real transitions restore the mode defaults.
+Simple empty history wording: `Aucune comparaison disponible pour ces filtres.`
+
+Limit: Simple users can explicitly expand advanced panels. Recovery
 errors keep their existing full wording in both modes to preserve guard clarity.
+
+
+## Review corrections (4 October 2026)
+
+Presentation-only follow-up to 540134ca8c4c6d31ce7b3d97d74bd043fa2dc41b:
+active history-filter scope is always visible in Simple; same-mode storage events
+preserve manual disclosure choices; empty history uses comparison wording.
+Recovery diagnostics (UUID, idempotence, Supersession, projection Outcome) retain
+their existing wording and actions pending a separate recovery batch. No recovery
+handler or guard was changed. Open-Meteo footer attribution remains shared.
+
+Regression validation: 853 targeted tests passed (Tonight, Field Observation,
+Outcome API/UI, Simple/Pro, simplified UX and all history tests). Eight additional
+parameterized cases cover provider, population, mode, coverage and coordinate
+summaries; combined filters, clearing, mode changes and reload are also covered.
+Chrome smoke passed in both modes at 390 and 1280 pixels, including site scope
+after history reload, summary access and repeated storage events.
+
+Complete final suite: 4803 passed, 44 existing warnings, with Node available and
+local loopback listener access. JavaScript syntax and git diff checks passed.

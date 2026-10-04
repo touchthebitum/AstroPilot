@@ -75,9 +75,41 @@ const assert = require('node:assert/strict');
   assert.equal(await page.locator('#history-table th[data-pro-only]').first().isVisible(),mode==='pro');
   assert.equal(await page.locator('#history-table details').evaluate(e=>e.open),mode==='pro');
  }
+ await page.evaluate(() => {
+  applyUiMode('simple');
+  const details = document.querySelector('#history-filters details');
+  details.open = true;
+  window.dispatchEvent(new StorageEvent('storage', {key:UI_MODE_KEY,newValue:'simple'}));
+  if (!details.open) throw Error('same mode closed filters');
+  window.dispatchEvent(new StorageEvent('storage', {key:UI_MODE_KEY,newValue:'pro'}));
+  if (!details.open) throw Error('Pro did not open filters');
+  details.open = false;
+  window.dispatchEvent(new StorageEvent('storage', {key:UI_MODE_KEY,newValue:'pro'}));
+  if (details.open) throw Error('repeated Pro event churn');
+  applyUiMode('simple');
+  state.configuration = {site:{latitude:46.12,longitude:7.34}};
+  document.querySelector('#history-current-site').click();
+ });
+ assert.match(await page.locator('#history-filter-summary').innerText(),/ce site · source : retained/);
+ await page.evaluate(() => loadOutcomeHistory());
+ assert.match(await page.locator('#history-filter-summary').innerText(),/ce site/);
+ assert.equal(await page.locator('#history-filters details').evaluate(e=>e.open),false);
+ await page.locator('#history-filter-summary').click();
+ assert.equal(await page.locator('#history-filters details').evaluate(e=>e.open),true);
+ await page.evaluate(() => {
+  const form=document.querySelector('#history-filters');
+  form.reset(); updateHistoryFilterSummary();
+ });
+ assert.equal(await page.locator('#history-filter-summary').innerText(),'Filtres actifs : observations actuelles — Modifier');
  for (const mode of ['simple','pro']) for (const width of [390,1280]) {
+  await page.evaluate(() => {
+   const form=document.querySelector('#history-filters');
+   form.elements.provider.value='retained';form.elements.mode.value='execution';
+   form.elements.status.value='partial';form.elements.include_superseded.checked=true;
+  });
   await page.evaluate(mode=>applyUiMode(mode),mode);
   await page.setViewportSize({width,height:900});
+  if (mode==='simple') assert.match(await page.locator('#history-filter-summary').innerText(),/source : retained · exécution · couverture partielle · observations remplacées incluses/);
   assert.equal(await page.locator('#history-dialog').evaluate(e=>e.scrollWidth<=e.clientWidth),true);
  }
  assert.deepEqual(errors,[]);

@@ -664,7 +664,7 @@
           <label>Depuis (UTC)<input name="observed_from" type="datetime-local" step="1"></label>
           <label>Jusqu’au (UTC)<input name="observed_to" type="datetime-local" step="1"></label>
           <button id="history-current-site" class="secondary-button" type="button">Ce site</button>
-          <details class="full-width" data-mode-disclosure><summary>Filtres avancés</summary>
+          <details class="full-width" data-mode-disclosure><summary id="history-filter-summary" aria-live="polite">Filtres avancés</summary>
           <label>Latitude exacte<input name="latitude" type="number" step="any" min="-90" max="90"></label>
           <label>Longitude exacte<input name="longitude" type="number" step="any" min="-180" max="180"></label>
           <label>Provider comparé<input name="provider" type="text"></label>

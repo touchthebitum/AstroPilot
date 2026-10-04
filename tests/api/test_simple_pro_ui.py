@@ -10,6 +10,7 @@ WEB = Path(__file__).parents[2] / 'astropilot/web'
 def test_mode_preference_and_reversible_disclosure(tmp_path):
     source = (WEB / 'app.js').read_text().split('initializeUiMode();', 1)[0]
     harness = r'''
+function updateHistoryFilterSummary() {}
 const listeners = {}, windowListeners = {}, writes = [];
 const select = {value: '', addEventListener: (name, fn) => listeners[name] = fn};
 const labels = {};
@@ -31,8 +32,15 @@ initializeUiMode();
 const reload = select.value;
 listeners.change({target:{value:'simple'}});
 const simple = [select.value, details[0].open, labels['outcome-reopen'].textContent];
+details[0].open = true;
+windowListeners.storage({key:UI_MODE_KEY,newValue:'simple'});
+windowListeners.storage({key:UI_MODE_KEY,newValue:'simple'});
+if (!details[0].open) throw Error('same Simple mode closes disclosure');
 windowListeners.storage({key:UI_MODE_KEY,newValue:'pro'});
 const synchronized = select.value;
+details[0].open = false;
+windowListeners.storage({key:UI_MODE_KEY,newValue:'pro'});
+if (details[0].open) throw Error('same Pro mode churn');
 windowListeners.storage({key:UI_MODE_KEY,newValue:'invalid'});
 const invalid = select.value;
 windowListeners.storage({key:'other',newValue:'pro'});
@@ -61,7 +69,7 @@ def test_shared_dom_and_technical_disclosures():
     css = (WEB / 'styles.css').read_text()
     assert 'data-ui-mode="simple"' in html
     assert 'aria-label="Mode de présentation"' in html
-    assert html.index('id="history-current-site"') < html.index('<summary>Filtres avancés')
+    assert html.index('id="history-current-site"') < html.index('<summary id="history-filter-summary"')
     assert 'id="outcome-trace"' in html
     assert 'html[data-ui-mode="simple"] [data-pro-only]' in css
     mode = script.split('initializeUiMode();', 1)[0]
