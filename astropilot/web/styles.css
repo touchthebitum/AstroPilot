@@ -560,3 +560,27 @@ main:has(#message-state[hidden]) #add-field-observation-message { display: none;
 }
 
 .tonight-section-title { font-size: 1rem; margin: 20px 0 12px; }
+
+/* Integrated help: a single source and stable sections in both presentations. */
+#help-dialog { width: min(860px, calc(100% - 24px)); max-height: calc(100dvh - 24px); box-sizing: border-box; padding: 20px; color: var(--ink); background: var(--night-soft); border: 1px solid var(--line-bright); border-radius: var(--radius); overflow: hidden; }
+#help-dialog[open] { display: flex; flex-direction: column; gap: 12px; }
+#help-dialog::backdrop { background: rgba(1, 6, 12, .82); }
+.help-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.help-heading h2 { margin: 0; font-size: 1.2rem; }
+.help-heading button { flex-shrink: 0; }
+.help-navigation { display: flex; flex-wrap: wrap; gap: 8px; }
+.help-navigation button { white-space: normal; min-width: 0; max-width: 100%; }
+.help-navigation [aria-current] { border-color: var(--ink); }
+html[data-ui-mode="simple"] .help-navigation [data-help-guide="start"] { flex-basis: 100%; font-weight: 700; }
+html[data-ui-mode="simple"] .help-navigation [data-help-guide="complete"] { font-size: .8rem; }
+#help-content { min-height: 0; overflow-y: auto; overflow-wrap: anywhere; line-height: 1.65; padding-right: 8px; }
+#help-content h3 { margin-top: 0; }
+#help-content h4 { font-size: 1rem; margin-bottom: 8px; }
+#help-content nav { display: grid; gap: 6px; }
+#help-content a { color: var(--ink); }
+#help-dialog :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+@media (max-width: 600px) {
+  #help-dialog { padding: 14px; }
+  .help-heading { flex-wrap: wrap; }
+  .help-heading h2 { font-size: 1rem; }
+}
