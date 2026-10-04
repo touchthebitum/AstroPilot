@@ -52,6 +52,46 @@ const assert = require('node:assert/strict');
   assert.equal(await page.locator('#field-observation-dialog').evaluate(e=>e.scrollWidth<=e.clientWidth),true);
  }
 
+ // Terrain uses the original controls and respects their former ancestor visibility.
+ await page.evaluate(() => document.querySelector('#field-observation-dialog').close());
+ for (const mode of ['simple','pro']) for (const width of [390,1280]) {
+  await page.setViewportSize({width,height:900});
+  await page.evaluate(mode => applyUiMode(mode), mode);
+  assert.equal(await page.locator('#decision [id^="add-field-observation"]').count(),0);
+  assert.equal(await page.locator('#message-state [id^="add-field-observation"]').count(),0);
+  assert.equal(await page.locator('#terrain #outcome-reopen').count(),1);
+  assert.equal(await page.locator('#add-field-observation-decision').textContent(),mode==='simple'?'Ajouter une observation':'Ajouter une observation terrain');
+  assert.equal(await page.locator('#outcome-reopen').textContent(),mode==='simple'?'Mes observations':'Retrouver les observations enregistrées récentes');
+  assert.equal(await page.locator('#terrain #history-open').count(),0);
+  assert.equal(await page.locator('#history-section #history-open').count(),1);
+  for (const view of ['decision','message','other']) for (const available of [false,true]) {
+   await page.evaluate(({view,available}) => {
+    ui.decision.hidden=view!=='decision'; ui.message.hidden=view!=='message';
+    ui.addObservationDecision.hidden=!available; ui.addObservationMessage.hidden=!available;
+   },{view,available});
+   assert.equal(await page.locator('#add-field-observation-decision').isVisible(),view==='decision' && available);
+   assert.equal(await page.locator('#add-field-observation-message').isVisible(),view==='message' && available);
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+   assert.equal(await page.locator('#terrain').evaluate(e=>e.scrollWidth<=e.clientWidth),true);
+  }
+ }
+ await page.evaluate(() => {
+  ui.decision.hidden=false; ui.addObservationDecision.hidden=false;
+  window.originalTerrainOpen=openFieldObservation;
+  window.terrainCalls=[];
+  openFieldObservation=context=>terrainCalls.push(context);
+ });
+ await page.evaluate(() => {ui.addObservationDecision.disabled=true;});
+ assert.equal(await page.locator('#add-field-observation-decision').isDisabled(),true);
+ assert.deepEqual(await page.evaluate(()=>terrainCalls),[]);
+ await page.evaluate(() => {ui.addObservationDecision.disabled=false;});
+ await page.locator('#add-field-observation-decision').click();
+ await page.evaluate(() => {ui.decision.hidden=true;ui.message.hidden=false;ui.addObservationMessage.hidden=false;});
+ await page.locator('#add-field-observation-message').click();
+ assert.deepEqual(await page.evaluate(()=>terrainCalls),['decision','decision']);
+ // The recent-observation listener is bound directly; its unchanged binding is checked in pytest.
+ await page.evaluate(() => {ui.message.hidden=true;openFieldObservation=originalTerrainOpen;document.querySelector('#field-observation-dialog').showModal();});
+
  // Exercise the real consultation and real toggles, including replacement of old messages.
  await page.evaluate(async () => {
   window.savedNetworkRequest=fieldObservationNetworkRequest;

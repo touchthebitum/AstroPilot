@@ -1399,3 +1399,22 @@ if (!ui.addObservationMessage.hidden) throw new Error("error button visible");
     ]
     completed = subprocess.run(command, capture_output=True, text=True, check=False)
     assert completed.returncode == 0, completed.stderr
+
+
+def test_terrain_groups_existing_controls_outside_decision():
+    page = make_client().get("/").text
+    decision = page.split('<article id="decision"', 1)[1].split('</article>', 1)[0]
+    terrain = page.split('<section id="terrain"', 1)[1].split('</section>', 1)[0]
+    history = page.split('<section id="history-section"', 1)[1].split('</section>', 1)[0]
+    assert "add-field-observation" not in decision
+    assert 'aria-labelledby="terrain-title"' in terrain
+    assert '>Terrain</h2>' in terrain
+    for control in ("add-field-observation-message", "add-field-observation-decision", "outcome-reopen"):
+        assert f'id="{control}"' in terrain
+        assert page.count(f'id="{control}"') == 1
+    assert 'id="history-open"' not in terrain
+    assert 'id="history-open"' in history
+    script = make_client().get("/ui/app.js").text
+    for control in ("Message", "Decision"):
+        assert f'ui.addObservation{control}.addEventListener("click", () => openFieldObservation("decision"));' in script
+    assert 'document.querySelector("#outcome-reopen").addEventListener("click", reopenRecentFieldObservations);' in script

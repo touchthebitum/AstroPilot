@@ -277,6 +277,7 @@
         </div>
       </section>
 
+      <h2 class="tonight-section-title" id="tonight-section-title">Décision de ce soir</h2>
       <section id="message-state" class="state-panel message-panel" hidden aria-live="polite">
         <span class="message-icon" id="message-icon" aria-hidden="true">!</span>
         <div>
@@ -285,7 +286,6 @@
           <p id="message-body"></p>
         </div>
         <div class="message-actions">
-          <button class="secondary-button" id="add-field-observation-message" type="button" hidden>Ajouter une observation terrain</button>
           <button class="secondary-button" id="message-retry" type="button">Réessayer</button>
         </div>
       </section>
@@ -328,7 +328,6 @@
             <p id="acceptance-status" class="acceptance-status" role="status" hidden></p>
           </div>
           <div class="decision-actions">
-            <button class="secondary-button" id="add-field-observation-decision" type="button" hidden>Ajouter une observation terrain</button>
             <button class="mission-button" id="open-mission" type="button">
               Photographier cette cible
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
@@ -438,6 +437,15 @@
 
       </article>
 
+      <section id="terrain" class="compact-actions-section" aria-labelledby="terrain-title">
+        <h2 id="terrain-title">Terrain</h2>
+        <div class="terrain-actions">
+          <button class="secondary-button" id="add-field-observation-message" type="button" hidden>Ajouter une observation terrain</button>
+          <button class="secondary-button" id="add-field-observation-decision" type="button" hidden>Ajouter une observation terrain</button>
+          <button class="secondary-button" id="outcome-reopen" type="button">Mes observations</button>
+        </div>
+      </section>
+
       <dialog class="mission-dialog" id="mission-dialog" aria-labelledby="mission-title">
         <div class="mission-surface">
           <header class="mission-header">
@@ -527,7 +535,6 @@
         </div>
       </dialog>
 
-      <button class="secondary-button" id="outcome-reopen" type="button">Mes observations</button>
       <dialog class="observation-dialog" id="field-observation-dialog" aria-labelledby="observation-title">
         <div class="observation-surface observation-panel">
           <header class="observation-heading">
@@ -655,7 +662,10 @@
             </section>
         </div>
       </dialog>
-      <button class="secondary-button" id="history-open" type="button">Mon historique</button>
+      <section id="history-section" class="compact-actions-section" aria-labelledby="history-section-title">
+        <h2 id="history-section-title">Historique</h2>
+        <button class="secondary-button" id="history-open" type="button">Mon historique</button>
+      </section>
       <dialog id="history-dialog" aria-labelledby="history-title">
         <h2 id="history-title">Mon historique</h2>
         <p id="history-description">Comparez les prévisions aux conditions observées. Les statistiques ne concluent pas à la qualité globale des prévisions.</p>
