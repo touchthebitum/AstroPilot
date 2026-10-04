@@ -79,3 +79,32 @@ after history reload, summary access and repeated storage events.
 
 Complete final suite: 4803 passed, 44 existing warnings, with Node available and
 local loopback listener access. JavaScript syntax and git diff checks passed.
+
+## Outcome warning and mobile follow-up (4 October 2026)
+
+Outcome consultation now computes its applicable warnings before calling
+`renderOutcomeEvaluation(evaluation, warnings)`. The renderer builds a complete
+message (warnings, status, variable results and reasons) before deriving and
+storing both Simple/Pro wording variants. Toggles only select the complete variant;
+they never append warnings. Each new consultation clears the old variants and
+recomputes warnings. The existing creation guards are unchanged.
+
+Other Outcome messages (loading, missing evaluation, readback uncertainty,
+protocol errors, superseded errors, unavailable comparison, selection and
+canonical lineage diagnostics) follow paths that clear the old variants first.
+They remain visible in both modes. Exceptional recovery wording remains deferred.
+
+The clickable `#history-filter-summary` uses `min-width: 0` and
+`overflow-wrap: anywhere`: normal words retain ordinary wrapping, while
+unbroken provider tokens can wrap and leave the full scope and Modifier readable.
+
+Validation: 853 targeted tests passed, with enhanced Node Outcome regressions for
+unknown supersession and replaced observations after both wording switches,
+disabled creation, a subsequent warning-free evaluation, variable reasons,
+unavailable comparison, invalid projection, superseded error and missing result.
+Chrome smoke passed with actual consultation and mode toggles at 390/1280 px;
+200-character unbroken provider summaries with multiple filters have no dialog
+or summary horizontal overflow, and the summary still opens the filter controls.
+
+Full suite: 4803 passed, 44 existing warnings. JavaScript syntax and
+`git diff --check` passed.

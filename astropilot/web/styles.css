@@ -541,3 +541,9 @@ html[data-ui-mode="simple"] [data-pro-only] { display: none !important; }
 .header-actions { flex-wrap: wrap; }
 #outcome-trace { white-space: pre-wrap; overflow-wrap: anywhere; }
 #outcome-result details { white-space: normal; }
+
+/* Keep the full active-filter scope and Modifier accessible with long providers. */
+#history-filter-summary {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

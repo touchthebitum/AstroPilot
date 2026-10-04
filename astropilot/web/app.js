@@ -2547,14 +2547,15 @@ const OUTCOME_REASON_TEXT = {
   forecast_outside_temporal_tolerance: "Prévision trop éloignée de l’heure observée.",
 };
 
-function renderOutcomeEvaluation(evaluation) {
+function renderOutcomeEvaluation(evaluation, warnings = []) {
   const labels = {temperature_c: "Température", relative_humidity_percent: "Humidité relative",
     wind_speed_kmh: "Vent", cloud_cover_percent: "Nuages"};
   const statuses = {comparable: "Comparable", partial: "Partiellement comparable", not_comparable: "Non comparable"};
   const cloud = {clear: "Ciel clair", few: "Peu de nuages", partly_cloudy: "Partiellement nuageux",
     mostly_cloudy: "Très nuageux", overcast: "Couvert", unknown: "Inconnu"};
   const knownStatus = Object.hasOwn(statuses, evaluation.status);
-  const lines = [knownStatus ? statuses[evaluation.status] : "Statut non reconnu"];
+  // Build both wording variants from the complete message, including business warnings.
+  const lines = [...warnings, knownStatus ? statuses[evaluation.status] : "Statut non reconnu"];
   const technicalLines = [`Observation enregistrée : ${evaluation.observation_id}`];
   const reasonText = reason => Object.hasOwn(OUTCOME_REASON_TEXT, reason.code) ? OUTCOME_REASON_TEXT[reason.code] : "Raison non reconnue.";
   for (const item of knownStatus ? evaluation.results : []) {
@@ -2703,9 +2704,11 @@ async function consultOutcomeEvaluation(createIfMissing = false) {
     }
     if (!current()) return;
     if (result.kind === "found") {
-      renderOutcomeEvaluation(result.evaluation);
-      if (state.outcomeLineageStatus !== "ready") output.textContent = "Supersession inconnue : création bloquée.\n" + output.textContent;
-      else if (!outcomeCanCreate(observationId)) output.textContent = "Historique / remplacée (ou chaîne incohérente).\n" + output.textContent;
+      const warnings = state.outcomeLineageStatus !== "ready"
+        ? ["Supersession inconnue : création bloquée."]
+        : !outcomeCanCreate(observationId)
+          ? ["Historique / remplacée (ou chaîne incohérente)."] : [];
+      renderOutcomeEvaluation(result.evaluation, warnings);
     } else if (state.outcomeLineageStatus !== "ready") {
       output.textContent = "Supersession inconnue : création bloquée. Rouvrez cet éditeur pour réessayer la lecture canonique.";
     } else if (!outcomeCanCreate(observationId)) {

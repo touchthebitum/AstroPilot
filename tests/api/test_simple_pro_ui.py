@@ -72,6 +72,9 @@ def test_shared_dom_and_technical_disclosures():
     assert html.index('id="history-current-site"') < html.index('<summary id="history-filter-summary"')
     assert 'id="outcome-trace"' in html
     assert 'html[data-ui-mode="simple"] [data-pro-only]' in css
+    summary_rule = css.split('#history-filter-summary {', 1)[1].split('}', 1)[0]
+    assert 'overflow-wrap: anywhere' in summary_rule
+    assert 'min-width: 0' in summary_rule
     mode = script.split('initializeUiMode();', 1)[0]
     for forbidden in ['currentDecision', 'acceptedMission', 'fetch(', 'historyParameters', '.reset(']:
         assert forbidden not in mode

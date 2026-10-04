@@ -51,6 +51,52 @@ const assert = require('node:assert/strict');
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   assert.equal(await page.locator('#field-observation-dialog').evaluate(e=>e.scrollWidth<=e.clientWidth),true);
  }
+
+ // Exercise the real consultation and real toggles, including replacement of old messages.
+ await page.evaluate(async () => {
+  window.savedNetworkRequest=fieldObservationNetworkRequest;
+  state.outcomeContext={decision_id:'d',execution_id:null};
+  state.outcomeObservationId='obs';
+  state.visibleObservationsForContext=[{observation_id:'obs',decision_id:'d'}];
+  fieldObservationNetworkRequest=async (_url,_options,consume)=>consume({
+   ok:true,json:async()=>({evaluation_id:'e',observation_id:'obs',decision_id:'d',execution_id:null,
+    version:'outcome_evaluation.v1',comparison_id:'c',computed_at_utc:'2026-10-04T20:00:00Z',
+    status:'partial',results:[],reasons:[{code:'forecast_variable_unavailable',variable:null}],
+    assessment:null,evidence_reference:null})
+  });
+ });
+ for (const width of [390,1280]) {
+  await page.setViewportSize({width,height:900});
+  for (const kind of ['unknown','superseded','clean','error']) {
+   await page.evaluate(async kind=>{
+    applyUiMode('simple');
+    state.outcomeLineageStatus=kind==='unknown'?'pending':'ready';
+    state.allObservationsForDecision=[{observation_id:'obs',decision_id:'d'},
+     ...(kind==='superseded'?[{observation_id:'new',decision_id:'d',supersedes_observation_id:'obs'}]:[])];
+    if(kind==='error') fieldObservationNetworkRequest=async()=>{throw Error('unavailable');};
+    await consultOutcomeEvaluation(false);
+    renderSavedFieldObservations();
+   },kind);
+   const before=await page.locator('#outcome-result').innerText();
+   if(kind==='unknown') assert.match(before,/Supersession inconnue : création bloquée\.\nPartiellement comparable/);
+   if(kind==='superseded') assert.match(before,/Historique \/ remplacée.*\nPartiellement comparable/);
+   if(kind==='clean') {assert.match(before,/^Partiellement comparable/);assert.doesNotMatch(before,/Supersession inconnue|Historique \/ remplacée/);}
+   if(kind==='error') assert.match(before,/Comparaison indisponible/);
+   for(const mode of ['pro','simple']) {
+    await page.evaluate(mode=>applyUiMode(mode),mode);
+    assert.equal(await page.locator('#outcome-result').innerText(),before);
+    if(['unknown','superseded'].includes(kind)) assert.equal(await page.locator('#outcome-compare').isDisabled(),true);
+   }
+   // Reinstall the successful fixture for the next width.
+   if(kind==='error') await page.evaluate(()=>fieldObservationNetworkRequest=async (_u,_o,consume)=>consume({
+    ok:true,json:async()=>({evaluation_id:'e',observation_id:'obs',decision_id:'d',execution_id:null,
+     version:'outcome_evaluation.v1',comparison_id:'c',computed_at_utc:'2026-10-04T20:00:00Z',
+     status:'partial',results:[],reasons:[{code:'forecast_variable_unavailable',variable:null}],assessment:null,evidence_reference:null})
+   }));
+  }
+ }
+ await page.evaluate(()=>fieldObservationNetworkRequest=window.savedNetworkRequest);
+
  await page.evaluate(()=>{ document.querySelector('#field-observation-dialog').close(); applyUiMode('simple'); });
  await page.selectOption('#ui-mode','pro');
  await page.reload();
@@ -104,13 +150,15 @@ const assert = require('node:assert/strict');
  for (const mode of ['simple','pro']) for (const width of [390,1280]) {
   await page.evaluate(() => {
    const form=document.querySelector('#history-filters');
-   form.elements.provider.value='retained';form.elements.mode.value='execution';
+   form.elements.provider.value='x'.repeat(200);form.elements.mode.value='execution';
    form.elements.status.value='partial';form.elements.include_superseded.checked=true;
   });
   await page.evaluate(mode=>applyUiMode(mode),mode);
   await page.setViewportSize({width,height:900});
-  if (mode==='simple') assert.match(await page.locator('#history-filter-summary').innerText(),/source : retained · exécution · couverture partielle · observations remplacées incluses/);
+  if (mode==='simple') assert.match(await page.locator('#history-filter-summary').innerText(),/source : x{200} · exécution · couverture partielle · observations remplacées incluses — Modifier/);
   assert.equal(await page.locator('#history-dialog').evaluate(e=>e.scrollWidth<=e.clientWidth),true);
+  assert.equal(await page.locator('#history-filter-summary').evaluate(e=>e.scrollWidth<=e.clientWidth),true);
+  if(mode==='simple') {await page.locator('#history-filters details').evaluate(e=>e.open=false);await page.locator('#history-filter-summary').click();assert.equal(await page.locator('#history-filters details').evaluate(e=>e.open),true);}
  }
  assert.deepEqual(errors,[]);
  console.log('Browser checks passed: persistence, multi-tab, draft/guards/filter retention, disclosures, 390/1280px.');

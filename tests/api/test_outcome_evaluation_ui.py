@@ -105,6 +105,62 @@ const missing = () => response(404,{detail:{code:'outcome_evaluation_not_found'}
   await consultOutcomeEvaluation(true);
   assert.equal(posts,1); // found canonical result prevents another POST
 
+
+  // Canonical consultation builds both variants with warnings before a mode toggle.
+  element('#outcome-result').dataset = {};
+  document.documentElement = {dataset:{uiMode:'simple'}};
+  const toggle = mode => {
+    document.documentElement.dataset.uiMode=mode;
+    const output=element('#outcome-result');
+    if (output.dataset.simpleText !== undefined)
+      output.textContent=output.dataset[mode==='pro'?'proText':'simpleText'];
+  };
+  for (const lineage of ['pending','ready']) {
+    state.outcomeLineageStatus=lineage;
+    state.allObservationsForDecision = lineage==='ready'
+      ? [{observation_id:'obs-1',decision_id:'d'},
+         {observation_id:'replacement',decision_id:'d',supersedes_observation_id:'obs-1'}] : [];
+    await consultOutcomeEvaluation(false);
+    const warning=lineage==='pending' ? 'Supersession inconnue : création bloquée.'
+      : 'Historique / remplacée (ou chaîne incohérente).';
+    assert.equal(outcomeCanCreate('obs-1'),false);
+    renderSavedFieldObservations();
+    assert.equal(element('#outcome-compare').disabled,true);
+    for (const mode of ['pro','simple']) {
+      toggle(mode);
+      assert.ok(element('#outcome-result').textContent.startsWith(warning+'\nPartiellement comparable'));
+      assert.match(element('#outcome-result').textContent,/Prévision absente pour cette variable/);
+    }
+  }
+  state.outcomeLineageStatus='ready';
+  state.allObservationsForDecision=[{observation_id:'obs-1',decision_id:'d'}];
+  await consultOutcomeEvaluation(false);
+  for (const mode of ['pro','simple']) {
+    toggle(mode);
+    assert.ok(element('#outcome-result').textContent.startsWith('Partiellement comparable'));
+    assert.doesNotMatch(element('#outcome-result').textContent,/Supersession inconnue|Historique \/ remplacée/);
+  }
+  fetch=async()=>response(503,{detail:{code:'outcome_evaluation_unavailable'}});
+  await consultOutcomeEvaluation(false);
+  toggle('pro'); toggle('simple');
+  assert.match(element('#outcome-result').textContent,/Comparaison indisponible/);
+  assert.equal(element('#outcome-result').dataset.simpleText,undefined);
+
+  for (const [reply,pattern] of [
+    [response(200,{invalid:true}),/Erreur de protocole/],
+    [response(409,{detail:{code:'field_observation_superseded'}}),/Observation remplacée/],
+    [missing(),/Aucune comparaison enregistrée/],
+  ]) {
+    fetch=async()=>reply;
+    await consultOutcomeEvaluation(false);
+    toggle('pro'); toggle('simple');
+    assert.match(element('#outcome-result').textContent,pattern);
+    assert.equal(element('#outcome-result').dataset.simpleText,undefined);
+  }
+  // Restore the minimal DOM used by the remainder of this harness.
+  delete element('#outcome-result').dataset;
+  delete document.documentElement;
+
   stored=null;
   fetch=async(_url,options)=> {
     if(options.method==='POST') { posts++; throw new TypeError('timeout'); } return missing();
