@@ -215,6 +215,25 @@ class FileFieldLabStore:
         with self._directory(create=True) as fd:
             return self._publish(fd, self._name(artifact.idempotency_key), document)
 
+    def confirm_durable(self, artifact):
+        """Revalidate and fsync the existing inode and pinned parent this attempt."""
+        if type(artifact) is not FieldLabArtifact:
+            raise ValueError("field_lab_artifact_required")
+        with self._directory() as fd:
+            handle = os.open(self._name(artifact.idempotency_key),
+                             os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+            with os.fdopen(handle, "rb") as stream:
+                if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                    raise ValueError("field_lab_regular_file_required")
+                document = stream.read(_MAX_BYTES + 1)
+                if len(document) > _MAX_BYTES:
+                    raise ValueError("field_lab_document_too_large")
+                existing = FieldLabArtifact.decode(document.decode("utf-8"))
+                if existing.document() != artifact.document():
+                    raise ValueError("field_lab_immutable_conflict")
+                os.fsync(stream.fileno())
+                os.fsync(fd)
+
     def load(self, *, idempotency_key):
         name = self._name(idempotency_key)
         try:
@@ -226,12 +245,19 @@ class FileFieldLabStore:
         except FileNotFoundError:
             return None
 
-    def iter_artifacts(self):
+    def iter_artifacts(self, *, max_names=100000):
         """Read-only enumeration through the same pinned, fail-closed boundary."""
+        if type(max_names) is not int or max_names < 1:
+            raise ValueError("invalid_field_lab_name_limit")
         try:
             with self._directory() as fd:
+                names = []
                 with os.scandir(fd) as entries:
-                    names = sorted(entry.name for entry in entries)
+                    for entry in entries:
+                        if len(names) >= max_names:
+                            raise ValueError("field_lab_name_limit_exceeded")
+                        names.append(entry.name)
+                names.sort()
                 for name in names:
                     if name.startswith(".") and name.endswith(".tmp"):
                         continue

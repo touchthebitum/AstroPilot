@@ -189,6 +189,8 @@ class ReferenceObservation:
                 or self.quality not in ('unverified', 'missing', 'invalid_qc', 'invalid_value')
                 or (self.value is not None and not numeric(self.value, self.variable))):
             raise ValueError('invalid_reference_observation')
+        if self.quality == 'unverified' and self.value is None:
+            raise ValueError('invalid_reference_unverified_missing_value')
         if self.quality != 'unverified' and self.value is not None:
             raise ValueError('invalid_reference_missing_value')
 
@@ -482,6 +484,10 @@ class ReferenceLab:
         self.save('reference_seal', 'seal-' + run.run_id,
                   {'run_id': run.run_id, 'snapshot_digest': run.snapshot_digest},
                   sealed.isoformat(), run.station_id)
+        # Presence after an interrupted publication is not durability evidence.
+        # Reopen, validate and fsync both existing artifacts in this attempt.
+        for key in (run.run_id, 'seal-' + run.run_id):
+            self.store.confirm_durable(self.store.load(idempotency_key=key))
         completed = utc(clock())
         self.save('reference_seal_completion', 'durable-' + run.run_id,
                   {'run_id': run.run_id, 'snapshot_digest': run.snapshot_digest,
@@ -507,6 +513,19 @@ class ReferenceLab:
             raise ValueError('reference_seal_identity_mismatch')
         return completion.created_at_utc
 
+    def save_catalogue(self, payload, retrieved_at, *, event_id=None):
+        stamp = canonical_utc(retrieved_at)
+        catalogue_digest = digest(payload)
+        event = {'catalogue_digest': catalogue_digest, 'retrieved_at_utc': stamp}
+        key = event_id or 'catalog-' + digest(event)
+        # Reject a conflicting event before publishing new content.
+        existing = self.store.load(idempotency_key=key)
+        if existing is not None and (existing.artifact_type != 'catalog_activation_event'
+                or json.loads(existing.payload_json) != event):
+            raise ValueError('field_lab_immutable_conflict')
+        self.save('reference_catalogue', catalogue_digest, payload, stamp)
+        return self.save('catalog_activation_event', key, event, stamp)
+
     def save_observation(self, observation):
         self.save('reference_observation', observation.measurement_digest,
                   asdict(observation), observation.retrieved_at_utc, observation.station_id)
@@ -515,7 +534,7 @@ class ReferenceLab:
 
     def facts(self):
         artifacts = []
-        for artifact in self.store.iter_artifacts():
+        for artifact in self.store.iter_artifacts(max_names=self.max_artifacts):
             if len(artifacts) >= self.max_artifacts:
                 raise ValueError("reference_artifact_limit_exceeded")
             artifacts.append(artifact)

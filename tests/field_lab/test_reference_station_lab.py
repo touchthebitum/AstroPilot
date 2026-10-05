@@ -372,7 +372,7 @@ def test_strict_comparison_forgery(change):
 def test_artifact_limit(lab):
     lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
     lab.max_artifacts = 1
-    with pytest.raises(ValueError, match='artifact_limit'):
+    with pytest.raises(ValueError, match='(artifact|name)_limit'):
         lab.facts()
 
 
@@ -388,9 +388,10 @@ def test_sync_identical_noop(lab, monkeypatch):
     import astropilot.reference_station_cli as cli
     monkeypatch.setattr(cli, 'ReferenceLab', lambda:lab)
     monkeypatch.setattr(cli, 'MeteoSwissReferenceClient', lambda:SimpleNamespace(stations=lambda:(STATION,)))
+    monkeypatch.setattr(cli, 'now_utc', lambda:T)
     assert main(['stations', 'sync', '--stations', 'NEU']) == 0
     assert main(['stations', 'sync', '--stations', 'NEU']) == 0
-    assert len(tuple(lab.store.iter_artifacts())) == 1
+    assert len(tuple(lab.store.iter_artifacts())) == 2
 
 
 def test_unsorted_snapshot_points_rejected():
@@ -403,3 +404,144 @@ def test_unsorted_snapshot_points_rejected():
     fields['run_id'] = digest({k:v for k,v in fields.items() if k != 'run_id'})
     with pytest.raises(ValueError, match='forecast_times'):
         ReferenceForecastRun(**fields)
+
+
+@pytest.mark.parametrize('late', [False, True])
+def test_seal_fsync_failure_retry_current_completion(lab, monkeypatch, late):
+    import os
+    import stat
+    import astropilot.field_lab_store as storage
+    r = run()
+    original = os.fsync
+    seal_name = lab.store._name('seal-' + r.run_id)
+    def fail_visible_seal_dir(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode) and seal_name in os.listdir(fd):
+            raise OSError('seal directory fsync failed')
+        original(fd)
+    monkeypatch.setattr(storage.os, 'fsync', fail_visible_seal_dir)
+    with pytest.raises(OSError, match='seal directory'):
+        lab.save_run(r, clock=lambda:T-timedelta(minutes=58))
+    assert lab.store.load(idempotency_key='seal-' + r.run_id) is not None
+    assert lab.store.load(idempotency_key='durable-' + r.run_id) is None
+    monkeypatch.setattr(storage.os, 'fsync', original)
+    current = T-timedelta(minutes=57)
+    confirm = lab.store.confirm_durable
+    seen = []
+    def reconfirm(artifact):
+        nonlocal current
+        confirm(artifact)
+        seen.append(artifact.artifact_type)
+        if artifact.artifact_type == 'reference_seal':
+            current = T+timedelta(seconds=1) if late else T-timedelta(minutes=56)
+    monkeypatch.setattr(lab.store, 'confirm_durable', reconfirm)
+    if late:
+        with pytest.raises(ValueError, match='deadline_missed'):
+            lab.save_run(r, clock=lambda:current)
+    else:
+        lab.save_run(r, clock=lambda:current)
+    assert seen == ['reference_forecast', 'reference_seal']
+    assert lab.durable_seal(r) == canonical_utc(current)
+    assert len(lab.facts()[0]) == (0 if late else 1)
+    if late:
+        with pytest.raises(ValueError):
+            lab.save_run(r, clock=lambda:T+timedelta(minutes=1))
+        assert lab.durable_seal(r) == canonical_utc(current)
+
+
+@pytest.mark.parametrize('stage', ['before_file', 'before_dir', 'after_dir', 'before_proof'])
+def test_reconfirmation_crash_no_proof(lab, monkeypatch, stage):
+    import os
+    import stat
+    r = run()
+    lab.save('reference_forecast', r.run_id, asdict(r), r.created_at_utc, r.station_id)
+    lab.save('reference_seal', 'seal-' + r.run_id,
+             {'run_id':r.run_id, 'snapshot_digest':r.snapshot_digest},
+             T-timedelta(minutes=58), r.station_id)
+    original = os.fsync
+    confirming = False
+    confirm = lab.store.confirm_durable
+    def fault(fd):
+        if confirming and ((stage == 'before_file' and stat.S_ISREG(os.fstat(fd).st_mode))
+                           or (stage == 'before_dir' and stat.S_ISDIR(os.fstat(fd).st_mode))):
+            raise OSError('crash')
+        original(fd)
+    def reconfirm(artifact):
+        nonlocal confirming
+        confirming = True
+        try:
+            confirm(artifact)
+            if stage == 'after_dir':
+                raise OSError('crash')
+        finally:
+            confirming = False
+    monkeypatch.setattr(os, 'fsync', fault)
+    monkeypatch.setattr(lab.store, 'confirm_durable', reconfirm)
+    save = lab.save
+    def publish(kind, *args, **kwargs):
+        if kind == 'reference_seal_completion' and stage == 'before_proof':
+            raise OSError('crash')
+        return save(kind, *args, **kwargs)
+    monkeypatch.setattr(lab, 'save', publish)
+    with pytest.raises(OSError, match='crash'):
+        lab.save_run(r, clock=lambda:T-timedelta(minutes=57))
+    assert lab.store.load(idempotency_key='durable-' + r.run_id) is None
+    assert lab.facts()[0] == ()
+
+
+@pytest.mark.parametrize('order', [(0, 1, 2), (2, 0, 1)])
+def test_catalog_activation_return_and_ingestion_order(lab, order):
+    from astropilot.reference_station_cli import saved_catalogue
+    a = {'stations':[asdict(STATION)], 'active_station_ids':['NEU']}
+    b = {'stations':[asdict(replace(STATION, altitude_m=500))], 'active_station_ids':['NEU']}
+    events = [(a, T), (b, T+timedelta(hours=1)), (a, T+timedelta(hours=2))]
+    for i in order:
+        assert lab.save_catalogue(*events[i])
+    assert not lab.save_catalogue(*events[2])
+    assert saved_catalogue(lab)[0][0].altitude_m == 485
+    artifacts = tuple(lab.store.iter_artifacts())
+    assert sum(a.artifact_type == 'reference_catalogue' for a in artifacts) == 2
+    assert sum(a.artifact_type == 'catalog_activation_event' for a in artifacts) == 3
+    assert lab.facts() == ((), ())
+
+
+def test_catalog_same_content_new_time_tie_and_conflict(lab):
+    from astropilot.reference_station_cli import saved_catalogue
+    a = {'stations':[asdict(STATION)], 'active_station_ids':['NEU']}
+    b = {'stations':[asdict(replace(STATION, altitude_m=500))], 'active_station_ids':['NEU']}
+    assert lab.save_catalogue(a, T, event_id='event-one')
+    with pytest.raises(ValueError, match='immutable_conflict'):
+        lab.save_catalogue(b, T, event_id='event-one')
+    lab.save_catalogue(a, T+timedelta(hours=1))
+    assert len(tuple(lab.store.iter_artifacts())) == 3
+    lab.save_catalogue(b, T+timedelta(hours=1))
+    expected = a if digest(a) > digest(b) else b
+    assert saved_catalogue(lab)[0][0].altitude_m == expected['stations'][0]['altitude_m']
+
+
+@pytest.mark.parametrize('limit, succeeds', [(2, False), (3, True), (4, True)])
+def test_name_limit_before_payload_reads(lab, monkeypatch, limit, succeeds):
+    for i in range(3):
+        lab.save('test', str(i), {'i':i}, T)
+    if succeeds:
+        assert len(tuple(lab.store.iter_artifacts(max_names=limit))) == 3
+    else:
+        read = lab.store._read
+        def no_payload(fd, name):
+            if name.endswith('.json'):
+                pytest.fail('payload read before enumeration limit')
+            return read(fd, name)
+        monkeypatch.setattr(lab.store, '_read', no_payload)
+        with pytest.raises(ValueError, match='field_lab_name_limit_exceeded'):
+            tuple(lab.store.iter_artifacts(max_names=limit))
+
+
+def test_unverified_missing_rejected_at_ingestion(lab):
+    obs = observations()[0]
+    with pytest.raises(ValueError, match='unverified_missing'):
+        replace(obs, value=None)
+    missing = replace(obs, value=None, quality='missing')
+    lab.save_observation(missing)
+    assert lab.facts()[1] == (missing,)
+    comparison = compare_point(run(), point(run()), 'temperature_2m', [missing], 10)
+    assert comparison.status == 'non_comparable'
+    assert comparison.observed_value is None

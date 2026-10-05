@@ -315,9 +315,13 @@ stations and an isolated temporary root; no expired fake forecast is published.
   189 parsed variable values (63 ten-minute rows, three variables). Latest official
   timestamp: 10:20 UTC. Read-only parser inspection did not persist these past values.
 - Production forecast capture stored two genuinely prospective 24-point snapshots
-  plus durable completion seals in a fresh temporary Field Lab (five artifacts
+  plus the original seals in a fresh temporary Field Lab (five artifacts
   including catalogue). Every artifact is calibration-ineligible. No user root
   was created. Dry-run cycle made zero network calls and zero writes.
+- This smoke predates completion proofs and catalogue activation events; it did
+  not test either mechanism. No new network smoke has been performed since. A new
+  controlled smoke is required after validation of the corrected HEAD and before
+  real automated collection.
 - The real prospective report is empty until targets mature; no real MAE/bias is
   claimed from the smoke. End-to-end comparison/statistics are verified offline.
 - No push, PR or scheduler was created. Physical sharding, cross-year observation
@@ -370,3 +374,40 @@ storage access, equally in dry-run and execution. `facts()` fails closed above
 up to that many artifacts. This is a bounded materialization, not an indexed store.
 Temperature and RH alone yield numerical errors. Wind aggregation and official QC
 remain unverified; no calibration, scoring, ranking or provider reliability changes.
+
+
+### Interrupted seal publication and catalogue activation
+
+Before sampling any new completion timestamp, the current attempt explicitly
+reconfirms both snapshot and seal, including existing artifacts: descriptor-relative
+open with no symlink following, regular-file/size/envelope/content/digest checks,
+then fsync of that same file descriptor and its pinned artifacts directory. Any
+validation or fsync failure aborts without sampling or publishing a proof. A crash
+before proof publication leaves no candidate; retry reconfirms afresh. Identical
+seals remain immutable. An already complete compatible run remains an immutable
+idempotent replay; an incompatible or late existing proof is never replaced or
+backdated. A retry whose reconfirmation crosses the target records a late proof
+and remains inadmissible permanently.
+
+Catalogue metadata/selection content is deduplicated by payload digest. Each sync
+also records a distinct `catalog_activation_event`, binding that digest and canonical
+sync timestamp. Same timestamp and content replay is a no-op; same content at a
+new timestamp creates an activation only. Active selection uses the greatest event
+timestamp, independent of ingestion order; equal timestamps select the greatest
+content digest deterministically (this does not imply an official revision order).
+Conflicting content under an explicit event ID fails closed. Activations do not
+enter observations, comparison counts or statistics. Legacy catalogues without
+activation events require an explicit sync; there is no inferred activation.
+
+`iter_artifacts(max_names=100000)` bounds all directory entries, including temporary
+names, before sorting or reading artifact payloads; exceeding it raises
+`field_lab_name_limit_exceeded` without a partial result. `facts()` and catalogue
+selection pass `ReferenceLab.max_artifacts` as this bound. Payload materialization
+remains linear and can retain up to the configured count of 16 MiB documents;
+this is not an indexed or streaming statistics store.
+
+An `unverified` observation requires a finite real value at model construction.
+Missing parser values are explicitly `missing` with null value from ingestion
+through matching; missing is never zero. Official QC remains unverified for real
+values until an official QC contract is available. Temperature/RH mapping, excluded
+wind errors, prospective/historical separation and isolation #313 are unchanged.

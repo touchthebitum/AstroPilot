@@ -39,11 +39,25 @@ def parser():
 
 
 def saved_catalogue(lab):
-    catalogues = [a for a in lab.store.iter_artifacts() if a.artifact_type == 'reference_catalogue']
-    if not catalogues:
+    activations = [a for a in lab.store.iter_artifacts(max_names=lab.max_artifacts)
+                   if a.artifact_type == 'catalog_activation_event']
+    if not activations:
         raise ValueError('reference_catalogue_missing_run_stations_sync')
-    latest = max(catalogues, key=lambda a: (a.created_at_utc, a.idempotency_key))
-    payload = json.loads(latest.payload_json)
+    events = [(a, json.loads(a.payload_json)) for a in activations]
+    from astropilot.reference_station_lab import canonical_utc
+    for artifact, value in events:
+        if (set(value) != {'catalogue_digest', 'retrieved_at_utc'}
+                or canonical_utc(value['retrieved_at_utc']) != value['retrieved_at_utc']
+                or artifact.created_at_utc != value['retrieved_at_utc']):
+            raise ValueError('reference_catalog_activation_invalid')
+    # Equal sync times have no official order: choose content digest deterministically.
+    latest, event = max(events, key=lambda item: (item[1]['retrieved_at_utc'],
+                                                 item[1]['catalogue_digest']))
+    catalogue = lab.store.load(idempotency_key=event['catalogue_digest'])
+    if (catalogue is None or catalogue.artifact_type != 'reference_catalogue'
+            or catalogue.digest != event['catalogue_digest']):
+        raise ValueError('reference_catalog_activation_mismatch')
+    payload = json.loads(catalogue.payload_json)
     return tuple(ReferenceStation(**s) for s in payload['stations']), payload['active_station_ids']
 
 
@@ -77,7 +91,7 @@ def execute(args):
                        'stations': [asdict(s) for s in catalogue],
                        'active_station_ids': [s.station_id for s in active],
                        'selection_version': 'smn-prospective-v1'}
-            lab.save('reference_catalogue', digest(payload), payload, retrieved)
+            lab.save_catalogue(payload, retrieved)
             return {'catalogue_size': len(catalogue), 'active': [asdict(s) for s in active]}
         catalogue, active = saved_catalogue(lab)
         return [asdict(s) for s in selection(args, catalogue, active)]
