@@ -28,6 +28,7 @@ const decision={status:'available',decision_id:'d',catalog_key:'M31',target:'Gal
  await page.goto('https://nightmerit.test/');
  await page.waitForFunction(()=>appliedUiMode!==null);
  const positions=[];
+ const savedMissionBounds=[];
  for(const mode of ['simple','pro'])for(const width of [390,1280]){
   await page.setViewportSize({width,height:800});
   await page.evaluate(({mode,decision})=>{
@@ -205,6 +206,37 @@ const decision={status:'available',decision_id:'d',catalog_key:'M31',target:'Gal
   await page.evaluate(()=>renderMission(state.acceptedMission.mission));
   assert.match(await page.locator('#mission-summary').textContent(),new RegExp(expectedZone));
  }
+ // Saved labels: constrain the native select and wrap the full target above it.
+ for(const mode of ['simple','pro'])for(const width of [390,1280])for(const target of ['M31','Andromède','Cible descriptive '.repeat(3).trim(),'Cible'.repeat(35)]) {
+  await page.setViewportSize({width,height:800});
+  mission.target=target;
+  await page.evaluate(async ({mission,mode})=>{
+   applyUiMode(mode);state.acceptedMission={mission_id:'saved',mission,windowTimezone:'Europe/Zurich'};
+   await restoreSavedMission();setView('availability');
+  },{mission,mode});
+  assert.match(await page.locator('#saved-mission-choice').textContent(),/20:00 · Europe\/Zurich/);
+  await page.locator('#open-saved-mission').scrollIntoViewIfNeeded();
+  const bounds=await page.evaluate(()=>{
+   const rect=id=>{const r=document.getElementById(id).getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height}};
+   return {card:rect('saved-mission-entry'),button:rect('open-saved-mission'),select:rect('saved-mission-choice'),text:rect('saved-mission-target'),viewport:{width:innerWidth,height:innerHeight},overflow:document.documentElement.scrollWidth>innerWidth};
+  });
+  for(const child of [bounds.button,bounds.select,bounds.text]) {
+   assert.ok(child.x>=bounds.card.x && child.right<=bounds.card.right,JSON.stringify({mode,width,target,bounds}));
+   assert.ok(child.y>=bounds.card.y && child.bottom<=bounds.card.bottom);
+  }
+  assert.ok(bounds.button.x>=0 && bounds.button.right<=width);
+  assert.ok(bounds.button.y>=0 && bounds.button.bottom<=800);
+  assert.equal(bounds.overflow,false);
+  assert.equal(await page.locator('#open-saved-mission').evaluate(e=>{const r=e.getBoundingClientRect();return document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===e}),true,'button must not be clipped or covered');
+  assert.ok(await page.locator('#saved-mission-target').evaluate(e=>e.scrollWidth<=e.clientWidth));
+  if(target.length===175)assert.ok(bounds.text.height>25,'extreme target must wrap');
+  await page.locator('#saved-mission-choice').focus();await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(()=>document.activeElement.id),'open-saved-mission');
+  await page.keyboard.press('Enter');await page.waitForFunction(()=>ui.mission.open);
+  assert.equal(await page.locator('#mission-title').textContent(),target);
+  await page.evaluate(()=>ui.mission.close());
+  savedMissionBounds.push({mode,width,targetLength:target.length,...bounds});
+ }
  // Exercise the real acceptance listener and retention of the evaluated zone.
  await page.route('https://nightmerit.test/v1/decision-selections',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({
   status:'accepted',decision_id:'d',catalog_key:'M31',selection_id:'s',mission_id:'m',selected_acquisition_intent_id:null,
@@ -223,6 +255,6 @@ const decision={status:'available',decision_id:'d',catalog_key:'M31',target:'Gal
   await page.evaluate(()=>ui.mission.close());
  }
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({positions,errors},null,2));
+ console.log(JSON.stringify({positions,savedMissionBounds,errors},null,2));
  await browser.close();
 })().catch(e=>{console.error(e);process.exit(1)});
