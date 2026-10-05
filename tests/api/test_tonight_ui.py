@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -1496,7 +1497,7 @@ let appliedUiMode = 'simple';
 let shown;
 function text(key,value) {document.querySelector(key).textContent=value;}
 function showMessage(title,body) {shown={title,body};}
-''' + functions + r'''
+''' + source[source.index('function hoursToIsoDuration('):source.index('function normalizeLocalDateTime(')] + functions + r'''
 for (const stage of ['no_productive_slice','continuous_window_too_short']) {
  const payload={status:'no_productive_window',actionability_refusal:{
   conclusion:'no_productive_window',status:'constraints_refusal',refusal_stage:stage,
@@ -1513,15 +1514,49 @@ for (const stage of ['no_productive_slice','continuous_window_too_short']) {
   assert.equal(document.querySelector('#message-edit-availability').hidden,true);
  }
 }
-state.availability={mode:'duration',duration:.5};
+state.availability={mode:'duration',duration:hoursToIsoDuration('0.5')};
 showTonightUnavailable({status:'no_productive_window',actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}});
 assert.equal(document.querySelector('#message-edit-availability').hidden,false);
-state.availability={mode:'duration',duration:8};
+state.availability={mode:'duration',duration:hoursToIsoDuration('8')};
 showTonightUnavailable({status:'no_productive_window',actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}});
 assert.equal(document.querySelector('#message-edit-availability').hidden,true);
+for (const input of ['1','1.5']) {
+ state.availability={mode:'duration',duration:hoursToIsoDuration(input)};
+ assert.equal(canEditRefusedAvailability({status:'no_productive_window',actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}}),false);
+}
+state.availability={mode:'duration',duration:hoursToIsoDuration('0.5')};
+for (const stage of ['no_productive_slice','unknown',null]) {
+ assert.equal(canEditRefusedAvailability({status:'no_productive_window',actionability_refusal:{status:'constraints_refusal',refusal_stage:stage,required_continuous_minutes:60}}),false);
+}
+assert.equal(canEditRefusedAvailability({status:'weather_refused',actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}}),false);
+assert.equal(hoursToIsoDuration('0.5'),'PT30M');
+assert.equal(hoursToIsoDuration('1'),'PT1H');
+assert.equal(hoursToIsoDuration('1.5'),'PT1H30M');
+assert.equal(isoAvailabilityMinutes('PT1H30M'),90);
+for (const invalid of [null,undefined,0,.5,'','PT','PT0M','PT-30M','PT0.5H','P1D','PT60M','PT30Mgarbage','PT30M\n','PT9007199254740992H']) {
+ state.availability={mode:'duration',duration:invalid};
+ assert.equal(isoAvailabilityMinutes(invalid),null);
+ assert.equal(canEditRefusedAvailability({status:'no_productive_window',actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}}),false);
+}
 state.availability=null;
 showTonightUnavailable({status:'no_recommendation'});
 assert.equal(document.querySelector('#message-edit-availability').hidden,true);
 '''
     result = subprocess.run([node, "-e", harness], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("hours,iso,minutes", [("0.5", "PT30M", 30), ("1", "PT1H", 60), ("1.5", "PT1H30M", 90), ("0.25", "PT15M", 15)])
+def test_ui_duration_iso_roundtrip(hours, iso, minutes):
+    import json
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required")
+    source = make_client().get("/ui/app.js").text
+    helpers = source[source.index("function hoursToIsoDuration("):source.index("function normalizeLocalDateTime(")]
+    helpers += source[source.index("function isoAvailabilityMinutes("):source.index("function canEditRefusedAvailability(")]
+    checks = f"const assert=require('node:assert/strict');const iso=hoursToIsoDuration({json.dumps(hours)});assert.equal(iso,{json.dumps(iso)});assert.equal(isoAvailabilityMinutes(iso),{minutes});"
+    result = subprocess.run([node, "-e", helpers + checks], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
