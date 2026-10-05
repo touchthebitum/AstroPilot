@@ -386,6 +386,8 @@ def test_hours_zero_rejected_before_store(monkeypatch, capsys):
 
 def test_sync_identical_noop(lab, monkeypatch):
     import astropilot.reference_station_cli as cli
+    from astropilot.field_lab_collection import initialize
+    initialize()
     monkeypatch.setattr(cli, 'ReferenceLab', lambda:lab)
     monkeypatch.setattr(cli, 'MeteoSwissReferenceClient', lambda:SimpleNamespace(stations=lambda:(STATION,)))
     monkeypatch.setattr(cli, 'now_utc', lambda:T)
@@ -777,3 +779,213 @@ lab.save_run(run, clock=lambda:utc(sys.argv[2]))
     assert reader.facts()[0] == (r,)
     assert reader.durable_seal(r) == stamp
     assert reader.save_run(r, clock=lambda:T+timedelta(seconds=1)) is False
+
+
+def collection_catalogue(lab):
+    lab.save_catalogue(dict(schema_version=1, source='MeteoSwiss', collection='ch.meteoschweiz.ogd-smn',
+        stations=[asdict(STATION)], active_station_ids=['NEU'], selection_version='smn-prospective-v1'),
+        T.isoformat())
+
+
+def test_bounded_cycle_noop_restart_and_user_unchanged(lab, tmp_path):
+    from astropilot.field_lab_collection import cycle, initialize
+    initialize()
+    collection_catalogue(lab)
+    lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
+    calls = []
+    client = SimpleNamespace(observations=lambda *args: calls.append(args) or observations(),
+                             stations=lambda:pytest.fail('catalogue not due'))
+    first = cycle(lab, clock=lambda:T+timedelta(hours=1), client=client,
+                  capture=lambda *a, **kw:pytest.fail('forecast not due'))
+    before = sorted((p.name, p.read_bytes()) for p in (tmp_path/'lab'/'artifacts').iterdir())
+    second = cycle(ReferenceLab(), clock=lambda:T+timedelta(hours=1, minutes=1), client=client)
+    assert second['no_op'] and second['writes'] == second['network_calls'] == 0
+    assert len(calls) == 1 and first['acquisitions_created'] > 0
+    assert before == sorted((p.name, p.read_bytes()) for p in (tmp_path/'lab'/'artifacts').iterdir())
+    assert not (tmp_path/'user').exists()
+
+
+def test_acquisition_coalescing_revision_a_b_a_and_horizon(lab):
+    lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
+    a = next(o for o in observations() if o.variable == 'temperature_2m')
+    collect = lambda observation:lab.collect(SimpleNamespace(observations=lambda *args:[observation]),
+        clock=lambda:T+timedelta(hours=2), revision_days=7, coalesce=True)
+    assert collect(a) == 1
+    assert collect(replace(a, retrieved_at_utc=canonical_utc(T+timedelta(hours=2)))) == 0
+    b = replace(a, value=a.value+1, retrieved_at_utc=canonical_utc(T+timedelta(hours=3)))
+    assert collect(b) == 1
+    assert collect(replace(a, retrieved_at_utc=canonical_utc(T+timedelta(hours=4)))) == 1
+    assert len(lab.facts()[1]) == 3
+    assert lab.collect(SimpleNamespace(observations=lambda *a:pytest.fail('outside horizon')),
+                       clock=lambda:T+timedelta(days=8), revision_days=7, coalesce=True) == 0
+
+
+def test_collection_capacity_warning_stop_preserves_facts(lab):
+    from astropilot.field_lab_collection import usage, check_capacity
+    collection_catalogue(lab)
+    lab.max_artifacts = 3
+    assert usage(lab)['count'] == 2
+    lab.max_artifacts = 2
+    assert usage(lab)['warning'] and usage(lab)['blocked']
+    before = [a.document() for a in lab.store.iter_artifacts()]
+    with pytest.raises(ValueError, match='capacity_stop'):
+        check_capacity(lab)
+    assert before == [a.document() for a in lab.store.iter_artifacts()]
+
+
+@pytest.mark.parametrize('period,days', [('24h',1), ('7d',7), ('30d',30), ('all',100)])
+def test_longitudinal_period_prospective_only(lab, period, days):
+    from astropilot.field_lab_collection import periodic_report
+    lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
+    for observation in observations():
+        lab.save_observation(observation)
+    rows = periodic_report(lab, period, clock=lambda:T+timedelta(days=days-0.5))
+    assert rows and all(r['cohort'] == 'prospective' for r in rows)
+    if period != 'all':
+        assert periodic_report(lab, period, clock=lambda:T+timedelta(days=days+1)) == []
+
+
+def test_scheduler_offline_plan_commands_and_uninstall(lab, monkeypatch):
+    import astropilot.field_lab_collection as collection
+    import plistlib
+    from astropilot.reference_station_cli import parser
+    calls = []
+    monkeypatch.setattr(collection, 'launch_agents_path', lambda:collection.field_lab_root()/'launch-agents'/('test.plist'))
+    def runner(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=1 if argv[1] == 'print' else 0)
+    collection.initialize()
+    assert collection.scheduler('install', runner=runner)['enabled'] is False
+    assert calls == []
+    value = plistlib.loads(collection.scheduler_path().read_bytes())
+    assert value['StartInterval'] == 3600 and value['RunAtLoad'] is False
+    assert 'StandardOutPath' not in value and 'StandardErrorPath' not in value
+    assert value['EnvironmentVariables']['FIELD_LAB_DATA_DIR'] == str(collection.field_lab_root())
+    monkeypatch.setattr(collection.sys, 'platform', 'darwin')
+    collection.scheduler('enable', runner=runner)
+    assert any(c[1] == 'bootstrap' for c in calls)
+    collection.scheduler('disable', runner=runner)
+    collection.scheduler('uninstall', runner=runner)
+    assert not collection.scheduler_path().exists()
+    for operation in ('install','status','enable','disable','uninstall'):
+        assert parser().parse_args(['scheduler',operation]).operation == operation
+
+
+def test_bounded_logs_and_symlink_refusal(lab, tmp_path):
+    from astropilot.field_lab_collection import initialize, BoundedLogHandler
+    import logging
+    initialize()
+    handler = BoundedLogHandler()
+    for i in range(85):
+        handler.emit(logging.LogRecord('test',20,'test',1,'x'*65536,(),None))
+    logs = list((tmp_path/'lab').glob('collection.log*'))
+    assert len(logs) == 4 and all(p.stat().st_size <= 1024*1024 for p in logs)
+    (tmp_path/'lab'/'collection.log').unlink()
+    (tmp_path/'lab'/'collection.log').symlink_to(tmp_path/'user')
+    with pytest.raises(ValueError, match='regular_file'):
+        handler.emit(logging.LogRecord('test',20,'test',1,'hello',(),None))
+    assert not (tmp_path/'user').exists()
+
+
+def test_collection_init_overlap_before_creation(tmp_path, monkeypatch):
+    from astropilot.field_lab_collection import initialize
+    monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(tmp_path/'user'))
+    monkeypatch.setenv('FIELD_LAB_DATA_DIR', str(tmp_path/'user'/'lab'))
+    with pytest.raises(ValueError, match='overlap'):
+        initialize()
+    assert not (tmp_path/'user').exists()
+
+
+def test_asset_audit_content_coalescence_and_reversion(lab):
+    from astropilot.field_lab_collection import save_asset_audit
+    payload = dict(station='NEU', family='now', asset_href='https://data.geo.admin.ch/now.csv',
+                   sha256='a'*64, official_checksum='1220'+'a'*64, retrieved_at_utc=canonical_utc(T))
+    assert save_asset_audit(lab,payload)
+    assert not save_asset_audit(lab,dict(payload,retrieved_at_utc=canonical_utc(T+timedelta(hours=1))))
+    assert save_asset_audit(lab,dict(payload,sha256='b'*64,official_checksum='1220'+'b'*64,
+                                   retrieved_at_utc=canonical_utc(T+timedelta(hours=2))))
+    assert save_asset_audit(lab,dict(payload,retrieved_at_utc=canonical_utc(T+timedelta(hours=3))))
+    assert len(list(lab.store.iter_artifacts())) == 3
+
+
+def test_write_budget_stops_partial_cycle_safely(lab):
+    lab.write_budget = 1
+    lab.save('collection_success','one',{'n':1},T.isoformat())
+    assert not lab.save('collection_success','one',{'n':1},T.isoformat())
+    with pytest.raises(ValueError,match='capacity_stop'):
+        lab.save('collection_success','two',{'n':2},T.isoformat())
+    assert len(list(lab.store.iter_artifacts())) == 1
+
+
+def test_scheduler_disable_enabled_offline(lab, monkeypatch):
+    import astropilot.field_lab_collection as collection
+    calls = []
+    monkeypatch.setattr(collection, 'launch_agents_path', lambda:collection.field_lab_root()/'launch-agents'/('test.plist'))
+    collection.initialize()
+    collection.scheduler('install', runner=lambda *a,**kw:pytest.fail('install is offline'))
+    monkeypatch.setattr(collection.sys,'platform','darwin')
+    def runner(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0)
+    collection.scheduler('disable', runner=runner)
+    assert any(argv[1]=='bootout' for argv in calls)
+    collection.scheduler('uninstall',runner=runner)
+    assert not collection.scheduler_path().exists()
+
+
+def test_initial_cycle_sync_and_capture_offline(lab, monkeypatch):
+    import astropilot.field_lab_collection as collection
+    collection.initialize()
+    monkeypatch.setattr(collection, 'select_stations', lambda catalogue, ids=None:tuple(catalogue))
+    calls = []
+    client = SimpleNamespace(stations=lambda:calls.append('catalogue') or (STATION,),
+        observations=lambda *a:pytest.fail('no window closed'))
+    result = collection.cycle(lab, clock=lambda:T-timedelta(minutes=58), client=client,
+                             capture=lambda station, hours:calls.append((station.station_id,hours)) or run())
+    assert result['forecasts_created'] == 1 and calls == ['catalogue',('NEU',24)]
+    assert len(lab.facts()[0]) == 1
+
+
+def test_cycle_invalid_tolerance_before_network_or_creation(lab, tmp_path):
+    from astropilot.field_lab_collection import cycle
+    with pytest.raises(ValueError,match='tolerance'):
+        cycle(lab,tolerance_minutes=-1)
+    assert not (tmp_path/'lab').exists()
+
+
+def test_status_and_bounded_failure_audit(lab, monkeypatch):
+    import astropilot.field_lab_collection as collection
+    collection.initialize()
+    monkeypatch.setattr(collection,'now_utc',lambda:T)
+    collection.record_error(RuntimeError('checksum_mismatch'))
+    collection.record_error(RuntimeError('network_failure'))
+    result = collection.status(lab)
+    assert result['recent_errors'] == 1 and result['usage']['by_type']['collection_error'] == 1
+    assert not result['scheduler']['installed']
+    assert result['last_forecast'] is None
+
+
+def test_empty_csv_has_stable_headers(lab, capsys):
+    assert main(['report','--period','7d','--format','csv']) == 0
+    assert capsys.readouterr().out.startswith('station,altitude_m,variable,unit,n_comparable,')
+
+
+def test_cycle_lock_regular_file_and_concurrent_refusal(lab, tmp_path):
+    from astropilot.field_lab_collection import initialize, cycle_lock
+    initialize()
+    with cycle_lock(lab):
+        with cycle_lock(lab):
+            pass  # nested operations share the outer writer transaction
+    path = tmp_path/'lab'/'.writer.lock'
+    path.unlink()
+    path.symlink_to(tmp_path/'user')
+    with pytest.raises(OSError):
+        with cycle_lock(lab):
+            pytest.fail('symlink lock admitted')
+    assert not (tmp_path/'user').exists()
+
+
+def test_failure_audit_does_not_initialize_an_absent_store(lab, tmp_path):
+    from astropilot.field_lab_collection import record_error
+    record_error(RuntimeError('initialization_required'))
+    assert not (tmp_path/'lab').exists()

@@ -358,7 +358,8 @@ def test_same_owner_rename_is_outside_storage_threat_model(roots, monkeypatch):
     moved = user / 'field_observations'
     def rename_before_publish(fd, name, document):
         if name.endswith('.json'):
-            (lab / 'artifacts').rename(moved)
+            if (lab / 'artifacts').exists():
+                (lab / 'artifacts').rename(moved)
         return original(fd, name, document)
     monkeypatch.setattr(FileFieldLabStore, '_publish', staticmethod(rename_before_publish))
     assert store.save(artifact(idempotency_key='sample-2')) is True
