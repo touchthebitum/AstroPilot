@@ -296,6 +296,10 @@ def test_scheduler_capacity_boundaries_offline(lab, monkeypatch, count):
     initialize()
     calls = []
     runner = lambda argv, **kwargs: calls.append(argv) or SimpleNamespace(returncode=1 if argv[1] == 'print' else 0)
+    from functools import partial
+    monkeypatch.setattr(collection, 'scheduler', partial(collection.scheduler, runner=runner))
+    monkeypatch.setattr(collection.subprocess, 'Popen',
+                        lambda *args, **kwargs: pytest.fail('offline test launched a real subprocess'))
     monkeypatch.setattr(collection, 'launch_agents_path', lambda:collection.field_lab_root()/'mock-launch-agents'/'test.plist')
     collection.scheduler('install', runner=runner)
     monkeypatch.setattr(collection.sys, 'platform', 'darwin')
@@ -307,6 +311,7 @@ def test_scheduler_capacity_boundaries_offline(lab, monkeypatch, count):
     assert policy == dict(operational_soft_limit=20000, stop_at=18000,
                           reserved_budget=3000, effective_stop_at=15000)
     value = status(lab)['usage']
+    calls.clear()  # Admission assertions exclude the simulated status probe.
     assert value['warning'] == (count >= 12000)
     assert value['blocked'] == value['would_block_next_cycle'] == (count >= 15000)
     if value['blocked']:
