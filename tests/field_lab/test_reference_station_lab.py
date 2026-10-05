@@ -386,6 +386,8 @@ def test_hours_zero_rejected_before_store(monkeypatch, capsys):
 
 def test_sync_identical_noop(lab, monkeypatch):
     import astropilot.reference_station_cli as cli
+    from astropilot.field_lab_collection import initialize
+    initialize()
     monkeypatch.setattr(cli, 'ReferenceLab', lambda:lab)
     monkeypatch.setattr(cli, 'MeteoSwissReferenceClient', lambda:SimpleNamespace(stations=lambda:(STATION,)))
     monkeypatch.setattr(cli, 'now_utc', lambda:T)
@@ -852,6 +854,7 @@ def test_scheduler_offline_plan_commands_and_uninstall(lab, monkeypatch):
     def runner(argv, **kwargs):
         calls.append(argv)
         return SimpleNamespace(returncode=1 if argv[1] == 'print' else 0)
+    collection.initialize()
     assert collection.scheduler('install', runner=runner)['enabled'] is False
     assert calls == []
     value = plistlib.loads(collection.scheduler_path().read_bytes())
@@ -918,6 +921,7 @@ def test_scheduler_disable_enabled_offline(lab, monkeypatch):
     import astropilot.field_lab_collection as collection
     calls = []
     monkeypatch.setattr(collection, 'launch_agents_path', lambda:collection.field_lab_root()/'launch-agents'/('test.plist'))
+    collection.initialize()
     collection.scheduler('install', runner=lambda *a,**kw:pytest.fail('install is offline'))
     monkeypatch.setattr(collection.sys,'platform','darwin')
     def runner(argv, **kwargs):
@@ -970,10 +974,9 @@ def test_cycle_lock_regular_file_and_concurrent_refusal(lab, tmp_path):
     from astropilot.field_lab_collection import initialize, cycle_lock
     initialize()
     with cycle_lock(lab):
-        with pytest.raises(BlockingIOError):
-            with cycle_lock(lab):
-                pytest.fail('concurrent cycle admitted')
-    path = tmp_path/'lab'/'artifacts'/'.cycle.tmp'
+        with cycle_lock(lab):
+            pass  # nested operations share the outer writer transaction
+    path = tmp_path/'lab'/'.writer.lock'
     path.unlink()
     path.symlink_to(tmp_path/'user')
     with pytest.raises(OSError):

@@ -46,7 +46,7 @@ def parser():
 
 
 def saved_catalogue(lab):
-    activations = [a for a in lab.store.iter_artifacts(max_names=lab.max_artifacts)
+    activations = [a for a in lab.store.iter_artifacts(max_names=lab.max_artifacts, artifact_type='catalog_activation_event')
                    if a.artifact_type == 'catalog_activation_event']
     if not activations:
         raise ValueError('reference_catalogue_missing_run_stations_sync')
@@ -76,22 +76,33 @@ def selection(args, catalogue, active):
 
 
 def execute(args):
-    if args.command == "forecast-run" and (type(args.hours) is not int or not 1 <= args.hours <= 168):
-        raise ValueError("reference_hours_1_to_168")
-    from astropilot.field_lab_collection import CAPACITY, initialize, status, scheduler, cycle, periodic_report
+    if args.command == 'forecast-run' and not 1 <= args.hours <= 168:
+        raise ValueError('reference_hours_1_to_168')
+    from astropilot.field_lab_collection import CAPACITY, initialize, scheduler
     if args.command == 'init':
         return initialize()
     if args.command == 'scheduler':
         return scheduler(args.operation)
     lab = ReferenceLab()
-    lab.max_artifacts = CAPACITY  # Validates storage configuration/capabilities before network calls.
-    mutates = (args.command in ('forecast-run', 'observations', 'compare')
+    lab.max_artifacts = CAPACITY
+    mutates = (args.command in ('forecast-run', 'observations', 'compare', 'cycle')
                or (args.command == 'stations' and args.operation == 'sync')
                or getattr(args, 'export', False)) and not getattr(args, 'dry_run', False)
     if mutates:
-        from astropilot.field_lab_collection import check_capacity
-        capacity = check_capacity(lab, reserve=15000)
-        lab.write_budget = int(lab.max_artifacts*.90)-capacity['count']-1
+        from astropilot.field_lab_store import fcntl
+        if fcntl is None:
+            raise RuntimeError('field_lab_secure_lock_unavailable')
+        from astropilot.field_lab_collection import require_initialized
+        require_initialized(lab)
+        with lab.store.writer_lock(max_names=CAPACITY):
+            from astropilot.field_lab_collection import check_capacity
+            check_capacity(lab)
+            return _execute(args, lab)
+    return _execute(args, lab)
+
+
+def _execute(args, lab):
+    from astropilot.field_lab_collection import status, cycle, periodic_report
     if args.command == 'status':
         return status(lab)
     if args.command == 'cycle':
@@ -128,11 +139,12 @@ def execute(args):
     if args.command == 'observations':
         return {'new_observations': lab.collect(MeteoSwissReferenceClient(),
                                                tolerance_minutes=args.tolerance_minutes, revision_days=7, coalesce=True)}
-    comparisons = lab.comparisons(tolerance_minutes=args.tolerance_minutes,
-                                 persist=args.command in ('compare', 'cycle'),
-                                 historical=getattr(args, 'historical', False))
-    runs, _ = lab.facts()
-    rows = periodic_report(lab, args.period, tolerance_minutes=args.tolerance_minutes, historical=args.historical) if args.command == 'report' else report(comparisons, runs)
+    if args.command == 'report':
+        rows = periodic_report(lab, args.period, tolerance_minutes=args.tolerance_minutes, historical=args.historical)
+    else:
+        comparisons = lab.comparisons(tolerance_minutes=args.tolerance_minutes, persist=True, incremental=True)
+        runs = lab.iter_facts(artifact_type='reference_forecast')
+        rows = report(comparisons, runs)
     if getattr(args, 'export', False):
         payload = {'schema_version': 1, 'rows': rows}
         lab.save('reference_report', digest(payload), payload, now_utc().isoformat())

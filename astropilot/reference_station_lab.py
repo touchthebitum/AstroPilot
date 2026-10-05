@@ -441,6 +441,44 @@ def capture_forecast(station, *, provider=None, clock=now_utc, build=None, hours
     return ReferenceForecastRun(digest(fields), **fields)
 
 
+def writer_method(method):
+    from functools import wraps
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self.store.writer_lock(create=True, max_names=self.max_artifacts):
+            return method(self, *args, **kwargs)
+    return wrapped
+
+
+class ObservationIndex:
+    """One revision pass, sorted station/variable timelines, logarithmic nearest."""
+    def __init__(self, observations):
+        from bisect import bisect_left
+        self.bisect = bisect_left
+        self.revision_visits = 0
+        self.candidate_visits = 0
+        revisions = {}
+        for observation in observations:
+            self.revision_visits += 1
+            key = (observation.station_id, observation.variable, canonical_utc(observation.observed_at_utc))
+            rank = (utc(observation.retrieved_at_utc), observation.measurement_digest)
+            if key not in revisions or rank > revisions[key][0]:
+                revisions[key] = (rank, observation)
+        self.timelines = {}
+        for (station, variable, stamp), (_, observation) in revisions.items():
+            self.timelines.setdefault((station, variable), []).append((utc(stamp), observation))
+        for key, items in self.timelines.items():
+            ordered = sorted(items, key=lambda item:item[0])
+            self.timelines[key] = (tuple(t for t, _ in ordered), tuple(o for _, o in ordered))
+
+    def nearest(self, station, variable, target):
+        times, observations = self.timelines.get((station, variable), ((), ()))
+        position = self.bisect(times, target)
+        candidates = [observations[i] for i in (position-1, position) if 0 <= i < len(times)]
+        self.candidate_visits += len(candidates)
+        return candidates
+
+
 class ReferenceLab:
     def __init__(self, store=None, *, max_artifacts=100000):
         if type(max_artifacts) is not int or max_artifacts < 1:
@@ -449,6 +487,7 @@ class ReferenceLab:
         self.store = store or FileFieldLabStore()
         self.write_budget = None
 
+    @writer_method
     def save(self, kind, key, payload, stamp, station='MeteoSwiss'):
         artifact = FieldLabArtifact.create(artifact_type=kind, source_id=station,
                        idempotency_key=key, payload=payload, created_at_utc=canonical_utc(stamp))
@@ -466,11 +505,16 @@ class ReferenceLab:
             return False
         if self.write_budget is not None and self.write_budget <= 0:
             raise ValueError("field_lab_capacity_stop_scientific_facts_preserved")
+        from astropilot.field_lab_store import _WRITERS
+        state = _WRITERS.state
+        if state['count'] + 1 >= state['stop_at']:
+            raise ValueError('field_lab_capacity_stop_scientific_facts_preserved')
         saved = self.store.save(artifact)
         if saved and self.write_budget is not None:
             self.write_budget -= 1
         return saved
 
+    @writer_method
     def save_run(self, run, *, clock=now_utc):
         # Scientific deadline covers durable forecast/seal/candidate, not attestation persistence.
         existing = self.store.load(idempotency_key=run.run_id)
@@ -486,7 +530,7 @@ class ReferenceLab:
         # Validate orphan candidates as well as the legacy receipt, never reuse time.
         expected = {'run_id': run.run_id, 'snapshot_digest': run.snapshot_digest,
                     'seal_digest': seal.digest if seal is not None else None}
-        for candidate in self.store.iter_artifacts(max_names=self.max_artifacts):
+        for candidate in self.store.iter_artifacts(max_names=self.max_artifacts, artifact_type='reference_seal_completion', station_id=run.station_id):
             if (candidate.idempotency_key == 'durable-' + run.run_id
                     or candidate.idempotency_key.startswith('candidate-' + run.run_id + '-')):
                 if (candidate.artifact_type != 'reference_seal_completion'
@@ -560,6 +604,7 @@ class ReferenceLab:
             raise ValueError('reference_seal_identity_mismatch')
         return commit.created_at_utc
 
+    @writer_method
     def save_catalogue(self, payload, retrieved_at, *, event_id=None):
         stamp = canonical_utc(retrieved_at)
         catalogue_digest = digest(payload)
@@ -573,20 +618,17 @@ class ReferenceLab:
         self.save('reference_catalogue', catalogue_digest, payload, stamp)
         return self.save('catalog_activation_event', key, event, stamp)
 
+    @writer_method
     def save_observation(self, observation):
         self.save('reference_observation', observation.measurement_digest,
                   asdict(observation), observation.retrieved_at_utc, observation.station_id)
         return self.save('reference_acquisition', observation.acquisition_id,
                          asdict(observation), observation.retrieved_at_utc, observation.station_id)
 
-    def facts(self):
-        artifacts = []
-        for artifact in self.store.iter_artifacts(max_names=self.max_artifacts):
-            if len(artifacts) >= self.max_artifacts:
-                raise ValueError("reference_artifact_limit_exceeded")
-            artifacts.append(artifact)
-        runs, observations = [], []
-        for artifact in artifacts:
+    def iter_facts(self, *, artifact_type=None, station_id=None, start=None, end=None):
+        kinds = artifact_type or ('reference_forecast', 'reference_acquisition')
+        for artifact in self.store.iter_artifacts(max_names=self.max_artifacts, artifact_type=kinds,
+                station_id=station_id, start=start, end=end):
             payload = json.loads(artifact.payload_json)
             if artifact.artifact_type == 'reference_forecast':
                 run = ReferenceForecastRun(**payload)
@@ -595,22 +637,32 @@ class ReferenceLab:
                 sealed = self.durable_seal(run)
                 if sealed is not None and (not run.prospective or all(
                         utc(sealed) < utc(p['at']) for p in json.loads(run.snapshot_json)['points'])):
-                    runs.append(run)
+                    yield run
             elif artifact.artifact_type == 'reference_acquisition':
                 observation = ReferenceObservation(**payload)
                 if observation.acquisition_id != artifact.idempotency_key:
                     raise ValueError('reference_acquisition_digest_mismatch')
-                observations.append(observation)
+                yield observation
+
+    def facts(self, *, artifact_type=None, station_id=None, start=None, end=None, stream=False):
+        facts = self.iter_facts(artifact_type=artifact_type, station_id=station_id, start=start, end=end)
+        if stream:
+            return facts
+        runs, observations = [], []
+        for fact in facts:
+            (runs if isinstance(fact, ReferenceForecastRun) else observations).append(fact)
         return tuple(runs), tuple(observations)
 
+    @writer_method
     def collect(self, client, *, clock=now_utc, tolerance_minutes=10, revision_days=None, coalesce=False):
         validate_tolerance(tolerance_minutes)
         current = utc(clock())
-        runs, previous = self.facts()
+        start = canonical_utc(current-timedelta(days=revision_days, minutes=tolerance_minutes)) if revision_days is not None else None
+        runs = self.iter_facts(artifact_type='reference_forecast', start=start)
         latest = {}
-        for observation in previous:
-            key = (observation.station_id, observation.variable, observation.observed_at_utc)
-            if key not in latest or utc(observation.retrieved_at_utc) > utc(latest[key].retrieved_at_utc):
+        for observation in self.iter_facts(artifact_type='reference_acquisition', start=start):
+            key = (observation.station_id, observation.variable, canonical_utc(observation.observed_at_utc))
+            if key not in latest or (utc(observation.retrieved_at_utc), observation.measurement_digest) > (utc(latest[key].retrieved_at_utc), latest[key].measurement_digest):
                 latest[key] = observation
         due = {}
         for run in runs:
@@ -621,17 +673,26 @@ class ReferenceLab:
                 if (target + timedelta(minutes=tolerance_minutes) < current
                         and (revision_days is None or target >= current-timedelta(days=revision_days))):
                     due.setdefault(run.station_id, set()).add(target)
+        from bisect import bisect_left
         count = 0
+        self.noncollectable_targets = []
         for station, targets in sorted(due.items()):
+            for target in sorted(t for t in targets if t.year != current.year):
+                self.noncollectable_targets.append(dict(station=station, target_at_utc=canonical_utc(target), reason='reference_cross_year_collection_not_supported'))
+            # Annual assets are not yet supported; isolate older targets instead
+            # of stopping new-year acquisition for the entire revision horizon.
+            targets = {t for t in targets if t.year == current.year}
+            if not targets:
+                continue
             families = {'now' if t.date() == current.date() else 'recent' for t in targets}
-            if any(t.year != current.year for t in targets):
-                raise ValueError('reference_cross_year_collection_not_supported')
+            ordered_targets = sorted(targets)
             for family in sorted(families):
                 for observation in client.observations(station, family):
-                    if utc(observation.observed_at_utc) <= current and any(
-                            abs(utc(observation.observed_at_utc) - t) <= timedelta(minutes=tolerance_minutes)
-                            for t in targets):
-                        key = (observation.station_id, observation.variable, observation.observed_at_utc)
+                    observed_at = utc(observation.observed_at_utc)
+                    position = bisect_left(ordered_targets, observed_at)
+                    nearest_targets = ordered_targets[max(0, position-1):position+1]
+                    if observed_at <= current and any(abs(observed_at-t) <= timedelta(minutes=tolerance_minutes) for t in nearest_targets):
+                        key = (observation.station_id, observation.variable, canonical_utc(observation.observed_at_utc))
                         prior = latest.get(key)
                         if coalesce and prior and prior.measurement_digest == observation.measurement_digest and prior.asset_href == observation.asset_href:
                             continue
@@ -639,23 +700,103 @@ class ReferenceLab:
                         latest[key] = observation
         return count
 
-    def comparisons(self, *, clock=now_utc, tolerance_minutes=10, persist=False, historical=False):
+    def comparison_states(self, *, start=None, end=None, tolerance_minutes=10, historical=False):
+        latest = {}
+        for artifact in self.store.iter_artifacts(max_names=self.max_artifacts,
+                artifact_type=('reference_comparison', 'reference_comparison_state'), start=start, end=end):
+            payload = json.loads(artifact.payload_json)
+            comparison = ReferenceComparison(**(payload['comparison'] if artifact.artifact_type == 'reference_comparison_state' else payload))
+            if comparison.tolerance_minutes != tolerance_minutes or (comparison.cohort == 'historical_backfill') != historical:
+                continue
+            key = (comparison.forecast_run_id, comparison.forecast_point_at_utc, comparison.variable)
+            rank = (utc(artifact.created_at_utc), artifact.artifact_type == 'reference_comparison_state', artifact.idempotency_key)
+            if key not in latest or rank > latest[key][0]:
+                latest[key] = (rank, comparison, payload.get('input_signature'))
+        return latest
+
+    def comparisons(self, *, clock=now_utc, tolerance_minutes=10, persist=False, historical=False,
+                    start=None, end=None, incremental=False):
+        if persist:
+            with self.store.writer_lock(create=True, max_names=self.max_artifacts):
+                return self._comparisons(clock=clock, tolerance_minutes=tolerance_minutes, persist=True,
+                    historical=historical, start=start, end=end, incremental=incremental)
+        return self._comparisons(clock=clock, tolerance_minutes=tolerance_minutes, historical=historical,
+                                 start=start, end=end)
+
+    def _comparisons(self, *, clock=now_utc, tolerance_minutes=10, persist=False, historical=False,
+                     start=None, end=None, incremental=False):
         validate_tolerance(tolerance_minutes)
         current = utc(clock())
-        runs, observations = self.facts()
+        states = self.comparison_states(start=start, end=end, tolerance_minutes=tolerance_minutes, historical=historical) if incremental else {}
+        from types import SimpleNamespace
+        def observation_metadata():
+            for meta in self.store.iter_metadata(max_names=self.max_artifacts):
+                if meta['artifact_type'] != 'reference_acquisition':
+                    continue
+                stamp = utc(meta['time_min'])
+                if (start and stamp < utc(start)-timedelta(minutes=tolerance_minutes)) or (end and stamp > utc(end)+timedelta(minutes=tolerance_minutes)):
+                    continue
+                yield SimpleNamespace(station_id=meta['source_id'], variable=meta['variable'],
+                    observed_at_utc=meta['time_min'], retrieved_at_utc=meta['created_at_utc'],
+                    measurement_digest=meta['measurement_digest'], acquisition_id=meta['idempotency_key'])
+        index = ObservationIndex(observation_metadata())
+        def inputs(station, variable, target):
+            candidates = index.nearest(station, variable, target)
+            return [o for o in candidates if abs(utc(o.observed_at_utc)-target) <= timedelta(minutes=tolerance_minutes)]
+        changed_runs = set()
+        coverage = {}
+        for (run_id, stamp, variable), (_, comparison, signature) in states.items():
+            coverage[run_id] = coverage.get(run_id, 0)+1
+            if signature != digest([o.acquisition_id for o in inputs(comparison.station_id, variable, utc(stamp))]):
+                changed_runs.add(run_id)
+        def candidate_runs():
+            for meta in self.store.iter_metadata(max_names=self.max_artifacts):
+                if meta['artifact_type'] != 'reference_forecast' or meta['prospective'] == historical:
+                    continue
+                if (start and utc(meta['time_max']) < utc(start)) or (end and utc(meta['time_min']) > utc(end)):
+                    continue
+                if incremental and meta['idempotency_key'] not in changed_runs and coverage.get(meta['idempotency_key'], 0) == meta['point_count']*len(VARIABLES):
+                    continue
+                artifact = self.store.load(idempotency_key=meta['idempotency_key'])
+                if artifact is None or self.store._metadata(artifact) != meta:
+                    raise ValueError('field_lab_metadata_mismatch')
+                run = ReferenceForecastRun(**json.loads(artifact.payload_json))
+                sealed = self.durable_seal(run)
+                if sealed is not None and (not run.prospective or all(utc(sealed) < utc(p['at']) for p in json.loads(run.snapshot_json)['points'])):
+                    yield run
+        self.last_index = index
+        self.computed_targets = 0
         result = []
-        for run in runs:
+        for run in candidate_runs():
             if run.prospective == historical:
                 continue
+            sealed = self.durable_seal(run)
             for point in json.loads(run.snapshot_json)['points']:
-                if utc(point['at']) + timedelta(minutes=tolerance_minutes) >= current:
+                target = utc(point['at'])
+                if target + timedelta(minutes=tolerance_minutes) >= current or (start and target < utc(start)) or (end and target > utc(end)):
                     continue
                 for variable in VARIABLES:
-                    comparison = compare_point(run, point, variable, observations, tolerance_minutes, durable_sealed_at_utc=self.durable_seal(run))
+                    candidates = inputs(run.station_id, variable, target)
+                    signature = digest([o.acquisition_id for o in candidates])
+                    key = (run.run_id, point['at'], variable)
+                    if incremental and key in states and states[key][2] == signature:
+                        continue
+                    decoded = []
+                    for candidate in candidates:
+                        artifact = self.store.load(idempotency_key=candidate.acquisition_id)
+                        observation = ReferenceObservation(**json.loads(artifact.payload_json))
+                        if observation.acquisition_id != candidate.acquisition_id or observation.measurement_digest != candidate.measurement_digest:
+                            raise ValueError('reference_acquisition_digest_mismatch')
+                        decoded.append(observation)
+                    comparison = compare_point(run, point, variable, decoded, tolerance_minutes, durable_sealed_at_utc=sealed)
+                    self.computed_targets += 1
                     result.append(comparison)
                     if persist:
                         payload = asdict(comparison)
-                        self.save('reference_comparison', digest(payload), payload, run.created_at_utc, run.station_id)
+                        self.save('reference_comparison', digest(payload), payload, canonical_utc(current), run.station_id)
+                        state = dict(comparison=payload, input_signature=signature,
+                                     forecast_point_at_utc=point['at'], comparison_computed_at=canonical_utc(current))
+                        self.save('reference_comparison_state', digest(state), state, canonical_utc(current), run.station_id)
         return tuple(result)
 
 
@@ -723,13 +864,14 @@ def percentile(values, fraction):
 
 def report(comparisons, runs):
     runs = tuple(runs)
+    run_by_id = {r.run_id: r for r in runs}
     lookup = {r.run_id: json.loads(r.snapshot_json) for r in runs}
     groups = {}
     for comparison in comparisons:
         if type(comparison) is not ReferenceComparison:
             raise ValueError("reference_comparison_required")
         comparison = ReferenceComparison(**asdict(comparison))
-        run = next((r for r in runs if r.run_id == comparison.forecast_run_id), None)
+        run = run_by_id.get(comparison.forecast_run_id)
         if run is None:
             raise ValueError("reference_comparison_unknown_run")
         if comparison.station_id != run.station_id or comparison.forecast_digest != run.snapshot_digest or comparison.cohort != ("prospective" if run.prospective else "historical_backfill"):

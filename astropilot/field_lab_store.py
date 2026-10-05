@@ -14,6 +14,25 @@ import os
 import re
 import stat
 import uuid
+import threading
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
+_WRITERS = threading.local()
+_PROCESS_LOCK = threading.RLock()
+OPERATIONAL_SOFT_LIMIT = 20_000
+
+
+@contextmanager
+def _process_writer():
+    if not _PROCESS_LOCK.acquire(blocking=False):
+        raise RuntimeError('field_lab_writer_busy')
+    try:
+        yield
+    finally:
+        _PROCESS_LOCK.release()
 
 from astropilot.field_lab_paths import field_lab_root, MARKER
 from decision.storage_namespace import FIELD_LAB_PROVENANCE
@@ -225,7 +244,142 @@ class FileFieldLabStore:
             if not rollback:
                 os.fsync(fd)
 
+    @contextmanager
+    def writer_lock(self, *, create=False, max_names=100000):
+        """One reentrant process/thread and POSIX cross-process writer boundary."""
+        if fcntl is None or os.name != 'posix':
+            raise RuntimeError('field_lab_secure_lock_unavailable')
+        with _process_writer():
+            state = getattr(_WRITERS, 'state', None)
+            identity = (os.getpid(), str(self._root))
+            if state is not None and state['identity'] == identity:
+                yield state
+                return
+            if state is not None and state['identity'][0] == os.getpid():
+                raise ValueError('field_lab_nested_writer_root_changed')
+            with self._directory(create=create, root_only=True) as fd:
+                handle = os.open('.writer.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=fd)
+                try:
+                    if not stat.S_ISREG(os.fstat(handle).st_mode):
+                        raise ValueError('field_lab_lock_regular_file_required')
+                    try:
+                        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError as error:
+                        raise RuntimeError('field_lab_writer_busy') from error
+                    state = dict(identity=identity, count=sum(1 for _ in self.iter_metadata(max_names=max_names)),
+                                 stop_at=int(min(max_names, OPERATIONAL_SOFT_LIMIT)*.90))
+                    _WRITERS.state = state
+                    try:
+                        yield state
+                    finally:
+                        _WRITERS.state = None
+                finally:
+                    os.close(handle)
+
+    @staticmethod
+    def _metadata(artifact):
+        payload = json.loads(artifact.payload_json)
+        measurement_digest = None
+        if artifact.artifact_type == 'reference_acquisition':
+            from astropilot.reference_station_lab import ReferenceObservation
+            measurement_digest = ReferenceObservation(**payload).measurement_digest
+        times = [artifact.created_at_utc]
+        if artifact.artifact_type == 'reference_forecast':
+            times = [p['at'] for p in json.loads(payload['snapshot_json'])['points']] or times
+        elif artifact.artifact_type in ('reference_comparison', 'reference_comparison_state'):
+            times = [payload['forecast_point_at_utc']]
+        elif artifact.artifact_type in ('reference_acquisition', 'reference_observation'):
+            times = [payload['observed_at_utc']]
+        times = [datetime.fromisoformat(t.replace('Z', '+00:00')).astimezone(timezone.utc).isoformat(timespec='microseconds') for t in times]
+        return dict(point_count=len(times), artifact_type=artifact.artifact_type, source_id=artifact.source_id,
+                    idempotency_key=artifact.idempotency_key, created_at_utc=artifact.created_at_utc,
+                    time_min=min(times), time_max=max(times), variable=payload.get('variable'),
+                    digest=artifact.digest, measurement_digest=measurement_digest,
+                    prospective=payload.get('prospective'))
+
+    def _save_metadata(self, artifact):
+        with self._directory(root_only=True) as root:
+            try:
+                os.mkdir('metadata', mode=0o700, dir_fd=root)
+                os.fsync(root)
+            except FileExistsError:
+                pass
+            fd = os.open('metadata', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root)
+            try:
+                name = self._name(artifact.idempotency_key)
+                document = _json(self._metadata(artifact))
+                try:
+                    previous = self._read(fd, name)
+                except FileNotFoundError:
+                    previous = None
+                if previous is not None and previous != document:
+                    # Sidecars are disposable derived metadata, never scientific facts.
+                    os.unlink(name, dir_fd=fd)
+                self._publish(fd, name, document)
+            finally:
+                os.close(fd)
+
+    def iter_metadata(self, *, max_names=100000):
+        """Stream lightweight sidecars; legacy files fall back to validated envelopes.
+
+        Missing sidecars after interruption never hide authoritative facts. Readers
+        never migrate storage; a writer publishes sidecars for new artifacts.
+        """
+        try:
+            with self._directory(root_only=True) as root:
+                try:
+                    meta = os.open('metadata', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root)
+                except FileNotFoundError:
+                    meta = None
+                try:
+                    with self._directory() as fd:
+                        # Constant-memory preflight preserves fail-closed limits.
+                        for _ in self._names(fd, max_names):
+                            pass
+                        for name in self._names(fd, max_names):
+                            try:
+                                value = json.loads(self._read(meta, name)) if meta is not None else None
+                            except FileNotFoundError:
+                                value = None
+                            if value is None:
+                                artifact = FieldLabArtifact.decode(self._read(fd, name))
+                                value = self._metadata(artifact)
+                            if self._name(value['idempotency_key']) != name:
+                                raise ValueError('field_lab_identity_mismatch')
+                            yield value
+                finally:
+                    if meta is not None:
+                        os.close(meta)
+        except FileNotFoundError:
+            if self._root.exists():
+                raise
+
+    @staticmethod
+    def _names(fd, max_names):
+        if type(max_names) is not int or max_names < 1:
+            raise ValueError('invalid_field_lab_name_limit')
+        count = 0
+        with os.scandir(fd) as entries:
+            for entry in entries:
+                name = entry.name
+                if name.startswith('.') and name.endswith('.tmp'):
+                    continue
+                if re.fullmatch(r'[0-9a-f]{64}\.json', name) is None:
+                    raise ValueError('field_lab_unexpected_artifact_file')
+                if entry.is_symlink():
+                    raise OSError('field_lab_regular_file_required')
+                if not stat.S_ISREG(entry.stat(follow_symlinks=False).st_mode):
+                    raise ValueError('field_lab_regular_file_required')
+                count += 1
+                if count > max_names:
+                    raise ValueError('field_lab_name_limit_exceeded')
+                yield name
+
     def save(self, artifact):
+        with self.writer_lock(create=True, max_names=2_000_000):
+            return self._save(artifact)
+
+    def _save(self, artifact):
         if type(artifact) is not FieldLabArtifact:
             raise ValueError("field_lab_artifact_required")
         document = artifact.document()
@@ -234,9 +388,18 @@ class FileFieldLabStore:
         if len(document.encode()) > _MAX_BYTES:
             raise ValueError("field_lab_document_too_large")
         with self._directory(create=True) as fd:
-            if artifact.artifact_type == "reference_seal_commit":
-                return self._publish(fd, self._name(artifact.idempotency_key), document, rollback=True)
-            return self._publish(fd, self._name(artifact.idempotency_key), document)
+            state = _WRITERS.state
+            existing = self.load(idempotency_key=artifact.idempotency_key)
+            if existing is None and state['count'] + 1 >= state['stop_at']:
+                raise ValueError('field_lab_capacity_stop_scientific_facts_preserved')
+            if artifact.artifact_type == 'reference_seal_commit':
+                saved = self._publish(fd, self._name(artifact.idempotency_key), document, rollback=True)
+            else:
+                saved = self._publish(fd, self._name(artifact.idempotency_key), document)
+            if saved:
+                state['count'] += 1
+        self._save_metadata(artifact)
+        return saved
 
     def confirm_durable(self, artifact):
         """Revalidate and fsync the existing inode and pinned parent this attempt."""
@@ -268,29 +431,24 @@ class FileFieldLabStore:
         except FileNotFoundError:
             return None
 
-    def iter_artifacts(self, *, max_names=100000):
-        """Read-only enumeration through the same pinned, fail-closed boundary."""
-        if type(max_names) is not int or max_names < 1:
-            raise ValueError("invalid_field_lab_name_limit")
-        try:
-            with self._directory() as fd:
-                names = []
-                with os.scandir(fd) as entries:
-                    for entry in entries:
-                        if len(names) >= max_names:
-                            raise ValueError("field_lab_name_limit_exceeded")
-                        names.append(entry.name)
-                names.sort()
-                for name in names:
-                    if name.startswith(".") and name.endswith(".tmp"):
-                        continue
-                    if re.fullmatch(r"[0-9a-f]{64}\.json", name) is None:
-                        raise ValueError("field_lab_unexpected_artifact_file")
-                    artifact = FieldLabArtifact.decode(self._read(fd, name))
-                    if self._name(artifact.idempotency_key) != name:
-                        raise ValueError("field_lab_identity_mismatch")
-                    yield artifact
-        except FileNotFoundError:
-            if self._root.exists():
-                raise
-            return
+    def iter_artifacts(self, *, max_names=100000, artifact_type=None, station_id=None,
+                       start=None, end=None, variable=None):
+        """Filter metadata before decoding payloads; enumeration memory is constant."""
+        start = datetime.fromisoformat(start.replace('Z', '+00:00')).isoformat(timespec='microseconds') if start else None
+        end = datetime.fromisoformat(end.replace('Z', '+00:00')).isoformat(timespec='microseconds') if end else None
+        for meta in self.iter_metadata(max_names=max_names):
+            if artifact_type is not None and meta['artifact_type'] not in (
+                    (artifact_type,) if isinstance(artifact_type, str) else artifact_type):
+                continue
+            if station_id is not None and meta['source_id'] != station_id:
+                continue
+            if variable is not None and meta['variable'] != variable:
+                continue
+            if start is not None and meta['time_max'] < start:
+                continue
+            if end is not None and meta['time_min'] > end:
+                continue
+            artifact = self.load(idempotency_key=meta['idempotency_key'])
+            if artifact is None or artifact.digest != meta['digest'] or self._metadata(artifact) != meta:
+                raise ValueError('field_lab_metadata_mismatch')
+            yield artifact

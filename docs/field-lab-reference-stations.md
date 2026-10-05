@@ -549,28 +549,104 @@ collection horizon prevent redundant event spam. No unique scientific fact is
 silently removed. This is the request's calculated-capacity fallback, not a claim
 of infinite storage or a completed indexed/compacted long-term backend.
 
-Operational CLI/cycle capacity is **2,000,000 artifacts**, warning at **80%**, stop
-at **90%**, reserving 15,000 before starting network activity. An in-cycle write
-budget prevents crossing the stop threshold even when a catch-up batch exceeds
-the initial reserve. Already published immutable facts survive an interrupted
-batch. At the cited conservative dense rate of 11,268/day, raw capacity is about
-177.5 days, warning about 142 days, stop about 159.7 days from empty. Less frequent
-forecasts and coalescence should reduce growth; real capacity planning must use
-`status`'s measured trailing 7-day rate, not assume a multi-year guarantee.
-Manual scientific writers also receive an operational capacity budget.
+The **2,000,000 artifact ceiling is an enumeration safety guard, not an
+operational capacity promise**. The operational soft limit is **20,000 artifacts**.
+Writes stop strictly below 90% of the smaller of the configured ceiling and this
+soft limit. Before a CLI mutation or cycle begins, it reserves the smaller of
+15,000 artifacts and one sixth of that stop threshold: normally **3,000**.
+Consequently `effective_stop_at=15,000`, `blocked=true` at 15,000, and warning
+starts at 80% of the effective threshold (**12,000**). The cycle and CLI refuse
+at exactly that blocked boundary, before network activity. A batch already admitted
+can consume its reserve, but each publication rechecks its shared in-lock count
+and cannot reach the hard write stop (**18,000**). Partial immutable facts remain
+valid if a batch exhausts its budget; retry does not invent observations.
 
-`status` reports counts by artifact type, total/capacity/remaining, warning/blocked,
-trailing 7-day average artifacts/day, estimated days to the 90% stop, oldest/newest
-envelope UTC times, disk bytes, latest successful cycle, forecast, official
-observation, comparison, errors in the last 7 days, and scheduler state.
-Creation times are artifact provenance, not a filesystem ingestion ledger; a
-late imported legacy artifact can therefore skew measured growth. No imports are
-performed here. CLI JSON flags are the monitoring interface; there is no external
-notification service. Enumeration/reporting remain linear and materialize facts:
-large-store memory/time benchmarks and an indexed/sharded backend remain necessary
-before claiming comfortable operation near the raised limit. `ReferenceLab()`
-retains its explicit lower-level default 100k bound for existing integrations;
-operational CLI/cycles explicitly use the new bound.
+`usage` exposes `capacity`, `operational_soft_limit`, `warning`, `blocked`,
+`remaining` (individual writes available below the hard stop), `reserved_budget`,
+`effective_stop_at`, and `would_block_next_cycle`. The growth estimate uses the
+effective entry boundary, not the 2M guard. The 10k-artifact synthetic regression
+is evidence for bounded scans and decoding, not a production throughput promise
+or proof of sustained operation at the soft limit. There is no advertised
+160-day operating horizon. Increase capacity only after representative filesystem,
+latency, disk-growth and recovery measurements, and a compaction design.
+
+All scientific writers and the scheduler use the same `.writer.lock` in the
+validated dedicated root. A process/thread reentrant boundary covers planning,
+budget calculation and publication for a mutation batch; a nonblocking POSIX
+`fcntl.flock` prevents other processes from entering. Contention returns the stable
+`field_lab_writer_busy` error immediately. A retry must reacquire and recount,
+never reuse a prior remaining budget. Lock creation is descriptor-relative,
+no-follow and restricted to regular files. Init validates/publishes the namespace
+before opening the writer lock; simultaneous init remains idempotent. Read-only
+scans do not take this lock and can observe an interrupted batch; they never
+present a multi-file transaction guarantee. The #313 same-owner directory-move
+threat model remains unchanged.
+
+### Scans, observation indexing and incremental comparisons
+
+Artifact filenames are enumerated with constant memory (no global name list).
+Lightweight `metadata/` sidecars contain type, station, variable, target/observation
+bounds, revision identity, and envelope digest. They are disposable derived data;
+the artifact remains authoritative. Missing sidecars after interruption or on
+legacy stores fall back to a validated envelope read. Readers do not migrate a
+legacy store. A normal new-store `status`/`usage` loads no scientific payloads;
+legacy missing sidecars can require payload decoding. A filtered payload load
+checks its envelope against its sidecar. This is not a defense against a malicious
+same-owner process rewriting the derived metadata and hiding facts.
+
+`iter_facts(...)` and `facts(..., stream=True)` support artifact type, station and
+time bounds. The tuple-returning `facts()` compatibility API remains for existing
+callers, while the cycle uses filtered scans. Metadata scans remain O(total files)
+and incur filesystem I/O; they are not a database range index.
+
+A comparison scan builds active observation revisions once, using canonical
+(station, variable, observed timestamp) identities and the existing deterministic
+retrieval-time/digest revision ordering. Sorted timelines provide nearest lookup
+by binary search. Cost is O(A log A + T log A + K), with O(A+T) index/state memory,
+where A is scanned acquisition metadata, T stored targets and K comparisons
+requiring recalculation. At most two candidate payloads per computed variable
+are loaded. Off-station/variable observations add one metadata/index pass, not
+one scan per target. Nearest ties remain non-comparable, tolerance remains ±10
+minutes, and there is no interpolation.
+
+Immutable `reference_comparison_state` receipts record input acquisition identities,
+computed time and the corresponding comparison. They preserve A→B→A even when
+the A comparison content is deduplicated. A fully compared unchanged run is skipped
+before decoding its forecast or validating its seals again. New closed targets
+and targets invalidated by relevant revision identities are computed; open targets
+remain untouched. `last_comparison` uses computation/receipt time, while scientific
+forecast and observation timestamps remain unchanged. Legacy comparisons without
+a computation receipt expose `last_comparison=null` and
+`comparison_time_unavailable=true`; their scientific time is not presented as an
+unknown historical execution time.
+
+24h/7d/30d reports filter persisted comparison receipts by forecast target time
+before loading payloads and load only the referenced forecasts. CLI report does
+not perform a preliminary full comparison. If a window has no persisted results,
+a compatibility reconstruction filters forecasts and targets at the start.
+Exact medians/p90 still retain values, so all reports have a strict **20,000
+comparison-envelope/receipt limit** checked from metadata before payload loading;
+reconstruction also guards the candidate target upper bound. Exceeding it returns
+`field_lab_report_operational_limit_exceeded_use_shorter_period`. This deliberately
+uses a bounded exact aggregation instead of claiming an unlimited streaming percentile.
+
+Secure persistent storage/locking requires POSIX descriptor capabilities and
+`fcntl` (supported macOS/Linux). Imports and `--help` do not require `fcntl`.
+Scheduler status can render safely on unsupported systems; other read-only
+storage commands fail closed with `field_lab_secure_storage_unavailable` if secure
+reads are unavailable. Mutations fail with `field_lab_secure_lock_unavailable`
+or the secure-storage capability error, never an unconditional import failure.
+
+### Year boundary
+
+Annual asset lookup is still unsupported. On January 1 the cycle partitions
+closed targets: prior-year targets are exposed in `noncollectable_targets` with
+`reference_cross_year_collection_not_supported`, while current-year targets
+continue normal now/recent acquisition in the original prospective cohort.
+The seven-day revision horizon therefore does not stop the whole cycle for seven
+days. No observations or replacement forecasts are fabricated for old targets.
+The regression spans December 31 to January 1; real annual-asset collection remains
+future work.
 
 ### Opt-in launchd scheduler and logs
 
@@ -583,7 +659,10 @@ uv run astropilot-field-lab scheduler disable
 uv run astropilot-field-lab scheduler uninstall
 ```
 
-`install` only renders an immutable, disabled `scheduler.plist` inside the lab;
+`install` requires an existing store initialized by explicit `field-lab init`.
+The runner also refuses an absent/uninitialized store (`field_lab_init_required`).
+Neither implicitly initializes data. `install` only renders an immutable, disabled
+`scheduler.plist` inside the lab;
 it performs no launchctl command and writes no LaunchAgents file. The plan pins
 the Python interpreter, checkout working directory, isolated lab root and effective
 user root for overlap protection. Changing those requires uninstall/reinstall.
@@ -604,7 +683,10 @@ CI never requires or activates real launchd.
 Logs are `<FIELD_LAB_DATA_DIR>/collection.log` plus `.1`, `.2`, `.3`, at most
 1 MiB each (4 MiB total), records capped at 64 KiB. Rotation uses pinned root
 operations and no-follow regular-file checks, with private new-file modes.
-There are no unbounded StandardOutPath/StandardErrorPath files. The original #313
+The multi-rename rotation is not an atomic transaction: a crash between renames
+may leave fewer backups. Each file remains size-bounded; restart resumes rotation
+without a promise to preserve every log record. There are no unbounded
+StandardOutPath/StandardErrorPath files. The original #313
 same-owner directory-rename threat assumption still applies. Errors are never
 silently treated as successful cycles. A failed isolation/capacity boundary may
 prevent writing an error envelope; stderr/log still reports the failure.

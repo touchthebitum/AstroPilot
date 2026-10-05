@@ -3,7 +3,10 @@ from collections import Counter
 from contextlib import contextmanager
 from datetime import timedelta
 from dataclasses import asdict
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 import json
 import os
 from pathlib import Path
@@ -17,7 +20,10 @@ from astropilot.field_lab_paths import field_lab_root
 from astropilot.reference_station_lab import (ReferenceLab, MeteoSwissReferenceClient,
     capture_forecast, select_stations, now_utc, utc, digest, report)
 
-CAPACITY = 2_000_000
+CAPACITY = 2_000_000  # Hard enumeration safety ceiling, not an operating promise.
+OPERATIONAL_SOFT_LIMIT = 20_000
+RESERVED_BUDGET = 15_000
+REPORT_LIMIT = 20_000
 WARNING = .80
 STOP = .90
 REVISION_DAYS = 7
@@ -28,62 +34,106 @@ def proposed_root():
     return Path.home() / 'Documents' / 'NightMerit Field Lab' / 'reference-weather-v1'
 
 
+def require_initialized(lab):
+    try:
+        with lab.store._directory(root_only=True):
+            pass
+    except FileNotFoundError as error:
+        raise ValueError('field_lab_init_required') from error
+
+
 def initialize():
     store = ReferenceLab(max_artifacts=CAPACITY).store
-    with store._directory(create=True):
+    with store.writer_lock(create=True, max_names=CAPACITY):
         pass
     return {'root': str(field_lab_root()), 'initialized': True, 'smoke_imported': False}
 
 
-def artifacts(lab):
-    return list(lab.store.iter_artifacts(max_names=lab.max_artifacts))
+def artifacts(lab, artifact_type=None):
+    return lab.store.iter_artifacts(max_names=lab.max_artifacts, artifact_type=artifact_type)
 
 
 def usage(lab, *, clock=now_utc):
-    items = artifacts(lab)
-    times = sorted(utc(a.created_at_utc) for a in items)
     current = utc(clock())
-    recent = sum(current - timedelta(days=7) <= t <= current for t in times)
-    rate = recent / 7
-    count = len(items)
-    # Includes marker and management/log files; do not follow symlinks.
-    size = sum(p.lstat().st_size for p in field_lab_root().rglob('*') if p.is_file() and not p.is_symlink()) if field_lab_root().exists() else 0
-    return dict(count=count, by_type=dict(sorted(Counter(a.artifact_type for a in items).items())),
-                capacity=lab.max_artifacts, remaining=lab.max_artifacts-count,
-                growth_per_day_7d=rate, estimated_days_to_stop=(lab.max_artifacts*STOP-count)/rate if rate else None,
-                oldest=times[0].isoformat() if times else None, newest=times[-1].isoformat() if times else None,
-                disk_bytes=size, warning=count >= lab.max_artifacts*WARNING,
-                blocked=count >= lab.max_artifacts*STOP)
+    count, recent, size = 0, 0, 0
+    kinds = Counter()
+    oldest = newest = None
+    for meta in lab.store.iter_metadata(max_names=lab.max_artifacts):
+        stamp = utc(meta['created_at_utc'])
+        count += 1
+        kinds[meta['artifact_type']] += 1
+        recent += current-timedelta(days=7) <= stamp <= current
+        oldest = min(oldest, stamp) if oldest else stamp
+        newest = max(newest, stamp) if newest else stamp
+    def directory_bytes(path):
+        total = 0
+        with os.scandir(path) as entries:
+            for entry in entries:
+                info = entry.stat(follow_symlinks=False)
+                if stat.S_ISREG(info.st_mode):
+                    total += info.st_size
+                elif stat.S_ISDIR(info.st_mode):
+                    total += directory_bytes(entry.path)
+        return total
+    if field_lab_root().exists():
+        size = directory_bytes(field_lab_root())
+    stop_at = int(min(lab.max_artifacts, OPERATIONAL_SOFT_LIMIT)*STOP)
+    reserve = min(RESERVED_BUDGET, max(0, stop_at//6))
+    effective = stop_at-reserve
+    rate = recent/7
+    return dict(count=count, by_type=dict(sorted(kinds.items())), capacity=lab.max_artifacts,
+                operational_soft_limit=min(lab.max_artifacts, OPERATIONAL_SOFT_LIMIT),
+                remaining=max(0, stop_at-count-1), reserved_budget=reserve, effective_stop_at=effective,
+                growth_per_day_7d=rate, estimated_days_to_stop=(effective-count)/rate if rate else None,
+                oldest=oldest.isoformat() if oldest else None, newest=newest.isoformat() if newest else None,
+                disk_bytes=size, warning=count >= effective*WARNING,
+                blocked=count >= effective, would_block_next_cycle=count >= effective)
 
 
-def check_capacity(lab, reserve=0):
+def check_capacity(lab, reserve=None):
     result = usage(lab)
-    if result['count'] + reserve >= lab.max_artifacts * STOP:
+    if reserve is None:
+        reserve = result['reserved_budget']
+    stop_at = int(min(lab.max_artifacts, OPERATIONAL_SOFT_LIMIT)*STOP)
+    if result['count'] + reserve >= stop_at:
         raise ValueError('field_lab_capacity_stop_scientific_facts_preserved')
     return result
 
 
 @contextmanager
 def cycle_lock(lab):
-    # Open relative to the same validated, pinned storage boundary.
-    with lab.store._directory() as fd:
-        handle = os.open('.cycle.tmp', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=fd)
-        try:
-            if not stat.S_ISREG(os.fstat(handle).st_mode):
-                raise ValueError('field_lab_lock_regular_file_required')
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            yield
-        finally:
-            os.close(handle)
+    require_initialized(lab)
+    with lab.store.writer_lock(max_names=lab.max_artifacts):
+        yield
 
 
 def periodic_report(lab, period='all', *, clock=now_utc, tolerance_minutes=10, historical=False):
     days = {'24h': 1, '7d': 7, '30d': 30, 'all': None}[period]
     current = utc(clock())
-    comparisons = lab.comparisons(clock=clock, tolerance_minutes=tolerance_minutes, historical=historical)
-    comparisons = tuple(c for c in comparisons if utc(c.forecast_point_at_utc) <= current and
-                        (days is None or utc(c.forecast_point_at_utc) >= current-timedelta(days=days)))
-    runs, _ = lab.facts()
+    start = (current-timedelta(days=days)).isoformat(timespec='microseconds') if days else None
+    end = current.isoformat(timespec='microseconds')
+    # Exact percentiles retain values: explicitly bound this materialization.
+    count = sum(1 for m in lab.store.iter_metadata(max_names=lab.max_artifacts)
+                if m['artifact_type'] in ('reference_comparison', 'reference_comparison_state')
+                and (start is None or m['time_max'] >= start) and m['time_min'] <= end)
+    if count > REPORT_LIMIT:
+        raise ValueError('field_lab_report_operational_limit_exceeded_use_shorter_period')
+    states = lab.comparison_states(start=start, end=end, tolerance_minutes=tolerance_minutes, historical=historical)
+    comparisons = tuple(value[1] for value in states.values())
+    if not comparisons:
+        targets = sum(m['point_count']*3 for m in lab.store.iter_metadata(max_names=lab.max_artifacts)
+                      if m['artifact_type'] == 'reference_forecast' and
+                      (start is None or m['time_max'] >= start) and m['time_min'] <= end)
+        if targets > REPORT_LIMIT:
+            raise ValueError('field_lab_report_operational_limit_exceeded_use_shorter_period')
+        # Read-only compatibility reconstruction, filtered at the target boundary.
+        comparisons = lab.comparisons(clock=clock, tolerance_minutes=tolerance_minutes,
+                                      historical=historical, start=start, end=end)
+        if len(comparisons) > REPORT_LIMIT:
+            raise ValueError('field_lab_report_operational_limit_exceeded_use_shorter_period')
+    run_ids = {c.forecast_run_id for c in comparisons}
+    from astropilot.reference_station_lab import ReferenceForecastRun
+    runs = (ReferenceForecastRun(**json.loads(lab.store.load(idempotency_key=key).payload_json)) for key in run_ids)
     return report(comparisons, runs)
 
 
@@ -92,24 +142,23 @@ def cycle(lab, *, clock=now_utc, client=None, capture=capture_forecast, toleranc
     from astropilot.reference_station_lab import validate_tolerance
     validate_tolerance(tolerance_minutes)
     current = utc(clock())
-    check_capacity(lab, reserve=15000)
-    items = artifacts(lab)
+    items = tuple(artifacts(lab, ('catalog_activation_event', 'collection_success')))
     activations = [a for a in items if a.artifact_type == 'catalog_activation_event']
     sync_due = not activations or current-max(utc(a.created_at_utc) for a in activations) >= timedelta(days=7)
-    runs, _ = lab.facts()
+    runs = tuple(lab.iter_facts(artifact_type='reference_forecast', start=(current-timedelta(hours=12)).isoformat()))
     plan = dict(catalogue_due=sync_due, forecast_interval_hours=12, horizon_hours=24,
                 revision_horizon_days=REVISION_DAYS, dry_run=dry_run)
     if dry_run:
         return dict(plan, writes=0, network_calls=0)
     with cycle_lock(lab):
         # Re-read after locking: another cycle may have completed while planning.
-        items = artifacts(lab)
+        items = tuple(artifacts(lab, ('catalog_activation_event', 'collection_success')))
         successes = [a for a in items if a.artifact_type == 'collection_success']
         if successes and current-max(utc(a.created_at_utc) for a in successes) < timedelta(hours=1):
             return dict(plan, no_op=True, writes=0, network_calls=0)
-        capacity = check_capacity(lab, reserve=15000)
-        lab.write_budget = int(lab.max_artifacts*STOP)-capacity['count']-1
-        runs, _ = lab.facts()
+        capacity = check_capacity(lab)
+        lab.write_budget = int(min(lab.max_artifacts, OPERATIONAL_SOFT_LIMIT)*STOP)-capacity['count']-1
+        runs = tuple(lab.iter_facts(artifact_type='reference_forecast', start=(current-timedelta(hours=12)).isoformat()))
         client = client or MeteoSwissReferenceClient()
         if isinstance(client, MeteoSwissReferenceClient):
             client.asset_audit_sink = lambda payload:save_asset_audit(lab, payload)
@@ -133,28 +182,37 @@ def cycle(lab, *, clock=now_utc, client=None, capture=capture_forecast, toleranc
                 created += 1
         collected = lab.collect(client, clock=clock, tolerance_minutes=tolerance_minutes,
                                 revision_days=REVISION_DAYS, coalesce=True)
-        comparisons = lab.comparisons(clock=clock, tolerance_minutes=tolerance_minutes, persist=True)
-        runs, _ = lab.facts()
-        rows = report(comparisons, runs)
+        lab.comparisons(clock=clock, tolerance_minutes=tolerance_minutes, persist=True, incremental=True)
+        rows = periodic_report(lab, '24h', clock=clock, tolerance_minutes=tolerance_minutes)
         payload = {'schema_version': 1, 'rows': rows}
         lab.save('reference_report', digest(payload), payload, current.isoformat())
         # Success is coalesced by UTC hour, keeping operational evidence bounded.
         stamp = current.replace(minute=0, second=0, microsecond=0).isoformat()
         lab.save('collection_success', 'success-'+digest(stamp), {'at_utc': stamp, 'completed_at_utc': utc(clock()).isoformat()}, stamp)
-        return dict(plan, forecasts_created=created, acquisitions_created=collected, rows=rows, usage=usage(lab, clock=clock))
+        return dict(plan, forecasts_created=created, acquisitions_created=collected,
+                    noncollectable_targets=lab.noncollectable_targets, rows=rows, usage=usage(lab, clock=clock))
 
 
+from astropilot.reference_station_lab import writer_method
+
+
+@writer_method
 def save_asset_audit(lab, payload):
-    previous = [json.loads(a.payload_json) for a in artifacts(lab)
-                if a.artifact_type == 'official_asset_activation' and a.source_id == payload['station']]
-    previous = [p for p in previous if p['asset_href'] == payload['asset_href']]
-    if previous:
-        maximum = max(p['retrieved_at_utc'] for p in previous)
-        latest = [p for p in previous if p['retrieved_at_utc'] == maximum]
-        if len({p['sha256'] for p in latest}) != 1:
-            raise ValueError('field_lab_asset_activation_ambiguous')
-        if latest[0]['sha256'] == payload['sha256']:
-            return False
+    maximum, hashes = None, set()
+    for artifact in lab.store.iter_artifacts(max_names=lab.max_artifacts,
+            artifact_type='official_asset_activation', station_id=payload['station']):
+        previous = json.loads(artifact.payload_json)
+        if previous['asset_href'] != payload['asset_href']:
+            continue
+        stamp = utc(previous['retrieved_at_utc'])
+        if maximum is None or stamp > maximum:
+            maximum, hashes = stamp, {previous['sha256']}
+        elif stamp == maximum:
+            hashes.add(previous['sha256'])
+    if len(hashes) > 1:
+        raise ValueError('field_lab_asset_activation_ambiguous')
+    if hashes == {payload['sha256']}:
+        return False
     return lab.save('official_asset_activation', 'asset-'+digest(payload), payload,
                     payload['retrieved_at_utc'], payload['station'])
 
@@ -177,15 +235,29 @@ def scheduler_document():
 
 
 def scheduler(operation, *, runner=subprocess.run):
+    if operation == 'status':
+        return _scheduler(operation, runner=runner)
+    if fcntl is None or os.name != 'posix':
+        raise RuntimeError('field_lab_secure_lock_unavailable')
+    lab = ReferenceLab()
+    require_initialized(lab)
+    with lab.store.writer_lock(max_names=CAPACITY):
+        return _scheduler(operation, runner=runner)
+
+
+def _scheduler(operation, *, runner=subprocess.run):
     path = scheduler_path()
-    domain = 'gui/'+str(os.getuid())
+    domain = 'gui/'+str(os.getuid()) if hasattr(os, 'getuid') else None
     if operation == 'status':
         result = {'installed': path.exists(), 'plist': str(path), 'enabled': False}
         if path.exists() and sys.platform == 'darwin':
             result['enabled'] = runner(['launchctl', 'print', domain+'/'+LABEL], capture_output=True).returncode == 0
         return result
     if operation == 'install':
-        initialize()
+        if fcntl is None or os.name != 'posix':
+            raise RuntimeError('field_lab_secure_lock_unavailable')
+        with ReferenceLab().store._directory(root_only=True):
+            pass
         document = plistlib.dumps(scheduler_document(), sort_keys=True).decode()
         store = ReferenceLab().store
         # Scheduler plans are immutable; uninstall before changing interpreter/configuration.
@@ -237,20 +309,28 @@ def scheduler(operation, *, runner=subprocess.run):
 
 
 def status(lab):
-    items = artifacts(lab)
-    latest = lambda kind: max((a.created_at_utc for a in items if a.artifact_type == kind), default=None)
-    observations = [json.loads(a.payload_json)['observed_at_utc'] for a in items if a.artifact_type == 'reference_acquisition']
+    latest = {}
+    last_observed = None
+    errors = 0
+    for meta in lab.store.iter_metadata(max_names=lab.max_artifacts):
+        kind, stamp = meta['artifact_type'], meta['created_at_utc']
+        latest[kind] = max(latest.get(kind, stamp), stamp)
+        if kind == 'reference_acquisition':
+            last_observed = max(last_observed or meta['time_max'], meta['time_max'])
+        errors += kind == 'collection_error' and utc(stamp) >= now_utc()-timedelta(days=7)
     return dict(root=str(field_lab_root()), usage=usage(lab), scheduler=scheduler('status'),
-                last_success=max((json.loads(a.payload_json).get('completed_at_utc', a.created_at_utc) for a in items if a.artifact_type == 'collection_success'), default=None),
-                last_forecast=latest('reference_forecast'),
-                last_acquisition=latest('reference_acquisition'),
-                last_official_observation=max(observations, default=None), last_comparison=latest('reference_comparison'),
-                recent_errors=sum(a.artifact_type == 'collection_error' and utc(a.created_at_utc) >= now_utc()-timedelta(days=7) for a in items))
+                last_success=latest.get('collection_success'), last_forecast=latest.get('reference_forecast'),
+                last_acquisition=latest.get('reference_acquisition'), last_official_observation=last_observed,
+                last_comparison=latest.get('reference_comparison_state'),
+                comparison_time_unavailable=('reference_comparison' in latest and 'reference_comparison_state' not in latest),
+                recent_errors=errors)
 
 
 class BoundedLogHandler(logging.Handler):
     """Pinned root, no-follow files, 1 MiB each, three backups, bounded records."""
     def emit(self, record):
+        if fcntl is None or os.name != 'posix':
+            raise RuntimeError('field_lab_secure_lock_unavailable')
         data = (self.format(record)[:65535] + '\n').encode('utf-8')[:65536]
         with ReferenceLab().store._directory(root_only=True) as fd:
             lock = os.open('.collection-log.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=fd)
@@ -290,7 +370,9 @@ class BoundedLogHandler(logging.Handler):
 
 def scheduled_main():
     """Separate bounded logs; launchd receives no unbounded stdout/stderr files."""
-    initialize()
+    if fcntl is None or os.name != 'posix':
+        raise RuntimeError('field_lab_secure_lock_unavailable')
+    require_initialized(ReferenceLab())
     logger = logging.getLogger('field-lab')
     handler = BoundedLogHandler()
     logger.addHandler(handler)
@@ -314,7 +396,15 @@ def record_error(error):
         lab = ReferenceLab(max_artifacts=CAPACITY)
         with lab.store._directory(root_only=True):
             pass
-        check_capacity(lab)
+        with lab.store.writer_lock(max_names=CAPACITY):
+            check_capacity(lab)
+            _record_error_locked(lab, error)
+    except (ValueError, RuntimeError, OSError):
+        pass
+
+
+def _record_error_locked(lab, error):
+    try:
         stamp = now_utc().replace(minute=0, second=0, microsecond=0).isoformat()
         key = 'error-'+digest(stamp)
         if lab.store.load(idempotency_key=key) is None:
