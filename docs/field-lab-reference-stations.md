@@ -301,3 +301,24 @@ missing observations, wind exclusion, statistics, idempotence, immutable reader
 validation, user storage preservation, CLI dry-run and inherited capability/
 namespace protections. A real smoke is limited to one or two explicitly selected
 stations and an isolated temporary root; no expired fake forecast is published.
+
+## Validation of this implementation (2026-10-05)
+
+- Offline Field Lab + packaging contracts: 115 passed, 1 filesystem-specific skip.
+- Full suite with bundled Node and local-listener capability: 4,901 passed,
+  1 filesystem-specific skip (44 existing astronomy warnings).
+- Locked dependency resolution and wheel build succeeded. The wheel includes the
+  explicit CLI entry point and versioned selection config; beta version unchanged.
+- Controlled real smoke at 10:41 UTC, NEU/CDF only: catalogue 159 stations;
+  each station's official NOW CSV passed STAC checksum verification and yielded
+  189 parsed variable values (63 ten-minute rows, three variables). Latest official
+  timestamp: 10:20 UTC. Read-only parser inspection did not persist these past values.
+- Production forecast capture stored two genuinely prospective 24-point snapshots
+  plus durable completion seals in a fresh temporary Field Lab (five artifacts
+  including catalogue). Every artifact is calibration-ineligible. No user root
+  was created. Dry-run cycle made zero network calls and zero writes.
+- The real prospective report is empty until targets mature; no real MAE/bias is
+  claimed from the smoke. End-to-end comparison/statistics are verified offline.
+- No push, PR or scheduler was created. Physical sharding, cross-year observation
+  asset discovery, explicit validated QC and compatible mean-wind aggregation
+  remain deferred. The accepted local P3 rename limitation is unchanged.
