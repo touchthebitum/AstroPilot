@@ -710,6 +710,14 @@ provider/model and reason counts. Prospective is the default; historical remains
 a distinct explicitly selected cohort. CSV encodes reason maps as sorted JSON;
 JSON/CSV columns and ordering follow the existing deterministic report schema.
 `--export` saves immutable deduplicated content inside the isolated lab.
+
+The recalculation performed by `compare` remains incremental. After that step,
+`compare --export` aggregates the complete active state of persisted comparisons
+for the requested scope and cohort, with the same semantics as
+`report --period all`. A rerun without changes retains the existing active comparisons
+and does not produce an empty export. A partial revision replaces the affected
+active comparison while preserving all other active comparisons in the export.
+
 Overlapping run/target pairs remain distinct forecast leads, not independent
 samples. No causal conclusion, recalibration or automated provider verdict follows.
 
