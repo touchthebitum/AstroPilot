@@ -1,9 +1,9 @@
-# Reference Weather Station Field Lab: prerequisite isolation
+# Reference Weather Station Field Lab v1 — prospective MeteoSwiss validation
 
-This micro-lot provides offline storage primitives only. **No station collection
-may begin until this isolation lot has been merged and reviewed.** MeteoSwiss
-clients, STAC/CSV ingestion, forecasts, comparisons, reporting, scheduling,
-calibration and UI are outside this change.
+The prerequisite isolation shipped in PR #313, merged at
+`77040e8536dab67268ee5487f41a91932eef978d`. This extension adds an internal,
+prospective reference pipeline using that boundary. It does not recalibrate the
+engine, change scores/ranking/provider reliability, or write user data.
 
 ## Filesystem boundary
 
@@ -121,3 +121,183 @@ Review this lot read-only and merge it before any station integration. Subsequen
 station code must construct only the dedicated lab model/store and preserve this
 boundary; it must not reuse user application factories or publish lab artifacts
 into user sessions, profiles or histories.
+
+
+## Prospective protocol and dedicated models
+
+`ReferenceStation`, `ReferenceForecastRun`, `ReferenceObservation` and
+`ReferenceComparison` are dedicated frozen v1 dataclasses in
+`astropilot/reference_station_lab.py`. Every persisted document is wrapped in
+`FieldLabArtifact`: namespace/provenance `field_lab_reference_station`,
+`calibration_eligible=false`, immutable canonical payload SHA-256 and v1 schema.
+No user project, observation, session, mission, profile or decision is fabricated.
+
+1. Synchronize official metadata and persist a catalogue plus active selection.
+2. Call **the production `astro_score.fetch_weather` chain**, with exact station
+   coordinates. Production resolves the timezone and validates provider units,
+   cadence, values and grid distance. The provider is Open-Meteo **for forecasts
+   only**; observations are exclusively MeteoSwiss.
+3. Keep future points within 24 hours (configurable 1–168), temperature, humidity
+   and wind, requested/grid coordinates, provider retrieval time, grid altitude,
+   station metadata, code SHA/version and snapshot digest. The provider does not
+   expose its resolved model: record `provider_default_unspecified`, never infer
+   a model. Require a clean tracked Git checkout build (forecast capture from a standalone
+   installed wheel without its Git checkout is unsupported). A fresh provider call creates a new
+   run, never reconstructs an old run.
+4. Persist the forecast and then an immutable seal. Both retrieval and creation
+   must precede every target. Check the clock before and after the durable
+   forecast publication, then record that durable completion time in the seal. A missed deadline leaves an
+   unsealed artifact, which readers exclude. The completion time recorded in the seal must also precede every
+   target. Identical already-sealed runs are no-ops, including after the deadline.
+5. After target + tolerance has passed, collect official measurements, select the
+   unique nearest observation and compare stored facts only. Any observation at
+   or before retrieval/creation produces `leakage_detected`, even when nearby.
+
+Local wall clocks must be correct. Digests protect against accidental changes,
+not a hostile owner forging artifacts or changing the clock. The accepted P3
+opened-directory rename limitation above continues to apply to every operation.
+
+## Official source contract and attribution
+
+Source: **MeteoSwiss**. Documentation inspected 2026-10-05:
+
+- https://opendatadocs.meteoswiss.ch/a-data-groundbased/a1-automatic-weather-stations
+- https://opendatadocs.meteoswiss.ch/general/download
+- Collection: `ch.meteoschweiz.ogd-smn`
+- STAC: `https://data.geo.admin.ch/api/stac/v1/collections/ch.meteoschweiz.ogd-smn`
+- Metadata under `https://data.geo.admin.ch/ch.meteoschweiz.ogd-smn/`:
+  `ogd-smn_meta_stations.csv`, `ogd-smn_meta_parameters.csv`,
+  `ogd-smn_meta_datainventory.csv`.
+- Per-station items `/items/{lowercase-three-letter-id}`, assets
+  `ogd-smn_{id}_t_now.csv` (today) and `_t_recent.csv` (current year to yesterday).
+
+Reuse the existing read-only STAC downloader: official HTTPS host, no redirects,
+fixed timeouts, bounded asset download and mandatory STAC SHA-256 checksum.
+CSV is CP1252, semicolon-separated; `reference_timestamp` has format
+`DD.MM.YYYY HH:MM`, explicitly interpreted in UTC as documented. Metadata supplies
+name, coordinates, altitude and station identifiers; active variables come from
+inventory entries without `data_till`. The parameter catalogue must confirm exact
+units and `T` granularity before a catalogue is accepted. Persist a combined
+metadata digest and the complete station catalogue, with explicit active IDs.
+
+| Provider variable | Official parameter | Unit | v1 comparison |
+| --- | --- | --- | --- |
+| temperature_2m | tre200s0 | °C | instantaneous air temperature at 2 m |
+| relative_humidity_2m | ure200s0 | % | instantaneous relative humidity at 2 m |
+| wind_speed_10m | fu3010z0 | km/h | captured; non-comparable aggregation semantics |
+
+`fkl010z0` is the official mean scalar wind in m/s, but is not substituted for the
+km/h parameter. The forecast provider does not establish matching ten-minute
+aggregation semantics, so wind contributes no numerical error statistics.
+Precipitation and pressure are deferred. No cloud cover, seeing, transparency or
+OIII quality is inferred from station data.
+
+The current CSV supplies no per-measurement validated QC flag. Finite,
+range-checked temperature/humidity values are comparable under the **explicit
+unverified official QC cohort policy**, reason
+`comparable_unverified_official_qc`; they are not claimed to be validated.
+Empty cells and absent variable columns become missing, malformed/non-finite/
+out-of-range values become invalid, never zero. Any nonempty supplied `_qc` field
+is conservatively rejected until its official semantics are implemented.
+Official revisions are immutable observation versions keyed by measurement
+content; the latest first-acquisition timestamp wins, with digest tie-breaking.
+Original retrieval metadata is preserved on identical re-acquisition.
+
+## Station selection and volume
+
+`astropilot/reference_stations_v1.json` is the packaged, versioned default:
+NEU, CDF, CHA, PAY, BER, BAS, GVE, SIO, LUG, DAV, JUN, SAE (12 stations).
+NEU/CDF/CHA cover Neuchâtel/Jura; the remaining sites cover lowlands, western,
+central, southern and alpine Switzerland, including high altitude JUN/SAE.
+Selection requires active temperature + humidity + mean wind inventory entries.
+Unavailable IDs fail explicitly rather than silently changing the cohort.
+`--stations NEU,CDF` overrides selection; `--all` explicitly opts into all eligible
+sites. Ordinary selection is capped at 30. No full-Switzerland smoke or scheduler
+is run. Catalogue snapshots preserve the actual selection used. Each forecast
+also embeds its station metadata.
+
+## Matching and descriptive reports
+
+Policy `nearest-unique-no-interpolation-v1`, default tolerance **10 minutes**,
+configurable 0–30. This is a dedicated Field Lab policy because the existing user
+comparison uses user evidence models and validated QC; its nearest-neighbor and
+ambiguous-tie refusal are preserved here. Select per station/variable, deduplicate
+measurement revisions first, reject equal nearest timestamps, store exact offset
+**forecast timestamp minus observation timestamp**, and refuse out-of-tolerance
+pairs. No interpolation or hourly aggregation occurs. Collection keeps only
+past observations within tolerance of due stored targets. Before the full
+matching window closes, a target is pending and omitted from report N.
+
+Reports group by station/variable/provider/model/cohort, plus station `ALL` for
+variable-level global aggregates. They provide N comparable/non-comparable/
+missing, signed forecast-minus-observed bias, MAE, median, linearly interpolated
+p50/p90 absolute error, target period bounds, source, altitude, policy, tolerance
+and reason counts. Empty statistics are JSON null. N counts run/target/variable
+pairs; overlapping forecast runs remain distinct leads and are not independent
+samples. Reports recompute from sealed snapshots and current immutable observation
+versions, so old missing comparison artifacts cannot double-count a later match.
+Persisted comparison artifacts remain audit evidence rather than an additive
+statistics table. Re-run reports with the same tolerance for comparable cohorts.
+
+Backfill models can be marked `prospective=false`; default readers/reporting exclude
+these. `report --historical` selects only `historical_backfill`, never mixes it into
+prospective totals. There is no historical forecast reconstruction command.
+Cross-year observation collection is explicitly unsupported in v1; historical
+asset discovery must be added before evaluating previous-year targets.
+
+## Commands and export
+
+Use a separate **empty** root, never under the user root:
+
+```sh
+export FIELD_LAB_DATA_DIR=/absolute/separate/nightmerit-field-lab
+uv run astropilot-field-lab stations sync
+uv run astropilot-field-lab stations list
+uv run astropilot-field-lab forecast-run --stations NEU,CDF --dry-run
+uv run astropilot-field-lab forecast-run --stations NEU,CDF --hours 24
+# Later, after targets + tolerance have elapsed:
+uv run astropilot-field-lab observations collect
+uv run astropilot-field-lab compare --tolerance-minutes 10
+uv run astropilot-field-lab report --export
+uv run astropilot-field-lab report --historical
+uv run astropilot-field-lab cycle --dry-run
+uv run astropilot-field-lab cycle
+```
+
+All output is console JSON, directly exportable using shell redirection. `--export`
+saves an immutable report artifact **inside the isolated store**, with the same
+provenance as other artifacts. The CLI offers no arbitrary output path. `cycle`
+collects due observations, compares and prints the report; capture new forecasts
+explicitly with `forecast-run`. `cycle --dry-run` performs no network call and no
+write, including when the configured root does not yet exist. No cron, launchd
+or GitHub Actions are introduced.
+
+Storage keeps #313's descriptor-pinned hashed filenames under `artifacts/`.
+Logical partitions are one catalogue version, one forecast per run/station,
+one seal per run, one observation per station/timestamp/variable/revision and
+one comparison per run/target/variable/observation/policy. No monolithic history
+JSON or mutable index is introduced. The reader checks namespace, digest and
+filename identity; unknown filenames, malformed envelopes and symlinks fail
+closed. Identical scientific facts are no-ops, changed content with an existing
+key conflicts. Enumeration currently scans all artifacts; physical directory
+sharding and retention are deferred, and should be separately reviewed before
+long-term large-volume operation.
+
+## Scientific limitations and validation
+
+Stations represent local meteorological measurements, not complete astronomical
+truth. Provider grid altitude/terrain differs from station exposure. Indirect
+assimilation of past station measurements by forecast models is possible; the
+strict timestamp protocol prevents direct future-observation leakage but does
+not claim statistical independence from the forecasting system. This is
+**descriptive weather validation**, with no automatic calibration, reliability
+update, adjusted forecast or score/ranking change.
+
+Tests under `tests/field_lab/` use minimal official-shaped catalogue/parameter/
+inventory fixtures, missing/QC/invalid-value 10-minute rows and injected provider
+snapshots. Network tests are never required by CI. They cover model identity,
+metadata units, timestamps, sealing/deadlines, leakage, unique nearest matching,
+missing observations, wind exclusion, statistics, idempotence, immutable reader
+validation, user storage preservation, CLI dry-run and inherited capability/
+namespace protections. A real smoke is limited to one or two explicitly selected
+stations and an isolated temporary root; no expired fake forecast is published.

@@ -83,7 +83,7 @@ def test_wheel_includes_only_immutable_product_assets():
     package_data = _pyproject()["tool"]["setuptools"]["package-data"]
 
     assert package_data == {
-        "astropilot": ["knowledge/objects/*.json", "web/*"],
+        "astropilot": ["knowledge/objects/*.json", "web/*", "reference_stations_v1.json"],
     }
     declared_patterns = package_data["astropilot"]
     assert "data/user_profile.json" not in declared_patterns
@@ -94,7 +94,7 @@ def test_obsolete_image_quality_demo_is_not_shipped_as_a_module():
     assert not (ROOT / "decision" / "test_decision_context_image_quality.py").exists()
 
 
-def test_launcher_is_directly_executable_without_changing_entry_points():
+def test_launcher_and_internal_field_lab_entry_points_are_explicit():
     launcher = (ROOT / "astropilot" / "launcher.py").read_text(encoding="utf-8")
     scripts = _pyproject()["project"]["scripts"]
 
@@ -102,6 +102,7 @@ def test_launcher_is_directly_executable_without_changing_entry_points():
     assert scripts == {
         "astropilot": "astro_score:main",
         "astropilot-app": "astropilot.launcher:main",
+        "astropilot-field-lab": "astropilot.reference_station_cli:main",
     }
 
 

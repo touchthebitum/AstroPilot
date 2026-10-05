@@ -1,0 +1,5 @@
+station_abbr;reference_timestamp;tre200s0;ure200s0;fu3010z0;tre200s0_qc
+NEU;05.10.2026 12:00;10;80;3.6;
+NEU;05.10.2026 12:10;;NaN;-999;
+NEU;05.10.2026 12:20;11;81;4;bad
+NEU;05.10.2026 14:00;12;82;4;

@@ -225,3 +225,23 @@ class FileFieldLabStore:
                 return artifact
         except FileNotFoundError:
             return None
+
+    def iter_artifacts(self):
+        """Read-only enumeration through the same pinned, fail-closed boundary."""
+        try:
+            with self._directory() as fd:
+                with os.scandir(fd) as entries:
+                    names = sorted(entry.name for entry in entries)
+                for name in names:
+                    if name.startswith(".") and name.endswith(".tmp"):
+                        continue
+                    if re.fullmatch(r"[0-9a-f]{64}\.json", name) is None:
+                        raise ValueError("field_lab_unexpected_artifact_file")
+                    artifact = FieldLabArtifact.decode(self._read(fd, name))
+                    if self._name(artifact.idempotency_key) != name:
+                        raise ValueError("field_lab_identity_mismatch")
+                    yield artifact
+        except FileNotFoundError:
+            if self._root.exists():
+                raise
+            return

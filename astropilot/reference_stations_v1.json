@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "selection_version": "smn-prospective-v1",
+  "criteria": "Active 2m temperature, relative humidity and mean wind; Jura/Neuchatel focus plus geographic and altitude coverage. Explicit failure if any configured station is unavailable.",
+  "station_ids": ["NEU", "CDF", "CHA", "PAY", "BER", "BAS", "GVE", "SIO", "LUG", "DAV", "JUN", "SAE"]
+}
