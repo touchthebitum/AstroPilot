@@ -1,0 +1,7 @@
+station_abbr;parameter_shortname;meas_cat_nr;data_since;data_till;owner
+CDF;fu3010z0;1;01.02.2004 00:00;;MeteoSchweiz
+CDF;tre200s0;1;01.02.2004 00:00;;MeteoSchweiz
+CDF;ure200s0;1;01.02.2004 00:00;;MeteoSchweiz
+NEU;fu3010z0;1;01.02.2004 00:00;;MeteoSchweiz
+NEU;tre200s0;1;01.02.2004 00:00;;MeteoSchweiz
+NEU;ure200s0;1;01.02.2004 00:00;;MeteoSchweiz

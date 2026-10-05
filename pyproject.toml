@@ -19,6 +19,7 @@ dependencies = [
 [project.scripts]
 astropilot = "astro_score:main"
 astropilot-app = "astropilot.launcher:main"
+astropilot-field-lab = "astropilot.reference_station_cli:main"
 
 [project.optional-dependencies]
 packaging = [
@@ -50,7 +51,7 @@ pythonpath = [
 py-modules = ["astro_score"]
 
 [tool.setuptools.package-data]
-astropilot = ["knowledge/objects/*.json", "web/*"]
+astropilot = ["knowledge/objects/*.json", "web/*", "reference_stations_v1.json"]
 
 [tool.setuptools.packages.find]
 include = [
