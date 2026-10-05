@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -1117,8 +1118,10 @@ def test_weather_refusal_keeps_global_confidence_cartouche_off_blocked_screen():
     )[0]
 
     assert '<div id="recommendation-confidence" class="recommendation-reliability" hidden' in page
-    assert "payload.weather_decision.presentation.label" in refusal
-    assert "payload.weather_decision.presentation.summary" in refusal
+    assert "showTonightUnavailable(payload)" in refusal
+    presentation = script.split("function showTonightUnavailable(payload)", 1)[1].split("function showMessage", 1)[0]
+    assert "payload.weather_decision.presentation.label" in presentation
+    assert "payload.weather_decision.presentation.summary" in presentation
     assert "return;" in refusal
     assert "renderDecision(payload)" not in refusal
 
@@ -1274,19 +1277,21 @@ def test_primary_status_render_executes_without_fabricating_missing_values(tmp_p
 const values = {};
 const state = {};
 const ui = {openMission: {dataset: {}}, recommendationConfidencePanel: {hidden: true}, recommendationConfidence: {}, primaryIntentChoice: {}};
-const document = {querySelector: () => ({style: {}})};
+const document = {querySelector: () => ({style: {}, textContent: ""}), querySelectorAll: () => []};
+const appliedUiMode = "simple";
 const labels = {actions: {
   start_project: "Commencer ce projet",
   continue_project: "Continuer ce projet",
 }, quality: {}, factors: {}};
 function clearAcceptedMission() {}
 function setCurrentFieldObservationDecision(decision) { state.currentDecision = decision; }
+function windowTimezone() {return "UTC";}
 function clock(value) {return value || null;}
 function duration(value) {return value ? String(value) : "Non précisée";}
 function dateLabel(value) {return value;}
 function text(key, value) {values[key] = value;}
 function setList(key, values, fallback) {text(key, values.length ? values : fallback);}
-function reasonText(value) {return value;}
+function reasonText(value) {return value.title || value.value;}
 function renderWeatherTrust() {}
 function renderAlternatives() {}
 function renderIntentChoice() {}
@@ -1310,6 +1315,16 @@ function run() {
   renderDecision({target: "IC1396", catalog_key: "IC1396", decision_id: "continue-decision",
     action: "continue_project", target_decision_status: "recommended"});
   results.continue_project = {values: JSON.parse(JSON.stringify(values))};
+  results.reasons = [];
+  for (const explanation of [undefined, {positives:["Cible bien placée — Altitude favorable"]},
+      {information:["Nouvelle justification"]}, {positives:[{}]}]) {
+    // This harness uses string reasons; give supplied values the title field.
+    if (explanation) for (const key of ["positives", "information"]) {
+      explanation[key] = (explanation[key] || []).map(value => typeof value === "string" ? {title:value} : value);
+    }
+    renderDecision({target_decision_status:"recommended", explanation, astro_quality:{limiting_factor:"clouds"}});
+    results.reasons.push(values["#decision-reason"]);
+  }
   return JSON.stringify(results);
 }
 '''
@@ -1322,6 +1337,10 @@ function run() {
     path.write_text(harness)
     completed = subprocess.run([*command, str(path)], text=True, capture_output=True, check=True)
     results = json.loads(completed.stdout)
+    assert results['reasons'] == [
+        'Pourquoi : non précisé', 'Pourquoi : Cible bien placée — Altitude favorable',
+        'Pourquoi : Nouvelle justification', 'Pourquoi : non précisé',
+    ]
     for status in ('insufficient_evidence', 'not_recommended'):
         rendered = results[status]
         assert rendered['hidden'] and rendered['disabled']
@@ -1377,6 +1396,7 @@ const ui = {
   addObservationDecision: {hidden: true},
 };
 const rendered = {};
+const document = {querySelector: () => null};
 function text(selector, value) { rendered[selector] = value; }
 function show(view) { rendered.view = view; }
 function syncFieldObservationContext() {}
@@ -1418,3 +1438,125 @@ def test_terrain_groups_existing_controls_outside_decision():
     for control in ("Message", "Decision"):
         assert f'ui.addObservation{control}.addEventListener("click", () => openFieldObservation("decision"));' in script
     assert 'document.querySelector("#outcome-reopen").addEventListener("click", reopenRecentFieldObservations);' in script
+
+
+def test_compact_tonight_keeps_essential_fields_and_critical_warnings_outside_details():
+    from html.parser import HTMLParser
+
+    class Elements(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack = []
+            self.by_id = {}
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if "id" in attrs:
+                self.by_id[attrs["id"]] = (attrs, list(self.stack))
+            if tag not in {"input", "meta", "link", "br", "hr", "img", "path", "circle"}:
+                self.stack.append((tag, attrs))
+
+        def handle_endtag(self, tag):
+            for index in range(len(self.stack) - 1, -1, -1):
+                if self.stack[index][0] == tag:
+                    self.stack = self.stack[:index]
+                    break
+
+    page = Elements()
+    page.feed(make_client().get("/").text)
+    for field in ("recommendation", "target-name", "window-value", "duration-value",
+                  "filter-value", "filter-note", "decision-reason", "open-mission", "decision-warning"):
+        _, ancestors = page.by_id[field]
+        assert any(attrs.get("id") == "decision-essential" for _, attrs in ancestors)
+        assert all(tag != "details" for tag, _ in ancestors)
+    assert page.by_id["decision-warning"][0]["role"] == "status"
+    for field in ("quality-score", "recommendation-confidence-value"):
+        assert any(tag == "details" and "data-mode-disclosure" in attrs
+                   for tag, attrs in page.by_id[field][1])
+    for field in ("risks-list", "classic-weather-age"):
+        assert all(tag != "details" for tag, _ in page.by_id[field][1])
+
+
+def test_unavailable_tonight_guidance_preserves_technical_evidence_and_availability():
+    import shutil
+    import subprocess
+    import pytest
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for the renderer test")
+    source = make_client().get("/ui/app.js").text
+    functions = source[source.index("const partialMessages ="):source.index("function showMessage(")]
+    harness = r'''
+const assert = require('node:assert/strict');
+const elements = {};
+const document = {querySelector: key => elements[key] ||= {hidden:true,open:false}};
+const state = {availability:{mode:'full_night'}};
+const ui = {retry:{}};
+let appliedUiMode = 'simple';
+let shown;
+function text(key,value) {document.querySelector(key).textContent=value;}
+function showMessage(title,body) {shown={title,body};}
+''' + source[source.index('function hoursToIsoDuration('):source.index('function normalizeLocalDateTime(')] + functions + r'''
+for (const stage of ['no_productive_slice','continuous_window_too_short']) {
+ const payload={status:'no_productive_window',actionability_refusal:{
+  conclusion:'no_productive_window',status:'constraints_refusal',refusal_stage:stage,
+  best_productive_window_minutes:30,required_continuous_minutes:60,
+  productivity_breakdown:{best_slice_score:.39,productive_slice_threshold:.5,
+   best_slice_tie_count:1,evaluated_slice_count:8,losses:{cloud:.4}}}};
+ for (const mode of ['simple','pro']) {
+  appliedUiMode=mode;showTonightUnavailable(payload);
+  assert.match(shown.body,/Réessayez plus tard/);
+  assert.doesNotMatch(shown.body,/seuil|points/i);
+
+  assert.equal(document.querySelector('#message-details').open,mode==='pro');
+  assert.match(document.querySelector('#message-technical').textContent,/Seuil|seuil/);
+  assert.equal(document.querySelector('#message-edit-availability').hidden,true);
+ }
+}
+state.availability={mode:'duration',duration:hoursToIsoDuration('0.5')};
+showTonightUnavailable({status:'no_productive_window',actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}});
+assert.equal(document.querySelector('#message-edit-availability').hidden,false);
+state.availability={mode:'duration',duration:hoursToIsoDuration('8')};
+showTonightUnavailable({status:'no_productive_window',actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}});
+assert.equal(document.querySelector('#message-edit-availability').hidden,true);
+for (const input of ['1','1.5']) {
+ state.availability={mode:'duration',duration:hoursToIsoDuration(input)};
+ assert.equal(canEditRefusedAvailability({status:'no_productive_window',actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}}),false);
+}
+state.availability={mode:'duration',duration:hoursToIsoDuration('0.5')};
+for (const stage of ['no_productive_slice','unknown',null]) {
+ assert.equal(canEditRefusedAvailability({status:'no_productive_window',actionability_refusal:{status:'constraints_refusal',refusal_stage:stage,required_continuous_minutes:60}}),false);
+}
+assert.equal(canEditRefusedAvailability({status:'weather_refused',actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}}),false);
+assert.equal(hoursToIsoDuration('0.5'),'PT30M');
+assert.equal(hoursToIsoDuration('1'),'PT1H');
+assert.equal(hoursToIsoDuration('1.5'),'PT1H30M');
+assert.equal(isoAvailabilityMinutes('PT1H30M'),90);
+for (const invalid of [null,undefined,0,.5,'','PT','PT0M','PT-30M','PT0.5H','P1D','PT60M','PT30Mgarbage','PT30M\n','PT9007199254740992H']) {
+ state.availability={mode:'duration',duration:invalid};
+ assert.equal(isoAvailabilityMinutes(invalid),null);
+ assert.equal(canEditRefusedAvailability({status:'no_productive_window',actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}}),false);
+}
+state.availability=null;
+showTonightUnavailable({status:'no_recommendation'});
+assert.equal(document.querySelector('#message-edit-availability').hidden,true);
+'''
+    result = subprocess.run([node, "-e", harness], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("hours,iso,minutes", [("0.5", "PT30M", 30), ("1", "PT1H", 60), ("1.5", "PT1H30M", 90), ("0.25", "PT15M", 15)])
+def test_ui_duration_iso_roundtrip(hours, iso, minutes):
+    import json
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required")
+    source = make_client().get("/ui/app.js").text
+    helpers = source[source.index("function hoursToIsoDuration("):source.index("function normalizeLocalDateTime(")]
+    helpers += source[source.index("function isoAvailabilityMinutes("):source.index("function canEditRefusedAvailability(")]
+    checks = f"const assert=require('node:assert/strict');const iso=hoursToIsoDuration({json.dumps(hours)});assert.equal(iso,{json.dumps(iso)});assert.equal(isoAvailabilityMinutes(iso),{minutes});"
+    result = subprocess.run([node, "-e", helpers + checks], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

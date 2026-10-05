@@ -28,6 +28,7 @@ def test_configuration_and_acceptance_generation_races():
     edit_start = source.index("function editConfiguration()")
     helpers += source[edit_start:source.index('document.querySelector("#save-configuration")', edit_start)]
     helpers += between('function sameAcceptanceIntent(', 'function resetMissionPresentation(')
+    helpers += between('function windowTimezone(', 'function clock(')
     helpers += between('function resetMissionPresentation(', 'function renderDecision(')
     helpers += between('async function restoreSavedMission(', 'function invalidateAvailabilityForSiteChange(')
     harness = r'''

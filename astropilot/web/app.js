@@ -210,7 +210,11 @@ function renderSession() {
   for (const item of state.sessions) {
     const option = document.createElement("option");
     option.value = item.execution.execution_id;
-    option.textContent = `${item.execution.actual_start ? new Date(item.execution.actual_start).toLocaleString("fr-CH") : "À démarrer"} · ${sessionStatus(item.execution.status)}`;
+    const context = state.acceptedMission?.mission_id === item.mission_id ? state.acceptedMission : item;
+    const startLabel = item.execution.actual_start
+      ? missionDateTimeLabel(item.execution.actual_start, missionTimezone(item.mission, context))
+      : "À démarrer";
+    option.textContent = `${startLabel} · ${sessionStatus(item.execution.status)}`;
     choice.append(option);
   }
   choice.hidden = !state.sessions.length;
@@ -3532,7 +3536,34 @@ function duration(hours) {
   return `${whole} h ${String(minutes).padStart(2, "0")}`;
 }
 
-function clock(value) {
+// Decision weather trust carries the evaluated site's zone. Accepted mission DTOs
+// have no zone; retain that presentation context until the mission is reopened.
+function windowTimezone(decision) {
+  const candidate = decision?.weather_trust?.timezone ?? siteTimezone() ?? "UTC";
+  try {
+    return new Intl.DateTimeFormat("fr-CH", {timeZone: candidate}).resolvedOptions().timeZone;
+  } catch (_) { return "UTC"; }
+}
+
+// Restored DTOs contain no historical timezone. Never infer it from today's
+// configuration or the browser; keep known frontend context, otherwise use UTC.
+function missionTimezone(mission, context) {
+  const candidate = context?.windowTimezone ?? mission?.windowTimezone ?? "UTC";
+  try {
+    return new Intl.DateTimeFormat("fr-CH", {timeZone: candidate}).resolvedOptions().timeZone;
+  } catch (_) { return "UTC"; }
+}
+
+function missionDateTimeLabel(value, zone) {
+  const parsed = new Date(value);
+  const label = value && !Number.isNaN(parsed.getTime())
+    ? new Intl.DateTimeFormat("fr-CH", {year:"numeric", month:"2-digit", day:"2-digit",
+      hour:"2-digit", minute:"2-digit", hour12:false, timeZone:zone}).format(parsed)
+    : "Non précisée";
+  return `${label} · ${zone}`;
+}
+
+function clock(value, timeZone) {
   if (!value) return null;
   if (/^\d{2}:\d{2}$/.test(value)) return value;
   const parsed = new Date(value);
@@ -3541,6 +3572,7 @@ function clock(value) {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    ...(timeZone ? { timeZone } : {}),
   }).format(parsed);
 }
 
@@ -3641,10 +3673,11 @@ function renderMission(mission) {
   state.activeSessionId = null;
   state.fieldObservationSelectedExecutionId = null;
   syncFieldObservationContext();
-  const start = clock(mission.window_start);
-  const end = clock(mission.window_end);
+  const zone = missionTimezone(mission, state.acceptedMission?.mission === mission ? state.acceptedMission : null);
+  const start = clock(mission.window_start, zone);
+  const end = clock(mission.window_end, zone);
   text("#mission-title", mission.target || "Mission de cette nuit");
-  text("#mission-summary", mission.site_name ? `Mission acceptée · ${mission.site_name}` : "Mission acceptée");
+  text("#mission-summary", `${mission.site_name ? `Mission acceptée · ${mission.site_name}` : "Mission acceptée"} · Horaires : ${zone}`);
   text("#mission-window", start && end ? `${start} — ${end}` : "À confirmer");
   text("#mission-duration", duration(mission.recommended_hours));
   text("#mission-gain", Number(mission.expected_gain) > 0 ? `+${Math.round(Number(mission.expected_gain))} %` : "Non estimé");
@@ -4187,8 +4220,9 @@ function renderDecision(decision) {
   const actionableHours = decision.recommended_hours;
   const firstWindow = productivity?.windows?.find((window) => window.productive)
     || productivity?.windows?.[0];
-  const start = clock(decision.window_start) || firstWindow?.start_time || null;
-  const end = clock(decision.window_end) || firstWindow?.end_time || null;
+  const zone = windowTimezone(decision);
+  const start = clock(decision.window_start, zone) || firstWindow?.start_time || null;
+  const end = clock(decision.window_end, zone) || firstWindow?.end_time || null;
   const quality = decision.astro_quality;
   const qualityScore = quality ? Math.round(Number(quality.score)) : null;
   const qualityCopy = labels.quality[quality?.label] || ["Non évaluée", "L’indice de qualité n’est pas disponible pour cette décision."];
@@ -4211,7 +4245,7 @@ function renderDecision(decision) {
   text("#target-name", decision.target || "Cible à confirmer");
   text("#catalog-key", decision.target_common_name || (decision.catalog_key && decision.catalog_key !== decision.target ? decision.catalog_key : ""));
   text("#window-value", start && end ? `${start} — ${end}` : "À confirmer");
-  text("#window-note", firstWindow?.reason ? "Fenêtre productive principale" : "Heure locale");
+  text("#window-note", `Horaires : ${zone}${firstWindow?.reason ? " · Fenêtre productive principale" : ""}`);
   text("#duration-value", duration(actionableHours));
   text("#duration-note", "Durée de mission exploitable");
   const filterCopy = filterCardCopy(decision);
@@ -4246,8 +4280,33 @@ function renderDecision(decision) {
     ? "NightMerit ne dispose pas d’assez d’éléments fiables pour recommander cette cible pour cette session."
     : null;
   setList("#insights-list", [...(evidenceMessage ? [evidenceMessage] : []), ...positives, ...information], "Aucune explication supplémentaire disponible.");
-  text("#decision-essential", evidenceMessage || positives.find(Boolean) || information.find(Boolean)
-    || "Décision calculée pour votre configuration actuelle.");
+  // Copy the supplied justification, without inferring selection from weather.
+  const shortReason = [...(decision.explanation?.positives || []), ...(decision.explanation?.information || [])]
+    .filter(reason => reason && (reason.title || reason.value))
+    .map(reasonText).find(Boolean);
+  text("#decision-reason", shortReason ? `Pourquoi : ${shortReason}` : "Pourquoi : non précisé");
+  const warningCopy = [...warnings];
+  if (weatherTrust?.freshness_status !== "fresh") warningCopy.unshift(
+    weatherTrust?.freshness_status === "stale"
+      ? "Données météo périmées : actualisez avant de démarrer."
+      : "Fraîcheur météo non confirmée : vérifiez les données avant de démarrer.",
+  );
+  if (weatherTrust?.validation_status !== "validated" || !weatherDecision?.admissibility) {
+    warningCopy.unshift("Confiance météo non confirmée : vérifiez les données avant de démarrer.");
+  }
+  if (weatherDecision?.admissibility && weatherDecision.admissibility !== "admissible") {
+    warningCopy.unshift(weatherDecision.presentation?.summary || "Conditions météo à vérifier avant de démarrer.");
+  }
+  if (decision.dew_risk && String(decision.dew_risk.level).toLowerCase() === "high") {
+    warningCopy.push("Rosée : risque élevé.");
+  }
+  if (insufficient) warningCopy.unshift(evidenceMessage);
+  const warningElement = document.querySelector("#decision-warning");
+  warningElement.textContent = [...new Set(warningCopy.filter(Boolean))].join(" ");
+  warningElement.hidden = !warningElement.textContent;
+  document.querySelectorAll("#decision [data-mode-disclosure]").forEach(element => {
+    element.open = appliedUiMode === "pro";
+  });
   setList("#risks-list", risks, "Aucun risque essentiel signalé.");
   renderIntentChoice(ui.primaryIntentChoice, decision, "primary-intent");
   const actionablePrimary = Boolean(
@@ -4816,6 +4875,7 @@ async function restoreSavedMission() {
   const generation = state.configurationGeneration;
   const isCurrent = () => configurationOperationIsCurrent(generation)
     && state.configuration === configuration && !state.decisionSiteReloadRequired;
+  const knownMissions = [state.acceptedMission, ...(state.savedMissions || [])].filter(Boolean);
   const savedMissions = [];
   state.acceptedMission = null;
   state.savedMissions = [];
@@ -4864,6 +4924,10 @@ async function restoreSavedMission() {
     // The current mission can still be opened if session discovery is unavailable.
   }
   if (!isCurrent()) return;
+  for (const item of [...savedMissions, ...(current ? [current] : [])]) {
+    const known = knownMissions.find(previous => previous.mission_id === item.mission_id);
+    item.windowTimezone = missionTimezone(item.mission, known || item);
+  }
   state.savedMissions = savedMissions;
   if (current && !state.savedMissions.some((item) => item.mission_id === current.mission_id)) {
     state.savedMissions.unshift(current);
@@ -4873,7 +4937,7 @@ async function restoreSavedMission() {
   for (const item of state.savedMissions) {
     const option = document.createElement("option");
     option.value = item.mission_id;
-    option.textContent = `${item.mission.target} · ${new Date(item.mission.window_start).toLocaleString("fr-CH")}`;
+    option.textContent = `${item.mission.target} · ${missionDateTimeLabel(item.mission.window_start, missionTimezone(item.mission, item))}`;
     ui.savedMissionChoice.append(option);
   }
   if (state.acceptedMission) {
@@ -5334,7 +5398,61 @@ function actionabilityRefusalMessage(refusal) {
   ];
 }
 
+// Inverse of hoursToIsoDuration: UI emits integer hours and/or minutes only.
+function isoAvailabilityMinutes(value) {
+  if (typeof value !== "string") return null;
+  const match = /^PT(?:(\d+)H)?(?:(\d+)M)?$/.exec(value);
+  if (!match || match[0] !== value || (!match[1] && !match[2])) return null;
+  const hours = Number(match[1] || 0);
+  const minutes = Number(match[2] || 0);
+  const total = hours * 60 + minutes;
+  return Number.isSafeInteger(hours) && Number.isSafeInteger(minutes)
+    && minutes < 60 && Number.isSafeInteger(total) && total > 0 ? total : null;
+}
+
+// A duration cap below the explicitly required continuous time is a proven
+// user constraint. Other refusal diagnostics do not establish availability as cause.
+function canEditRefusedAvailability(payload) {
+  const refusal = payload.actionability_refusal;
+  const minutes = isoAvailabilityMinutes(state.availability?.duration);
+  return payload.status === "no_productive_window"
+    && state.availability?.mode === "duration"
+    && Number.isFinite(minutes) && minutes > 0
+    && refusal?.status === "constraints_refusal"
+    && refusal.refusal_stage === "continuous_window_too_short"
+    && Number.isFinite(refusal.required_continuous_minutes)
+    && minutes < refusal.required_continuous_minutes;
+}
+
+function showTonightUnavailable(payload) {
+  const productiveRefusal = payload.status === "no_productive_window";
+  const [title, technical] = payload.status === "weather_refused"
+    ? [payload.weather_decision.presentation.label, payload.weather_decision.presentation.summary]
+    : productiveRefusal
+    ? actionabilityRefusalMessage(payload.actionability_refusal)
+    : partialMessages[payload.status] || ["Décision indisponible", "Aucune recommandation exploitable."];
+  const shortWindow = payload.actionability_refusal?.refusal_stage === "continuous_window_too_short";
+  const editAvailability = canEditRefusedAvailability(payload);
+  const body = productiveRefusal
+    ? shortWindow
+      ? `Le créneau utilisable est trop court pour lancer une mission. Réessayez plus tard si les conditions évoluent.${editAvailability ? " Vous pouvez revoir votre disponibilité, sans garantie de trouver un créneau suffisant." : ""}`
+      : "Aucun créneau ne permet de lancer une mission dans les conditions évaluées. Réessayez plus tard lorsque les prévisions évoluent."
+    : `${technical} Réessayez plus tard lorsque les données ou les conditions évoluent.`;
+  showMessage(title, body, { kicker: "Analyse terminée" });
+  text("#message-technical", technical);
+  const details = document.querySelector("#message-details");
+  details.hidden = false;
+  details.open = appliedUiMode === "pro";
+  ui.retry.textContent = "Réessayer plus tard";
+  document.querySelector("#message-edit-availability").hidden = !editAvailability;
+}
+
 function showMessage(title, body, { kicker = "Décision indisponible", retry = true } = {}) {
+  const details = document.querySelector("#message-details");
+  if (details) details.hidden = true;
+  const editAvailability = document.querySelector("#message-edit-availability");
+  if (editAvailability) editAvailability.hidden = true;
+  ui.retry.textContent = "Réessayer";
   text("#message-kicker", kicker);
   text("#message-title", title);
   text("#message-body", body);
@@ -5627,6 +5745,7 @@ async function acceptRecommendation({
       selectedCatalogKey: payload.catalog_key,
       acquisitionIntentId: payload.selected_acquisition_intent_id,
       source,
+      windowTimezone: windowTimezone(decision),
       mission,
     };
     if (decision?.decision_id === expectedDecisionId) {
@@ -5735,19 +5854,12 @@ async function loadTonight(availability) {
     clearAcceptedMission();
     setCurrentFieldObservationDecision(payload);
     if (payload.status === "weather_refused") {
-      showMessage(
-        payload.weather_decision.presentation.label,
-        payload.weather_decision.presentation.summary,
-        { kicker: "Analyse terminée" },
-      );
+      showTonightUnavailable(payload);
       return;
     }
 
     if (payload.status !== "available") {
-      const [title, body] = payload.status === "no_productive_window"
-        ? actionabilityRefusalMessage(payload.actionability_refusal)
-        : partialMessages[payload.status] || ["Décision indisponible", "NightMerit ne dispose pas encore d’une recommandation exploitable."];
-      showMessage(title, body, { kicker: "Analyse terminée" });
+      showTonightUnavailable(payload);
       return;
     }
 
@@ -5840,6 +5952,10 @@ ui.retry.addEventListener("click", () => {
   if (guardUnresolvedAcceptance()) return;
   if (state.availability) loadTonight(state.availability);
   else setView("availability");
+});
+document.querySelector("#message-edit-availability").addEventListener("click", () => {
+  if (guardUnresolvedAcceptance()) return;
+  setView("availability");
 });
 ui.retryPendingAcceptance.addEventListener("click", retryPendingAcceptance);
 

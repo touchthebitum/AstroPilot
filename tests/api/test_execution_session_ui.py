@@ -65,7 +65,7 @@ assert.equal(document.querySelector('#session-hours').value, '0');
 assert.equal(document.querySelector('#session-minutes').value, '30');
 assert.equal(observationLinkageRenderCount, 3);
 '''
-    result = subprocess.run([node, "-"], input=harness + helpers + checks, capture_output=True, text=True)
+    result = subprocess.run([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 
@@ -144,7 +144,7 @@ async function fetch(url, options) {
   assert.equal(posts, 1, 'reopen must not submit a second credit');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    result = subprocess.run([node, "-"], input=harness + helpers + checks, capture_output=True, text=True)
+    result = subprocess.run([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 
@@ -248,7 +248,7 @@ async function fetch(url, options) {
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    result = subprocess.run([node, "-"], input=harness + helpers + checks, capture_output=True, text=True)
+    result = subprocess.run([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 
@@ -292,7 +292,7 @@ async function fetch(_url, options) {
   assert.doesNotMatch(message, /réponse incertaine/);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    result = subprocess.run([node, "-"], input=harness + helpers + checks, capture_output=True, text=True)
+    result = subprocess.run([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 
@@ -342,7 +342,7 @@ async function fetch(url) {
   assert.equal(opened, true);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    result = subprocess.run([node, "-"], input=harness + restore + open_handler + checks, capture_output=True, text=True)
+    result = subprocess.run([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + restore + open_handler + checks, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 
@@ -408,7 +408,7 @@ assert.equal(sessionStatus('completed'), 'Terminée');
 assert.equal(sessionStatus('interrupted'), 'Interrompue');
 assert.doesNotMatch(document.querySelector('#session-credit-preview').textContent, /intent|sh2|ha/i);
 '''
-    result = subprocess.run([node, "-"], input=harness + helpers + checks, capture_output=True, text=True)
+    result = subprocess.run([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 
@@ -446,7 +446,7 @@ assert.equal(message.hidden, true); assert.equal(loads, 1); assert.equal(opens, 
 assert.equal(state.fieldObservationContextInvalid, true);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    result = subprocess.run([node, "-"], input=harness + helper + checks, capture_output=True, text=True)
+    result = subprocess.run([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helper + checks, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 
@@ -454,3 +454,25 @@ def test_completion_dom_order_follows_action_priority():
     html = (SCRIPT.parent / "index.html").read_text(encoding="utf-8")
     assert html.index('id="session-record-evidence"') < html.index('id="session-apply-credit"') < html.index('id="session-start"')
     assert 'tabindex="1"' not in html
+
+
+@pytest.mark.parametrize("browser_zone", ["America/New_York", "Asia/Tokyo"])
+@pytest.mark.parametrize("zone,expected", [("Europe/Zurich", "20:00"), (None, "18:00"), ("Invalid/Zone", "18:00")])
+def test_mission_session_labels_ignore_browser_timezone(browser_zone, zone, expected):
+    import json
+    import os
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required")
+    source = SCRIPT.read_text(encoding="utf-8")
+    helpers = source[source.index("function missionTimezone("):source.index("function clock(")]
+    checks = f"""
+const assert = require('node:assert/strict');
+const zone = missionTimezone({{}}, {{windowTimezone:{json.dumps(zone)}}});
+assert.equal(zone, {json.dumps('Europe/Zurich' if zone == 'Europe/Zurich' else 'UTC')});
+const label = missionDateTimeLabel('2026-10-04T18:00:00Z', zone);
+assert.ok(label.includes({json.dumps(expected)}), label);
+assert.ok(label.endsWith(' · ' + zone));
+"""
+    result = subprocess.run([node, "-e", helpers + checks], env={**os.environ, "TZ": browser_zone}, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
