@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from astropilot.field_lab_paths import require_user_directory
+
 import os
 import sys
 import tempfile
@@ -21,6 +23,7 @@ class FileExecutionRecordStore:
         self._directory = Path(directory)
 
     def _path(self, execution_id: str) -> Path:
+        require_user_directory(self._directory)
         try:
             identity = validate_execution_identity(
                 execution_id,

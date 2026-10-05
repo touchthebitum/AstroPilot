@@ -1,6 +1,9 @@
 """Best-effort historical snapshot. Never invokes a store or writer lock."""
 from __future__ import annotations
 
+from astropilot.field_lab_paths import require_user_directory
+from decision.storage_namespace import is_field_lab_document
+
 import hashlib
 import json
 import os
@@ -75,6 +78,8 @@ class FileOutcomeHistoryReader:
 
     def _directory_fd(self, kind):
         _require_secure_fs_capabilities()
+        require_user_directory(self.directory)
+        require_user_directory(self.directory / kind)
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         try:
             root = os.open(self.directory, flags)
@@ -222,8 +227,11 @@ class FileOutcomeHistoryReader:
             manifest.setdefault(key, digest)
             try:
                 text = raw.decode('utf-8')
+                root = json.loads(text)
+                if is_field_lab_document(root):
+                    diagnostics.append({'code': 'field_lab_document_excluded', 'kind': kind, 'id': identity})
+                    return
                 if kind == 'outcome_evaluations':
-                    root = json.loads(text)
                     if isinstance(root, dict) and (
                             type(root.get('schema_version')) is int and root['schema_version'] > 1 or
                             isinstance(root.get('domain_version'), str) and

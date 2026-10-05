@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decision.storage_namespace import require_user_document
+
 import json
 from collections.abc import Mapping
 from datetime import datetime
@@ -111,6 +113,7 @@ def deserialize_execution_record(
     except (TypeError, ValueError, json.JSONDecodeError) as error:
         raise ExecutionRecordPersistenceError("invalid_json_document") from error
 
+    require_user_document(payload, ExecutionRecordPersistenceError)
     if not isinstance(payload, Mapping):
         raise ExecutionRecordPersistenceError("invalid_root_fields")
     if "schema_version" not in payload:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from astropilot.field_lab_paths import require_user_directory
+
 import os
 import sys
 import tempfile
@@ -29,15 +31,18 @@ class FileDecisionAcceptanceLineageStore:
         self._directory = Path(directory)
 
     def _path(self, decision_id: str) -> Path:
+        require_user_directory(self._directory)
         identity = validate_lineage_identity(decision_id, field="decision_id")
         return self._directory / f"{identity}.json"
 
     def _locked(self):
+        require_user_directory(self._directory)
         return exclusive_file_lock(
             self._directory / ".decision_lineage.lock"
         )
 
     def _load_path(self, path: Path) -> DecisionAcceptanceAggregate:
+        require_user_directory(self._directory)
         try:
             document = path.read_text(encoding="utf-8")
         except FileNotFoundError as error:
@@ -61,6 +66,7 @@ class FileDecisionAcceptanceLineageStore:
             ) from error
 
     def _load_all(self) -> list[DecisionAcceptanceAggregate]:
+        require_user_directory(self._directory)
         if not self._directory.exists():
             return []
         return [

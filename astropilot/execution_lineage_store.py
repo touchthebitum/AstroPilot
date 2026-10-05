@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from astropilot.field_lab_paths import require_user_directory
+
 import os
 import sys
 import tempfile
@@ -40,15 +42,18 @@ class FileExecutionLineageStore:
         self._directory = Path(directory)
 
     def _path(self, execution_id: str) -> Path:
+        require_user_directory(self._directory)
         identity = validate_lineage_identity(execution_id, field="execution_id")
         return self._directory / f"{identity}.json"
 
     def _locked(self):
+        require_user_directory(self._directory)
         return exclusive_file_lock(
             self._directory / ".execution_lineage.lock"
         )
 
     def _load_path(self, path: Path) -> ExecutionLineageAggregate:
+        require_user_directory(self._directory)
         try:
             document = path.read_text(encoding="utf-8")
         except FileNotFoundError as error:
@@ -61,6 +66,7 @@ class FileExecutionLineageStore:
         )
 
     def _load_all(self) -> list[ExecutionLineageAggregate]:
+        require_user_directory(self._directory)
         return [
             self._load_path(path)
             for path in sorted(self._directory.glob("*.json"))

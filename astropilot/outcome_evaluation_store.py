@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from astropilot.field_lab_paths import require_user_directory
+
 import os
 import re
 import sys
@@ -33,14 +35,17 @@ class FileOutcomeEvaluationStore:
         )
 
     def _path(self, evaluation_id: str) -> Path:
+        require_user_directory(self._directory)
         if not isinstance(evaluation_id, str) or _DIGEST.fullmatch(evaluation_id) is None:
             raise OutcomeEvaluationPersistenceError("invalid_evaluation_id")
         return self._directory / f"{evaluation_id}.json"
 
     def _locked(self):
+        require_user_directory(self._directory)
         return exclusive_file_lock(self._directory / ".outcome_evaluations.lock")
 
     def _load_path(self, path: Path) -> OutcomeEvaluation:
+        require_user_directory(self._directory)
         try:
             document = path.read_text(encoding="utf-8")
             return deserialize_outcome_evaluation(document, evaluation_id=path.stem)
@@ -100,6 +105,7 @@ class FileOutcomeEvaluationStore:
         return True
 
     def _load_all(self) -> list[OutcomeEvaluation]:
+        require_user_directory(self._directory)
         if not self._directory.exists():
             return []
         return [self._load_path(path) for path in sorted(self._directory.glob("*.json"))]

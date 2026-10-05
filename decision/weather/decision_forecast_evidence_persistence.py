@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decision.storage_namespace import require_user_document
+
 import json
 import re
 from collections.abc import Mapping
@@ -277,6 +279,7 @@ def deserialize_decision_forecast_evidence(
         raise DecisionForecastEvidencePersistenceError(
             "invalid_json_document"
         ) from error
+    require_user_document(payload, DecisionForecastEvidencePersistenceError)
     if not isinstance(payload, Mapping):
         raise DecisionForecastEvidencePersistenceError("invalid_root_fields")
     if "schema_version" not in payload:

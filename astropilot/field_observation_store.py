@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from astropilot.field_lab_paths import require_user_directory
+
 import os
 import sys
 import tempfile
@@ -29,6 +31,7 @@ class FileFieldObservationStore:
         )
 
     def _path(self, observation_id: str) -> Path:
+        require_user_directory(self._directory)
         try:
             identity = validate_observation_identity(
                 observation_id,
@@ -41,11 +44,13 @@ class FileFieldObservationStore:
         return self._directory / f"{identity}.json"
 
     def _locked(self):
+        require_user_directory(self._directory)
         return exclusive_file_lock(
             self._directory / ".field_observations.lock"
         )
 
     def _load_path(self, path: Path) -> FieldObservation:
+        require_user_directory(self._directory)
         try:
             document = path.read_text(encoding="utf-8")
         except UnicodeError as error:
@@ -65,6 +70,7 @@ class FileFieldObservationStore:
             return self._load_path(path)
 
     def _load_all(self) -> list[FieldObservation]:
+        require_user_directory(self._directory)
         if not self._directory.exists():
             return []
         return [
