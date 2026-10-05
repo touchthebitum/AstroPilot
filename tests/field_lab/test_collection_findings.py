@@ -287,3 +287,95 @@ def test_legacy_comparison_does_not_claim_scientific_time_as_execution(lab):
     lab.save('reference_comparison', digest(payload), payload, T-timedelta(hours=1), 'NEU')
     value = status(lab)
     assert value['last_comparison'] is None and value['comparison_time_unavailable']
+
+
+@pytest.mark.parametrize('count', [0, 2999, 3000, 11999, 12000, 14999, 15000])
+def test_scheduler_capacity_boundaries_offline(lab, monkeypatch, count):
+    import astropilot.field_lab_collection as collection
+    from astropilot.field_lab_capacity import capacity_policy
+    initialize()
+    calls = []
+    runner = lambda argv, **kwargs: calls.append(argv) or SimpleNamespace(returncode=1 if argv[1] == 'print' else 0)
+    monkeypatch.setattr(collection, 'launch_agents_path', lambda:collection.field_lab_root()/'mock-launch-agents'/'test.plist')
+    collection.scheduler('install', runner=runner)
+    monkeypatch.setattr(collection.sys, 'platform', 'darwin')
+    # Synthetic metadata exercises exact admission counts without 15k disk writes.
+    monkeypatch.setattr(lab.store.__class__, 'iter_metadata', lambda self, **kw:iter([
+        dict(created_at_utc=canonical_utc(T), artifact_type='synthetic', time_max=canonical_utc(T))
+    ] * count))
+    policy = capacity_policy(collection.CAPACITY)
+    assert policy == dict(operational_soft_limit=20000, stop_at=18000,
+                          reserved_budget=3000, effective_stop_at=15000)
+    value = status(lab)['usage']
+    assert value['warning'] == (count >= 12000)
+    assert value['blocked'] == value['would_block_next_cycle'] == (count >= 15000)
+    if value['blocked']:
+        with pytest.raises(ValueError, match='capacity_stop'):
+            check_capacity(lab)
+        with pytest.raises(ValueError, match='capacity_stop'):
+            collection.scheduler('enable', runner=runner)
+        assert calls == []
+        assert not collection.launch_agents_path().exists()
+    else:
+        assert check_capacity(lab)['reserved_budget'] == 3000
+        collection.scheduler('enable', runner=runner)
+        assert any(argv[1] == 'bootstrap' for argv in calls)
+
+
+@pytest.mark.parametrize('format', ['json', 'csv'])
+def test_compare_export_full_active_state_idempotent(lab, monkeypatch, capsys, format):
+    import csv
+    import io
+    import astropilot.reference_station_cli as cli
+    import astropilot.field_lab_collection as collection
+    for station in (STATION,):
+        forecast = capture_forecast(station, provider=lambda *a:fake_snapshot(),
+            clock=lambda:T-timedelta(minutes=59), build=('a'*40, '1.0.0b7'))
+        lab.save_run(forecast, clock=lambda:T-timedelta(minutes=58))
+        for observation in observations():
+            lab.save_observation(replace(observation, station_id=station.station_id))
+    monkeypatch.setattr(cli, 'ReferenceLab', lambda:lab)
+    actual_compare = lab.comparisons
+    computed = []
+    current = T+timedelta(hours=6)
+    def compare(**kwargs):
+        assert kwargs['persist'] and kwargs['incremental']
+        result = actual_compare(clock=lambda:current, **kwargs)
+        computed.append(len(result))
+        return result
+    monkeypatch.setattr(lab, 'comparisons', compare)
+    actual_report = collection.periodic_report
+    monkeypatch.setattr(collection, 'periodic_report', lambda *a, **kw:
+        actual_report(*a, clock=lambda:current, **kw))
+    def invoke(argv):
+        assert cli.main(argv+['--format', format]) == 0
+        output = capsys.readouterr().out
+        rows = json.loads(output) if format == 'json' else list(csv.DictReader(io.StringIO(output)))
+        return output, rows
+    first, rows = invoke(['compare', '--export'])
+    assert len(rows) == 6 and computed == [3]
+    report_output, _ = invoke(['report', '--period', 'all'])
+    assert first == report_output
+    # Unchanged inputs must not decode forecast seals or observations for a rebuild.
+    with monkeypatch.context() as patch:
+        patch.setattr(lab, 'durable_seal', lambda *a:pytest.fail('unchanged target recalculated'))
+        rerun, _ = invoke(['compare', '--export'])
+    assert rerun == first and computed == [3, 0]
+    a = next(o for o in observations() if o.variable == 'temperature_2m' and o.value is not None)
+    for station_id in ('NEU',):
+        lab.save_observation(replace(a, station_id=station_id, value=a.value+2,
+                                    retrieved_at_utc=canonical_utc(T+timedelta(hours=4))))
+    current += timedelta(hours=1)
+    revised, revised_rows = invoke(['compare', '--export'])
+    assert len(revised_rows) == 6 and computed == [3, 0, 1]
+    assert revised != first
+    assert [r for r in revised_rows if r['variable'] == 'relative_humidity_2m'] == [
+        r for r in rows if r['variable'] == 'relative_humidity_2m']
+    full, _ = invoke(['report', '--period', 'all'])
+    assert revised == full
+    assert invoke(['compare', '--export'])[0] == revised
+    assert computed == [3, 0, 1, 0]
+    persisted = [json.loads(a.payload_json)['rows'] for a in
+                 lab.store.iter_artifacts(artifact_type='reference_report')]
+    assert len(persisted) == 2  # Identical exports deduplicate, revised export remains complete.
+    assert all(len(rows) == 6 for rows in persisted)

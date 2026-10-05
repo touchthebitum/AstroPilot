@@ -7,7 +7,7 @@ import subprocess
 
 from astropilot.reference_station_lab import (
     MeteoSwissReferenceClient, ReferenceLab, ReferenceStation, capture_forecast,
-    digest, now_utc, report, select_stations,
+    digest, now_utc, select_stations,
 )
 
 
@@ -36,7 +36,8 @@ def parser():
     cycle = commands.add_parser('cycle')
     cycle.add_argument('--dry-run', action='store_true')
     summary.add_argument('--period', choices=['24h', '7d', '30d', 'all'], default='all')
-    summary.add_argument('--format', choices=['json', 'csv'], default='json')
+    for item in (compare, summary):
+        item.add_argument('--format', choices=['json', 'csv'], default='json')
     summary.add_argument('--historical', action='store_true', help='Separate backfill cohort; never included by default')
     for item in (collect, compare, summary, cycle):
         item.add_argument('--tolerance-minutes', type=float, default=10)
@@ -142,9 +143,8 @@ def _execute(args, lab):
     if args.command == 'report':
         rows = periodic_report(lab, args.period, tolerance_minutes=args.tolerance_minutes, historical=args.historical)
     else:
-        comparisons = lab.comparisons(tolerance_minutes=args.tolerance_minutes, persist=True, incremental=True)
-        runs = lab.iter_facts(artifact_type='reference_forecast')
-        rows = report(comparisons, runs)
+        lab.comparisons(tolerance_minutes=args.tolerance_minutes, persist=True, incremental=True)
+        rows = periodic_report(lab, 'all', tolerance_minutes=args.tolerance_minutes)
     if getattr(args, 'export', False):
         payload = {'schema_version': 1, 'rows': rows}
         lab.save('reference_report', digest(payload), payload, now_utc().isoformat())

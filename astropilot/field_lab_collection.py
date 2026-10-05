@@ -21,11 +21,9 @@ from astropilot.reference_station_lab import (ReferenceLab, MeteoSwissReferenceC
     capture_forecast, select_stations, now_utc, utc, digest, report)
 
 CAPACITY = 2_000_000  # Hard enumeration safety ceiling, not an operating promise.
-OPERATIONAL_SOFT_LIMIT = 20_000
-RESERVED_BUDGET = 15_000
+from astropilot.field_lab_capacity import (
+    OPERATIONAL_SOFT_LIMIT, RESERVED_BUDGET, WARNING, STOP, capacity_policy)
 REPORT_LIMIT = 20_000
-WARNING = .80
-STOP = .90
 REVISION_DAYS = 7
 LABEL = 'org.nightmerit.field-lab'
 
@@ -77,12 +75,13 @@ def usage(lab, *, clock=now_utc):
         return total
     if field_lab_root().exists():
         size = directory_bytes(field_lab_root())
-    stop_at = int(min(lab.max_artifacts, OPERATIONAL_SOFT_LIMIT)*STOP)
-    reserve = min(RESERVED_BUDGET, max(0, stop_at//6))
-    effective = stop_at-reserve
+    policy = capacity_policy(lab.max_artifacts)
+    stop_at = policy['stop_at']
+    reserve = policy['reserved_budget']
+    effective = policy['effective_stop_at']
     rate = recent/7
     return dict(count=count, by_type=dict(sorted(kinds.items())), capacity=lab.max_artifacts,
-                operational_soft_limit=min(lab.max_artifacts, OPERATIONAL_SOFT_LIMIT),
+                operational_soft_limit=policy['operational_soft_limit'],
                 remaining=max(0, stop_at-count-1), reserved_budget=reserve, effective_stop_at=effective,
                 growth_per_day_7d=rate, estimated_days_to_stop=(effective-count)/rate if rate else None,
                 oldest=oldest.isoformat() if oldest else None, newest=newest.isoformat() if newest else None,
@@ -94,7 +93,7 @@ def check_capacity(lab, reserve=None):
     result = usage(lab)
     if reserve is None:
         reserve = result['reserved_budget']
-    stop_at = int(min(lab.max_artifacts, OPERATIONAL_SOFT_LIMIT)*STOP)
+    stop_at = capacity_policy(lab.max_artifacts)['stop_at']
     if result['count'] + reserve >= stop_at:
         raise ValueError('field_lab_capacity_stop_scientific_facts_preserved')
     return result
@@ -157,7 +156,7 @@ def cycle(lab, *, clock=now_utc, client=None, capture=capture_forecast, toleranc
         if successes and current-max(utc(a.created_at_utc) for a in successes) < timedelta(hours=1):
             return dict(plan, no_op=True, writes=0, network_calls=0)
         capacity = check_capacity(lab)
-        lab.write_budget = int(min(lab.max_artifacts, OPERATIONAL_SOFT_LIMIT)*STOP)-capacity['count']-1
+        lab.write_budget = capacity['remaining']
         runs = tuple(lab.iter_facts(artifact_type='reference_forecast', start=(current-timedelta(hours=12)).isoformat()))
         client = client or MeteoSwissReferenceClient()
         if isinstance(client, MeteoSwissReferenceClient):
@@ -267,7 +266,7 @@ def _scheduler(operation, *, runner=subprocess.run):
     if operation == 'enable':
         if sys.platform != 'darwin':
             raise RuntimeError('field_lab_scheduler_requires_macos')
-        check_capacity(ReferenceLab(max_artifacts=CAPACITY), reserve=15000)
+        check_capacity(ReferenceLab(max_artifacts=CAPACITY))
         with ReferenceLab().store._directory(root_only=True) as fd:
             if plistlib.loads(ReferenceLab().store._read(fd, 'scheduler.plist').encode()) != scheduler_document():
                 raise ValueError('field_lab_scheduler_plan_mismatch')

@@ -22,7 +22,7 @@ except ImportError:
 
 _WRITERS = threading.local()
 _PROCESS_LOCK = threading.RLock()
-OPERATIONAL_SOFT_LIMIT = 20_000
+from astropilot.field_lab_capacity import capacity_policy
 
 
 @contextmanager
@@ -267,7 +267,7 @@ class FileFieldLabStore:
                     except BlockingIOError as error:
                         raise RuntimeError('field_lab_writer_busy') from error
                     state = dict(identity=identity, count=sum(1 for _ in self.iter_metadata(max_names=max_names)),
-                                 stop_at=int(min(max_names, OPERATIONAL_SOFT_LIMIT)*.90))
+                                 stop_at=capacity_policy(max_names)['stop_at'])
                     _WRITERS.state = state
                     try:
                         yield state

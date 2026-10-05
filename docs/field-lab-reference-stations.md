@@ -512,8 +512,10 @@ horizon**. Outside this horizon, existing scientific facts remain readable and
 contribute to longitudinal reports; old missing data are not repeatedly retried.
 There is no sub-minute polling. Manual `observations collect` also uses this
 horizon and measurement coalescence. Cross-year asset discovery remains unsupported:
-near January 1, a due previous-year target inside the horizon raises explicitly.
-An operator must resolve this limitation before unattended year-round use.
+near January 1, due previous-year targets inside the horizon are reported individually
+in `noncollectable_targets` as `reference_cross_year_collection_not_supported`.
+Current-year targets continue collection; these unsupported targets do not block
+the entire cycle.
 
 Within a cycle, an advisory nonblocking lock serializes cycles. Concurrent attempts
 fail with a nonzero error rather than racing forecast captures. A successful UTC
