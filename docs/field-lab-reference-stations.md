@@ -146,12 +146,12 @@ No user project, observation, session, mission, profile or decision is fabricate
    run, never reconstructs an old run.
 4. Persist the forecast and then an immutable seal. Both retrieval and creation
    must precede every target. Check the clock before and after the durable
-   forecast publication, then record that durable completion time in the seal. A missed deadline leaves an
-   unsealed artifact, which readers exclude. The completion time recorded in the seal must also precede every
+   forecast and seal publication, then record completion in a separate durable receipt. A missed deadline leaves an
+   inadmissible artifact, which readers exclude. The receipt completion time must also precede every
    target. Identical already-sealed runs are no-ops, including after the deadline.
 5. After target + tolerance has passed, collect official measurements, select the
    unique nearest observation and compare stored facts only. Any observation at
-   or before retrieval/creation produces `leakage_detected`, even when nearby.
+   or before retrieval/creation/durable seal completion produces `leakage_detected`, even when nearby.
 
 Local wall clocks must be correct. Digests protect against accidental changes,
 not a hostile owner forging artifacts or changing the clock. The accepted P3
@@ -200,8 +200,8 @@ Empty cells and absent variable columns become missing, malformed/non-finite/
 out-of-range values become invalid, never zero. Any nonempty supplied `_qc` field
 is conservatively rejected until its official semantics are implemented.
 Official revisions are immutable observation versions keyed by measurement
-content; the latest first-acquisition timestamp wins, with digest tie-breaking.
-Original retrieval metadata is preserved on identical re-acquisition.
+content; separate acquisition events retain each retrieval. The latest event
+timestamp wins, with digest tie-breaking. Exact event replays are no-ops.
 
 ## Station selection and volume
 
@@ -274,7 +274,8 @@ or GitHub Actions are introduced.
 
 Storage keeps #313's descriptor-pinned hashed filenames under `artifacts/`.
 Logical partitions are one catalogue version, one forecast per run/station,
-one seal per run, one observation per station/timestamp/variable/revision and
+one seal and completion receipt per run, one observation per station/timestamp/variable/revision and
+one acquisition event per retrieval/content and
 one comparison per run/target/variable/observation/policy. No monolithic history
 JSON or mutable index is introduced. The reader checks namespace, digest and
 filename identity; unknown filenames, malformed envelopes and symlinks fail
@@ -322,3 +323,50 @@ stations and an isolated temporary root; no expired fake forecast is published.
 - No push, PR or scheduler was created. Physical sharding, cross-year observation
   asset discovery, explicit validated QC and compatible mean-wind aggregation
   remain deferred. The accepted local P3 rename limitation is unchanged.
+
+
+### Review corrections: durable sealing and acquisition history
+
+Publication uses three create-only artifacts: forecast snapshot, seal binding the
+run ID and canonical snapshot digest, then a completion receipt binding the seal
+digest. The completion timestamp is sampled only after snapshot and seal writes
+have returned from file and directory fsync. Thus it certifies the already durable
+snapshot/seal, not an intention to publish them. The receipt itself must also be
+durably present before readers admit the run. A delayed seal write crossing the
+first target produces a permanently inadmissible receipt; a missing receipt is
+never inferred from file dates or reconstructed after the target. Mismatched
+identities fail closed. Missing or late seals exclude runs from `facts()`; direct
+matching reports `missing_durable_seal` or `leakage_detected`. The completion
+instant must be strictly before the matched observation and every prospective
+target. Forecast retrieval must also precede the observation. This is a local
+trusted-clock/process guarantee, not an externally signed timestamp authority.
+
+Each official acquisition now has a distinct immutable `reference_acquisition`
+artifact, identified by canonical observation content and retrieval provenance.
+Content artifacts remain deduplicated by measurement digest. Matching uses the
+latest acquisition timestamp, so A(T1), B(T2), A(T3) selects A(T3). An exact
+replayed event is a no-op; conflicting content under the same event ID is refused.
+No absent official revision identifier is assumed. Existing legacy content-only
+observations are not promoted into acquisition events; recollect explicitly.
+
+All reference domain timestamps are canonical UTC `YYYY-MM-DDTHH:MM:SS.ffffffZ`
+before IDs, digests, matching or reports. Zero-offset `+00:00` inputs are equivalent;
+nonzero offsets, including local DST timestamps, remain rejected. Snapshot point
+order must be strictly increasing and unique. Old noncanonical run identities
+are not silently migrated or rehashed: they fail closed and require a fresh
+prospective capture, never a reconstructed forecast.
+
+`ReferenceComparison` validates schema, provenance, cohort, identities, variables,
+UTC instants, finite offsets, tolerance, status/reason consistency, physical bounds
+and arithmetic (absolute tolerance 1e-9, relative 1e-12). Noncomparable numerical
+values are null. Units are determined by the variable contract. Reports revalidate
+instances at their boundary, including instances mutated through low-level access.
+The existing separate `historical_backfill` cohort name is retained.
+
+Identical station metadata/selection syncs reuse the catalogue artifact, excluding
+acquisition time from its logical payload. Forecast hours are validated before
+storage access, equally in dry-run and execution. `facts()` fails closed above
+`ReferenceLab(max_artifacts=100000)`; it still scans the store linearly and retains
+up to that many artifacts. This is a bounded materialization, not an indexed store.
+Temperature and RH alone yield numerical errors. Wind aggregation and official QC
+remain unverified; no calibration, scoring, ranking or provider reliability changes.

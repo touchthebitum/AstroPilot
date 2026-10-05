@@ -10,9 +10,15 @@ from astropilot.field_lab_store import FileFieldLabStore
 from astropilot.reference_station_lab import (
     MeteoSwissReferenceClient, ReferenceForecastRun, ReferenceLab, ReferenceObservation,
     ReferenceStation, capture_forecast, compare_point, digest, parse_observations,
-    report, select_stations, validate_tolerance,
+    report, select_stations, validate_tolerance, canonical_utc, ReferenceComparison,
 )
 from astropilot.reference_station_cli import main
+
+_compare_point = compare_point
+def compare_point(*args, **kwargs):
+    kwargs.setdefault('durable_sealed_at_utc', canonical_utc(T-timedelta(minutes=58)))
+    return _compare_point(*args, **kwargs)
+
 
 FIXTURES = Path(__file__).parent / 'fixtures'
 T = datetime(2026, 10, 5, 12, tzinfo=timezone.utc)
@@ -154,7 +160,8 @@ def test_store_sealing_idempotence_and_user_unchanged(lab, tmp_path):
     assert not lab.save_run(r, clock=lambda: T+timedelta(days=1))
     for obs in observations():
         assert lab.save_observation(obs)
-        assert not lab.save_observation(replace(obs, retrieved_at_utc=(T+timedelta(hours=2)).isoformat()))
+        assert not lab.save_observation(obs)
+        assert lab.save_observation(replace(obs, retrieved_at_utc=(T+timedelta(hours=2)).isoformat()))
     clock = lambda: T+timedelta(hours=1)
     first = lab.comparisons(clock=clock, persist=True)
     count = len(tuple(lab.store.iter_artifacts()))
@@ -258,3 +265,141 @@ def test_revision_missing_invalid_and_future_pair_refusal():
     assert datetime.fromisoformat(r.forecast_retrieved_at_utc)<datetime.fromisoformat(c.observation_at_utc)
     with pytest.raises(ValueError,match='future_reference_observation'):
         replace(base,retrieved_at_utc=(T-timedelta(minutes=1)).isoformat())
+
+
+def test_delayed_seal_publication_and_no_retroactive_recovery(lab, monkeypatch):
+    r = run()
+    current = T-timedelta(seconds=1)
+    original = lab.store.save
+    def delayed(artifact):
+        nonlocal current
+        result = original(artifact)
+        if artifact.artifact_type == 'reference_seal':
+            current = T+timedelta(seconds=1)
+        return result
+    monkeypatch.setattr(lab.store, 'save', delayed)
+    with pytest.raises(ValueError, match='deadline_missed'):
+        lab.save_run(r, clock=lambda: current)
+    assert lab.facts()[0] == ()
+    with pytest.raises(ValueError):
+        lab.save_run(r, clock=lambda: current)
+    assert lab.facts()[0] == ()
+
+
+def test_durable_snapshot_delay(lab, monkeypatch):
+    current = T-timedelta(seconds=1)
+    original = lab.store.save
+    def delayed(artifact):
+        nonlocal current
+        result = original(artifact)
+        if artifact.artifact_type == 'reference_forecast':
+            current = T+timedelta(seconds=1)
+        return result
+    monkeypatch.setattr(lab.store, 'save', delayed)
+    with pytest.raises(ValueError, match='deadline_missed'):
+        lab.save_run(run(), clock=lambda: current)
+    assert lab.facts()[0] == ()
+
+
+def test_seal_required_before_observation():
+    r = run()
+    obs = replace(observations()[0], observed_at_utc=canonical_utc(T-timedelta(minutes=10)))
+    assert _compare_point(r, point(r), obs.variable, [obs], 10).reason == 'missing_durable_seal'
+    assert _compare_point(r, point(r), obs.variable, [obs], 10,
+        durable_sealed_at_utc=canonical_utc(T-timedelta(minutes=5))).reason == 'leakage_detected'
+    assert _compare_point(r, point(r), obs.variable, [obs], 10,
+        durable_sealed_at_utc=canonical_utc(T-timedelta(minutes=11))).status == 'comparable'
+
+
+def test_seal_mismatch(lab):
+    r = run()
+    lab.save('reference_forecast', r.run_id, asdict(r), r.created_at_utc, r.station_id)
+    lab.save('reference_seal', 'seal-'+r.run_id,
+        {'run_id':r.run_id, 'snapshot_digest':'f'*64}, canonical_utc(T-timedelta(minutes=30)), r.station_id)
+    lab.save('reference_seal_completion', 'durable-'+r.run_id, {}, canonical_utc(T-timedelta(minutes=29)), r.station_id)
+    with pytest.raises(ValueError, match='seal_identity_mismatch'):
+        lab.facts()
+
+
+def test_revision_a_b_a_and_event_idempotence(lab):
+    r = run()
+    lab.save_run(r, clock=lambda:T-timedelta(minutes=58))
+    a = observations()[0]
+    b = replace(a, value=11, retrieved_at_utc=canonical_utc(T+timedelta(hours=2)))
+    a3 = replace(a, retrieved_at_utc=canonical_utc(T+timedelta(hours=3)))
+    for event in (a3, a, b):
+        assert lab.save_observation(event)
+        assert not lab.save_observation(event)
+        assert not lab.save_observation(replace(event, asset_href="https://data.geo.admin.ch/alias"))
+    assert len(lab.facts()[1]) == 3
+    c = next(c for c in lab.comparisons(clock=lambda:T+timedelta(hours=4)) if c.variable == a.variable)
+    assert c.observed_value == 10
+    with pytest.raises(ValueError, match='immutable_conflict'):
+        lab.save('reference_acquisition', a.acquisition_id, asdict(b), a.retrieved_at_utc, a.station_id)
+
+
+def test_timestamp_equivalence_microseconds_and_offsets():
+    a = observations()[0]
+    b = replace(a, observed_at_utc=a.observed_at_utc.replace('Z', '+00:00'))
+    assert a == b and a.measurement_digest == b.measurement_digest and a.acquisition_id == b.acquisition_id
+    assert canonical_utc('2026-10-05T12:00:00.123456+00:00') == '2026-10-05T12:00:00.123456Z'
+    with pytest.raises(ValueError, match='utc_required'):
+        canonical_utc('2026-10-25T02:30:00+02:00')
+    r = run()
+    fields = asdict(r)
+    fields['created_at_utc'] = fields['created_at_utc'].replace('Z', '+00:00')
+    assert ReferenceForecastRun(**fields) == r
+
+
+@pytest.mark.parametrize('change', [
+    {'schema_version':999}, {'forecast_point_at_utc':'bad'}, {'forecast_point_at_utc':None},
+    {'temporal_offset_minutes':5}, {'observed_value':1000}, {'source':'forged'},
+    {'cohort':'fake'}, {'signed_error':float('nan')}, {'absolute_error':float('inf')},
+    {'signed_error':99}, {'status':'non_comparable'}, {'observed_value':float('nan')},
+])
+def test_strict_comparison_forgery(change):
+    r = run()
+    c = compare_point(r, point(r), 'temperature_2m', observations(), 10)
+    with pytest.raises(ValueError):
+        replace(c, **change)
+    object.__setattr__(c, next(iter(change)), next(iter(change.values())))
+    with pytest.raises(ValueError):
+        report([c], [r])
+    with pytest.raises(ValueError):
+        report([asdict(c)], [r])
+
+
+def test_artifact_limit(lab):
+    lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
+    lab.max_artifacts = 1
+    with pytest.raises(ValueError, match='artifact_limit'):
+        lab.facts()
+
+
+def test_hours_zero_rejected_before_store(monkeypatch, capsys):
+    import astropilot.reference_station_cli as cli
+    monkeypatch.setattr(cli, 'ReferenceLab', lambda:pytest.fail('store constructed'))
+    for options in ([], ['--dry-run']):
+        assert main(['forecast-run', '--hours', '0', *options]) == 2
+        assert 'reference_hours' in capsys.readouterr().err
+
+
+def test_sync_identical_noop(lab, monkeypatch):
+    import astropilot.reference_station_cli as cli
+    monkeypatch.setattr(cli, 'ReferenceLab', lambda:lab)
+    monkeypatch.setattr(cli, 'MeteoSwissReferenceClient', lambda:SimpleNamespace(stations=lambda:(STATION,)))
+    assert main(['stations', 'sync', '--stations', 'NEU']) == 0
+    assert main(['stations', 'sync', '--stations', 'NEU']) == 0
+    assert len(tuple(lab.store.iter_artifacts())) == 1
+
+
+def test_unsorted_snapshot_points_rejected():
+    r = run()
+    fields = asdict(r)
+    snapshot = json.loads(r.snapshot_json)
+    later = dict(snapshot['points'][0], at=canonical_utc(T+timedelta(hours=1)))
+    snapshot['points'] = [later, snapshot['points'][0]]
+    fields['snapshot_json'] = json.dumps(snapshot)
+    fields['run_id'] = digest({k:v for k,v in fields.items() if k != 'run_id'})
+    with pytest.raises(ValueError, match='forecast_times'):
+        ReferenceForecastRun(**fields)

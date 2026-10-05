@@ -46,8 +46,29 @@ def utc(value):
     return stamp
 
 
+def canonical_utc(value):
+    return utc(value).astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def canonical_domain(value):
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            if key == 'snapshot_json':
+                result[key] = json.dumps(canonical_domain(json.loads(item)),
+                    sort_keys=True, separators=(',', ':'), allow_nan=False)
+            elif (key.endswith('_at_utc') or key == 'at') and item is not None:
+                result[key] = canonical_utc(item)
+            else:
+                result[key] = canonical_domain(item)
+        return result
+    if isinstance(value, (list, tuple)):
+        return [canonical_domain(v) for v in value]
+    return value
+
+
 def digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'),
+    return hashlib.sha256(json.dumps(canonical_domain(value), sort_keys=True, separators=(',', ':'),
                                      allow_nan=False).encode()).hexdigest()
 
 
@@ -100,6 +121,9 @@ class ReferenceForecastRun:
 
     def __post_init__(self):
         station_identity(self.station_id)
+        for name in ("created_at_utc", "forecast_retrieved_at_utc"):
+            object.__setattr__(self, name, canonical_utc(getattr(self, name)))
+        object.__setattr__(self, "snapshot_json", json.dumps(canonical_domain(json.loads(self.snapshot_json)), sort_keys=True, separators=(",", ":"), allow_nan=False))
         created, retrieved = utc(self.created_at_utc), utc(self.forecast_retrieved_at_utc)
         snapshot = json.loads(self.snapshot_json)
         if type(self.schema_version) is not int or self.schema_version != 1 or type(self.prospective) is not bool:
@@ -153,6 +177,10 @@ class ReferenceObservation:
 
     def __post_init__(self):
         station_identity(self.station_id)
+        for name in ("observed_at_utc", "retrieved_at_utc"):
+            object.__setattr__(self, name, canonical_utc(getattr(self, name)))
+        if self.variable not in VARIABLES:
+            raise ValueError("invalid_reference_variable")
         if utc(self.observed_at_utc) > utc(self.retrieved_at_utc):
             raise ValueError('future_reference_observation')
         expected, unit, _, _ = VARIABLES[self.variable]
@@ -165,8 +193,13 @@ class ReferenceObservation:
             raise ValueError('invalid_reference_missing_value')
 
     @property
+    def acquisition_id(self):
+        return digest({"measurement_digest": self.measurement_digest,
+                       "retrieved_at_utc": self.retrieved_at_utc})
+
+    @property
     def measurement_digest(self):
-        # Retrieval metadata belongs to the first immutable acquisition of this revision.
+        # Canonical content is independent of acquisition history.
         return digest({k: v for k, v in asdict(self).items()
                        if k not in ('retrieved_at_utc', 'asset_href')})
 
@@ -179,7 +212,7 @@ class ReferenceComparison:
     forecast_point_at_utc: str
     observation_at_utc: str | None
     temporal_offset_minutes: float | None
-    forecast_value: float
+    forecast_value: float | None
     observed_value: float | None
     signed_error: float | None
     absolute_error: float | None
@@ -192,6 +225,56 @@ class ReferenceComparison:
     source: str = 'MeteoSwiss'
     cohort: str = 'prospective'
     schema_version: int = 1
+
+    def __post_init__(self):
+        station_identity(self.station_id)
+        if (type(self.schema_version) is not int or self.schema_version != 1
+                or self.source != 'MeteoSwiss' or self.policy != POLICY
+                or self.cohort not in ('prospective', 'historical_backfill')
+                or self.variable not in VARIABLES
+                or re.fullmatch('[0-9a-f]{64}', self.forecast_run_id or '') is None
+                or re.fullmatch('[0-9a-f]{64}', self.forecast_digest or '') is None):
+            raise ValueError('invalid_reference_comparison')
+        validate_tolerance(self.tolerance_minutes)
+        utc(self.forecast_point_at_utc)
+        for name in ('forecast_point_at_utc', 'observation_at_utc'):
+            if getattr(self, name) is not None:
+                object.__setattr__(self, name, canonical_utc(getattr(self, name)))
+        if self.observation_at_utc is None:
+            if self.temporal_offset_minutes is not None or self.observation_digest is not None:
+                raise ValueError('invalid_reference_comparison_observation')
+        else:
+            expected = (utc(self.forecast_point_at_utc)-utc(self.observation_at_utc)).total_seconds()/60
+            if (type(self.temporal_offset_minutes) not in (int, float)
+                    or not math.isfinite(self.temporal_offset_minutes)
+                    or not math.isclose(self.temporal_offset_minutes, expected, abs_tol=1e-9)
+                    or re.fullmatch('[0-9a-f]{64}', self.observation_digest or '') is None):
+                raise ValueError('invalid_reference_comparison_offset')
+        if self.status == 'comparable':
+            if (self.reason != 'comparable_unverified_official_qc'
+                    or self.variable == 'wind_speed_10m' or self.observation_at_utc is None
+                    or abs(self.temporal_offset_minutes) > self.tolerance_minutes
+                    or not numeric(self.forecast_value, self.variable)
+                    or not numeric(self.observed_value, self.variable)
+                    or any(type(v) not in (int, float) or not math.isfinite(v)
+                           for v in (self.signed_error, self.absolute_error))
+                    or not math.isclose(self.signed_error, self.forecast_value-self.observed_value, rel_tol=1e-12, abs_tol=1e-9)
+                    or not math.isclose(self.absolute_error, abs(self.signed_error), rel_tol=1e-12, abs_tol=1e-9)):
+                raise ValueError('invalid_reference_comparison_arithmetic')
+        elif self.status == 'non_comparable':
+            reasons = {'missing_observation', 'ambiguous_nearest_observation', 'leakage_detected',
+                       'outside_time_tolerance', 'missing', 'invalid_qc', 'invalid_value',
+                       'aggregation_semantics_unverified', 'missing_durable_seal'}
+            if self.reason not in reasons or any(v is not None for v in
+                    (self.forecast_value, self.observed_value, self.signed_error, self.absolute_error)):
+                raise ValueError('invalid_reference_comparison_status')
+            if (self.reason in ('missing_observation', 'ambiguous_nearest_observation')) != (self.observation_at_utc is None):
+                raise ValueError('invalid_reference_comparison_reason')
+            if (self.reason == 'outside_time_tolerance' and abs(self.temporal_offset_minutes) <= self.tolerance_minutes
+                    or self.reason == 'aggregation_semantics_unverified' and self.variable != 'wind_speed_10m'):
+                raise ValueError('invalid_reference_comparison_reason')
+        else:
+            raise ValueError('invalid_reference_comparison_status')
 
 
 def csv_rows(text, required):
@@ -350,20 +433,24 @@ def capture_forecast(station, *, provider=None, clock=now_utc, build=None, hours
 
 
 class ReferenceLab:
-    def __init__(self, store=None):
+    def __init__(self, store=None, *, max_artifacts=100000):
+        if type(max_artifacts) is not int or max_artifacts < 1:
+            raise ValueError("invalid_reference_artifact_limit")
+        self.max_artifacts = max_artifacts
         self.store = store or FileFieldLabStore()
 
     def save(self, kind, key, payload, stamp, station='MeteoSwiss'):
         artifact = FieldLabArtifact.create(artifact_type=kind, source_id=station,
-                       idempotency_key=key, payload=payload, created_at_utc=stamp)
+                       idempotency_key=key, payload=payload, created_at_utc=canonical_utc(stamp))
         existing = self.store.load(idempotency_key=key)
         if existing is not None:
-            # Repeat acquisition preserves first retrieval time; all scientific fields must match.
+            # Deduplicated content keeps its first provenance; events retain each retrieval.
             previous = json.loads(existing.payload_json)
             incoming = json.loads(json.dumps(payload, allow_nan=False))
+            if kind in ('reference_observation', 'reference_acquisition'):
+                incoming['asset_href'] = previous['asset_href']
             if kind == 'reference_observation':
                 incoming['retrieved_at_utc'] = previous['retrieved_at_utc']
-                incoming['asset_href'] = previous['asset_href']
             if previous != incoming or existing.artifact_type != kind:
                 raise ValueError('field_lab_immutable_conflict')
             return False
@@ -373,14 +460,16 @@ class ReferenceLab:
         # Publication deadline includes actual durable write, not just retrieval.
         existing = self.store.load(idempotency_key=run.run_id)
         seal = self.store.load(idempotency_key='seal-' + run.run_id)
-        if existing is not None and seal is not None:
+        completion = self.store.load(idempotency_key='durable-' + run.run_id)
+        if existing is not None and seal is not None and completion is not None:
             if (existing.artifact_type != 'reference_forecast'
                     or json.loads(existing.payload_json) != asdict(run)
                     or seal.artifact_type != 'reference_seal'
                     or json.loads(seal.payload_json) != {'run_id': run.run_id, 'snapshot_digest': run.snapshot_digest}
-                    or (run.prospective and any(utc(seal.created_at_utc) >= utc(p['at'])
+                    or (run.prospective and any(utc(completion.created_at_utc) >= utc(p['at'])
                         for p in json.loads(run.snapshot_json)['points']))):
                 raise ValueError('field_lab_immutable_conflict')
+            self.durable_seal(run)
             return False
         deadline = min(utc(p['at']) for p in json.loads(run.snapshot_json)['points'])
         if run.prospective and utc(clock()) >= deadline:
@@ -393,15 +482,43 @@ class ReferenceLab:
         self.save('reference_seal', 'seal-' + run.run_id,
                   {'run_id': run.run_id, 'snapshot_digest': run.snapshot_digest},
                   sealed.isoformat(), run.station_id)
+        completed = utc(clock())
+        self.save('reference_seal_completion', 'durable-' + run.run_id,
+                  {'run_id': run.run_id, 'snapshot_digest': run.snapshot_digest,
+                   'seal_digest': self.store.load(idempotency_key='seal-' + run.run_id).digest},
+                  canonical_utc(completed), run.station_id)
+        if run.prospective and completed >= deadline:
+            raise ValueError('reference_seal_deadline_missed')
         return saved
 
+    def durable_seal(self, run):
+        seal = self.store.load(idempotency_key='seal-' + run.run_id)
+        completion = self.store.load(idempotency_key='durable-' + run.run_id)
+        if seal is None or completion is None:
+            return None
+        if (seal.artifact_type != 'reference_seal'
+                or json.loads(seal.payload_json) != {'run_id': run.run_id, 'snapshot_digest': run.snapshot_digest}
+                or completion.artifact_type != 'reference_seal_completion'
+                or json.loads(completion.payload_json) != {'run_id': run.run_id,
+                    'snapshot_digest': run.snapshot_digest, 'seal_digest': seal.digest}
+                or seal.source_id != run.station_id or completion.source_id != run.station_id
+                or utc(seal.created_at_utc) < utc(run.created_at_utc)
+                or utc(completion.created_at_utc) < utc(seal.created_at_utc)):
+            raise ValueError('reference_seal_identity_mismatch')
+        return completion.created_at_utc
+
     def save_observation(self, observation):
-        return self.save('reference_observation', observation.measurement_digest,
+        self.save('reference_observation', observation.measurement_digest,
+                  asdict(observation), observation.retrieved_at_utc, observation.station_id)
+        return self.save('reference_acquisition', observation.acquisition_id,
                          asdict(observation), observation.retrieved_at_utc, observation.station_id)
 
     def facts(self):
-        artifacts = tuple(self.store.iter_artifacts())
-        seals = {json.loads(a.payload_json)['run_id']: a for a in artifacts if a.artifact_type == 'reference_seal'}
+        artifacts = []
+        for artifact in self.store.iter_artifacts():
+            if len(artifacts) >= self.max_artifacts:
+                raise ValueError("reference_artifact_limit_exceeded")
+            artifacts.append(artifact)
         runs, observations = [], []
         for artifact in artifacts:
             payload = json.loads(artifact.payload_json)
@@ -409,16 +526,14 @@ class ReferenceLab:
                 run = ReferenceForecastRun(**payload)
                 if artifact.idempotency_key != run.run_id:
                     raise ValueError('reference_run_identity_mismatch')
-                seal = seals.get(run.run_id)
-                if seal and json.loads(seal.payload_json)['snapshot_digest'] == run.snapshot_digest:
-                    if run.prospective and any(utc(seal.created_at_utc) >= utc(p['at'])
-                                              for p in json.loads(run.snapshot_json)['points']):
-                        raise ValueError('leakage_detected')
+                sealed = self.durable_seal(run)
+                if sealed is not None and (not run.prospective or all(
+                        utc(sealed) < utc(p['at']) for p in json.loads(run.snapshot_json)['points'])):
                     runs.append(run)
-            elif artifact.artifact_type == 'reference_observation':
+            elif artifact.artifact_type == 'reference_acquisition':
                 observation = ReferenceObservation(**payload)
-                if observation.measurement_digest != artifact.idempotency_key:
-                    raise ValueError('reference_observation_digest_mismatch')
+                if observation.acquisition_id != artifact.idempotency_key:
+                    raise ValueError('reference_acquisition_digest_mismatch')
                 observations.append(observation)
         return tuple(runs), tuple(observations)
 
@@ -457,7 +572,7 @@ class ReferenceLab:
                 if utc(point['at']) + timedelta(minutes=tolerance_minutes) >= current:
                     continue
                 for variable in VARIABLES:
-                    comparison = compare_point(run, point, variable, observations, tolerance_minutes)
+                    comparison = compare_point(run, point, variable, observations, tolerance_minutes, durable_sealed_at_utc=self.durable_seal(run))
                     result.append(comparison)
                     if persist:
                         payload = asdict(comparison)
@@ -470,7 +585,7 @@ def validate_tolerance(value):
         raise ValueError('reference_tolerance_0_to_30_minutes')
 
 
-def compare_point(run, point, variable, observations, tolerance_minutes):
+def compare_point(run, point, variable, observations, tolerance_minutes, *, durable_sealed_at_utc=None):
     validate_tolerance(tolerance_minutes)
     target = utc(point['at'])
     # Retain the latest retrieved official revision of each measurement, then nearest timestamp.
@@ -493,8 +608,13 @@ def compare_point(run, point, variable, observations, tolerance_minutes):
         observed_at = utc(observation.observed_at_utc)
         offset = (target - observed_at).total_seconds() / 60
         observed = observation.value
-        if run.prospective and (utc(run.forecast_retrieved_at_utc) >= observed_at
-                                or utc(run.created_at_utc) >= observed_at):
+        if durable_sealed_at_utc is None:
+            reason = 'missing_durable_seal'
+        elif (utc(durable_sealed_at_utc) >= observed_at
+                or (run.prospective and utc(durable_sealed_at_utc) >= target)):
+            reason = 'leakage_detected'
+        elif (utc(run.forecast_retrieved_at_utc) >= observed_at
+                or (run.prospective and utc(run.created_at_utc) >= observed_at)):
             reason = 'leakage_detected'
         elif abs(offset) > tolerance_minutes:
             reason = 'outside_time_tolerance'
@@ -506,8 +626,8 @@ def compare_point(run, point, variable, observations, tolerance_minutes):
             reason = 'comparable_unverified_official_qc'
             error = point['values'][variable] - observed
     return ReferenceComparison(run.run_id, run.station_id, variable, point['at'],
-        observation.observed_at_utc if observation else None, offset, point['values'][variable],
-        observed, error, abs(error) if error is not None else None,
+        observation.observed_at_utc if observation else None, offset, point['values'][variable] if error is not None else None,
+        observed if error is not None else None, error, abs(error) if error is not None else None,
         'comparable' if error is not None else 'non_comparable', reason,
         run.snapshot_digest, observation.measurement_digest if observation else None,
         tolerance_minutes, cohort='prospective' if run.prospective else 'historical_backfill')
@@ -523,9 +643,22 @@ def percentile(values, fraction):
 
 
 def report(comparisons, runs):
+    runs = tuple(runs)
     lookup = {r.run_id: json.loads(r.snapshot_json) for r in runs}
     groups = {}
     for comparison in comparisons:
+        if type(comparison) is not ReferenceComparison:
+            raise ValueError("reference_comparison_required")
+        comparison = ReferenceComparison(**asdict(comparison))
+        run = next((r for r in runs if r.run_id == comparison.forecast_run_id), None)
+        if run is None:
+            raise ValueError("reference_comparison_unknown_run")
+        if comparison.station_id != run.station_id or comparison.forecast_digest != run.snapshot_digest or comparison.cohort != ("prospective" if run.prospective else "historical_backfill"):
+            raise ValueError("reference_comparison_provenance_mismatch")
+        points = lookup[comparison.forecast_run_id]['points']
+        matched = next((p for p in points if p['at'] == comparison.forecast_point_at_utc), None)
+        if matched is None or (comparison.status == 'comparable' and comparison.forecast_value != matched['values'][comparison.variable]):
+            raise ValueError('reference_comparison_forecast_mismatch')
         transport = lookup[comparison.forecast_run_id]['transport']
         model = lookup[comparison.forecast_run_id]['model']
         provider = transport['provider']

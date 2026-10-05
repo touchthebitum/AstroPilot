@@ -53,6 +53,8 @@ def selection(args, catalogue, active):
 
 
 def execute(args):
+    if args.command == "forecast-run" and (type(args.hours) is not int or not 1 <= args.hours <= 168):
+        raise ValueError("reference_hours_1_to_168")
     lab = ReferenceLab()  # Validates storage configuration/capabilities before network calls.
     if args.command == 'cycle' and args.dry_run:
         from astropilot.reference_station_lab import validate_tolerance
@@ -71,7 +73,6 @@ def execute(args):
             active = select_stations(catalogue, ids, all_stations=args.all)
             retrieved = now_utc().isoformat()
             payload = {'schema_version': 1, 'source': 'MeteoSwiss',
-                       'retrieved_at_utc': retrieved,
                        'collection': 'ch.meteoschweiz.ogd-smn',
                        'stations': [asdict(s) for s in catalogue],
                        'active_station_ids': [s.station_id for s in active],
