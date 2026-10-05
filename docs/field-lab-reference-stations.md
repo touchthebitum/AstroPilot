@@ -147,7 +147,7 @@ No user project, observation, session, mission, profile or decision is fabricate
 4. Persist the forecast and then an immutable seal. Both retrieval and creation
    must precede every target. Check the clock before and after the durable
    forecast and seal publication, then publish a fresh completion candidate and its commit. A missed deadline leaves an
-   inadmissible artifact, which readers exclude. The commit completion time must also precede every
+   inadmissible artifact, which readers exclude. The attested forecast durable seal time must also precede every
    target. Identical successfully committed runs are no-ops, including after the deadline.
 5. After target + tolerance has passed, collect official measurements, select the
    unique nearest observation and compare stored facts only. Any observation at
@@ -274,7 +274,7 @@ or GitHub Actions are introduced.
 
 Storage keeps #313's descriptor-pinned hashed filenames under `artifacts/`.
 Logical partitions are one catalogue version, one forecast per run/station,
-one seal and durable commit per run, with completion candidates per attempt, one observation per station/timestamp/variable/revision and
+one seal and attestation commit per run, with completion candidates per attempt, one observation per station/timestamp/variable/revision and
 one acquisition event per retrieval/content and
 one comparison per run/target/variable/observation/policy. No monolithic history
 JSON or mutable index is introduced. The reader checks namespace, digest and
@@ -334,7 +334,7 @@ stations and an isolated temporary root; no expired fake forecast is published.
 Publication uses create-only forecast snapshot, seal, completion candidate and
 commit artifacts. Snapshot and seal are revalidated and fsynced before the candidate.
 Each attempt uses a fresh candidate identity; its publication must return successfully
-from file and directory fsync (including cleanup) before the commit timestamp is
+from file and directory fsync (including cleanup) before the forecast durable seal timestamp is
 sampled. The commit binds the candidate's complete canonical document digest, run,
 snapshot and seal. Readers require and validate this commit and all its bindings;
 a visible candidate alone, including a legacy receipt, never admits a run.
@@ -347,7 +347,7 @@ These are application/fsync guarantees, not a simulation of physical power loss
 or protection against same-owner tampering. A fresh real smoke remains required.
 
 Recovery validates orphan identities/content and reconfirms snapshot/seal, creates
-a fresh candidate and samples a new commit time; it never promotes an old timestamp.
+a fresh candidate and samples a new forecast durable seal time; it never promotes an old timestamp.
 A recovery after the target records a late commit, reports
 `reference_seal_deadline_missed`, and remains inadmissible. Conflicting orphan
 content fails closed. Successful durable replay is immutable and idempotent.
@@ -417,3 +417,50 @@ Missing parser values are explicitly `missing` with null value from ingestion
 through matching; missing is never zero. Official QC remains unverified for real
 values until an official QC contract is available. Temperature/RH mapping, excluded
 wind errors, prospective/historical separation and isolation #313 are unchanged.
+
+### Scientific temporal contract (Field Lab v1)
+
+The scientific boundary is the successful durable confirmation of the forecast
+snapshot, seal and fresh candidate. The commit envelope's `created_at_utc` stores
+`forecast_durable_at_utc`: a clock sample after that barrier, before commit creation.
+It does not measure completion of the commit's own fsync. The candidate envelope's
+time is sampled before candidate publication and is not the admission timestamp.
+The persisted format is unchanged.
+
+Exact writer order: snapshot/seal publication, snapshot file+directory reconfirmation,
+seal file+directory reconfirmation, candidate temporary write/flush/file fsync,
+candidate hard link, directory fsync, temporary unlink, cleanup directory fsync,
+forecast durable time sample, commit temporary write/flush/file fsync, commit hard
+link, temporary unlink, commit directory fsync. No commit is constructed if the
+candidate publication or reconfirmation fails. Readers validate run/snapshot/seal
+and the complete candidate document bound by the commit. Admission requires this
+attested time strictly before every prospective target; comparison also requires
+it strictly before the matched observation.
+
+A reader may admit a visible commit before its directory fsync, including a commit
+surviving process interruption there: its existence causally follows the earlier
+successful forecast barrier. Delayed commit persistence across target does not
+change the earlier scientific event. If the commit disappears, the run is absent
+(an acceptable false negative). Handled publication failures still roll back the
+commit; orphan recovery reconfirms and samples a fresh time, never backdates it.
+No third marker is required.
+
+An artifact containing a timestamp sampled after its own final fsync requires
+another write to store that sample, and that write requires another fsync. Repeating
+this cannot close the self-attestation regression. A transactional database can
+provide a different externally defined commit boundary, but its stored timestamp
+is still not inherently a post-fsync sample.
+
+Option A retains the current causal protocol with minimal complexity and satisfies
+local Field Lab v1. Option B (SQLite with durable transactions) can simplify atomic
+relationships and recovery but adds migration, connection and transaction semantics
+and does not inherently provide a trusted post-commit wall-clock receipt. Option C
+(an external ledger/service) can supply independently timed receipts but adds network
+availability, identity, operation and trust requirements. Neither stronger option
+is required to ensure the forecast content was fixed before target/observation.
+
+This contract assumes trusted application execution, a truthful local clock and
+filesystem/hardware honoring successful fsync. It does not protect against hardware
+failure, a lying clock or same-owner artifact forgery. Missing evidence cannot be
+reconstructed afterwards using an old timestamp. Physical power-loss behavior has
+not been verified.

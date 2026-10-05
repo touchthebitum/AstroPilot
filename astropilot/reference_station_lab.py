@@ -460,7 +460,7 @@ class ReferenceLab:
         return self.store.save(artifact)
 
     def save_run(self, run, *, clock=now_utc):
-        # Publication deadline includes actual durable write, not just retrieval.
+        # Scientific deadline covers durable forecast/seal/candidate, not attestation persistence.
         existing = self.store.load(idempotency_key=run.run_id)
         seal = self.store.load(idempotency_key='seal-' + run.run_id)
         completion = self.durable_seal(run)
@@ -503,17 +503,23 @@ class ReferenceLab:
                   canonical_utc(clock()), run.station_id)
         candidate = self.store.load(idempotency_key=candidate_key)
         # The commit attests a successfully fsynced candidate, not mere visibility.
-        completed = utc(clock())
+        forecast_durable_at = utc(clock())
         self.save('reference_seal_commit', 'commit-' + run.run_id,
                   {'run_id': run.run_id, 'snapshot_digest': run.snapshot_digest,
                    'seal_digest': json.loads(candidate.payload_json)['seal_digest'],
                    'candidate_key': candidate_key, 'candidate_digest': digest(candidate.document())},
-                  canonical_utc(completed), run.station_id)
-        if run.prospective and completed >= deadline:
+                  canonical_utc(forecast_durable_at), run.station_id)
+        if run.prospective and forecast_durable_at >= deadline:
             raise ValueError('reference_seal_deadline_missed')
         return saved
 
     def durable_seal(self, run):
+        """Return attested forecast barrier time, not commit publication completion.
+
+        The writer samples this time only after candidate publication returns.
+        A surviving visible commit is sufficient even before its directory fsync.
+        This causal guarantee assumes the trusted writer and local clock.
+        """
         seal = self.store.load(idempotency_key='seal-' + run.run_id)
         if seal is not None and (seal.artifact_type != 'reference_seal'
                 or json.loads(seal.payload_json) != {'run_id': run.run_id, 'snapshot_digest': run.snapshot_digest}

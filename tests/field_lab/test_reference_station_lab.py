@@ -702,3 +702,78 @@ def test_candidate_publication_boundary(lab, monkeypatch, stage):
             lab.save_run(r, clock=lambda:current)
         assert lab.store.load(idempotency_key='commit-'+r.run_id) is None
     assert lab.facts()[0] == ()
+
+
+@pytest.mark.parametrize('outcome', ['delayed', 'failure'])
+def test_visible_commit_attests_prior_forecast_barrier(lab, monkeypatch, outcome):
+    import os
+    import stat
+    r = run()
+    current = T-timedelta(seconds=1)
+    barrier_time = current
+    original = os.fsync
+    name = lab.store._name('commit-'+r.run_id)
+    seen = []
+    def boundary(fd):
+        nonlocal current
+        if stat.S_ISDIR(os.fstat(fd).st_mode) and name in os.listdir(fd):
+            # A fresh reader observes the process-interruption window.
+            reader = ReferenceLab(FileFieldLabStore())
+            assert reader.facts()[0] == (r,)
+            assert reader.durable_seal(r) == canonical_utc(barrier_time)
+            current = T+timedelta(seconds=1)
+            assert reader.save_run(r, clock=lambda:current) is False
+            seen.append(True)
+            if outcome == 'failure':
+                raise OSError('attestation persistence failed')
+        original(fd)
+    monkeypatch.setattr(os, 'fsync', boundary)
+    if outcome == 'failure':
+        with pytest.raises(OSError, match='attestation persistence failed'):
+            lab.save_run(r, clock=lambda:current)
+        assert lab.facts()[0] == ()
+    else:
+        assert lab.save_run(r, clock=lambda:current)
+        assert lab.facts()[0] == (r,)
+        assert lab.durable_seal(r) == canonical_utc(barrier_time)
+    assert seen
+
+
+def test_disappeared_attestation_is_false_negative(lab):
+    import os
+    r = run()
+    lab.save_run(r, clock=lambda:T-timedelta(seconds=1))
+    with lab.store._directory() as fd:
+        os.unlink(lab.store._name('commit-'+r.run_id), dir_fd=fd)
+        os.fsync(fd)
+    assert lab.facts()[0] == ()
+    with pytest.raises(ValueError, match='deadline_missed'):
+        lab.save_run(r, clock=lambda:T+timedelta(seconds=1))
+    assert lab.facts()[0] == ()
+
+
+def test_process_exit_with_visible_commit_preserves_prior_barrier(lab):
+    import subprocess
+    import sys
+    r = run()
+    stamp = canonical_utc(T-timedelta(seconds=1))
+    script = '''
+import json, os, stat, sys
+from astropilot.reference_station_lab import ReferenceLab, ReferenceForecastRun, utc
+lab = ReferenceLab()
+run = ReferenceForecastRun(**json.loads(sys.argv[1]))
+name = lab.store._name('commit-'+run.run_id)
+original = os.fsync
+def interrupted(fd):
+    if stat.S_ISDIR(os.fstat(fd).st_mode) and name in os.listdir(fd):
+        os._exit(73)
+    original(fd)
+os.fsync = interrupted
+lab.save_run(run, clock=lambda:utc(sys.argv[2]))
+'''
+    result = subprocess.run([sys.executable, '-c', script, json.dumps(asdict(r)), stamp])
+    assert result.returncode == 73
+    reader = ReferenceLab(FileFieldLabStore())
+    assert reader.facts()[0] == (r,)
+    assert reader.durable_seal(r) == stamp
+    assert reader.save_run(r, clock=lambda:T+timedelta(seconds=1)) is False
