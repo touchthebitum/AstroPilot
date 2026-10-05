@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decision.storage_namespace import require_user_document
+
 import json
 import math
 from collections.abc import Mapping
@@ -442,6 +444,7 @@ def deserialize_outcome_evaluation(document: str, *, evaluation_id: str | None =
         raise
     except (TypeError, ValueError, json.JSONDecodeError) as error:
         raise OutcomeEvaluationPersistenceError("invalid_json_document") from error
+    require_user_document(payload, OutcomeEvaluationPersistenceError)
     if not isinstance(payload, Mapping):
         raise OutcomeEvaluationPersistenceError("invalid_root_fields")
     if payload.get("schema_version") != SCHEMA_VERSION or type(payload.get("schema_version")) is not int:

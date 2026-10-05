@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from astropilot.field_lab_paths import require_user_directory
+
 import os
 import re
 import sys
@@ -30,10 +32,12 @@ class FileDecisionForecastEvidenceStore:
         self._directory = Path(directory)
 
     def _path(self, decision_id: str) -> Path:
+        require_user_directory(self._directory)
         identity = validate_decision_id(decision_id)
         return self._directory / f"{identity}.json"
 
     def _locked(self):
+        require_user_directory(self._directory)
         return exclusive_file_lock(
             self._directory / ".decision_forecast_evidence.lock"
         )
@@ -44,6 +48,7 @@ class FileDecisionForecastEvidenceStore:
         *,
         decision_id: str,
     ) -> DecisionForecastEvidence:
+        require_user_directory(self._directory)
         try:
             document = path.read_text(encoding="utf-8")
         except UnicodeError as error:

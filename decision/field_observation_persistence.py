@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decision.storage_namespace import require_user_document
+
 import json
 from collections.abc import Mapping
 from contextlib import AbstractContextManager
@@ -481,6 +483,7 @@ def deserialize_field_observation(
         payload = json.loads(document, parse_constant=_reject_json_constant)
     except (TypeError, ValueError, json.JSONDecodeError) as error:
         raise FieldObservationPersistenceError("invalid_json_document") from error
+    require_user_document(payload, FieldObservationPersistenceError)
     if not isinstance(payload, Mapping):
         raise FieldObservationPersistenceError("invalid_root_fields")
     version = payload.get("schema_version")

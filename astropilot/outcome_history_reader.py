@@ -1,9 +1,13 @@
 """Best-effort historical snapshot. Never invokes a store or writer lock."""
 from __future__ import annotations
 
+from astropilot.field_lab_paths import require_user_directory
+from decision.storage_namespace import is_field_lab_document
+
 import hashlib
 import json
 import os
+import re
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,6 +79,8 @@ class FileOutcomeHistoryReader:
 
     def _directory_fd(self, kind):
         _require_secure_fs_capabilities()
+        require_user_directory(self.directory)
+        require_user_directory(self.directory / kind)
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         try:
             root = os.open(self.directory, flags)
@@ -222,8 +228,18 @@ class FileOutcomeHistoryReader:
             manifest.setdefault(key, digest)
             try:
                 text = raw.decode('utf-8')
+                root = json.loads(text)
+                if is_field_lab_document(root):
+                    diagnostics.append({'code': 'field_lab_document_excluded', 'kind': kind, 'id': identity})
+                    # Evaluation filenames are persisted SHA-256 identities. An
+                    # excluded document occupying one is ambiguous unless it is
+                    # the lab artifact's own content-addressed filename.
+                    if (kind == 'outcome_evaluations' and
+                            re.fullmatch(r'[0-9a-f]{64}', identity) and
+                            identity != hashlib.sha256(str(root.get('idempotency_key', '')).encode()).hexdigest()):
+                        diagnostics.append({'code': 'expected_user_document_excluded', 'kind': kind, 'id': identity})
+                    return
                 if kind == 'outcome_evaluations':
-                    root = json.loads(text)
                     if isinstance(root, dict) and (
                             type(root.get('schema_version')) is int and root['schema_version'] > 1 or
                             isinstance(root.get('domain_version'), str) and
@@ -242,6 +258,9 @@ class FileOutcomeHistoryReader:
             for name in inventories[kind]:
                 load(kind, name[:-5], decoder, keyword)
         evaluations = tuple(values['outcome_evaluations'].values())
+        for identity in sorted({e.comparison.observation_id for e in evaluations}):
+            if identity not in values['field_observations']:
+                diagnostics.append({'code': 'missing_user_observation', 'kind': 'field_observations', 'id': identity})
         decision_ids = {e.comparison.decision_id for e in evaluations if e.comparison.decision_id}
         execution_ids = {e.comparison.execution_id for e in evaluations if e.comparison.execution_id}
         for kind, identities, decoder, keyword in (
@@ -253,6 +272,10 @@ class FileOutcomeHistoryReader:
             self._inventory(kind)
             for identity in sorted(identities):
                 load(kind, identity, decoder, keyword)
+                if identity not in values[kind] and any(
+                        d['code'] == 'field_lab_document_excluded' and d['kind'] == kind and d['id'] == identity
+                        for d in diagnostics):
+                    diagnostics.append({'code': 'expected_user_document_excluded', 'kind': kind, 'id': identity})
         # Content validation follows all decoding/join reads. Membership and metadata
         # are checked last, including files hashed early in this final pass.
         stable = not content_changed
@@ -266,7 +289,7 @@ class FileOutcomeHistoryReader:
             diagnostics.append({'code': 'dataset_changed_during_read'})
         fingerprint = hashlib.sha256(json.dumps({'files': manifest, 'inventory': inventories},
             sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-        complete = stable and not any(d['code'] != 'incompatible_version' for d in diagnostics)
+        complete = stable and not any(d['code'] not in ('incompatible_version', 'field_lab_document_excluded') for d in diagnostics)
         return OutcomeHistorySnapshot(evaluations, values['field_observations'],
             values['decision_forecast_evidence'], values['execution_lineage'],
             values['decision_lineage'], fingerprint, tuple(diagnostics), complete, stable)

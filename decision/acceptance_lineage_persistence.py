@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decision.storage_namespace import require_user_document
+
 import json
 import math
 import re
@@ -671,6 +673,7 @@ def deserialize_decision_acceptance_aggregate(
         payload = json.loads(document, parse_constant=_reject_json_constant)
     except (TypeError, ValueError, json.JSONDecodeError) as error:
         raise AcceptanceLineageCorruptionError("invalid_json_document") from error
+    require_user_document(payload, AcceptanceLineageCorruptionError)
     if type(payload) is not dict:
         raise AcceptanceLineageCorruptionError("invalid_root_fields")
     version = payload.get("schema_version")

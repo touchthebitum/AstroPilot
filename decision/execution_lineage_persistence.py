@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decision.storage_namespace import require_user_document
+
 import json
 import re
 from dataclasses import dataclass
@@ -348,6 +350,7 @@ def deserialize_execution_lineage_aggregate(
         raw = json.loads(document)
     except (json.JSONDecodeError, UnicodeError) as error:
         raise ExecutionLineageCorruptionError("invalid_json_document") from error
+    require_user_document(raw, ExecutionLineageCorruptionError)
     root = _exact_mapping(
         raw,
         frozenset(
