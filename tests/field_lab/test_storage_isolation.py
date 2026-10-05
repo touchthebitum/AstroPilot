@@ -307,3 +307,122 @@ def test_dangling_marker_still_excludes_user_stores(roots, monkeypatch):
     monkeypatch.delenv('FIELD_LAB_DATA_DIR')
     with pytest.raises(ValueError, match='excluded'):
         require_user_directory(lab)
+
+
+@pytest.mark.parametrize('suffix', ['', 'lab', 'new/deeper'])
+def test_real_case_alias_overlap(roots, monkeypatch, suffix):
+    user, lab = roots
+    renamed = user.with_name('User')
+    user.rename(renamed)
+    alias = renamed.with_name('user')
+    if not alias.exists():
+        pytest.skip('volume is case-sensitive; simulated coverage below')
+    monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(renamed))
+    monkeypatch.setenv('FIELD_LAB_DATA_DIR', str(alias / suffix))
+    with pytest.raises(ValueError, match='overlap'):
+        FileFieldLabStore()
+    assert not list(renamed.iterdir())
+
+
+def test_additive_lab_preserves_populated_http_statistics(roots):
+    user, _ = roots
+    helpers = runpy.run_path(str(Path(__file__).parents[1] / 'history/test_outcome_history.py'))
+    helpers['seed'](user)
+    before = helpers['client'](user).get(helpers['URL'])
+    for kind in ('field_observations', 'outcome_evaluations'):
+        (user / kind / 'extra-lab.json').write_text(artifact().document())
+    after = helpers['client'](user).get(helpers['URL'])
+    assert before.status_code == after.status_code == 200
+    assert before.json()['statistics'] is not None
+    assert after.json()['statistics'] == before.json()['statistics']
+    assert any(d['code'] == 'field_lab_document_excluded' for d in after.json()['diagnostics'])
+
+
+@pytest.mark.parametrize('kind', ['field_observations', 'outcome_evaluations', 'decision_forecast_evidence'])
+def test_lab_replacement_suspends_statistics(roots, kind):
+    user, _ = roots
+    helpers = runpy.run_path(str(Path(__file__).parents[1] / 'history/test_outcome_history.py'))
+    helpers['seed'](user)
+    next((user / kind).glob('*.json')).write_text(artifact().document())
+    response = helpers['client'](user).get(helpers['URL'])
+    assert response.status_code == 200
+    assert response.json()['statistics'] is None
+
+
+def test_same_owner_rename_is_outside_storage_threat_model(roots, monkeypatch):
+    # Executable limitation: 0700 cannot stop a process with this same UID.
+    user, lab = roots
+    store = FileFieldLabStore()
+    store.save(artifact())
+    original = FileFieldLabStore._publish
+    moved = user / 'field_observations'
+    def rename_before_publish(fd, name, document):
+        if name.endswith('.json'):
+            (lab / 'artifacts').rename(moved)
+        return original(fd, name, document)
+    monkeypatch.setattr(FileFieldLabStore, '_publish', staticmethod(rename_before_publish))
+    assert store.save(artifact(idempotency_key='sample-2')) is True
+    assert (moved / store._name('sample-2')).exists()
+    snapshot = FileOutcomeHistoryReader(user).read()
+    assert not snapshot.observations
+    assert any(d['code'] == 'field_lab_document_excluded' for d in snapshot.diagnostics)
+
+
+@pytest.mark.parametrize('sensitive', [True, False])
+@pytest.mark.parametrize('left,right,overlap', [
+    ('/User', '/user/lab', True),
+    ('/User/future', '/user/future/deeper', True),
+    ('/User/future', '/user/other', False),
+    ('/User/future', '/user', True),
+])
+def test_filesystem_identity_injected_case_semantics(monkeypatch, sensitive, left, right, overlap):
+    import astropilot.field_lab_paths as paths
+    def identity(path):
+        spelling = str(path)
+        if spelling == '/':
+            return (1, 1)
+        if spelling in ('/User', '/user'):
+            return (1, 2 if not sensitive or spelling == '/User' else 3)
+        raise FileNotFoundError(spelling)
+    monkeypatch.setattr(paths, '_directory_identity', identity)
+    assert paths._overlaps(Path(left), Path(right)) is (overlap and not sensitive)
+
+
+def test_identity_probe_errors_fail_closed(roots, monkeypatch):
+    import astropilot.field_lab_paths as paths
+    def unavailable(path):
+        raise PermissionError('cannot establish identity')
+    monkeypatch.setattr(paths, '_directory_identity', unavailable)
+    with pytest.raises(PermissionError):
+        FileFieldLabStore()
+    assert not roots[1].exists()
+
+
+def test_real_case_sensitive_distinct_directories(tmp_path):
+    import astropilot.field_lab_paths as paths
+    upper, lower = tmp_path / 'User', tmp_path / 'user'
+    upper.mkdir()
+    if lower.exists():
+        pytest.skip('volume is case-insensitive; real alias regression covers it')
+    lower.mkdir()
+    assert not paths._overlaps(upper, lower)
+    assert not paths._overlaps(upper, lower / 'lab')
+
+
+def test_additive_content_addressed_lab_evaluation_preserves_stats(roots):
+    user, _ = roots
+    helpers = runpy.run_path(str(Path(__file__).parents[1] / 'history/test_outcome_history.py'))
+    helpers['seed'](user)
+    before = helpers['client'](user).get(helpers['URL']).json()['statistics']
+    (user / 'outcome_evaluations' / FileFieldLabStore._name('sample-1')).write_text(artifact().document())
+    assert helpers['client'](user).get(helpers['URL']).json()['statistics'] == before
+
+
+@pytest.mark.parametrize('left,right,expected', [
+    ('future', 'FUTURE/lab', True),
+    ('future', 'FUTURE', True),
+    ('future', 'other', False),
+])
+def test_missing_suffix_case_ambiguity_fails_closed(tmp_path, left, right, expected):
+    import astropilot.field_lab_paths as paths
+    assert paths._overlaps(tmp_path / left, tmp_path / right) is expected

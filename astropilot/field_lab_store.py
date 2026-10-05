@@ -1,6 +1,8 @@
 """Minimal immutable Field Lab artifacts, offline only.
 
 Descriptor-relative operations pin each directory and refuse symlink redirection.
+They do not prevent same-owner processes from relocating an opened directory;
+see docs/field-lab-reference-stations.md for the local-process threat model.
 Unsupported platforms fail before touching storage (same POSIX policy as History).
 """
 from contextlib import contextmanager
