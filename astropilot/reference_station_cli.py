@@ -50,9 +50,11 @@ def saved_catalogue(lab):
                 or canonical_utc(value['retrieved_at_utc']) != value['retrieved_at_utc']
                 or artifact.created_at_utc != value['retrieved_at_utc']):
             raise ValueError('reference_catalog_activation_invalid')
-    # Equal sync times have no official order: choose content digest deterministically.
-    latest, event = max(events, key=lambda item: (item[1]['retrieved_at_utc'],
-                                                 item[1]['catalogue_digest']))
+    maximum = max(value['retrieved_at_utc'] for _, value in events)
+    latest = [value for _, value in events if value['retrieved_at_utc'] == maximum]
+    if len({value['catalogue_digest'] for value in latest}) != 1:
+        raise ValueError('reference_catalogue_activation_ambiguous')
+    event = latest[0]
     catalogue = lab.store.load(idempotency_key=event['catalogue_digest'])
     if (catalogue is None or catalogue.artifact_type != 'reference_catalogue'
             or catalogue.digest != event['catalogue_digest']):

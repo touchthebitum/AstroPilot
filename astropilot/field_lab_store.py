@@ -181,10 +181,12 @@ class FileFieldLabStore:
         return document.decode("utf-8")
 
     @staticmethod
-    def _publish(fd, name, document):
+    def _publish(fd, name, document, *, rollback=False):
         temporary = "." + uuid.uuid4().hex + ".tmp"
         handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                          0o600, dir_fd=fd)
+        linked = False
+        cleaned = False
         try:
             with os.fdopen(handle, "w", encoding="utf-8") as stream:
                 stream.write(document)
@@ -198,11 +200,27 @@ class FileFieldLabStore:
                     raise ValueError("field_lab_immutable_conflict")
                 os.fsync(fd)
                 return False
+            linked = True
+            if rollback:
+                os.unlink(temporary, dir_fd=fd)
+                cleaned = True
             os.fsync(fd)
             return True
+        except BaseException:
+            if rollback and linked:
+                os.unlink(name, dir_fd=fd)
+                try:
+                    os.fsync(fd)
+                except OSError:
+                    # Preserve the original publication failure; never claim recovery.
+                    pass
+            raise
         finally:
-            os.unlink(temporary, dir_fd=fd)
-            os.fsync(fd)
+            if not cleaned:
+                os.unlink(temporary, dir_fd=fd)
+            # Candidate cleanup is not part of commit publication.
+            if not rollback:
+                os.fsync(fd)
 
     def save(self, artifact):
         if type(artifact) is not FieldLabArtifact:
@@ -213,6 +231,8 @@ class FileFieldLabStore:
         if len(document.encode()) > _MAX_BYTES:
             raise ValueError("field_lab_document_too_large")
         with self._directory(create=True) as fd:
+            if artifact.artifact_type == "reference_seal_commit":
+                return self._publish(fd, self._name(artifact.idempotency_key), document, rollback=True)
             return self._publish(fd, self._name(artifact.idempotency_key), document)
 
     def confirm_durable(self, artifact):

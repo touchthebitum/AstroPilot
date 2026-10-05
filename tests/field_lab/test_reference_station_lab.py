@@ -514,8 +514,8 @@ def test_catalog_same_content_new_time_tie_and_conflict(lab):
     lab.save_catalogue(a, T+timedelta(hours=1))
     assert len(tuple(lab.store.iter_artifacts())) == 3
     lab.save_catalogue(b, T+timedelta(hours=1))
-    expected = a if digest(a) > digest(b) else b
-    assert saved_catalogue(lab)[0][0].altitude_m == expected['stations'][0]['altitude_m']
+    with pytest.raises(ValueError, match='reference_catalogue_activation_ambiguous'):
+        saved_catalogue(lab)
 
 
 @pytest.mark.parametrize('limit, succeeds', [(2, False), (3, True), (4, True)])
@@ -545,3 +545,160 @@ def test_unverified_missing_rejected_at_ingestion(lab):
     comparison = compare_point(run(), point(run()), 'temperature_2m', [missing], 10)
     assert comparison.status == 'non_comparable'
     assert comparison.observed_value is None
+
+
+@pytest.mark.parametrize('late', [False, True])
+def test_candidate_visible_directory_failure_replay(lab, monkeypatch, late):
+    import os
+    import stat
+    r = run()
+    original = os.fsync
+    def fault(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            for name in os.listdir(fd):
+                if name.endswith('.json'):
+                    value = json.loads(lab.store._read(fd, name))
+                    if value.get('artifact_type') == 'reference_seal_completion':
+                        raise OSError('candidate directory failure')
+        original(fd)
+    monkeypatch.setattr(os, 'fsync', fault)
+    with pytest.raises(OSError, match='candidate directory failure'):
+        lab.save_run(r, clock=lambda:T-timedelta(minutes=58))
+    assert lab.facts()[0] == ()
+    assert lab.store.load(idempotency_key='commit-'+r.run_id) is None
+    monkeypatch.setattr(os, 'fsync', original)
+    current = T+timedelta(seconds=1) if late else T-timedelta(seconds=1)
+    if late:
+        with pytest.raises(ValueError, match='deadline_missed'):
+            lab.save_run(r, clock=lambda:current)
+    else:
+        lab.save_run(r, clock=lambda:current)
+        assert not lab.save_run(r, clock=lambda:T+timedelta(days=1))
+    assert lab.durable_seal(r) == canonical_utc(current)
+    assert len(lab.facts()[0]) == (0 if late else 1)
+    assert sum(a.artifact_type == 'reference_seal_completion'
+               for a in lab.store.iter_artifacts()) == 2
+
+
+def test_crash_between_candidate_and_commit(lab, monkeypatch):
+    save = lab.store.save
+    def fault(artifact):
+        if artifact.artifact_type == 'reference_seal_commit':
+            raise OSError('crash before commit')
+        return save(artifact)
+    monkeypatch.setattr(lab.store, 'save', fault)
+    with pytest.raises(OSError, match='crash before commit'):
+        lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
+    assert lab.facts()[0] == ()
+
+
+@pytest.mark.parametrize('field', ['run_id', 'snapshot_digest', 'seal_digest', 'candidate_digest', 'candidate_key'])
+def test_commit_binding_mismatch(lab, monkeypatch, field):
+    from astropilot.field_lab_store import FieldLabArtifact
+    r = run()
+    lab.save_run(r, clock=lambda:T-timedelta(minutes=58))
+    load = lab.store.load
+    def corrupt(*, idempotency_key):
+        artifact = load(idempotency_key=idempotency_key)
+        if idempotency_key == 'commit-'+r.run_id:
+            payload = json.loads(artifact.payload_json)
+            payload[field] = 'f'*64
+            return FieldLabArtifact.create(artifact_type=artifact.artifact_type,
+                source_id=artifact.source_id, idempotency_key=idempotency_key,
+                payload=payload, created_at_utc=artifact.created_at_utc)
+        return artifact
+    monkeypatch.setattr(lab.store, 'load', corrupt)
+    with pytest.raises(ValueError, match='seal_identity_mismatch'):
+        lab.facts()
+    with pytest.raises(ValueError, match='seal_identity_mismatch'):
+        lab.save_run(r)
+
+
+@pytest.mark.parametrize('reverse', [False, True])
+def test_catalog_equal_timestamp_divergence_cli(lab, monkeypatch, capsys, reverse):
+    from astropilot.reference_station_cli import saved_catalogue
+    a = {'stations':[asdict(STATION)], 'active_station_ids':['NEU']}
+    b = {'stations':[asdict(replace(STATION, altitude_m=500))], 'active_station_ids':['NEU']}
+    for value in ([b, a] if reverse else [a, b]):
+        lab.save_catalogue(value, T)
+    with pytest.raises(ValueError, match='activation_ambiguous'):
+        saved_catalogue(lab)
+    assert main(['stations', 'list']) == 2
+    assert 'reference_catalogue_activation_ambiguous' in capsys.readouterr().err
+
+
+def test_catalog_equal_timestamp_same_content(lab):
+    from astropilot.reference_station_cli import saved_catalogue
+    a = {'stations':[asdict(STATION)], 'active_station_ids':['NEU']}
+    lab.save_catalogue(a, T, event_id='one')
+    lab.save_catalogue(a, T, event_id='two')
+    assert saved_catalogue(lab)[0] == (STATION,)
+
+
+def test_orphan_candidate_conflict(lab, monkeypatch):
+    r = run()
+    lab.save('reference_forecast', r.run_id, asdict(r), r.created_at_utc, r.station_id)
+    lab.save('reference_seal', 'seal-'+r.run_id,
+        {'run_id':r.run_id, 'snapshot_digest':r.snapshot_digest}, T-timedelta(minutes=58), r.station_id)
+    lab.save('reference_seal_completion', 'candidate-'+r.run_id+'-orphan',
+        {'run_id':r.run_id, 'snapshot_digest':'f'*64, 'seal_digest':'f'*64}, T-timedelta(minutes=58), r.station_id)
+    with pytest.raises(ValueError, match='seal_identity_mismatch'):
+        lab.save_run(r, clock=lambda:T-timedelta(minutes=57))
+
+
+def test_commit_directory_failure_removes_visible_commit(lab, monkeypatch):
+    import os
+    import stat
+    r = run()
+    original = os.fsync
+    name = lab.store._name('commit-'+r.run_id)
+    def fault(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode) and name in os.listdir(fd):
+            raise OSError('commit directory failure')
+        original(fd)
+    monkeypatch.setattr(os, 'fsync', fault)
+    with pytest.raises(OSError, match='commit directory failure'):
+        lab.save_run(r, clock=lambda:T-timedelta(minutes=58))
+    assert lab.facts()[0] == ()
+
+
+@pytest.mark.parametrize('stage', ['candidate_file', 'candidate_cleanup', 'candidate_delayed'])
+def test_candidate_publication_boundary(lab, monkeypatch, stage):
+    import os
+    import stat
+    r = run()
+    original = os.fsync
+    current = T-timedelta(seconds=1)
+    publishing = False
+    calls = 0
+    def fault(fd):
+        nonlocal calls, current
+        if publishing:
+            calls += 1
+            if stage == 'candidate_file' and stat.S_ISREG(os.fstat(fd).st_mode):
+                raise OSError('candidate file failure')
+            if stage == 'candidate_cleanup' and calls == 3:
+                raise OSError('candidate cleanup failure')
+        original(fd)
+    save = lab.store.save
+    def publish(artifact):
+        nonlocal publishing, current
+        publishing = artifact.artifact_type == 'reference_seal_completion'
+        try:
+            result = save(artifact)
+            if publishing and stage == 'candidate_delayed':
+                current = T+timedelta(seconds=1)
+            return result
+        finally:
+            publishing = False
+    monkeypatch.setattr(os, 'fsync', fault)
+    monkeypatch.setattr(lab.store, 'save', publish)
+    if stage == 'candidate_delayed':
+        with pytest.raises(ValueError, match='deadline_missed'):
+            lab.save_run(r, clock=lambda:current)
+        assert lab.durable_seal(r) == canonical_utc(current)
+    else:
+        with pytest.raises(OSError, match='candidate'):
+            lab.save_run(r, clock=lambda:current)
+        assert lab.store.load(idempotency_key='commit-'+r.run_id) is None
+    assert lab.facts()[0] == ()

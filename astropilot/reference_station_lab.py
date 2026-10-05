@@ -9,6 +9,7 @@ import math
 import re
 import statistics
 import subprocess
+import uuid
 from importlib.metadata import version
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -462,23 +463,30 @@ class ReferenceLab:
         # Publication deadline includes actual durable write, not just retrieval.
         existing = self.store.load(idempotency_key=run.run_id)
         seal = self.store.load(idempotency_key='seal-' + run.run_id)
-        completion = self.store.load(idempotency_key='durable-' + run.run_id)
-        if existing is not None and seal is not None and completion is not None:
+        completion = self.durable_seal(run)
+        if existing is not None and completion is not None:
             if (existing.artifact_type != 'reference_forecast'
                     or json.loads(existing.payload_json) != asdict(run)
-                    or seal.artifact_type != 'reference_seal'
-                    or json.loads(seal.payload_json) != {'run_id': run.run_id, 'snapshot_digest': run.snapshot_digest}
-                    or (run.prospective and any(utc(completion.created_at_utc) >= utc(p['at'])
+                    or (run.prospective and any(utc(completion) >= utc(p['at'])
                         for p in json.loads(run.snapshot_json)['points']))):
                 raise ValueError('field_lab_immutable_conflict')
-            self.durable_seal(run)
             return False
+        # Validate orphan candidates as well as the legacy receipt, never reuse time.
+        expected = {'run_id': run.run_id, 'snapshot_digest': run.snapshot_digest,
+                    'seal_digest': seal.digest if seal is not None else None}
+        for candidate in self.store.iter_artifacts(max_names=self.max_artifacts):
+            if (candidate.idempotency_key == 'durable-' + run.run_id
+                    or candidate.idempotency_key.startswith('candidate-' + run.run_id + '-')):
+                if (candidate.artifact_type != 'reference_seal_completion'
+                        or json.loads(candidate.payload_json) != expected
+                        or candidate.source_id != run.station_id):
+                    raise ValueError('reference_seal_identity_mismatch')
         deadline = min(utc(p['at']) for p in json.loads(run.snapshot_json)['points'])
-        if run.prospective and utc(clock()) >= deadline:
+        if seal is None and run.prospective and utc(clock()) >= deadline:
             raise ValueError('leakage_detected')
         saved = self.save('reference_forecast', run.run_id, asdict(run), run.created_at_utc, run.station_id)
         sealed = utc(clock())
-        if run.prospective and sealed >= deadline:
+        if seal is None and run.prospective and sealed >= deadline:
             raise ValueError('reference_seal_deadline_missed')
         # Only runs with a durable seal are comparison candidates.
         self.save('reference_seal', 'seal-' + run.run_id,
@@ -488,10 +496,18 @@ class ReferenceLab:
         # Reopen, validate and fsync both existing artifacts in this attempt.
         for key in (run.run_id, 'seal-' + run.run_id):
             self.store.confirm_durable(self.store.load(idempotency_key=key))
-        completed = utc(clock())
-        self.save('reference_seal_completion', 'durable-' + run.run_id,
+        candidate_key = 'candidate-' + run.run_id + '-' + uuid.uuid4().hex
+        self.save('reference_seal_completion', candidate_key,
                   {'run_id': run.run_id, 'snapshot_digest': run.snapshot_digest,
                    'seal_digest': self.store.load(idempotency_key='seal-' + run.run_id).digest},
+                  canonical_utc(clock()), run.station_id)
+        candidate = self.store.load(idempotency_key=candidate_key)
+        # The commit attests a successfully fsynced candidate, not mere visibility.
+        completed = utc(clock())
+        self.save('reference_seal_commit', 'commit-' + run.run_id,
+                  {'run_id': run.run_id, 'snapshot_digest': run.snapshot_digest,
+                   'seal_digest': json.loads(candidate.payload_json)['seal_digest'],
+                   'candidate_key': candidate_key, 'candidate_digest': digest(candidate.document())},
                   canonical_utc(completed), run.station_id)
         if run.prospective and completed >= deadline:
             raise ValueError('reference_seal_deadline_missed')
@@ -499,19 +515,32 @@ class ReferenceLab:
 
     def durable_seal(self, run):
         seal = self.store.load(idempotency_key='seal-' + run.run_id)
-        completion = self.store.load(idempotency_key='durable-' + run.run_id)
-        if seal is None or completion is None:
-            return None
-        if (seal.artifact_type != 'reference_seal'
+        if seal is not None and (seal.artifact_type != 'reference_seal'
                 or json.loads(seal.payload_json) != {'run_id': run.run_id, 'snapshot_digest': run.snapshot_digest}
-                or completion.artifact_type != 'reference_seal_completion'
-                or json.loads(completion.payload_json) != {'run_id': run.run_id,
-                    'snapshot_digest': run.snapshot_digest, 'seal_digest': seal.digest}
-                or seal.source_id != run.station_id or completion.source_id != run.station_id
-                or utc(seal.created_at_utc) < utc(run.created_at_utc)
-                or utc(completion.created_at_utc) < utc(seal.created_at_utc)):
+                or seal.source_id != run.station_id
+                or utc(seal.created_at_utc) < utc(run.created_at_utc)):
             raise ValueError('reference_seal_identity_mismatch')
-        return completion.created_at_utc
+        commit = self.store.load(idempotency_key='commit-' + run.run_id)
+        if commit is None:
+            return None
+        value = json.loads(commit.payload_json)
+        key = value.get('candidate_key')
+        if not isinstance(key, str) or not key.startswith('candidate-' + run.run_id + '-'):
+            raise ValueError('reference_seal_identity_mismatch')
+        candidate = self.store.load(idempotency_key=key)
+        if (seal is None or candidate is None
+                or candidate.artifact_type != 'reference_seal_completion'
+                or json.loads(candidate.payload_json) != {'run_id': run.run_id,
+                    'snapshot_digest': run.snapshot_digest, 'seal_digest': seal.digest}
+                or commit.artifact_type != 'reference_seal_commit'
+                or value != {'run_id': run.run_id, 'snapshot_digest': run.snapshot_digest,
+                    'seal_digest': seal.digest, 'candidate_key': key,
+                    'candidate_digest': digest(candidate.document())}
+                or candidate.source_id != run.station_id or commit.source_id != run.station_id
+                or utc(candidate.created_at_utc) < utc(seal.created_at_utc)
+                or utc(commit.created_at_utc) < utc(candidate.created_at_utc)):
+            raise ValueError('reference_seal_identity_mismatch')
+        return commit.created_at_utc
 
     def save_catalogue(self, payload, retrieved_at, *, event_id=None):
         stamp = canonical_utc(retrieved_at)

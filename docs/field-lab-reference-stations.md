@@ -146,9 +146,9 @@ No user project, observation, session, mission, profile or decision is fabricate
    run, never reconstructs an old run.
 4. Persist the forecast and then an immutable seal. Both retrieval and creation
    must precede every target. Check the clock before and after the durable
-   forecast and seal publication, then record completion in a separate durable receipt. A missed deadline leaves an
-   inadmissible artifact, which readers exclude. The receipt completion time must also precede every
-   target. Identical already-sealed runs are no-ops, including after the deadline.
+   forecast and seal publication, then publish a fresh completion candidate and its commit. A missed deadline leaves an
+   inadmissible artifact, which readers exclude. The commit completion time must also precede every
+   target. Identical successfully committed runs are no-ops, including after the deadline.
 5. After target + tolerance has passed, collect official measurements, select the
    unique nearest observation and compare stored facts only. Any observation at
    or before retrieval/creation/durable seal completion produces `leakage_detected`, even when nearby.
@@ -201,7 +201,7 @@ out-of-range values become invalid, never zero. Any nonempty supplied `_qc` fiel
 is conservatively rejected until its official semantics are implemented.
 Official revisions are immutable observation versions keyed by measurement
 content; separate acquisition events retain each retrieval. The latest event
-timestamp wins, with digest tie-breaking. Exact event replays are no-ops.
+timestamp wins; divergent content at that timestamp fails closed. Exact event replays are no-ops.
 
 ## Station selection and volume
 
@@ -274,7 +274,7 @@ or GitHub Actions are introduced.
 
 Storage keeps #313's descriptor-pinned hashed filenames under `artifacts/`.
 Logical partitions are one catalogue version, one forecast per run/station,
-one seal and completion receipt per run, one observation per station/timestamp/variable/revision and
+one seal and durable commit per run, with completion candidates per attempt, one observation per station/timestamp/variable/revision and
 one acquisition event per retrieval/content and
 one comparison per run/target/variable/observation/policy. No monolithic history
 JSON or mutable index is introduced. The reader checks namespace, digest and
@@ -318,7 +318,7 @@ stations and an isolated temporary root; no expired fake forecast is published.
   plus the original seals in a fresh temporary Field Lab (five artifacts
   including catalogue). Every artifact is calibration-ineligible. No user root
   was created. Dry-run cycle made zero network calls and zero writes.
-- This smoke predates completion proofs and catalogue activation events; it did
+- This smoke predates the final candidate/commit completion protocol and catalogue activation events; it did
   not test either mechanism. No new network smoke has been performed since. A new
   controlled smoke is required after validation of the corrected HEAD and before
   real automated collection.
@@ -331,19 +331,28 @@ stations and an isolated temporary root; no expired fake forecast is published.
 
 ### Review corrections: durable sealing and acquisition history
 
-Publication uses three create-only artifacts: forecast snapshot, seal binding the
-run ID and canonical snapshot digest, then a completion receipt binding the seal
-digest. The completion timestamp is sampled only after snapshot and seal writes
-have returned from file and directory fsync. Thus it certifies the already durable
-snapshot/seal, not an intention to publish them. The receipt itself must also be
-durably present before readers admit the run. A delayed seal write crossing the
-first target produces a permanently inadmissible receipt; a missing receipt is
-never inferred from file dates or reconstructed after the target. Mismatched
-identities fail closed. Missing or late seals exclude runs from `facts()`; direct
-matching reports `missing_durable_seal` or `leakage_detected`. The completion
-instant must be strictly before the matched observation and every prospective
-target. Forecast retrieval must also precede the observation. This is a local
-trusted-clock/process guarantee, not an externally signed timestamp authority.
+Publication uses create-only forecast snapshot, seal, completion candidate and
+commit artifacts. Snapshot and seal are revalidated and fsynced before the candidate.
+Each attempt uses a fresh candidate identity; its publication must return successfully
+from file and directory fsync (including cleanup) before the commit timestamp is
+sampled. The commit binds the candidate's complete canonical document digest, run,
+snapshot and seal. Readers require and validate this commit and all its bindings;
+a visible candidate alone, including a legacy receipt, never admits a run.
+The timestamp attests the candidate and snapshot/seal durability already confirmed
+in that attempt. Commit publication errors withdraw the newly linked commit in the
+running process, leaving the candidate orphaned and inadmissible. A crash before
+commit publication also leaves an orphan. A visible commit attests a successfully
+confirmed candidate; visibility of the candidate cannot produce that attestation.
+These are application/fsync guarantees, not a simulation of physical power loss
+or protection against same-owner tampering. A fresh real smoke remains required.
+
+Recovery validates orphan identities/content and reconfirms snapshot/seal, creates
+a fresh candidate and samples a new commit time; it never promotes an old timestamp.
+A recovery after the target records a late commit, reports
+`reference_seal_deadline_missed`, and remains inadmissible. Conflicting orphan
+content fails closed. Successful durable replay is immutable and idempotent.
+The completion instant must be strictly before the matched observation and every
+prospective target. This relies on a trusted local clock.
 
 Each official acquisition now has a distinct immutable `reference_acquisition`
 artifact, identified by canonical observation content and retrieval provenance.
@@ -378,23 +387,20 @@ remain unverified; no calibration, scoring, ranking or provider reliability chan
 
 ### Interrupted seal publication and catalogue activation
 
-Before sampling any new completion timestamp, the current attempt explicitly
-reconfirms both snapshot and seal, including existing artifacts: descriptor-relative
-open with no symlink following, regular-file/size/envelope/content/digest checks,
-then fsync of that same file descriptor and its pinned artifacts directory. Any
-validation or fsync failure aborts without sampling or publishing a proof. A crash
-before proof publication leaves no candidate; retry reconfirms afresh. Identical
-seals remain immutable. An already complete compatible run remains an immutable
-idempotent replay; an incompatible or late existing proof is never replaced or
-backdated. A retry whose reconfirmation crosses the target records a late proof
-and remains inadmissible permanently.
+Every recovery reopens snapshot and seal without following symlinks, validates
+regular files, bounds, envelopes and digests, and fsyncs their descriptors and
+pinned parent before publishing a fresh candidate. An incomplete attempt is never
+certified by its original time. Missing commits exclude runs from `facts()`;
+invalid commits fail closed. No user stores are read or migrated.
 
 Catalogue metadata/selection content is deduplicated by payload digest. Each sync
 also records a distinct `catalog_activation_event`, binding that digest and canonical
 sync timestamp. Same timestamp and content replay is a no-op; same content at a
 new timestamp creates an activation only. Active selection uses the greatest event
-timestamp, independent of ingestion order; equal timestamps select the greatest
-content digest deterministically (this does not imply an official revision order).
+timestamp, independent of ingestion order; all events at the maximum timestamp must agree on the content digest. Equal-time
+identical content is accepted; divergent content raises
+`reference_catalogue_activation_ambiguous`, including in CLI consumers. Filesystem
+and ingestion order cannot select a winner. No official revision order is invented.
 Conflicting content under an explicit event ID fails closed. Activations do not
 enter observations, comparison counts or statistics. Legacy catalogues without
 activation events require an explicit sync; there is no inferred activation.
