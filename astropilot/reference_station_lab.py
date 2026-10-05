@@ -295,6 +295,7 @@ class MeteoSwissReferenceClient:
     """Read-only injectable session. Official metadata CSV + checked STAC assets."""
     def __init__(self, session=None):
         self.session = session or requests.Session()
+        self.asset_audit_sink = None
 
     def metadata(self, name):
         url = f'{BASE}/ogd-smn_meta_{name}.csv'
@@ -336,8 +337,13 @@ class MeteoSwissReferenceClient:
             station_id.lower(), granularity=MeteoSwissGranularity.TEN_MINUTES,
             product_family=MeteoSwissProductFamily(family), session=self.session)
         downloaded = download_meteoswiss_observation_asset(asset, session=self.session)
-        return parse_observations(decode_meteoswiss_csv(downloaded.content), station_id,
-                                  retrieved_at or now_utc(), asset.href)
+        stamp = retrieved_at or now_utc()
+        observations = parse_observations(decode_meteoswiss_csv(downloaded.content), station_id, stamp, asset.href)
+        if self.asset_audit_sink is not None:
+            self.asset_audit_sink(dict(station=station_id, family=family, asset_href=asset.href,
+                                      sha256=hashlib.sha256(downloaded.content).hexdigest(),
+                                      official_checksum=asset.checksum, retrieved_at_utc=canonical_utc(stamp)))
+        return observations
 
 
 def parse_observations(text, station_id, retrieved_at, href):
@@ -441,6 +447,7 @@ class ReferenceLab:
             raise ValueError("invalid_reference_artifact_limit")
         self.max_artifacts = max_artifacts
         self.store = store or FileFieldLabStore()
+        self.write_budget = None
 
     def save(self, kind, key, payload, stamp, station='MeteoSwiss'):
         artifact = FieldLabArtifact.create(artifact_type=kind, source_id=station,
@@ -457,7 +464,12 @@ class ReferenceLab:
             if previous != incoming or existing.artifact_type != kind:
                 raise ValueError('field_lab_immutable_conflict')
             return False
-        return self.store.save(artifact)
+        if self.write_budget is not None and self.write_budget <= 0:
+            raise ValueError("field_lab_capacity_stop_scientific_facts_preserved")
+        saved = self.store.save(artifact)
+        if saved and self.write_budget is not None:
+            self.write_budget -= 1
+        return saved
 
     def save_run(self, run, *, clock=now_utc):
         # Scientific deadline covers durable forecast/seal/candidate, not attestation persistence.
@@ -591,15 +603,23 @@ class ReferenceLab:
                 observations.append(observation)
         return tuple(runs), tuple(observations)
 
-    def collect(self, client, *, clock=now_utc, tolerance_minutes=10):
+    def collect(self, client, *, clock=now_utc, tolerance_minutes=10, revision_days=None, coalesce=False):
         validate_tolerance(tolerance_minutes)
         current = utc(clock())
-        runs, _ = self.facts()
+        runs, previous = self.facts()
+        latest = {}
+        for observation in previous:
+            key = (observation.station_id, observation.variable, observation.observed_at_utc)
+            if key not in latest or utc(observation.retrieved_at_utc) > utc(latest[key].retrieved_at_utc):
+                latest[key] = observation
         due = {}
         for run in runs:
+            if not run.prospective:
+                continue
             for point in json.loads(run.snapshot_json)['points']:
                 target = utc(point['at'])
-                if target + timedelta(minutes=tolerance_minutes) < current:
+                if (target + timedelta(minutes=tolerance_minutes) < current
+                        and (revision_days is None or target >= current-timedelta(days=revision_days))):
                     due.setdefault(run.station_id, set()).add(target)
         count = 0
         for station, targets in sorted(due.items()):
@@ -611,7 +631,12 @@ class ReferenceLab:
                     if utc(observation.observed_at_utc) <= current and any(
                             abs(utc(observation.observed_at_utc) - t) <= timedelta(minutes=tolerance_minutes)
                             for t in targets):
+                        key = (observation.station_id, observation.variable, observation.observed_at_utc)
+                        prior = latest.get(key)
+                        if coalesce and prior and prior.measurement_digest == observation.measurement_digest and prior.asset_href == observation.asset_href:
+                            continue
                         count += self.save_observation(observation)
+                        latest[key] = observation
         return count
 
     def comparisons(self, *, clock=now_utc, tolerance_minutes=10, persist=False, historical=False):

@@ -116,7 +116,7 @@ class FileFieldLabStore:
         self._root = field_lab_root()
 
     @contextmanager
-    def _directory(self, *, create=False):
+    def _directory(self, *, create=False, root_only=False):
         _capabilities()
         if field_lab_root() != self._root:
             raise ValueError("field_lab_configuration_changed")
@@ -156,6 +156,9 @@ class FileFieldLabStore:
                     raise ValueError("field_lab_marker_missing") from error
                 if marker != _MARKER_DOCUMENT:
                     raise ValueError("field_lab_marker_mismatch")
+            if root_only:
+                yield fd
+                return
             child = os.open("artifacts", flags, dir_fd=fd)
             os.close(fd)
             fd = child

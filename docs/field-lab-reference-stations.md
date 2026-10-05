@@ -464,3 +464,180 @@ filesystem/hardware honoring successful fsync. It does not protect against hardw
 failure, a lying clock or same-owner artifact forgery. Missing evidence cannot be
 reconstructed afterwards using an old timestamp. Physical power-loss behavior has
 not been verified.
+
+## Persistent bounded collection (next lot, 2026-10-05)
+
+This section supersedes the original smoke-only cycle/scheduler/volume instructions
+above. The smoke remains validation evidence and is **never automatically imported**.
+No calibration, scoring or provider verdict is introduced. Temperature/RH alone
+produce numerical errors; wind remains non-comparable and QC remains unverified.
+
+### Explicit persistent root and initialization
+
+Proposed macOS root: `~/Documents/NightMerit Field Lab/reference-weather-v1`.
+This visible, stable directory is separate from
+`~/Library/Application Support/AstroPilot`. The proposal passed the #313 overlap
+validator on the development machine without creating it. Operators must also
+check any custom user store roots outside the effective/default roots; these cannot
+be discovered automatically. There is no default storage fallback:
+
+```sh
+export FIELD_LAB_DATA_DIR="$HOME/Documents/NightMerit Field Lab/reference-weather-v1"
+uv run astropilot-field-lab init
+uv run astropilot-field-lab status
+uv run astropilot-field-lab cycle --dry-run
+```
+
+`init` uses the existing descriptor-pinned marker boundary, validates effective
+and default user roots before creation, and refuses a nonempty unmarked directory.
+It creates only the isolated root/marker/artifacts. It does not sync, import the
+smoke, capture a forecast or enable a scheduler. Configuration/isolation errors
+fail closed at every store access. This lot does not initialize the proposed root
+on the user's machine.
+
+### Cadence, bounded horizon and content/audit semantics
+
+`cycle` refreshes catalogue/selection at most weekly, preserving configured active
+IDs. The first cycle uses the packaged 12-station selection; initialize a custom
+selection with `stations sync --stations NEU,CDF` before enabling. It captures a
+fresh prospective 24-hour forecast only when each selected station's last sealed
+run is at least 12 hours old. It never reconstructs a missed run or backfills a
+historical forecast. Provider/model metadata remain the production chain's facts.
+This is an initial conservative sampling policy, not an assertion that the
+provider publishes a new model version every 12 hours.
+
+Observation collection is hourly and restricted to stored prospective targets
+whose complete nearest ±10-minute window is closed, with a **7-day revision
+horizon**. Outside this horizon, existing scientific facts remain readable and
+contribute to longitudinal reports; old missing data are not repeatedly retried.
+There is no sub-minute polling. Manual `observations collect` also uses this
+horizon and measurement coalescence. Cross-year asset discovery remains unsupported:
+near January 1, a due previous-year target inside the horizon raises explicitly.
+An operator must resolve this limitation before unattended year-round use.
+
+Within a cycle, an advisory nonblocking lock serializes cycles. Concurrent attempts
+fail with a nonzero error rather than racing forecast captures. A successful UTC
+hour slot makes a repeat cycle in that slot a no-op (zero network calls/writes),
+including after process restart. This slot is not a retry loop: failed cycles are
+visible and may be explicitly retried. Partial successful forecast seals survive
+and are respected on retry; they are never rebuilt with an earlier timestamp.
+
+Scientific content (forecast, observation revision, comparison, identical report)
+remains immutable and deduplicated. Acquisition history is append-only. Unchanged
+measurement content **and asset href** are coalesced against the most recent
+acquisition for the station/variable/timestamp. A→B→A creates three events, retaining
+revision precedence; repeated A does not create another measurement acquisition.
+A changed official asset produces a separate `official_asset_activation` binding
+href, station/family, verified STAC checksum, downloaded SHA-256 and retrieval time.
+Unchanged asset hashes are coalesced; A→B→A asset reversions retain all three
+activations. The prior activation remains evidence until the next activation;
+these are observed retrieval transitions, not proof of the provider's exact
+publication instant. Metadata activations remain weekly acquisition evidence.
+Hourly success and first-error envelopes provide bounded-frequency operational
+history; error details are also emitted on stderr or to rotating scheduler logs.
+Failures in checksum/network/parsing never produce synthetic observations or
+zero values and return a nonzero exit code.
+
+### Retention and capacity: explicit conservative fallback
+
+No physical compaction or expiry is implemented in this lot. Deleting acquisition
+history safely requires a versioned compaction proof understood by the existing
+latest-acquisition reader; removing it would silently change revision precedence.
+**All unique observations, acquisitions, forecasts, seals, comparisons, reports and
+asset transition proofs are retained.** Temporal coalescence and the 7-day
+collection horizon prevent redundant event spam. No unique scientific fact is
+silently removed. This is the request's calculated-capacity fallback, not a claim
+of infinite storage or a completed indexed/compacted long-term backend.
+
+Operational CLI/cycle capacity is **2,000,000 artifacts**, warning at **80%**, stop
+at **90%**, reserving 15,000 before starting network activity. An in-cycle write
+budget prevents crossing the stop threshold even when a catch-up batch exceeds
+the initial reserve. Already published immutable facts survive an interrupted
+batch. At the cited conservative dense rate of 11,268/day, raw capacity is about
+177.5 days, warning about 142 days, stop about 159.7 days from empty. Less frequent
+forecasts and coalescence should reduce growth; real capacity planning must use
+`status`'s measured trailing 7-day rate, not assume a multi-year guarantee.
+Manual scientific writers also receive an operational capacity budget.
+
+`status` reports counts by artifact type, total/capacity/remaining, warning/blocked,
+trailing 7-day average artifacts/day, estimated days to the 90% stop, oldest/newest
+envelope UTC times, disk bytes, latest successful cycle, forecast, official
+observation, comparison, errors in the last 7 days, and scheduler state.
+Creation times are artifact provenance, not a filesystem ingestion ledger; a
+late imported legacy artifact can therefore skew measured growth. No imports are
+performed here. CLI JSON flags are the monitoring interface; there is no external
+notification service. Enumeration/reporting remain linear and materialize facts:
+large-store memory/time benchmarks and an indexed/sharded backend remain necessary
+before claiming comfortable operation near the raised limit. `ReferenceLab()`
+retains its explicit lower-level default 100k bound for existing integrations;
+operational CLI/cycles explicitly use the new bound.
+
+### Opt-in launchd scheduler and logs
+
+```sh
+uv run astropilot-field-lab scheduler install
+uv run astropilot-field-lab scheduler status
+# Only after READ-ONLY review and explicit final operator validation:
+uv run astropilot-field-lab scheduler enable
+uv run astropilot-field-lab scheduler disable
+uv run astropilot-field-lab scheduler uninstall
+```
+
+`install` only renders an immutable, disabled `scheduler.plist` inside the lab;
+it performs no launchctl command and writes no LaunchAgents file. The plan pins
+the Python interpreter, checkout working directory, isolated lab root and effective
+user root for overlap protection. Changing those requires uninstall/reinstall.
+The checkout/interpreter must remain available and tracked-clean for production
+forecast capture. `enable` is macOS-only: explicitly publishes
+`~/Library/LaunchAgents/org.nightmerit.field-lab.plist` and bootstraps the GUI
+launchd job, including login persistence. It validates plan/isolation/capacity,
+and withdraws a newly published login plist if bootstrap fails. `disable` boots out
+the job and removes its login plist; `uninstall` also removes the lab plan.
+Data and logs remain after uninstall. There is no KeepAlive polling loop.
+
+The job calls the dedicated bounded cycle runner every **3,600 seconds**;
+`RunAtLoad=false`. It uses no application factory/user-store writer.
+`status` performs a read-only `launchctl print` only when an installed plan exists
+on macOS. Scheduler command tests inject launchctl and sandboxed login destinations;
+CI never requires or activates real launchd.
+
+Logs are `<FIELD_LAB_DATA_DIR>/collection.log` plus `.1`, `.2`, `.3`, at most
+1 MiB each (4 MiB total), records capped at 64 KiB. Rotation uses pinned root
+operations and no-follow regular-file checks, with private new-file modes.
+There are no unbounded StandardOutPath/StandardErrorPath files. The original #313
+same-owner directory-rename threat assumption still applies. Errors are never
+silently treated as successful cycles. A failed isolation/capacity boundary may
+prevent writing an error envelope; stderr/log still reports the failure.
+
+### Longitudinal exports
+
+```sh
+uv run astropilot-field-lab report --period 24h
+uv run astropilot-field-lab report --period 7d --format json
+uv run astropilot-field-lab report --period 30d --format csv
+uv run astropilot-field-lab report --period all --export
+uv run astropilot-field-lab report --historical --period 30d
+```
+
+Periods filter stored forecast target timestamps relative to current UTC, never
+reconstructing forecasts. Reports retain N, bias, MAE, median/p90 absolute error,
+missing/non-comparable counts, actual target bounds, station altitude,
+provider/model and reason counts. Prospective is the default; historical remains
+a distinct explicitly selected cohort. CSV encodes reason maps as sorted JSON;
+JSON/CSV columns and ordering follow the existing deterministic report schema.
+`--export` saves immutable deduplicated content inside the isolated lab.
+Overlapping run/target pairs remain distinct forecast leads, not independent
+samples. No causal conclusion, recalibration or automated provider verdict follows.
+
+### Offline validation of persistent collection
+
+On 2026-10-05, the targeted Field Lab suite passed **154 tests**, with one
+case-sensitive-volume test skipped on this case-insensitive macOS volume.
+The complete suite passed **4,974 tests**, with the same one skip and 44 existing
+astronomy warnings, using the bundled Node runtime and permitted local listeners.
+`git diff --check` and module compilation passed. Scheduler enable/disable tests
+used injected launchctl and temporary login-plist destinations only. The proposed
+persistent root and actual login plist were not created; no real scheduler was
+installed/enabled. The critical stash and beta.7 were preserved. A real collection
+smoke on this new implementation and large-volume performance validation remain
+outside this offline lot and require the requested READ-ONLY review first.

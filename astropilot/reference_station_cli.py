@@ -1,8 +1,9 @@
-"""Internal field lab CLI; no scheduler, app factory or user store writes."""
+"""Isolated Field Lab CLI with explicit opt-in scheduler management."""
 import argparse
 from dataclasses import asdict
 import json
 import sys
+import subprocess
 
 from astropilot.reference_station_lab import (
     MeteoSwissReferenceClient, ReferenceLab, ReferenceStation, capture_forecast,
@@ -13,6 +14,10 @@ from astropilot.reference_station_lab import (
 def parser():
     root = argparse.ArgumentParser(prog='astropilot-field-lab')
     commands = root.add_subparsers(dest='command', required=True)
+    commands.add_parser('init')
+    commands.add_parser('status')
+    scheduler = commands.add_parser('scheduler')
+    scheduler.add_argument('operation', choices=['install', 'status', 'enable', 'disable', 'uninstall'])
     stations = commands.add_parser('stations').add_subparsers(dest='operation', required=True)
     sync = stations.add_parser('sync')
     listing = stations.add_parser('list')
@@ -30,6 +35,8 @@ def parser():
     summary = commands.add_parser('report')
     cycle = commands.add_parser('cycle')
     cycle.add_argument('--dry-run', action='store_true')
+    summary.add_argument('--period', choices=['24h', '7d', '30d', 'all'], default='all')
+    summary.add_argument('--format', choices=['json', 'csv'], default='json')
     summary.add_argument('--historical', action='store_true', help='Separate backfill cohort; never included by default')
     for item in (collect, compare, summary, cycle):
         item.add_argument('--tolerance-minutes', type=float, default=10)
@@ -71,17 +78,24 @@ def selection(args, catalogue, active):
 def execute(args):
     if args.command == "forecast-run" and (type(args.hours) is not int or not 1 <= args.hours <= 168):
         raise ValueError("reference_hours_1_to_168")
-    lab = ReferenceLab()  # Validates storage configuration/capabilities before network calls.
-    if args.command == 'cycle' and args.dry_run:
-        from astropilot.reference_station_lab import validate_tolerance
-        validate_tolerance(args.tolerance_minutes)
-        runs, _ = lab.facts()
-        current = now_utc()
-        return {'dry_run': True, 'network_calls': 0, 'writes': 0,
-                'sealed_runs': len(runs), 'at_utc': current.isoformat(),
-                'steps': ['collect_due_observations', 'compare', 'report'],
-                'forecast_capture': 'explicit forecast-run required',
-                'tolerance_minutes': args.tolerance_minutes}
+    from astropilot.field_lab_collection import CAPACITY, initialize, status, scheduler, cycle, periodic_report
+    if args.command == 'init':
+        return initialize()
+    if args.command == 'scheduler':
+        return scheduler(args.operation)
+    lab = ReferenceLab()
+    lab.max_artifacts = CAPACITY  # Validates storage configuration/capabilities before network calls.
+    mutates = (args.command in ('forecast-run', 'observations', 'compare')
+               or (args.command == 'stations' and args.operation == 'sync')
+               or getattr(args, 'export', False)) and not getattr(args, 'dry_run', False)
+    if mutates:
+        from astropilot.field_lab_collection import check_capacity
+        capacity = check_capacity(lab, reserve=15000)
+        lab.write_budget = int(lab.max_artifacts*.90)-capacity['count']-1
+    if args.command == 'status':
+        return status(lab)
+    if args.command == 'cycle':
+        return cycle(lab, tolerance_minutes=args.tolerance_minutes, dry_run=args.dry_run)
     if args.command == 'stations':
         if args.operation == 'sync':
             catalogue = MeteoSwissReferenceClient().stations()
@@ -113,14 +127,12 @@ def execute(args):
         return results
     if args.command == 'observations':
         return {'new_observations': lab.collect(MeteoSwissReferenceClient(),
-                                               tolerance_minutes=args.tolerance_minutes)}
-    if args.command == 'cycle':
-        lab.collect(MeteoSwissReferenceClient(), tolerance_minutes=args.tolerance_minutes)
+                                               tolerance_minutes=args.tolerance_minutes, revision_days=7, coalesce=True)}
     comparisons = lab.comparisons(tolerance_minutes=args.tolerance_minutes,
                                  persist=args.command in ('compare', 'cycle'),
                                  historical=getattr(args, 'historical', False))
     runs, _ = lab.facts()
-    rows = report(comparisons, runs)
+    rows = periodic_report(lab, args.period, tolerance_minutes=args.tolerance_minutes, historical=args.historical) if args.command == 'report' else report(comparisons, runs)
     if getattr(args, 'export', False):
         payload = {'schema_version': 1, 'rows': rows}
         lab.save('reference_report', digest(payload), payload, now_utc().isoformat())
@@ -131,10 +143,21 @@ def main(argv=None):
     args = parser().parse_args(argv)
     try:
         result = execute(args)
-    except (ValueError, RuntimeError, OSError) as error:
+    except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as error:
+        if args.command == 'cycle' and not args.dry_run:
+            from astropilot.field_lab_collection import record_error
+            record_error(error)
         print(json.dumps({'error': str(error)}, ensure_ascii=False), file=sys.stderr)
         return 2
-    print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
+    if getattr(args, 'format', 'json') == 'csv':
+        import csv
+        fields = ['station', 'altitude_m', 'variable', 'unit', 'n_comparable', 'n_non_comparable', 'n_missing', 'mean_bias', 'mae', 'median_abs_error', 'p50_abs_error', 'p90_abs_error', 'period_min', 'period_max', 'provider', 'model', 'source', 'cohort', 'reasons', 'policy', 'tolerance_minutes']
+        writer = csv.DictWriter(sys.stdout, fieldnames=fields)
+        writer.writeheader()
+        for row in result:
+            writer.writerow({key: json.dumps(value, sort_keys=True) if isinstance(value, dict) else value for key, value in row.items()})
+    else:
+        print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
     return 0
 
 
