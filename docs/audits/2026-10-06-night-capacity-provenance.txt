@@ -1,0 +1,112 @@
+AUDIT — PROVENANCE DES CAPACITÉS NOCTURNES — 6 OCTOBRE 2026
+
+BASELINE
+PR #322 MERGED le 2026-10-06 à 18:52:53 UTC (20:52:53 Europe/Zurich).
+Head #322 : 5a8335d44644f8847c3709a7f7348dfb1882e7a6.
+Merge, main, origin/main : 98d633d266a01d5767ea4d4be3c99957dd61ee7f.
+Fetch puis fast-forward main ; aucune modification suivie préexistante.
+Non suivis préexistants .DS_Store et astropilot.egg-info/ conservés.
+Stash critique 223ec1f5904131d726b694655f137670c0ddeb0b : intact, aucune opération pop/apply/drop, aucune nouvelle entrée.
+Branche : fix/night-capacity-provenance. Aucun merge automatique.
+
+CARTE DES SOURCES ET DES CONSOMMATEURS
+1. HistoricalNightCapacityEstimator : sessions utilisateur avec date et heures positives finies,
+   agrégées par nuit ; au moins 3 nuits => moyenne history. Heures manquantes/non positives
+   ignorées. Cette moyenne est une statistique passée, pas une disponibilité future.
+2. Moins de 3 nuits : préférence productive_hours_per_night explicitement fournie => profile.
+   Ancien défaut implicite 4h étiqueté profile supprimé ; absence => unknown/None.
+   sessions=None => historical_nights=None ; sessions=[] => 0 ; 1/2 nuits => compteur exact,
+   mais ne suffisent pas à autoriser une moyenne empirique décisionnelle.
+3. Scénario explicite : fallback_source=scenario, valeur positive finie ; simulation autorisée,
+   confiance faible, pas observed. Le fallback ne peut pas être étiqueté history.
+4. astro_score.build_decision_context => PortfolioContext : valeur/source/compteur explicites,
+   source projetée en chaîne pour le format persistant existant. Aucun défaut 4h.
+5. ProjectRiskContextBuilder => ProjectCompletionEstimator => required_nights : calcul dérivé
+   de remaining et capacité explicite history/profile/scenario. Pas de calcul depuis un nombre
+   de source unknown. required_nights de profil/scénario est diagnostique, pas preuve empirique.
+6. pressure => RiskEngine => MissionAssembler => NightAdvisor : pression calculée seulement
+   si history et au moins 3 nuits ; profil/scénario => pressure=None => risque UNKNOWN,
+   score=None ; pas de conseil impératif risk depuis une hypothèse de capacité.
+7. TonightResponse / modèle API : capacity_source, historical_nights, capacity_observed,
+   capacity_estimated, capacity_confidence, capacity_decision_eligible. Le dernier champ signifie
+   éligibilité à la pression empirique, jamais disponibilité réelle Tonight. Le rapport entier
+   reste estimated=true et decision_eligible=false, conformément à #322.
+8. astro_score.main => completion_kwargs => portfolio_presenter : capacité explicitement
+   transmise ; extrapolation de calendrier profil annoncée profil et confiance faible ;
+   absence de capacité => date de fin indisponible. MissionPresenter affiche inconnue pour null.
+9. forecast_night_capacities : quantification météo 6/4/2/1/0h, calcul de modèle dérivé, pas
+   historique utilisateur. Consommée par les runners report/tonight et PortfolioForecastEngine
+   pour roadmap/calendrier simulés. Indépendante de l'estimateur history/profile. Inchangée.
+10. PortfolioForecastEngine : night_capacities[].hours ou avg_night_hours explicitement fourni ;
+    absent =>0 depuis #322, aucun gain inventé. Scénario de simulation, pas allocation API réelle.
+11. FutureOpportunityEngine : modèle remaining /3h par nuit ; n'utilise pas la moyenne history
+    ou profile. Contrat d'hypothèse fixe à traiter séparément. Inchangé.
+12. recommend_project_for_night : available_hours explicites => ROI/closure/strategy scores ;
+    ne lit pas productive_hours_per_night. Gain moderne dérivé de progrès d'intent et durée.
+13. build_mission_input / MissionAssembler : fenêtre astronomique + disponibilité utilisateur
+    et capacité d'acquisition explicite => plafond réel. La capacité historique/profile n'est
+    pas injectée dans ce plafond, ni dans recommended_hours/expected_gain. Guards #320/#321 préservés.
+14. project_gain / project_scoring : aides legacy session_hours=3h ; Tonight fournit durée
+    explicite. Même chantier distinct que l'hypothèse 3h, aucun changement dans ces helpers.
+15. Persistence acceptance_lineage : triplet valeur/source/compteur conservé, pas de nouveau
+    schéma ni conversion de lecture. ProjectRiskContext garde ses defaults legacy pour replay.
+    PortfolioContext neuf a maintenant defaults unknown/None/None. Les documents complets
+    persistent leurs champs et roundtrip restent identiques. Aucun backfill des décisions anciennes.
+
+FINDINGS
+Aucun P0 ; aucun P1 prouvé dans score/ranking/mission réelle sur cette famille.
+P2 confirmé : défaut 4h sans préférence déclaré profile et consommé comme capacité de pression.
+P2 confirmé : suppression d'un historique défavorable peut rendre le rapport plus rassurant
+via un profil optimiste. Reproduction sur les sources immuables de 98d633d : 3 nuits de 1h,
+remaining=60h, priorité0, 100 nuits favorables, saison100j, profil100h => history pressure0.60,
+score25 ; retrait historique => profile pressure0.01, score0. Le correctif rend le second
+rapport UNKNOWN, sans fabriquer une mesure de risque maximale ni modifier les poids.
+P2 helper confirmé : ProjectCompletionEstimator omettait la capacité =>4h ; maintenant None,
+required_nights=None. Capacité explicitement fournie conservée comme calcul de scénario.
+P3 metadata confirmé : absence du champ sessions transformée en historique vide connu ;
+le producteur respecte désormais None vs0. Les imports normalisés qui écrivent une liste vide
+établissent explicitement un historique vide dans leur propre document ; pas de migration ici.
+P3 contrat API : source déjà exposée, mais sémantique observée/estimée et confiance insuffisantes ;
+projections enrichies. Pas de conversion des anciennes capacités de profil en observations.
+
+CONTRAT RETENU
+Structure minimale NightCapacityEstimate(value, enum source, historical_nights), avec propriétés
+sémantiques calculées : observed, estimated, confidence, scenario_eligible, decision_eligible.
+Sources history/profile/scenario/unknown. observed exige history, >=3 nuits, valeur positive finie.
+Une capacité de profil ou scénario sert uniquement au nombre de nuits diagnostique et à
+l'extrapolation explicitement estimée ; elle ne fournit pas de pression empirique.
+Unknown ne devient pas zéro heure observée. Le zéro compte les nuits seulement si liste connue vide.
+Estimated est vrai aussi pour unknown ; confidence=unknown distingue l'absence d'estimation utilisable.
+Confiance medium de la moyenne history : niveau qualitatif lié au seuil existant, pas intervalle
+statistique ni preuve de capacité demain. La disponibilité mission reste un contrat indépendant.
+
+TESTS ET PÉRIMÈTRE
+Tests dédiés : None vs liste vide ; seuil historique ; profile non observed ; scénario autorisé ;
+retrait historique avec profils1/4/100h ; risque UNKNOWN et absence de conseil risk fabriqué ;
+API source/confidence/eligibility ; roundtrip mission ; numéro nu/source incohérente non empirique ;
+scores final/decision/strategy/closure et gain/plafond de MissionInput invariants.
+Fixtures de saison désormais dotées de provenance history explicite pour vérifier leur pression ;
+fixture sans préférence attend unknown au lieu du défaut4h ; assertion API enrichie.
+Legacy ProjectRiskContext/defaults/read conservés. Tests de roundtrip existants + nouveaux.
+Field Lab : aucun fichier ni flux modifié. Pas de changement AQI, stations de référence, météo
+partielle, ingestion Field Lab, stash ni hypothèse fixe3h.
+Validation : 345 tests ciblés passants (2.40s) sur les fichiers finaux ; suite complète
+5784 passants, 1 skip volume insensible à la casse, 44 warnings Astropy, 110.16s.
+La suite avait collecté 16 cas dédiés ; un 17e cas de scénario diagnostique a été ajouté
+et passé avec les 345 ciblés après collecte. Aucun changement de production depuis cette collecte.
+Premier passage interrompu : Node absent et fixtures CLI source chaîne incompatibles ;
+projection source corrigée pour accepter chaîne/enum. Suite finale avec Node fourni et loopback
+local autorisé, aucun test réseau modifié. git diff --check propre.
+Périmètre : 10 fichiers production, 5 fichiers tests, 1 document audit ; aucun fichier Field Lab.
+
+LIMITES
+Ce correctif n'atteste pas la véracité de chaque session saisie/importée : history représente les
+sessions validées présentes dans le profil, pas une validation instrumentale indépendante.
+Pas de certificat global de monotonie de tous états artisanaux : builder et frontières réelles
+couverts, lectures legacy conservées même si leur pression ancienne était calculée sur profile.
+RiskEngine direct avec un ProjectRiskContext fabriqué reste une frontière interne ; aucun rewrite
+legacy. Futurs consommateurs doivent respecter provenance et eligibility.
+Météo =>6/4/2/1/0h reste un modèle simulé sans structure de provenance commune : P2 de contrat
+à traiter dans un audit séparé si ces chiffres sont réutilisés comme capacité réelle.
+3h/nuit FutureOpportunity et defaults helpers legacy restent volontairement inchangés.
+Recommandation : merge seulement après tests finaux et CI du commit exact verts.

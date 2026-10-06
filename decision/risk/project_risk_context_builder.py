@@ -1,3 +1,4 @@
+from decision.portfolio.historical_night_capacity_estimator import NightCapacityEstimate
 from decision.risk.project_risk_context import ProjectRiskContext
 from decision.risk.project_completion_estimator import ProjectCompletionEstimator
 from decision.intelligence.analysis_context import AnalysisContext
@@ -30,14 +31,18 @@ class ProjectRiskContextBuilder:
         good_nights = season["remaining_good_nights"]
 
         capacity = context.portfolio.productive_hours_per_night
+        estimate = NightCapacityEstimate(
+            capacity, context.portfolio.night_capacity_source,
+            context.portfolio.historical_nights,
+        )
         required_nights = (
             ProjectCompletionEstimator.required_nights(remaining_hours, capacity)
-            if remaining_hours is not None and capacity is not None and capacity > 0
+            if remaining_hours is not None and estimate.scenario_eligible
             else None
         )
         pressure = (
             required_nights / max(good_nights, 1)
-            if required_nights is not None and good_nights is not None
+            if estimate.decision_eligible and required_nights is not None and good_nights is not None
             else None
         )
 

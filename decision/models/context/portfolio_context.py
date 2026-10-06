@@ -15,9 +15,9 @@ class PortfolioContext:
 
     average_progress: float
 
-    productive_hours_per_night: float = 4.0
+    productive_hours_per_night: float | None = None
     observing_nights_per_week: float = 0.0
 
-    night_capacity_source: str = "profile"
+    night_capacity_source: str = "unknown"
 
-    historical_nights: int = 0
+    historical_nights: int | None = None

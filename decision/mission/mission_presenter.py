@@ -172,11 +172,9 @@ class MissionPresenter:
                 mission.risk_report.context.night_capacity_source,
             )
 
-            print(
-                "Capacité moyenne estimée : "
-                f"{mission.risk_report.context.productive_hours_per_night:.1f} "
-                f"h/nuit ({capacity_source})"
-            )
+            capacity = mission.risk_report.context.productive_hours_per_night
+            capacity_text = f"{capacity:.1f} h/nuit" if capacity is not None else "inconnue"
+            print(f"Capacité moyenne estimée : {capacity_text} ({capacity_source})")
 
             print(
                 "Nuits nécessaires estimées : "
