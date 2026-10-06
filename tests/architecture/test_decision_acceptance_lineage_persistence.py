@@ -1,3 +1,4 @@
+from dataclasses import replace
 import json
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -882,7 +883,12 @@ def test_v8_mission_acquisition_intent_round_trip_is_exact():
     ) == night_mission
 
 
-def test_new_ha_mission_input_with_oiii_filter_is_rejected_on_persistence():
+@pytest.mark.parametrize(
+    ("intent_id", "filter_type"),
+    [("sh2-129_ha", "OIII"), ("ou4_oiii", "Ha")],
+)
+@pytest.mark.parametrize("value_kind", ["input", "mission"])
+def test_new_divergent_filter_is_rejected_on_persistence(intent_id, filter_type, value_kind):
     value = MissionInput(
         window_start=START,
         window_end=END,
@@ -891,10 +897,16 @@ def test_new_ha_mission_input_with_oiii_filter_is_rejected_on_persistence():
         moon_penalty=None,
         recommended_hours=3.5,
         expected_gain=1.25,
-        selected_filter=SelectedFilter("OIII", "OIII"),
+        selected_filter=SelectedFilter(filter_type, filter_type),
         imaging_field_id="sh2-129_ou4",
-        acquisition_intent_id="sh2-129_ha",
+        acquisition_intent_id=intent_id,
     )
+
+    if value_kind == "mission":
+        value = replace(
+            mission(imaging_field_id="sh2-129_ou4", acquisition_intent_id=intent_id),
+            selected_filter=SelectedFilter(filter_type, filter_type),
+        )
 
     with pytest.raises(
         AcceptanceLineageCorruptionError,
