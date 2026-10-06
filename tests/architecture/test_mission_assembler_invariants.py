@@ -181,17 +181,23 @@ def test_mission_preserves_reasons_and_computed_results(
     assert mission.productivity is isolated_dependencies.productivity
 
 
+@pytest.mark.parametrize(
+    ("intent_id", "filter_type"),
+    [("sh2-129_ha", "OIII"), ("ou4_oiii", "Ha")],
+)
 def test_mission_rejects_filter_diverging_from_selected_intent(
     frozen_time,
     summary,
     context,
+    intent_id,
+    filter_type,
 ):
     input_data = mission_input(
         frozen_time,
         WeatherForecast(),
         imaging_field_id="sh2-129_ou4",
-        acquisition_intent_id="sh2-129_ha",
-        selected_filter=SelectedFilter("OIII", "OIII"),
+        acquisition_intent_id=intent_id,
+        selected_filter=SelectedFilter(filter_type, filter_type),
     )
 
     with pytest.raises(ValueError, match="selected_filter_intent_mismatch"):
@@ -721,3 +727,62 @@ def test_assessment_without_productive_window_is_consistent_but_ineligible(
     assert assessment.expected_gain == 0.0
     DecisionConsistencyGate.validate_mission(assessment)
     assert DecisionConsistencyGate.has_productive_window(assessment) is False
+
+
+@pytest.mark.parametrize(
+    ("intent_id", "required_type", "other_type"),
+    [("sh2-129_ha", "Ha", "OIII"), ("ou4_oiii", "OIII", "Ha")],
+)
+@pytest.mark.parametrize("inventory_kind", ["absent", "incompatible", "compatible"])
+@pytest.mark.parametrize("bandwidth_nm", [3.0, 7.0])
+def test_tonight_composes_intent_filter_through_real_input_and_assembler(
+    monkeypatch, frozen_time, summary, context, isolated_dependencies,
+    intent_id, required_type, other_type, inventory_kind, bandwidth_nm,
+):
+    import astro_score
+    from decision.services.tonight_mission_service import TonightMissionService
+
+    compatible = SelectedFilter("Hardware", required_type, bandwidth_nm,
+                                source="user_default")
+    incompatible = SelectedFilter("Other", other_type)
+    inventory = {
+        "absent": (),
+        "incompatible": (incompatible,),
+        "compatible": (incompatible, compatible),
+    }[inventory_kind]
+    monkeypatch.setattr(astro_score.FilterInventoryLoader, "load", lambda: inventory)
+    # Force the old heuristic to disagree: only the intent can authorize the type.
+    monkeypatch.setattr(astro_score.FilterSelectionEngine, "select",
+                        lambda _: incompatible)
+    evaluation = {
+        "catalog_key": "Sh2-129",
+        "imaging_field_id": "sh2-129_ou4",
+        "selected_acquisition_intent_id": intent_id,
+        "window": {"start": frozen_time,
+                   "end": frozen_time + timedelta(hours=2),
+                   "moon_penalty": 0.2},
+        "remaining_hours": 2.0,
+    }
+    inputs = []
+
+    def build_input(value):
+        result = astro_score.build_mission_input(value, profile={})
+        inputs.append(result)
+        return result
+
+    service = TonightMissionService(build_mission=lambda **kwargs:
+        MissionAssembler.build(equipment=["setup"], alternatives=[], **kwargs))
+    mission = service.create(
+        winner={"object_evaluations": {"Sh2-129": evaluation}},
+        objects=[{"catalog_key": "Sh2-129", "name": "Sh2-129",
+                  "decision_summary": summary, "decision_context": context}],
+        recommended_key="Sh2-129", build_mission_input=build_input,
+    )
+    expected = compatible if inventory_kind == "compatible" else None
+    assert inputs[0].selected_filter is expected
+    assert mission.selected_filter is expected
+    assert mission.imaging_field_id == inputs[0].imaging_field_id == "sh2-129_ou4"
+    assert mission.acquisition_intent_id == inputs[0].acquisition_intent_id == intent_id
+    if expected is not None:
+        assert mission.selected_filter.bandwidth_nm == bandwidth_nm
+        assert mission.selected_filter.source == "user_default"

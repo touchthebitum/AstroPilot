@@ -259,11 +259,15 @@ def test_acceptance_allows_eligible_intent_with_compatible_filter(
     assert mission.selected_filter is selected_filter
 
 
-def test_acceptance_rejects_filter_diverging_from_selected_intent():
+@pytest.mark.parametrize(
+    ("intent_id", "filter_type"),
+    [("sh2-129_ha", "OIII"), ("ou4_oiii", "Ha")],
+)
+def test_acceptance_rejects_filter_diverging_from_selected_intent(intent_id, filter_type):
     composer, _, _ = service(
         base_input=replace(
             mission_input(),
-            selected_filter=SelectedFilter("OIII", "OIII"),
+            selected_filter=SelectedFilter(filter_type, filter_type),
         )
     )
 
@@ -274,7 +278,7 @@ def test_acceptance_rejects_filter_diverging_from_selected_intent():
                 UserSelectionSource.PRIMARY_RECOMMENDATION,
                 "M31",
                 selected_imaging_field_id="sh2-129_ou4",
-                selected_acquisition_intent_id="sh2-129_ha",
+                selected_acquisition_intent_id=intent_id,
             ),
             decision_context=decision_context(),
             recommendation=recommendation(),
