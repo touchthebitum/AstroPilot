@@ -3,6 +3,10 @@
 from dataclasses import dataclass
 from enum import Enum
 
+from decision.models.lunar_evidence_snapshot import (
+    LunarEvidenceSnapshot, validate_lunar_snapshot,
+)
+
 from decision.models.acquisition_intent_assessment import (
     AcquisitionIntentAssessment,
 )
@@ -55,6 +59,8 @@ class AcquisitionIntentSelection:
         AcquisitionIntentAssessment, ...
     ] = ()
 
+    lunar_evidence_snapshot: LunarEvidenceSnapshot | None = None
+
     def __post_init__(self) -> None:
         selected = self.selected_acquisition_intent_id
         if selected is not None:
@@ -94,6 +100,10 @@ class AcquisitionIntentSelection:
             raise TypeError(
                 "acquisition_intent_assessments must contain intent assessments"
             )
+        validate_lunar_snapshot(self.lunar_evidence_snapshot,
+            acquisition_intent_id=self.selected_acquisition_intent_id,
+            eligible_ids=(item.acquisition_intent_id for item in self.eligibility_assessments
+                          if item.status.value == "eligible"))
         eligibility_ids = tuple(
             item.acquisition_intent_id for item in self.eligibility_assessments
         )

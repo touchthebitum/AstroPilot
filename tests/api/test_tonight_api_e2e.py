@@ -513,9 +513,13 @@ def test_tonight_exposes_modern_ou4_acquisition_intent_candidate(
         ),
     )
 
+    captured_snapshots = []
+
     class MissionService:
         def create(self, **kwargs):
             mission_input = kwargs["build_mission_input"](evaluation)
+            captured_snapshots.append(mission_input.lunar_evidence_snapshot)
+            assert mission_input.lunar_evidence_snapshot is not None
             assert mission_input.recommended_hours == 2
             assert mission_input.expected_gain == 100
             return NightMission(
@@ -578,6 +582,12 @@ def test_tonight_exposes_modern_ou4_acquisition_intent_candidate(
     assert response.status_code == 200
     payload = response.json()
     assert payload["catalog_key"] == "Sh2-129"
+    from dataclasses import asdict
+    from decision.services.tonight_response import _json_value
+    from pydantic import TypeAdapter
+    from decision.models.lunar_evidence_snapshot import LunarEvidenceSnapshot
+    assert payload["lunar_evidence_snapshot"] == TypeAdapter(LunarEvidenceSnapshot).dump_python(captured_snapshots[0], mode="json")
+    assert len(payload["lunar_evidence_snapshot"]["estimates"]) == 2
     assert payload["imaging_field_id"] == "sh2-129_ou4"
     assert payload["selected_acquisition_intent_id"] == "sh2-129_ha"
     assert payload["viable_acquisition_intent_ids"] == ["sh2-129_ha"]

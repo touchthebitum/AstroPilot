@@ -124,6 +124,7 @@ def test_partial_results_produce_stable_transport_status(status):
         "viable_acquisition_intent_ids": [],
         "acquisition_intent_selection_status": None,
         "acquisition_intent_assessments": [],
+        "lunar_evidence_snapshot": None,
         "target_decision_status": None,
         "actionability_refusal": None,
         "shortlist_entries": [],
@@ -546,6 +547,7 @@ def test_alternatives_serialize_only_preselected_candidates():
                 "viable_acquisition_intent_ids": [],
                 "acquisition_intent_selection_status": None,
                 "acquisition_intent_assessments": [],
+                "lunar_evidence_snapshot": None,
             }
         ]
 
@@ -717,6 +719,7 @@ def test_refused_weather_decision_redacts_active_transport_only():
         "viable_acquisition_intent_ids": [],
         "acquisition_intent_selection_status": None,
         "acquisition_intent_assessments": [],
+        "lunar_evidence_snapshot": None,
         "target_decision_status": "insufficient_evidence",
         "actionability_refusal": None,
         "shortlist_entries": [],

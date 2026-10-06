@@ -1,5 +1,9 @@
 from dataclasses import dataclass
 from datetime import datetime
+from decision.models.lunar_evidence_snapshot import (
+    LunarEvidenceSnapshot, validate_lunar_snapshot,
+)
+
 from decision.filtering.selected_filter import SelectedFilter
 from decision.models.session_availability import SessionAvailability
 from decision.weather.weather_forecast import WeatherForecast
@@ -27,7 +31,16 @@ class MissionInput:
     acquisition_capacity: AcquisitionIntentRemainingProgress | None = None
     evidence_only: bool = False
 
+    lunar_evidence_snapshot: LunarEvidenceSnapshot | None = None
+
     def __post_init__(self):
+        if self.lunar_evidence_snapshot is not None and (
+            self.imaging_field_id is None or self.acquisition_intent_id is None
+        ):
+            raise ValueError("lunar_snapshot_mission_identity_required")
+        validate_lunar_snapshot(self.lunar_evidence_snapshot,
+            imaging_field_id=self.imaging_field_id,
+            acquisition_intent_id=self.acquisition_intent_id)
         capacity = self.acquisition_capacity
         if capacity is not None:
             if not isinstance(capacity, AcquisitionIntentRemainingProgress):

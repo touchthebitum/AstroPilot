@@ -219,7 +219,7 @@ def test_api_comparisons_default_to_empty_and_have_exact_public_schema():
         "target_decision_status", "reasons",
         "imaging_field_id", "selected_acquisition_intent_id",
             "viable_acquisition_intent_ids", "acquisition_intent_selection_status",
-            "acquisition_intent_options", "acquisition_intent_assessments",
+            "acquisition_intent_options", "acquisition_intent_assessments", "lunar_evidence_snapshot",
         }
     alternative_reason = schemas[
         alternative["properties"]["reasons"]["items"]["$ref"].split("/")[-1]

@@ -35,6 +35,8 @@ class LunarContaminationEstimator:
     No atmospheric extinction, aerosol weighting, or combined score is used.
     """
 
+    ALGORITHM_VERSION = "relative-rayleigh-mie-v1"
+
     def estimate(
         self,
         evidence: IntentNightEvidence,
