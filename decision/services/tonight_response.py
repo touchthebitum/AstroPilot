@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Sequence
+from decision.portfolio.historical_night_capacity_estimator import NightCapacityEstimate
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import date, datetime, timedelta
 from enum import Enum
@@ -287,6 +288,10 @@ class TonightPostponementRiskResponse:
     required_nights: int | None = None
     productive_hours_per_night: float | None = None
     capacity_source: str | None = None
+    capacity_observed: bool = False
+    capacity_estimated: bool = True
+    capacity_confidence: str = "unknown"
+    capacity_decision_eligible: bool = False
     historical_nights: int | None = None
     remaining_hours: float | None = None
     favorable_nights: int | None = None
@@ -767,7 +772,16 @@ class TonightResponse:
         if mission is not None and mission.risk_report is not None:
             source = mission.risk_report
             context = source.context
+            capacity = NightCapacityEstimate(
+                getattr(context, "productive_hours_per_night", None),
+                getattr(context, "night_capacity_source", "unknown"),
+                getattr(context, "historical_nights", None),
+            )
             postponement_risk = TonightPostponementRiskResponse(
+                capacity_observed=capacity.observed,
+                capacity_estimated=capacity.estimated,
+                capacity_confidence=capacity.confidence,
+                capacity_decision_eligible=capacity.decision_eligible,
                 level=source.level,
                 score=int(source.score) if source.score is not None else None,
                 explanations=list(source.explanation),

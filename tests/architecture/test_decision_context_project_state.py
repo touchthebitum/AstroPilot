@@ -152,13 +152,13 @@ def test_decision_context_session_times_are_timezone_aware():
         bortle=3,
     )
 
-    assert context.portfolio.productive_hours_per_night == 4.0
+    assert context.portfolio.productive_hours_per_night is None
     assert context.session.start_time.tzinfo is not None
     assert context.session.end_time.tzinfo is not None
     assert context.session.start_time is EXPLICIT_START
     assert context.session.end_time is EXPLICIT_END
-    assert context.portfolio.night_capacity_source == "profile"
-    assert context.portfolio.historical_nights == 0
+    assert context.portfolio.night_capacity_source == "unknown"
+    assert context.portfolio.historical_nights is None
     assert (
         context.portfolio.observing_nights_per_week
         == 2.0

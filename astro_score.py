@@ -1650,12 +1650,12 @@ def build_decision_context(
         {},
     ).get(
         "productive_hours_per_night",
-        4.0,
+        None,
     )
 
     night_capacity_estimate = (
         HistoricalNightCapacityEstimator.estimate(
-            sessions=profile.get("sessions", []),
+            sessions=profile.get("sessions"),
             fallback=configured_night_capacity,
         )
     )
@@ -1679,7 +1679,7 @@ def build_decision_context(
         observing_nights_per_week=(
             configured_observing_nights_per_week
         ),
-        night_capacity_source=night_capacity_estimate.source,
+        night_capacity_source=str(night_capacity_estimate.source),
         historical_nights=night_capacity_estimate.historical_nights,
         )
 
@@ -2637,12 +2637,12 @@ def main(argv=None) -> int:
 
     configured_night_capacity = preferences.get(
         "productive_hours_per_night",
-        4.0,
+        None,
     )
 
     night_capacity_estimate = (
         HistoricalNightCapacityEstimator.estimate(
-            sessions=profile.get("sessions", []),
+            sessions=profile.get("sessions"),
             fallback=configured_night_capacity,
         )
     )
@@ -2655,7 +2655,7 @@ def main(argv=None) -> int:
             "observing_nights_per_week",
             0.0,
         ),
-        "night_capacity_source": night_capacity_estimate.source,
+        "night_capacity_source": str(night_capacity_estimate.source),
         "historical_nights": night_capacity_estimate.historical_nights,
     }
 

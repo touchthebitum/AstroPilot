@@ -65,7 +65,7 @@ def show_portfolio_completion_forecast(
 
     if remaining_after_horizon > 0:
         weekly_capacity = (
-            productive_hours_per_night
+            (productive_hours_per_night or 0)
             * observing_nights_per_week
         )
 

@@ -1030,6 +1030,10 @@ class TonightPostponementRiskModel(BaseModel):
     required_nights: int | None = None
     productive_hours_per_night: float | None = None
     capacity_source: str | None = None
+    capacity_observed: bool = False
+    capacity_estimated: bool = True
+    capacity_confidence: str = "unknown"
+    capacity_decision_eligible: bool = False
     historical_nights: int | None = None
     remaining_hours: float | None = None
     favorable_nights: int | None = None

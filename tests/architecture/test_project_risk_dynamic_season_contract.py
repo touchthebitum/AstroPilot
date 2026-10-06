@@ -58,6 +58,9 @@ def test_project_risk_uses_dynamic_season():
             total_remaining_hours=15,
             highest_priority=80,
             average_progress=0,
+            night_capacity_source="history",
+            historical_nights=3,
+            productive_hours_per_night=4,
         ),
         preferences=PreferencesContext(
             astro_weight=0.7,
@@ -122,6 +125,8 @@ def test_project_risk_pressure_compares_required_to_favorable_nights(
             total_remaining_hours=15,
             highest_priority=80,
             average_progress=0,
+            night_capacity_source="history",
+            historical_nights=3,
             productive_hours_per_night=5,
         ),
         preferences=PreferencesContext(
@@ -164,8 +169,8 @@ def test_project_risk_pressure_compares_required_to_favorable_nights(
     assert result.favorable_nights == 20
     assert result.pressure == 0.15
     assert result.productive_hours_per_night == 5
-    assert result.night_capacity_source == "profile"
-    assert result.historical_nights == 0
+    assert result.night_capacity_source == "history"
+    assert result.historical_nights == 3
     assert season_contexts[-1].observation_time is selected_window_start
 
     ProjectRiskContextBuilder.build(
