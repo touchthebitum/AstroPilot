@@ -14,13 +14,16 @@ class RiskEngine:
         completion = context.completion
         season_remaining_days = context.season_remaining_days
         favorable_nights = context.favorable_nights
-        pressure = context.pressure or 0
+        pressure = context.pressure
 
-        if season_remaining_days is None:
-            season_remaining_days = 999
-
-        if favorable_nights is None:
-            favorable_nights = 999
+        if any(value is None for value in (
+            priority, remaining_hours, pressure, season_remaining_days, favorable_nights,
+        )):
+            return RiskReport(
+                level="UNKNOWN", score=None,
+                explanation=["Risque de report inconnu : preuves numériques insuffisantes."],
+                context=context,
+            )
 
         score = 0
         explanation = []

@@ -86,13 +86,15 @@ class FutureOpportunityEngine:
                 opportunity_ratio=0.0,
             )
 
-        weather_ratio = 0.35
+        weather_ratio = None
 
         if lat is not None and lon is not None:
             weather = self.weather_provider(lat, lon)
 
             if weather:
                 weather_ratio = self._estimate_weather_good_night_ratio(weather)
+        if weather_ratio is None:
+            return FutureOpportunity(0, "INCONNU", 0.0, 0, 0.0)
         if season_source == "dynamic":
             good_nights = int(
                 season_good_nights * weather_ratio
@@ -113,7 +115,7 @@ class FutureOpportunityEngine:
             remaining = remaining_hours
 
         if remaining is None:
-            remaining = 10
+            return FutureOpportunity(0, "INCONNU", 0.0, 0, 0.0)
 
         needed_nights = max(
             1,
@@ -143,11 +145,11 @@ class FutureOpportunityEngine:
         )
 
     @staticmethod
-    def _estimate_weather_good_night_ratio(weather) -> float:
+    def _estimate_weather_good_night_ratio(weather) -> float | None:
         snapshot = weather if isinstance(weather, WeatherSnapshot) else None
         payload = snapshot.payload if snapshot is not None else weather
         if not payload or "hourly" not in payload:
-            return 0.35
+            return None
 
         hourly = payload["hourly"]
         times = hourly.get("time", [])
@@ -182,6 +184,6 @@ class FutureOpportunityEngine:
                 good_hours += 1
 
         if total_night_hours == 0:
-            return 0.35
+            return None
 
         return good_hours / total_night_hours

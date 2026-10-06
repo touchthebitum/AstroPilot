@@ -323,6 +323,8 @@ def test_complete_result_maps_only_json_compatible_values():
     assert response["postponement_risk"] == {
         "level": "MEDIUM",
         "score": 63,
+        "estimated": True,
+        "decision_eligible": False,
         "explanations": ["Only two favorable nights remain"],
         "required_nights": 2,
         "productive_hours_per_night": 3.5,

@@ -21,7 +21,7 @@ class PortfolioForecastEngine:
     def simulate_dynamic_portfolio_roadmap(
         self,
         night_capacities=None,
-        avg_night_hours=5,
+        avg_night_hours=0,
         *,
         profile=None,
     ):
@@ -32,6 +32,9 @@ class PortfolioForecastEngine:
                 profile = {"projects": self.project_provider()}
             else:
                 profile = {}
+
+        if not night_capacities and avg_night_hours <= 0:
+            return []
 
         projects = copy.deepcopy(profile.get("projects", {}))
 
@@ -48,14 +51,16 @@ class PortfolioForecastEngine:
 
             if night_capacities:
                 capacity = night_capacities[current_night - 1]
-                hours_remaining_night = capacity.get(
-                    "hours",
-                    avg_night_hours,
-                )
+                hours_remaining_night = capacity.get("hours")
+                if hours_remaining_night is None:
+                    # Only an explicitly supplied scenario capacity may replace
+                    # missing evidence. The neutral default allocates no gain.
+                    hours_remaining_night = avg_night_hours
             else:
                 capacity = None
                 hours_remaining_night = avg_night_hours
 
+            night_capacity = hours_remaining_night
             while hours_remaining_night > 0:
                 active_projects = {}
 
@@ -121,6 +126,9 @@ class PortfolioForecastEngine:
                         ),
                     )
 
+                    if future.risk == "INCONNU":
+                        # Unknown counters are sentinels, not scarcity evidence.
+                        opportunity_bonus = 0
                     score = base_score + opportunity_bonus
 
                     if score > best_score:
@@ -152,11 +160,7 @@ class PortfolioForecastEngine:
                         if capacity
                         else None
                     ),
-                    "capacity": (
-                        capacity.get("hours", avg_night_hours)
-                        if capacity
-                        else avg_night_hours
-                    ),
+                    "capacity": night_capacity,
                     "project": best_name,
                     "score": best_score,
                     "hours": hours_this_step,

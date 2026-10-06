@@ -69,10 +69,7 @@ def simulated_portfolio_score(
         - project["hours"]
     )
 
-    importance = project.get(
-        "importance",
-        5,
-    )
+    importance = project.get("importance", 0)
 
     closure = closure_bonus_for_remaining(
         remaining,

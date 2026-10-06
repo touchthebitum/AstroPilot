@@ -9,8 +9,8 @@ def risk_context(**overrides):
         "priority": 0,
         "remaining_hours": 10,
         "completion": 0.5,
-        "season_remaining_days": None,
-        "favorable_nights": None,
+        "season_remaining_days": 100,
+        "favorable_nights": 100,
         "pressure": 0,
     }
     values.update(overrides)
@@ -61,7 +61,7 @@ def test_score_maps_to_the_expected_risk_level(
     assert report.level == expected_level
 
 
-def test_missing_season_data_is_neutral_and_context_is_preserved():
+def test_missing_season_data_is_unknown_and_context_is_preserved():
     context = risk_context(
         season_remaining_days=None,
         favorable_nights=None,
@@ -70,9 +70,9 @@ def test_missing_season_data_is_neutral_and_context_is_preserved():
 
     report = RiskEngine.evaluate(context)
 
-    assert report.score == 0
-    assert report.level == "LOW"
-    assert report.explanation == []
+    assert report.score is None
+    assert report.level == "UNKNOWN"
+    assert report.explanation
     assert report.context is context
 
 

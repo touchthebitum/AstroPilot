@@ -1,0 +1,360 @@
+AUDIT UNKNOWN → NUMERIC — ASTROPILOT / NIGHTMERIT — 6 OCTOBRE 2026
+
+BASELINE ET PRÉSERVATION
+PR #321 vérifiée MERGED via GitHub. Merge 2026-10-06 18:37:21 UTC (20:37:21 Europe/Zurich).
+Head de #321: 788fab10b4fb14581be1ce69bd877730ab7fe594.
+Merge/main/origin/main: fda3453cf65d2a341c811161404c761348ca7d8e.
+Fetch réussi puis fast-forward de main. Main == origin/main avant branche et après correctif.
+Checkout principal: Documents/Codex/2026-08-23/referenced-chatgpt-conversation-this-is-an/AstroPilot.
+Aucun changement suivi préexistant. Non suivis préexistants .DS_Store et astropilot.egg-info/ conservés.
+Branche indépendante fix/unknown-numeric-decision-fallbacks.
+Stash critique 223ec1f5904131d726b694655f137670c0ddeb0b conservé sans pop/apply/drop ni nouvelle entrée stash.
+Aucun changement de fichier Field Lab, de filtre legacy ou d'AQI partiel.
+
+CONCLUSION ET FINDINGS
+Aucun P0 démontré. Un P1 confirmé dans les scores Tonight : risque inconnu converti en 50,
+puis -4, alors qu'une observation adverse connue peut imposer jusqu'à -36. Retirer la preuve
+pouvait améliorer le score et le classement. Le défaut ne prouve pas à lui seul une mission
+acceptée : les guards de disponibilité et de capacité restent indépendants.
+
+P2 confirmés corrigés, de la même famille :
+- confidence absente/inconnue -> facteur1 au lieu d'une borne prudente1.2 ; priorité du helper
+  omise ->50 pouvant créer une urgence ou atténuer une pénalité ;
+- rapport de risque remaining falsey ->5h, priority falsey ->50, saison absente ->999 :
+  nombres de risque/required_nights et conseils d'urgence inventés. Aucun de ces 5h n'est
+  consommé comme capacité du MissionInput, comme expected_gain ou comme autorisation ;
+- FutureOpportunity service avec contexte saison connu : météo absente ->0.35, remaining
+  inconnu ->10h, puis ratio/risk décisionnels. Non atteignable dans Tonight nominal actuel
+  car celui-ci n'envoie pas observation_time ; atteignable à la frontière du service future ;
+- roadmap : ratio inconnu ->+30, importance omise ->5 et capacité absente ->5h allouées.
+  Ces résultats sont des scores/gains simulés, pas des missions API. Le correctif reste
+  limité aux mêmes mécanismes décisionnels confirmés ; pas de refonte du modèle future.
+
+P3/bénins ou conservateurs : accumulateurs de gain/closure0 avec unknown gardé dans la
+preuve, mode stratégique balanced par défaut, confidence recommandation None, lecture
+legacy des valeurs canoniques. Des chemins helpers/artisanaux restent P2 latents, listés
+sans prétendre un exploit HTTP : progress legacy0 derrière loader strict, productivité6h
+sans bornes internes, météo partielle interne et provenance capacité de profil4h.
+
+POLITIQUES DU CORRECTIF
+1. UNKNOWN reste None pour risk_label_to_score. Aucun score50 mesuré n'est fabriqué.
+2. DEGRADE pour la contribution de report inconnue : penalty = 100×0.20×1.2×1.5 = 36,
+   borne du modèle existant sur risk∈[0,100], confidence_factor∈[0.8,1.2], priority∈[0,100].
+   Il s'agit d'une borne prudente de pénalité, jamais d'une observation de risque100.
+   Urgency=0. Cette borne est moins favorable ou égale à tous les impacts connus supportés,
+   y compris les nuits mauvaises ; une neutralisation0 aurait amélioré les scores adverses.
+   Le changement réduit volontairement les scores des projets Tonight sans preuve de risque
+   futur, cas nominal actuel. Les modes et poids existants restent inchangés.
+3. Unknown confidence utilise la borne1.2 seulement pour pénaliser ; unknown priorité ne
+   peut augmenter urgency. La borne100 ne sert qu'à la branche adverse, contribution0 sinon.
+4. Rapport risk incomplet ->level UNKNOWN, score=None ; remaining/priority/completion None
+   conservés, zéros valides conservés ; required_nights et pressure non calculables restent None.
+   Le NightAdvisor ne traite pas UNKNOWN comme une urgence HIGH mesurée.
+5. API diagnostic estimated=true, decision_eligible=false. Ces marqueurs décrivent l'usage
+   du rapport : il ne fournit aucun score de classement, aucune autorisation de mission,
+   aucune heure ou aucun gain. Le conseil NightAdvisor reste un consommateur advisory distinct.
+   Un score non calculable est null ; un historique connu conserve son nombre exact.
+6. Future sans preuve requise ->INCONNU. Les compteurs0 restent des sentinelles legacy et
+   ne justifient aucun bonus. Aucun changement de format FutureOpportunity persistant.
+7. NEUTRAL_DEFAULT pour contributions unknown roadmap : bonus de rareté0, importance0,
+   capacité0 allouant zéro gain. USER_DEFAULT autorisé uniquement si avg_night_hours est
+   explicitement fourni par l'appelant ; un scénario5h explicite est conservé.
+8. REJECT reste le contrat d'ingress legacy/progress/météo et de nouvelles acceptations
+   sans disponibilité explicite (#320/#321). Aucun guard retiré ni changement de schéma.
+
+REACHABILITY ET TESTS
+Nouveau fichier test_unknown_numeric_decision_fallbacks.py :
+- libellés unknown/None/invalid ne sont pas score50 ;
+- monotonie de l'impact sur tous les risques numériques0–100, quatre scores astro,
+  trois priorités et trois niveaux de confidence ; absence d'urgency unknown ;
+- vraie construction recommend_project_for_night, quatre labels connus et leur retrait,
+  quatre scores astro, cinq modes ; final, decision et tous les strategy scores ne montent pas ;
+- vrai ProjectRiskContextBuilder sur remaining/priority None et zero ; aucun required_nights
+  ou pressure calculé à partir de5h ; aucune urgence advisor fabriquée ;
+- vraie frontière FutureOpportunity avec saison isolée connue, météo/remaining/heures de nuit
+  retirés séparément : INCONNU ; tests connus avec météo explicite préservent leurs calculs ;
+- vraie simulation roadmap : pas de+30 unknown, préférence inconnue ne dépasse pas importance1,
+  capacité None/empty/missing/null/zero n'alloue aucun gain, scénario5h explicite conservé ;
+- risk report historique numérique et nouveau unknown : serialize→deserialize→serialize
+  exactement identique, réponse et modèle API conservent score ou null + marqueurs explicites ;
+- retirer confidence/priority connues ne rend pas un risque adverse plus favorable.
+
+Régressions #320/#321 couvertes par la suite : unknown opportunity bonus Tonight, importance
+75 invariants, duration inconnue, acquisition intent progress inconnu/gain0, autorisation
+availability explicite, nouvelle acceptance rejetée sans disponibilité et replay legacy.
+Le fixture moderne unknown de test_acquisition_intent_remaining_progress passe volontairement
+63.5→31.5 (ancienne pénalité4 remplacée par borne36). Le cas legacy connu reste inchangé ;
+les assertions d'identité, ranking, action, inéligibilité, confidence et lectures sont conservées.
+
+VALIDATION
+Tests nouveaux sur copie immuable de baseline fda3453 : 81 échecs / 62 passants (143 cas).
+Les échecs incluent les contre-exemples réels de scores, les defaults de report/future/roadmap
+et les nouveaux marqueurs de contrat API. La copie de baseline ne touche ni checkout ni stash.
+Tests ciblés finaux avec API, progress, reachability, #320/#321 : 521 passants, 5.45s.
+Premier passage complet en sandbox : 5751 passants, deux échecs (fixture score obsolète et
+socket loopback interdit), deux skips. Fixture corrigée ; test loopback validé dans la suite
+finale avec permission d'exécution locale. Aucun test réseau assoupli ou modifié.
+Suite complète finale Python3.13, Node fourni par Codex : 5768 passants, 1 skip volume
+insensible à la casse (régression alias réelle couverte), 44 warnings Astropy, 112.37s.
+Aucun test réseau modifié. git diff --check propre. Audit du périmètre : 11 fichiers
+production, 5 fichiers tests, 1 document d'audit ; aucune modification Field Lab.
+
+LIMITES ET PROCHAINE PRIORITÉ
+Le correctif ne certifie pas le conservatisme global de tous les modèles. La matrice
+classe explicitement les conversions non résolues au lieu de les appeler bénignes.
+Priorité suivante : capacité profil/historique — distinguer préférence explicitement
+fournie, historique mesuré, absence d'historique et default de modèle4h ; tracer leurs
+effets sur pressure/required_nights/conseil advisory et simulations. Traiter séparément
+l'hypothèse fixe3h/nuit de FutureOpportunity, avec provenance d'estimation claire.
+Les defaults internes ProductiveWindowAssessment6h/météo demandent ensuite un audit
+frontière propre : ils sont latents en contexte artisanal, pas un exploit API prouvé ici.
+Le score report API estimated/non décisionnel ne neutralise pas automatiquement tout
+usage externe futur : les consommateurs doivent respecter les marqueurs. La confidence
+inconnue reste distincte d'un facteur prudent appliqué uniquement à la pénalité.
+
+FICHIERS MODIFIÉS
+astro_score.py
+astropilot/app.py
+decision/engines/future_opportunity_engine.py
+decision/portfolio/portfolio_forecast_engine.py
+decision/portfolio/project_scoring.py
+decision/risk/postponement_impact.py
+decision/risk/project_risk_context.py
+decision/risk/project_risk_context_builder.py
+decision/risk/risk_engine.py
+decision/risk/risk_report.py
+decision/services/tonight_response.py
+tests/architecture/test_acquisition_intent_remaining_progress.py
+tests/architecture/test_future_opportunity_simulated_remaining_contract.py
+tests/architecture/test_risk_engine.py
+tests/architecture/test_tonight_response.py
+tests/architecture/test_unknown_numeric_decision_fallbacks.py
+docs/audits/2026-10-06-unknown-numeric-decisions.txt
+
+MATRICE UNKNOWN → NUMERIC — ASTROPILOT — 6 OCTOBRE 2026
+Baseline fda3453cf65d2a341c811161404c761348ca7d8e
+32 familles revues. Inventaire syntaxique de soutien: 519 occurrences dans 41 fichiers. Les occurrences incluent guards/accumulateurs: elles ne sont pas toutes des bugs. Aucune garantie formelle exhaustive de tout état arbitraire.
+
+N01 — risk inconnu ->50
+Source: decision/risk/postponement_impact.py
+Reachability: Tonight nominal via future INCONNU
+Impact: pénalité -4 puis final/decision/5 strategy scores; adverse connu jusqu’à -36
+Politique: DEGRADE: risk=None, borne adverse -36 sans urgence
+Finding: P1 confirmé/corrigé
+
+N02 — risk=None ->0
+Source: decision/risk/postponement_impact.py
+Reachability: appel helper direct; N01 masquait None Tonight
+Impact: absence de pénalité favorable
+Politique: DEGRADE: même borne, pas observation numérique
+Finding: P1 helper/corrigé
+
+N03 — confidence inconnue ->facteur1 / absence ->MOYENNE
+Source: decision/risk/postponement_impact.py
+Reachability: Tonight obj confidence ou helper
+Impact: pénalité moindre que BASSE=1.2
+Politique: DEGRADE: facteur maximal1.2 seulement sur pénalité
+Finding: P2 confirmé/corrigé
+
+N04 — priority omise ->50
+Source: decision/risk/postponement_impact.py
+Reachability: helper; Tonight fournit contribution0 ou borne100 #320
+Impact: bonus urgence inventé ou pénalité atténuée
+Politique: DEGRADE: omission=None, borne100 en branche adverse, contribution0 pour urgence
+Finding: P2 helper/corrigé
+
+N05 — remaining falsey ->5h
+Source: decision/risk/project_risk_context_builder.py
+Reachability: MissionAssembler après actionability productive
+Impact: required_nights/pressure/RiskEngine/NightAdvisor/API; aucune allocation de mission/gain
+Politique: DEGRADE: None conservé, zero conservé, required/pressure None si inconnu
+Finding: P2 confirmé/corrigé; pas exploit gain mission
+
+N06 — priority falsey ->50
+Source: decision/risk/project_risk_context_builder.py
+Reachability: mission découverte/importance0 ou appel contexte None
+Impact: 20 points risque inventés; conseil urgence possible
+Politique: DEGRADE: None et zero conservés
+Finding: P2 confirmé/corrigé
+
+N07 — completion falsey ->0
+Source: decision/risk/project_risk_context_builder.py
+Reachability: contexte risk
+Impact: champ exposé au rapport; pas consommé dans formule risk
+Politique: unknown conservé; aucun score nouveau
+Finding: P3 diagnostic corrigé dans même builder
+
+N08 — season/favorable None ->999; pressure falsey ->0
+Source: decision/risk/risk_engine.py
+Reachability: rapport mission
+Impact: LOW numérique prétendument rassurant; report consommé par advisor
+Politique: DEGRADE: level UNKNOWN score None si composant décisionnel absent
+Finding: P2 confirmé/corrigé
+
+N09 — int(risk.score), pas de marque diagnostic
+Source: decision/services/tonight_response.py;astropilot/app.py
+Reachability: API /v1/tonight sur mission persistée ou nouvelle
+Impact: affichage; pas retour dans ranking/autorisation/gain
+Politique: score nullable; estimated=true decision_eligible=false; conseil séparé documenté
+Finding: P2 contrat diagnostic corrigé
+
+N10 — saison/catalog inconnus ->compteurs0 ratio0
+Source: decision/engines/future_opportunity_engine.py
+Reachability: Tonight nominal: observation_time non passée par candidate builder
+Impact: sentinelles ne doivent pas devenir rareté
+Politique: DEGRADE: risk INCONNU gardé; bonus Tonight0 #320
+Finding: correct/préservé
+
+N11 — weather missing/hourly missing/no nocturnal rows ->0.35
+Source: decision/engines/future_opportunity_engine.py
+Reachability: Future service avec saison connue; roadmap context daté; pas Tonight nominal
+Impact: good_nights/risk/opportunity ratio puis bonus/ranking
+Politique: DEGRADE: résultat INCONNU, aucun nombre observé inventé
+Finding: P2 confirmé service/corrigé
+
+N12 — remaining/provider None ->10h
+Source: decision/engines/future_opportunity_engine.py
+Reachability: Future service avec météo/saison connues; moderne Tonight court-circuit unknown
+Impact: needed_nights/opportunity_ratio puis décision
+Politique: DEGRADE: INCONNU
+Finding: P2 confirmé service/corrigé
+
+N13 — remaining/3h par nuit
+Source: decision/engines/future_opportunity_engine.py
+Reachability: Future service/roadmap
+Impact: ratio décisionnel; hypothèse fixe de modèle, pas remplacement None
+Politique: modèle existant; pas certificat disponibilité; prochain contrat à expliciter
+Finding: P2 modèle non résolu, pas bug unknown injecté prouvé
+
+N14 — legacy good_nights minimum1; needed minimum1
+Source: decision/engines/future_opportunity_engine.py
+Reachability: season source legacy test artificiel; resolver produit dynamic/unknown
+Impact: opportunité minimale; zéro remaining known
+Politique: non modifié: pas chemin production Tonight établi
+Finding: P3 latent
+
+N15 — array short ->cloud100/humidity100/wind99/rain99
+Source: decision/engines/future_opportunity_engine.py
+Reachability: helper dict artisanal; ingress météo nominal rejette arrays invalides
+Impact: heure non favorable; unknown partiel peut devenir risque élevé
+Politique: DEGRADE par heure; débat couverture d’évidence à isoler
+Finding: P2/P3 helper, pas météo/AQI partiel dans ce correctif
+
+N16 — INCONNU ratio0 ->opportunity_bonus30
+Source: decision/portfolio/portfolio_forecast_engine.py
+Reachability: roadmap CLI/service; /v1/tonight ne lance pas roadmap
+Impact: score et ranking simulés
+Politique: NEUTRAL_DEFAULT contribution0; sentinelles jamais preuve de rareté
+Finding: P2 confirmé/corrigé même défaut #320
+
+N17 — importance missing ->5 (score30)
+Source: decision/portfolio/project_scoring.py
+Reachability: roadmap score_project=simulated_portfolio_score
+Impact: inconnu dépasse projet connu importance1
+Politique: NEUTRAL_DEFAULT contribution0
+Finding: P2 confirmé/corrigé même défaut importance #320
+
+N18 — night capacities absentes/hours missing ->avg5h
+Source: decision/portfolio/portfolio_forecast_engine.py
+Reachability: roadmap service/CLI, aucune mission HTTP
+Impact: allocation heures et gain simulés
+Politique: NEUTRAL_DEFAULT0; USER_DEFAULT avg explicite conservé; None/zero n’allouent rien implicitement
+Finding: P2 confirmé/corrigé
+
+N19 — score météo ->6/4/2/1/0h
+Source: astro_score.py:forecast_night_capacities
+Reachability: CLI capacity future, rapport Tonight seulement
+Impact: estimation quantifiée puis roadmap; aucune disponibilité utilisateur réelle
+Politique: modèle quantification: pas un fallback unknown; scénario météo estimé
+Finding: P2 précision modèle à expliciter, hors correctif
+
+N20 — mode non reconnu ->fallback_score; missing decision_mode ->balanced
+Source: decision/engines/night_strategy_engine.py
+Reachability: Tonight préférences validées ou appel helper
+Impact: choix score calculé déjà connu; pas preuve numérique inventée
+Politique: USER_DEFAULT mode produit existant; monotonie 5 modes testée
+Finding: P3 bénin dans ce scope
+
+N21 — <3 nights ->capacity profil /4h si pref absente
+Source: decision/portfolio/historical_night_capacity_estimator.py;astro_score.py
+Reachability: mission risk report; CLI completion estimate
+Impact: required_nights et pressure estimés; aucune capacité MissionInput et aucun gain Tonight
+Politique: USER_DEFAULT si fourni; estimation modèle si absent, API explicitement estimated et non décisionnelle pour ranking/mission/gain
+Finding: P2 provenance default vs profile et advice à clarifier; non corrigé
+
+N22 — hours missing ->0; absent date /hours<=0 ignorés
+Source: decision/portfolio/historical_night_capacity_estimator.py
+Reachability: historique sessions
+Impact: ne crédite aucune heure inexistante; contribue choix source profile
+Politique: NEUTRAL_DEFAULT accumulateur sans preuve de gain
+Finding: P3 bénin; ingestion history séparée
+
+N23 — legacy missing hours/target ->0
+Source: decision/portfolio/project_state.py
+Reachability: helper direct possible; production profile loader REJECT absent
+Impact: helper seul pourrait influencer remaining/progress; legacy lecture conservée
+Politique: REJECT ingress existant; pas changer lecture legacy dans ce chantier
+Finding: P2 latent helper/import; pas exploit nominal
+
+N24 — progress absent ->None; credits observed + (seconds or0)
+Source: decision/services/acquisition_intent_remaining_progress.py
+Reachability: API moderne; crédits persistés réels
+Impact: unknown remaining conservé; crédit mesuré ne crée pas heures fictives
+Politique: DEGRADE unknown; credits evidence distincte
+Finding: correct/préservé; provenance baseline à auditer ultérieurement
+
+N25 — unknown remaining/capacity ->gain0 closure0 ROI0
+Source: decision/portfolio/project_gain.py;decision/portfolio/project_scoring.py
+Reachability: Tonight moderne production
+Impact: aucun bonus/gain; pas remplacement remaining par5h
+Politique: NEUTRAL_DEFAULT contribution0, pas diagnostic de complétion
+Finding: correct/préservé
+
+N26 — omitted session_hours/available_hours ->3h
+Source: decision/portfolio/project_gain.py;decision/portfolio/project_scoring.py
+Reachability: helper public/legacy; Tonight passe valeur explicite ou n’appelle pas en unknown
+Impact: scénario modèle direct seulement; Tonight duration unknown guard #320
+Politique: USER_DEFAULT scénario historique; ne pas confondre evidence production
+Finding: P2 contrat helper à expliciter; production gardée
+
+N27 — unknown modern intent ->recommended_hours0/gain0; evidence_only physique
+Source: astro_score.py:build_mission_input
+Reachability: Tonight/AquisitionIntent composition/mission/acceptance
+Impact: aucune mission depuis unknown remaining; physique distincte du gain
+Politique: REJECT/DEGRADE guards existants + availability explicitness #321
+Finding: correct/préservé
+
+N28 — PWA missing astronomical bounds ->6h; weather20/60/5/1.5/0.2
+Source: decision/mission/mission_assembler.py
+Reachability: appel contexte interne incomplet; producer nominal supplies bounds/weather
+Impact: latent actionability/productivity avec données artisanales; pas fallback du risk remaining5
+Politique: REJECT souhaité aux frontières internes; pas défaut API nominal prouvé
+Finding: P2 prochain audit frontière interne, inchangé
+
+N29 — missing project/step hours ->0; target0 ->progress100/1
+Source: decision/portfolio/portfolio_presenter.py
+Reachability: CLI presentation
+Impact: résumé estimation; ne réinjecte pas mission/ranking
+Politique: diagnostic/scénario; pas certification historique; lecture inchangée
+Finding: P3 affichage, à labelliser si interface engageante
+
+N30 — progress absent ->START_PROJECT label
+Source: decision/opportunity/opportunity_engine.py
+Reachability: Tonight candidates modernes inéligibles
+Impact: label action distinct statut/actionability; mission bloquée
+Politique: DEGRADE/REJECT selection/capacity/availability existants
+Finding: P2 sémantique label, pas gain/mission prouvé
+
+N31 — importance unknown ->contribution0 Candidate.priorityNone
+Source: decision/portfolio/project_scoring.py;astro_score.py
+Reachability: Tonight nominal #320
+Impact: pas avantage numérique; priorité API unknown
+Politique: NEUTRAL_DEFAULT contribution + unknown evidence conservée
+Finding: correct/préservé; 75 invariants historiques
+
+N32 — confidence inconnue ->None
+Source: decision/engines/decision_summary_engine.py
+Reachability: recommandation/API
+Impact: aucune confidence favorable inventée
+Politique: DEGRADE
+Finding: correct/préservé

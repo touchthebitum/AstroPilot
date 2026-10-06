@@ -24,11 +24,14 @@ def test_estimate_can_use_simulated_remaining_hours(
                 "name": "M31",
             }
         },
-        weather_provider=lambda lat, lon: None,
+        weather_provider=lambda lat, lon: {"hourly": {
+            "time": ["2026-08-27T23:00"], "cloud_cover": [0],
+            "relative_humidity_2m": [50], "wind_speed_10m": [5], "precipitation": [0],
+        }},
         profile_provider=lambda: {
             "location": {
-                "latitude": None,
-                "longitude": None,
+                "latitude": 46.7508,
+                "longitude": 6.5495,
             }
         },
         project_provider=lambda name: 18,
@@ -90,11 +93,14 @@ def test_estimate_accepts_explicit_observation_context(
                 "name": "M31",
             }
         },
-        weather_provider=lambda lat, lon: None,
+        weather_provider=lambda lat, lon: {"hourly": {
+            "time": ["2026-08-27T23:00"], "cloud_cover": [0],
+            "relative_humidity_2m": [50], "wind_speed_10m": [5], "precipitation": [0],
+        }},
         profile_provider=lambda: {
             "location": {
-                "latitude": None,
-                "longitude": None,
+                "latitude": 46.7508,
+                "longitude": 6.5495,
             }
         },
         project_provider=lambda name: 18,
@@ -148,11 +154,14 @@ def test_estimate_uses_dynamic_season_with_observation_context(
                 "dec": 41.2692,
             }
         },
-        weather_provider=lambda lat, lon: None,
+        weather_provider=lambda lat, lon: {"hourly": {
+            "time": ["2026-08-27T23:00"], "cloud_cover": [0],
+            "relative_humidity_2m": [50], "wind_speed_10m": [5], "precipitation": [0],
+        }},
         profile_provider=lambda: {
             "location": {
-                "latitude": None,
-                "longitude": None,
+                "latitude": 46.7508,
+                "longitude": 6.5495,
             }
         },
         project_provider=lambda name: 6,
@@ -207,11 +216,14 @@ def test_dynamic_future_opportunity_uses_geometric_good_nights(
                 "dec": 41.2692,
             }
         },
-        weather_provider=lambda lat, lon: None,
+        weather_provider=lambda lat, lon: {"hourly": {
+            "time": ["2026-08-27T23:00"], "cloud_cover": [0],
+            "relative_humidity_2m": [50], "wind_speed_10m": [5], "precipitation": [0],
+        }},
         profile_provider=lambda: {
             "location": {
-                "latitude": None,
-                "longitude": None,
+                "latitude": 46.7508,
+                "longitude": 6.5495,
             }
         },
         project_provider=lambda name: 6,
@@ -231,10 +243,9 @@ def test_dynamic_future_opportunity_uses_geometric_good_nights(
         ),
     )
 
-    # Aucun forecast météo -> fallback weather_ratio = 0.35.
-    # 20 nuits géométriques × 0.35 = 7 nuits attendues.
-    assert result.weather_ratio == 0.35
-    assert result.good_nights == 7
+    # Observed favorable night hours preserve geometric capacity.
+    assert result.weather_ratio == 1.0
+    assert result.good_nights == 20
 
 def test_dynamic_future_opportunity_can_have_zero_good_nights(
     monkeypatch,
@@ -262,11 +273,14 @@ def test_dynamic_future_opportunity_can_have_zero_good_nights(
                 "dec": 41.2692,
             }
         },
-        weather_provider=lambda lat, lon: None,
+        weather_provider=lambda lat, lon: {"hourly": {
+            "time": ["2026-08-27T23:00"], "cloud_cover": [0],
+            "relative_humidity_2m": [50], "wind_speed_10m": [5], "precipitation": [0],
+        }},
         profile_provider=lambda: {
             "location": {
-                "latitude": None,
-                "longitude": None,
+                "latitude": 46.7508,
+                "longitude": 6.5495,
             }
         },
         project_provider=lambda name: 6,
