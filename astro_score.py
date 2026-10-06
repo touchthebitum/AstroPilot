@@ -1042,7 +1042,9 @@ def recommend_project_for_night(
             0,
             min(8, round(8 / max(opportunity_ratio, 0.1), 1))
         )
-        if project_targets and remaining_for_night is None:
+        if future.risk == "INCONNU":
+            # Unknown counters are sentinels, not evidence of scarce opportunity.
+            # In particular ratio=0 must not authorize the maximum +8 bonus.
             opportunity_bonus = 0
 
         diversity_bonus = diversification_bonus(catalog_key, projects)
@@ -1072,7 +1074,9 @@ def recommend_project_for_night(
 
         # Limite l’avantage portefeuille si l’objet est surtout choisi grâce au portefeuille
         if portfolio_bonus > astro_part * 0.5:
-            final_score -= portfolio_bonus * 0.3
+            # Discount only the excess. Discounting the entire contribution at
+            # this threshold made removing evidence/bonuses increase the score.
+            final_score -= (portfolio_bonus - astro_part * 0.5) * 0.3
 
 
         strategy_scores, decision_score = (
@@ -1096,7 +1100,9 @@ def recommend_project_for_night(
             project_selection_engine.build_candidate(
                 name=obj["name"],
                 catalog_key=catalog_key,
-                priority=priority,
+                # Keep unknown user evidence distinct from its zero score
+                # contribution; the API must not report an invented preference.
+                priority=priority if "importance" in project else None,
                 astro_score=astro_score,
                 final_score=final_score,
                 decision_score=decision_score,
@@ -1726,6 +1732,33 @@ def build_selected_window_weather(
         if start_instant <= timeline_value(h["time"]) < end_instant
     ]
 
+    lunar_details = best.get("hourly_lunar_evidence")
+    if lunar_details is not None:
+        try:
+            aligned = [timeline_value(detail["time"]) for detail in lunar_details] == [
+                timeline_value(hour["time"]) for hour in selected_hours
+            ]
+        except (KeyError, TypeError, ValueError, AttributeError):
+            aligned = False
+        if not aligned:
+            raise DecisionConsistencyError(["selected_window_lunar_series_unaligned"])
+    else:
+        lunar_details = best.get("details", [])
+    if len(lunar_details) != len(selected_hours) or not selected_hours:
+        # The altitude gate can omit hours from details while leaving window
+        # bounds unchanged. Such a compressed array cannot be indexed by elapsed
+        # hour or extended with its last value. Reject new evidence explicitly.
+        raise DecisionConsistencyError(["selected_window_lunar_series_unaligned"])
+    if any(
+        not isinstance(detail, dict)
+        or isinstance(detail.get("moon"), bool)
+        or not isinstance(detail.get("moon"), (int, float))
+        or not isfinite(detail["moon"])
+        or not 0 <= detail["moon"] <= 35
+        for detail in lunar_details
+    ):
+        raise DecisionConsistencyError(["selected_window_lunar_series_invalid"])
+
     return WeatherForecast(
         hourly=selected_hours,
         hourly_clouds=[
@@ -1749,7 +1782,7 @@ def build_selected_window_weather(
         ],
         hourly_moon_penalty=[
             detail["moon"]
-            for detail in best.get("details", [])
+            for detail in lunar_details
         ],
         hourly_temperature=[
             h.get("temperature_2m", 0)

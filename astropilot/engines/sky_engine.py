@@ -533,6 +533,7 @@ class SkyEngine:
             hour_details = []
             moon_impacts = []
             moon_penalties = []
+            hourly_lunar_evidence = []
 
             for h in window:
                 geometry = self.hour_geometry(
@@ -545,6 +546,16 @@ class SkyEngine:
 
                 target_alt = geometry["target_altitude"]
                 if target_alt < min_altitude_deg:
+                    # Keep lunar evidence aligned even when this hour is excluded
+                    # from target scoring. Use the existing penalty algorithm.
+                    hourly_lunar_evidence.append({
+                        "time": h["time"],
+                        "moon": self.moon_penalty(
+                            moon_illumination,
+                            geometry["moon_elevation"],
+                            geometry["moon_target_sep"],
+                        ),
+                    })
                     continue
 
                 result = self.score_hour(
@@ -614,6 +625,9 @@ class SkyEngine:
                 hour_details.append(result["details"])
                 moon_impacts.append(result["moon_impact"])
                 moon_penalties.append(result["moon_penalty"])
+                hourly_lunar_evidence.append({
+                    "time": h["time"], "moon": result["moon_penalty"],
+                })
 
             if not scores:
                 continue
@@ -658,6 +672,7 @@ class SkyEngine:
                     "score": avg,
                     "hour_scores": scores,
                     "details": hour_details,
+                    "hourly_lunar_evidence": hourly_lunar_evidence,
                     "clouds": round(
                         sum(
                             h["cloud_cover_low"] * 0.2 +

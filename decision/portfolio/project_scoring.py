@@ -12,7 +12,9 @@ def project_priority(object_name, projects):
     project = projects[object_name]
 
     importance = float(
-        project.get("importance", 5)
+        # No user preference means no priority contribution, never midpoint
+        # importance that can outrank an explicitly low-priority project.
+        project.get("importance", 0)
     )
 
     return round(

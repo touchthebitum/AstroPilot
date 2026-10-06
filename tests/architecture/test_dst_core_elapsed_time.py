@@ -103,12 +103,14 @@ def test_selected_weather_distinguishes_the_two_fall_folds():
 
     weather = astro_score.build_selected_window_weather(
         hours=hours,
-        best={"start": first, "end": second, "details": []},
+        best={"start": first, "end": second, "details": [{"moon": 0.0}],
+              "hourly_lunar_evidence": [{"time": first, "moon": 0.0}]},
         sky=SimpleNamespace(estimate_seeing=lambda *_args: 1.5),
     )
 
     assert weather.hourly == [hours[0]]
     assert weather.hourly_clouds == [10.0]
+    assert weather.hourly_moon_penalty == [0.0]
 
 
 def test_altitude_sample_uses_the_correct_elapsed_instant(monkeypatch):
