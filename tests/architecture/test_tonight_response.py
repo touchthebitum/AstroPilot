@@ -278,6 +278,7 @@ def test_complete_result_maps_only_json_compatible_values():
         "name": "L-Pro",
         "filter_type": "broadband",
         "bandwidth_nm": 50.0,
+        "source": "selection",
     }
     assert response["astro_quality"] == {
         "score": 78.0,

@@ -444,3 +444,31 @@ def test_modern_project_passes_exact_selection_without_changing_score(
         expected.acquisition_intent_assessments
     )
     assert candidate.decision_score == captured[0]["decision_score"]
+
+
+def test_characterize_different_lunar_estimates_leave_identical_selection():
+    """Audit finding: different actual estimates cannot be replayed from selection."""
+    from dataclasses import replace
+
+    class RecordingEstimator:
+        def __init__(self, scale):
+            self.scale = scale
+            self.estimates = []
+
+        def estimate(self, evidence, profile):
+            estimate = LunarContaminationEstimator().estimate(evidence, profile)
+            estimate = replace(
+                estimate,
+                rayleigh_relative_index=estimate.rayleigh_relative_index * self.scale,
+                mie_relative_index=estimate.mie_relative_index * self.scale,
+            )
+            self.estimates.append(estimate)
+            return estimate
+
+    original = RecordingEstimator(1.0)
+    changed = RecordingEstimator(2.0)
+    first = _compose(estimator=original)
+    second = _compose(estimator=changed)
+    assert original.estimates != changed.estimates
+    assert first.status is AcquisitionIntentSelectionStatus.PREFERRED
+    assert first == second

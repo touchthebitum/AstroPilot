@@ -633,6 +633,7 @@ class AcceptedMissionFilterResponse(BaseModel):
     name: str
     filter_type: str
     bandwidth_nm: float | None = None
+    source: str | None = None
 
 
 class AcceptedMissionTaskResponse(BaseModel):
@@ -648,6 +649,7 @@ class AcceptedMissionResponse(BaseModel):
     decision_id: str
     selection_id: str
     imaging_field_id: str | None = None
+    acquisition_intent_id: str | None = None
     target: str
     confidence: float | str | None = None
     equipment: list[str] = Field(default_factory=list)
@@ -959,6 +961,7 @@ class TonightFilterModel(BaseModel):
     name: str
     filter_type: str
     bandwidth_nm: float | None = None
+    source: str | None = None
 
 
 class TonightAstroQualityModel(BaseModel):
@@ -1646,6 +1649,7 @@ def _accepted_mission_response(mission: NightMission) -> AcceptedMissionResponse
         decision_id=mission.decision_id,
         selection_id=mission.selection_id,
         imaging_field_id=mission.imaging_field_id,
+        acquisition_intent_id=mission.acquisition_intent_id,
         target=mission.target,
         confidence=mission.confidence,
         equipment=list(mission.equipment),
@@ -1659,6 +1663,7 @@ def _accepted_mission_response(mission: NightMission) -> AcceptedMissionResponse
                 name=mission.selected_filter.name,
                 filter_type=mission.selected_filter.filter_type,
                 bandwidth_nm=mission.selected_filter.bandwidth_nm,
+                source=mission.selected_filter.source,
             )
             if mission.selected_filter is not None
             else None

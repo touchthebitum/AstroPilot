@@ -786,3 +786,71 @@ def test_tonight_composes_intent_filter_through_real_input_and_assembler(
     if expected is not None:
         assert mission.selected_filter.bandwidth_nm == bandwidth_nm
         assert mission.selected_filter.source == "user_default"
+
+
+@pytest.mark.parametrize("legacy_remaining", [0.0, 4.0])
+def test_characterize_tonight_duration_uses_global_remainder_not_intent_progress(
+    monkeypatch, frozen_time, summary, context, isolated_dependencies,
+    legacy_remaining,
+):
+    """Audit finding: the modern intent's 0.5h remainder never reaches assembly.
+
+    This records current behavior, not an authorization of the legacy cap.
+    Resolving project/global versus intent capacity needs a separate increment.
+    """
+    import astro_score
+    from decision.definitions.production_imaging_fields import (
+        build_production_imaging_field_resolver,
+    )
+    from decision.models.project_acquisition_intent_target import (
+        ProjectAcquisitionIntentTarget,
+    )
+    from decision.services.acquisition_intent_remaining_progress import (
+        derive_acquisition_intent_remaining_progress,
+    )
+    from decision.services.tonight_mission_service import TonightMissionService
+
+    monkeypatch.setattr(astro_score.FilterInventoryLoader, "load", lambda: ())
+    project = {
+        "hours": 4.0 - legacy_remaining, "target_hours": 4.0,
+        "imaging_field_id": "sh2-129_ou4",
+        "acquisition_intent_targets": [
+            {"acquisition_intent_id": "sh2-129_ha", "target_hours": 2.0},
+        ],
+        "acquisition_intent_progress": [
+            {"acquisition_intent_id": "sh2-129_ha",
+             "acquired_duration_manual": 5400.0},
+        ],
+    }
+    remaining = derive_acquisition_intent_remaining_progress(
+        build_production_imaging_field_resolver().resolve("sh2-129_ou4"),
+        (ProjectAcquisitionIntentTarget("sh2-129_ha", 2.0),),
+        tuple(project["acquisition_intent_progress"]),
+    )[0]
+    assert remaining.remaining_hours == 0.5
+    assert remaining.completed is False
+    evaluation = {
+        "catalog_key": "Sh2-129", "imaging_field_id": "sh2-129_ou4",
+        "selected_acquisition_intent_id": "sh2-129_ha",
+        "remaining_hours": astro_score.project_remaining_hours(
+            "Sh2-129", {"Sh2-129": project},
+        ),
+        "window": {"start": frozen_time,
+                   "end": frozen_time + timedelta(hours=2), "moon_penalty": 0},
+    }
+    service = TonightMissionService(build_mission=lambda **kwargs:
+        MissionAssembler.build(equipment=["setup"], alternatives=[], **kwargs))
+    mission = service.create(
+        winner={"object_evaluations": {"Sh2-129": evaluation}},
+        objects=[{"name": "Sh2-129", "catalog_key": "Sh2-129",
+                  "decision_summary": summary, "decision_context": context}],
+        recommended_key="Sh2-129",
+        build_mission_input=lambda value: astro_score.build_mission_input(
+            value, profile={"projects": {"Sh2-129": project}},
+        ),
+    )
+    if legacy_remaining == 0:
+        assert mission is None
+    else:
+        assert mission.recommended_hours == 1.5
+        assert mission.recommended_hours > remaining.remaining_hours
