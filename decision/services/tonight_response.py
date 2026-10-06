@@ -171,6 +171,7 @@ class TonightFilterResponse:
     name: str
     filter_type: str
     bandwidth_nm: float | None = None
+    source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -688,6 +689,7 @@ class TonightResponse:
                 name=mission.selected_filter.name,
                 filter_type=mission.selected_filter.filter_type,
                 bandwidth_nm=mission.selected_filter.bandwidth_nm,
+                source=mission.selected_filter.source,
             )
 
         astro_quality = None
