@@ -60,6 +60,11 @@ class UserSelectionMissionService:
         if validated_selection.source is UserSelectionSource.DECLINED:
             return None
 
+        if availability is None:
+            raise UserSelectionValidationError("user_availability_required")
+        if not isinstance(availability, SessionAvailability):
+            raise TypeError("Expected SessionAvailability")
+
         if not isinstance(recommendation, Recommendation):
             raise TypeError("Expected Recommendation")
         primary_catalog_key = _candidate_catalog_key(

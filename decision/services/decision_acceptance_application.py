@@ -408,6 +408,14 @@ class DecisionAcceptanceApplicationService:
         if not isinstance(context, DecisionAcceptanceContext):
             raise DecisionAcceptanceError("decision_context_incomplete")
 
+        # Persisted legacy missions remain readable/replayable; new commitment
+        # never inherits authorization from an absent availability snapshot.
+        if selection.source is not UserSelectionSource.DECLINED:
+            if context.availability is None:
+                raise DecisionAcceptanceError("user_availability_required")
+            if not isinstance(context.availability, SessionAvailability):
+                raise DecisionAcceptanceError("user_availability_invalid")
+
         reference_time = self._acceptance_time()
         self._validate_forecast_freshness(
             decision_id=selection.decision_id,

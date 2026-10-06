@@ -72,7 +72,7 @@ def assessment(
 def test_project_cap_limits_the_real_mission_window(maximum_hours, expected_hours):
     timing = _mission_timing_for_availability(
         assessment([0.8, 0.8], maximum_mission_hours=maximum_hours),
-        None,
+        SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert timing[2] == expected_hours
@@ -82,9 +82,9 @@ def test_project_cap_limits_the_real_mission_window(maximum_hours, expected_hour
 def test_project_need_below_minimum_is_not_artificially_extended():
     source = assessment([0.8, 0.8], maximum_mission_hours=0.75)
 
-    assert select_continuous_actionable_productive_window(source, None) is None
-    assert _mission_timing_for_availability(source, None) is None
-    refusal = evaluate_continuous_actionable_productive_window(source, None).refusal
+    assert select_continuous_actionable_productive_window(source, SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)) is None
+    assert _mission_timing_for_availability(source, SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)) is None
+    refusal = evaluate_continuous_actionable_productive_window(source, SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)).refusal
     assert refusal.best_productive_window_minutes == 45
 
 

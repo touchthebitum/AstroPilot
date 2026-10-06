@@ -385,7 +385,7 @@ def assessment_for_window(start, end):
     )
 
 
-def test_none_availability_still_requires_retained_actionability_evidence():
+def test_none_availability_preserves_physical_viability_without_actionable_alternatives():
     primary, first, second, third = (
         candidate("M31"), candidate("M42"), candidate("M33"), candidate("M51")
     )
@@ -406,11 +406,10 @@ def test_none_availability_still_requires_retained_actionability_evidence():
         assessments,
         None,
         primary_catalog_key="M31",
-    ) == select_viable_alternatives(
-        shortlist,
-        viable,
-        primary_catalog_key="M31",
-    )
+    ) == ()
+    assert all(CandidateViabilityEvaluator.is_viable(item) for item in assessments.values())
+    assert select_viable_alternatives(shortlist, viable, primary_catalog_key="M31") == (first, second)
+
 
 
 @pytest.mark.parametrize(

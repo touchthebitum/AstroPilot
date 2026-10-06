@@ -35,6 +35,7 @@ class TonightStatus(str, Enum):
     NO_CANDIDATE = "no_candidate"
     NO_RECOMMENDATION = "no_recommendation"
     NO_MISSION = "no_mission"
+    USER_AVAILABILITY_REQUIRED = "user_availability_required"
     NO_PRODUCTIVE_WINDOW = "no_productive_window"
 
 
@@ -266,6 +267,16 @@ class TonightApplicationService:
                 candidate_rejections=candidate_rejections,
             )
 
+        if inputs.availability is None:
+            return TonightResult(
+                night,
+                recommendation,
+                None,
+                status=TonightStatus.USER_AVAILABILITY_REQUIRED,
+                forecast_evidence=forecast_evidence,
+                candidate_rejections=candidate_rejections,
+            )
+
         candidate = recommendation.opportunity.candidate
         recommended_key = candidate.get(
             "catalog_key",
@@ -290,8 +301,6 @@ class TonightApplicationService:
                 profile=effective_profile,
             )
             timeline_start = getattr(mission_input, "window_start", None)
-            if inputs.availability is None:
-                return mission_input
             return replace(
                 mission_input,
                 availability=inputs.availability,

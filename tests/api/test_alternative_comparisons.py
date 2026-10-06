@@ -118,7 +118,7 @@ def test_api_comparisons_match_only_exposed_alternatives_in_order(monkeypatch, r
         return original(**kwargs)
 
     monkeypatch.setattr(comparisons, "compare_recommendation_reasons", record)
-    response = client_for(result, refused=refused).post("/v1/tonight", json={})
+    response = client_for(result, refused=refused).post("/v1/tonight", json={"availability": {"mode": "all_night"}})
     assert response.status_code == 200, response.json()
     payload = response.json()
     entries = payload["alternative_comparisons"]
@@ -382,7 +382,7 @@ def test_api_preserves_stable_reason_codes_and_legacy_messages_exactly(monkeypat
         },
     )
 
-    response = client_for(result).post("/v1/tonight", json={})
+    response = client_for(result).post("/v1/tonight", json={"availability": {"mode": "all_night"}})
     assert response.status_code == 200
     payload = response.json()
     comparison = payload["alternative_comparisons"][0]

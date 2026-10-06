@@ -58,7 +58,7 @@ from decision.services.lunar_contamination_estimator import (
     LunarContaminationEstimator,
 )
 from decision.services.session_availability_windowing import (
-    select_continuous_actionable_productive_window,
+    select_physical_productive_window,
 )
 from decision.weather.weather_trust_decision import WeatherTrustDecision
 
@@ -196,7 +196,7 @@ def compose_acquisition_intent_selection(
         return _select(imaging_field, assessments, ())
 
     actionable_window = (
-        select_continuous_actionable_productive_window(
+        select_physical_productive_window(
             productive_window,
             session_availability,
         )

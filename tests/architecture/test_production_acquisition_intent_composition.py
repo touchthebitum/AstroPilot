@@ -1,3 +1,4 @@
+from decision.models.session_availability import SessionAvailability, SessionAvailabilityMode
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -686,7 +687,7 @@ def test_acceptance_copies_historical_candidate_snapshot_and_rejects_replacement
 
     service = UserSelectionMissionService(tonight_mission_service=MissionService(),
         build_mission_input=lambda *args, **kwargs: MissionInput(START, END, 4, None, None, 2, 100))
-    kwargs = dict(mission_id="mission", selection=UserSelection(
+    kwargs = dict(availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT), mission_id="mission", selection=UserSelection(
         selection_id="selection", decision_id="decision", selected_catalog_key=candidate.catalog_key,
         source=UserSelectionSource.PRIMARY_RECOMMENDATION, selected_at=START,
         selected_imaging_field_id=candidate.imaging_field_id,

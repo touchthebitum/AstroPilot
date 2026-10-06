@@ -33,7 +33,9 @@ from decision.weather.weather_ingress import WeatherSnapshot
 from decision.services.tonight_application_service import TonightApplicationService
 
 
+@pytest.mark.parametrize("commitment", ["explicit", "omitted", "null"])
 def test_http_request_runs_real_application_composition_once(
+    commitment,
     request,
     monkeypatch,
     tmp_path,
@@ -308,11 +310,34 @@ def test_http_request_runs_real_application_composition_once(
             },
             "equipment": "fra400_2600",
             "goal": "galaxies",
+            **({"availability": {"mode": "all_night"}} if commitment == "explicit"
+               else {"availability": None} if commitment == "null" else {}),
             "bortle": 4,
         },
     )
 
     assert response.status_code == 200
+    if commitment != "explicit":
+        payload = response.json()
+        assert payload["status"] == "user_availability_required"
+        assert payload["catalog_key"] == "M31"
+        assert payload["target_decision_status"] == "insufficient_evidence"
+        assert payload["recommended_hours"] == payload["expected_gain"] == 0
+        assert payload["window_start"] is payload["window_end"] is None
+        assert payload["mission_confidence"] is None
+        assert payload["recommendation_confidence"] == recommendation.confidence
+        assert payload["alternatives"] == []
+        assert calls["mission"] == []
+        rejected = client.post("/v1/decision-selections", json={
+            "acceptance_request_id": "c219f146-5106-48c3-b617-4b96cf6257a4",
+            "decision_id": payload["decision_id"], "source": "primary_recommendation",
+            "selected_catalog_key": "M31", "selected_at": "2026-09-10T20:00:00+00:00",
+        })
+        assert rejected.status_code == 409
+        assert rejected.json()["detail"]["code"] == "user_availability_required"
+        assert calls["mission"] == []
+        assert client.get("/v1/accepted-mission/current").json() is None
+        return
     assert profile_loads == [True]
     assert calls["weather"] == [(47.1, 6.8)]
     assert len(calls["forecast"]) == 1
@@ -577,7 +602,7 @@ def test_tonight_exposes_modern_ou4_acquisition_intent_candidate(
         weather_provider=lambda *args: weather,
         profile_provider=lambda: profile,
         clock=lambda: reference_time,
-    )).post("/v1/tonight", json={"bortle": 4})
+    )).post("/v1/tonight", json={"bortle": 4, "availability": {"mode": "all_night"}})
 
     assert response.status_code == 200
     payload = response.json()

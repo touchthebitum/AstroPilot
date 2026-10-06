@@ -1,3 +1,4 @@
+from decision.models.session_availability import SessionAvailability, SessionAvailabilityMode
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -70,6 +71,7 @@ def isolated_peripheral_analyses(monkeypatch):
 def _build_mission(rows, frozen_time, buttes_site):
     weather = _forecast_engine().build_weather_forecast(rows)
     mission_input = MissionInput(
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
         window_start=frozen_time,
         window_end=frozen_time + timedelta(hours=1),
         astronomical_hours=1.0,

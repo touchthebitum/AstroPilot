@@ -7,7 +7,7 @@ from typing import Any
 from decision.mission.mission_assembler import ProductiveWindowAssessment
 from decision.models.session_availability import SessionAvailability
 from decision.services.session_availability_windowing import (
-    select_continuous_actionable_productive_window,
+    select_physical_productive_window,
 )
 from decision.validation.weather_window_coverage import (
     WeatherWindowCoverageError,
@@ -128,7 +128,7 @@ class CandidateViabilityEvaluator:
             assessment.productive_window
         )
         return (
-            select_continuous_actionable_productive_window(
+            select_physical_productive_window(
                 assessment.productive_window,
                 None,
             )
@@ -171,6 +171,7 @@ def select_actionable_alternatives(
     if not isinstance(availability, SessionAvailability):
         if availability is not None:
             raise TypeError("Expected SessionAvailability or None")
+        return ()
 
     alternatives = []
     for candidate in shortlist_entries:
@@ -181,7 +182,7 @@ def select_actionable_alternatives(
         assessment = candidate_assessments.get(candidate.catalog_key)
         if assessment is None:
             continue
-        actionable_window = select_continuous_actionable_productive_window(
+        actionable_window = select_physical_productive_window(
             assessment.productive_window,
             availability,
         )

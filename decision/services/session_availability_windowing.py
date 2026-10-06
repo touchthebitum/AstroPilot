@@ -22,6 +22,7 @@ MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW = timedelta(hours=1)
 
 class ActionabilityRefusalConclusion(str, Enum):
     NO_PRODUCTIVE_WINDOW = "no_productive_window"
+    USER_AVAILABILITY_REQUIRED = "user_availability_required"
 
 
 class ActionabilityRefusalStatus(str, Enum):
@@ -186,11 +187,14 @@ def _missing_evidence_refusal() -> ActionableProductiveWindowSelection:
     )
 
 
-def evaluate_continuous_actionable_productive_window(
+def evaluate_physical_productive_window(
     assessment: ProductiveWindowAssessment,
     availability: SessionAvailability | None,
 ) -> ActionableProductiveWindowSelection:
-    """Select a window and preserve the authoritative refusal diagnostic."""
+    """Evaluate physical viability, optionally constrained by supplied availability.
+
+    None carries no user commitment. A returned window cannot authorize a mission.
+    """
     if not isinstance(assessment, ProductiveWindowAssessment):
         raise TypeError("Expected ProductiveWindowAssessment")
     if availability is not None and not isinstance(
@@ -387,6 +391,42 @@ def evaluate_continuous_actionable_productive_window(
         window=SessionAvailabilityWindow(selected_start, selected_end),
         refusal=None,
     )
+
+
+def evaluate_continuous_actionable_productive_window(
+    assessment: ProductiveWindowAssessment,
+    availability: SessionAvailability | None,
+) -> ActionableProductiveWindowSelection:
+    """Evaluate actionability only with explicit user session availability."""
+    return evaluate_authorized_session_window(assessment, availability)
+
+
+def select_physical_productive_window(
+    assessment: ProductiveWindowAssessment,
+    availability: SessionAvailability | None,
+) -> SessionAvailabilityWindow | None:
+    return evaluate_physical_productive_window(assessment, availability).window
+
+
+def evaluate_authorized_session_window(
+    assessment: ProductiveWindowAssessment,
+    availability: SessionAvailability | None,
+) -> ActionableProductiveWindowSelection:
+    """Require explicit user commitment before selecting any mission window."""
+    if not isinstance(assessment, ProductiveWindowAssessment):
+        raise TypeError("Expected ProductiveWindowAssessment")
+    if availability is None:
+        return ActionableProductiveWindowSelection(
+            window=None,
+            refusal=ActionabilityRefusal(
+                conclusion=ActionabilityRefusalConclusion.USER_AVAILABILITY_REQUIRED,
+                status=ActionabilityRefusalStatus.INSUFFICIENT_EVIDENCE,
+                cause_code="user_availability_required",
+                best_productive_window_minutes=None,
+                required_continuous_minutes=_required_continuous_minutes(),
+            ),
+        )
+    return evaluate_physical_productive_window(assessment, availability)
 
 
 def _productivity_between(slices, start_hour: float, end_hour: float) -> float:

@@ -49,7 +49,7 @@ def timing(value, *, duration=None, windows=None):
             windows=windows if windows is not None else [SimpleNamespace(
                 start_hour=0, end_hour=4, productivity=1, productive=True)]),
     )
-    availability = SessionAvailability(SessionAvailabilityMode.START_AND_DURATION, start=START, duration=timedelta(hours=duration)) if duration else None
+    availability = SessionAvailability(SessionAvailabilityMode.START_AND_DURATION, start=START, duration=timedelta(hours=duration)) if duration else SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)
     return _mission_timing_assessment(assessment, availability)[0]
 
 

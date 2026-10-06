@@ -1,3 +1,4 @@
+from decision.models.session_availability import SessionAvailability, SessionAvailabilityMode
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -93,6 +94,7 @@ def selection(
 
 def registered_service(
     *,
+    availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     evidence=DEFAULT_EVIDENCE,
     accepted_at=ACCEPTED_AT,
     window_end=None,
@@ -189,7 +191,7 @@ def registered_service(
                 else profile_projects
             ),
         },
-        availability=None,
+        availability=availability,
         primary_catalog_key="M31",
         exposed_alternative_catalog_keys=("M42",),
         explicitly_evaluated_catalog_keys=("M31", "M42", "M33"),
@@ -280,6 +282,7 @@ def test_unique_candidate_intent_idempotent_replay_accepts_omission_or_same():
 
 def test_historical_none_intent_replay_keeps_canonical_lineage_unchanged():
     service, composer, store, _ = registered_service(
+        availability=None,
         primary_intent_provenance=(
             "intent-A",
             ("intent-A",),
@@ -1042,3 +1045,26 @@ def test_selected_at_cannot_override_authoritative_freshness_clock(selected_at):
         ))
 
     assert composer.calls == []
+
+
+@pytest.mark.parametrize("source,target", [
+    (UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"),
+    (UserSelectionSource.ALTERNATIVE, "M42"),
+    (UserSelectionSource.OTHER_EVALUATED_TARGET, "M33"),
+])
+def test_missing_availability_rejects_new_acceptance_before_allocation(source, target):
+    service, composer, store, _ = registered_service(availability=None)
+    service.mission_id_factory = lambda: pytest.fail("missing commitment allocated a mission")
+    with pytest.raises(DecisionAcceptanceError, match="user_availability_required"):
+        service.accept_idempotently(selection(source, target), acceptance_request_id="missing-request")
+    assert composer.calls == []
+    assert store.load_acceptance("missing-request") is None
+
+
+def test_missing_availability_still_allows_declining():
+    service, composer, store, _ = registered_service(availability=None)
+    result = service.accept_idempotently(
+        selection(UserSelectionSource.DECLINED, None), acceptance_request_id="decline-request",
+    )
+    assert result.mission is None
+    assert store.load_acceptance("decline-request") is not None
