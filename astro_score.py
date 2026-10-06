@@ -716,6 +716,7 @@ def build_mission_input(evaluation, *, profile=None, for_intent_selection=False)
         selected_filter=selected_filter,
         imaging_field_id=imaging_field_id,
         acquisition_intent_id=acquisition_intent_id,
+        lunar_evidence_snapshot=(evaluation.get("lunar_evidence_snapshot") if not for_intent_selection else None),
         acquisition_capacity=capacity,
         evidence_only=bool(targets and for_intent_selection),
     )

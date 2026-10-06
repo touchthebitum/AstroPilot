@@ -81,6 +81,10 @@ class ProjectSelectionEngine:
                 if acquisition_intent_selection is not None
                 else None
             ),
+            lunar_evidence_snapshot=(
+                acquisition_intent_selection.lunar_evidence_snapshot
+                if acquisition_intent_selection is not None else None
+            ),
             acquisition_intent_assessments=(
                 acquisition_intent_selection.acquisition_intent_assessments
                 if acquisition_intent_selection is not None

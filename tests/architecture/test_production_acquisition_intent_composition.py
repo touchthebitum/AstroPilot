@@ -452,7 +452,7 @@ def test_modern_project_passes_exact_selection_without_changing_score(
 
 
 def test_characterize_different_lunar_estimates_leave_identical_selection():
-    """Audit finding: different actual estimates cannot be replayed from selection."""
+    """Regression: changed estimates remain visible with unchanged selection."""
     from dataclasses import replace
 
     class RecordingEstimator:
@@ -476,7 +476,8 @@ def test_characterize_different_lunar_estimates_leave_identical_selection():
     second = _compose(estimator=changed)
     assert original.estimates != changed.estimates
     assert first.status is AcquisitionIntentSelectionStatus.PREFERRED
-    assert first == second
+    assert replace(first, lunar_evidence_snapshot=None) == replace(second, lunar_evidence_snapshot=None)
+    assert first.lunar_evidence_snapshot != second.lunar_evidence_snapshot
 
 
 def test_short_intent_is_excluded_and_existing_selection_can_choose_other():
@@ -530,3 +531,203 @@ def test_modern_ranking_gain_and_future_ignore_contradictory_legacy_totals(monke
         scores.append((candidate.decision_score, candidate.strategy_scores))
     assert future_caps == [1.5, 1.5]
     assert scores[0] == scores[1]
+
+
+class ScaledEstimator(LunarContaminationEstimator):
+    def __init__(self, scale):
+        self.scale = scale
+
+    def estimate(self, evidence, profile):
+        from dataclasses import replace
+        estimate = super().estimate(evidence, profile)
+        return replace(estimate,
+            rayleigh_relative_index=estimate.rayleigh_relative_index * self.scale,
+            mie_relative_index=estimate.mie_relative_index * self.scale)
+
+
+def test_lunar_snapshot_distinguishes_same_winner_and_keeps_alternatives():
+    first = _compose(estimator=ScaledEstimator(1))
+    second = _compose(estimator=ScaledEstimator(2))
+    assert first.selected_acquisition_intent_id == second.selected_acquisition_intent_id
+    assert first.status == second.status
+    assert first.reason_codes == second.reason_codes
+    assert first.lunar_evidence_snapshot != second.lunar_evidence_snapshot
+    snapshot = first.lunar_evidence_snapshot
+    assert {item.acquisition_intent_id for item in snapshot.estimates} == {"sh2-129_ha", "ou4_oiii"}
+    assert {item.estimate.filter_profile_id for item in snapshot.estimates} == {
+        "baader_ha_highspeed_6_5nm", "baader_oiii_highspeed_6_5nm"}
+    assert snapshot.evidence.reference_time == START
+    assert snapshot.evidence.actionable_window_end == END
+    assert snapshot.evidence.moon_separation_deg == 50
+
+
+def test_single_intent_has_no_historical_lunar_snapshot():
+    assert _compose(targets=("sh2-129_ha",)).lunar_evidence_snapshot is None
+
+
+def test_incomparable_lunar_snapshot_keeps_both_estimates():
+    selection = _compose(estimator=CrossingEstimator())
+    assert selection.status is AcquisitionIntentSelectionStatus.NO_CLEAR_PREFERENCE
+    assert len(selection.lunar_evidence_snapshot.estimates) == 2
+
+
+def _snapshot_candidate():
+    from decision.engines.project_selection_engine import ProjectSelectionEngine
+    selection = _compose()
+    return ProjectSelectionEngine.build_candidate(
+        name="Sh2-129", catalog_key="Sh2-129", priority=1,
+        astro_score=80, final_score=90, decision_score=80, portfolio_score=0,
+        global_score=80, setup_score=80, best_setup="widefield",
+        closure_bonus=0, reasons=[], strategy_scores={}, acquired_hours=0,
+        imaging_field_id="sh2-129_ou4", acquisition_intent_selection=selection)
+
+
+def test_candidate_mission_and_api_snapshot_round_trip_exactly():
+    from dataclasses import asdict
+    from decision.acceptance_lineage_persistence import _encode, _decode
+    from decision.mission.mission_input import MissionInput
+    from decision.mission.night_mission import NightMission
+    from astropilot.app import _accepted_mission_response, TonightResponseModel
+    from pydantic import TypeAdapter
+    from decision.models.lunar_evidence_snapshot import LunarEvidenceSnapshot
+    from decision.services.tonight_response import TonightResponse, _json_value
+    candidate = _snapshot_candidate()
+    snapshot = candidate.lunar_evidence_snapshot
+    restored = _decode(_encode(candidate))
+    assert restored.lunar_evidence_snapshot == snapshot
+    source = MissionInput(START, END, 4, None, None, 2, 100,
+        imaging_field_id=candidate.imaging_field_id,
+        acquisition_intent_id=candidate.selected_acquisition_intent_id,
+        lunar_evidence_snapshot=snapshot)
+    assert _decode(_encode(source)).lunar_evidence_snapshot == snapshot
+    mission = NightMission(target="Sh2-129", confidence=None,
+        mission_id="mission", decision_id="decision", selection_id="selection",
+        equipment=["widefield"], site_name="Mont Sujet",
+        imaging_field_id=candidate.imaging_field_id,
+        acquisition_intent_id=candidate.selected_acquisition_intent_id,
+        lunar_evidence_snapshot=snapshot)
+    restored_mission = _decode(_encode(mission))
+    assert restored_mission.lunar_evidence_snapshot == snapshot
+    expected = TypeAdapter(LunarEvidenceSnapshot).dump_python(snapshot, mode="json")
+    assert _accepted_mission_response(restored_mission).model_dump(mode="json")["lunar_evidence_snapshot"] == expected
+    response = TonightResponse(status="available", lunar_evidence_snapshot=snapshot)
+    assert TonightResponseModel.model_validate(response.to_dict()).model_dump(mode="json")["lunar_evidence_snapshot"] == expected
+
+
+@pytest.mark.parametrize("model", ["candidate", "mission_input", "mission"])
+def test_v9_snapshot_absence_is_explicit_and_never_recomputed(model):
+    from decision.acceptance_lineage_persistence import _encode, _decode
+    from decision.mission.mission_input import MissionInput
+    from decision.mission.night_mission import NightMission
+    values = {
+        "candidate": _snapshot_candidate(),
+        "mission_input": MissionInput(START, END, 4, None, None, 2, 100),
+        "mission": NightMission(target="Sh2-129", confidence=None),
+    }
+    document = _encode(values[model])
+    document["fields"].pop("lunar_evidence_snapshot")
+    assert _decode(document, schema_version=9).lunar_evidence_snapshot is None
+    assert "lunar_evidence_snapshot" not in document["fields"]
+
+
+def test_snapshot_rejects_profile_field_intent_and_eligible_set_mismatches():
+    from dataclasses import replace, FrozenInstanceError
+    candidate = _snapshot_candidate()
+    snapshot = candidate.lunar_evidence_snapshot
+    with pytest.raises(ValueError, match="profile_mismatch"):
+        replace(snapshot.estimates[0], filter_profile_id="wrong-profile")
+    with pytest.raises(ValueError, match="field_mismatch"):
+        replace(candidate, imaging_field_id="wrong-field")
+    with pytest.raises(ValueError, match="eligible_intents_mismatch"):
+        replace(candidate, lunar_evidence_snapshot=replace(snapshot,
+            estimates=(replace(snapshot.estimates[0], acquisition_intent_id="wrong-intent"), snapshot.estimates[1])))
+    from decision.mission.mission_input import MissionInput
+    with pytest.raises(ValueError, match="intent_mismatch"):
+        MissionInput(START, END, 4, None, None, 2, 100,
+            imaging_field_id=candidate.imaging_field_id,
+            acquisition_intent_id="wrong-intent", lunar_evidence_snapshot=snapshot)
+    with pytest.raises(FrozenInstanceError):
+        snapshot.estimates[0].fwhm_nm = 999
+
+
+def test_lunar_transport_does_not_change_candidate_ranking():
+    from dataclasses import replace
+    from decision.engines.project_selection_engine import ProjectSelectionEngine
+    candidate = _snapshot_candidate()
+    weaker = replace(candidate, catalog_key="weaker", final_score=70)
+    assert [item.catalog_key for item in ProjectSelectionEngine.rank_candidates([weaker, candidate])] == [
+        item.catalog_key for item in ProjectSelectionEngine.rank_candidates([
+            replace(weaker, lunar_evidence_snapshot=None), replace(candidate, lunar_evidence_snapshot=None)])]
+
+
+@pytest.mark.parametrize("tamper", [False, True])
+def test_acceptance_copies_historical_candidate_snapshot_and_rejects_replacement(tamper):
+    from dataclasses import replace
+    from decision.mission.mission_input import MissionInput
+    from decision.mission.night_mission import NightMission
+    from decision.models.user_selection import UserSelection, UserSelectionSource
+    from decision.recommendation.recommendation import Recommendation
+    from decision.services.user_selection_mission import UserSelectionMissionService
+    from decision.services.user_selection_validator import UserSelectionDecisionContext, UserSelectionValidationError
+    candidate = _snapshot_candidate()
+    snapshot = candidate.lunar_evidence_snapshot
+    captured = []
+
+    class MissionService:
+        def create(self, **kwargs):
+            source = kwargs["build_mission_input"](kwargs["winner"]["object_evaluations"][candidate.catalog_key])
+            captured.append(source)
+            return NightMission(target=candidate.catalog_key, confidence=None,
+                mission_id=source.mission_id, decision_id=source.decision_id,
+                selection_id=source.selection_id, site_name="Mont Sujet",
+                equipment=["widefield"], imaging_field_id=source.imaging_field_id,
+                acquisition_intent_id=source.acquisition_intent_id,
+                lunar_evidence_snapshot=None if tamper else source.lunar_evidence_snapshot)
+
+    service = UserSelectionMissionService(tonight_mission_service=MissionService(),
+        build_mission_input=lambda *args, **kwargs: MissionInput(START, END, 4, None, None, 2, 100))
+    kwargs = dict(mission_id="mission", selection=UserSelection(
+        selection_id="selection", decision_id="decision", selected_catalog_key=candidate.catalog_key,
+        source=UserSelectionSource.PRIMARY_RECOMMENDATION, selected_at=START,
+        selected_imaging_field_id=candidate.imaging_field_id,
+        selected_acquisition_intent_id=candidate.selected_acquisition_intent_id),
+        decision_context=UserSelectionDecisionContext("decision", candidate.catalog_key, (), (candidate.catalog_key,)),
+        recommendation=Recommendation(SimpleNamespace(candidate=candidate), 0.9),
+        night={"top_objects": [{"catalog_key": candidate.catalog_key}],
+            "object_evaluations": {candidate.catalog_key: {
+                "decision_context": SimpleNamespace(site=SITE),
+                "lunar_evidence_snapshot": None}}}, profile={})
+    if tamper:
+        with pytest.raises(UserSelectionValidationError, match="mission_lunar_snapshot_mismatch"):
+            service.create(**kwargs)
+    else:
+        mission = service.create(**kwargs)
+        assert mission.lunar_evidence_snapshot is snapshot
+    assert captured[0].lunar_evidence_snapshot is snapshot
+
+
+def test_persistence_rejects_corrupt_snapshot_profile_identity():
+    from decision.acceptance_lineage_persistence import _encode, _decode, AcceptanceLineageCorruptionError
+    document = _encode(_snapshot_candidate())
+    document["fields"]["lunar_evidence_snapshot"]["fields"]["estimates"]["items"][0]["fields"]["filter_profile_id"] = "wrong"
+    with pytest.raises(AcceptanceLineageCorruptionError, match="invalid_dataclass_value"):
+        _decode(document)
+
+
+def test_alternative_api_transports_all_compared_intents():
+    from dataclasses import replace
+    from decision.recommendation.recommendation import Recommendation
+    from decision.opportunity.opportunity import Opportunity
+    from decision.opportunity.action import Action
+    from decision.services.tonight_application_service import TonightResult
+    from decision.services.tonight_response import TonightResponse
+    from astropilot.app import TonightResponseModel
+    from pydantic import TypeAdapter
+    from decision.models.lunar_evidence_snapshot import LunarEvidenceSnapshot
+    candidate = _snapshot_candidate()
+    primary = replace(candidate, catalog_key="primary")
+    result = TonightResult(night={"date": START.date()}, recommendation=Recommendation(
+        Opportunity(action=Action.START_PROJECT, candidate=primary, shortlist_entries=(candidate,)), None), mission=None)
+    response = TonightResponse.from_result(result, selected_alternatives=(candidate,)).to_dict()
+    payload = TonightResponseModel.model_validate(response).model_dump(mode="json")
+    assert payload["alternatives"][0]["lunar_evidence_snapshot"] == TypeAdapter(LunarEvidenceSnapshot).dump_python(candidate.lunar_evidence_snapshot, mode="json")

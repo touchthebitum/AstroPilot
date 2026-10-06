@@ -863,3 +863,27 @@ def test_tonight_caps_duration_and_gain_by_intent_through_real_assembly(
         assert mission.recommended_hours <= remaining.remaining_hours
         assert mission.recommended_hours <= (user_hours or 4)
         assert mission.expected_gain == round(expected_hours / 2 * 100, 2)
+
+
+def test_assembler_carries_original_lunar_comparison_window_without_recalculation(
+    frozen_time, summary, context, isolated_dependencies,
+):
+    from decision.models.intent_night_evidence import IntentNightEvidence
+    from decision.models.lunar_contamination_estimate import LunarContaminationEstimate
+    from decision.models.lunar_evidence_snapshot import LunarEvidenceSnapshot, IntentLunarEstimateSnapshot
+    snapshot = LunarEvidenceSnapshot(
+        IntentNightEvidence("sh2-129_ou4", frozen_time,
+            frozen_time + timedelta(hours=4), 4, frozen_time, 0.8, 45, 50),
+        tuple(IntentLunarEstimateSnapshot(intent, profile, wavelength, 6.5,
+            LunarContaminationEstimate(profile, 0.3, rayleigh, mie))
+            for intent, profile, wavelength, rayleigh, mie in (
+                ("sh2-129_ha", "ha", 656.3, 1, 1),
+                ("ou4_oiii", "oiii", 500.7, 2, 2))),
+        "test-estimator", None)
+    source = mission_input(frozen_time, WeatherForecast(),
+        imaging_field_id="sh2-129_ou4", acquisition_intent_id="sh2-129_ha",
+        lunar_evidence_snapshot=snapshot)
+    mission = MissionAssembler.build(target="Sh2-129", summary=summary,
+        context=context, equipment=["setup"], alternatives=[], mission_input=source)
+    assert mission.lunar_evidence_snapshot is snapshot
+    assert mission.window_end < snapshot.evidence.actionable_window_end

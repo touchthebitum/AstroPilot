@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import date, datetime, timedelta
 from enum import Enum
 
+from decision.models.lunar_evidence_snapshot import LunarEvidenceSnapshot
 from astropilot.catalog import CATALOG
 from decision.advisor.night_advisor import NightAdvisor
 from decision.models.candidate import CandidateProvenance
@@ -364,6 +365,7 @@ class TonightAlternativeResponse:
     acquisition_intent_selection_status: (
         AcquisitionIntentSelectionStatus | None
     ) = None
+    lunar_evidence_snapshot: LunarEvidenceSnapshot | None = None
     acquisition_intent_assessments: tuple[
         AcquisitionIntentAssessment, ...
     ] = ()
@@ -442,6 +444,7 @@ class TonightResponse:
     acquisition_intent_selection_status: (
         AcquisitionIntentSelectionStatus | None
     ) = None
+    lunar_evidence_snapshot: LunarEvidenceSnapshot | None = None
     acquisition_intent_assessments: tuple[
         AcquisitionIntentAssessment, ...
     ] = ()
@@ -637,6 +640,7 @@ class TonightResponse:
                     acquisition_intent_selection_status=(
                         entry.acquisition_intent_selection_status
                     ),
+                    lunar_evidence_snapshot=entry.lunar_evidence_snapshot,
                     acquisition_intent_assessments=(
                         entry.acquisition_intent_assessments
                     ),
@@ -903,6 +907,7 @@ class TonightResponse:
                 if candidate is not None
                 else None
             ),
+            lunar_evidence_snapshot=(candidate.lunar_evidence_snapshot if candidate is not None else None),
             acquisition_intent_assessments=(
                 candidate.acquisition_intent_assessments
                 if candidate is not None

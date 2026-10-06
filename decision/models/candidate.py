@@ -1,6 +1,10 @@
 from dataclasses import dataclass, field
 from enum import Enum
 
+from decision.models.lunar_evidence_snapshot import (
+    LunarEvidenceSnapshot, validate_lunar_snapshot,
+)
+
 from decision.models.acquisition_intent_selection import (
     AcquisitionIntentSelectionStatus,
 )
@@ -50,6 +54,8 @@ class Candidate:
     ] = ()
     reasons: list[str] = field(default_factory=list)
     strategy_scores: dict = field(default_factory=dict)
+
+    lunar_evidence_snapshot: LunarEvidenceSnapshot | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.provenance, CandidateProvenance):
@@ -110,6 +116,13 @@ class Candidate:
         )
         if len(set(assessment_ids)) != len(assessment_ids):
             raise ValueError("duplicate_acquisition_intent_assessment")
+        if self.lunar_evidence_snapshot is not None and self.imaging_field_id is None:
+            raise ValueError("lunar_snapshot_field_required")
+        validate_lunar_snapshot(self.lunar_evidence_snapshot,
+            imaging_field_id=self.imaging_field_id,
+            acquisition_intent_id=self.selected_acquisition_intent_id,
+            eligible_ids=(item.acquisition_intent_id for item in self.acquisition_intent_assessments
+                          if item.status.value == "eligible"))
         self._validate_acquisition_intent_selection_provenance()
         self._validate_acquisition_intent_assessment_consistency()
 

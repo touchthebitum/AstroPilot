@@ -129,6 +129,7 @@ class UserSelectionMissionService:
             )
             return replace(
                 mission_input,
+                lunar_evidence_snapshot=getattr(selected_candidate, "lunar_evidence_snapshot", None),
                 availability=availability,
                 mission_id=mission_id,
                 decision_id=validated_selection.decision_id,
@@ -197,4 +198,6 @@ class UserSelectionMissionService:
             raise UserSelectionValidationError(
                 "mission_acquisition_intent_mismatch"
             )
+        if mission.lunar_evidence_snapshot != getattr(selected_candidate, "lunar_evidence_snapshot", None):
+            raise UserSelectionValidationError("mission_lunar_snapshot_mismatch")
         return mission

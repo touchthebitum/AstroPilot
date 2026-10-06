@@ -28,6 +28,7 @@ from pydantic import (
     model_validator,
 )
 
+from decision.models.lunar_evidence_snapshot import LunarEvidenceSnapshot
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 from decision.definitions.production_imaging_fields import (
     IMAGING_FIELD_DEFINITIONS,
@@ -645,6 +646,7 @@ class AcceptedMissionTaskResponse(BaseModel):
 
 
 class AcceptedMissionResponse(BaseModel):
+    lunar_evidence_snapshot: LunarEvidenceSnapshot | None = None
     mission_id: str
     decision_id: str
     selection_id: str
@@ -1168,6 +1170,7 @@ class TonightAlternativeModel(BaseModel):
     viable_acquisition_intent_ids: tuple[str, ...] = ()
     acquisition_intent_selection_status: AcquisitionIntentSelectionStatus | None = None
     acquisition_intent_options: list[TonightAcquisitionIntentOptionModel] = Field(default_factory=list)
+    lunar_evidence_snapshot: LunarEvidenceSnapshot | None = None
     acquisition_intent_assessments: list[
         TonightAcquisitionIntentAssessmentModel
     ] = Field(default_factory=list)
@@ -1541,6 +1544,7 @@ class TonightResponseModel(BaseModel):
     selected_acquisition_intent_id: str | None = None
     viable_acquisition_intent_ids: tuple[str, ...] = ()
     acquisition_intent_options: list[TonightAcquisitionIntentOptionModel] = Field(default_factory=list)
+    lunar_evidence_snapshot: LunarEvidenceSnapshot | None = None
     acquisition_intent_assessments: list[
         TonightAcquisitionIntentAssessmentModel
     ] = Field(default_factory=list)
@@ -1650,6 +1654,7 @@ def _accepted_mission_response(mission: NightMission) -> AcceptedMissionResponse
         selection_id=mission.selection_id,
         imaging_field_id=mission.imaging_field_id,
         acquisition_intent_id=mission.acquisition_intent_id,
+        lunar_evidence_snapshot=mission.lunar_evidence_snapshot,
         target=mission.target,
         confidence=mission.confidence,
         equipment=list(mission.equipment),

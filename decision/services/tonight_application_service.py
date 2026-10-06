@@ -279,6 +279,7 @@ class TonightApplicationService:
             if isinstance(evaluation, Mapping):
                 evaluation = {
                     **evaluation,
+                    "lunar_evidence_snapshot": candidate.lunar_evidence_snapshot,
                     "imaging_field_id": candidate.imaging_field_id,
                     "selected_acquisition_intent_id": (
                         candidate.selected_acquisition_intent_id

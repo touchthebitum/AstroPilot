@@ -1,6 +1,8 @@
 """Production composition of first-class acquisition-intent decisions."""
 
 from itertools import combinations
+from dataclasses import replace
+from decision.models.lunar_evidence_snapshot import LunarEvidenceSnapshot, IntentLunarEstimateSnapshot
 
 from decision.mission.mission_assembler import ProductiveWindowAssessment
 from decision.models.acquisition_intent_eligibility import (
@@ -220,12 +222,14 @@ def compose_acquisition_intent_selection(
             actionable_window_end=actionable_window.window_end,
             site=site,
         )
+        profiles = {
+            intent_id: filter_profile_resolver.resolve(resolved_profile_ids[intent_id])
+            for intent_id in eligible_ids
+        }
         estimates = {
             intent_id: contamination_estimator.estimate(
                 evidence,
-                filter_profile_resolver.resolve(
-                    resolved_profile_ids[intent_id]
-                ),
+                profiles[intent_id],
             )
             for intent_id in eligible_ids
         }
@@ -245,6 +249,9 @@ def compose_acquisition_intent_selection(
         )
         return _select(imaging_field, assessments, ())
 
+    if evidence.imaging_field_id != imaging_field.imaging_field_id:
+        raise ValueError("lunar_snapshot_field_mismatch")
+
     preferences = tuple(
         determine_acquisition_intent_preference(
             left_id,
@@ -256,4 +263,17 @@ def compose_acquisition_intent_selection(
         )
         for left_id, right_id in combinations(sorted(eligible_ids), 2)
     )
-    return _select(imaging_field, assessments, preferences)
+    snapshot = LunarEvidenceSnapshot(
+        evidence=evidence,
+        estimates=tuple(IntentLunarEstimateSnapshot(
+            acquisition_intent_id=intent_id,
+            filter_profile_id=resolved_profile_ids[intent_id],
+            central_wavelength_nm=profiles[intent_id].central_wavelength_nm,
+            fwhm_nm=profiles[intent_id].fwhm_nm,
+            estimate=estimates[intent_id],
+        ) for intent_id in sorted(eligible_ids)),
+        estimator_id=f"{type(contamination_estimator).__module__}.{type(contamination_estimator).__qualname__}",
+        estimator_version=type(contamination_estimator).__dict__.get("ALGORITHM_VERSION"),
+    )
+    return replace(_select(imaging_field, assessments, preferences),
+                   lunar_evidence_snapshot=snapshot)

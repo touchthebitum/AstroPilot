@@ -500,6 +500,8 @@ class MissionAssembler:
                 if mission_input is not None
                 else None
             ),
+            lunar_evidence_snapshot=(mission_input.lunar_evidence_snapshot
+                                     if mission_input is not None else None),
             reasons=reasons,
             equipment=equipment,
             window_start=mission_window_start,

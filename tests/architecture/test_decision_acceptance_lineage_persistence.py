@@ -455,7 +455,7 @@ def test_decision_acceptance_context_full_typed_round_trip():
     )
 
 
-def test_v9_candidate_document_contains_exact_additive_provenance_keys():
+def test_v10_candidate_document_contains_exact_additive_provenance_keys():
     document = json.loads(
         serialize_decision_acceptance_aggregate(
             DecisionAcceptanceAggregate(context=context())
@@ -463,7 +463,7 @@ def test_v9_candidate_document_contains_exact_additive_provenance_keys():
     )
     candidate_fields = candidate_field_documents(document)
 
-    assert document["schema_version"] == 9
+    assert document["schema_version"] == 10
     assert candidate_fields
     assert all(
         fields["imaging_field_id"] == "sh2-129_ou4"
@@ -490,6 +490,7 @@ def test_v9_candidate_document_contains_exact_additive_provenance_keys():
             "viable_acquisition_intent_ids",
             "acquisition_intent_selection_status",
             "acquisition_intent_assessments",
+            "lunar_evidence_snapshot",
             "reasons",
             "strategy_scores",
         }
@@ -529,6 +530,7 @@ def test_v5_candidate_without_selection_provenance_loads_legacy_defaults(
     store.create_context(context())
     path = tmp_path / "decision-1.json"
     document = json.loads(path.read_text(encoding="utf-8"))
+    remove_lunar_snapshot_fields(document)
     document["schema_version"] = 5
     for candidate_fields in candidate_field_documents(document):
         candidate_fields.pop("acquisition_intent_assessments")
@@ -560,6 +562,7 @@ def test_v8_candidate_without_assessments_loads_empty_without_rewrite(tmp_path):
     store.create_context(context())
     path = tmp_path / "decision-1.json"
     document = json.loads(path.read_text(encoding="utf-8"))
+    remove_lunar_snapshot_fields(document)
     document["schema_version"] = 8
     for candidate_fields in candidate_field_documents(document):
         candidate_fields.pop("acquisition_intent_assessments")
@@ -602,7 +605,7 @@ def test_v9_candidate_with_eligible_assessment_and_no_eligible_selection_fails()
         AcceptanceLineageCorruptionError,
         match="invalid_dataclass_value",
     ):
-        deserialize_decision_acceptance_context(document, schema_version=9)
+        deserialize_decision_acceptance_context(remove_lunar_snapshot_fields(document), schema_version=9)
 
 
 def test_v9_coherent_candidate_assessments_round_trip_strictly():
@@ -633,14 +636,14 @@ def test_v9_coherent_candidate_assessments_round_trip_strictly():
     document = serialize_decision_acceptance_context(source)
 
     restored = deserialize_decision_acceptance_context(
-        document,
+        remove_lunar_snapshot_fields(document),
         schema_version=9,
     )
 
     assert restored.recommendation.opportunity.candidate == (
         source.recommendation.opportunity.candidate
     )
-    assert serialize_decision_acceptance_context(restored) == document
+    assert remove_lunar_snapshot_fields(serialize_decision_acceptance_context(restored)) == document
 
 
 @pytest.mark.parametrize("version", [1, 2])
@@ -652,6 +655,7 @@ def test_legacy_candidate_without_imaging_field_loads_as_none_without_rewrite(
     store.create_context(context())
     path = tmp_path / "decision-1.json"
     document = json.loads(path.read_text(encoding="utf-8"))
+    remove_lunar_snapshot_fields(document)
     document["schema_version"] = version
     if version == 1:
         document.pop("acceptance_requests")
@@ -928,7 +932,7 @@ def test_v8_v9_ha_mission_with_oiii_filter_loads_faithfully(
     ] = "OIII"
 
     restored = deserialize_night_mission(
-        document,
+        remove_lunar_snapshot_fields(document),
         schema_version=schema_version,
     )
 
@@ -987,7 +991,7 @@ def test_v1_to_v7_mission_without_acquisition_intent_loads_none(version, model):
     if version <= 4:
         document["fields"].pop("imaging_field_id")
 
-    restored = _decode(document, schema_version=version)
+    restored = _decode(remove_lunar_snapshot_fields(document), schema_version=version)
 
     assert restored.acquisition_intent_id is None
 
@@ -1006,7 +1010,7 @@ def test_legacy_mission_input_without_imaging_field_loads_as_none(version):
     document["fields"].pop("imaging_field_id")
     document["fields"].pop("acquisition_intent_id")
 
-    assert _decode(document, schema_version=version).imaging_field_id is None
+    assert _decode(remove_lunar_snapshot_fields(document), schema_version=version).imaging_field_id is None
 
 
 @pytest.mark.parametrize("malformation", ["missing", "extra", "empty", "typed"])
@@ -1307,6 +1311,7 @@ def test_legacy_aggregate_loads_without_fabricated_selection_identity(
     store.commit_selection_and_mission(selection(), mission())
     path = tmp_path / "decision-1.json"
     document = json.loads(path.read_text(encoding="utf-8"))
+    remove_lunar_snapshot_fields(document)
     document["schema_version"] = version
     for fields in candidate_field_documents(document):
         fields.pop("acquisition_intent_assessments")
@@ -1362,6 +1367,7 @@ def test_v4_selection_identity_loads_with_legacy_mission_none_without_rewrite(
     )
     path = tmp_path / "decision-1.json"
     document = json.loads(path.read_text(encoding="utf-8"))
+    remove_lunar_snapshot_fields(document)
     document["schema_version"] = 4
     for fields in candidate_field_documents(document):
         fields.pop("acquisition_intent_assessments")
@@ -1585,7 +1591,7 @@ def test_duplicate_identity_in_another_aggregate_fails_globally(
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda document: document.update(schema_version=10),
+        lambda document: document.update(schema_version=11),
         lambda document: document.pop("schema_version"),
         lambda document: document["context"].update(
             {"$type": "unsupported.DomainType"}
@@ -1686,7 +1692,7 @@ def test_concurrent_conflicting_commits_allow_exactly_one_success(tmp_path):
         outcomes = list(executor.map(commit, ("M31", "M42")))
 
     assert sorted(outcomes) == ["conflict", "saved"]
-    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 9
+    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 10
 
 
 def test_unique_temporary_files_are_cleaned(tmp_path, monkeypatch):
@@ -1705,3 +1711,59 @@ def test_unique_temporary_files_are_cleaned(tmp_path, monkeypatch):
     assert len(set(replaced)) == 2
     assert all(name.startswith(".decision-") for name in replaced)
     assert not list(tmp_path.glob(".*.tmp"))
+
+
+def remove_lunar_snapshot_fields(document):
+    if isinstance(document, dict):
+        if document.get("$type") == "dataclass" and document.get("class") in {
+            "decision.models.candidate.Candidate",
+            "decision.mission.mission_input.MissionInput",
+            "decision.mission.night_mission.NightMission",
+        }:
+            document["fields"].pop("lunar_evidence_snapshot", None)
+        for value in document.values():
+            remove_lunar_snapshot_fields(value)
+    elif isinstance(document, list):
+        for value in document:
+            remove_lunar_snapshot_fields(value)
+    return document
+
+
+def test_v10_file_store_preserves_exact_lunar_snapshot_in_decision_and_mission(tmp_path):
+    from decision.models.intent_night_evidence import IntentNightEvidence
+    from decision.models.lunar_evidence_snapshot import LunarEvidenceSnapshot, IntentLunarEstimateSnapshot
+    from decision.services.lunar_contamination_estimator import LunarContaminationEstimator
+    from decision.definitions.production_filter_optical_profiles import build_production_filter_optical_profile_resolver
+    evidence = IntentNightEvidence("sh2-129_ou4", START, END, 4, START, 0.8, 45, 50)
+    resolver = build_production_filter_optical_profile_resolver()
+    estimator = LunarContaminationEstimator()
+    profiles = [resolver.resolve(name) for name in (
+        "baader_ha_highspeed_6_5nm", "baader_oiii_highspeed_6_5nm")]
+    snapshot = LunarEvidenceSnapshot(evidence, tuple(
+        IntentLunarEstimateSnapshot(intent_id, profile.filter_profile_id,
+            profile.central_wavelength_nm, profile.fwhm_nm, estimator.estimate(evidence, profile))
+        for intent_id, profile in zip(("sh2-129_ha", "ou4_oiii"), profiles)
+    ), f"{type(estimator).__module__}.{type(estimator).__qualname__}", estimator.ALGORITHM_VERSION)
+    source = context()
+    candidate_value = replace(source.recommendation.opportunity.candidate,
+        imaging_field_id="sh2-129_ou4", selected_acquisition_intent_id="sh2-129_ha",
+        viable_acquisition_intent_ids=("sh2-129_ha",),
+        acquisition_intent_selection_status=AcquisitionIntentSelectionStatus.PREFERRED,
+        acquisition_intent_assessments=tuple(AcquisitionIntentAssessment(
+            intent_id, filter_type, intent_id, AcquisitionIntentEligibilityStatus.ELIGIBLE, ())
+            for intent_id, filter_type in (("sh2-129_ha", "Ha"), ("ou4_oiii", "OIII"))),
+        lunar_evidence_snapshot=snapshot)
+    source = replace(source, recommendation=replace(source.recommendation,
+        opportunity=replace(source.recommendation.opportunity, candidate=candidate_value,
+            shortlist_entries=(candidate_value,))))
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    store.create_context(source)
+    assert store.load_context("decision-1").recommendation.opportunity.candidate.lunar_evidence_snapshot == snapshot
+    accepted = selection(selected_imaging_field_id="sh2-129_ou4", selected_acquisition_intent_id="sh2-129_ha")
+    bound_mission = replace(mission(imaging_field_id="sh2-129_ou4", acquisition_intent_id="sh2-129_ha"),
+        lunar_evidence_snapshot=snapshot)
+    store.commit_selection_and_mission(accepted, bound_mission)
+    payload = (tmp_path / "decision-1.json").read_text()
+    restored = deserialize_decision_acceptance_aggregate(payload)
+    assert restored.missions[0].lunar_evidence_snapshot == snapshot
+    assert serialize_decision_acceptance_aggregate(restored) == payload

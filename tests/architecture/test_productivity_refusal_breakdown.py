@@ -326,8 +326,8 @@ def test_insufficient_evidence_has_no_stage_or_causal_breakdown():
     assert refusal.productivity_breakdown is None
 
 
-def test_persistent_lineage_productivity_structures_and_schema_are_unchanged():
-    assert SCHEMA_VERSION == 9
+def test_persistent_lineage_productivity_structures_are_unchanged():
+    assert SCHEMA_VERSION == 10
     assert [item.name for item in fields(NightSlice)] == [
         "start_hour", "end_hour", "target_altitude", "target_azimuth",
         "moon_altitude", "moon_separation", "moon_penalty", "cloud_cover",
