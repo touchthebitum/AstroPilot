@@ -143,10 +143,15 @@ def _compose(
     weather=None,
     profile_resolver=None,
     estimator=None,
-    remaining_progress=(),
+    remaining_progress=None,
     site=SITE,
 ):
     field = build_production_imaging_field_resolver().resolve("sh2-129_ou4")
+    if remaining_progress is None:
+        remaining_progress = tuple(
+            AcquisitionIntentRemainingProgress(intent_id, 0, 0, 2, 2)
+            for intent_id in targets
+        )
     return compose_acquisition_intent_selection(
         imaging_field=field,
         project_targets=_targets(*targets),
@@ -472,3 +477,56 @@ def test_characterize_different_lunar_estimates_leave_identical_selection():
     assert original.estimates != changed.estimates
     assert first.status is AcquisitionIntentSelectionStatus.PREFERRED
     assert first == second
+
+
+def test_short_intent_is_excluded_and_existing_selection_can_choose_other():
+    selection = _compose(remaining_progress=(
+        AcquisitionIntentRemainingProgress("sh2-129_ha", 5400, 1.5, 2, 0.5),
+        AcquisitionIntentRemainingProgress("ou4_oiii", 0, 0, 2, 2),
+    ))
+    assert selection.selected_acquisition_intent_id == "ou4_oiii"
+    assert selection.acquisition_intent_assessments[0].reason_codes == (
+        "insufficient_actionable_productive_window",
+    )
+
+
+def test_unknown_remaining_cannot_be_selected():
+    selection = _compose(targets=("sh2-129_ha",), remaining_progress=(
+        AcquisitionIntentRemainingProgress("sh2-129_ha", None, None, 2, None),
+    ))
+    assert selection.selected_acquisition_intent_id is None
+    assert selection.acquisition_intent_assessments[0].reason_codes == (
+        "intent_progress_evidence_insufficient",
+    )
+
+
+def test_modern_ranking_gain_and_future_ignore_contradictory_legacy_totals(monkeypatch):
+    selected = _compose(targets=("sh2-129_ha",), remaining_progress=(
+        AcquisitionIntentRemainingProgress("sh2-129_ha", 1800, 0.5, 2, 1.5),
+    ))
+    monkeypatch.setattr(astro_score, "compose_acquisition_intent_selection", lambda **kwargs: selected)
+    future_caps = []
+
+    def future(*args, **kwargs):
+        future_caps.append(kwargs["remaining_hours"])
+        return SimpleNamespace(risk="LOW", opportunity_ratio=1)
+
+    monkeypatch.setattr(astro_score.future_engine, "estimate", future)
+    scores = []
+    for legacy_hours in (0, 4):
+        project = {
+            "hours": legacy_hours, "target_hours": 4,
+            "imaging_field_id": "sh2-129_ou4",
+            "acquisition_intent_targets": [
+                {"acquisition_intent_id": "sh2-129_ha", "target_hours": 2},
+            ],
+            "acquisition_intent_progress": [
+                {"acquisition_intent_id": "sh2-129_ha", "acquired_duration_manual": 1800},
+            ],
+        }
+        candidate = astro_score.recommend_project_for_night(
+            _top_object(), available_hours=2, profile=_profile(project),
+        ).candidates[0]
+        scores.append((candidate.decision_score, candidate.strategy_scores))
+    assert future_caps == [1.5, 1.5]
+    assert scores[0] == scores[1]

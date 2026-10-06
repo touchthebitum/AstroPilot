@@ -21,6 +21,7 @@ class AcquisitionIntentEligibilityReason(str, Enum):
 
 
 class AcquisitionIntentEvidenceGap(str, Enum):
+    INTENT_PROGRESS_EVIDENCE_INSUFFICIENT = "intent_progress_evidence_insufficient"
     SETUP_CAPABILITIES_MISSING = "setup_capabilities_missing"
     PRODUCTIVE_WINDOW_EVIDENCE_MISSING = (
         "productive_window_evidence_missing"

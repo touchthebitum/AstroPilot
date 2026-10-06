@@ -3,6 +3,9 @@ from datetime import datetime
 from decision.filtering.selected_filter import SelectedFilter
 from decision.models.session_availability import SessionAvailability
 from decision.weather.weather_forecast import WeatherForecast
+from decision.models.acquisition_intent_remaining_progress import (
+    AcquisitionIntentRemainingProgress,
+)
 
 
 @dataclass(frozen=True)
@@ -21,8 +24,22 @@ class MissionInput:
     selection_id: str | None = None
     imaging_field_id: str | None = None
     acquisition_intent_id: str | None = None
+    acquisition_capacity: AcquisitionIntentRemainingProgress | None = None
+    evidence_only: bool = False
 
     def __post_init__(self):
+        capacity = self.acquisition_capacity
+        if capacity is not None:
+            if not isinstance(capacity, AcquisitionIntentRemainingProgress):
+                raise TypeError("Expected AcquisitionIntentRemainingProgress")
+            if capacity.acquisition_intent_id != self.acquisition_intent_id:
+                raise ValueError("acquisition_capacity_intent_mismatch")
+            ceiling = capacity.remaining_hours
+            if ceiling is None:
+                if self.recommended_hours != 0 or self.expected_gain != 0:
+                    raise ValueError("unknown_acquisition_capacity_must_fail_closed")
+            elif self.recommended_hours > ceiling:
+                raise ValueError("recommended_hours_exceeds_acquisition_capacity")
         provenance = (self.mission_id, self.decision_id, self.selection_id)
         if any(value is not None for value in provenance) and any(
             not isinstance(value, str) or not value.strip()

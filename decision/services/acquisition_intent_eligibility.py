@@ -1,5 +1,7 @@
 """Pure V1 eligibility evaluator for a resolved acquisition intent."""
 
+from dataclasses import replace
+
 from decision.mission.mission_assembler import ProductiveWindowAssessment
 from decision.models.acquisition_intent_eligibility import (
     AcquisitionIntentEligibilityAssessment,
@@ -157,6 +159,16 @@ def evaluate_acquisition_intent_eligibility(
             AcquisitionIntentEvidenceGap.PRODUCTIVE_WINDOW_EVIDENCE_MISSING
         )
     else:
+        if (remaining_progress is not None
+                and remaining_progress.remaining_hours is not None):
+            existing_cap = productive_window.maximum_mission_hours
+            productive_window = replace(
+                productive_window,
+                maximum_mission_hours=min(
+                    remaining_progress.remaining_hours,
+                    existing_cap if existing_cap is not None else remaining_progress.remaining_hours,
+                ),
+            )
         window_selection = evaluate_continuous_actionable_productive_window(
             productive_window,
             session_availability,
@@ -178,6 +190,11 @@ def evaluate_acquisition_intent_eligibility(
                         window_selection.refusal.cause_code
                     ),
                 )
+
+    if remaining_progress is None or remaining_progress.remaining_hours is None:
+        evidence_gaps.append(
+            AcquisitionIntentEvidenceGap.INTENT_PROGRESS_EVIDENCE_INSUFFICIENT
+        )
 
     if not _weather_allows_intent_eligibility(weather_trust_decision):
         evidence_gaps.append(

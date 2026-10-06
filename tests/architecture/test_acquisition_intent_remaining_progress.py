@@ -256,7 +256,7 @@ def test_execution_credit_completes_intent_without_changing_legacy_ranking(monke
 
 
 @pytest.mark.parametrize("targeted", [False, True])
-def test_legacy_opportunity_recommendation_and_tonight_baselines(monkeypatch, targeted):
+def test_legacy_baseline_and_unknown_modern_degradation(monkeypatch, targeted):
     monkeypatch.setattr(astro_score.future_engine, "estimate", lambda *args, **kwargs: SimpleNamespace(risk="FAIBLE", opportunity_ratio=1))
     objects = [{"name": key, "catalog_key": key, "global_score": score}
                for key, score in (("M31", 75), ("M42", 65))]
@@ -269,15 +269,19 @@ def test_legacy_opportunity_recommendation_and_tonight_baselines(monkeypatch, ta
     candidates = astro_score.recommend_project_for_night(objects, profile=profile)
     # Historical scoring/ranking constants, not a second invocation of the new path.
     assert candidates.rejections == ()
-    assert [(item.catalog_key, item.final_score, item.decision_score, item.acquired_hours)
-            for item in candidates] == [
-                ("M31", 77.80000000000001, 77.80000000000001, 2.0),
-                ("M42", 70.80000000000001, 70.80000000000001, 2.0),
-            ]
+    assert {item.catalog_key: (item.final_score, item.decision_score, item.acquired_hours)
+            for item in candidates} == {
+                "M31": ((63.5, 63.5, 2.0) if targeted else
+                        (77.80000000000001, 77.80000000000001, 2.0)),
+                "M42": (70.80000000000001, 70.80000000000001, 2.0),
+            }
+    winner = "M42" if targeted else "M31"
+    alternative = "M31" if targeted else "M42"
+    modern = next(item for item in candidates if item.catalog_key == "M31")
     if targeted:
-        assert candidates[0].acquisition_intent_selection_status is AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT
-        assert candidates[0].acquisition_intent_remaining_progress[0].remaining_hours is None
-        assert candidates[0].acquisition_intent_remaining_progress[0].acquired_hours is None
+        assert modern.acquisition_intent_selection_status is AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT
+        assert modern.acquisition_intent_remaining_progress[0].remaining_hours is None
+        assert modern.acquisition_intent_remaining_progress[0].acquired_hours is None
     else:
         assert all(item.acquisition_intent_selection_status is None for item in candidates)
         assert all(item.acquisition_intent_remaining_progress == () for item in candidates)
@@ -286,10 +290,10 @@ def test_legacy_opportunity_recommendation_and_tonight_baselines(monkeypatch, ta
         recommendation_engine=RecommendationEngine())
     opportunity = OpportunityEngine().evaluate(candidates=list(candidates))
     assert opportunity.action is Action.CONTINUE_PROJECT
-    assert opportunity.candidate.catalog_key == "M31"
-    assert [item.catalog_key for item in opportunity.shortlist_entries] == ["M42"]
+    assert opportunity.candidate.catalog_key == winner
+    assert [item.catalog_key for item in opportunity.shortlist_entries] == [alternative]
     recommendation = service.build(candidates=list(candidates))
-    assert recommendation.opportunity.candidate.catalog_key == "M31"
+    assert recommendation.opportunity.candidate.catalog_key == winner
     assert recommendation.opportunity.action is Action.CONTINUE_PROJECT
     assert recommendation.confidence is None
 
@@ -311,6 +315,6 @@ def test_legacy_opportunity_recommendation_and_tonight_baselines(monkeypatch, ta
     runner.run(top_nights=[{"duration": 3, "top_objects": objects}],
                night_capacities=[], profile=profile)
     assert len(report.calls) == 1
-    assert report.calls[0]["recommendation"].opportunity.candidate.catalog_key == "M31"
+    assert report.calls[0]["recommendation"].opportunity.candidate.catalog_key == winner
     assert report.calls[0]["recommendation"].opportunity.action is Action.CONTINUE_PROJECT
     assert report.roadmap == []

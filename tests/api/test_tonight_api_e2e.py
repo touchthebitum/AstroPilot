@@ -414,8 +414,9 @@ def test_http_request_runs_real_application_composition_once(
     assert len(calls["mission"]) == 2
 
 
+@pytest.mark.parametrize("legacy_remaining", [0.0, 4.0])
 def test_tonight_exposes_modern_ou4_acquisition_intent_candidate(
-    monkeypatch,
+    monkeypatch, legacy_remaining,
 ):
     reference_time = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
     window_start = datetime(2026, 9, 1, 22, tzinfo=timezone.utc)
@@ -442,7 +443,7 @@ def test_tonight_exposes_modern_ou4_acquisition_intent_candidate(
         "name": "Sh2-129",
         "catalog_key": "Sh2-129",
         "window": {"start": window_start, "end": window_end},
-        "remaining_hours": 4.0,
+        "remaining_hours": legacy_remaining,
         "decision_context": SimpleNamespace(
             site=SiteContext("Mont Sujet", 47.12, 7.04, 1000.0, 4),
             session=SimpleNamespace(
@@ -482,9 +483,13 @@ def test_tonight_exposes_modern_ou4_acquisition_intent_candidate(
         "preferences": {"bortle": 4},
         "projects": {
             "Sh2-129": {
-                "hours": 1.0,
+                "hours": 5.0 - legacy_remaining,
                 "target_hours": 5.0,
                 "imaging_field_id": "sh2-129_ou4",
+                "acquisition_intent_progress": [
+                    {"acquisition_intent_id": "sh2-129_ha", "acquired_duration_manual": 0},
+                    {"acquisition_intent_id": "ou4_oiii", "acquired_duration_manual": 0},
+                ],
                 "acquisition_intent_targets": [
                     {
                         "acquisition_intent_id": "sh2-129_ha",
@@ -510,6 +515,9 @@ def test_tonight_exposes_modern_ou4_acquisition_intent_candidate(
 
     class MissionService:
         def create(self, **kwargs):
+            mission_input = kwargs["build_mission_input"](evaluation)
+            assert mission_input.recommended_hours == 2
+            assert mission_input.expected_gain == 100
             return NightMission(
                 target="Sh2-129",
                 confidence=0.8,

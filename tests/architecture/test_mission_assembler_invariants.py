@@ -688,6 +688,7 @@ def test_productive_window_assessment_is_immutable_and_gate_compatible(
         "productivity",
         "maximum_mission_hours",
         "productivity_breakdown",
+        "acquisition_capacity",
     ]
     assert assessment.window_start is input_data.window_start
     assert assessment.window_end is input_data.window_end
@@ -789,15 +790,13 @@ def test_tonight_composes_intent_filter_through_real_input_and_assembler(
 
 
 @pytest.mark.parametrize("legacy_remaining", [0.0, 4.0])
-def test_characterize_tonight_duration_uses_global_remainder_not_intent_progress(
+@pytest.mark.parametrize("acquired", [0.5, 0.764, 1.0, 1.5, 2.0])
+@pytest.mark.parametrize("user_hours", [None, 1.1])
+def test_tonight_caps_duration_and_gain_by_intent_through_real_assembly(
     monkeypatch, frozen_time, summary, context, isolated_dependencies,
-    legacy_remaining,
+    legacy_remaining, acquired, user_hours,
 ):
-    """Audit finding: the modern intent's 0.5h remainder never reaches assembly.
-
-    This records current behavior, not an authorization of the legacy cap.
-    Resolving project/global versus intent capacity needs a separate increment.
-    """
+    """Contradictory legacy totals cannot cap or expand an intent mission."""
     import astro_score
     from decision.definitions.production_imaging_fields import (
         build_production_imaging_field_resolver,
@@ -819,7 +818,7 @@ def test_characterize_tonight_duration_uses_global_remainder_not_intent_progress
         ],
         "acquisition_intent_progress": [
             {"acquisition_intent_id": "sh2-129_ha",
-             "acquired_duration_manual": 5400.0},
+             "acquired_duration_manual": acquired * 3600},
         ],
     }
     remaining = derive_acquisition_intent_remaining_progress(
@@ -827,8 +826,8 @@ def test_characterize_tonight_duration_uses_global_remainder_not_intent_progress
         (ProjectAcquisitionIntentTarget("sh2-129_ha", 2.0),),
         tuple(project["acquisition_intent_progress"]),
     )[0]
-    assert remaining.remaining_hours == 0.5
-    assert remaining.completed is False
+    assert remaining.remaining_hours == pytest.approx(max(2 - acquired, 0))
+    assert remaining.completed is (acquired >= 2)
     evaluation = {
         "catalog_key": "Sh2-129", "imaging_field_id": "sh2-129_ou4",
         "selected_acquisition_intent_id": "sh2-129_ha",
@@ -840,17 +839,27 @@ def test_characterize_tonight_duration_uses_global_remainder_not_intent_progress
     }
     service = TonightMissionService(build_mission=lambda **kwargs:
         MissionAssembler.build(equipment=["setup"], alternatives=[], **kwargs))
+    def build_input(value):
+        from dataclasses import replace
+        result = astro_score.build_mission_input(value, profile={"projects": {"Sh2-129": project}})
+        availability = (SessionAvailability(
+            SessionAvailabilityMode.START_AND_DURATION, start=frozen_time,
+            duration=timedelta(hours=user_hours),
+        ) if user_hours is not None else None)
+        return replace(result, availability=availability)
+
     mission = service.create(
         winner={"object_evaluations": {"Sh2-129": evaluation}},
         objects=[{"name": "Sh2-129", "catalog_key": "Sh2-129",
                   "decision_summary": summary, "decision_context": context}],
         recommended_key="Sh2-129",
-        build_mission_input=lambda value: astro_score.build_mission_input(
-            value, profile={"projects": {"Sh2-129": project}},
-        ),
+        build_mission_input=build_input,
     )
-    if legacy_remaining == 0:
+    if remaining.remaining_hours < 1:
         assert mission is None
     else:
-        assert mission.recommended_hours == 1.5
-        assert mission.recommended_hours > remaining.remaining_hours
+        expected_hours = min(1.5, remaining.remaining_hours, user_hours or 4)
+        assert mission.recommended_hours == pytest.approx(expected_hours)
+        assert mission.recommended_hours <= remaining.remaining_hours
+        assert mission.recommended_hours <= (user_hours or 4)
+        assert mission.expected_gain == round(expected_hours / 2 * 100, 2)

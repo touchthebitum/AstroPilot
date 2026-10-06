@@ -64,7 +64,7 @@ def productive_window(start, end):
     )
 
 
-def arrange(monkeypatch, assessment):
+def arrange(monkeypatch, assessment, *, candidate=None):
     captured = {}
     evaluation = {
         "catalog_key": "M31",
@@ -89,7 +89,7 @@ def arrange(monkeypatch, assessment):
         build_productive_window,
     )
     result = CandidateAssessment.build(
-        candidate=SimpleNamespace(catalog_key="M31"),
+        candidate=candidate or SimpleNamespace(catalog_key="M31"),
         object_evaluations={"M31": evaluation},
         profile=profile,
         weather_snapshot=snapshot(),
@@ -529,3 +529,17 @@ def test_actionability_filter_does_not_fill_slot_with_unavailable_candidate():
         availability,
         primary_catalog_key="M31",
     ) == (actionable,)
+
+
+def test_shortlist_assessment_transports_its_selected_intent(monkeypatch):
+    candidate = SimpleNamespace(
+        catalog_key="M31", imaging_field_id="sh2-129_ou4",
+        selected_acquisition_intent_id="ou4_oiii",
+        acquisition_intent_selection_status="single_eligible_intent",
+    )
+    _, captured, evaluation, _, _ = arrange(
+        monkeypatch, productive_window(START, END), candidate=candidate,
+    )
+    assert captured["evaluation"]["imaging_field_id"] == "sh2-129_ou4"
+    assert captured["evaluation"]["selected_acquisition_intent_id"] == "ou4_oiii"
+    assert "selected_acquisition_intent_id" not in evaluation
