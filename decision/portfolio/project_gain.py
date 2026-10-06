@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decision.portfolio.session_capacity import explicit_session_hours
+
 from decision.portfolio.project_state import (
     project_state_from_project,
 )
@@ -42,10 +44,13 @@ def marginal_gain_factor(progress):
 
 def portfolio_gain_if_shot(
     object_name,
-    session_hours=3.0,
+    session_hours=None,
     *,
     projects,
 ):
+    session_hours = explicit_session_hours(session_hours)
+    if session_hours <= 0:
+        return 0
     state = project_state_from_project(projects.get(object_name))
 
     if state is None:
@@ -79,10 +84,13 @@ def portfolio_gain_if_shot(
 
 def session_portfolio_gain(
     name,
-    session_hours=3.0,
+    session_hours=None,
     *,
     projects,
 ):
+    session_hours = explicit_session_hours(session_hours)
+    if session_hours <= 0:
+        return 0
     state = project_state_from_project(projects.get(name))
     remaining = state["remaining"] if state is not None else None
 
@@ -116,10 +124,11 @@ def session_portfolio_gain(
 
 def session_roi(
     name,
-    session_hours=3.0,
+    session_hours=None,
     *,
     projects,
 ):
+    session_hours = explicit_session_hours(session_hours)
     if session_hours <= 0:
         return 0
 

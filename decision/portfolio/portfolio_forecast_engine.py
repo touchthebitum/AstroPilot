@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import copy
+from decision.portfolio.historical_night_capacity_estimator import (
+    NightCapacityEstimate,
+)
 
 
 class PortfolioForecastEngine:
@@ -24,6 +27,7 @@ class PortfolioForecastEngine:
         avg_night_hours=0,
         *,
         profile=None,
+        future_night_capacity: NightCapacityEstimate | None = None,
     ):
         if profile is None:
             if self.profile_provider is not None:
@@ -78,6 +82,7 @@ class PortfolioForecastEngine:
 
                 best_name = None
                 best_score = -9999
+                best_future = None
 
                 for name, project in active_projects.items():
 
@@ -87,8 +92,12 @@ class PortfolioForecastEngine:
                         - project["hours"],
                     )
 
+                    future_kwargs = {}
+                    if future_night_capacity is not None:
+                        future_kwargs["night_capacity"] = future_night_capacity
                     future = self.future_engine.estimate(
                         name,
+                        **future_kwargs,
                         remaining_hours=remaining,
                         profile=profile,
                         latitude=(
@@ -133,6 +142,7 @@ class PortfolioForecastEngine:
 
                     if score > best_score:
                         best_score = score
+                        best_future = future
                         best_name = name
 
                 project = projects[best_name]
@@ -153,7 +163,20 @@ class PortfolioForecastEngine:
                 project["hours"] += hours_this_step
                 hours_remaining_night -= hours_this_step
 
+                future_capacity = getattr(best_future, "night_capacity", None)
+                capacity_metadata = {}
+                if future_capacity is not None:
+                    capacity_metadata["future_capacity"] = {
+                        "hours": future_capacity.productive_hours_per_night,
+                        "source": str(future_capacity.source),
+                        "historical_nights": future_capacity.historical_nights,
+                        "observed": future_capacity.observed,
+                        "estimated": future_capacity.estimated,
+                        "confidence": future_capacity.confidence,
+                        "empirical_eligible": future_capacity.decision_eligible,
+                    }
                 simulated.append({
+                    **capacity_metadata,
                     "night": current_night,
                     "date": (
                         capacity.get("date")

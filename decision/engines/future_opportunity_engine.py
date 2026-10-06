@@ -3,6 +3,9 @@ import math
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from decision.models.future_opportunity import FutureOpportunity
+from decision.portfolio.historical_night_capacity_estimator import (
+    HistoricalNightCapacityEstimator, NightCapacityEstimate, NightCapacitySource,
+)
 from decision.intelligence.analysis_context import AnalysisContext
 from decision.season.season_resolver import SeasonResolver
 from decision.weather.weather_ingress import WeatherSnapshot
@@ -34,6 +37,8 @@ class FutureOpportunityEngine:
         longitude: float | None = None,
         observation_time=None,
         profile=None,
+        *,
+        night_capacity: NightCapacityEstimate | None = None,
     ) -> FutureOpportunity:
         project = self.catalog.get(project_name)
 
@@ -117,10 +122,28 @@ class FutureOpportunityEngine:
         if remaining is None:
             return FutureOpportunity(0, "INCONNU", 0.0, 0, 0.0)
 
-        needed_nights = max(
-            1,
-            math.ceil(remaining / 3),
+        explicit_capacity = night_capacity is not None
+        if night_capacity is None:
+            night_capacity = HistoricalNightCapacityEstimator.estimate(
+                profile.get("sessions"),
+                profile.get("preferences", {}).get("productive_hours_per_night"),
+            )
+        # An implicit profile estimate must not replace empirical capacity evidence.
+        # A scenario is allowed only when the caller passes it deliberately.
+        authorized_capacity = night_capacity.observed or (
+            explicit_capacity
+            and night_capacity.source == NightCapacitySource.SCENARIO
+            and night_capacity.scenario_eligible
         )
+        if (not authorized_capacity or not math.isfinite(remaining) or remaining < 0):
+            return FutureOpportunity(0, "INCONNU", 0.0, 0, 0.0,
+                                     night_capacity=night_capacity)
+
+        night_count = remaining / night_capacity.productive_hours_per_night
+        if not math.isfinite(night_count):
+            return FutureOpportunity(0, "INCONNU", 0.0, 0, 0.0,
+                                     night_capacity=night_capacity)
+        needed_nights = max(1, math.ceil(night_count))
 
         opportunity_ratio = round(
             good_nights / needed_nights,
@@ -142,6 +165,7 @@ class FutureOpportunityEngine:
             weather_ratio=weather_ratio,
             needed_nights=needed_nights,
             opportunity_ratio=opportunity_ratio,
+            night_capacity=night_capacity,
         )
 
     @staticmethod

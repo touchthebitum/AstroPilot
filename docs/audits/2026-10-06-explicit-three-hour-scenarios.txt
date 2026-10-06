@@ -1,0 +1,121 @@
+AUDIT — HYPOTHÈSE FIXE 3 H/NUIT — ASTROPILOT / NIGHTMERIT — 6 OCTOBRE 2026
+
+BASELINE ET PROTECTION
+PR #323 MERGED, merge e8b1df6508ceb803ca7f6db51912fd6709d8eb25.
+Main == origin/main == e8b1df6508ceb803ca7f6db51912fd6709d8eb25 après fetch.
+Checkout principal AstroPilot : aucune modification suivie préexistante ; seuls .DS_Store
+et astropilot.egg-info/ non suivis préexistants, conservés.
+Stash critique 223ec1f5904131d726b694655f137670c0ddeb0b conservé ; aucune opération
+pop/apply/drop, aucune nouvelle entrée. Aucun fichier ou flux Field Lab modifié.
+Branche séparée fix/explicit-night-capacity-scenarios. Pas de merge automatique.
+
+CARTE DES PRODUCTEURS ET CONSOMMATEURS
+T01 FutureOpportunityEngine : remaining /3 => needed_nights, puis good_nights /needed_nights
+=> opportunity_ratio => risk. Le 3 était une hypothèse implicite de modèle, sans source.
+Entrées restantes : remaining explicite ou provider, saison géométrique et météo valides.
+T02 PortfolioForecastEngine : appelle FutureOpportunity avec contexte daté/site, puis bonus
+jusqu'à30 depuis ratio ; ordre de la roadmap et allocation simulée peuvent changer.
+T03 recommend_project_for_night : risque FutureOpportunity => pénalité/urgence, ratio=>bonus8,
+puis final/decision/strategy scores. Tonight nominal n'envoie pas observation_time : saison
+unknown court-circuite encore le modèle. Pas d'exploit mission API nominal démontré avec /3.
+T04 build_mission_input / MissionAssembler : recommended_hours et gain viennent de durée,
+disponibilité et progrès d'acquisition explicites. /3 FutureOpportunity n'alimente aucun plafond.
+T05 project_gain : portfolio_gain_if_shot, session_portfolio_gain, session_roi omettaient durée
+=>3h ; contributions de gain/ROI inventées au helper public. Appels Tonight/renderer existants
+fournissent leur durée et restent fidèles. Nouveau défaut None => contribution neutre0.
+T06 project_scoring : closure_bonus_for_remaining, closure_bonus, simulated_portfolio_score
+omettaient durée =>3h ; bonus clôture ou score sans durée. Nouveau défaut None=>bonus0,
+importance explicite conservée ; ne crée aucune mesure de durée0h.
+T07 renderer : calculs gain/ROI ont déjà durée requise, pas de défaut3h. Présentation stratégique
+peut désormais montrer la capacité de calcul et sa source/confiance lorsqu'elle est présente.
+T08 NightCapacityEstimate / HistoricalNightCapacityEstimator de #323 : réutilisés, pas de nouveau
+booléen indépendant. Moyenne history avec >=3 nuits = éligible empirique ; profile/scenario =
+estimés ; unknown conserve None. Aucun changement de cet estimateur dans ce correctif.
+T09 capacités météo 6/4/2/1/0h et avg_night_hours : allocation de roadmap distincte de l'hypothèse
+future. On n'extrapole pas automatiquement une seule nuit ni la durée restante de cette nuit
+à toutes les nuits futures. Un scénario future_night_capacity doit être fourni séparément.
+T10 autres constantes3 : seeing3 arcsec, sampling ratio3, risque de rosée/spread3°C et valeurs
+catalogue de SQM/exposition => autres unités/règles, hors périmètre, inchangées.
+
+FINDINGS CONFIRMÉS ET PRIORITÉS
+Aucun P0/P1 nominal Tonight démontré.
+P2 : FutureOpportunity peut déclarer risque FAIBLE depuis capacité implicite3h, même si le profil
+ne contient aucun historique ou contient un historique défavorable ignoré. Contre-exemple :
+remaining15h, 30 nuits géométriquement/météorologiquement favorables : baseline needed5,
+ratio6, riskFAIBLE ; historique1h/nuit => needed15, ratio2, riskMOYEN après correctif.
+P2 : classement roadmap réel modifié par cette hypothèse. M31 remaining90h importance5,
+M51 remaining12h importance8.5, 30 nuits favorables, historique1h/nuit, allocation1h :
+baseline /3 => scores60 et55, M31 choisi ; correctif historique => scores60 et63, M51 choisi.
+La capacité d'allocation reste1h dans les deux cas ; la fausse capacité3h modifiait le choix,
+sans créditer directement3h à une mission ou créer une disponibilité utilisateur.
+P2 helper : durée omise pouvait inventer gain/clôture. Pour un projet remaining2h/target2h,
+ancien session_gain omis100%, closure15, simulated_score45 (importance5) ; après correctif
+0%,0,30. Durée3h explicitement fournie garde100%,15,45.
+P3 contrat : FutureOpportunity n'exposait pas la capacité utilisée. Nouveau champ typé
+night_capacity ; nouvelles lignes roadmap future_capacity exposent source, valeur, compteur,
+observed/estimated, confiance et empirical_eligible. L'API Tonight n'expose pas ces objets
+future et ne nécessite pas de changement de schéma ; diagnostics risk de #323 préservés.
+
+CONTRAT ET CORRECTIF
+1. Aucune division implicite /3 dans FutureOpportunity.
+2. En l'absence d'argument night_capacity, résolution depuis profil : seul history suffisant
+peut fournir le diviseur. Profile explicite/absent, <3 nuits ou unknown => risque INCONNU,
+needed_nights0 et ratio0 comme sentinelles legacy, jamais preuve de rareté.
+3. night_capacity explicitement fourni avec source=scenario et valeur positive finie autorise
+un calcul de scénario. 3h demeure utilisable si l'appelant le demande délibérément.
+4. Une source profile passée directement ne devient pas observed ni un scénario autorisé.
+History exige compteur>=3 et valeur positive finie. Quotient non fini => INCONNU.
+5. FutureOpportunity peut produire un risque/ratio simulé avec scénario, mais conserve sa
+structure typée de provenance. Observed qualifie la capacité passée, pas la prévision météo
+ou les nuits futures ; ces résultats restent des estimations de modèle.
+6. PortfolioForecastEngine accepte future_night_capacity pour scénario explicite ; l'allocation
+night_capacities/avg_night_hours est inchangée et indépendante. Métadonnées du diviseur pour
+le projet choisi projetées à chaque étape. Objets legacy sans provenance ne sont pas réétiquetés.
+7. Tonight vérifie les nouvelles capacités attachées à FutureOpportunity : non observed =>
+risk_label INCONNU et opportunity_bonus0, avec borne prudente #322 pour la pénalité. Un scénario
+ne peut donc pas améliorer le classement réel même s'il est injecté à la frontière interne.
+8. Les helpers de gain/clôture ont durée omise=None. Une entrée absente, non positive, non finie
+ou booléenne produit contribution0, jamais3h observées. Les durées numériques explicites restent
+scénarios/calculs et ne prétendent pas être de l'historique. acquisition_intent_session_gain
+reçoit déjà une durée obligatoire ; inchangé.
+9. Legacy : cinq premiers champs/constructeur de FutureOpportunity inchangés, night_capacity
+optionnel=None. FutureOpportunity n'est pas dans le schéma persistant acceptance_lineage ;
+aucun changement de schéma ou migration. Les missions/profils persistés ne sont pas réécrits,
+les tests de roundtrip existants sont conservés. Nouveaux calculs sans durée sont volontairement
+neutres ; ceci n'est pas une migration des anciennes valeurs sauvegardées.
+
+REACHABILITY ET INVARIANTS
+54 cas dédiés : capacités absentes/profil/<3 nuits ; sources explicites history/scenario/unknown ;
+comparaison1/3/5h et compteur ; capacités invalides/non autorisées/non finies ; provenance JSON ;
+15 combinaisons history1/3/5h et cinq modes sur vrai recommend_project_for_night ; retrait historique
+n'augmente pas les scores par cible ni gain/plafond du MissionInput ; trois scénarios injectés ne
+peuvent relever le classement réel Tonight ; vraie roadmap, choix M31 vsM51, allocation1h ;
+absence d'extrapolation d'une seule nuit ; omission/invalidité durée => aucun gain/ROI/clôture ;
+scénario3h explicite fidèle ; valeurs legacy FutureOpportunity fidèles.
+Tests existants de service FutureOpportunity complétés par scénario3h explicite pour conserver
+leurs assertions de calcul. Tests #322 weather/remaining manquants reçoivent scénario explicite
+afin de continuer à isoler leur défaut indépendamment de l'absence de capacité.
+Baseline immuable copiée via git archive (aucun checkout/stash modifié) : tests nouveaux y
+échouent sur les contre-exemples et les contrats absents ; les échecs de nouveau paramètre/
+métadonnées ne sont pas chacun une preuve de bug numérique distinct.
+Tests nouveaux sur baseline immuable : 38 échecs /16 succès (54 cas), 0.89s.
+Tests ciblés finaux : 686 passants, 1.50s. Suite complète finale : 5839 passants,
+1 skip volume insensible à la casse, 44 warnings Astropy, 110.32s.
+Node fourni par Codex et socket loopback local autorisé ; aucun test réseau modifié.
+Passages intermédiaires interrompus pour inclure le garde Tonight puis le contrôle de quotient
+non fini dans la version finale ; aucun échec final. git diff --check propre.
+Audit de périmètre : 8 fichiers production, 3 fichiers tests, 1 document ; Field Lab exclu.
+
+LIMITES ET RECOMMANDATION
+La moyenne historique n'est pas une garantie d'une nuit future. Le modèle météo/season existant,
+seuil>=3, minimum needed_nights1 même avec remaining0 et règles de rareté ne sont pas refondus.
+Les bornes horaires réelles de Tonight restent des preuves distinctes de toute moyenne historique.
+Les entrées internes legacy sans metadata sont lues fidèlement ; le nouveau producteur fournit
+provenance sur chaque calcul de capacité atteignable. Pas de validation instrumentale indépendante
+des sessions de profil. Pas de certificat global de monotonie de toutes stratégies arbitraires :
+les invariants concernent les scores par cible et ses heures/gains, pas le gain global après un
+changement de cible dans un classement simulé. Ce dernier est un résultat de stratégie et peut
+varier lorsque les preuves changent. Aucun gain réel Tonight n'est crédité depuis la capacité future.
+Les modèles capacités météo6/4/2/1/0h, defaults internes ProductiveWindowAssessment et météo
+partielle gardent leurs audits séparés ; aucun changement Field Lab/AQI.
+Recommandation de merge à confirmer après suite complète et CI du commit exact.

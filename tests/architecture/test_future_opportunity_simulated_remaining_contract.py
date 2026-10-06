@@ -1,3 +1,7 @@
+from decision.portfolio.historical_night_capacity_estimator import NightCapacityEstimate, NightCapacitySource
+
+SCENARIO = NightCapacityEstimate(3, NightCapacitySource.SCENARIO, None)
+
 from decision.engines.future_opportunity_engine import (
     FutureOpportunityEngine,
 )
@@ -37,10 +41,11 @@ def test_estimate_can_use_simulated_remaining_hours(
         project_provider=lambda name: 18,
     )
 
-    real = engine.estimate("M31")
+    real = engine.estimate("M31", night_capacity=SCENARIO)
 
     simulated = engine.estimate(
         "M31",
+        night_capacity=SCENARIO,
         remaining_hours=6,
     )
 
@@ -108,6 +113,7 @@ def test_estimate_accepts_explicit_observation_context(
 
     result = engine.estimate(
         "M31",
+        night_capacity=SCENARIO,
         remaining_hours=6,
         latitude=46.7508,
         longitude=6.5495,
@@ -178,6 +184,7 @@ def test_estimate_uses_dynamic_season_with_observation_context(
 
     engine.estimate(
         "M31",
+        night_capacity=SCENARIO,
         latitude=46.7508,
         longitude=6.5495,
         observation_time=observation_time,
@@ -231,6 +238,7 @@ def test_dynamic_future_opportunity_uses_geometric_good_nights(
 
     result = engine.estimate(
         "M31",
+        night_capacity=SCENARIO,
         latitude=46.7508,
         longitude=6.5495,
         observation_time=datetime(
@@ -288,6 +296,7 @@ def test_dynamic_future_opportunity_can_have_zero_good_nights(
 
     result = engine.estimate(
         "M31",
+        night_capacity=SCENARIO,
         latitude=46.7508,
         longitude=6.5495,
         observation_time=datetime(
