@@ -1,0 +1,157 @@
+P1 — DISPONIBILITÉ UTILISATEUR ET AUTORISATION DE MISSION
+
+Baseline
+PR #320 vérifiée merged=true via GitHub; head bce8ba1757f532329d29c65ec58f9f68ec184145.
+Merge/main/origin/main: 376047532fcbdcb35ebcaeab2be91b7b2b39ce75.
+Main synchronisé par fetch et fast-forward, sans changement suivi. Éléments non suivis
+préexistants conservés: .DS_Store et astropilot.egg-info/.
+Stash critique 223ec1f5904131d726b694655f137670c0ddeb0b présent; aucune opération
+pop/apply/drop, aucune nouvelle entrée stash. Ancien dépôt astrophoto_app laissé intact.
+Branche indépendante: fix/explicit-user-availability. Aucun merge automatique.
+
+Cause racine
+Le sélecteur partagé de fenêtre interprétait availability=None comme aucune contrainte.
+CandidateViabilityEvaluator en avait besoin pour étudier une nuit sans engagement.
+MissionAssembler consommait le même résultat comme autorisation; Tonight retournait
+MissionInput inchangé en absence d'availability et UserSelectionMissionService
+transportait None. Retirer un UNTIL défavorable pouvait donc créer une mission.
+
+Contrat retenu
+1. None signifie uniquement « preuve de disponibilité non fournie ». Il ne devient
+   jamais SessionAvailability(ALL_NIGHT). Les cinq modes explicites existants restent
+   inchangés et validés par SessionAvailability.
+2. L'étude physique, le classement et l'éligibilité des intentions restent possibles
+   sans disponibilité. Le nom des nouveaux helpers indique leur portée physique.
+   Une éligibilité d'intention ou une fenêtre physique ne prouve aucun engagement.
+3. Tonight peut garder une recommandation preview. Dès qu'une recommandation existe,
+   None produit status=user_availability_required, mission=None; aucun builder de
+   mission n'est appelé. Les statuts amont no_night/no_candidate/no_recommendation
+   restent valides lorsqu'aucun aperçu n'existe. Pas de confidence inventée.
+4. Une fenêtre actionable exige un objet SessionAvailability explicite. Les helpers
+   historiques evaluate/select_continuous_actionable_productive_window deviennent
+   également fermés pour None. Le diagnostic domaine porte conclusion et cause
+   user_availability_required, status=insufficient_evidence, sans durée physique
+   inventée ni productivity_breakdown. Ce refus n'est pas « nuit improductive ».
+5. select_actionable_alternatives ne publie aucune alternative engageante sans preuve.
+   CandidateViabilityEvaluator et select_viable_alternatives gardent leur exploration
+   physique. L'API conserve le candidat preview, mais n'expose pas ses alternatives
+   comme choix engageants. Un preview n'est pas target_decision_status=recommended.
+6. Une nouvelle acceptation non DECLINED exige la disponibilité sauvegardée avec le
+   decision_id, avant allocation de mission ou persistance. Rejet HTTP 409 / code
+   user_availability_required. UserSelectionMissionService applique aussi cette règle
+   directement. Décliner reste autorisé sans disponibilité.
+7. Les missions déjà persistées restent lisibles, et une requête idempotente déjà
+   commise peut restituer la mission historique sans la reconstruire. Ce replay est
+   une lecture du résultat canonique, pas une nouvelle autorisation. Un ancien contexte
+   None non accepté ne peut plus créer une mission. Aucune migration de schéma.
+
+Architecture minimale
+Pas de nouveau mode, booléen, champ confidence ou schéma de persistance.
+SessionAvailability existant porte l'évidence explicite; son absence reste None.
+evaluate_physical_productive_window / select_physical_productive_window conservent
+le calcul physique, evaluate_authorized_session_window garde la frontière engageante.
+Guards indépendants: TonightApplicationService, MissionAssembler et nouvelle acceptance.
+L'autorisation d'une mission acceptée est liée au contexte de décision persistant,
+pas déduite de ses seules bornes NightMission. NightMission reste un objet historique
+lisible; son constructeur ne réautorise pas une mission.
+
+Cartographie des usages et propagation
+- astropilot/app.py: SessionAvailabilityRequest.to_domain, TonightRequest facultatif,
+  résolution des heures locales, passage aux inputs/evaluate, alternatives et
+  register_decision_context; /v1/decision-selections mappe le rejet en 409;
+  /v1/accepted-mission/current lit seulement la mission canonique historique.
+- astro_score.py: recommend_project_for_night transmet session_availability à la
+  composition d'intention; build_mission_input crée l'évidence physique et n'invente
+  pas de disponibilité. L'application remplace toujours availability avec la requête
+  explicite pour une nouvelle mission.
+- decision/models/session_availability.py: cinq modes existants, contrat immuable et
+  validation des bornes; ALL_NIGHT n'a aucune valeur par défaut implicite.
+- decision/services/candidate_assessment.py: évaluation physique sans disponibilité;
+  alternatives viables versus alternatives actionables explicitement autorisées.
+- decision/services/acquisition_intent_eligibility.py et acquisition_intent_composition.py:
+  fenêtre physique éventuellement restreinte pour capacités/intention/lune; aucun
+  engagement utilisateur n'est déduit de l'état ELIGIBLE.
+- decision/services/session_availability_windowing.py: calcul physique séparé du
+  contrôle d'autorisation; seuil continu et bornage existants inchangés.
+- decision/services/tonight_application_service.py: TonightInputs None conservé,
+  preview distinct de la création; availability explicite liée à MissionInput.
+- decision/runners/report_runner.py et CLI astro_score.py: les chemins historiques
+  sans disponibilité conservent leur analyse mais ne peuvent plus présenter une
+  nouvelle mission via le même assembleur. Aucun nouveau mode CLI ajouté.
+- decision/services/tonight_mission_service.py et mission/mission_builder.py:
+  délégation à MissionAssembler, sans fallback d'autorisation.
+- decision/mission/mission_input.py: None conservé pour étude physique et lectures;
+  decision/mission/mission_assembler.py: timing engageant exige explicit availability.
+- decision/mission/night_mission.py: objet historique sans changement de format;
+  nouvelles instances de production créées uniquement par l'assembleur gardé.
+- decision/services/user_selection_mission.py: sélection validée, refus sans
+  disponibilité, remplacement de MissionInput et conservation de la provenance.
+- decision/services/decision_acceptance_application.py: DecisionAcceptanceContext
+  sauvegarde availability; nouvelles acceptations la contrôlent; replay canonique
+  préexistant reste une lecture avant les contrôles de nouvelle création.
+- decision/acceptance_lineage_persistence.py et astropilot/decision_acceptance_lineage_store.py:
+  sérialisation existante de SessionAvailability, MissionInput et contexte, versions
+  legacy inchangées; lecture NightMission ne fabrique pas all_night.
+- decision/services/tonight_response.py et modèles astropilot/app.py: transport du
+  nouveau statut par le champ status existant; mission absente => heures/gain nuls,
+  bornes/confiance mission absentes, target_decision_status=insufficient_evidence.
+- astropilot/web/app.js: le flux existant demande déjà un choix de disponibilité
+  explicite. Aucun changement UI ni Field Lab.
+
+Validation
+Tests rouges avant production: 6 cas frontières domaine/sélection + 2 cas HTTP
+omitted/null échouaient sur la baseline; all_night explicite restait passant.
+Tests ajoutés: omitted/null HTTP preview sans mission et rejet à l'acceptation;
+all_night accepté et replay idempotent; UNTIL/START_AND_DURATION bornés; monotonie
+UNTIL de 0 à 240 minutes, missing jamais plus permissif; viabilité physique conservée;
+rejet avant allocation pour primary/alternative/other; decline sans engagement;
+replay historique avec availability=None. Fixtures de missions autorisées passent
+explicitement all_night en gardant leurs assertions de résultat métier.
+Les vérifications legacy de persistance n'ont aucun changement de schéma.
+Résultats finaux:
+- Ciblés API/services: 282 passants, puis 49 passants sur les deux fichiers finalisés.
+- Suite entière Python 3.13 avec Node fourni par Codex: 5625 passants, 1 skip
+  (volume insensible à la casse, couvert par le test de véritable alias), 44 warnings,
+  aucun échec, 109.50 secondes. Journal: work/full-with-node.log du chat.
+- git diff --check propre. Main et origin/main conservent le SHA de baseline.
+- Stash critique toujours présent sous le même hash; type commit confirmé.
+- Aucun changement dans les fichiers Field Lab, UI, météo/scoring, NightMission
+  ou schéma de persistance. Les changements sont 8 fichiers de production,
+  17 fichiers de tests et ce document.
+
+Limites
+Aucune preuve utilisateur externe/signature nouvelle: explicite veut dire disponibilité
+validée fournie dans la requête et enregistrée dans le contexte du decision_id.
+Le changement affecte volontairement les clients qui omettaient availability et
+attendaient une mission. Ils doivent fournir un des modes existants explicitement.
+Le preview peut conserver action/recommendation_confidence du moteur de classement;
+ces champs ne constituent pas une autorisation. Le statut, le target status et la
+mission absente sont les preuves de non-engagement.
+
+Fichiers modifiés (audit de périmètre)
+decision/mission/mission_assembler.py
+decision/services/acquisition_intent_composition.py
+decision/services/acquisition_intent_eligibility.py
+decision/services/candidate_assessment.py
+decision/services/decision_acceptance_application.py
+decision/services/session_availability_windowing.py
+decision/services/tonight_application_service.py
+decision/services/user_selection_mission.py
+docs/audits/2026-10-06-user-availability-authorization.txt
+tests/api/test_alternative_comparisons.py
+tests/api/test_tonight_api.py
+tests/api/test_tonight_api_e2e.py
+tests/architecture/test_candidate_assessment.py
+tests/architecture/test_intent_acquisition_capacity.py
+tests/architecture/test_mission_assembler_invariants.py
+tests/architecture/test_production_acquisition_intent_composition.py
+tests/architecture/test_productivity_refusal_breakdown.py
+tests/architecture/test_session_actionability_contract.py
+tests/architecture/test_session_duration_contract.py
+tests/architecture/test_tonight_application_service.py
+tests/architecture/test_tonight_fallback_reachability.py
+tests/architecture/test_typed_mission_input.py
+tests/architecture/test_user_availability_authorization.py
+tests/architecture/test_weather_productivity_mission_integration.py
+tests/services/test_decision_acceptance_application.py
+tests/services/test_user_selection_mission.py

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from dataclasses import FrozenInstanceError, fields
 from datetime import timedelta
 from types import SimpleNamespace
@@ -132,6 +133,7 @@ def isolated_dependencies(monkeypatch):
 
 def mission_input(frozen_time, weather, **overrides):
     values = {
+        "availability": SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
         "window_start": frozen_time,
         "window_end": frozen_time + timedelta(hours=2),
         "astronomical_hours": 2.0,
@@ -619,7 +621,7 @@ def test_zero_reference_duration_never_transports_expected_gain(
         productivity=isolated_dependencies.productivity,
     )
 
-    timing = module._mission_timing_for_availability(assessment, None)
+    timing = module._mission_timing_for_availability(assessment, SessionAvailability(SessionAvailabilityMode.ALL_NIGHT))
 
     assert timing is not None
     assert timing[2:] == (1.0, 0.0)
@@ -768,6 +770,7 @@ def test_tonight_composes_intent_filter_through_real_input_and_assembler(
 
     def build_input(value):
         result = astro_score.build_mission_input(value, profile={})
+        result = replace(result, availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT))
         inputs.append(result)
         return result
 
@@ -845,7 +848,7 @@ def test_tonight_caps_duration_and_gain_by_intent_through_real_assembly(
         availability = (SessionAvailability(
             SessionAvailabilityMode.START_AND_DURATION, start=frozen_time,
             duration=timedelta(hours=user_hours),
-        ) if user_hours is not None else None)
+        ) if user_hours is not None else SessionAvailability(SessionAvailabilityMode.ALL_NIGHT))
         return replace(result, availability=availability)
 
     mission = service.create(

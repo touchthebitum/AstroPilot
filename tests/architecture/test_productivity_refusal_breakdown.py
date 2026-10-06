@@ -1,3 +1,4 @@
+from decision.models.session_availability import SessionAvailability, SessionAvailabilityMode
 from dataclasses import fields
 from datetime import datetime, timedelta, timezone
 from inspect import signature
@@ -318,7 +319,7 @@ def test_insufficient_evidence_has_no_stage_or_causal_breakdown():
     )
 
     refusal = evaluate_continuous_actionable_productive_window(
-        assessment, None
+        assessment, SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)
     ).refusal
 
     assert refusal.status is ActionabilityRefusalStatus.INSUFFICIENT_EVIDENCE

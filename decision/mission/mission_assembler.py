@@ -230,10 +230,10 @@ def _mission_timing_assessment(
     availability: SessionAvailability | None,
 ):
     from decision.services.session_availability_windowing import (
-        evaluate_continuous_actionable_productive_window,
+        evaluate_authorized_session_window,
     )
 
-    selection = evaluate_continuous_actionable_productive_window(
+    selection = evaluate_authorized_session_window(
         assessment,
         availability,
     )

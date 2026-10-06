@@ -441,7 +441,7 @@ def test_mission_timing_uses_existing_availability_windowing(
     )
 
 
-def test_mission_timing_omitted_availability_selects_real_productive_window():
+def test_mission_timing_requires_explicit_availability():
     assessment = _productive_assessment()
 
     timing = mission_assembler_module._mission_timing_for_availability(
@@ -449,12 +449,7 @@ def test_mission_timing_omitted_availability_selects_real_productive_window():
         None,
     )
 
-    assert timing == (
-        assessment.window_start + timedelta(hours=1),
-        assessment.window_start + timedelta(hours=3),
-        2.0,
-        0.8,
-    )
+    assert timing is None
 
 
 def test_mission_timing_empty_intersection_returns_none():
@@ -606,6 +601,7 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
         goal="galaxies",
         target="deep_sky",
         bortle=4,
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert forecast_calls == [
@@ -850,6 +846,7 @@ def test_recommendation_without_creatable_mission_fails_closed():
         weather=object(),
         reference_time_utc=REFERENCE_TIME,
         bortle=3,
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert result.night is night
@@ -910,6 +907,7 @@ def test_known_window_constraint_is_preserved_in_tonight_result():
         weather=object(),
         reference_time_utc=REFERENCE_TIME,
         bortle=3,
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW
@@ -934,6 +932,7 @@ def test_actionability_mission_has_no_fabricated_selection_provenance():
         weather=object(),
         reference_time_utc=REFERENCE_TIME,
         bortle=3,
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert result.status is TonightStatus.AVAILABLE
@@ -984,6 +983,7 @@ def test_result_transports_timeline_start_outside_persistent_mission_models():
         weather=object(),
         reference_time_utc=REFERENCE_TIME,
         bortle=3,
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert result.timeline_start is timeline_start
@@ -1023,6 +1023,7 @@ def test_non_productive_mission_without_diagnostic_fails_closed_as_no_mission():
         weather=object(),
         reference_time_utc=REFERENCE_TIME,
         bortle=3,
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert result.status is TonightStatus.NO_MISSION
@@ -1055,6 +1056,7 @@ def test_every_no_productive_window_result_has_authoritative_diagnostic():
         weather=object(),
         reference_time_utc=REFERENCE_TIME,
         bortle=3,
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert result.status is TonightStatus.NO_PRODUCTIVE_WINDOW

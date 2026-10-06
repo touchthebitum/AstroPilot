@@ -101,9 +101,9 @@ def test_soul_weighted_equivalent_does_not_create_an_actionable_window():
     assert soul.productivity.productive_hours == pytest.approx(0.95)
     assert len(soul.productivity.windows) == 1
     assert soul.productivity.windows[0].end_hour - soul.productivity.windows[0].start_hour == 0.25
-    assert select_continuous_actionable_productive_window(soul, None) is None
+    assert select_continuous_actionable_productive_window(soul, SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)) is None
     assert CandidateViabilityEvaluator.is_viable(candidate(soul)) is False
-    assert _mission_timing_for_availability(soul, None) is None
+    assert _mission_timing_for_availability(soul, SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)) is None
 
 
 @pytest.mark.parametrize(
@@ -120,7 +120,7 @@ def test_continuous_minimum_is_inclusive_at_exactly_sixty_minutes(
 ):
     source = assessment([0.8], slice_duration=slice_duration)
 
-    selected = select_continuous_actionable_productive_window(source, None)
+    selected = select_continuous_actionable_productive_window(source, SessionAvailability(SessionAvailabilityMode.ALL_NIGHT))
 
     assert (selected is not None) is expected_actionable
     assert CandidateViabilityEvaluator.is_viable(candidate(source)) is expected_actionable
@@ -129,7 +129,7 @@ def test_continuous_minimum_is_inclusive_at_exactly_sixty_minutes(
 def test_fifty_nine_minutes_fifty_nine_seconds_preserves_exact_refusal_duration():
     source = assessment([0.8], slice_duration=timedelta(seconds=3599))
 
-    selection = evaluate_continuous_actionable_productive_window(source, None)
+    selection = evaluate_continuous_actionable_productive_window(source, SessionAvailability(SessionAvailabilityMode.ALL_NIGHT))
 
     assert selection.window is None
     assert selection.refusal.status is ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL
@@ -142,7 +142,7 @@ def test_fifty_nine_minutes_fifty_nine_seconds_preserves_exact_refusal_duration(
 def test_exactly_sixty_minutes_has_no_actionability_refusal():
     source = assessment([0.8], slice_duration=timedelta(minutes=60))
 
-    selection = evaluate_continuous_actionable_productive_window(source, None)
+    selection = evaluate_continuous_actionable_productive_window(source, SessionAvailability(SessionAvailabilityMode.ALL_NIGHT))
 
     assert selection.window is not None
     assert selection.refusal is None
@@ -156,8 +156,8 @@ def test_separated_productive_windows_are_never_summed_to_reach_minimum():
         window.end_hour - window.start_hour
         for window in source.productivity.windows
     ] == [0.5, 0.5]
-    assert select_continuous_actionable_productive_window(source, None) is None
-    refusal = evaluate_continuous_actionable_productive_window(source, None).refusal
+    assert select_continuous_actionable_productive_window(source, SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)) is None
+    refusal = evaluate_continuous_actionable_productive_window(source, SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)).refusal
     assert refusal.best_productive_window_minutes == 30
 
 
@@ -204,7 +204,7 @@ def test_refusal_duration_is_computed_after_every_availability_intersection(
 def test_no_productive_slice_is_known_zero_minutes():
     source = assessment([0.2] * 4)
 
-    refusal = evaluate_continuous_actionable_productive_window(source, None).refusal
+    refusal = evaluate_continuous_actionable_productive_window(source, SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)).refusal
 
     assert refusal.status is ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL
     assert refusal.best_productive_window_minutes == 0
@@ -220,7 +220,7 @@ def test_missing_temporal_evidence_is_not_reclassified_as_a_constraint():
         productivity=SimpleNamespace(windows=None),
     )
 
-    refusal = evaluate_continuous_actionable_productive_window(source, None).refusal
+    refusal = evaluate_continuous_actionable_productive_window(source, SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)).refusal
 
     assert refusal.status is ActionabilityRefusalStatus.INSUFFICIENT_EVIDENCE
     assert refusal.cause_code == "productive_window_evidence_missing"

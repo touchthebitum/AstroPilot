@@ -163,6 +163,7 @@ def test_validated_selection_creates_mission_for_selected_target(
         recommendation=recommendation(),
         night=night(),
         profile={},
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert mission.target == catalog_key
@@ -188,6 +189,7 @@ def test_other_target_requires_v1_39_validation_before_mission_creation():
             recommendation=recommendation(),
             night=night(),
             profile={},
+            availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
         )
 
     assert mission_service.calls == []
@@ -203,6 +205,7 @@ def test_declined_selection_creates_no_mission():
         recommendation=recommendation(),
         night=night(),
         profile={},
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert mission is None
@@ -227,6 +230,7 @@ def test_non_actionable_selection_is_rejected_instead_of_becoming_a_decline():
             recommendation=recommendation(),
             night=night(),
             profile={},
+            availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
         )
 
 
@@ -254,6 +258,7 @@ def test_acceptance_allows_eligible_intent_with_compatible_filter(
         recommendation=recommendation(),
         night=night(),
         profile={"active_equipment": "samyang_183"},
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert mission.selected_filter is selected_filter
@@ -284,6 +289,7 @@ def test_acceptance_rejects_filter_diverging_from_selected_intent(intent_id, fil
             recommendation=recommendation(),
             night=night(),
             profile={},
+            availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
         )
 
 
@@ -305,6 +311,7 @@ def test_unbound_selection_fails_closed_without_primary_fallback():
             recommendation=recommendation(),
             night=night(),
             profile={},
+            availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
         )
 
     assert mission_service.calls == []
@@ -330,6 +337,7 @@ def test_inconsistent_recommendation_context_fails_closed():
             recommendation=inconsistent_recommendation,
             night=night(),
             profile={},
+            availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
         )
 
     assert mission_service.calls == []
@@ -350,6 +358,7 @@ def test_selection_preserves_recommendation_and_source_collections():
         recommendation=original_recommendation,
         night=night(),
         profile={},
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert original_recommendation.opportunity is original_opportunity
@@ -389,28 +398,16 @@ def test_session_availability_transport_and_constrained_window_are_preserved():
     assert mission.window_end == constrained_input.window_end
 
 
-def test_omitted_availability_adds_no_temporal_default():
-    composer, mission_service, base_input = service()
-
-    composer.create(
-        mission_id="mission-1",
-        selection=user_selection(
-            UserSelectionSource.PRIMARY_RECOMMENDATION,
-            "M31",
-        ),
-        decision_context=decision_context(),
-        recommendation=recommendation(),
-        night=night(),
-        profile={},
-    )
-
-    transported = mission_service.calls[0]["mission_input"]
-    assert transported.availability is None
-    assert transported.window_start is base_input.window_start
-    assert transported.window_end is base_input.window_end
-    assert transported.mission_id == "mission-1"
-    assert transported.decision_id == "decision-1"
-    assert transported.selection_id == "selection-1"
+def test_omitted_availability_rejects_instead_of_adding_a_default():
+    composer, mission_service, _ = service()
+    with pytest.raises(UserSelectionValidationError, match="user_availability_required"):
+        composer.create(
+            mission_id="mission-1",
+            selection=user_selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"),
+            decision_context=decision_context(), recommendation=recommendation(),
+            night=night(), profile={},
+        )
+    assert mission_service.calls == []
 
 
 @pytest.mark.parametrize("imaging_field_id", [None, "sh2-129_ou4"])
@@ -431,6 +428,7 @@ def test_selection_imaging_field_is_copied_exactly_without_resolution(
         recommendation=recommendation(),
         night=night(),
         profile={},
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert mission_service.calls[0]["mission_input"].imaging_field_id == imaging_field_id
@@ -459,6 +457,7 @@ def test_selection_acquisition_intent_is_authoritative_for_mission():
         recommendation=recommendation(),
         night=night(),
         profile={},
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     transported = mission_service.calls[0]["mission_input"]
@@ -502,6 +501,7 @@ def test_modern_first_class_selection_without_resolved_intent_creates_no_mission
             recommendation=modern_recommendation,
             night=night(),
             profile={},
+            availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
         )
 
     assert mission_service.calls == []
@@ -521,6 +521,7 @@ def test_legacy_first_class_selection_without_intent_keeps_none():
         recommendation=recommendation(),
         night=night(),
         profile={},
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert mission_service.calls[0]["mission_input"].acquisition_intent_id is None
@@ -604,6 +605,7 @@ def test_created_mission_requires_explicit_mission_id():
             recommendation=recommendation(),
             night=night(),
             profile={},
+            availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
         )
 
     assert mission_service.calls == []
@@ -624,6 +626,7 @@ def test_created_mission_rejects_empty_mission_id(mission_id):
             recommendation=recommendation(),
             night=night(),
             profile={},
+            availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
         )
 
 
@@ -669,6 +672,7 @@ def test_mission_contract_is_immutable_and_preserves_stable_identities():
         recommendation=recommendation(),
         night=night(),
         profile={},
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert mission.target == "M42"
@@ -706,6 +710,7 @@ def test_mission_window_is_planned_and_contains_no_execution_semantics():
         recommendation=recommendation(),
         night=night(),
         profile={},
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
     assert mission.window_start is START
@@ -727,11 +732,25 @@ def test_blocked_primary_does_not_block_exposed_viable_alternative():
         service.create(
             mission_id='mission-blocked', selection=user_selection(UserSelectionSource.PRIMARY_RECOMMENDATION, 'M31'),
             decision_context=context, recommendation=recommendation(), night=night(), profile={},
+            availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
         )
     assert recorder.calls == []
     mission = service.create(
         mission_id='mission-viable', selection=user_selection(UserSelectionSource.ALTERNATIVE, 'M42'),
         decision_context=context, recommendation=recommendation(), night=night(), profile={},
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
     assert mission.target == 'M42'
     assert len(recorder.calls) == 1
+
+
+def test_missing_availability_rejects_selection_before_mission_builder():
+    composer, recorder, _ = service()
+    with pytest.raises(UserSelectionValidationError, match="user_availability_required"):
+        composer.create(
+            mission_id="mission-1",
+            selection=user_selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"),
+            decision_context=decision_context(), recommendation=recommendation(),
+            night=night(), profile={}, availability=None,
+        )
+    assert recorder.calls == []

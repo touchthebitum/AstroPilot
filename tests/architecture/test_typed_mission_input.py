@@ -1,3 +1,4 @@
+from decision.models.session_availability import SessionAvailability, SessionAvailabilityMode
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -13,6 +14,7 @@ def _mission_input(frozen_time, weather, **overrides):
     from decision.mission.mission_input import MissionInput
 
     values = {
+        "availability": SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
         "window_start": frozen_time,
         "window_end": frozen_time + timedelta(hours=2),
         "astronomical_hours": 2.0,

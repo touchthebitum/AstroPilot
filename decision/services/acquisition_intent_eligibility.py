@@ -23,7 +23,7 @@ from decision.models.acquisition_intent_remaining_progress import AcquisitionInt
 from decision.models.session_availability import SessionAvailability
 from decision.services.session_availability_windowing import (
     ActionabilityRefusalStatus,
-    evaluate_continuous_actionable_productive_window,
+    evaluate_physical_productive_window,
 )
 from decision.weather.weather_trust_decision import (
     WeatherDecisionAdmissibility,
@@ -169,7 +169,7 @@ def evaluate_acquisition_intent_eligibility(
                     existing_cap if existing_cap is not None else remaining_progress.remaining_hours,
                 ),
             )
-        window_selection = evaluate_continuous_actionable_productive_window(
+        window_selection = evaluate_physical_productive_window(
             productive_window,
             session_availability,
         )

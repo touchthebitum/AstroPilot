@@ -18,7 +18,7 @@ from decision.mission.mission_assembler import ProductiveWindowAssessment
 from decision.models.session_availability import SessionAvailability, SessionAvailabilityMode
 from decision.night_productivity.night_productivity_result import NightProductivityResult
 from decision.night_productivity.night_window import NightWindow
-from decision.services.session_availability_windowing import evaluate_continuous_actionable_productive_window
+from decision.services.session_availability_windowing import evaluate_continuous_actionable_productive_window, evaluate_physical_productive_window
 
 
 def profile():
@@ -191,12 +191,14 @@ def test_characterize_missing_availability_is_unconstrained_not_user_evidence():
                 productive=True, reason="stable_conditions")],
         ),
     )
-    absent = evaluate_continuous_actionable_productive_window(assessment, None)
+    absent = evaluate_physical_productive_window(assessment, None)
     unavailable = evaluate_continuous_actionable_productive_window(assessment,
         SessionAvailability(mode=SessionAvailabilityMode.UNTIL, end=start))
     assert absent.window is not None
     assert unavailable.window is None
-    # Characterization of an open product-policy finding, not a safety invariant.
+    refused = evaluate_continuous_actionable_productive_window(assessment, None)
+    assert refused.window is None
+    assert refused.refusal.cause_code == "user_availability_required"
 
 
 @pytest.mark.parametrize("moon", [None, True, float("nan"), -1, 36])

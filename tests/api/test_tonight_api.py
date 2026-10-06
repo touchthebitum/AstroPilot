@@ -2462,7 +2462,7 @@ def test_target_insufficiency_api_binds_each_decision_to_its_own_candidate(monke
         profile_provider=valid_profile,
         clock=lambda: reference,
     ))
-    response = client.post("/v1/tonight", json={})
+    response = client.post("/v1/tonight", json={"availability": {"mode": "all_night"}})
     assert response.status_code == 200, response.json()
     payload = response.json()
     entries = payload["insufficient_evidence_targets"]
@@ -2857,7 +2857,7 @@ def test_durable_acceptance_lineage_survives_two_api_reconstructions(
 ):
     monkeypatch.setattr(durable_module, "generate_mission_id", lambda: "mission-lineage")
     reference = DEFAULT_WEATHER_REFERENCE_TIME
-    tonight = lineage_client(tmp_path, reference).post("/v1/tonight", json={})
+    tonight = lineage_client(tmp_path, reference).post("/v1/tonight", json={"availability": {"mode": "all_night"}})
     store = FileDecisionAcceptanceLineageStore(tmp_path / "decision_lineage")
 
     accepted = lineage_client(tmp_path, reference).post(
@@ -2911,7 +2911,7 @@ def test_current_accepted_mission_is_read_only_and_context_scoped(tmp_path):
     reference = DEFAULT_WEATHER_REFERENCE_TIME
     first = lineage_client(tmp_path, reference)
     assert first.get("/v1/accepted-mission/current").json() is None
-    assert first.post("/v1/tonight", json={}).status_code == 200
+    assert first.post("/v1/tonight", json={"availability": {"mode": "all_night"}}).status_code == 200
     accepted = first.post(
         "/v1/decision-selections", json=lineage_selection_payload(),
     )
@@ -2968,7 +2968,7 @@ def test_public_api_replays_canonical_acceptance_after_staleness(
         reference,
         selection_id="selection-canonical",
     )
-    assert initial_client.post("/v1/tonight", json={}).status_code == 200
+    assert initial_client.post("/v1/tonight", json={"availability": {"mode": "all_night"}}).status_code == 200
     request = lineage_selection_payload()
     first = initial_client.post("/v1/decision-selections", json=request)
 
@@ -2995,7 +2995,7 @@ def test_public_api_maps_acceptance_request_payload_conflict(tmp_path, monkeypat
     )
     reference = DEFAULT_WEATHER_REFERENCE_TIME
     client = lineage_client(tmp_path, reference)
-    assert client.post("/v1/tonight", json={}).status_code == 200
+    assert client.post("/v1/tonight", json={"availability": {"mode": "all_night"}}).status_code == 200
     first = client.post(
         "/v1/decision-selections",
         json=lineage_selection_payload(),
@@ -3026,7 +3026,7 @@ def test_public_api_maps_acceptance_request_payload_conflict(tmp_path, monkeypat
 def test_public_acceptance_preserves_source_and_target_validation(tmp_path):
     reference = DEFAULT_WEATHER_REFERENCE_TIME
     client = lineage_client(tmp_path, reference)
-    assert client.post("/v1/tonight", json={}).status_code == 200
+    assert client.post("/v1/tonight", json={"availability": {"mode": "all_night"}}).status_code == 200
 
     invalid_source = client.post(
         "/v1/decision-selections",
@@ -3064,7 +3064,7 @@ def test_stale_reconstructed_decision_cannot_be_bypassed_by_selected_at(
     selected_at,
 ):
     initial = DEFAULT_WEATHER_REFERENCE_TIME
-    assert lineage_client(tmp_path, initial).post("/v1/tonight", json={}).status_code == 200
+    assert lineage_client(tmp_path, initial).post("/v1/tonight", json={"availability": {"mode": "all_night"}}).status_code == 200
     stale_reference = initial + timedelta(minutes=91)
     response = lineage_client(tmp_path, stale_reference).post(
         "/v1/decision-selections",
@@ -3183,13 +3183,13 @@ def test_context_and_acceptance_persistence_failures_do_not_return_success(
     context_response = TestClient(
         context_client.app,
         raise_server_exceptions=False,
-    ).post("/v1/tonight", json={})
+    ).post("/v1/tonight", json={"availability": {"mode": "all_night"}})
     assert context_response.status_code == 500
 
     store.context = None
     healthy = FileDecisionAcceptanceLineageStore(tmp_path / "decision_lineage")
     assert lineage_client(tmp_path, reference, lineage_store=healthy).post(
-        "/v1/tonight", json={}
+        "/v1/tonight", json={"availability": {"mode": "all_night"}}
     ).status_code == 200
     stored_context = healthy.load_context("decision-lineage")
     store.context = stored_context
@@ -3742,7 +3742,7 @@ def test_missing_primary_window_fails_closed_without_inventing_evidence(tmp_path
         profile_provider=valid_profile,
         clock=lambda: DEFAULT_WEATHER_REFERENCE_TIME,
     ))
-    response = client.post('/v1/tonight', json={})
+    response = client.post('/v1/tonight', json={"availability": {"mode": "all_night"}})
     assert response.status_code == 200, response.json()
     payload = response.json()
     assert payload['target_decision_status'] == 'insufficient_evidence'
@@ -3831,7 +3831,7 @@ def test_synthetic_weather_coverage_window_cannot_make_primary_actionable(
         selection_id_factory=lambda: "selection-lineage",
     ))
 
-    response = client.post("/v1/tonight", json={})
+    response = client.post("/v1/tonight", json={"availability": {"mode": "all_night"}})
     assert response.status_code == 200, response.json()
     payload = response.json()
     assert payload["target"] == "IC1396"
