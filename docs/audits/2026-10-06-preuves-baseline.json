@@ -1,0 +1,29 @@
+{
+  "baseline": "f96acd6c5a68cabdfd92144ecff2d931373e9b55",
+  "proofs": {
+    "unknown_future_bonus": 8,
+    "missing_importance": {
+      "unknown_priority": 50.0,
+      "explicit_zero_priority": 0.0,
+      "unknown_final": 77.9,
+      "explicit_zero_final": 74.0
+    },
+    "portfolio_cap_counterexample": {
+      "lower_importance": 2.0,
+      "lower_importance_score": 80.0,
+      "higher_importance": 2.01,
+      "higher_importance_score": 71.621
+    },
+    "lunar_compression": {
+      "window_hours": 2,
+      "old_series": [
+        0
+      ],
+      "expected_aligned_penalties": [
+        17.5,
+        0
+      ],
+      "note": "Baseline astro_score consumer + production SkyEngine; astrometry alone substituted. Baseline consumer ignores the new producer field and still compresses details."
+    }
+  }
+}

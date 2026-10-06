@@ -1,0 +1,75 @@
+AUDIT TONIGHT — FALLBACKS / FAIL-CLOSED — 6 OCTOBRE 2026
+
+Résultat
+Quatre défauts P1 sont corrigés dans une branche dédiée. La matrice contient 75 familles métier, avec valeur, injection, déclenchement, frontière atteignable, impact, politique actuelle et souhaitée. Un inventaire syntaxique complémentaire contient 758 occurrences dans 55 fichiers. Cet inventaire est un outil de contrôle du périmètre, pas une preuve formelle d’exhaustivité sémantique de tous les états possibles du programme.
+Aucun P0 démontré. Aucun algorithme météo, lunar contamination ou AQI nouveau. Aucun fichier Field Lab modifié. Aucun merge automatique.
+
+Baseline vérifiée
+PR #319 mergée le 6 octobre 2026 à 17:37:02 UTC, merge SHA f96acd6c5a68cabdfd92144ecff2d931373e9b55.
+Fetch origin effectué. main == origin/main == ce SHA. Le checkout main reste sur ce SHA.
+Working tree main: aucune modification suivie; deux éléments non suivis préexistants: .DS_Store et astropilot.egg-info/.
+Stash critique: 223ec1f5904131d726b694655f137670c0ddeb0b, présent avant/après; aucune opération pop/apply/drop/stash créée.
+Le vieux checkout /Users/.../astrophoto_app est distinct, antérieur et sale: aucune modification n’y a été effectuée.
+Checkout d’audit réutilisé: Documents/Codex/2026-10-06/referenced-chatgpt-conversation-this-is-an-5/work/AstroPilot. Il était propre avant audit.
+Branche initiale dédiée: audit/tonight-fallbacks-fail-closed; branche publiée et commit exact renseignés dans livraison-git.txt.
+
+Findings P1 confirmés et corrigés
+1. Future opportunity inconnue transformée en bonus maximal.
+Le builder Tonight ne passe pas observation_time au FutureOpportunityEngine. Le vrai SeasonResolver renvoie donc unknown; risk INCONNU/opportunity_ratio=0 étaient ensuite consommés comme rareté maximale, ajoutant +8 au portfolio.
+Preuve: requête HTTP avec ingress météo production et service Tonight réel; seule la production des évaluations nocturnes est une fixture. Future engine, saison, candidate builder et calculs restent réels. Probe baseline confirme opportunity_bonus=8.
+Correctif: risk INCONNU neutralise uniquement ce bonus. Les compteurs restent des sentinelles, pas une observation de rareté. Le mapping séparé de risque inconnu vers 50 reste un finding P2, explicitement non résolu ici.
+
+2. Série lunaire raccourcie et décalée par le filtre altitude.
+SkyEngine.best_windows conservait la fenêtre entière, mais n’ajoutait des details que pour les heures dépassant le seuil d’altitude. build_selected_window_weather traitait alors details[moon] comme une série complète indexée par heure. NightConditionsProvider répétait sa dernière valeur.
+Contre-exemple service forecast: deux heures, première sous le seuil et lune défavorable (pénalité17.5), seconde favorable (0). L’ancien consumer fournit [0] au lieu de [17.5,0]. Ce chemin n’est pas arrêté par l’ingress météo: il est créé APRÈS validation par le pipeline lui-même.
+Correctif: conserver time/moon pour chaque heure avec le même calcul lunaire existant, même quand l’heure est exclue du score cible. Les scores target/summary/details historiques ne changent pas. Le consumer valide longueur, horodatages exacts et valeur finie dans [0,35]. Missing/short/misaligned/invalid => REJECT explicite via DecisionConsistencyError. Les nouvelles séries ne peuvent plus passer par l’extrapolation de dernière valeur à cause de ce filtre altitude.
+L’API clean-machine complète, avec météo valide et vrais calculs astronomiques, continue de créer une décision cohérente. Le refus initial trop large a été remplacé avant livraison par la conservation de preuve alignée; le test API reste passant.
+Aucune reconstruction de mission legacy, aucun changement du snapshot P2/persistance/API v10 existants.
+
+3. Importance utilisateur absente inventée à5, priorité50.
+Le champ importance est optionnel dans le profil validé. L’ancien default favorisait une préférence absente face à une importance explicitement basse.
+Probe baseline: importance absente => priorité50, final77.9; importance0 => priorité0, final74.0, avec les mêmes autres données.
+Correctif: contribution de score nulle quand importance manque; Candidate/API conserve priority=None pour l’absence d’évidence. Importance explicite0 reste une vraie préférence0. Pas de modification du profil persistant.
+75 invariants sur vrais candidats couvrent importance0/1/2/5/10, cinq scores astronomiques et trois progressions. Retirer importance n’augmente ni final_score ni decision_score dans ce périmètre.
+
+4. Cap portfolio discontinu, empêchant un fallback conservateur.
+Au-dessus de50% de la part astronomique, l’ancien calcul retirait30% de TOUT le bonus portfolio d’un coup. Une petite suppression de contribution pouvait ainsi améliorer le score.
+Probe runtime baseline: importance2.00 => score80.0; importance2.01 => score71.621. La contribution supplémentaire de0.01 d’importance abaissait le résultat de plus de8 points.
+Correctif: appliquer la réduction de30% seulement à l’excès au-dessus du seuil. Le score est continu et monotone dans cette contribution. Ce changement concerne une politique de score, pas les algorithmes météo/lunaires/AQI. Il est nécessaire pour que la contribution neutre d’une importance inconnue soit conservatrice.
+Les scores connus peuvent changer et des préférences proches peuvent être départagées autrement. Deux constantes de régression sont actualisées; identité, action et vainqueur des cas testés restent explicitement vérifiés. Il ne faut pas présenter cette PR comme un simple changement d’affichage ni promettre un ranking global inchangé.
+
+Findings ouverts et limites
+P1 — Disponibilité utilisateur omise: request availability=None est accepté et interprété comme sans contrainte; retirer un UNTIL défavorable peut donc créer une fenêtre actionnable. Le test de caractérisation du vrai service de windowing le confirme; ce test n’est pas un invariant de sûreté. Politique souhaitée: REJECT pour engagement/acceptation d’une mission sans disponibilité explicite, tout en permettant une étude de viabilité physique non engageante. Les deux usages de None sont actuellement partagés dans candidate assessment/alternatives. Les séparer demande un contrat actionability/API/acceptance cohérent, pas le remplacement aveugle de None par all_night ou un refus général de la viabilité physique. Prochaine priorité recommandée.
+
+P2 — Diagnostics inconnus encore convertis en valeurs: risk label inconnu=>50; remaining falsey=>5h; priority falsey=>50; capacité sans historique=>4h source profile même si préférence absente. Ces defaults peuvent déformer des diagnostics ou des impacts de risque. Le scope distingue leur effet sur ranking, confidence et statut; ils ne sont pas tous des causes de mission créée.
+P2 — Scores partiels: AQI omet des métriques et renormalise les poids; une confidence moindre n’empêche pas un score plus haut qu’avec une preuve adverse. SeeingRule et certains modèles ont score0 pour unknown alors qu’un résultat connu peut être négatif. Les entrées critiques nominales et le catalogue actuel empêchent plusieurs de ces états depuis l’API; les helpers/services restent vulnérables à des contextes artisanaux. Aucun nouvel algorithme AQI proposé ici.
+P2 — History/filter progress/credits: distinguer zéro observé, ledger vide complet et historique inconnu. Les intent progress modernes absents restent inéligibles et donnent gain0; les crédits réellement observés ne sont pas des données inventées, mais ne prouvent pas que toute l’ancienne baseline est connue.
+P2 — Legacy filter fallback available[0], context matériel synthétique, absence d’inventory: lecture fidèle des anciennes missions préservée, mais la validité d’une nouvelle décision legacy doit être qualifiée explicitement. Les profils optiques modernes absents/ambigus sont déjà refusés, sans profil générique reconstitué.
+P2/P3 — Defaults FutureOpportunity 0.35,10h,3h/nuit et roadmap5h/6h: actifs dans des frontières future/roadmap; pas atteints par l’estimation Tonight nominale actuelle car celle-ci retourne unknown avant météo sans observation_time. Ne pas prétendre un exploit API Tonight prouvé pour ces chemins.
+P2/P3 — ProductiveWindowAssessment defaults20%/60%/5kmh/1.5/0.2 et6h: atteignables en appel interne avec contexte incomplet, pas démontrés depuis le producteur API nominal. build_decision_context exige les valeurs météo critiques; build_mission_input exige les bornes; les séries production sont validées. Les défauts ne sont pas certifiés neutres: durcissement des frontières internes recommandé.
+
+Reachability et couverture des cas demandés
+(a,d) Météo absente, partielle, clouds/humidity/wind missing: météo absente HTTP503 existant;27 nouveaux tests HTTP par neuf champs requis × missing/short/null, avec requests transport remplacé seulement et fetch/validation production inchangés.
+(b,c) Arrays courts et moon missing: la météo provider courte est rejetée; le lunaire court généré après ingress est confirmé/corrigé; nouveau consumer refuse absence, raccourcissement, horodatage faux, NaN/null/bool/hors plage.
+(e)6h: latent PWA quand aucune durée/bornes; builder API réel utilise elapsed_hours des bornes. Tests DST/folds préservés.
+(f) Disponibilité: None vs UNTIL test de caractérisation; all_night explicitement utilisateur et clean-machine API complète passent.
+(g) Progress: nouveaux HTTP production loader hours/target_hours absents=>503 sans météo et sans mutation fichier; tests modernes intent unknown=>ineligible/gain0 et suites progress/credit existantes passent.
+(h) Profil absent/ambigu: tests resolver/composition/reconciliation existants, aucune préférence reconstruite.
+(i) Future defaults: nouveau HTTP pour unknown=>absence de+8; autres branches classifiées service/roadmap, non revendiquées API nominale.
+(j) Legacy: tests lineage/accepted transport existants préservent None/provenance; aucun schema persistence modifié.
+(k) Conservatisme:75 invariants priority/score, refus ingress missing/short, série lunaire horodatée adverse17.5 vs0, garde de gain/remaining moderne existant. Le conservatisme GLOBAL n’est pas certifié: disponibilité omise et métriques partielles restent ouverts. Des tests passants ne les transforment pas en politiques acceptables.
+
+Validation
+Tests ciblés finaux:115 tests du nouveau fichier de reachability/conservatisme; aucun échec.
+Suite élargie pertinente:3740 tests passants, aucun échec, aucun skip;44 avertissements Astropy sur des transformations de coordonnées. La suite inclut architecture, API, services et decision/tests. Les15 dernières variantes de paramétrage ont été validées dans les115 tests ciblés après la suite, sans modification supplémentaire du code de production.
+Node fourni par le runtime de l’application pour les harness UI. Les tests de loopback sont exécutés avec autorisation hors sandbox; aucun réseau externe autorisé par les tests. Les premiers échecs environnement Node/loopback ont été résolus par ce contexte, pas par une suppression de tests.
+git diff --check propre. Revue des fichiers scoped. Vérification finale du stash, main et absence de modifications Field Lab dans livraison-git.txt.
+
+Fichiers d’audit
+matrice-fallbacks-tonight.txt: matrice lisible,75 familles.
+matrice-fallbacks-tonight.json: matrice structurée,manifest55 fichiers.
+inventaire-syntaxique-fallbacks.json:758 occurrences de soutien; guards inclus, pas tous des bugs.
+preuves-baseline.json: observations reproductibles des quatre défauts baseline.
+livraison-git.txt: branche, SHA, PR et état final.
+
+La PR est séparée et ne doit pas être mergée automatiquement. Prochaine priorité: disponibilité explicite et séparation entre viabilité physique, statut de preuve et engagement utilisateur; ensuite diagnostics unknown/risque et métriques partielles conservatrices.

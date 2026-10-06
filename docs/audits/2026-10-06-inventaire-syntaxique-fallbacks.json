@@ -1,0 +1,4610 @@
+{
+  "scope_manifest": [
+    "astro_score.py",
+    "astropilot/app.py",
+    "astropilot/engines/sky_engine.py",
+    "astropilot/user_profile.py",
+    "decision/acceptance_lineage_persistence.py",
+    "decision/calculators/setup_calculator.py",
+    "decision/engines/decision_summary_engine.py",
+    "decision/engines/future_opportunity_engine.py",
+    "decision/engines/image_quality_engine.py",
+    "decision/engines/night_strategy_engine.py",
+    "decision/filtering/filter_inventory_loader.py",
+    "decision/filtering/filter_selection_engine.py",
+    "decision/forecast/forecast_engine.py",
+    "decision/mission/mission_assembler.py",
+    "decision/mission/mission_builder.py",
+    "decision/mission/mission_input.py",
+    "decision/models/candidate.py",
+    "decision/models/resolution_model.py",
+    "decision/models/sampling_model.py",
+    "decision/night_productivity/night_conditions_provider.py",
+    "decision/night_productivity/night_timeline_builder.py",
+    "decision/opportunity/opportunity_engine.py",
+    "decision/portfolio/historical_night_capacity_estimator.py",
+    "decision/portfolio/portfolio_engine.py",
+    "decision/portfolio/portfolio_forecast_engine.py",
+    "decision/portfolio/project_filter_progress.py",
+    "decision/portfolio/project_gain.py",
+    "decision/portfolio/project_scoring.py",
+    "decision/portfolio/project_state.py",
+    "decision/quality/astro_quality_engine.py",
+    "decision/recommendation/recommendation_engine.py",
+    "decision/risk/postponement_impact.py",
+    "decision/risk/project_risk_context_builder.py",
+    "decision/rules/object_fit_rule.py",
+    "decision/rules/sampling_rule.py",
+    "decision/rules/seeing_rule.py",
+    "decision/season/dynamic_season_engine.py",
+    "decision/season/season_resolver.py",
+    "decision/services/acquisition_intent_composition.py",
+    "decision/services/acquisition_intent_eligibility.py",
+    "decision/services/acquisition_intent_filter_profile_resolution.py",
+    "decision/services/acquisition_intent_remaining_progress.py",
+    "decision/services/candidate_assessment.py",
+    "decision/services/durable_tonight_application_service.py",
+    "decision/services/intent_night_evidence_builder.py",
+    "decision/services/lunar_contamination_estimator.py",
+    "decision/services/project_imaging_field_resolution.py",
+    "decision/services/session_availability_windowing.py",
+    "decision/services/tonight_application_service.py",
+    "decision/services/tonight_mission_service.py",
+    "decision/services/tonight_response.py",
+    "decision/services/user_selection_mission.py",
+    "decision/validation/weather_window_coverage.py",
+    "decision/weather/weather_ingress.py",
+    "decision/weather/weather_trust_decision.py"
+  ],
+  "note": "Inventaire syntaxique de soutien: get/setdefault/getattr/or/branches None. Inclut des guards qui ne sont pas des fallbacks et ne prouve pas une exhaustivité sémantique ni la reachability. Les familles métier sont classifiées dans la matrice.",
+  "occurrences": [
+    {
+      "source": "astro_score.py",
+      "line": 272,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['14', 'None'], 'keyword': {}}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 570,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'profile': 'None', 'for_intent_selection': 'False'}}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 725,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [\"'balanced'\"], 'keyword': {}}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 800,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {'object_evaluations': 'None', 'session_availability': 'None', 'weather_snapshot': 'None', 'weather_freshness': 'None', 'decision_location': 'None'}}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1223,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1257,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1314,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['4', 'None'], 'keyword': {}}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1842,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2090,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [\"'deep_sky'\", 'None', \"'nebulae'\", 'None', 'None'], 'keyword': {}}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2176,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2196,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2396,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 455,
+      "kind": "mapping_default",
+      "expression": "project.get('astro_score', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 456,
+      "kind": "mapping_default",
+      "expression": "project.get('roi', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 457,
+      "kind": "mapping_default",
+      "expression": "project.get('postponement_risk', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 458,
+      "kind": "mapping_default",
+      "expression": "project.get('marginal_progress_bonus', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 462,
+      "kind": "mapping_default",
+      "expression": "project.get('closure_bonus', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 496,
+      "kind": "mapping_default",
+      "expression": "setup.get('focal_length_mm', setup.get('focal_length', 135))"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 501,
+      "kind": "mapping_default",
+      "expression": "setup.get('sensor_width_mm', setup.get('sensor_width', 23.5))"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 532,
+      "kind": "mapping_default",
+      "expression": "setup.get('focal_length_mm', setup.get('focal_length', 135))"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 533,
+      "kind": "mapping_default",
+      "expression": "setup.get('f_ratio', 5.6)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 535,
+      "kind": "mapping_default",
+      "expression": "project.get('type', '')"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 571,
+      "kind": "falsey_fallback",
+      "expression": "profile or {}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 572,
+      "kind": "mapping_default",
+      "expression": "profile.get('projects', {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 577,
+      "kind": "mapping_default",
+      "expression": "evaluation.get('catalog_key', evaluation.get('name'))"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 581,
+      "kind": "mapping_default",
+      "expression": "projects.get(catalog_key, {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 779,
+      "kind": "mapping_default",
+      "expression": "strategies.get(mode, strategies['balanced'])"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 811,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 813,
+      "kind": "mapping_default",
+      "expression": "prefs.get('astro_weight', 0.7)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 814,
+      "kind": "mapping_default",
+      "expression": "prefs.get('project_weight', 0.3)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 815,
+      "kind": "mapping_default",
+      "expression": "prefs.get('decision_mode', 'balanced')"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 817,
+      "kind": "mapping_default",
+      "expression": "profile.get('projects', {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1232,
+      "kind": "none_branch",
+      "expression": "rows[0].get('time').tzinfo if rows and isinstance(rows[0], dict) and (getattr(rows[0].get('time'), 'tzinfo', None) is not None) else None"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1238,
+      "kind": "falsey_fallback",
+      "expression": "row_zone or ZoneInfo(timezone_name or TIMEZONE)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1258,
+      "kind": "falsey_fallback",
+      "expression": "profile or {}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1319,
+      "kind": "mapping_default",
+      "expression": "obj.get('imaging_difficulty', 3)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1393,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1423,
+      "kind": "mapping_default",
+      "expression": "profile.get('available_equipment', [])"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1620,
+      "kind": "mapping_default",
+      "expression": "profile.get('projects', {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1624,
+      "kind": "none_branch",
+      "expression": "project['remaining'] if project is not None else 0"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1630,
+      "kind": "none_branch",
+      "expression": "project['progress'] if project is not None else 0"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1637,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {}).get('productive_hours_per_night', 4.0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1652,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {}).get('observing_nights_per_week', 0.0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1747,
+      "kind": "falsey_fallback",
+      "expression": "len(lunar_details) != len(selected_hours) or not selected_hours"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1886,
+      "kind": "none_branch",
+      "expression": "resolve_equipment_definition(profile, best_setup) if best_setup is not None else None"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2134,
+      "kind": "falsey_fallback",
+      "expression": "row_zone or (ZoneInfo(weather.timezone) if isinstance(weather, WeatherSnapshot) else LocationTimeResolver.resolve(lat, lon).zone)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2177,
+      "kind": "falsey_fallback",
+      "expression": "profile or {}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2197,
+      "kind": "falsey_fallback",
+      "expression": "profile or {}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2625,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2627,
+      "kind": "mapping_default",
+      "expression": "preferences.get('productive_hours_per_night', 4.0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 199,
+      "kind": "mapping_default",
+      "expression": "value.get('size_arcmin', value.get('width_arcmin', 30))"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 307,
+      "kind": "mapping_default",
+      "expression": "h.get('cloud_cover', 100)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 308,
+      "kind": "mapping_default",
+      "expression": "h.get('relative_humidity_2m', 100)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 498,
+      "kind": "mapping_default",
+      "expression": "setup.get('focal_length', 135)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 503,
+      "kind": "mapping_default",
+      "expression": "setup.get('sensor_width', 23.5)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 532,
+      "kind": "mapping_default",
+      "expression": "setup.get('focal_length', 135)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 537,
+      "kind": "mapping_default",
+      "expression": "project.get('name', '')"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 538,
+      "kind": "mapping_default",
+      "expression": "CATALOG.get(name, {}).get('type', '')"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 608,
+      "kind": "none_branch",
+      "expression": "capacity.remaining_hours if capacity is not None else None"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 648,
+      "kind": "mapping_default",
+      "expression": "CATALOG.get(catalog_key, {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 658,
+      "kind": "mapping_default",
+      "expression": "profile.get('projects', {}).get(catalog_key, {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 824,
+      "kind": "mapping_default",
+      "expression": "obj.get('catalog_key', obj.get('name'))"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 826,
+      "kind": "falsey_fallback",
+      "expression": "'global_score' in obj or 'score' in obj"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 828,
+      "kind": "mapping_default",
+      "expression": "obj.get('global_score', obj.get('score', 0))"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 889,
+      "kind": "none_branch",
+      "expression": "derive_acquisition_intent_remaining_progress(imaging_field, project_targets, resolve_project_acquisition_intent_progress(project, imaging_field_resolver), credit_totals(profile, catalog_key)) if imaging_field is not None else ()"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1055,
+      "kind": "none_branch",
+      "expression": "min(15, roi * 0.2) if roi is not None else 0"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1199,
+      "kind": "none_branch",
+      "expression": "snapshot.timezone if snapshot is not None else TIMEZONE"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1291,
+      "kind": "mapping_default",
+      "expression": "item.get('reasons', [])"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1299,
+      "kind": "none_branch",
+      "expression": "f'{fill_ratio:.2f}' if fill_ratio is not None else '?'"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1341,
+      "kind": "mapping_default",
+      "expression": "base_hours.get(difficulty, 6)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1342,
+      "kind": "mapping_default",
+      "expression": "bortle_factor.get(bortle, 1.0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1352,
+      "kind": "mapping_default",
+      "expression": "filter_factor.get(filter_type, 1.0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1438,
+      "kind": "falsey_fallback",
+      "expression": "setup.get('pixel_size_um') or setup.get('pixel_size_mm')"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1522,
+      "kind": "falsey_fallback",
+      "expression": "isinstance(value, bool) or not isinstance(value, (int, float)) or (not isfinite(value))"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1746,
+      "kind": "mapping_default",
+      "expression": "best.get('details', [])"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1829,
+      "kind": "mapping_default",
+      "expression": "best.get('season_bonus', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1830,
+      "kind": "mapping_default",
+      "expression": "best.get('weather_bonus', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1881,
+      "kind": "mapping_default",
+      "expression": "setup_ranking[0].get('reasons', [])"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1896,
+      "kind": "mapping_default",
+      "expression": "profile.get('projects', {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1968,
+      "kind": "mapping_default",
+      "expression": "top3[0].get('setup_score', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1969,
+      "kind": "mapping_default",
+      "expression": "top3[0].get('global_score', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2132,
+      "kind": "attribute_default",
+      "expression": "getattr(rows[0].get('time'), 'tzinfo', None)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2643,
+      "kind": "mapping_default",
+      "expression": "preferences.get('observing_nights_per_week', 0.0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 201,
+      "kind": "mapping_default",
+      "expression": "value.get('width_arcmin', 30)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 614,
+      "kind": "none_branch",
+      "expression": "min(astronomical_hours, remaining_hours) if remaining_hours is not None else 0.0"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 828,
+      "kind": "mapping_default",
+      "expression": "obj.get('score', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 976,
+      "kind": "none_branch",
+      "expression": "selected_capacity.remaining_hours if selected_capacity is not None else None"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1027,
+      "kind": "none_branch",
+      "expression": "closure_bonus_for_remaining(remaining_for_night, available_hours) if available_hours is not None else 0"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1035,
+      "kind": "none_branch",
+      "expression": "closure_bonus(catalog_key, available_hours, projects=projects) if available_hours is not None else 0"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1097,
+      "kind": "mapping_default",
+      "expression": "projects.get(catalog_key, {}).get('hours', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1238,
+      "kind": "falsey_fallback",
+      "expression": "timezone_name or TIMEZONE"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1404,
+      "kind": "mapping_default",
+      "expression": "preferences.get('window_size', 2)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1501,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1593,
+      "kind": "attribute_default",
+      "expression": "getattr(session_zone, 'key', str(session_zone))"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1611,
+      "kind": "mapping_default",
+      "expression": "best.get('moon_sep', 180)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1637,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1647,
+      "kind": "mapping_default",
+      "expression": "profile.get('sessions', [])"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1652,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1676,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {}).get('astro_weight', 0.7)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1680,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {}).get('project_weight', 0.3)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1687,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {}).get('min_sqm', 20)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1753,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(detail, dict) or isinstance(detail.get('moon'), bool) or (not isinstance(detail.get('moon'), (int, float))) or (not isfinite(detail['moon'])) or (not 0 <= detail['moon'] <= 35)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2634,
+      "kind": "mapping_default",
+      "expression": "profile.get('sessions', [])"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 289,
+      "kind": "mapping_default",
+      "expression": "h.get('cloud_cover', 100)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 290,
+      "kind": "mapping_default",
+      "expression": "h.get('relative_humidity_2m', 100)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 291,
+      "kind": "mapping_default",
+      "expression": "h.get('wind_speed_10m', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 292,
+      "kind": "mapping_default",
+      "expression": "h.get('temperature_2m', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 293,
+      "kind": "mapping_default",
+      "expression": "h.get('visibility', 10000)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 538,
+      "kind": "mapping_default",
+      "expression": "CATALOG.get(name, {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 631,
+      "kind": "none_branch",
+      "expression": "[min(1.0, max(0.0, value / 35.0)) for value in selected_weather.hourly_moon_penalty] if selected_weather.hourly_moon_penalty is not None else None"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 658,
+      "kind": "mapping_default",
+      "expression": "profile.get('projects', {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 667,
+      "kind": "mapping_default",
+      "expression": "profile.get('sessions', [])"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 878,
+      "kind": "mapping_default",
+      "expression": "project.get('target_hours', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 879,
+      "kind": "mapping_default",
+      "expression": "project.get('hours', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1010,
+      "kind": "mapping_default",
+      "expression": "obj.get('confidence', 'MOYENNE')"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1206,
+      "kind": "none_branch",
+      "expression": "datetime.fromtimestamp(float(t), timezone.utc).astimezone(zone) if snapshot is not None else datetime.fromisoformat(t).replace(tzinfo=zone)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1235,
+      "kind": "attribute_default",
+      "expression": "getattr(rows[0].get('time'), 'tzinfo', None)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1272,
+      "kind": "mapping_default",
+      "expression": "obj.get('size_arcmin', '?')"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1433,
+      "kind": "mapping_default",
+      "expression": "CATALOG.get(obj_name, {}).get('type', '')"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1685,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1765,
+      "kind": "mapping_default",
+      "expression": "h.get('cloud_cover', 100)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1769,
+      "kind": "mapping_default",
+      "expression": "h.get('relative_humidity_2m', 100)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1773,
+      "kind": "mapping_default",
+      "expression": "h.get('wind_speed_10m', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1788,
+      "kind": "mapping_default",
+      "expression": "h.get('temperature_2m', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1792,
+      "kind": "mapping_default",
+      "expression": "h.get('visibility', 10000)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2027,
+      "kind": "mapping_default",
+      "expression": "r.get('setup_score', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2029,
+      "kind": "mapping_default",
+      "expression": "r.get('global_score', r['score'])"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2054,
+      "kind": "mapping_default",
+      "expression": "all_results[0]['window'].get('top_windows', [best])"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2161,
+      "kind": "mapping_default",
+      "expression": "profile.get('projects', {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 683,
+      "kind": "none_branch",
+      "expression": "0.0 if moon_penalty is None else moon_penalty"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 945,
+      "kind": "none_branch",
+      "expression": "assessment.productive_window if assessment is not None else None"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 951,
+      "kind": "none_branch",
+      "expression": "assessment.weather_decision if assessment is not None else None"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 956,
+      "kind": "none_branch",
+      "expression": "evaluation['decision_context'].site if evaluation is not None and 'decision_context' in evaluation else None"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1097,
+      "kind": "mapping_default",
+      "expression": "projects.get(catalog_key, {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1110,
+      "kind": "mapping_default",
+      "expression": "obj.get('global_score', astro_score)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1111,
+      "kind": "mapping_default",
+      "expression": "obj.get('setup_score', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1134,
+      "kind": "none_branch",
+      "expression": "imaging_field.imaging_field_id if imaging_field is not None else None"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1574,
+      "kind": "mapping_default",
+      "expression": "CATALOG.get(obj_name, {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1575,
+      "kind": "mapping_default",
+      "expression": "CATALOG.get(obj_name, {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1676,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1680,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1687,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1778,
+      "kind": "mapping_default",
+      "expression": "h.get('wind_speed_10m', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1779,
+      "kind": "mapping_default",
+      "expression": "h.get('relative_humidity_2m', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1155,
+      "kind": "mapping_default",
+      "expression": "obj.get('global_score', astro_score)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1156,
+      "kind": "mapping_default",
+      "expression": "obj.get('setup_score', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1433,
+      "kind": "mapping_default",
+      "expression": "CATALOG.get(obj_name, {})"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2010,
+      "kind": "mapping_default",
+      "expression": "r['window']['details'][0].get('project_bonus', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2020,
+      "kind": "mapping_default",
+      "expression": "r['window']['details'][0].get('priority_bonus', 0)"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 1121,
+      "kind": "none_branch",
+      "expression": "{'roi': roi, 'closure_bonus': closure} if available_hours is not None else {}"
+    },
+    {
+      "source": "astro_score.py",
+      "line": 2678,
+      "kind": "attribute_default",
+      "expression": "getattr(tonight_result, 'timeline_start', None)"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 462,
+      "kind": "declared_field_default",
+      "expression": "start: datetime | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 463,
+      "kind": "declared_field_default",
+      "expression": "end: datetime | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 464,
+      "kind": "declared_field_default",
+      "expression": "start_local: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 465,
+      "kind": "declared_field_default",
+      "expression": "end_local: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 466,
+      "kind": "declared_field_default",
+      "expression": "duration: timedelta | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 472,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'site_zone': 'None'}}"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 578,
+      "kind": "declared_field_default",
+      "expression": "location: LocationRequest | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 579,
+      "kind": "declared_field_default",
+      "expression": "availability: SessionAvailabilityRequest | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 580,
+      "kind": "declared_field_default",
+      "expression": "equipment: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 581,
+      "kind": "declared_field_default",
+      "expression": "goal: Literal['balanced', 'galaxies', 'nebulae', 'widefield', 'small_targets', 'highest_score', 'best_setup'] = 'balanced'"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 590,
+      "kind": "declared_field_default",
+      "expression": "target: Literal['milky_way', 'deep_sky', 'planetary', 'moon', 'nightscape'] = 'deep_sky'"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 597,
+      "kind": "declared_field_default",
+      "expression": "bortle: int | None = Field(default=None, ge=1, le=9)"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 603,
+      "kind": "declared_field_default",
+      "expression": "acceptance_request_id: str = Field(min_length=1, max_length=128, pattern='^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 610,
+      "kind": "declared_field_default",
+      "expression": "selected_catalog_key: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 611,
+      "kind": "declared_field_default",
+      "expression": "acquisition_intent_id: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 636,
+      "kind": "declared_field_default",
+      "expression": "bandwidth_nm: float | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 637,
+      "kind": "declared_field_default",
+      "expression": "source: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 644,
+      "kind": "declared_field_default",
+      "expression": "description: str = ''"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 645,
+      "kind": "declared_field_default",
+      "expression": "priority: int = 0"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 649,
+      "kind": "declared_field_default",
+      "expression": "lunar_evidence_snapshot: LunarEvidenceSnapshot | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 653,
+      "kind": "declared_field_default",
+      "expression": "imaging_field_id: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 654,
+      "kind": "declared_field_default",
+      "expression": "acquisition_intent_id: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 656,
+      "kind": "declared_field_default",
+      "expression": "confidence: float | str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 657,
+      "kind": "declared_field_default",
+      "expression": "equipment: list[str] = Field(default_factory=list)"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 659,
+      "kind": "declared_field_default",
+      "expression": "window_start: datetime | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 660,
+      "kind": "declared_field_default",
+      "expression": "window_end: datetime | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 661,
+      "kind": "declared_field_default",
+      "expression": "recommended_hours: float = 0.0"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 662,
+      "kind": "declared_field_default",
+      "expression": "expected_gain: float = 0.0"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 663,
+      "kind": "declared_field_default",
+      "expression": "selected_filter: AcceptedMissionFilterResponse | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 664,
+      "kind": "declared_field_default",
+      "expression": "tasks: list[AcceptedMissionTaskResponse] = Field(default_factory=list)"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 669,
+      "kind": "declared_field_default",
+      "expression": "mission_id: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 672,
+      "kind": "declared_field_default",
+      "expression": "catalog_key: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 673,
+      "kind": "declared_field_default",
+      "expression": "selected_imaging_field_id: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 674,
+      "kind": "declared_field_default",
+      "expression": "selected_acquisition_intent_id: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 675,
+      "kind": "declared_field_default",
+      "expression": "mission: AcceptedMissionResponse | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 746,
+      "kind": "declared_field_default",
+      "expression": "actual_capture_duration: timedelta | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 747,
+      "kind": "declared_field_default",
+      "expression": "usable_integration_duration: timedelta | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 791,
+      "kind": "declared_field_default",
+      "expression": "actual_capture_duration: timedelta | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 792,
+      "kind": "declared_field_default",
+      "expression": "usable_integration_duration: timedelta | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 798,
+      "kind": "declared_field_default",
+      "expression": "temperature_c: float | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 799,
+      "kind": "declared_field_default",
+      "expression": "relative_humidity_percent: float | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 800,
+      "kind": "declared_field_default",
+      "expression": "cloud_state: CloudState | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 801,
+      "kind": "declared_field_default",
+      "expression": "transparency: Transparency | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 802,
+      "kind": "declared_field_default",
+      "expression": "seeing: SeeingCondition | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 803,
+      "kind": "declared_field_default",
+      "expression": "wind_speed_kmh: float | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 804,
+      "kind": "declared_field_default",
+      "expression": "surface_condition: SurfaceCondition | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 805,
+      "kind": "declared_field_default",
+      "expression": "moon_halo: bool | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 814,
+      "kind": "declared_field_default",
+      "expression": "attempted_frames: int | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 815,
+      "kind": "declared_field_default",
+      "expression": "usable_frames: int | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 816,
+      "kind": "declared_field_default",
+      "expression": "stop_reason: StopReason | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 825,
+      "kind": "declared_field_default",
+      "expression": "hfr: float | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 826,
+      "kind": "declared_field_default",
+      "expression": "hfr_unit: HfrUnit | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 827,
+      "kind": "declared_field_default",
+      "expression": "sky_background: float | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 828,
+      "kind": "declared_field_default",
+      "expression": "sky_background_unit: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 829,
+      "kind": "declared_field_default",
+      "expression": "guiding_rms_arcsec: float | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 844,
+      "kind": "declared_field_default",
+      "expression": "execution_id: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 846,
+      "kind": "declared_field_default",
+      "expression": "recorded_at_utc: AwareDatetime | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 847,
+      "kind": "declared_field_default",
+      "expression": "supersedes_observation_id: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 848,
+      "kind": "declared_field_default",
+      "expression": "conditions: FieldObservationConditionsRequest = Field(default_factory=FieldObservationConditionsRequest)"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 851,
+      "kind": "declared_field_default",
+      "expression": "acquisition: FieldObservationAcquisitionRequest = Field(default_factory=FieldObservationAcquisitionRequest)"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 854,
+      "kind": "declared_field_default",
+      "expression": "technical: FieldObservationTechnicalRequest = Field(default_factory=FieldObservationTechnicalRequest)"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 857,
+      "kind": "declared_field_default",
+      "expression": "confidence: Confidence = Confidence.MEDIUM"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 858,
+      "kind": "declared_field_default",
+      "expression": "quality_flags: tuple[QualityFlag, ...] = (QualityFlag.ESTIMATED,)"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 959,
+      "kind": "declared_field_default",
+      "expression": "value: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 965,
+      "kind": "declared_field_default",
+      "expression": "bandwidth_nm: float | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 966,
+      "kind": "declared_field_default",
+      "expression": "source: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 971,
+      "kind": "declared_field_default",
+      "expression": "confidence: float = Field(ge=0.0, le=1.0, description='Completeness of AQI inputs; not weather forecast reliability.')"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 979,
+      "kind": "declared_field_default",
+      "expression": "limiting_factor: str | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 980,
+      "kind": "declared_field_default",
+      "expression": "metrics: dict[str, float] = Field(default_factory=dict)"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 1000,
+      "kind": "declared_field_default",
+      "expression": "productive_fraction: float = Field(ge=0.0, le=1.0)"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 2514,
+      "kind": "declared_field_default",
+      "expression": "weather_freshness: WeatherFreshness | None = None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 470,
+      "kind": "falsey_fallback",
+      "expression": "self.start_local is not None or self.end_local is not None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 861,
+      "kind": "falsey_fallback",
+      "expression": "self.recorded_at_utc or self.observed_at_utc"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 474,
+      "kind": "falsey_fallback",
+      "expression": "self.start is not None or self.end is not None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 770,
+      "kind": "falsey_fallback",
+      "expression": "self.actual_capture_duration is not None or self.usable_integration_duration is not None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 2434,
+      "kind": "none_branch",
+      "expression": "request.location.model_dump() if request.location is not None else None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 514,
+      "kind": "none_branch",
+      "expression": "normalize_local_wall_time(self.start_local, site_zone) if self.start_local is not None else None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 519,
+      "kind": "none_branch",
+      "expression": "normalize_local_wall_time(self.end_local, site_zone) if self.end_local is not None else None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 2534,
+      "kind": "mapping_default",
+      "expression": "messages.get(exc.code, 'Weather data failed validation.')"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 2619,
+      "kind": "attribute_default",
+      "expression": "getattr(result, 'recommendation', None)"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 2621,
+      "kind": "none_branch",
+      "expression": "recommendation.opportunity if recommendation is not None else None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 2625,
+      "kind": "falsey_fallback",
+      "expression": "getattr(result, 'night', None) or {}"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 2626,
+      "kind": "mapping_default",
+      "expression": "night.get('object_evaluations', {})"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 2628,
+      "kind": "none_branch",
+      "expression": "object_evaluations.get(opportunity.candidate.catalog_key) if opportunity is not None else None"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 2625,
+      "kind": "attribute_default",
+      "expression": "getattr(result, 'night', None)"
+    },
+    {
+      "source": "astropilot/app.py",
+      "line": 2652,
+      "kind": "falsey_fallback",
+      "expression": "issues and issues <= decisional_issues or (weather_coverage_subject is None and issues == {'invalid_mission_window'})"
+    },
+    {
+      "source": "astropilot/engines/sky_engine.py",
+      "line": 37,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "astropilot/engines/sky_engine.py",
+      "line": 518,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['4', \"'deep_sky'\", 'None', \"'balanced'\", '2', '30', '3'], 'keyword': {}}"
+    },
+    {
+      "source": "astropilot/engines/sky_engine.py",
+      "line": 38,
+      "kind": "falsey_fallback",
+      "expression": "context or {}"
+    },
+    {
+      "source": "astropilot/engines/sky_engine.py",
+      "line": 327,
+      "kind": "mapping_default",
+      "expression": "penalties.get(bortle, 40)"
+    },
+    {
+      "source": "astropilot/engines/sky_engine.py",
+      "line": 353,
+      "kind": "mapping_default",
+      "expression": "{1: 21.9, 2: 21.7, 3: 21.3, 4: 20.8, 5: 20.2, 6: 19.5, 7: 18.8, 8: 18.2, 9: 17.5}.get(bortle, 20.0)"
+    },
+    {
+      "source": "astropilot/engines/sky_engine.py",
+      "line": 573,
+      "kind": "falsey_fallback",
+      "expression": "target_obj or {}"
+    },
+    {
+      "source": "astropilot/engines/sky_engine.py",
+      "line": 575,
+      "kind": "mapping_default",
+      "expression": "obj_meta.get('difficulty', 2)"
+    },
+    {
+      "source": "astropilot/engines/sky_engine.py",
+      "line": 576,
+      "kind": "mapping_default",
+      "expression": "obj_meta.get('magnitude', 8)"
+    },
+    {
+      "source": "astropilot/engines/sky_engine.py",
+      "line": 577,
+      "kind": "mapping_default",
+      "expression": "obj_meta.get('type', 'unknown')"
+    },
+    {
+      "source": "astropilot/engines/sky_engine.py",
+      "line": 581,
+      "kind": "mapping_default",
+      "expression": "obj_meta.get('size_arcmin', 30)"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 624,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'expected_revision': 'None', 'preserve_legacy_setups': 'False'}}"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 830,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'expected_revision': 'None'}}"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 908,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 54,
+      "kind": "mapping_default",
+      "expression": "profile.get('profile_revision', 0)"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 56,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(revision, int) or isinstance(revision, bool) or revision < 0"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 142,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(equipment_id, str) or not equipment_id.strip()"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 209,
+      "kind": "mapping_default",
+      "expression": "preferences.get('min_altitude_deg', preferences.get('minimum_altitude_deg', 30))"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 254,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {})"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 594,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(active_equipment, str) or not active_equipment.strip()"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 602,
+      "kind": "mapping_default",
+      "expression": "profile.get('available_equipment', [])"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 666,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(available_equipment, list) or not available_equipment"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 713,
+      "kind": "mapping_default",
+      "expression": "normalized.setdefault('sessions', [])"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 756,
+      "kind": "mapping_default",
+      "expression": "validated.setdefault('profile_revision', 0)"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 766,
+      "kind": "mapping_default",
+      "expression": "load_user_profile().get('preferences', {}).get('favorite_targets', ['galaxy', 'nebula'])"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 919,
+      "kind": "mapping_default",
+      "expression": "profile.get('projects', {})"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 945,
+      "kind": "mapping_default",
+      "expression": "profile.setdefault('sessions', [])"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 109,
+      "kind": "falsey_fallback",
+      "expression": "os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA')"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 155,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(value, str) or not value.strip()"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 163,
+      "kind": "falsey_fallback",
+      "expression": "not is_finite_number(value) or value <= 0"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 211,
+      "kind": "mapping_default",
+      "expression": "preferences.get('minimum_altitude_deg', 30)"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 248,
+      "kind": "falsey_fallback",
+      "expression": "not is_finite_number(weight) or weight < 0"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 260,
+      "kind": "falsey_fallback",
+      "expression": "not is_finite_number(weight) or weight < 0"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 269,
+      "kind": "falsey_fallback",
+      "expression": "not is_finite_number(productive_hours) or productive_hours <= 0"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 281,
+      "kind": "falsey_fallback",
+      "expression": "not is_finite_number(observing_nights) or not 0 <= observing_nights <= 7"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 293,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(window_size, int) or isinstance(window_size, bool) or window_size <= 0"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 307,
+      "kind": "falsey_fallback",
+      "expression": "not is_finite_number(altitude) or not 0 <= altitude <= 90"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 329,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(bortle, int) or isinstance(bortle, bool) or (not 1 <= bortle <= 9)"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 340,
+      "kind": "falsey_fallback",
+      "expression": "not is_finite_number(min_sqm) or not 0 <= min_sqm <= 30"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 364,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(name, str) or not name.strip()"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 371,
+      "kind": "falsey_fallback",
+      "expression": "not is_finite_number(latitude) or not -90 <= latitude <= 90"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 378,
+      "kind": "falsey_fallback",
+      "expression": "not is_finite_number(longitude) or not -180 <= longitude <= 180"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 385,
+      "kind": "mapping_default",
+      "expression": "profile.get('available_equipment', [])"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 388,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(equipment_name, str) or not equipment_name.strip()"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 538,
+      "kind": "mapping_default",
+      "expression": "profile.get('sessions', [])"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 547,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(object_name, str) or not object_name.strip()"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 556,
+      "kind": "falsey_fallback",
+      "expression": "not is_finite_number(hours) or hours <= 0"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 689,
+      "kind": "falsey_fallback",
+      "expression": "catalog_entry is None or 'ra' not in catalog_entry or 'dec' not in catalog_entry"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 709,
+      "kind": "mapping_default",
+      "expression": "normalized_project.setdefault('hours', 0)"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 841,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(expected_revision, int) or isinstance(expected_revision, bool) or expected_revision < 0"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 853,
+      "kind": "none_branch",
+      "expression": "_profile_revision(current, path) if current is not None else 0"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 929,
+      "kind": "mapping_default",
+      "expression": "project.get('hours', 0)"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 932,
+      "kind": "mapping_default",
+      "expression": "project.get('target_hours', 0)"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 237,
+      "kind": "mapping_default",
+      "expression": "profile.get('equipment_definitions', {})"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 247,
+      "kind": "mapping_default",
+      "expression": "profile.get('decision_weights', {})"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 397,
+      "kind": "mapping_default",
+      "expression": "profile.get('projects', {})"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 461,
+      "kind": "falsey_fallback",
+      "expression": "not is_finite_number(value) or value < 0"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 478,
+      "kind": "falsey_fallback",
+      "expression": "not is_finite_number(importance) or not 0 <= importance <= 10"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 503,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(filter_name, str) or not filter_name.strip()"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 511,
+      "kind": "falsey_fallback",
+      "expression": "not is_finite_number(target_hours) or target_hours < 0"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 565,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(filter_type, str) or not filter_type.strip()"
+    },
+    {
+      "source": "astropilot/user_profile.py",
+      "line": 766,
+      "kind": "mapping_default",
+      "expression": "load_user_profile().get('preferences', {})"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 292,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'schema_version': 'SCHEMA_VERSION'}}"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 485,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'schema_version': 'SCHEMA_VERSION'}}"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 508,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'schema_version': 'SCHEMA_VERSION'}}"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 525,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'schema_version': 'SCHEMA_VERSION'}}"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 542,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'schema_version': 'SCHEMA_VERSION'}}"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 555,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'enforce_imaging_field_consistency': 'True', 'enforce_acquisition_intent_consistency': 'True'}}"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 690,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'decision_id': 'None'}}"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 180,
+      "kind": "declared_field_default",
+      "expression": "selections: tuple[UserSelection, ...] = ()"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 181,
+      "kind": "declared_field_default",
+      "expression": "missions: tuple[NightMission, ...] = ()"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 182,
+      "kind": "declared_field_default",
+      "expression": "acceptance_requests: tuple[AcceptanceRequestMapping, ...] = ()"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 190,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(value, str) or _IDENTITY_PATTERN.fullmatch(value) is None"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 207,
+      "kind": "falsey_fallback",
+      "expression": "value is None or isinstance(value, (str, bool, int))"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 287,
+      "kind": "falsey_fallback",
+      "expression": "type(value) is not dict or set(value) != expected_fields"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 293,
+      "kind": "falsey_fallback",
+      "expression": "value is None or isinstance(value, (str, bool, int))"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 706,
+      "kind": "falsey_fallback",
+      "expression": "isinstance(version, bool) or not isinstance(version, int) or version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, SCHEMA_VERSION)"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 214,
+      "kind": "falsey_fallback",
+      "expression": "value.tzinfo is None or value.utcoffset() is None"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 313,
+      "kind": "falsey_fallback",
+      "expression": "result.tzinfo is None or result.utcoffset() is None"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 337,
+      "kind": "falsey_fallback",
+      "expression": "isinstance(raw, bool) or not isinstance(raw, int)"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 350,
+      "kind": "falsey_fallback",
+      "expression": "type(attributes) is not dict or any((not isinstance(key, str) for key in attributes))"
+    },
+    {
+      "source": "decision/acceptance_lineage_persistence.py",
+      "line": 395,
+      "kind": "falsey_fallback",
+      "expression": "type(items) is not dict or any((not isinstance(key, str) for key in items))"
+    },
+    {
+      "source": "decision/engines/future_opportunity_engine.py",
+      "line": 17,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None', 'None'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/engines/future_opportunity_engine.py",
+      "line": 29,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None', 'None', 'None', 'None', 'None'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/engines/future_opportunity_engine.py",
+      "line": 54,
+      "kind": "mapping_default",
+      "expression": "profile.get('location', {})"
+    },
+    {
+      "source": "decision/engines/future_opportunity_engine.py",
+      "line": 57,
+      "kind": "none_branch",
+      "expression": "latitude if latitude is not None else location.get('latitude')"
+    },
+    {
+      "source": "decision/engines/future_opportunity_engine.py",
+      "line": 62,
+      "kind": "none_branch",
+      "expression": "longitude if longitude is not None else location.get('longitude')"
+    },
+    {
+      "source": "decision/engines/future_opportunity_engine.py",
+      "line": 148,
+      "kind": "none_branch",
+      "expression": "snapshot.payload if snapshot is not None else weather"
+    },
+    {
+      "source": "decision/engines/future_opportunity_engine.py",
+      "line": 149,
+      "kind": "falsey_fallback",
+      "expression": "not payload or 'hourly' not in payload"
+    },
+    {
+      "source": "decision/engines/future_opportunity_engine.py",
+      "line": 153,
+      "kind": "mapping_default",
+      "expression": "hourly.get('time', [])"
+    },
+    {
+      "source": "decision/engines/future_opportunity_engine.py",
+      "line": 154,
+      "kind": "mapping_default",
+      "expression": "hourly.get('cloud_cover', [])"
+    },
+    {
+      "source": "decision/engines/future_opportunity_engine.py",
+      "line": 155,
+      "kind": "mapping_default",
+      "expression": "hourly.get('relative_humidity_2m', [])"
+    },
+    {
+      "source": "decision/engines/future_opportunity_engine.py",
+      "line": 156,
+      "kind": "mapping_default",
+      "expression": "hourly.get('wind_speed_10m', [])"
+    },
+    {
+      "source": "decision/engines/future_opportunity_engine.py",
+      "line": 157,
+      "kind": "mapping_default",
+      "expression": "hourly.get('precipitation', [])"
+    },
+    {
+      "source": "decision/engines/night_strategy_engine.py",
+      "line": 33,
+      "kind": "declared_field_default",
+      "expression": "strategy_scores: dict[str, float] = {}"
+    },
+    {
+      "source": "decision/engines/night_strategy_engine.py",
+      "line": 52,
+      "kind": "mapping_default",
+      "expression": "strategy_scores.get(decision_mode, fallback_score)"
+    },
+    {
+      "source": "decision/filtering/filter_inventory_loader.py",
+      "line": 10,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/filtering/filter_inventory_loader.py",
+      "line": 24,
+      "kind": "mapping_default",
+      "expression": "data.get('filters', [])"
+    },
+    {
+      "source": "decision/filtering/filter_inventory_loader.py",
+      "line": 28,
+      "kind": "falsey_fallback",
+      "expression": "not name or not filter_type"
+    },
+    {
+      "source": "decision/filtering/filter_selection_engine.py",
+      "line": 53,
+      "kind": "mapping_default",
+      "expression": "remaining.get(candidate.filter_type, 0.0)"
+    },
+    {
+      "source": "decision/filtering/filter_selection_engine.py",
+      "line": 65,
+      "kind": "mapping_default",
+      "expression": "remaining.get(item.filter_type, 0.0)"
+    },
+    {
+      "source": "decision/forecast/forecast_engine.py",
+      "line": 35,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/forecast/forecast_engine.py",
+      "line": 149,
+      "kind": "mapping_default",
+      "expression": "top3[0].get('best_setup', 'inconnu')"
+    },
+    {
+      "source": "decision/forecast/forecast_engine.py",
+      "line": 184,
+      "kind": "none_branch",
+      "expression": "rows[0].get('time').tzinfo if rows and isinstance(rows[0], dict) and (getattr(rows[0].get('time'), 'tzinfo', None) is not None) else None"
+    },
+    {
+      "source": "decision/forecast/forecast_engine.py",
+      "line": 190,
+      "kind": "attribute_default",
+      "expression": "getattr(row_zone, 'key', self.timezone)"
+    },
+    {
+      "source": "decision/forecast/forecast_engine.py",
+      "line": 62,
+      "kind": "mapping_default",
+      "expression": "hour.get('cloud_cover', 100)"
+    },
+    {
+      "source": "decision/forecast/forecast_engine.py",
+      "line": 66,
+      "kind": "mapping_default",
+      "expression": "hour.get('relative_humidity_2m', 100)"
+    },
+    {
+      "source": "decision/forecast/forecast_engine.py",
+      "line": 70,
+      "kind": "mapping_default",
+      "expression": "hour.get('wind_speed_10m', 0)"
+    },
+    {
+      "source": "decision/forecast/forecast_engine.py",
+      "line": 74,
+      "kind": "mapping_default",
+      "expression": "hour.get('temperature_2m', 0)"
+    },
+    {
+      "source": "decision/forecast/forecast_engine.py",
+      "line": 78,
+      "kind": "mapping_default",
+      "expression": "hour.get('visibility', 10000)"
+    },
+    {
+      "source": "decision/forecast/forecast_engine.py",
+      "line": 187,
+      "kind": "attribute_default",
+      "expression": "getattr(rows[0].get('time'), 'tzinfo', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 55,
+      "kind": "declared_field_default",
+      "expression": "maximum_mission_hours: float | None = None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 56,
+      "kind": "declared_field_default",
+      "expression": "productivity_breakdown: ProductivityBreakdown | None = None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 57,
+      "kind": "declared_field_default",
+      "expression": "acquisition_capacity: AcquisitionIntentRemainingProgress | None = None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 60,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'weather': 'None', 'mission_input': 'None'}}"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 217,
+      "kind": "declared_field_default",
+      "expression": "actionability_refusal: ActionabilityRefusal | None = None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 280,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None', 'None', 'False'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 69,
+      "kind": "none_branch",
+      "expression": "mission_input.weather if mission_input is not None and mission_input.weather is not None else weather"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 73,
+      "kind": "attribute_default",
+      "expression": "getattr(context, 'weather', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 74,
+      "kind": "attribute_default",
+      "expression": "getattr(context, 'session', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 77,
+      "kind": "none_branch",
+      "expression": "mission_input.astronomical_hours if mission_input is not None else None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 115,
+      "kind": "none_branch",
+      "expression": "mission_input.moon_penalty if mission_input is not None else None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 126,
+      "kind": "none_branch",
+      "expression": "mission_input.window_start if mission_input is not None and mission_input.window_start is not None else getattr(context_session, 'start_time', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 132,
+      "kind": "none_branch",
+      "expression": "observation_time.hour + observation_time.minute / 60 if observation_time is not None else 22"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 166,
+      "kind": "none_branch",
+      "expression": "mission_input.recommended_hours if mission_input is not None else 0"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 168,
+      "kind": "attribute_default",
+      "expression": "getattr(productivity, 'productive_hours', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 169,
+      "kind": "attribute_default",
+      "expression": "getattr(productivity, 'windows', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 180,
+      "kind": "none_branch",
+      "expression": "mission_input.expected_gain if mission_input is not None else 0"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 319,
+      "kind": "none_branch",
+      "expression": "mission_input.weather if mission_input is not None and mission_input.weather is not None else weather"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 323,
+      "kind": "attribute_default",
+      "expression": "getattr(context, 'weather', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 324,
+      "kind": "attribute_default",
+      "expression": "getattr(context, 'session', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 343,
+      "kind": "none_branch",
+      "expression": "mission_input.moon_penalty if mission_input is not None else None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 354,
+      "kind": "none_branch",
+      "expression": "mission_input.window_start if mission_input is not None and mission_input.window_start is not None else getattr(context_session, 'start_time', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 397,
+      "kind": "attribute_default",
+      "expression": "getattr(context.sky, 'target_altitude_deg', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 91,
+      "kind": "attribute_default",
+      "expression": "getattr(context_session, 'start_time', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 92,
+      "kind": "attribute_default",
+      "expression": "getattr(context_session, 'end_time', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 99,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_weather, 'hourly_clouds', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 100,
+      "kind": "attribute_default",
+      "expression": "getattr(context_weather, 'cloud_cover', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 103,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_weather, 'hourly_humidity', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 104,
+      "kind": "attribute_default",
+      "expression": "getattr(context_weather, 'humidity', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 107,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_weather, 'hourly_wind', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 108,
+      "kind": "attribute_default",
+      "expression": "getattr(context_weather, 'wind_speed_kmh', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 111,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_weather, 'hourly_seeing', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 112,
+      "kind": "attribute_default",
+      "expression": "getattr(context_weather, 'seeing_arcsec', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 129,
+      "kind": "attribute_default",
+      "expression": "getattr(context_session, 'start_time', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 269,
+      "kind": "none_branch",
+      "expression": "capacity_hours if assessment.acquisition_capacity is not None else round(capacity_hours, 2)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 327,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_weather, 'hourly_clouds', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 328,
+      "kind": "attribute_default",
+      "expression": "getattr(context_weather, 'cloud_cover', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 331,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_weather, 'hourly_humidity', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 332,
+      "kind": "attribute_default",
+      "expression": "getattr(context_weather, 'humidity', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 335,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_weather, 'hourly_seeing', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 336,
+      "kind": "attribute_default",
+      "expression": "getattr(context_weather, 'seeing_arcsec', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 339,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_weather, 'hourly_temperature', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 340,
+      "kind": "attribute_default",
+      "expression": "getattr(context_weather, 'temperature_c', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 357,
+      "kind": "attribute_default",
+      "expression": "getattr(context_session, 'start_time', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 368,
+      "kind": "none_branch",
+      "expression": "mission_input.availability if mission_input is not None else None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 461,
+      "kind": "none_branch",
+      "expression": "mission_input.window_start if mission_input is not None and mission_input.window_start is not None else context.session.start_time"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 467,
+      "kind": "none_branch",
+      "expression": "mission_input.window_end if mission_input is not None and mission_input.window_end is not None else context.session.end_time"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 121,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_weather, 'hourly_moon_penalty', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 190,
+      "kind": "none_branch",
+      "expression": "mission_input.window_start if mission_input is not None else getattr(context_session, 'start_time', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 195,
+      "kind": "none_branch",
+      "expression": "mission_input.window_end if mission_input is not None else getattr(context_session, 'end_time', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 203,
+      "kind": "none_branch",
+      "expression": "mission_input.recommended_hours if mission_input is not None else None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 209,
+      "kind": "none_branch",
+      "expression": "mission_input.acquisition_capacity if mission_input is not None else None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 349,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_weather, 'hourly_moon_penalty', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 446,
+      "kind": "none_branch",
+      "expression": "mission_input.window_start if mission_input is not None and mission_input.window_start is not None else context.session.start_time"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 479,
+      "kind": "none_branch",
+      "expression": "mission_input.mission_id if mission_input is not None else None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 484,
+      "kind": "none_branch",
+      "expression": "mission_input.decision_id if mission_input is not None else None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 489,
+      "kind": "none_branch",
+      "expression": "mission_input.selection_id if mission_input is not None else None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 494,
+      "kind": "none_branch",
+      "expression": "mission_input.imaging_field_id if mission_input is not None else None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 499,
+      "kind": "none_branch",
+      "expression": "mission_input.acquisition_intent_id if mission_input is not None else None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 503,
+      "kind": "none_branch",
+      "expression": "mission_input.lunar_evidence_snapshot if mission_input is not None else None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 512,
+      "kind": "none_branch",
+      "expression": "mission_input.selected_filter if mission_input is not None else None"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 140,
+      "kind": "none_branch",
+      "expression": "20 if cloud_cover is None else cloud_cover"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 141,
+      "kind": "none_branch",
+      "expression": "0.2 if moon_penalty is None else moon_penalty"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 143,
+      "kind": "none_branch",
+      "expression": "60 if humidity is None else humidity"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 144,
+      "kind": "none_branch",
+      "expression": "5 if wind is None else wind"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 145,
+      "kind": "none_branch",
+      "expression": "1.5 if seeing is None else seeing"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 147,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_weather, 'hourly_clouds', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 148,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_weather, 'hourly_humidity', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 149,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_weather, 'hourly_wind', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 150,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_weather, 'hourly_seeing', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 151,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_weather, 'hourly_moon_penalty', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 192,
+      "kind": "attribute_default",
+      "expression": "getattr(context_session, 'start_time', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 197,
+      "kind": "attribute_default",
+      "expression": "getattr(context_session, 'end_time', None)"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 410,
+      "kind": "none_branch",
+      "expression": "20.0 if cloud_cover is None else cloud_cover"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 415,
+      "kind": "none_branch",
+      "expression": "0.2 if moon_penalty is None else moon_penalty"
+    },
+    {
+      "source": "decision/mission/mission_assembler.py",
+      "line": 422,
+      "kind": "none_branch",
+      "expression": "dew_risk.score if dew_risk is not None else None"
+    },
+    {
+      "source": "decision/mission/mission_builder.py",
+      "line": 10,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None', 'None'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/mission/mission_builder.py",
+      "line": 32,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None', 'None'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/mission/mission_input.py",
+      "line": 24,
+      "kind": "declared_field_default",
+      "expression": "selected_filter: SelectedFilter | None = None"
+    },
+    {
+      "source": "decision/mission/mission_input.py",
+      "line": 25,
+      "kind": "declared_field_default",
+      "expression": "availability: SessionAvailability | None = None"
+    },
+    {
+      "source": "decision/mission/mission_input.py",
+      "line": 26,
+      "kind": "declared_field_default",
+      "expression": "mission_id: str | None = None"
+    },
+    {
+      "source": "decision/mission/mission_input.py",
+      "line": 27,
+      "kind": "declared_field_default",
+      "expression": "decision_id: str | None = None"
+    },
+    {
+      "source": "decision/mission/mission_input.py",
+      "line": 28,
+      "kind": "declared_field_default",
+      "expression": "selection_id: str | None = None"
+    },
+    {
+      "source": "decision/mission/mission_input.py",
+      "line": 29,
+      "kind": "declared_field_default",
+      "expression": "imaging_field_id: str | None = None"
+    },
+    {
+      "source": "decision/mission/mission_input.py",
+      "line": 30,
+      "kind": "declared_field_default",
+      "expression": "acquisition_intent_id: str | None = None"
+    },
+    {
+      "source": "decision/mission/mission_input.py",
+      "line": 31,
+      "kind": "declared_field_default",
+      "expression": "acquisition_capacity: AcquisitionIntentRemainingProgress | None = None"
+    },
+    {
+      "source": "decision/mission/mission_input.py",
+      "line": 32,
+      "kind": "declared_field_default",
+      "expression": "evidence_only: bool = False"
+    },
+    {
+      "source": "decision/mission/mission_input.py",
+      "line": 34,
+      "kind": "declared_field_default",
+      "expression": "lunar_evidence_snapshot: LunarEvidenceSnapshot | None = None"
+    },
+    {
+      "source": "decision/mission/mission_input.py",
+      "line": 38,
+      "kind": "falsey_fallback",
+      "expression": "self.imaging_field_id is None or self.acquisition_intent_id is None"
+    },
+    {
+      "source": "decision/mission/mission_input.py",
+      "line": 63,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(self.imaging_field_id, str) or not self.imaging_field_id.strip()"
+    },
+    {
+      "source": "decision/mission/mission_input.py",
+      "line": 68,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(self.acquisition_intent_id, str) or not self.acquisition_intent_id.strip()"
+    },
+    {
+      "source": "decision/mission/mission_input.py",
+      "line": 52,
+      "kind": "falsey_fallback",
+      "expression": "self.recommended_hours != 0 or self.expected_gain != 0"
+    },
+    {
+      "source": "decision/mission/mission_input.py",
+      "line": 58,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(value, str) or not value.strip()"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 43,
+      "kind": "declared_field_default",
+      "expression": "acquired_hours: float | None = 0.0"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 44,
+      "kind": "declared_field_default",
+      "expression": "acquisition_intent_remaining_progress: tuple[AcquisitionIntentRemainingProgress, ...] = ()"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 45,
+      "kind": "declared_field_default",
+      "expression": "provenance: CandidateProvenance = CandidateProvenance.PROJECT"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 46,
+      "kind": "declared_field_default",
+      "expression": "imaging_field_id: str | None = None"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 47,
+      "kind": "declared_field_default",
+      "expression": "selected_acquisition_intent_id: str | None = None"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 48,
+      "kind": "declared_field_default",
+      "expression": "viable_acquisition_intent_ids: tuple[str, ...] = ()"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 49,
+      "kind": "declared_field_default",
+      "expression": "acquisition_intent_selection_status: AcquisitionIntentSelectionStatus | None = None"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 52,
+      "kind": "declared_field_default",
+      "expression": "acquisition_intent_assessments: tuple[AcquisitionIntentAssessment, ...] = ()"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 55,
+      "kind": "declared_field_default",
+      "expression": "reasons: list[str] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 56,
+      "kind": "declared_field_default",
+      "expression": "strategy_scores: dict = field(default_factory=dict)"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 58,
+      "kind": "declared_field_default",
+      "expression": "lunar_evidence_snapshot: LunarEvidenceSnapshot | None = None"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 200,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 106,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(self.acquisition_intent_assessments, tuple) or not all((isinstance(item, AcquisitionIntentAssessment) for item in self.acquisition_intent_assessments))"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 152,
+      "kind": "falsey_fallback",
+      "expression": "selected is None or viable != (selected,)"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 201,
+      "kind": "attribute_default",
+      "expression": "getattr(self, key, default)"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 69,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(self.imaging_field_id, str) or not self.imaging_field_id.strip()"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 74,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(self.selected_acquisition_intent_id, str) or not self.selected_acquisition_intent_id.strip()"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 134,
+      "kind": "falsey_fallback",
+      "expression": "selected is not None or viable or self.acquisition_intent_assessments"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 140,
+      "kind": "falsey_fallback",
+      "expression": "selected is not None or viable"
+    },
+    {
+      "source": "decision/models/candidate.py",
+      "line": 146,
+      "kind": "falsey_fallback",
+      "expression": "selected is not None or len(viable) < 2"
+    },
+    {
+      "source": "decision/models/resolution_model.py",
+      "line": 24,
+      "kind": "falsey_fallback",
+      "expression": "object_size_arcmin is None or pixel_size is None"
+    },
+    {
+      "source": "decision/models/sampling_model.py",
+      "line": 58,
+      "kind": "falsey_fallback",
+      "expression": "sampling_arcsec_pixel is None or seeing_arcsec is None"
+    },
+    {
+      "source": "decision/opportunity/opportunity_engine.py",
+      "line": 38,
+      "kind": "none_branch",
+      "expression": "Action.CONTINUE_PROJECT if candidate.acquired_hours is not None and candidate.acquired_hours > 0 else Action.START_PROJECT"
+    },
+    {
+      "source": "decision/portfolio/historical_night_capacity_estimator.py",
+      "line": 26,
+      "kind": "falsey_fallback",
+      "expression": "not date or hours <= 0"
+    },
+    {
+      "source": "decision/portfolio/historical_night_capacity_estimator.py",
+      "line": 24,
+      "kind": "mapping_default",
+      "expression": "session.get('hours', 0)"
+    },
+    {
+      "source": "decision/portfolio/historical_night_capacity_estimator.py",
+      "line": 30,
+      "kind": "mapping_default",
+      "expression": "hours_by_night.get(date, 0.0)"
+    },
+    {
+      "source": "decision/portfolio/portfolio_engine.py",
+      "line": 37,
+      "kind": "mapping_default",
+      "expression": "result.get('catalog_key', result.get('name'))"
+    },
+    {
+      "source": "decision/portfolio/portfolio_forecast_engine.py",
+      "line": 9,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None', 'None'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/portfolio/portfolio_forecast_engine.py",
+      "line": 21,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None', '5'], 'keyword': {'profile': 'None'}}"
+    },
+    {
+      "source": "decision/portfolio/portfolio_forecast_engine.py",
+      "line": 36,
+      "kind": "mapping_default",
+      "expression": "profile.get('projects', {})"
+    },
+    {
+      "source": "decision/portfolio/portfolio_forecast_engine.py",
+      "line": 51,
+      "kind": "mapping_default",
+      "expression": "capacity.get('hours', avg_night_hours)"
+    },
+    {
+      "source": "decision/portfolio/portfolio_forecast_engine.py",
+      "line": 156,
+      "kind": "mapping_default",
+      "expression": "capacity.get('hours', avg_night_hours)"
+    },
+    {
+      "source": "decision/portfolio/project_filter_progress.py",
+      "line": 152,
+      "kind": "mapping_default",
+      "expression": "project.get('hours', 0.0)"
+    },
+    {
+      "source": "decision/portfolio/project_filter_progress.py",
+      "line": 35,
+      "kind": "mapping_default",
+      "expression": "session.get('hours', 0.0)"
+    },
+    {
+      "source": "decision/portfolio/project_filter_progress.py",
+      "line": 118,
+      "kind": "mapping_default",
+      "expression": "session.get('hours', 0.0)"
+    },
+    {
+      "source": "decision/portfolio/project_gain.py",
+      "line": 43,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['3.0'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/portfolio/project_gain.py",
+      "line": 80,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['3.0'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/portfolio/project_gain.py",
+      "line": 117,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['3.0'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/portfolio/project_gain.py",
+      "line": 17,
+      "kind": "falsey_fallback",
+      "expression": "capacity is None or capacity.remaining_hours is None or capacity.target_hours is None or (capacity.target_hours <= 0)"
+    },
+    {
+      "source": "decision/portfolio/project_gain.py",
+      "line": 87,
+      "kind": "none_branch",
+      "expression": "state['remaining'] if state is not None else None"
+    },
+    {
+      "source": "decision/portfolio/project_gain.py",
+      "line": 89,
+      "kind": "falsey_fallback",
+      "expression": "remaining is None or remaining <= 0"
+    },
+    {
+      "source": "decision/portfolio/project_gain.py",
+      "line": 97,
+      "kind": "mapping_default",
+      "expression": "projects.get(name, {})"
+    },
+    {
+      "source": "decision/portfolio/project_gain.py",
+      "line": 101,
+      "kind": "mapping_default",
+      "expression": "project.get('target_hours', 0)"
+    },
+    {
+      "source": "decision/portfolio/project_scoring.py",
+      "line": 26,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['3.0'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/portfolio/project_scoring.py",
+      "line": 48,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['3.0'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/portfolio/project_scoring.py",
+      "line": 63,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['3.0'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/portfolio/project_scoring.py",
+      "line": 30,
+      "kind": "falsey_fallback",
+      "expression": "remaining is None or remaining <= 0"
+    },
+    {
+      "source": "decision/portfolio/project_scoring.py",
+      "line": 55,
+      "kind": "none_branch",
+      "expression": "state['remaining'] if state is not None else None"
+    },
+    {
+      "source": "decision/portfolio/project_scoring.py",
+      "line": 72,
+      "kind": "mapping_default",
+      "expression": "project.get('importance', 5)"
+    },
+    {
+      "source": "decision/portfolio/project_scoring.py",
+      "line": 17,
+      "kind": "mapping_default",
+      "expression": "project.get('importance', 0)"
+    },
+    {
+      "source": "decision/portfolio/project_state.py",
+      "line": 12,
+      "kind": "mapping_default",
+      "expression": "project.get('hours', 0)"
+    },
+    {
+      "source": "decision/portfolio/project_state.py",
+      "line": 15,
+      "kind": "mapping_default",
+      "expression": "project.get('target_hours', 0)"
+    },
+    {
+      "source": "decision/risk/postponement_impact.py",
+      "line": 18,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [\"'MOYENNE'\", '50', '0'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/risk/postponement_impact.py",
+      "line": 12,
+      "kind": "mapping_default",
+      "expression": "mapping.get(str(risk).upper(), 50)"
+    },
+    {
+      "source": "decision/risk/postponement_impact.py",
+      "line": 37,
+      "kind": "mapping_default",
+      "expression": "{'HAUTE': 0.8, 'MOYENNE': 1.0, 'BASSE': 1.2}.get(str(confidence).upper(), 1.0)"
+    },
+    {
+      "source": "decision/risk/project_risk_context_builder.py",
+      "line": 10,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/risk/project_risk_context_builder.py",
+      "line": 13,
+      "kind": "falsey_fallback",
+      "expression": "context.portfolio.total_remaining_hours or 5"
+    },
+    {
+      "source": "decision/risk/project_risk_context_builder.py",
+      "line": 22,
+      "kind": "none_branch",
+      "expression": "observation_time if observation_time is not None else context.session.start_time"
+    },
+    {
+      "source": "decision/risk/project_risk_context_builder.py",
+      "line": 42,
+      "kind": "falsey_fallback",
+      "expression": "good_nights or 0"
+    },
+    {
+      "source": "decision/risk/project_risk_context_builder.py",
+      "line": 47,
+      "kind": "falsey_fallback",
+      "expression": "context.portfolio.highest_priority or 50"
+    },
+    {
+      "source": "decision/risk/project_risk_context_builder.py",
+      "line": 52,
+      "kind": "falsey_fallback",
+      "expression": "context.portfolio.average_progress or 0"
+    },
+    {
+      "source": "decision/rules/object_fit_rule.py",
+      "line": 14,
+      "kind": "mapping_default",
+      "expression": "result.metrics.get('occupation_percent', 0)"
+    },
+    {
+      "source": "decision/season/dynamic_season_engine.py",
+      "line": 42,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['30'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/season/dynamic_season_engine.py",
+      "line": 76,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['180', '30', '2.0'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/season/dynamic_season_engine.py",
+      "line": 83,
+      "kind": "falsey_fallback",
+      "expression": "context.latitude is None or context.longitude is None or context.observation_time is None"
+    },
+    {
+      "source": "decision/season/dynamic_season_engine.py",
+      "line": 189,
+      "kind": "falsey_fallback",
+      "expression": "useful_minutes > peak_useful_minutes or (useful_minutes == peak_useful_minutes and night_peak_altitude > peak_altitude)"
+    },
+    {
+      "source": "decision/season/season_resolver.py",
+      "line": 15,
+      "kind": "falsey_fallback",
+      "expression": "dynamic.remaining_days is None or dynamic.remaining_good_nights is None"
+    },
+    {
+      "source": "decision/services/acquisition_intent_composition.py",
+      "line": 112,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'remaining_progress': '()'}}"
+    },
+    {
+      "source": "decision/services/acquisition_intent_composition.py",
+      "line": 155,
+      "kind": "declared_field_default",
+      "expression": "resolved_profile_ids: dict[str, str] = {}"
+    },
+    {
+      "source": "decision/services/acquisition_intent_composition.py",
+      "line": 199,
+      "kind": "none_branch",
+      "expression": "select_continuous_actionable_productive_window(productive_window, session_availability) if productive_window is not None else None"
+    },
+    {
+      "source": "decision/services/acquisition_intent_composition.py",
+      "line": 206,
+      "kind": "falsey_fallback",
+      "expression": "actionable_window is None or site is None"
+    },
+    {
+      "source": "decision/services/acquisition_intent_composition.py",
+      "line": 171,
+      "kind": "falsey_fallback",
+      "expression": "resolution is None or resolution.status is not AcquisitionIntentFilterProfileResolutionStatus.RESOLVED"
+    },
+    {
+      "source": "decision/services/acquisition_intent_eligibility.py",
+      "line": 64,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'remaining_progress': 'None'}}"
+    },
+    {
+      "source": "decision/services/acquisition_intent_eligibility.py",
+      "line": 143,
+      "kind": "declared_field_default",
+      "expression": "evidence_gaps: list[AcquisitionIntentEvidenceGap] = []"
+    },
+    {
+      "source": "decision/services/acquisition_intent_eligibility.py",
+      "line": 81,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(project_targets, tuple) or not all((isinstance(target, ProjectAcquisitionIntentTarget) for target in project_targets))"
+    },
+    {
+      "source": "decision/services/acquisition_intent_eligibility.py",
+      "line": 194,
+      "kind": "falsey_fallback",
+      "expression": "remaining_progress is None or remaining_progress.remaining_hours is None"
+    },
+    {
+      "source": "decision/services/acquisition_intent_eligibility.py",
+      "line": 169,
+      "kind": "none_branch",
+      "expression": "existing_cap if existing_cap is not None else remaining_progress.remaining_hours"
+    },
+    {
+      "source": "decision/services/acquisition_intent_filter_profile_resolution.py",
+      "line": 40,
+      "kind": "declared_field_default",
+      "expression": "matching_filter_profile_ids: list[str] = []"
+    },
+    {
+      "source": "decision/services/acquisition_intent_remaining_progress.py",
+      "line": 12,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/services/acquisition_intent_remaining_progress.py",
+      "line": 35,
+      "kind": "mapping_default",
+      "expression": "(credits_us or {}).get(intent_id, 0)"
+    },
+    {
+      "source": "decision/services/acquisition_intent_remaining_progress.py",
+      "line": 38,
+      "kind": "none_branch",
+      "expression": "seconds / 3600 if seconds is not None else None"
+    },
+    {
+      "source": "decision/services/acquisition_intent_remaining_progress.py",
+      "line": 40,
+      "kind": "none_branch",
+      "expression": "max(target - hours, 0.0) if target is not None and hours is not None else None"
+    },
+    {
+      "source": "decision/services/acquisition_intent_remaining_progress.py",
+      "line": 35,
+      "kind": "falsey_fallback",
+      "expression": "credits_us or {}"
+    },
+    {
+      "source": "decision/services/acquisition_intent_remaining_progress.py",
+      "line": 37,
+      "kind": "falsey_fallback",
+      "expression": "seconds or 0"
+    },
+    {
+      "source": "decision/services/candidate_assessment.py",
+      "line": 52,
+      "kind": "attribute_default",
+      "expression": "getattr(candidate, 'acquisition_intent_selection_status', None)"
+    },
+    {
+      "source": "decision/services/durable_tonight_application_service.py",
+      "line": 52,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'acceptance_lineage_store': 'None', 'execution_lineage_store': 'None', 'acceptance_service': 'None', 'clock': 'None', 'profile_loader': 'None', 'profile_saver': 'None', 'field_observation_store': 'None', 'outcome_evaluation_store': 'None', 'outcome_evaluation_clock': 'None', 'outcome_history_service': 'None', 'recent_decision_reader': 'None'}}"
+    },
+    {
+      "source": "decision/services/durable_tonight_application_service.py",
+      "line": 196,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/services/durable_tonight_application_service.py",
+      "line": 326,
+      "kind": "falsey_fallback",
+      "expression": "self.profile_loader is None or self.profile_saver is None"
+    },
+    {
+      "source": "decision/services/durable_tonight_application_service.py",
+      "line": 346,
+      "kind": "falsey_fallback",
+      "expression": "self.profile_loader is None or self.profile_saver is None"
+    },
+    {
+      "source": "decision/services/intent_night_evidence_builder.py",
+      "line": 106,
+      "kind": "falsey_fallback",
+      "expression": "value.tzinfo is None or value.utcoffset() is None"
+    },
+    {
+      "source": "decision/services/lunar_contamination_estimator.py",
+      "line": 58,
+      "kind": "falsey_fallback",
+      "expression": "illumination is None or altitude_deg is None or separation_deg is None"
+    },
+    {
+      "source": "decision/services/project_imaging_field_resolution.py",
+      "line": 27,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(imaging_field_id, str) or not imaging_field_id.strip()"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 157,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'refusal_stage': 'None', 'productivity_breakdown': 'None'}}"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 44,
+      "kind": "declared_field_default",
+      "expression": "limiting_factors: tuple[dict[str, str], ...] = ()"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 45,
+      "kind": "declared_field_default",
+      "expression": "refusal_stage: ProductivityRefusalStage | None = None"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 46,
+      "kind": "declared_field_default",
+      "expression": "productivity_breakdown: ProductivityBreakdown | None = None"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 207,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(analysis_start, datetime) or not isinstance(analysis_end, datetime) or analysis_start.tzinfo is None or (analysis_end.tzinfo is None) or (analysis_start.utcoffset() is None) or (analysis_end.utcoffset() is None) or (analysis_end.astimezone(timezone.utc) <= analysis_start.astimezone(timezone.utc))"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 249,
+      "kind": "attribute_default",
+      "expression": "getattr(assessment.productivity, 'windows', None)"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 403,
+      "kind": "attribute_default",
+      "expression": "getattr(assessment.productivity, 'timeline', None)"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 521,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(window_start, datetime) or not isinstance(window_end, datetime) or window_start.tzinfo is None or (window_end.tzinfo is None) or (window_start.utcoffset() is None) or (window_end.utcoffset() is None) or (window_end.astimezone(timezone.utc) <= window_start.astimezone(timezone.utc))"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 66,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(self.required_continuous_minutes, int) or isinstance(self.required_continuous_minutes, bool) or self.required_continuous_minutes <= 0"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 224,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(maximum_mission_hours, (int, float)) or isinstance(maximum_mission_hours, bool) or (not isfinite(maximum_mission_hours)) or (maximum_mission_hours < 0)"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 271,
+      "kind": "falsey_fallback",
+      "expression": "start_hour < 0 or end_hour <= start_hour or end_hour > analysis_hours + 1e-09 or (not getattr(window, 'productive', False))"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 336,
+      "kind": "none_branch",
+      "expression": "breakdown.productive_slice_count > 0 if breakdown is not None else bool(productive_windows)"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 423,
+      "kind": "falsey_fallback",
+      "expression": "start_hour != cursor or end_hour <= start_hour or end_hour > total_hours or (not 0.0 <= productivity_score <= 1.0)"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 517,
+      "kind": "falsey_fallback",
+      "expression": "window_start is None or window_end is None"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 58,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(self.best_productive_window_minutes, (int, float)) or isinstance(self.best_productive_window_minutes, bool) or (not isfinite(self.best_productive_window_minutes)) or (self.best_productive_window_minutes < 0)"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 99,
+      "kind": "falsey_fallback",
+      "expression": "self.refusal_stage is not None or self.productivity_breakdown is not None"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 258,
+      "kind": "attribute_default",
+      "expression": "getattr(window, 'start_hour', None)"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 259,
+      "kind": "attribute_default",
+      "expression": "getattr(window, 'end_hour', None)"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 260,
+      "kind": "attribute_default",
+      "expression": "getattr(window, 'productivity', None)"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 297,
+      "kind": "none_branch",
+      "expression": "min(available_duration, duration_cap) if duration_cap is not None else available_duration"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 410,
+      "kind": "attribute_default",
+      "expression": "getattr(slice_, 'start_hour', None)"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 411,
+      "kind": "attribute_default",
+      "expression": "getattr(slice_, 'end_hour', None)"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 412,
+      "kind": "attribute_default",
+      "expression": "getattr(slice_, 'productivity_score', None)"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 263,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(value, (int, float)) or isinstance(value, bool) or (not isfinite(value))"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 274,
+      "kind": "attribute_default",
+      "expression": "getattr(window, 'productive', False)"
+    },
+    {
+      "source": "decision/services/session_availability_windowing.py",
+      "line": 415,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(value, (int, float)) or isinstance(value, bool) or (not isfinite(value))"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 72,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'location': 'None', 'bortle': 'None', 'equipment': 'None', 'availability': 'None'}}"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 69,
+      "kind": "declared_field_default",
+      "expression": "availability: SessionAvailability | None = None"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 122,
+      "kind": "declared_field_default",
+      "expression": "status: TonightStatus = TonightStatus.AVAILABLE"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 123,
+      "kind": "declared_field_default",
+      "expression": "forecast_evidence: DecisionForecastEvidence | None = None"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 124,
+      "kind": "declared_field_default",
+      "expression": "decision_id: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 125,
+      "kind": "declared_field_default",
+      "expression": "candidate_rejections: tuple[CandidateRejection, ...] = ()"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 126,
+      "kind": "declared_field_default",
+      "expression": "actionability_refusal: ActionabilityRefusal | None = None"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 127,
+      "kind": "declared_field_default",
+      "expression": "timeline_start: datetime | None = None"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 152,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'equipment': 'None', 'goal': \"'balanced'\", 'target': \"'deep_sky'\", 'availability': 'None'}}"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 47,
+      "kind": "none_branch",
+      "expression": "requested_equipment if requested_equipment is not None else profile.get('active_equipment')"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 54,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(selected_equipment, str) or resolve_equipment_definition(profile, selected_equipment) is None or (not isinstance(available_equipment, list)) or (selected_equipment not in available_equipment)"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 82,
+      "kind": "none_branch",
+      "expression": "location if location is not None else profile.get('location')"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 86,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(name, str) or not name.strip()"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 93,
+      "kind": "mapping_default",
+      "expression": "profile.get('preferences', {})"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 95,
+      "kind": "none_branch",
+      "expression": "bortle if bortle is not None else preferences.get('bortle') if isinstance(preferences, dict) else None"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 100,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(selected_bortle, int) or isinstance(selected_bortle, bool) or (not 1 <= selected_bortle <= 9)"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 178,
+      "kind": "declared_field_default",
+      "expression": "forecast_run: ForecastRun | None = self.forecast_nights(location['latitude'], location['longitude'], location['name'], inputs.bortle, target=target, goal=goal, weather=weather, profile=effective_profile, reference_time_utc=reference_time_utc)"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 90,
+      "kind": "falsey_fallback",
+      "expression": "not is_finite_number(value) or not -limit <= value <= limit"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 210,
+      "kind": "falsey_fallback",
+      "expression": "night.get('top_objects') or []"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 215,
+      "kind": "none_branch",
+      "expression": "validate_weather_freshness(weather_snapshot, reference_time_utc=reference_time_utc) if weather_snapshot is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 270,
+      "kind": "mapping_default",
+      "expression": "candidate.get('catalog_key', candidate.get('name'))"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 300,
+      "kind": "attribute_default",
+      "expression": "getattr(self.tonight_mission_service, 'create_with_actionability_diagnostic', None)"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 292,
+      "kind": "attribute_default",
+      "expression": "getattr(mission_input, 'window_start', None)"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 226,
+      "kind": "mapping_default",
+      "expression": "night.get('object_evaluations', {})"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 231,
+      "kind": "none_branch",
+      "expression": "WeatherLocation(latitude=location['latitude'], longitude=location['longitude']) if weather_snapshot is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_application_service.py",
+      "line": 328,
+      "kind": "none_branch",
+      "expression": "TonightStatus.NO_PRODUCTIVE_WINDOW if actionability_refusal is not None else TonightStatus.NO_MISSION"
+    },
+    {
+      "source": "decision/services/tonight_mission_service.py",
+      "line": 8,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/services/tonight_mission_service.py",
+      "line": 29,
+      "kind": "mapping_default",
+      "expression": "obj.get('catalog_key', obj.get('name'))"
+    },
+    {
+      "source": "decision/services/tonight_mission_service.py",
+      "line": 79,
+      "kind": "mapping_default",
+      "expression": "obj.get('catalog_key', obj.get('name'))"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 46,
+      "kind": "declared_field_default",
+      "expression": "category: RecommendationReasonCategory | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 47,
+      "kind": "declared_field_default",
+      "expression": "direction: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 48,
+      "kind": "declared_field_default",
+      "expression": "importance: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 49,
+      "kind": "declared_field_default",
+      "expression": "basis: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 50,
+      "kind": "declared_field_default",
+      "expression": "message: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 51,
+      "kind": "declared_field_default",
+      "expression": "rendered: RecommendationReasonRenderingResponse | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 57,
+      "kind": "declared_field_default",
+      "expression": "category: RecommendationReasonCategory | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 58,
+      "kind": "declared_field_default",
+      "expression": "direction: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 59,
+      "kind": "declared_field_default",
+      "expression": "importance: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 60,
+      "kind": "declared_field_default",
+      "expression": "basis: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 61,
+      "kind": "declared_field_default",
+      "expression": "message: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 62,
+      "kind": "declared_field_default",
+      "expression": "rendered: RecommendationReasonRenderingResponse | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 67,
+      "kind": "declared_field_default",
+      "expression": "category: RecommendationReasonCategory | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 69,
+      "kind": "declared_field_default",
+      "expression": "direction: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 70,
+      "kind": "declared_field_default",
+      "expression": "importance: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 71,
+      "kind": "declared_field_default",
+      "expression": "basis: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 72,
+      "kind": "declared_field_default",
+      "expression": "message: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 73,
+      "kind": "declared_field_default",
+      "expression": "evidence_ref: object | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 74,
+      "kind": "declared_field_default",
+      "expression": "rendered_reasons: tuple[RecommendationReasonRenderingResponse, ...] = ()"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 81,
+      "kind": "declared_field_default",
+      "expression": "primary_only_reasons: tuple[RecommendationReasonResponse, ...] = ()"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 82,
+      "kind": "declared_field_default",
+      "expression": "alternative_only_reasons: tuple[RecommendationReasonResponse, ...] = ()"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 83,
+      "kind": "declared_field_default",
+      "expression": "shared_reasons: tuple[RecommendationReasonResponse, ...] = ()"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 105,
+      "kind": "declared_field_default",
+      "expression": "reasons: tuple[PrimaryRecommendationReasonResponse | AlternativeReasonResponse, ...] = ()"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 121,
+      "kind": "declared_field_default",
+      "expression": "target_decision_status: TargetDecisionStatus = field(default=TargetDecisionStatus.NOT_RECOMMENDED, init=False)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 133,
+      "kind": "declared_field_default",
+      "expression": "target_decision_status: TargetDecisionStatus = field(default=TargetDecisionStatus.INSUFFICIENT_EVIDENCE, init=False)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 167,
+      "kind": "declared_field_default",
+      "expression": "value: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 174,
+      "kind": "declared_field_default",
+      "expression": "bandwidth_nm: float | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 175,
+      "kind": "declared_field_default",
+      "expression": "source: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 183,
+      "kind": "declared_field_default",
+      "expression": "limiting_factor: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 184,
+      "kind": "declared_field_default",
+      "expression": "metrics: dict[str, float] = field(default_factory=dict)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 269,
+      "kind": "declared_field_default",
+      "expression": "windows: list[TonightProductivityWindowResponse] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 286,
+      "kind": "declared_field_default",
+      "expression": "explanations: list[str] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 287,
+      "kind": "declared_field_default",
+      "expression": "required_nights: int | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 288,
+      "kind": "declared_field_default",
+      "expression": "productive_hours_per_night: float | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 289,
+      "kind": "declared_field_default",
+      "expression": "capacity_source: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 290,
+      "kind": "declared_field_default",
+      "expression": "historical_nights: int | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 291,
+      "kind": "declared_field_default",
+      "expression": "remaining_hours: float | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 292,
+      "kind": "declared_field_default",
+      "expression": "favorable_nights: int | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 293,
+      "kind": "declared_field_default",
+      "expression": "season_remaining_days: int | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 301,
+      "kind": "declared_field_default",
+      "expression": "data: dict = field(default_factory=dict)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 306,
+      "kind": "declared_field_default",
+      "expression": "positives: list[TonightReasonResponse] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 307,
+      "kind": "declared_field_default",
+      "expression": "warnings: list[TonightReasonResponse] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 308,
+      "kind": "declared_field_default",
+      "expression": "information: list[TonightReasonResponse] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 309,
+      "kind": "declared_field_default",
+      "expression": "limiting_factors: list[str] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 317,
+      "kind": "declared_field_default",
+      "expression": "description: str = ''"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 318,
+      "kind": "declared_field_default",
+      "expression": "priority: int = 0"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 350,
+      "kind": "declared_field_default",
+      "expression": "target_decision_status: TargetDecisionStatus | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 360,
+      "kind": "declared_field_default",
+      "expression": "target_decision_status: TargetDecisionStatus | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 361,
+      "kind": "declared_field_default",
+      "expression": "reasons: tuple[AlternativeReasonResponse, ...] = ()"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 362,
+      "kind": "declared_field_default",
+      "expression": "imaging_field_id: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 363,
+      "kind": "declared_field_default",
+      "expression": "selected_acquisition_intent_id: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 364,
+      "kind": "declared_field_default",
+      "expression": "viable_acquisition_intent_ids: tuple[str, ...] = ()"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 365,
+      "kind": "declared_field_default",
+      "expression": "acquisition_intent_selection_status: AcquisitionIntentSelectionStatus | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 368,
+      "kind": "declared_field_default",
+      "expression": "lunar_evidence_snapshot: LunarEvidenceSnapshot | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 369,
+      "kind": "declared_field_default",
+      "expression": "acquisition_intent_assessments: tuple[AcquisitionIntentAssessment, ...] = ()"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 434,
+      "kind": "declared_field_default",
+      "expression": "decision_id: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 435,
+      "kind": "declared_field_default",
+      "expression": "night_date: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 436,
+      "kind": "declared_field_default",
+      "expression": "target: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 437,
+      "kind": "declared_field_default",
+      "expression": "catalog_key: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 438,
+      "kind": "declared_field_default",
+      "expression": "target_common_name: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 439,
+      "kind": "declared_field_default",
+      "expression": "action: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 440,
+      "kind": "declared_field_default",
+      "expression": "provenance: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 441,
+      "kind": "declared_field_default",
+      "expression": "imaging_field_id: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 442,
+      "kind": "declared_field_default",
+      "expression": "selected_acquisition_intent_id: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 443,
+      "kind": "declared_field_default",
+      "expression": "viable_acquisition_intent_ids: tuple[str, ...] = ()"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 444,
+      "kind": "declared_field_default",
+      "expression": "acquisition_intent_selection_status: AcquisitionIntentSelectionStatus | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 447,
+      "kind": "declared_field_default",
+      "expression": "lunar_evidence_snapshot: LunarEvidenceSnapshot | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 448,
+      "kind": "declared_field_default",
+      "expression": "acquisition_intent_assessments: tuple[AcquisitionIntentAssessment, ...] = ()"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 451,
+      "kind": "declared_field_default",
+      "expression": "target_decision_status: TargetDecisionStatus | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 452,
+      "kind": "declared_field_default",
+      "expression": "actionability_refusal: ActionabilityRefusal | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 453,
+      "kind": "declared_field_default",
+      "expression": "shortlist_entries: list[TonightShortlistEntryResponse] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 456,
+      "kind": "declared_field_default",
+      "expression": "alternatives: list[TonightAlternativeResponse] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 459,
+      "kind": "declared_field_default",
+      "expression": "recommendation_confidence: float | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 460,
+      "kind": "declared_field_default",
+      "expression": "mission_confidence: float | str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 461,
+      "kind": "declared_field_default",
+      "expression": "scores: dict[str, float] = field(default_factory=dict)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 462,
+      "kind": "declared_field_default",
+      "expression": "window_start: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 463,
+      "kind": "declared_field_default",
+      "expression": "window_end: str | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 464,
+      "kind": "declared_field_default",
+      "expression": "recommended_hours: float = 0.0"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 465,
+      "kind": "declared_field_default",
+      "expression": "expected_gain: float = 0.0"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 466,
+      "kind": "declared_field_default",
+      "expression": "equipment: list[str] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 467,
+      "kind": "declared_field_default",
+      "expression": "selected_filter: TonightFilterResponse | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 468,
+      "kind": "declared_field_default",
+      "expression": "astro_quality: TonightAstroQualityResponse | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 469,
+      "kind": "declared_field_default",
+      "expression": "productivity: TonightProductivityResponse | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 470,
+      "kind": "declared_field_default",
+      "expression": "dew_risk: TonightDewRiskResponse | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 471,
+      "kind": "declared_field_default",
+      "expression": "postponement_risk: TonightPostponementRiskResponse | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 472,
+      "kind": "declared_field_default",
+      "expression": "season: TonightSeasonResponse | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 473,
+      "kind": "declared_field_default",
+      "expression": "explanation: TonightExplanationResponse | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 474,
+      "kind": "declared_field_default",
+      "expression": "reasons: list[TonightReasonResponse] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 475,
+      "kind": "declared_field_default",
+      "expression": "tasks: list[TonightTaskResponse] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 476,
+      "kind": "declared_field_default",
+      "expression": "advices: list[TonightAdviceResponse] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 477,
+      "kind": "declared_field_default",
+      "expression": "weather_decision: TonightWeatherDecisionResponse | None = None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 478,
+      "kind": "declared_field_default",
+      "expression": "rejected_targets: list[TonightRejectedTargetResponse] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 481,
+      "kind": "declared_field_default",
+      "expression": "insufficient_evidence_targets: list[TonightInsufficientEvidenceTargetResponse] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 484,
+      "kind": "declared_field_default",
+      "expression": "alternative_comparisons: list[RecommendationComparisonResponse] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 487,
+      "kind": "declared_field_default",
+      "expression": "primary_reasons: list[PrimaryRecommendationReasonResponse] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 490,
+      "kind": "declared_field_default",
+      "expression": "target_explanations: list[TargetExplanationResponse] = field(default_factory=list)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 530,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'weather_decision': 'None', 'viable_shortlist_catalog_keys': 'None', 'selected_alternatives': 'None', 'alternative_reasons': 'None', 'rejected_targets': '()', 'insufficient_evidence_targets': '()', 'alternative_comparisons': '()', 'primary_reasons': '()', 'target_explanations': '()'}}"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 148,
+      "kind": "falsey_fallback",
+      "expression": "value is None or isinstance(value, (str, int, float, bool))"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 207,
+      "kind": "falsey_fallback",
+      "expression": "value.tzinfo is None or value.utcoffset() is None or value.replace(fold=0).utcoffset() == value.replace(fold=1).utcoffset()"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 230,
+      "kind": "falsey_fallback",
+      "expression": "timeline_start is None or timeline_start.tzinfo is None or timeline_start.utcoffset() is None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 416,
+      "kind": "mapping_default",
+      "expression": "_WEATHER_PRESENTATIONS.get((decision.admissibility, decision.reasons), _WEATHER_PRESENTATION_FALLBACKS[decision.admissibility])"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 557,
+      "kind": "none_branch",
+      "expression": "recommendation.opportunity.candidate if recommendation is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 562,
+      "kind": "none_branch",
+      "expression": "mission.target if mission is not None else candidate.get('name') if candidate is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 567,
+      "kind": "none_branch",
+      "expression": "candidate.get('catalog_key') if candidate is not None else target"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 570,
+      "kind": "none_branch",
+      "expression": "CATALOG.get(catalog_key, {}).get('name') if catalog_key is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 592,
+      "kind": "none_branch",
+      "expression": "[TonightShortlistEntryResponse(target=entry.name, catalog_key=entry.catalog_key, provenance=entry.provenance.value, decision_score=float(entry.decision_score), final_score=float(entry.final_score), target_decision_status=TargetDecisionStatus.VIABLE if viable_shortlist_catalog_keys is not None and entry.catalog_key in viable_shortlist_catalog_keys else None) for entry in recommendation.opportunity.shortlist_entries] if recommendation is not None else []"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 620,
+      "kind": "none_branch",
+      "expression": "[TonightAlternativeResponse(target=entry.name, catalog_key=entry.catalog_key, provenance=entry.provenance.value, decision_score=float(entry.decision_score), final_score=float(entry.final_score), target_decision_status=TargetDecisionStatus.VIABLE, reasons=alternative_reasons[index] if alternative_reasons is not None else (), imaging_field_id=entry.imaging_field_id, selected_acquisition_intent_id=entry.selected_acquisition_intent_id, viable_acquisition_intent_ids=entry.viable_acquisition_intent_ids, acquisition_intent_selection_status=entry.acquisition_intent_selection_status, lunar_evidence_snapshot=entry.lunar_evidence_snapshot, acquisition_intent_assessments=entry.acquisition_intent_assessments) for index, entry in enumerate(selected_alternatives)] if recommendation is not None and selected_alternatives is not None else []"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 807,
+      "kind": "none_branch",
+      "expression": "[TonightReasonResponse(title=reason.title, severity=reason.severity, value=reason.value) for reason in mission.reasons] if mission is not None else []"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 844,
+      "kind": "none_branch",
+      "expression": "[TonightTaskResponse(start=task.start, end=task.end, title=task.title, description=task.description, priority=int(task.priority)) for task in mission.tasks] if mission is not None else []"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 858,
+      "kind": "none_branch",
+      "expression": "[TonightAdviceResponse(time=advice.time, priority=advice.priority, category=advice.category, message=advice.message) for advice in NightAdvisor.build(mission)] if mission is not None and mission.productivity is not None else []"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 564,
+      "kind": "none_branch",
+      "expression": "candidate.get('name') if candidate is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 881,
+      "kind": "none_branch",
+      "expression": "recommendation.opportunity.action.value if recommendation is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 886,
+      "kind": "none_branch",
+      "expression": "candidate.provenance.value if candidate is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 891,
+      "kind": "none_branch",
+      "expression": "candidate.imaging_field_id if candidate is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 896,
+      "kind": "none_branch",
+      "expression": "candidate.selected_acquisition_intent_id if candidate is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 901,
+      "kind": "none_branch",
+      "expression": "candidate.viable_acquisition_intent_ids if candidate is not None else ()"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 906,
+      "kind": "none_branch",
+      "expression": "candidate.acquisition_intent_selection_status if candidate is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 910,
+      "kind": "none_branch",
+      "expression": "candidate.lunar_evidence_snapshot if candidate is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 912,
+      "kind": "none_branch",
+      "expression": "candidate.acquisition_intent_assessments if candidate is not None else ()"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 930,
+      "kind": "none_branch",
+      "expression": "float(recommendation.confidence) if recommendation is not None and recommendation.confidence is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 936,
+      "kind": "none_branch",
+      "expression": "mission.confidence if mission is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 946,
+      "kind": "none_branch",
+      "expression": "float(mission.recommended_hours) if mission is not None else 0.0"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 949,
+      "kind": "none_branch",
+      "expression": "float(mission.expected_gain) if mission is not None else 0.0"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 951,
+      "kind": "none_branch",
+      "expression": "list(mission.equipment) if mission is not None else []"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 963,
+      "kind": "none_branch",
+      "expression": "_weather_decision_response(weather_decision) if weather_decision is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 570,
+      "kind": "mapping_default",
+      "expression": "CATALOG.get(catalog_key, {})"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 771,
+      "kind": "attribute_default",
+      "expression": "getattr(context, 'required_nights', None)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 772,
+      "kind": "attribute_default",
+      "expression": "getattr(context, 'productive_hours_per_night', None)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 777,
+      "kind": "attribute_default",
+      "expression": "getattr(context, 'night_capacity_source', None)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 782,
+      "kind": "attribute_default",
+      "expression": "getattr(context, 'historical_nights', None)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 787,
+      "kind": "attribute_default",
+      "expression": "getattr(context, 'remaining_hours', None)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 788,
+      "kind": "attribute_default",
+      "expression": "getattr(context, 'favorable_nights', None)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 789,
+      "kind": "attribute_default",
+      "expression": "getattr(context, 'season_remaining_days', None)"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 875,
+      "kind": "none_branch",
+      "expression": "result.night.get('date') if result.night is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 940,
+      "kind": "none_branch",
+      "expression": "mission.window_start if mission is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 943,
+      "kind": "none_branch",
+      "expression": "mission.window_end if mission is not None else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 600,
+      "kind": "none_branch",
+      "expression": "TargetDecisionStatus.VIABLE if viable_shortlist_catalog_keys is not None and entry.catalog_key in viable_shortlist_catalog_keys else None"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 629,
+      "kind": "none_branch",
+      "expression": "alternative_reasons[index] if alternative_reasons is not None else ()"
+    },
+    {
+      "source": "decision/services/tonight_response.py",
+      "line": 926,
+      "kind": "falsey_fallback",
+      "expression": "entry.catalog_key != catalog_key or target_decision_status is TargetDecisionStatus.RECOMMENDED"
+    },
+    {
+      "source": "decision/services/user_selection_mission.py",
+      "line": 43,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'availability': 'None'}}"
+    },
+    {
+      "source": "decision/services/user_selection_mission.py",
+      "line": 19,
+      "kind": "attribute_default",
+      "expression": "getattr(candidate, 'catalog_key', None)"
+    },
+    {
+      "source": "decision/services/user_selection_mission.py",
+      "line": 27,
+      "kind": "attribute_default",
+      "expression": "getattr(opportunity, 'candidate', None)"
+    },
+    {
+      "source": "decision/services/user_selection_mission.py",
+      "line": 54,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(mission_id, str) or not mission_id.strip()"
+    },
+    {
+      "source": "decision/services/user_selection_mission.py",
+      "line": 97,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(object_evaluations, Mapping) or selected_catalog_key not in object_evaluations"
+    },
+    {
+      "source": "decision/services/user_selection_mission.py",
+      "line": 173,
+      "kind": "attribute_default",
+      "expression": "getattr(decision_context_value, 'site', None)"
+    },
+    {
+      "source": "decision/services/user_selection_mission.py",
+      "line": 174,
+      "kind": "attribute_default",
+      "expression": "getattr(site, 'name', None)"
+    },
+    {
+      "source": "decision/services/user_selection_mission.py",
+      "line": 176,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(site_name, str) or not site_name.strip() or mission.site_name != site_name"
+    },
+    {
+      "source": "decision/services/user_selection_mission.py",
+      "line": 182,
+      "kind": "falsey_fallback",
+      "expression": "mission.mission_id != mission_id or mission.decision_id != validated_selection.decision_id or mission.selection_id != validated_selection.selection_id"
+    },
+    {
+      "source": "decision/services/user_selection_mission.py",
+      "line": 32,
+      "kind": "attribute_default",
+      "expression": "getattr(opportunity, 'shortlist_entries', ())"
+    },
+    {
+      "source": "decision/services/user_selection_mission.py",
+      "line": 201,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_candidate, 'lunar_evidence_snapshot', None)"
+    },
+    {
+      "source": "decision/services/user_selection_mission.py",
+      "line": 83,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_candidate, 'acquisition_intent_selection_status', None)"
+    },
+    {
+      "source": "decision/services/user_selection_mission.py",
+      "line": 147,
+      "kind": "falsey_fallback",
+      "expression": "night.get('top_objects') or []"
+    },
+    {
+      "source": "decision/services/user_selection_mission.py",
+      "line": 106,
+      "kind": "falsey_fallback",
+      "expression": "night.get('top_objects') or ()"
+    },
+    {
+      "source": "decision/services/user_selection_mission.py",
+      "line": 132,
+      "kind": "attribute_default",
+      "expression": "getattr(selected_candidate, 'lunar_evidence_snapshot', None)"
+    },
+    {
+      "source": "decision/validation/weather_window_coverage.py",
+      "line": 20,
+      "kind": "attribute_default",
+      "expression": "getattr(mission, 'window_start', None)"
+    },
+    {
+      "source": "decision/validation/weather_window_coverage.py",
+      "line": 21,
+      "kind": "attribute_default",
+      "expression": "getattr(mission, 'window_end', None)"
+    },
+    {
+      "source": "decision/validation/weather_window_coverage.py",
+      "line": 23,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(start, datetime) or start.tzinfo is None or (not isinstance(end, datetime)) or (end.tzinfo is None)"
+    },
+    {
+      "source": "decision/validation/weather_window_coverage.py",
+      "line": 29,
+      "kind": "falsey_fallback",
+      "expression": "snapshot.valid_from.tzinfo is None or snapshot.valid_until.tzinfo is None"
+    },
+    {
+      "source": "decision/weather/weather_ingress.py",
+      "line": 112,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'maximum_age': 'MAXIMUM_SNAPSHOT_AGE', 'future_tolerance': 'FUTURE_RETRIEVAL_TOLERANCE'}}"
+    },
+    {
+      "source": "decision/weather/weather_ingress.py",
+      "line": 127,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'maximum_age': 'MAXIMUM_SNAPSHOT_AGE', 'future_tolerance': 'FUTURE_RETRIEVAL_TOLERANCE'}}"
+    },
+    {
+      "source": "decision/weather/weather_ingress.py",
+      "line": 184,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': [], 'keyword': {'retrieved_at_utc': 'None'}}"
+    },
+    {
+      "source": "decision/weather/weather_ingress.py",
+      "line": 81,
+      "kind": "declared_argument_defaults",
+      "expression": "{'positional': ['None'], 'keyword': {}}"
+    },
+    {
+      "source": "decision/weather/weather_ingress.py",
+      "line": 291,
+      "kind": "falsey_fallback",
+      "expression": "retrieved_at_utc or datetime.now(timezone.utc)"
+    },
+    {
+      "source": "decision/weather/weather_ingress.py",
+      "line": 243,
+      "kind": "falsey_fallback",
+      "expression": "numeric < lower or (upper is not None and numeric > upper)"
+    },
+    {
+      "source": "decision/weather/weather_ingress.py",
+      "line": 308,
+      "kind": "none_branch",
+      "expression": "float(elevation) if elevation is not None else None"
+    },
+    {
+      "source": "decision/weather/weather_trust_decision.py",
+      "line": 76,
+      "kind": "declared_field_default",
+      "expression": "reliability_context: WeatherReliabilityContext | None = None"
+    },
+    {
+      "source": "decision/weather/weather_trust_decision.py",
+      "line": 99,
+      "kind": "declared_field_default",
+      "expression": "provider_reliability: ProviderReliabilityReport | None = None"
+    },
+    {
+      "source": "decision/weather/weather_trust_decision.py",
+      "line": 100,
+      "kind": "declared_field_default",
+      "expression": "integrity_issues: tuple[str, ...] = ()"
+    },
+    {
+      "source": "decision/weather/weather_trust_decision.py",
+      "line": 30,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(value, str) or not value.strip()"
+    },
+    {
+      "source": "decision/weather/weather_trust_decision.py",
+      "line": 159,
+      "kind": "falsey_fallback",
+      "expression": "evidence.snapshot.requested_latitude != context.decision_location.latitude or evidence.snapshot.requested_longitude != context.decision_location.longitude"
+    },
+    {
+      "source": "decision/weather/weather_trust_decision.py",
+      "line": 118,
+      "kind": "falsey_fallback",
+      "expression": "not isinstance(issue, str) or not issue.strip()"
+    }
+  ]
+}
