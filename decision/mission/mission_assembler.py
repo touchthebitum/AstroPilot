@@ -28,6 +28,10 @@ from decision.quality.astro_quality_context import AstroQualityContext
 from decision.quality.astro_quality_engine import AstroQualityEngine
 from decision.quality.dew_risk_engine import DewRiskEngine
 from decision.time_math import elapsed_hours
+from decision.models.acquisition_intent_remaining_progress import (
+    AcquisitionIntentRemainingProgress,
+)
+from decision.portfolio.project_gain import acquisition_intent_session_gain
 
 if TYPE_CHECKING:
     from decision.services.session_availability_windowing import (
@@ -50,6 +54,7 @@ class ProductiveWindowAssessment:
     productivity: NightProductivityResult
     maximum_mission_hours: float | None = None
     productivity_breakdown: ProductivityBreakdown | None = None
+    acquisition_capacity: AcquisitionIntentRemainingProgress | None = None
 
     @classmethod
     def build(
@@ -200,6 +205,9 @@ class ProductiveWindowAssessment:
                 else None
             ),
             productivity_breakdown=productivity_evaluation.breakdown,
+            acquisition_capacity=(
+                mission_input.acquisition_capacity if mission_input is not None else None
+            ),
         )
 
 
@@ -237,6 +245,10 @@ def _mission_timing_assessment(
         constrained.window_end.astimezone(timezone.utc)
         - constrained.window_start.astimezone(timezone.utc)
     ).total_seconds() / 3600
+    if assessment.acquisition_capacity is not None:
+        capacity_hours = min(
+            capacity_hours, assessment.acquisition_capacity.remaining_hours,
+        )
     reference_hours = assessment.recommended_hours
     if reference_hours <= 0:
         expected_gain = 0.0
@@ -246,11 +258,16 @@ def _mission_timing_assessment(
             * min(1.0, capacity_hours / reference_hours),
             2,
         )
+    if assessment.acquisition_capacity is not None:
+        expected_gain = round(acquisition_intent_session_gain(
+            assessment.acquisition_capacity, capacity_hours,
+        ), 2)
     return (
         (
             constrained.window_start,
             constrained.window_end,
-            round(capacity_hours, 2),
+            (capacity_hours if assessment.acquisition_capacity is not None
+             else round(capacity_hours, 2)),
             expected_gain,
         ),
         None,
@@ -272,6 +289,8 @@ class MissionAssembler:
     ):
 
         if mission_input is not None:
+            if mission_input.evidence_only:
+                raise ValueError("preselection_evidence_cannot_authorize_mission")
             validate_selected_filter_for_intent(
                 imaging_field_id=mission_input.imaging_field_id,
                 acquisition_intent_id=mission_input.acquisition_intent_id,

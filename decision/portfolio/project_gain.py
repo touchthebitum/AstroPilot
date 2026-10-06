@@ -3,6 +3,25 @@ from __future__ import annotations
 from decision.portfolio.project_state import (
     project_state_from_project,
 )
+from decision.models.acquisition_intent_remaining_progress import (
+    AcquisitionIntentRemainingProgress,
+)
+
+
+def acquisition_intent_session_gain(
+    capacity: AcquisitionIntentRemainingProgress | None,
+    session_hours: float,
+) -> float:
+    """Percentage of the selected intent target, never the legacy project total."""
+    if (
+        capacity is None
+        or capacity.remaining_hours is None
+        or capacity.target_hours is None
+        or capacity.target_hours <= 0
+    ):
+        return 0.0
+    gain_hours = min(max(0.0, session_hours), capacity.remaining_hours)
+    return gain_hours / capacity.target_hours * 100
 
 
 def marginal_gain_factor(progress):

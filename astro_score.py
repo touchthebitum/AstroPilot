@@ -40,13 +40,16 @@ from decision.portfolio.project_state import (
 from decision.portfolio.project_scoring import (
     project_priority,
     closure_bonus,
+    closure_bonus_for_remaining,
     simulated_portfolio_score,
 )
 from decision.portfolio.project_gain import (
     marginal_gain_factor,
     session_portfolio_gain,
     session_roi,
+    acquisition_intent_session_gain,
 )
+from decision.models.future_opportunity import FutureOpportunity
 from decision.portfolio.diversification import (
     diversification_bonus,
 )
@@ -564,22 +567,62 @@ def setup_score(setup, project):
     "reasons": reasons,
 }
 
-def build_mission_input(evaluation, *, profile=None):
+def build_mission_input(evaluation, *, profile=None, for_intent_selection=False):
     profile = profile or {}
     projects = profile.get("projects", {})
     window = evaluation["window"]
     window_start = window["start"]
     window_end = window["end"]
     astronomical_hours = elapsed_hours(window_start, window_end)
-    remaining_hours = evaluation.get("remaining_hours")
-    recommended_hours = astronomical_hours
-    if remaining_hours is not None:
-        recommended_hours = min(recommended_hours, max(0, remaining_hours))
-
     catalog_key = evaluation.get(
         "catalog_key",
         evaluation.get("name"),
     )
+    project = projects.get(catalog_key, {})
+    resolver = build_production_imaging_field_resolver()
+    targets = resolve_project_acquisition_intent_targets(project, resolver)
+    capacity = None
+    if targets:
+        field = resolve_project_imaging_field(project, resolver)
+        field_id = evaluation.get("imaging_field_id")
+        if field_id is not None and field_id != field.imaging_field_id:
+            raise ValueError("acquisition_capacity_field_mismatch")
+        selected_id = evaluation.get("selected_acquisition_intent_id")
+        if for_intent_selection and selected_id is not None:
+            raise ValueError("preselection_requires_no_selected_intent")
+        if selected_id is not None and selected_id not in {
+            target.acquisition_intent_id for target in targets
+        }:
+            raise ValueError("acquisition_capacity_intent_not_targeted")
+        progress = derive_acquisition_intent_remaining_progress(
+            field, targets,
+            resolve_project_acquisition_intent_progress(project, resolver),
+            credit_totals(profile, catalog_key),
+        )
+        capacity = next(
+            (item for item in progress if item.acquisition_intent_id == selected_id),
+            None,
+        )
+        # Preselection assesses physical evidence only. It is never a mission
+        # authorization; final assembly must have an explicitly selected intent.
+        remaining_hours = capacity.remaining_hours if capacity is not None else None
+        if for_intent_selection:
+            recommended_hours = astronomical_hours
+            expected_gain = 0.0
+        else:
+            recommended_hours = (
+                min(astronomical_hours, remaining_hours)
+                if remaining_hours is not None else 0.0
+            )
+            expected_gain = acquisition_intent_session_gain(capacity, recommended_hours)
+    else:
+        remaining_hours = evaluation.get("remaining_hours")
+        recommended_hours = astronomical_hours
+        if remaining_hours is not None:
+            recommended_hours = min(recommended_hours, max(0, remaining_hours))
+        expected_gain = session_portfolio_gain(
+            catalog_key, recommended_hours, projects=projects,
+        )
 
     selected_weather = evaluation.get("selected_window_weather")
     if selected_weather is not None:
@@ -649,6 +692,8 @@ def build_mission_input(evaluation, *, profile=None):
             )
         )
     imaging_field_id = evaluation.get("imaging_field_id")
+    if targets:
+        imaging_field_id = field.imaging_field_id
     acquisition_intent_id = evaluation.get(
         "selected_acquisition_intent_id"
     )
@@ -667,14 +712,12 @@ def build_mission_input(evaluation, *, profile=None):
         weather=selected_weather,
         moon_penalty=moon_penalty,
         recommended_hours=recommended_hours,
-        expected_gain=session_portfolio_gain(
-            catalog_key,
-            recommended_hours,
-            projects=projects,
-        ),
+        expected_gain=expected_gain,
         selected_filter=selected_filter,
         imaging_field_id=imaging_field_id,
         acquisition_intent_id=acquisition_intent_id,
+        acquisition_capacity=capacity,
+        evidence_only=bool(targets and for_intent_selection),
     )
 
 
@@ -887,7 +930,9 @@ def recommend_project_for_night(
                     weather_snapshot=weather_snapshot,
                     weather_freshness=weather_freshness,
                     decision_location=decision_location,
-                    build_mission_input=build_mission_input,
+                    build_mission_input=lambda evaluation, *, profile: build_mission_input(
+                        evaluation, profile=profile, for_intent_selection=True,
+                    ),
                 )
             acquisition_intent_selection = (
                 compose_acquisition_intent_selection(
@@ -919,24 +964,37 @@ def recommend_project_for_night(
             )
 
         priority = project_priority(catalog_key, projects)
-        roi = (
-            session_roi(
-                catalog_key,
-                available_hours,
-                projects=projects,
+        selected_capacity = next(
+            (item for item in intent_remaining_progress
+             if acquisition_intent_selection is not None
+             and item.acquisition_intent_id
+             == acquisition_intent_selection.selected_acquisition_intent_id),
+            None,
+        )
+        remaining_for_night = (
+            selected_capacity.remaining_hours if selected_capacity is not None else None
+        ) if project_targets else project_remaining_hours(catalog_key, projects)
+        if available_hours is None:
+            roi = None
+        elif project_targets:
+            roi = (
+                round(acquisition_intent_session_gain(selected_capacity, available_hours)
+                      / available_hours, 2)
+                if available_hours > 0 else 0
             )
-            if available_hours is not None
-            else None
-        )
+        else:
+            roi = session_roi(catalog_key, available_hours, projects=projects)
 
-        future = future_engine.estimate(
-            catalog_key,
-            remaining_hours=project_remaining_hours(
+        if project_targets and remaining_for_night is None:
+            # Do not invoke the legacy provider/default-hours fallback for an
+            # unknown modern intent. These counters do not represent progress.
+            future = FutureOpportunity(0, "INCONNU", 0.0, 0, 0.0)
+        else:
+            future = future_engine.estimate(
                 catalog_key,
-                projects,
-            ),
-            profile=profile,
-        )
+                remaining_hours=remaining_for_night,
+                profile=profile,
+            )
 
         risk_label = future.risk
 
@@ -953,26 +1011,29 @@ def recommend_project_for_night(
             astro_score=astro_score,
         )
 
-        marginal_progress_bonus = (
-            marginal_gain_factor(
-                project_progress(catalog_key, projects)
+        if project_targets:
+            known_capacity = (
+                selected_capacity is not None
+                and selected_capacity.remaining_hours is not None
             )
-            * 10
-        )
-        marginal_progress_bonus = min(
-            marginal_progress_bonus,
-            30,
-        )
-
-        closure = (
-            closure_bonus(
-                catalog_key,
-                available_hours,
-                projects=projects,
+            marginal_progress_bonus = (
+                marginal_gain_factor(
+                    selected_capacity.acquired_hours
+                    / selected_capacity.target_hours * 100
+                ) * 10 if known_capacity else 0
             )
-            if available_hours is not None
-            else 0
-        )
+            closure = (
+                closure_bonus_for_remaining(remaining_for_night, available_hours)
+                if available_hours is not None else 0
+            )
+        else:
+            marginal_progress_bonus = min(
+                marginal_gain_factor(project_progress(catalog_key, projects)) * 10, 30,
+            )
+            closure = (
+                closure_bonus(catalog_key, available_hours, projects=projects)
+                if available_hours is not None else 0
+            )
 
         opportunity_ratio = future.opportunity_ratio
 
@@ -980,6 +1041,8 @@ def recommend_project_for_night(
             0,
             min(8, round(8 / max(opportunity_ratio, 0.1), 1))
         )
+        if project_targets and remaining_for_night is None:
+            opportunity_bonus = 0
 
         diversity_bonus = diversification_bonus(catalog_key, projects)
 

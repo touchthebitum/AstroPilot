@@ -48,9 +48,16 @@ class CandidateAssessment:
         decision_location: WeatherLocation,
         build_mission_input: Callable[..., Any],
     ) -> CandidateAssessment:
+        evaluation = object_evaluations[candidate.catalog_key]
+        if getattr(candidate, "acquisition_intent_selection_status", None) is not None:
+            evaluation = {
+                **evaluation,
+                "imaging_field_id": candidate.imaging_field_id,
+                "selected_acquisition_intent_id": candidate.selected_acquisition_intent_id,
+            }
         return cls.build_for_catalog_key(
             catalog_key=candidate.catalog_key,
-            object_evaluations=object_evaluations,
+            object_evaluations={candidate.catalog_key: evaluation},
             profile=profile,
             weather_snapshot=weather_snapshot,
             weather_freshness=weather_freshness,

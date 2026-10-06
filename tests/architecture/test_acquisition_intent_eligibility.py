@@ -31,6 +31,7 @@ from decision.models.session_availability import (
     SessionAvailability,
     SessionAvailabilityMode,
 )
+from decision.models.acquisition_intent_remaining_progress import AcquisitionIntentRemainingProgress
 from decision.services.acquisition_intent_eligibility import (
     evaluate_acquisition_intent_eligibility,
 )
@@ -87,6 +88,7 @@ def evaluate(
         acquisition_intent=intent,
         imaging_field=field,
         project_targets=targets,
+        remaining_progress=AcquisitionIntentRemainingProgress(intent.acquisition_intent_id, 0, 0, 8, 8),
         setup_filter_capabilities=capabilities,
         productive_window=productive_window() if window is None else window,
         session_availability=availability,
@@ -163,6 +165,7 @@ def test_missing_productive_window_is_insufficient_evidence():
         acquisition_intent=HA_INTENT,
         imaging_field=FIELD,
         project_targets=TARGETS,
+        remaining_progress=AcquisitionIntentRemainingProgress(HA_INTENT.acquisition_intent_id, 0, 0, 8, 8),
         setup_filter_capabilities=CAPABILITIES,
         productive_window=None,
         session_availability=None,
@@ -348,6 +351,7 @@ def test_certain_failure_discards_earlier_and_later_evidence_gaps():
         acquisition_intent=HA_INTENT,
         imaging_field=FIELD,
         project_targets=TARGETS,
+        remaining_progress=AcquisitionIntentRemainingProgress(HA_INTENT.acquisition_intent_id, 0, 0, 8, 8),
         setup_filter_capabilities=None,
         productive_window=productive_window(59),
         session_availability=None,
