@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decision.portfolio.session_capacity import explicit_session_hours
+
 from decision.portfolio.project_state import (
     project_state_from_project,
 )
@@ -25,11 +27,12 @@ def project_priority(object_name, projects):
 
 def closure_bonus_for_remaining(
     remaining,
-    available_hours=3.0,
+    available_hours=None,
 ):
     if remaining is None or remaining <= 0:
         return 0
 
+    available_hours = explicit_session_hours(available_hours)
     if available_hours <= 0:
         return 0
 
@@ -47,7 +50,7 @@ def closure_bonus_for_remaining(
 
 def closure_bonus(
     name,
-    available_hours=3.0,
+    available_hours=None,
     *,
     projects,
 ):
@@ -62,7 +65,7 @@ def closure_bonus(
 
 def simulated_portfolio_score(
     project,
-    available_hours=3.0,
+    available_hours=None,
 ):
     remaining = (
         project["target_hours"]

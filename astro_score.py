@@ -999,7 +999,12 @@ def recommend_project_for_night(
                 profile=profile,
             )
 
-        risk_label = future.risk
+        future_capacity = getattr(future, "night_capacity", None)
+        risk_label = (
+            "INCONNU"
+            if future_capacity is not None and not future_capacity.observed
+            else future.risk
+        )
 
         # Ancien système
         risk_v1 = risk_label_to_score(risk_label)
@@ -1053,7 +1058,7 @@ def recommend_project_for_night(
             0,
             min(8, round(8 / max(opportunity_ratio, 0.1), 1))
         )
-        if future.risk == "INCONNU":
+        if risk_label == "INCONNU":
             # Unknown counters are sentinels, not evidence of scarce opportunity.
             # In particular ratio=0 must not authorize the maximum +8 bonus.
             opportunity_bonus = 0

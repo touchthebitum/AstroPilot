@@ -79,6 +79,13 @@ def render_strategic_summary(
     if closure_bonus > 0:
         print(f"✓ Bonus clôture disponible : +{closure_bonus:.0f}")
 
+    capacity = chosen_future.night_capacity
+    if capacity is not None:
+        hours = capacity.productive_hours_per_night
+        capacity_text = f"{hours:.1f} h/nuit" if hours is not None else "inconnue"
+        print(f"Capacité de calcul : {capacity_text} ({capacity.source}, "
+              f"confiance {capacity.confidence})")
+
     weather_ratio = chosen_future.weather_ratio
     print(f"Taux météo utilisé : {weather_ratio * 100:.0f}%")
 

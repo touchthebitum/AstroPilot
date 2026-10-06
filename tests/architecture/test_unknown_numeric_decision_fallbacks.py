@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 import astro_score
+from decision.portfolio.historical_night_capacity_estimator import NightCapacityEstimate, NightCapacitySource
 from decision.engines.future_opportunity_engine import FutureOpportunityEngine
 from decision.models.future_opportunity import FutureOpportunity
 from decision.portfolio.portfolio_forecast_engine import PortfolioForecastEngine
@@ -93,7 +94,8 @@ def test_future_engine_unknown_evidence_does_not_invent_numeric_opportunity(monk
     engine = FutureOpportunityEngine({'M31': {'name': 'M31'}},
         lambda *a: None if missing == 'weather' else data)
     result = engine.estimate('M31', remaining_hours=None if missing == 'remaining' else 6,
-        latitude=46.7, longitude=6.5)
+        latitude=46.7, longitude=6.5,
+        night_capacity=NightCapacityEstimate(3, NightCapacitySource.SCENARIO, None))
     assert result.risk == 'INCONNU'
 
 
