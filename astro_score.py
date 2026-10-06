@@ -469,7 +469,9 @@ def explain_recommendation(project):
     if roi >= 1.0:
         reasons.append("Rendement projet élevé pour cette session.")
 
-    if postponement_risk >= 70:
+    if postponement_risk is None:
+        reasons.append("Risque de report inconnu : classement dégradé par prudence")
+    elif postponement_risk >= 70:
         reasons.append("Risque de report élevé : cette cible ne doit pas être trop repoussée.")
     elif postponement_risk >= 40:
         reasons.append("Risque de report modéré à prendre en compte.")
@@ -1007,12 +1009,13 @@ def recommend_project_for_night(
 
         postponement_impact = compute_postponement_impact(
             postponement_risk=postponement_risk,
-            confidence=obj.get("confidence", "MOYENNE"),
+            confidence=obj.get("confidence"),
             # Unknown preference must not reduce a prudence penalty. Use its
             # upper bound only in the adverse-risk branch; award no evidence.
             project_priority=(
                 100
                 if "importance" not in project
+                and postponement_risk is not None
                 and postponement_risk >= 70
                 and astro_score < 70
                 else priority

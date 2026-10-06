@@ -267,12 +267,12 @@ def test_legacy_baseline_and_unknown_modern_degradation(monkeypatch, targeted):
                                    {"acquisition_intent_id": "sh2-129_ha", "target_hours": 2}])
     profile = {"projects": projects}
     candidates = astro_score.recommend_project_for_night(objects, profile=profile)
-    # Fixed scoring constants after the conservative, continuous portfolio cap.
+    # Known legacy scores stay fixed; unknown modern risk uses the prudent bound.
     # Identity, action and ranking remain explicit assertions below.
     assert candidates.rejections == ()
     assert {item.catalog_key: (item.final_score, item.decision_score, item.acquired_hours)
             for item in candidates} == {
-                "M31": ((63.5, 63.5, 2.0) if targeted else
+                "M31": ((31.5, 31.5, 2.0) if targeted else
                         (85.67500000000001, 85.67500000000001, 2.0)),
                 "M42": (77.625, 77.625, 2.0),
             }

@@ -6,6 +6,6 @@ from typing import Any
 @dataclass(frozen=True)
 class RiskReport:
     level: str
-    score: int
+    score: int | None
     explanation: list[str] = field(default_factory=list)
     context: Any = None

@@ -9,10 +9,7 @@ class ProjectRiskContextBuilder:
     @staticmethod
     def build(target, context, observation_time=None):
 
-        remaining_hours = (
-            context.portfolio.total_remaining_hours
-            or 5
-        )
+        remaining_hours = context.portfolio.total_remaining_hours
 
         season_context = AnalysisContext(
             target=target,
@@ -32,26 +29,22 @@ class ProjectRiskContextBuilder:
         season_remaining_days = season["remaining_days"]
         good_nights = season["remaining_good_nights"]
 
-        required_nights = ProjectCompletionEstimator.required_nights(
-            remaining_hours,
-            context.portfolio.productive_hours_per_night,
+        capacity = context.portfolio.productive_hours_per_night
+        required_nights = (
+            ProjectCompletionEstimator.required_nights(remaining_hours, capacity)
+            if remaining_hours is not None and capacity is not None and capacity > 0
+            else None
         )
-
         pressure = (
-            required_nights
-            / max(good_nights or 0, 1)
+            required_nights / max(good_nights, 1)
+            if required_nights is not None and good_nights is not None
+            else None
         )
 
         return ProjectRiskContext(
-            priority=(
-                context.portfolio.highest_priority
-                or 50
-            ),
+            priority=context.portfolio.highest_priority,
             remaining_hours=remaining_hours,
-            completion=(
-                context.portfolio.average_progress
-                or 0
-            ),
+            completion=context.portfolio.average_progress,
             season_remaining_days=season_remaining_days,
             favorable_nights=good_nights,
             pressure=pressure,

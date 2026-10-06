@@ -1023,7 +1023,9 @@ class TonightDewRiskModel(BaseModel):
 
 class TonightPostponementRiskModel(BaseModel):
     level: str
-    score: int
+    score: int | None
+    estimated: bool = True
+    decision_eligible: bool = False
     explanations: list[str] = Field(default_factory=list)
     required_nights: int | None = None
     productive_hours_per_night: float | None = None

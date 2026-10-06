@@ -282,7 +282,7 @@ class TonightDewRiskResponse:
 @dataclass(frozen=True)
 class TonightPostponementRiskResponse:
     level: str
-    score: int
+    score: int | None
     explanations: list[str] = field(default_factory=list)
     required_nights: int | None = None
     productive_hours_per_night: float | None = None
@@ -291,6 +291,9 @@ class TonightPostponementRiskResponse:
     remaining_hours: float | None = None
     favorable_nights: int | None = None
     season_remaining_days: int | None = None
+    # This advisory report does not authorize ranking, mission hours or gain.
+    estimated: bool = True
+    decision_eligible: bool = False
 
 
 @dataclass(frozen=True)
@@ -766,7 +769,7 @@ class TonightResponse:
             context = source.context
             postponement_risk = TonightPostponementRiskResponse(
                 level=source.level,
-                score=int(source.score),
+                score=int(source.score) if source.score is not None else None,
                 explanations=list(source.explanation),
                 required_nights=getattr(context, "required_nights", None),
                 productive_hours_per_night=getattr(
