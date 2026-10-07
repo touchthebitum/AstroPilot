@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -55,6 +56,10 @@ def test_mission_assembler_uses_selected_night_conditions(
             context=context,
             equipment=["frozen setup"],
             alternatives=["M42"],
-            weather=frozen_weather,
+            weather=replace(frozen_weather, **{
+                name: getattr(frozen_weather, name) * 2
+                for name in ("hourly_clouds", "hourly_humidity", "hourly_wind",
+                             "hourly_seeing", "hourly_moon_penalty")
+            }),
         )
 

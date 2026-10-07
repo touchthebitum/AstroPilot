@@ -21,7 +21,7 @@ class NightConditionsProvider:
             return fallback
 
         if index >= len(values):
-            return values[-1]
+            raise ValueError("productive_window_hourly_evidence_uncovered")
 
         return values[index]
 

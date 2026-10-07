@@ -156,7 +156,7 @@ def test_mission_preserves_reasons_and_computed_results(
     selected_filter = object()
     input_data = mission_input(
         frozen_time,
-        WeatherForecast(),
+        None,
         selected_filter=selected_filter,
     )
 
@@ -196,7 +196,7 @@ def test_mission_rejects_filter_diverging_from_selected_intent(
 ):
     input_data = mission_input(
         frozen_time,
-        WeatherForecast(),
+        None,
         imaging_field_id="sh2-129_ou4",
         acquisition_intent_id=intent_id,
         selected_filter=SelectedFilter(filter_type, filter_type),
@@ -227,7 +227,7 @@ def test_eligible_intent_without_legacy_filter_remains_actionable(
         alternatives=[],
         mission_input=mission_input(
             frozen_time,
-            WeatherForecast(),
+            None,
             imaging_field_id="sh2-129_ou4",
             acquisition_intent_id="sh2-129_ha",
             selected_filter=None,
@@ -250,7 +250,7 @@ def test_mission_copies_imaging_field_identity_exactly(
 ):
     input_data = mission_input(
         frozen_time,
-        WeatherForecast(),
+        None,
         imaging_field_id=imaging_field_id,
     )
 
@@ -284,7 +284,7 @@ def test_mission_copies_acquisition_intent_identity_exactly(
 ):
     input_data = mission_input(
         frozen_time,
-        WeatherForecast(),
+        None,
         acquisition_intent_id=" intent-A ",
     )
 
@@ -314,7 +314,7 @@ def test_mission_preserves_unknown_summary_confidence(
         context=context,
         equipment=[],
         alternatives=[],
-        mission_input=mission_input(frozen_time, WeatherForecast()),
+        mission_input=mission_input(frozen_time, None),
     )
 
     assert mission.confidence is None
@@ -333,6 +333,7 @@ def test_mission_input_weather_takes_precedence_over_explicit_weather(
         hourly_wind=[4.0, 8.0],
         hourly_seeing=[1.0, 1.4],
         hourly_temperature=[2.0, 6.0],
+        hourly_moon_penalty=[0.3, 0.3],
     )
 
     MissionAssembler.build(
@@ -363,7 +364,7 @@ def test_window_duration_fills_missing_astronomical_hours(
 ):
     input_data = mission_input(
         frozen_time,
-        WeatherForecast(),
+        None,
         astronomical_hours=None,
         window_end=frozen_time + timedelta(hours=2, minutes=30),
     )
@@ -383,24 +384,14 @@ def test_window_duration_fills_missing_astronomical_hours(
     assert productivity_context.astronomical_hours == 2.5
 
 
-def test_context_session_fills_hours_without_mission_input(
-    summary,
-    context,
-    isolated_dependencies,
+def test_context_session_without_lunar_evidence_is_not_productive(
+    summary, context, isolated_dependencies,
 ):
-    MissionAssembler.build(
-        target="M31",
-        summary=summary,
-        context=context,
-        equipment=[],
-        alternatives=[],
+    result = MissionAssembler.build(
+        target="M31", summary=summary, context=context, equipment=[], alternatives=[],
     )
-
-    productivity_context = isolated_dependencies.captured[
-        "productivity_context"
-    ]
-    assert productivity_context.astronomical_hours == 4.0
-    assert productivity_context.observation_time == context.session.start_time
+    assert result is None
+    assert "productivity_context" not in isolated_dependencies.captured
 
 
 def test_missing_target_altitude_skips_astro_quality(
@@ -423,7 +414,7 @@ def test_missing_target_altitude_skips_astro_quality(
         context=context,
         equipment=[],
         alternatives=[],
-        mission_input=mission_input(frozen_time, WeatherForecast()),
+        mission_input=mission_input(frozen_time, None),
     )
 
     assert mission.astro_quality is None
@@ -452,7 +443,7 @@ def test_build_does_not_mutate_context(
         context=context,
         equipment=[],
         alternatives=[],
-        mission_input=mission_input(frozen_time, WeatherForecast()),
+        mission_input=mission_input(frozen_time, None),
     )
 
     assert {
@@ -482,7 +473,7 @@ def test_mission_duration_uses_the_real_continuous_productive_window(
     )]
     input_data = mission_input(
         frozen_time,
-        WeatherForecast(),
+        None,
         recommended_hours=1.5,
         expected_gain=6.0,
     )
@@ -522,7 +513,7 @@ def test_expected_gain_is_unchanged_for_the_full_assessment_window(
         alternatives=[],
         mission_input=mission_input(
             frozen_time,
-            WeatherForecast(),
+            None,
             recommended_hours=2.0,
             expected_gain=6.0,
         ),
@@ -559,7 +550,7 @@ def test_expected_gain_is_prorated_to_the_selected_actionable_hour(
         alternatives=[],
         mission_input=mission_input(
             frozen_time,
-            WeatherForecast(),
+            None,
             recommended_hours=2.0,
             expected_gain=6.0,
             availability=availability,
@@ -593,7 +584,7 @@ def test_expected_gain_cannot_increase_when_selected_window_exceeds_gain_referen
         alternatives=[],
         mission_input=mission_input(
             frozen_time,
-            WeatherForecast(),
+            None,
             recommended_hours=2.0,
             expected_gain=6.0,
         ),
@@ -644,7 +635,7 @@ def test_no_productive_window_creates_no_mission(
         alternatives=[],
         mission_input=mission_input(
             frozen_time,
-            WeatherForecast(),
+            None,
             recommended_hours=1.5,
             expected_gain=6.0,
         ),
@@ -671,7 +662,7 @@ def test_productive_window_assessment_is_immutable_and_gate_compatible(
     productivity.windows = [window]
     input_data = mission_input(
         frozen_time,
-        WeatherForecast(),
+        None,
         recommended_hours=1.5,
         expected_gain=6.0,
     )
@@ -691,6 +682,7 @@ def test_productive_window_assessment_is_immutable_and_gate_compatible(
         "maximum_mission_hours",
         "productivity_breakdown",
         "acquisition_capacity",
+        "evidence_issues",
     ]
     assert assessment.window_start is input_data.window_start
     assert assessment.window_end is input_data.window_end
@@ -720,7 +712,7 @@ def test_assessment_without_productive_window_is_consistent_but_ineligible(
         context=context,
         mission_input=mission_input(
             frozen_time,
-            WeatherForecast(),
+            None,
             recommended_hours=1.5,
             expected_gain=6.0,
         ),
@@ -883,7 +875,7 @@ def test_assembler_carries_original_lunar_comparison_window_without_recalculatio
                 ("sh2-129_ha", "ha", 656.3, 1, 1),
                 ("ou4_oiii", "oiii", 500.7, 2, 2))),
         "test-estimator", None)
-    source = mission_input(frozen_time, WeatherForecast(),
+    source = mission_input(frozen_time, None,
         imaging_field_id="sh2-129_ou4", acquisition_intent_id="sh2-129_ha",
         lunar_evidence_snapshot=snapshot)
     mission = MissionAssembler.build(target="Sh2-129", summary=summary,

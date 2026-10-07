@@ -1,4 +1,5 @@
 from decision.models.session_availability import SessionAvailability, SessionAvailabilityMode
+from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -8,6 +9,16 @@ from decision.mission.mission_assembler import MissionAssembler
 from decision.mission.mission_builder import NightMissionBuilder
 from decision.weather.weather_forecast import WeatherForecast
 from decision.filtering.selected_filter import SelectedFilter
+
+
+@pytest.fixture
+def frozen_weather(frozen_weather):
+    # The selected two-hour window needs two explicit hourly measurements.
+    return replace(frozen_weather, **{
+        name: getattr(frozen_weather, name) * 2
+        for name in ("hourly_clouds", "hourly_humidity", "hourly_wind",
+                     "hourly_seeing", "hourly_moon_penalty")
+    })
 
 
 def _mission_input(frozen_time, weather, **overrides):
@@ -263,7 +274,7 @@ def test_expected_gain_uses_existing_session_portfolio_gain(
     assert mission_input.expected_gain == 7.5
 
 
-def test_fallback_constants_are_used_only_when_data_is_missing(
+def test_missing_evidence_does_not_reach_productivity_engine(
     frozen_time,
     mission_context,
     summary,
@@ -296,13 +307,8 @@ def test_fallback_constants_are_used_only_when_data_is_missing(
         ),
     )
 
-    context = isolate_assembler["context"]
-    assert context.astronomical_hours == 6.0
-    assert context.cloud_cover == 20
-    assert context.humidity == 60
-    assert context.wind == 5
-    assert context.seeing == 1.5
-    assert context.moon_penalty == 0.2
+    assert "context" not in isolate_assembler
+
 
 def test_selected_filter_is_preserved_by_mission_input(
     frozen_time,

@@ -16,6 +16,8 @@ def _context(hourly_clouds, observation_time):
         hourly_clouds=hourly_clouds,
         hourly_humidity=[50.0] * len(hourly_clouds),
         hourly_wind=[5.0] * len(hourly_clouds),
+        hourly_seeing=[1.5] * len(hourly_clouds),
+        hourly_moon_penalty=[0.0] * len(hourly_clouds),
     )
     return NightProductivityContext(
         astronomical_hours=float(len(hourly_clouds)),

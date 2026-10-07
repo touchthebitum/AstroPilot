@@ -1740,6 +1740,8 @@ def build_selected_window_weather(
     best,
     sky,
 ):
+    from decision.validation.productive_window_evidence import valid_number
+
     start_instant = timeline_value(best["start"])
     end_instant = timeline_value(best["end"])
     selected_hours = [
@@ -1778,22 +1780,25 @@ def build_selected_window_weather(
     return WeatherForecast(
         hourly=selected_hours,
         hourly_clouds=[
-            h.get("cloud_cover", 100)
+            h.get("cloud_cover")
             for h in selected_hours
         ],
         hourly_humidity=[
-            h.get("relative_humidity_2m", 100)
+            h.get("relative_humidity_2m")
             for h in selected_hours
         ],
         hourly_wind=[
-            h.get("wind_speed_10m", 0)
+            h.get("wind_speed_10m")
             for h in selected_hours
         ],
         hourly_seeing=[
             sky.estimate_seeing(
-                h.get("wind_speed_10m", 0),
-                h.get("relative_humidity_2m", 0),
-            )
+                h.get("wind_speed_10m"),
+                h.get("relative_humidity_2m"),
+            ) if (
+                valid_number(h.get("wind_speed_10m"))
+                and valid_number(h.get("relative_humidity_2m"), maximum=100)
+            ) else None
             for h in selected_hours
         ],
         hourly_moon_penalty=[
