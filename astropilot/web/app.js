@@ -4224,8 +4224,10 @@ function renderDecision(decision) {
   const start = clock(decision.window_start, zone) || firstWindow?.start_time || null;
   const end = clock(decision.window_end, zone) || firstWindow?.end_time || null;
   const quality = decision.astro_quality;
-  const qualityScore = quality ? Math.round(Number(quality.score)) : null;
-  const qualityCopy = labels.quality[quality?.label] || ["Non évaluée", "L’indice de qualité n’est pas disponible pour cette décision."];
+  const qualityScore = quality?.decision_eligible === true ? Math.round(Number(quality.decision_score)) : null;
+  const qualityCopy = quality && quality.decision_eligible !== true
+    ? ["Preuves AQI insuffisantes", "Score partiel non comparable ; compléter les mesures avant utilisation décisionnelle."]
+    : labels.quality[quality?.label] || ["Non évaluée", "L’indice de qualité n’est pas disponible pour cette décision."];
   const limiting = quality?.limiting_factor;
   const weatherTrust = decision.weather_trust;
   const weatherDecision = decision.weather_decision;

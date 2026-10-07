@@ -461,7 +461,11 @@ class MissionAssembler:
                     cloud_cover_percent=cloud_cover,
                     moon_penalty=moon_penalty,
                     seeing_arcsec=seeing,
-                    image_quality_score=image_quality.score,
+                    image_quality_score=(
+                        image_quality.score
+                        if getattr(image_quality, "confidence", 0.0) == 1.0
+                        else None
+                    ),
                     dew_score=(
                         dew_risk.score
                         if dew_risk is not None

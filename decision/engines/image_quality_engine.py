@@ -56,7 +56,10 @@ class ImageQualityEngine:
 
         return EngineResult(
             score=score,
-            confidence=1.0,
+            confidence=(
+                1.0 if seeing is not None and sampling_value is not None
+                and object_size_arcmin is not None else 0.0
+            ),
 
             explanation=f"Qualité d'image globale : {score:.1f}/10.",
 

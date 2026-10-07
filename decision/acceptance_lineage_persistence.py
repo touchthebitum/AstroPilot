@@ -409,6 +409,10 @@ def _decode(value: object, *, schema_version: int = SCHEMA_VERSION) -> object:
             raise AcceptanceLineageCorruptionError("unsupported_dataclass_type")
         supplied = document["fields"]
         expected = frozenset(field.name for field in fields(dataclass_type))
+        if dataclass_type is AstroQualityResult and isinstance(supplied, dict):
+            legacy_quality_fields = frozenset(("score", "confidence", "limiting_factor", "metrics"))
+            if frozenset(supplied) == legacy_quality_fields:
+                expected = legacy_quality_fields
         if dataclass_type is Candidate:
             expected -= frozenset(("acquisition_intent_remaining_progress",))
         if dataclass_type is Candidate and schema_version <= 5:

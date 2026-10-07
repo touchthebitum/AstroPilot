@@ -1,3 +1,5 @@
+import math
+
 from decision.quality.astro_quality_result import AstroQualityResult
 
 
@@ -62,124 +64,42 @@ class AstroQualityEngine:
 
     @staticmethod
     def evaluate(context) -> AstroQualityResult:
-        metrics = {
-            "altitude_score": (
-                AstroQualityEngine._altitude_score(
-                    context.target_altitude_deg
-                )
-            ),
-            "cloud_score": (
-                AstroQualityEngine._cloud_score(
-                    context.cloud_cover_percent
-                )
-            ),
-            "moon_score": (
-                AstroQualityEngine._moon_score(
-                    context.moon_penalty
-                )
-            ),
-        }
-
-        weighted_scores = [
-            (
-                metrics["altitude_score"],
-                AstroQualityEngine.WEIGHTS["altitude"],
-                "altitude",
-            ),
-            (
-                metrics["cloud_score"],
-                AstroQualityEngine.WEIGHTS["clouds"],
-                "clouds",
-            ),
-            (
-                metrics["moon_score"],
-                AstroQualityEngine.WEIGHTS["moon"],
-                "moon",
-            ),
-        ]
-
-        if context.seeing_arcsec is not None:
-            metrics["seeing_score"] = (
-                AstroQualityEngine._seeing_score(
-                    context.seeing_arcsec
-                )
-            )
-
-            weighted_scores.append(
-                (
-                    metrics["seeing_score"],
-                    AstroQualityEngine.WEIGHTS["seeing"],
-                    "seeing",
-                )
-            )
-
-        if context.image_quality_score is not None:
-            metrics["setup_score"] = max(
-                0.0,
-                min(
-                    100.0,
-                    context.image_quality_score * 10.0,
-                ),
-            )
-
-            weighted_scores.append(
-                (
-                    metrics["setup_score"],
-                    AstroQualityEngine.WEIGHTS["setup"],
-                    "setup",
-                )
-            )
-        if context.dew_score is not None:
-            metrics["dew_score"] = max(
-                0.0,
-                min(
-                    100.0,
-                    context.dew_score,
-                ),
-            )
-
-            weighted_scores.append(
-                (
-                    metrics["dew_score"],
-                    AstroQualityEngine.WEIGHTS["dew"],
-                    "dew",
-                )
-            )
-
-        total_weight = sum(
-            weight
-            for _, weight, _ in weighted_scores
+        specifications = (
+            ("altitude", "altitude_score", "target_altitude_deg", -90, 90, AstroQualityEngine._altitude_score),
+            ("clouds", "cloud_score", "cloud_cover_percent", 0, 100, AstroQualityEngine._cloud_score),
+            ("moon", "moon_score", "moon_penalty", 0, 1, AstroQualityEngine._moon_score),
+            ("seeing", "seeing_score", "seeing_arcsec", 0, None, AstroQualityEngine._seeing_score),
+            ("setup", "setup_score", "image_quality_score", None, None, lambda value: max(0.0, min(100.0, value * 10))),
+            ("dew", "dew_score", "dew_score", 0, 100, lambda value: value),
         )
+        metrics = {}
+        weighted_scores = []
+        missing = []
+        for name, key, attribute, lower, upper, transform in specifications:
+            value = getattr(context, attribute, None)
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    or (lower is not None and value < lower)
+                    or (upper is not None and value > upper)):
+                missing.append(name)
+                continue
+            score = transform(value)
+            metrics[key] = round(score, 1)
+            weighted_scores.append((score, AstroQualityEngine.WEIGHTS[name], name))
 
-        score = sum(
-            value * weight
-            for value, weight, _ in weighted_scores
-        ) / total_weight
-
-        limiting_factor = min(
-            weighted_scores,
-            key=lambda item: item[0],
-        )[2]
-
-        if (
-            context.seeing_arcsec is not None
-            and context.image_quality_score is not None
-        ):
-            confidence = 1.0
-        elif (
-            context.seeing_arcsec is None
-            and context.image_quality_score is None
-        ):
-            confidence = 0.6
-        else:
-            confidence = 0.8
-
+        completeness = sum(weight for _, weight, _ in weighted_scores)
+        # The historical normalized score is diagnostic only when evidence is partial.
+        score = (sum(value * weight for value, weight, _ in weighted_scores)
+                 / completeness) if completeness else 0.0
+        eligible = not missing
         return AstroQualityResult(
             score=round(score, 1),
-            confidence=confidence,
-            limiting_factor=limiting_factor,
-            metrics={
-                key: round(value, 1)
-                for key, value in metrics.items()
-            },
+            confidence=round(completeness, 2),
+            limiting_factor=min(weighted_scores, key=lambda item: item[0])[2] if weighted_scores else None,
+            metrics=metrics,
+            completeness=round(completeness, 2),
+            missing_metrics=tuple(missing),
+            decision_eligible=eligible,
+            decision_score=round(score, 1) if eligible else None,
+            status="complete" if eligible else "insufficient_evidence",
         )

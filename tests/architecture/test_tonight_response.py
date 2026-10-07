@@ -284,7 +284,12 @@ def test_complete_result_maps_only_json_compatible_values():
     assert response["astro_quality"] == {
         "score": 78.0,
         "confidence": 0.84,
-        "label": "very_good",
+        "label": "insufficient_evidence",
+        "completeness": 0.0,
+        "missing_metrics": [],
+        "decision_eligible": False,
+        "decision_score": None,
+        "status": "insufficient_evidence",
         "limiting_factor": "clouds",
         "metrics": {"altitude": 91.0, "clouds": 64.0},
     }
@@ -610,7 +615,7 @@ def test_astro_quality_labels_are_stable(score, label):
     mission = NightMission(
         target="Andromeda",
         confidence=0.8,
-        astro_quality=AstroQualityResult(score=score, confidence=0.9),
+        astro_quality=AstroQualityResult(score=score, confidence=1.0, completeness=1.0, decision_eligible=True, decision_score=score, status="complete"),
     )
 
     response = TonightResponse.from_result(

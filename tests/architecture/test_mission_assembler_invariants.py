@@ -66,7 +66,7 @@ def isolated_dependencies(monkeypatch):
     )
     risk = SimpleNamespace(level="LOW")
     season = SimpleNamespace(conclusion="favorable")
-    image_quality = SimpleNamespace(score=8.0)
+    image_quality = SimpleNamespace(score=8.0, confidence=1.0)
     astro_quality = SimpleNamespace(score=82.0)
     dew_risk = SimpleNamespace(score=60.0)
     tasks = [SimpleNamespace(title="Capture")]
@@ -882,3 +882,19 @@ def test_assembler_carries_original_lunar_comparison_window_without_recalculatio
         context=context, equipment=["setup"], alternatives=[], mission_input=source)
     assert mission.lunar_evidence_snapshot is snapshot
     assert mission.window_end < snapshot.evidence.actionable_window_end
+
+
+def test_mission_does_not_count_partial_image_setup_as_known_aqi(
+    frozen_time, summary, context, isolated_dependencies, monkeypatch,
+):
+    monkeypatch.setattr(
+        module.ImageQualityEngine, "evaluate",
+        lambda value: SimpleNamespace(score=8.0, confidence=0.0),
+    )
+    mission = MissionAssembler.build(
+        target="M31", summary=summary, context=context,
+        equipment=["setup"], alternatives=[],
+        mission_input=mission_input(frozen_time, None),
+    )
+    assert mission is not None
+    assert isolated_dependencies.captured['astro_context'].image_quality_score is None

@@ -16,7 +16,8 @@ def test_aqi_rewards_excellent_imaging_conditions():
     result = AstroQualityEngine.evaluate(context)
 
     assert result.score >= 95
-    assert result.confidence == 1.0
+    assert result.confidence == 0.9
+    assert not result.decision_eligible
     assert result.limiting_factor == "setup"
 
 
@@ -48,7 +49,7 @@ def test_aqi_handles_missing_optional_quality_inputs():
     result = AstroQualityEngine.evaluate(context)
 
     assert 0 <= result.score <= 100
-    assert result.confidence == 0.6
+    assert result.confidence == 0.58
     assert "seeing_score" not in result.metrics
     assert "setup_score" not in result.metrics
 

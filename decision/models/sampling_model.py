@@ -55,7 +55,7 @@ class SamplingModel:
         
     ) -> SamplingEvaluation:
         
-        if sampling_arcsec_pixel is None or seeing_arcsec is None:
+        if sampling_arcsec_pixel is None or seeing_arcsec is None or object_size_arcmin is None:
             return SamplingEvaluation(
                 adequacy=0,
                 score=0,
