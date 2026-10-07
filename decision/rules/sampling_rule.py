@@ -13,8 +13,9 @@ class SamplingRule:
         if sampling is None:
             return RuleContribution(
                 rule=self.name,
-                score=0,
+                score=-6,
                 confidence=0.5,
+                evidence_status="unknown",
                 reason="Sampling indisponible",
                 details="",
             )
@@ -33,7 +34,8 @@ class SamplingRule:
         return RuleContribution(
             rule=self.name,
             score=evaluation.score,
-            confidence=1.0,
+            confidence=0.5 if getattr(evaluation, "evidence_status", "known") == "unknown" else 1.0,
+            evidence_status=getattr(evaluation, "evidence_status", "known"),
             reason=reason,
             details=details,
         )

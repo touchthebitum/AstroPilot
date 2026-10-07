@@ -19,7 +19,9 @@ class ResolutionRule:
         )
         pixels = resolution.pixels
 
-        if resolution.score >= 8:
+        if getattr(resolution, "evidence_status", "known") == "unknown":
+            reason = "Résolution inconnue"
+        elif resolution.score >= 8:
             reason = f"Résolution excellente (Objet projeté sur {pixels:.0f} px)"
         elif resolution.score >= 5:
             reason = f"Bonne résolution (Objet projeté sur {pixels:.0f} px)"
@@ -32,7 +34,8 @@ class ResolutionRule:
         return RuleContribution(
             rule=self.name,
             score=resolution.score,
-            confidence=1.0,
+            confidence=0.0 if getattr(resolution, "evidence_status", "known") == "unknown" else 1.0,
+            evidence_status=getattr(resolution, "evidence_status", "known"),
             reason=reason,
             details=details,
         )

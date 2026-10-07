@@ -86,7 +86,8 @@ def test_seeing_rule_reports_missing_measurement_with_low_confidence():
     )
 
     assert contribution.rule == "Seeing"
-    assert contribution.score == 0
+    assert contribution.score == -10
+    assert contribution.evidence_status == "unknown"
     assert contribution.confidence == 0.3
     assert contribution.reason == "Seeing indisponible"
     assert contribution.details == "Seeing : None"

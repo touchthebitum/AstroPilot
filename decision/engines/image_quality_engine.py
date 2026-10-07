@@ -45,7 +45,9 @@ class ImageQualityEngine:
         sampling_score = sampling.score
         resolution_score = resolution.score
 
-        seeing_match = 10 if abs(sampling.score - resolution.score) <= 2 else 7
+        unknown = (sampling.evidence_status == "unknown" or resolution.evidence_status == "unknown")
+        # Missing evidence must not earn the agreement bonus.
+        seeing_match = 7 if unknown else (10 if abs(sampling.score - resolution.score) <= 2 else 7)
 
         score = (
             sampling_score * 0.40 +
@@ -80,6 +82,7 @@ class ImageQualityEngine:
             ),
 
             metrics={
+                "evidence_status": "unknown" if unknown else "known",
                 "sampling_score": sampling.score,
                 "resolution_score": resolution.score,
                 "adequacy": adequacy,

@@ -15,3 +15,5 @@ class RuleContribution:
     details: str = ""
     weight: float = 1.0
     recommendation: Optional[str] = None
+    # None preserves faithful legacy contributions without inferred provenance.
+    evidence_status: str | None = None
