@@ -416,27 +416,9 @@ def test_http_request_runs_real_application_composition_once(
         json=selection_payload,
     )
 
-    assert accepted.status_code == 200, accepted.json()
-    accepted_payload = accepted.json()
-    assert accepted_payload["status"] == "accepted"
-    assert accepted_payload["catalog_key"] == "M31"
-    assert accepted_payload["mission"]["target"] == "Andromeda"
-    assert accepted_payload["mission"]["mission_id"]
-    assert accepted_payload["mission"]["decision_id"] == payload["decision_id"]
-    assert accepted_payload["mission"]["selection_id"]
-    assert len(calls["mission"]) == 2
-    acceptance_input = calls["mission"][1]["build_mission_input"](
-        selected_night["object_evaluations"]["M31"]
-    )
-    assert acceptance_input.mission_id == accepted_payload["mission"]["mission_id"]
-    assert acceptance_input.decision_id == payload["decision_id"]
-    assert acceptance_input.selection_id == accepted_payload["mission"]["selection_id"]
-
-    replayed = client.post("/v1/decision-selections", json=selection_payload)
-
-    assert replayed.status_code == 200, replayed.json()
-    assert replayed.json() == accepted_payload
-    assert len(calls["mission"]) == 2
+    assert accepted.status_code == 409, accepted.json()
+    assert accepted.json()["detail"]["code"] == "acquisition_intent_required_for_mission"
+    assert len(calls["mission"]) == 1  # preview only; no new commitment
 
 
 @pytest.mark.parametrize("legacy_remaining", [0.0, 4.0])

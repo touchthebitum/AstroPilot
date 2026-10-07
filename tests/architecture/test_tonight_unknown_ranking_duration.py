@@ -1,3 +1,4 @@
+from conftest import modern_ranking_project
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 
@@ -125,41 +126,26 @@ def test_candidate_imaging_field_and_provenance_survive_winner_wrappers():
 def test_project_candidate_carries_canonical_imaging_field_id(monkeypatch):
     candidate = build_project_candidate(
         monkeypatch,
-        {
+        modern_ranking_project({
             "hours": 2,
             "target_hours": 10,
             "importance": 5,
             "imaging_field_id": "sh2-129_ou4",
-        },
+        }),
     )
 
     assert candidate.imaging_field_id == "sh2-129_ou4"
 
 
-def test_legacy_project_candidate_has_no_imaging_field_id(monkeypatch):
-    candidate = build_project_candidate(
-        monkeypatch,
-        {"hours": 2, "target_hours": 10, "importance": 5},
-    )
-
-    assert candidate.imaging_field_id is None
-
-
-@pytest.mark.parametrize("imaging_field_id", ["unknown", "", 42])
-def test_invalid_explicit_project_imaging_field_fails_closed(
-    monkeypatch,
-    imaging_field_id,
-):
-    with pytest.raises(ProjectImagingFieldResolutionError):
-        build_project_candidate(
-            monkeypatch,
-            {
-                "hours": 2,
-                "target_hours": 10,
-                "importance": 5,
-                "imaging_field_id": imaging_field_id,
-            },
-        )
+@pytest.mark.parametrize("project", [
+    {"hours": 2, "target_hours": 10, "importance": 5},
+    {"imaging_field_id": "unknown"}, {"imaging_field_id": ""}, {"imaging_field_id": 42},
+])
+def test_legacy_or_invalid_provenance_fails_closed(project):
+    result = astro_score.recommend_project_for_night(
+        [{"name": "Sh2-129", "global_score": 80}], profile={"projects": {"Sh2-129": project}})
+    assert not result
+    assert result.rejections[0].basis is CandidateRejectionBasis.MODERN_PROVENANCE_MISSING
 
 
 def test_project_candidate_reuses_project_imaging_field_resolver(monkeypatch):
@@ -171,12 +157,12 @@ def test_project_candidate_reuses_project_imaging_field_resolver(monkeypatch):
         return original(project, resolver)
 
     monkeypatch.setattr(astro_score, "resolve_project_imaging_field", observe)
-    project = {
+    project = modern_ranking_project({
         "hours": 2,
         "target_hours": 10,
         "importance": 5,
         "imaging_field_id": "sh2-129_ou4",
-    }
+    })
 
     candidate = build_project_candidate(monkeypatch, project)
 
@@ -219,11 +205,11 @@ def test_unknown_duration_skips_roi_and_closure_scoring_and_reasons(monkeypatch)
         [{"name": "M31", "catalog_key": "M31", "global_score": 80}],
         profile={
             "projects": {
-                "M31": {
+                "M31": modern_ranking_project({
                     "hours": 2,
                     "target_hours": 10,
                     "importance": 5,
-                }
+                })
             }
         },
     )
@@ -248,8 +234,8 @@ def test_known_duration_keeps_roi_and_closure_scoring_and_reasons(monkeypatch):
         contributions.update(kwargs)
         return original_strategy_scores(**kwargs)
 
-    monkeypatch.setattr(astro_score, "session_roi", lambda *args, **kwargs: 10)
-    monkeypatch.setattr(astro_score, "closure_bonus", lambda *args, **kwargs: 15)
+    monkeypatch.setattr(astro_score, "acquisition_intent_session_gain", lambda *args: 30)
+    monkeypatch.setattr(astro_score, "closure_bonus_for_remaining", lambda *args: 15)
     monkeypatch.setattr(
         astro_score.night_strategy_engine,
         "compute_strategy_scores",
@@ -269,11 +255,11 @@ def test_known_duration_keeps_roi_and_closure_scoring_and_reasons(monkeypatch):
         available_hours=3,
         profile={
             "projects": {
-                "M31": {
+                "M31": modern_ranking_project({
                     "hours": 2,
                     "target_hours": 10,
                     "importance": 5,
-                }
+                })
             }
         },
     )[0]
@@ -368,11 +354,11 @@ def test_viable_project_candidate_suppresses_discovery(monkeypatch):
         ],
         profile={
             "projects": {
-                "M31": {
+                "M31": modern_ranking_project({
                     "hours": 2,
                     "target_hours": 10,
                     "importance": 5,
-                }
+                })
             }
         },
     )
@@ -393,11 +379,11 @@ def test_discovery_is_used_when_configured_project_is_not_viable(monkeypatch):
         ],
         profile={
             "projects": {
-                "M31": {
+                "M31": modern_ranking_project({
                     "hours": 2,
                     "target_hours": 10,
                     "importance": 5,
-                }
+                })
             }
         },
     )
@@ -444,6 +430,8 @@ def test_candidate_rejection_contract_is_exact_and_immutable():
         "non_positive_evaluation_score",
         "intent_targets_completed",
         "legacy_project_completed",
+        "modern_provenance_missing",
+        "legacy_read_only",
     }
     rejection = CandidateRejection(
         target="Orion",
@@ -482,3 +470,6 @@ def test_global_score_remains_the_selected_rejection_evidence():
 
     assert result.candidates == ()
     assert result.rejections[0].evaluation_score == -1
+
+
+pytestmark = pytest.mark.usefixtures("selected_modern_ranking_intent")

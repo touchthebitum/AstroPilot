@@ -761,7 +761,11 @@ def test_tonight_composes_intent_filter_through_real_input_and_assembler(
     inputs = []
 
     def build_input(value):
-        result = astro_score.build_mission_input(value, profile={})
+        result = astro_score.build_mission_input(value, profile={"projects": {"Sh2-129": {
+            "imaging_field_id": "sh2-129_ou4",
+            "acquisition_intent_targets": [{"acquisition_intent_id": intent_id, "target_hours": 2}],
+            "acquisition_intent_progress": [{"acquisition_intent_id": intent_id, "acquired_duration_manual": 0}],
+        }}})
         result = replace(result, availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT))
         inputs.append(result)
         return result
@@ -774,7 +778,7 @@ def test_tonight_composes_intent_filter_through_real_input_and_assembler(
                   "decision_summary": summary, "decision_context": context}],
         recommended_key="Sh2-129", build_mission_input=build_input,
     )
-    expected = compatible if inventory_kind == "compatible" else None
+    expected = None  # A legacy type match is not an exact modern profile identity.
     assert inputs[0].selected_filter is expected
     assert mission.selected_filter is expected
     assert mission.imaging_field_id == inputs[0].imaging_field_id == "sh2-129_ou4"
@@ -898,3 +902,17 @@ def test_mission_does_not_count_partial_image_setup_as_known_aqi(
     )
     assert mission is not None
     assert isolated_dependencies.captured['astro_context'].image_quality_score is None
+
+
+@pytest.mark.parametrize("source", ["inventory", "legacy_inventory", "selection", "user_default", "observed", "resolved_profile"])
+def test_legacy_filter_cannot_authorize_modern_mission_at_real_assembler(
+    frozen_time, summary, context, isolated_dependencies, source,
+):
+    selected = SelectedFilter("Old Ha", "Ha", 6.5, source=source)
+    value = mission_input(frozen_time, None, selected_filter=selected,
+                          imaging_field_id="sh2-129_ou4", acquisition_intent_id="sh2-129_ha")
+    # Construction is a historical read contract; authorization is a separate boundary.
+    assert value.selected_filter is selected
+    with pytest.raises(ValueError, match="legacy_filter_cannot_authorize_modern_mission"):
+        MissionAssembler.build(target="M31", summary=summary, context=context,
+                               equipment=[], alternatives=[], mission_input=value)

@@ -10,6 +10,25 @@ from typing import Protocol
 from decision.mission.night_mission import NightMission
 from decision.models.session_availability import SessionAvailability
 from decision.models.user_selection import UserSelection, UserSelectionSource
+from decision.services.project_decision_provenance import (
+    ProjectDecisionProvenance, resolve_project_decision_provenance,
+)
+from decision.definitions.production_imaging_fields import (
+    build_production_imaging_field_resolver,
+)
+from decision.services.project_acquisition_intent_targets import (
+    resolve_project_acquisition_intent_targets,
+)
+from decision.services.project_imaging_field_resolution import (
+    resolve_project_imaging_field,
+)
+from decision.services.project_acquisition_intent_progress import (
+    resolve_project_acquisition_intent_progress,
+)
+from decision.services.acquisition_intent_remaining_progress import (
+    derive_acquisition_intent_remaining_progress,
+)
+from decision.services.intent_progress_credit import credit_totals
 from decision.services.user_selection_validator import (
     UserSelectionDecisionContext,
     validate_user_selection,
@@ -448,19 +467,42 @@ class DecisionAcceptanceApplicationService:
             raise DecisionAcceptanceError(str(exc)) from exc
 
         try:
-            intent_provenance_expected = (
-                acquisition_intent_provenance_expected(context, selection)
-            )
+            acquisition_intent_provenance_expected(context, selection)
         except SelectedAcquisitionIntentResolutionError as exc:
             raise DecisionAcceptanceError(str(exc)) from exc
         if (
-            selection.selected_imaging_field_id is not None
-            and selection.selected_acquisition_intent_id is None
-            and intent_provenance_expected
+            selection.source is not UserSelectionSource.DECLINED
+            and (selection.selected_imaging_field_id is None
+                 or selection.selected_acquisition_intent_id is None)
         ):
             raise DecisionAcceptanceError(
                 "acquisition_intent_required_for_mission"
             )
+
+        if selection.source is not UserSelectionSource.DECLINED:
+            project = context.profile.get("projects", {}).get(
+                selection.selected_catalog_key, {},
+            )
+            resolver = build_production_imaging_field_resolver()
+            provenance = resolve_project_decision_provenance(project, resolver)
+            if provenance is not ProjectDecisionProvenance.MODERN_AUTHORIZED:
+                raise DecisionAcceptanceError("modern_project_provenance_required")
+            targets = resolve_project_acquisition_intent_targets(project, resolver)
+            if selection.selected_acquisition_intent_id not in {
+                target.acquisition_intent_id for target in targets
+            }:
+                raise DecisionAcceptanceError("selected_acquisition_intent_not_targeted")
+            progress = derive_acquisition_intent_remaining_progress(
+                resolve_project_imaging_field(project, resolver), targets,
+                resolve_project_acquisition_intent_progress(project, resolver),
+                credit_totals(context.profile, selection.selected_catalog_key),
+            )
+            selected_capacity = next(
+                item for item in progress
+                if item.acquisition_intent_id == selection.selected_acquisition_intent_id
+            )
+            if selected_capacity.remaining_hours is None or selected_capacity.completed:
+                raise DecisionAcceptanceError("acquisition_capacity_required_for_mission")
 
         mission_id = self.mission_id_factory()
         if not isinstance(mission_id, str) or not mission_id.strip():

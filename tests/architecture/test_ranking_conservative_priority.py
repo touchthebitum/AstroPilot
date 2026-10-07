@@ -1,3 +1,4 @@
+from conftest import modern_ranking_project
 """Ranking contract: missing preference contributes no reward and cannot soften risk."""
 from copy import deepcopy
 from types import SimpleNamespace
@@ -8,7 +9,7 @@ from decision.models.future_opportunity import FutureOpportunity
 @pytest.fixture
 def fixture(monkeypatch):
     monkeypatch.setattr(a,'future_engine',SimpleNamespace(estimate=lambda *args,**kw:FutureOpportunity(20,'FAIBLE',.5,2,10)))
-    profile={'location':{'latitude':46.7508,'longitude':6.5495},'active_equipment':'samyang_183','preferences':{},'projects':{'M31':{'hours':0,'target_hours':20,'importance':5}}}
+    profile={'location':{'latitude':46.7508,'longitude':6.5495},'active_equipment':'samyang_183','preferences':{},'projects':{'M31':modern_ranking_project({'hours':0,'target_hours':20,'importance':5})}}
     def candidate(p=profile):return a.recommend_project_for_night([{'name':'M31','catalog_key':'M31','global_score':80}],available_hours=2,profile=p)[0]
     return profile,candidate
 
@@ -43,8 +44,8 @@ def test_twelve_adverse_risk_winners(monkeypatch, fixture, astro, mode):
     profile, _ = fixture
     profile['preferences']['decision_mode'] = mode
     profile['projects'] = {
-        'M31': {'hours': 0, 'target_hours': 20},
-        'M33': {'hours': 0, 'target_hours': 20, 'importance': 1},
+        'M31': modern_ranking_project({'hours': 0, 'target_hours': 20}),
+        'M33': modern_ranking_project({'hours': 0, 'target_hours': 20, 'importance': 1}),
     }
     monkeypatch.setattr(a, 'future_engine', SimpleNamespace(
         estimate=lambda *args, **kw: FutureOpportunity(0, 'CRITIQUE', .5, 2, 0)))
@@ -99,3 +100,6 @@ def test_unknown_opportunity_has_no_bonus(monkeypatch, fixture, astro):
         {'name':'M31','catalog_key':'M31','global_score':astro}
     ], available_hours=2, profile=profile)
     assert captured[0]['opportunity_bonus'] == 0
+
+
+pytestmark = pytest.mark.usefixtures("selected_modern_ranking_intent")

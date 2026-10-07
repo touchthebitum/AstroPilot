@@ -54,10 +54,10 @@ HA = SelectedFilter("H-alpha", "Ha")
 
 @pytest.mark.parametrize(
     ("inventory", "expected_filter"),
-    [((), None), ((OIII,), None), ((OIII, HA), HA)],
+    [((), None), ((OIII,), None), ((OIII, HA), None)],
     ids=["absent", "oiii-only", "mixed"],
 )
-def test_legacy_inventory_only_enriches_eligible_ha_intent(
+def test_legacy_inventory_never_enriches_modern_ha_intent(
     monkeypatch,
     frozen_time,
     inventory,

@@ -154,7 +154,7 @@ def test_filter_inventory_loader_builds_selected_filters(tmp_path):
     assert filters[0].name == "Baader Ha 6.5nm Highspeed"
     assert filters[0].filter_type == "Ha"
     assert filters[0].bandwidth_nm == 6.5
-    assert filters[0].source == "inventory"
+    assert filters[0].source == "legacy_inventory"
 
     assert filters[1].filter_type == "LRGB"
 

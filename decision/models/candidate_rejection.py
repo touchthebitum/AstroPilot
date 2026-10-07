@@ -11,6 +11,8 @@ from decision.models.candidate import Candidate, CandidateProvenance
 class CandidateRejectionBasis(str, Enum):
     NON_POSITIVE_EVALUATION_SCORE = "non_positive_evaluation_score"
     INTENT_TARGETS_COMPLETED = "intent_targets_completed"
+    MODERN_PROVENANCE_MISSING = "modern_provenance_missing"
+    LEGACY_READ_ONLY = "legacy_read_only"
     LEGACY_PROJECT_COMPLETED = "legacy_project_completed"
 
 

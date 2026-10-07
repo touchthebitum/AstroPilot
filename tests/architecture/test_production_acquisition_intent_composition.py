@@ -370,16 +370,11 @@ def test_legacy_project_keeps_absent_intent_provenance(
         "estimate",
         lambda *args, **kwargs: SimpleNamespace(risk="LOW", opportunity_ratio=1.0),
     )
-    candidate = astro_score.recommend_project_for_night(
-        _top_object(),
-        available_hours=2.0,
-        profile=_profile(project),
-    ).candidates[0]
-
-    assert candidate.imaging_field_id == project.get("imaging_field_id")
-    assert candidate.selected_acquisition_intent_id is None
-    assert candidate.viable_acquisition_intent_ids == ()
-    assert candidate.acquisition_intent_selection_status is None
+    result = astro_score.recommend_project_for_night(
+        _top_object(), available_hours=2.0, profile=_profile(project),
+    )
+    assert not result
+    assert result.rejections[0].basis.value == "modern_provenance_missing"
 
 
 def test_modern_project_passes_exact_selection_without_changing_score(
@@ -429,7 +424,7 @@ def test_modern_project_passes_exact_selection_without_changing_score(
         "build_candidate",
         recording_build,
     )
-    project = {
+    project = {"acquisition_intent_progress": [],
         "hours": 1.0,
         "target_hours": 4.0,
         "imaging_field_id": "sh2-129_ou4",
@@ -732,3 +727,45 @@ def test_alternative_api_transports_all_compared_intents():
     response = TonightResponse.from_result(result, selected_alternatives=(candidate,)).to_dict()
     payload = TonightResponseModel.model_validate(response).model_dump(mode="json")
     assert payload["alternatives"][0]["lunar_evidence_snapshot"] == TypeAdapter(LunarEvidenceSnapshot).dump_python(candidate.lunar_evidence_snapshot, mode="json")
+
+
+@pytest.mark.parametrize('equipment_id', [None, 'legacy_synthetic_setup'])
+def test_legacy_inventory_and_synthetic_setup_do_not_supply_modern_capabilities(
+    tmp_path, monkeypatch, equipment_id,
+):
+    import json
+    from decision.filtering.filter_inventory_loader import FilterInventoryLoader
+    from decision.services.setup_filter_capabilities_resolver import SetupFilterCapabilitiesResolutionError
+
+    monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(tmp_path))
+    (tmp_path / 'user_filters.json').write_text(json.dumps({'filters': [
+        {'name': 'Old Ha', 'type': 'Ha', 'bandwidth_nm': 6.5},
+    ]}))
+    assert FilterInventoryLoader.load()[0].filter_type == 'Ha'
+    with pytest.raises(SetupFilterCapabilitiesResolutionError):
+        astro_score.setup_filter_capabilities_resolver.resolve(equipment_id)
+    result = _compose(targets=('sh2-129_ha',), capabilities=None)
+    assert result.selected_acquisition_intent_id is None
+    assert all(a.status is not AcquisitionIntentEligibilityStatus.ELIGIBLE for a in result.eligibility_assessments)
+
+
+def test_same_type_legacy_inventory_does_not_replace_missing_optical_profile(tmp_path, monkeypatch):
+    import json
+    from decision.filtering.filter_inventory_loader import FilterInventoryLoader
+    monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(tmp_path))
+    (tmp_path / 'user_filters.json').write_text(json.dumps({'filters': [
+        {'name': 'Old Ha', 'type': 'Ha', 'bandwidth_nm': 6.5},
+    ]}))
+    assert FilterInventoryLoader.load()[0].filter_type == 'Ha'
+    result = _compose(targets=('sh2-129_ha',),
+                      capabilities=SetupFilterCapabilities('modern', ('Ha',), ()))
+    assert result.selected_acquisition_intent_id is None
+    assert result.eligibility_assessments[0].status is AcquisitionIntentEligibilityStatus.INSUFFICIENT_EVIDENCE
+
+
+def test_removing_exact_modern_profile_cannot_improve_intent_actionability():
+    known = _compose(targets=('sh2-129_ha',))
+    unknown = _compose(targets=('sh2-129_ha',),
+                       capabilities=SetupFilterCapabilities('legacy', ('Ha',), ()))
+    assert known.selected_acquisition_intent_id == 'sh2-129_ha'
+    assert unknown.selected_acquisition_intent_id is None

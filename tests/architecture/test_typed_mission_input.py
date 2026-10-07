@@ -243,7 +243,7 @@ def test_recommended_hours_preserves_the_project_duration_cap(
     assert mission.recommended_hours == 1.25
 
 
-def test_expected_gain_uses_existing_session_portfolio_gain(
+def test_discovery_input_does_not_invent_project_gain(
     monkeypatch,
     frozen_time,
     frozen_weather,
@@ -271,7 +271,7 @@ def test_expected_gain_uses_existing_session_portfolio_gain(
     mission_input = astro_score.build_mission_input(evaluation)
 
     assert mission_input.recommended_hours == 1.5
-    assert mission_input.expected_gain == 7.5
+    assert mission_input.expected_gain == 0
 
 
 def test_missing_evidence_does_not_reach_productivity_engine(

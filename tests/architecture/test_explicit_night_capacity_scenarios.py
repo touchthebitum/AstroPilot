@@ -1,3 +1,4 @@
+from conftest import modern_ranking_project
 """No implicit 3h evidence at the real future/roadmap/gain boundaries."""
 from datetime import datetime, timedelta, timezone
 from dataclasses import asdict
@@ -15,7 +16,7 @@ from decision.portfolio.project_scoring import closure_bonus, closure_bonus_for_
 
 def profile(hours=None, *, history=None):
     value = {'location': {'latitude': 46.7, 'longitude': 6.5}, 'preferences': {},
-             'projects': {'M31': {'hours': 0, 'target_hours': 15, 'importance': 5}}}
+             'projects': {'M31': modern_ranking_project({'hours': 0, 'target_hours': 15, 'importance': 5})}}
     if hours is not None:
         value['preferences']['productive_hours_per_night'] = hours
     if history is not None:
@@ -99,7 +100,7 @@ def test_withdrawing_history_cannot_raise_real_candidate_scores_or_gain(engine, 
     assert removed.closure_bonus == known.closure_bonus
     assert removed.acquisition_intent_assessments == known.acquisition_intent_assessments
     start = datetime(2026, 10, 6, tzinfo=timezone.utc)
-    evaluation = {'name': 'M31', 'catalog_key': 'M31', 'window': {'start': start,
+    evaluation = {'selected_acquisition_intent_id': 'sh2-129_ha', 'name': 'M31', 'catalog_key': 'M31', 'window': {'start': start,
         'end': start + timedelta(hours=2), 'clouds': 10, 'humidity': 50, 'wind': 2, 'seeing': 1.5}}
     inputs = [astro_score.build_mission_input(evaluation, profile=p) for p in (known_profile, unknown_profile)]
     assert inputs[0].recommended_hours == inputs[1].recommended_hours == 2
@@ -109,8 +110,8 @@ def test_withdrawing_history_cannot_raise_real_candidate_scores_or_gain(engine, 
 def test_explicit_future_capacity_changes_simulated_ranking_but_not_night_allocation(engine):
     # 3 h is now a deliberate, inspectable scenario rather than a hidden divisor.
     p = profile()
-    p['projects'] = {'M31': {'hours': 0, 'target_hours': 90, 'importance': 5},
-                     'M51': {'hours': 0, 'target_hours': 12, 'importance': 8.5}}
+    p['projects'] = {'M31': modern_ranking_project({'hours': 0, 'target_hours': 90, 'importance': 5}),
+                     'M51': modern_ranking_project({'hours': 0, 'target_hours': 12, 'importance': 8.5})}
     forecast = PortfolioForecastEngine(engine, simulated_portfolio_score)
     results = [forecast.simulate_dynamic_portfolio_roadmap(
         [{'hours': 1}], profile=p,
@@ -134,7 +135,7 @@ def test_roadmap_does_not_extrapolate_current_night_to_all_future_nights(engine)
 
 @pytest.mark.parametrize('duration', [None, 0, -1, float('nan'), float('inf'), True])
 def test_missing_session_capacity_creates_no_gain_roi_or_closure(duration):
-    projects = {'M31': {'hours': 0, 'target_hours': 2, 'importance': 5}}
+    projects = {'M31': modern_ranking_project({'hours': 0, 'target_hours': 2, 'importance': 5})}
     assert portfolio_gain_if_shot('M31', duration, projects=projects) == 0
     assert session_portfolio_gain('M31', duration, projects=projects) == 0
     assert session_roi('M31', duration, projects=projects) == 0
@@ -144,7 +145,7 @@ def test_missing_session_capacity_creates_no_gain_roi_or_closure(duration):
 
 
 def test_omitted_session_capacity_is_neutral_but_explicit_three_hours_is_preserved():
-    projects = {'M31': {'hours': 0, 'target_hours': 2, 'importance': 5}}
+    projects = {'M31': modern_ranking_project({'hours': 0, 'target_hours': 2, 'importance': 5})}
     assert portfolio_gain_if_shot('M31', projects=projects) == 0
     assert session_portfolio_gain('M31', projects=projects) == 0
     assert session_roi('M31', projects=projects) == 0
@@ -165,8 +166,8 @@ def test_legacy_future_values_and_five_argument_constructor_remain_faithful():
 
 def test_real_roadmap_uses_history_instead_of_implicit_three_hours(engine):
     p = profile(100, history=observed(1))
-    p['projects'] = {'M31': {'hours': 0, 'target_hours': 90, 'importance': 5},
-                     'M51': {'hours': 0, 'target_hours': 12, 'importance': 8.5}}
+    p['projects'] = {'M31': modern_ranking_project({'hours': 0, 'target_hours': 90, 'importance': 5}),
+                     'M51': modern_ranking_project({'hours': 0, 'target_hours': 12, 'importance': 8.5})}
     result = PortfolioForecastEngine(engine, simulated_portfolio_score).simulate_dynamic_portfolio_roadmap(
         [{'hours': 1}], profile=p)
     assert result[0]['project'] == 'M51'
@@ -194,3 +195,6 @@ def test_future_scenario_cannot_improve_actual_tonight_ranking(engine, monkeypat
     assert unapproved.decision_score == unknown.decision_score
     assert unapproved.strategy_scores == unknown.strategy_scores
     assert unapproved.closure_bonus == unknown.closure_bonus
+
+
+pytestmark = pytest.mark.usefixtures("selected_modern_ranking_intent")
