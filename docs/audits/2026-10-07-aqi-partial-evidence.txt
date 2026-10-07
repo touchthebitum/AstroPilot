@@ -1,0 +1,104 @@
+Audit AQI partiel — 7 octobre 2026
+
+BASELINE
+PR #325 MERGED le 7 octobre 2026 à 15:49:08 UTC (17:49:08 Zurich).
+Merge/main : ec94f4e184f0f935968b7825358664b2f1585e1c.
+Références main et origin/main identiques dans la copie isolée, tree initial propre.
+Dépôt source partagé : Documents/Codex/2026-08-23/referenced-chatgpt-conversation-this-is-an/AstroPilot.
+Son checkout est sur fix/explicit-night-capacity-scenarios avec .DS_Store et astropilot.egg-info non suivis : non modifié.
+Le checkout de #325 était propre et le stash partagé contient exactement
+223ec1f5904131d726b694655f137670c0ddeb0b. Aucun pop/apply/drop.
+L'ancien ~/astrophoto_app est un autre clone avec modifications locales ; non utilisé/non modifié.
+
+CARTE ET POIDS (inchangés)
+AstroQualityContext -> AstroQualityEngine -> AstroQualityResult.
+Altitude 0.18 : paliers/interpolation 20 à 100.
+Clouds 0.27 : 100 - couverture, borné 0..100.
+Moon 0.13 : (1 - pénalité) * 100.
+Seeing 0.18 : paliers 100/90/75/55/30.
+Setup 0.14 : ImageQualityEngine score * 10, borné 0..100.
+Dew 0.10 : DewRiskEngine score 20/45/70/100.
+Somme = 1. Ancienne agrégation : somme pondérée / poids présents.
+Ancienne confidence 0.6/0.8/1 selon seeing/setup uniquement, ignorant dew.
+Altitude/cloud/moon None faisaient échouer les helpers ; seeing/setup/dew omis.
+ImageQualityEngine : sampling 40 %, resolution 40 %, seeing_match 20 %.
+SamplingModel/ResolutionModel unknown produisent 0 même si leurs valeurs connues
+peuvent être négatives ; ImageQualityEngine annonçait confidence=1 malgré unknown.
+
+TRANSPORT ET CONSOMMATEURS
+MissionAssembler calcule l'AQI après ProductiveWindow et sa validation d'actionabilité.
+NightMission stocke AstroQualityResult ; TonightResponseBuilder transporte vers
+TonightAstroQualityResponse -> TonightAstroQualityModel -> app.js renderDecision.
+MissionPresenter affichait aussi un label favorable pour le diagnostic partiel.
+La persistance acceptance_lineage sérialise le dataclass et exige des champs exacts.
+Candidate n'a pas de champ AQI. Son astro_score n'est pas cet indice : astro_score.py
+utilise global_score (score de règles + setup), puis les bonus portfolio.
+CandidateAssessment et CandidateViabilityEvaluator utilisent ProductiveWindow et
+WeatherTrustDecision, pas l'AQI. Aucun usage AQI direct dans ranking/actionability
+trouvé. L'AQI incomplet ne doit pas invalider arbitrairement une mission fondée sur
+un contrat ProductiveWindow indépendant : l'éligibilité ajoutée concerne l'AQI.
+
+FINDINGS
+P0 : aucun confirmé dans ce périmètre.
+P1 : aucun chemin nominal démontré d'AQI partiel vers le ranking/actionability.
+P2 confirmé/corrigé : renormalisation gonflant un AQI affiché comme plein.
+Exemple : altitude75/cloud0/moon0/seeing1.2/setup9/dew20 -> AQI90.6.
+Suppression dew -> diagnostic98.4, auparavant confidence1 et label excellent.
+P2 confirmé/corrigé : confidence ignorant dew et métriques inconnues critiques.
+P2 confirmé/corrigé : setup dérivé de composants inconnus compté comme complet.
+P2 confirmé/corrigé : legacy/API/UI ne distinguaient pas score partiel et plein.
+P2 confirmé restant, circuit DISTINCT : SeeingRule unknown=0/confidence0.3 contre
+seeing>3=-10/confidence1. DecisionEngine additionne les contributions pondérées
+sans utiliser la confidence. SamplingModel/ResolutionModel ont aussi unknown=0
+contre scores négatifs connus. Le chemin nominal météo est protégé par l'ingress
+et #325 ; des appels directs de helpers restent exposés. Remplacer ce barème ou
+modifier le contrat global de règles nécessite un chantier séparé, sans confondre
+AQI et global_score. Aucune affirmation de fermeture universelle de ces helpers.
+P3 : intégrations externes lisant seulement le champ historique score doivent
+adopter decision_score/decision_eligible ; ce contrat est maintenant explicite.
+
+CONTRAT RETENU
+Aucun nouveau poids ni nouvelle formule métier pour les preuves complètes.
+score conserve le diagnostic historique renormalisé, NON COMPARABLE et NON
+DECISIONNEL dès qu'une métrique manque. Il peut augmenter : ce n'est pas un
+score décisionnel. decision_score=None, decision_eligible=False et
+status=insufficient_evidence dans tous ces cas. Les six métriques valides sont
+requises : seuil completeness=1.0 justifié par l'existence des six poids métier.
+completeness = masse de poids connus ; confidence en est l'alias de couverture,
+pas une fiabilité météo. missing_metrics liste les entrées absentes/invalides.
+None, attribut absent, bool, string, NaN, inf et valeurs physiques hors domaine
+restent unknown. Setup garde le clamp historique, y compris scores négatifs.
+Aucune imputation unknown favorable/neutre. Sans métrique : diagnostic0 mais
+aucun decision_score. Legacy conserve score/confidence/metrics, sans preuve
+rétroactive d'éligibilité. Décodeur accepte exactement les 4 anciens champs ou
+l'ensemble complet nouveau, pas un sous-ensemble arbitraire.
+ImageQualityEngine annonce confidence0 si seeing/sampling/taille manquent ;
+MissionAssembler ne transmet alors aucun setup_score connu à l'AQI.
+SamplingModel traite une taille None comme unknown au lieu d'un TypeError.
+API ajoute le contrat et label insufficient_evidence ; UI masque le chiffre
+comparatif et explique la preuve insuffisante, y compris pour un payload legacy.
+CLI affiche explicitement AQI partiel/non décisionnel.
+
+VALIDATION ET LIMITES
+Tests paramétrés : suppression positive/adverse pour chaque métrique, invalides,
+contexte vide, diagnostic plus élevé mais décisionnel absent, legacy roundtrip,
+transport/labels, interface exécutée, setup partiel transmis comme unknown.
+Tests #325 ProductiveWindow inclus sans modification du correctif.
+Voir résultats définitifs dans le rapport de livraison.
+Scoped audit : aucun fichier Field Lab, collecteur, NAS, météo ingress,
+ProductiveWindow ou poids/ranking modifié. Tests Field Lab uniquement exécutés
+comme partie de la suite, aucun service Field Lab lancé/configuré.
+
+RESULTATS DEFINITIFS
+Suite complète avec Node et ports loopback autorisés : 5954 passed, 1 skipped,
+44 warnings Astropy, 111.17 s. Skip attendu : volume case-insensitive, alias réel
+couvert par une autre régression. Aucun échec.
+Tests ciblés AQI + ProductiveWindow #325 + UI : 160 passed.
+Après ajout du test de propagation setup : 97 passed (AQI + MissionAssembler).
+Suivi API + AQI + MissionAssembler : 266 passed. Exemple OpenAPI également
+actualisé pour un AQI complet (complétude et score décisionnel explicites).
+La première exécution sandbox a rencontré les restrictions du test loopback et
+l'absence de Node ; relance dans l'environnement approprié verte ci-dessus.
+Diff check propre. Aucun changement Field Lab. Stash critique revérifié intact.
+Recommandation : merge après review/CI du correctif AQI ; ne pas considérer le
+moteur indépendant de règles comme intégralement fermé pour unknown.

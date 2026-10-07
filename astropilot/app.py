@@ -967,7 +967,7 @@ class TonightFilterModel(BaseModel):
 
 
 class TonightAstroQualityModel(BaseModel):
-    score: float
+    score: float = Field(description="Diagnostic AQI; non-comparable when decision_eligible is false.")
     confidence: float = Field(
         ge=0.0,
         le=1.0,
@@ -978,6 +978,11 @@ class TonightAstroQualityModel(BaseModel):
     label: str
     limiting_factor: str | None = None
     metrics: dict[str, float] = Field(default_factory=dict)
+    completeness: float = 0.0
+    missing_metrics: tuple[str, ...] = ()
+    decision_eligible: bool = False
+    decision_score: float | None = None
+    status: str = "insufficient_evidence"
 
 
 class TonightProductivityWindowModel(BaseModel):
@@ -1392,11 +1397,16 @@ class TonightResponseModel(BaseModel):
                         "bandwidth_nm": 7.0,
                     },
                     "astro_quality": {
-                        "score": 86.0,
-                        "confidence": 0.9,
+                        "score": 85.8,
+                        "confidence": 1.0,
+                        "completeness": 1.0,
+                        "missing_metrics": [],
+                        "decision_eligible": True,
+                        "decision_score": 85.8,
+                        "status": "complete",
                         "label": "very_good",
                         "limiting_factor": "moon",
-                        "metrics": {"altitude": 92.0, "moon": 71.0},
+                        "metrics": {"altitude_score": 92.0, "cloud_score": 90.0, "moon_score": 71.0, "seeing_score": 90.0, "setup_score": 75.0, "dew_score": 90.0},
                     },
                     "productivity": {
                         "astronomical_hours": 6.2,

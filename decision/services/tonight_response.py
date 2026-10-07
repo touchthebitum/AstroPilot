@@ -183,6 +183,11 @@ class TonightAstroQualityResponse:
     label: str
     limiting_factor: str | None = None
     metrics: dict[str, float] = field(default_factory=dict)
+    completeness: float = 0.0
+    missing_metrics: tuple[str, ...] = ()
+    decision_eligible: bool = False
+    decision_score: float | None = None
+    status: str = "insufficient_evidence"
 
 
 def _quality_label(score: float) -> str:
@@ -710,7 +715,12 @@ class TonightResponse:
             astro_quality = TonightAstroQualityResponse(
                 score=float(quality.score),
                 confidence=float(quality.confidence),
-                label=_quality_label(quality.score),
+                label=_quality_label(quality.score) if quality.decision_eligible else "insufficient_evidence",
+                completeness=quality.completeness,
+                missing_metrics=quality.missing_metrics,
+                decision_eligible=quality.decision_eligible,
+                decision_score=quality.decision_score,
+                status=quality.status,
                 limiting_factor=quality.limiting_factor,
                 metrics={
                     name: float(value)

@@ -98,7 +98,10 @@ class MissionPresenter:
             )
 
             print("🌌 Qualité astrophotographique")
-            print(f"AQI : {score:.0f}/100 — {label}")
+            if getattr(mission.astro_quality, "decision_eligible", False):
+                print(f"AQI : {score:.0f}/100 — {label}")
+            else:
+                print(f"AQI partiel : {score:.0f}/100 — preuves insuffisantes, non décisionnel")
 
             if limiting_factor:
                 print(f"Facteur limitant : {limiting_factor}")

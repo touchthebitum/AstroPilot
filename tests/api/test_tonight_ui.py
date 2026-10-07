@@ -349,7 +349,8 @@ def test_tonight_ui_assets_are_served():
     assert 'ui.recommendationConfidence.textContent = formatted || ""' in script.text
     assert 'return "Non disponible"' not in script.text
     assert "renderMission(mission)" in acceptance_function
-    assert "decision_score" not in script.text
+    assert "decision.decision_score" not in script.text
+    assert "quality.decision_score" in script.text
     assert "final_score" not in script.text
     assert 'id="session-complete"' in page.text
     assert 'id="session-interrupt"' in page.text
@@ -1325,6 +1326,15 @@ function run() {
     renderDecision({target_decision_status:"recommended", explanation, astro_quality:{limiting_factor:"clouds"}});
     results.reasons.push(values["#decision-reason"]);
   }
+  results.quality = [];
+  for (const quality of [
+    {score:99, label:"excellent", decision_eligible:false, decision_score:null},
+    {score:99, label:"excellent"},
+    {score:81, label:"very_good", decision_eligible:true, decision_score:81}
+  ]) {
+    renderDecision({target_decision_status:"recommended", astro_quality:quality});
+    results.quality.push({score:values["#quality-score"], title:values["#quality-title"]});
+  }
   return JSON.stringify(results);
 }
 '''
@@ -1337,6 +1347,9 @@ function run() {
     path.write_text(harness)
     completed = subprocess.run([*command, str(path)], text=True, capture_output=True, check=True)
     results = json.loads(completed.stdout)
+    assert results['quality'][0] == {'score': '—', 'title': 'Preuves AQI insuffisantes'}
+    assert results['quality'][1] == {'score': '—', 'title': 'Preuves AQI insuffisantes'}
+    assert results['quality'][2]['score'] == '81'
     assert results['reasons'] == [
         'Pourquoi : non précisé', 'Pourquoi : Cible bien placée — Altitude favorable',
         'Pourquoi : Nouvelle justification', 'Pourquoi : non précisé',

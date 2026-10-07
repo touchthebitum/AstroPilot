@@ -63,7 +63,7 @@ def test_expected_gain_is_printed_once(monkeypatch, capsys):
     output = capsys.readouterr().out
 
     assert "🌌 Qualité astrophotographique" in output
-    assert "AQI : 84/100 — Très bonne" in output
+    assert "AQI partiel : 84/100 — preuves insuffisantes, non décisionnel" in output
     assert "Facteur limitant : Lune" in output
     assert "Complétude AQI : 100%" in output
     assert "Part productive : 75%" in output
