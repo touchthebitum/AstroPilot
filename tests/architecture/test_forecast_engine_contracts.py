@@ -64,7 +64,7 @@ def test_prepare_weather_returns_none_when_fetch_fails(capsys):
     assert "prévisions météo indisponibles" in capsys.readouterr().out
 
 
-def test_build_weather_forecast_preserves_rows_and_applies_defaults():
+def test_build_weather_forecast_preserves_missing_critical_evidence():
     rows = [
         {
             "cloud_cover": 12,
@@ -79,9 +79,9 @@ def test_build_weather_forecast_preserves_rows_and_applies_defaults():
     forecast = _engine().build_weather_forecast(rows)
 
     assert forecast.hourly is rows
-    assert forecast.hourly_clouds == [12, 100]
-    assert forecast.hourly_humidity == [65, 100]
-    assert forecast.hourly_wind == [8, 0]
+    assert forecast.hourly_clouds == [12, None]
+    assert forecast.hourly_humidity == [65, None]
+    assert forecast.hourly_wind == [8, None]
     assert forecast.hourly_temperature == [4, 0]
     assert forecast.hourly_visibility == [15000, 10000]
 

@@ -203,6 +203,9 @@ def evaluate_physical_productive_window(
     ):
         raise TypeError("Expected SessionAvailability or None")
 
+    if assessment.evidence_issues:
+        return _missing_evidence_refusal()
+
     analysis_start = assessment.window_start
     analysis_end = assessment.window_end
     if analysis_start is None and analysis_end is None:

@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from math import isfinite
 from typing import TYPE_CHECKING
+
+from decision.validation.productive_window_evidence import (
+    evidence_issues,
+    valid_number,
+)
+from decision.night_productivity.night_timeline import NightTimeline
 
 from decision.mission.night_mission import NightMission, MissionReason
 from decision.risk.risk_engine import RiskEngine
@@ -42,6 +49,11 @@ if TYPE_CHECKING:
 def _average(values, fallback):
     if not values:
         return fallback
+    if not isinstance(values, (list, tuple)) or any(
+        not isinstance(value, (int, float)) or isinstance(value, bool)
+        or not isfinite(value) for value in values
+    ):
+        return None
     return sum(values) / len(values)
 
 
@@ -55,6 +67,7 @@ class ProductiveWindowAssessment:
     maximum_mission_hours: float | None = None
     productivity_breakdown: ProductivityBreakdown | None = None
     acquisition_capacity: AcquisitionIntentRemainingProgress | None = None
+    evidence_issues: tuple[str, ...] = ()
 
     @classmethod
     def build(
@@ -80,8 +93,10 @@ class ProductiveWindowAssessment:
         )
         if astronomical_hours is None and mission_input is not None:
             if (
-                mission_input.window_start is not None
-                and mission_input.window_end is not None
+                isinstance(mission_input.window_start, datetime)
+                and isinstance(mission_input.window_end, datetime)
+                and mission_input.window_start.utcoffset() is not None
+                and mission_input.window_end.utcoffset() is not None
             ):
                 astronomical_hours = elapsed_hours(
                     mission_input.window_start,
@@ -90,33 +105,34 @@ class ProductiveWindowAssessment:
         if astronomical_hours is None and context_session is not None:
             start = getattr(context_session, "start_time", None)
             end = getattr(context_session, "end_time", None)
-            if start is not None and end is not None:
+            if (isinstance(start, datetime) and isinstance(end, datetime)
+                    and start.utcoffset() is not None and end.utcoffset() is not None):
                 astronomical_hours = elapsed_hours(start, end)
         if astronomical_hours is None:
-            astronomical_hours = 6.0
+            astronomical_hours = 0.0
 
         cloud_cover = _average(
             getattr(selected_weather, "hourly_clouds", None),
-            getattr(context_weather, "cloud_cover", None),
+            getattr(context_weather, "cloud_cover", None) if selected_weather is None else None,
         )
         humidity = _average(
             getattr(selected_weather, "hourly_humidity", None),
-            getattr(context_weather, "humidity", None),
+            getattr(context_weather, "humidity", None) if selected_weather is None else None,
         )
         wind = _average(
             getattr(selected_weather, "hourly_wind", None),
-            getattr(context_weather, "wind_speed_kmh", None),
+            getattr(context_weather, "wind_speed_kmh", None) if selected_weather is None else None,
         )
         seeing = _average(
             getattr(selected_weather, "hourly_seeing", None),
-            getattr(context_weather, "seeing_arcsec", None),
+            getattr(context_weather, "seeing_arcsec", None) if selected_weather is None else None,
         )
         moon_penalty = (
             mission_input.moon_penalty
             if mission_input is not None
             else None
         )
-        if moon_penalty is None:
+        if selected_weather is not None or moon_penalty is None:
             moon_penalty = _average(
                 getattr(selected_weather, "hourly_moon_penalty", None),
                 None,
@@ -125,41 +141,78 @@ class ProductiveWindowAssessment:
         observation_time = (
             mission_input.window_start
             if mission_input is not None
-            and mission_input.window_start is not None
             else getattr(context_session, "start_time", None)
         )
         display_start_hour = (
             observation_time.hour + observation_time.minute / 60
-            if observation_time is not None
+            if isinstance(observation_time, datetime)
             else 22
         )
 
-        productivity_evaluation = NightProductivityEngine.evaluate_with_breakdown(
-            NightProductivityContext(
-                astronomical_hours=astronomical_hours,
-                cloud_cover=20 if cloud_cover is None else cloud_cover,
-                moon_penalty=0.2 if moon_penalty is None else moon_penalty,
-                altitude_score=8,
-                humidity=60 if humidity is None else humidity,
-                wind=5 if wind is None else wind,
-                seeing=1.5 if seeing is None else seeing,
-                weather=selected_weather,
-                hourly_clouds=getattr(selected_weather, "hourly_clouds", None),
-                hourly_humidity=getattr(selected_weather, "hourly_humidity", None),
-                hourly_wind=getattr(selected_weather, "hourly_wind", None),
-                hourly_seeing=getattr(selected_weather, "hourly_seeing", None),
-                hourly_moon_penalty=getattr(
-                    selected_weather,
-                    "hourly_moon_penalty",
-                    None,
-                ),
-                display_start_hour=display_start_hour,
-                target=CATALOG[target],
-                latitude=context.site.latitude,
-                longitude=context.site.longitude,
-                observation_time=observation_time,
-            )
+        productivity_context = NightProductivityContext(
+            astronomical_hours=astronomical_hours,
+            cloud_cover=cloud_cover,
+            moon_penalty=moon_penalty,
+            altitude_score=8,
+            humidity=humidity,
+            wind=wind,
+            seeing=seeing,
+            weather=selected_weather,
+            hourly_clouds=getattr(selected_weather, "hourly_clouds", None),
+            hourly_humidity=getattr(selected_weather, "hourly_humidity", None),
+            hourly_wind=getattr(selected_weather, "hourly_wind", None),
+            hourly_seeing=getattr(selected_weather, "hourly_seeing", None),
+            hourly_moon_penalty=getattr(
+                selected_weather,
+                "hourly_moon_penalty",
+                None,
+            ),
+            display_start_hour=display_start_hour,
+            target=CATALOG[target],
+            latitude=context.site.latitude,
+            longitude=context.site.longitude,
+            observation_time=observation_time,
         )
+        issues = list(evidence_issues(productivity_context))
+        window_start = observation_time
+        window_end = (
+            mission_input.window_end if mission_input is not None
+            else getattr(context_session, "end_time", None)
+        )
+        if any(
+            not isinstance(value, datetime) or value.tzinfo is None
+            or value.utcoffset() is None for value in (window_start, window_end)
+        ):
+            issues.append("window_evidence_missing_or_invalid")
+        elif window_end.astimezone(timezone.utc) <= window_start.astimezone(timezone.utc):
+            issues.append("window_not_forward")
+        elif (
+            valid_number(astronomical_hours, positive=True)
+            and astronomical_hours > elapsed_hours(window_start, window_end) + 0.011
+        ):
+            issues.append("astronomical_hours_exceed_window")
+        if mission_input is not None:
+            if not valid_number(mission_input.recommended_hours):
+                issues.append("recommended_hours_invalid")
+            if not valid_number(mission_input.expected_gain):
+                issues.append("expected_gain_invalid")
+        if issues:
+            # Zero is a decision bound, not a weather measurement or a computed loss.
+            productivity = NightProductivityResult(
+                astronomical_hours=astronomical_hours if valid_number(astronomical_hours) else 0.0,
+                productive_hours=0.0, confidence=0.0, cloud_loss=0.0,
+                moon_loss=0.0, altitude_loss=0.0, weather_loss=0.0,
+                windows=[], timeline=NightTimeline(), display_start_hour=display_start_hour,
+            )
+            return cls(
+                window_start=window_start, window_end=window_end,
+                recommended_hours=0.0, expected_gain=0.0,
+                productivity=productivity,
+                maximum_mission_hours=mission_input.recommended_hours if mission_input is not None else None,
+                acquisition_capacity=mission_input.acquisition_capacity if mission_input is not None else None,
+                evidence_issues=tuple(issues),
+            )
+        productivity_evaluation = NightProductivityEngine.evaluate_with_breakdown(productivity_context)
 
         productivity = productivity_evaluation.result
         requested_hours = (
@@ -167,7 +220,7 @@ class ProductiveWindowAssessment:
         )
         productive_hours = getattr(productivity, "productive_hours", None)
         productive_windows = getattr(productivity, "windows", None)
-        if productive_windows == []:
+        if not productive_windows:
             operational_hours = 0.0
         elif productive_hours is not None:
             operational_hours = min(
@@ -175,7 +228,7 @@ class ProductiveWindowAssessment:
                 max(0.0, productive_hours),
             )
         else:
-            operational_hours = requested_hours
+            operational_hours = 0.0
         requested_gain = (
             mission_input.expected_gain if mission_input is not None else 0
         )
@@ -353,7 +406,6 @@ class MissionAssembler:
         window_start = (
             mission_input.window_start
             if mission_input is not None
-            and mission_input.window_start is not None
             else getattr(context_session, "start_time", None)
         )
 
@@ -402,20 +454,12 @@ class MissionAssembler:
 
         astro_quality = None
 
-        if target_altitude is not None:
+        if target_altitude is not None and cloud_cover is not None and moon_penalty is not None:
             astro_quality = AstroQualityEngine.evaluate(
                 AstroQualityContext(
                     target_altitude_deg=target_altitude,
-                    cloud_cover_percent=(
-                        20.0
-                        if cloud_cover is None
-                        else cloud_cover
-                    ),
-                    moon_penalty=(
-                        0.2
-                        if moon_penalty is None
-                        else moon_penalty
-                    ),
+                    cloud_cover_percent=cloud_cover,
+                    moon_penalty=moon_penalty,
                     seeing_arcsec=seeing,
                     image_quality_score=image_quality.score,
                     dew_score=(

@@ -1,3 +1,5 @@
+from decision.validation.productive_window_evidence import evidence_issues
+
 from dataclasses import dataclass
 from datetime import timedelta, timezone
 
@@ -48,6 +50,9 @@ class NightProductivityEngine:
     def _evaluate_with_breakdown(
         context: NightProductivityContext,
     ) -> NightProductivityEvaluation:
+        issues = evidence_issues(context)
+        if issues:
+            raise ValueError("productive_window_evidence_invalid:" + ";".join(issues))
         timeline, slice_evaluations = (
             NightTimelineBuilder.build_with_evaluations(context)
         )

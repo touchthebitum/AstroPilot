@@ -59,15 +59,15 @@ class ForecastEngine:
         return WeatherForecast(
             hourly=rows,
             hourly_clouds=[
-                hour.get("cloud_cover", 100)
+                hour.get("cloud_cover")
                 for hour in rows
             ],
             hourly_humidity=[
-                hour.get("relative_humidity_2m", 100)
+                hour.get("relative_humidity_2m")
                 for hour in rows
             ],
             hourly_wind=[
-                hour.get("wind_speed_10m", 0)
+                hour.get("wind_speed_10m")
                 for hour in rows
             ],
             hourly_temperature=[

@@ -121,7 +121,7 @@ class CandidateViabilityEvaluator:
     @staticmethod
     def is_viable(assessment: CandidateAssessment | None) -> bool:
         """Return whether a candidate has an actionable session window."""
-        if assessment is None:
+        if assessment is None or assessment.productive_window.evidence_issues:
             return False
 
         DecisionConsistencyGate.validate_mission(

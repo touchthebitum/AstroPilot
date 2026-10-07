@@ -1,4 +1,5 @@
 from decision.models.session_availability import SessionAvailability, SessionAvailabilityMode
+from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -69,7 +70,11 @@ def isolated_peripheral_analyses(monkeypatch):
 
 
 def _build_mission(rows, frozen_time, buttes_site):
-    weather = _forecast_engine().build_weather_forecast(rows)
+    weather = replace(
+        _forecast_engine().build_weather_forecast(rows),
+        hourly_seeing=[1.5] * len(rows),
+        hourly_moon_penalty=[0.1] * len(rows),
+    )
     mission_input = MissionInput(
         availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
         window_start=frozen_time,

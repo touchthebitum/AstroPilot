@@ -467,7 +467,7 @@ def test_tonight_exposes_modern_ou4_acquisition_intent_candidate(
     evaluation = {
         "name": "Sh2-129",
         "catalog_key": "Sh2-129",
-        "window": {"start": window_start, "end": window_end},
+        "window": {"start": window_start, "end": window_end, "moon_penalty": 0.0},
         "remaining_hours": legacy_remaining,
         "decision_context": SimpleNamespace(
             site=SiteContext("Mont Sujet", 47.12, 7.04, 1000.0, 4),
