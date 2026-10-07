@@ -1,3 +1,4 @@
+from conftest import modern_ranking_project
 """Capacity evidence reaches risk/API, but never supplies Tonight availability."""
 from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
@@ -81,7 +82,7 @@ def test_bare_value_or_label_is_not_empirical_evidence(source, count):
 
 @pytest.mark.parametrize('fallback', [1, 4, 100])
 def test_history_withdrawal_and_profile_changes_do_not_increase_candidate_or_mission_gain(fallback):
-    projects = {'M31': {'hours': 2, 'target_hours': 10, 'importance': 5}}
+    projects = {'M31': modern_ranking_project({'hours': 2, 'target_hours': 10, 'importance': 5})}
     profiles = [dict(projects=projects, preferences={'productive_hours_per_night': fallback},
                      sessions=[{'date': str(i), 'hours': 1} for i in range(3)]),
                 dict(projects=projects, preferences={'productive_hours_per_night': fallback}, sessions=[])]
@@ -93,7 +94,7 @@ def test_history_withdrawal_and_profile_changes_do_not_increase_candidate_or_mis
     assert candidates[0].strategy_scores == candidates[1].strategy_scores
     assert candidates[0].closure_bonus == candidates[1].closure_bonus
     start = datetime(2026, 10, 6, tzinfo=timezone.utc)
-    evaluation = {'name': 'M31', 'catalog_key': 'M31', 'window': {'start': start,
+    evaluation = {'selected_acquisition_intent_id': 'sh2-129_ha', 'name': 'M31', 'catalog_key': 'M31', 'window': {'start': start,
         'end': start + timedelta(hours=2), 'clouds': 10, 'humidity': 50, 'wind': 2, 'seeing': 1.5}}
     missions = [astro_score.build_mission_input(evaluation, profile=p) for p in profiles]
     assert missions[0].recommended_hours == missions[1].recommended_hours == 2
@@ -109,3 +110,6 @@ def test_explicit_scenario_computes_diagnostic_nights_without_empirical_pressure
     assert result.night_capacity_source == 'scenario'
     assert result.historical_nights is None
     assert result.pressure is None
+
+
+pytestmark = pytest.mark.usefixtures("selected_modern_ranking_intent")

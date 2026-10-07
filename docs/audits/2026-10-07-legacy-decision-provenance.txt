@@ -1,0 +1,86 @@
+PR #328 follow-up: legacy READ vs new AUTHORIZE
+
+Root cause
+The production candidate builder used presence of intent targets to choose modern
+capacity/risk/bonus calculation. With all modern fields erased, it used legacy
+hours/target_hours, future estimates, margin, closure and ROI again. Missing
+selection status also meant pre-intent acceptance could return None intent;
+acceptance only rejected None intent when a field survived. Together these
+branches made evidence deletion an authorization upgrade.
+
+Contract (defined before implementation; tests first)
+ProjectDecisionProvenance is a typed classification at the new-decision boundary:
+- modern_authorized: resolvable field + valid nonempty intent targets + explicit
+  validated progress snapshot. This authorizes modern assessment, not a mission.
+  Empty progress remains unknown, giving conservative assessment, never legacy
+  capacity. An absent progress snapshot is insufficient even if credits exist.
+- modern_provenance_missing: absent/invalid field, targets, progress snapshot,
+  or unclassified pre-intent data. No new project candidate; zero project mission
+  duration/gain; no inventory promotion; no new acceptance.
+- legacy_read_only: explicitly labelled historical data without sufficient modern
+  proof. READ/replay/display keep historical values; new decisions reject it.
+  A label is descriptive, never an authorization switch. Valid modern proof is
+  assessed identically with or without any descriptive label; removing a label
+  cannot itself restore permission. No persisted schema or migration is added.
+
+Signal map
+Historical hours/target_hours/filter_targets/sessions and legacy inventory:
+  historical projections only; do not supply modern capacity or exact identity.
+Complete modern field/targets/progress:
+  existing modern score arithmetic and exact profile selection stay unchanged.
+Missing any required modern field, including total field erasure:
+  typed rejection before scoring; no favorable legacy fallback.
+Explicit empty progress snapshot:
+  unknown modern progress, conservative score; acceptance requires known capacity.
+Old persisted contexts (including v1-v10):
+  deserialize faithfully. A fresh acceptance must meet current proof, availability,
+  freshness, selected field/intent, target membership and remaining capacity.
+Canonical committed acceptance replay:
+  resolved before the fresh-acceptance gate; historical None intent replay remains
+  canonical, without allocation or rewriting.
+Discovery:
+  physical preview remains available with zero invented project gain; a new
+  mission commitment still requires a modern project and selected intent.
+
+New acceptance contract
+Before mission_id allocation, require selected field AND intent, a positively
+validated modern project snapshot, selected intent belonging to explicit targets,
+and known positive remaining capacity (identified execution credits may contribute
+through the existing validated credit path). Primary, alternative, other-evaluated,
+API and idempotent fresh acceptance all use this gate. Decline stays possible.
+
+Scope
+Four production files in this follow-up: astro_score.py,
+decision/models/candidate_rejection.py,
+decision/services/project_decision_provenance.py,
+decision/services/decision_acceptance_application.py.
+The previous #328 inventory/filter/assembly fixes are retained. Tests migrate
+ranking/acceptance fixtures to explicit modern proof; test-only manual progress
+fixtures do not change production legacy reads. No Field Lab source, configuration,
+scheduler or test changes. No serialization/schema-version changes, destructive
+migration, automatic merge, or stash pop/apply/drop.
+
+Regression coverage
+- Historical 31.5 -> 85.675 exploit: M31 is 31.5 with explicit unknown progress;
+  M42 stays first at 77.625. Erasing field, targets, progress or all fields removes
+  M31 from the new ranking, rather than reactivating 85.675.
+- Complete modern M31 remains 85.67500000000001; duration 2 h / gain 10 unchanged.
+- Modern evidence withdrawal zeroes duration/gain and cannot use legacy inventory.
+- Typed historical/unknown/forged labels cannot supply authorization evidence;
+  removing a descriptive label does not change complete modern proof.
+- All pre-intent selection sources reject before allocation or persistence.
+- Missing targets/progress, unknown progress, completion and replayed old contexts
+  cannot create new missions; committed pre-intent replay is preserved.
+- CLI TonightRunner cannot pass fieldless projects to recommendation/mission;
+  HTTP acceptance of a pre-intent preview returns controlled 409 before commitment.
+- Existing v1-v10 historical read/replay tests and invariants #318/#320/#321/#322/
+  #324/#325/#326/#327 remain in the expanded suite.
+
+Repository state
+Starting HEAD: 3b0487dca881ca67c5f856da68c0daaf4f85344c
+Base main/origin/main: 3e2cc620daa93e6f68f62e13653bc08547214b70
+Branch: fix/legacy-decision-evidence (same PR #328; kept draft)
+Critical stash: 223ec1f5904131d726b694655f137670c0ddeb0b, unchanged.
+
+Validation results are recorded in the PR body and the delivery report against
+the final commit SHA. This audit document does not claim CI before it has run.

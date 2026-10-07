@@ -1,3 +1,4 @@
+from conftest import modern_ranking_project
 """Evidence deletion through real models, rules, weighted engine and candidates."""
 from types import SimpleNamespace as NS
 
@@ -31,8 +32,8 @@ def test_rule_total_and_real_candidate_never_improve(seeing, size, removed, weig
     for rule in (SeeingRule(), SamplingRule(), ResolutionRule()):
         engine.add_rule(rule)
     profile = {"decision_weights": {"seeing": weight, "sampling": weight, "resolution": weight},
-        "preferences": {"bortle": 4}, "projects": {"M31": {
-            "hours": 9, "target_hours": 10, "importance": 5}},
+        "preferences": {"bortle": 4}, "projects": {"M31": modern_ranking_project({
+            "hours": 9, "target_hours": 10, "importance": 5})},
         "active_equipment": "samyang_183", "available_equipment": ["samyang_183"]}
     known = context(seeing, size)
     missing = context(None if removed == "seeing" else seeing, None if removed == "size" else size)
@@ -85,3 +86,6 @@ def test_internal_weight_cannot_invert_evidence_contract(weight):
     engine.add_rule(SeeingRule())
     with pytest.raises(ValueError, match="finite and non-negative"):
         engine.evaluate(context(None, 1), {"decision_weights": {"seeing": weight}})
+
+
+pytestmark = pytest.mark.usefixtures("selected_modern_ranking_intent")

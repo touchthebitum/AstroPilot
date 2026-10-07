@@ -2700,6 +2700,8 @@ class LineageTonightMissionService:
             decision_id=mission_input.decision_id,
             selection_id=mission_input.selection_id,
             site_name="Buttes",
+            imaging_field_id=mission_input.imaging_field_id,
+            acquisition_intent_id=mission_input.acquisition_intent_id,
         )
 
 
@@ -2755,6 +2757,10 @@ def lineage_decision_context():
 
 def lineage_result(reference_time):
     base = make_result()
+    base.recommendation.opportunity.candidate.imaging_field_id = "sh2-129_ou4"
+    base.recommendation.opportunity.candidate.selected_acquisition_intent_id = "sh2-129_ha"
+    base.recommendation.opportunity.candidate.viable_acquisition_intent_ids = ("sh2-129_ha",)
+    base.recommendation.opportunity.candidate.acquisition_intent_selection_status = AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT
     source_context = lineage_decision_context()
     location = WeatherLocation(46.7508, 6.5495, 837.0)
     evidence = DecisionForecastEvidence((
@@ -2824,7 +2830,10 @@ def lineage_client(
         weather_provider=lambda lat, lon: make_weather_snapshot(
             reference_time - timedelta(minutes=5)
         ),
-        profile_provider=valid_profile,
+        profile_provider=lambda: {**valid_profile(), "projects": {"M31": {"acquisition_intent_progress": [{"acquisition_intent_id": "sh2-129_ha", "acquired_duration_manual": 0}, {"acquisition_intent_id": "ou4_oiii", "acquired_duration_manual": 0}],
+            "imaging_field_id": "sh2-129_ou4",
+            "acquisition_intent_targets": [{"acquisition_intent_id": "sh2-129_ha", "target_hours": 4}],
+        }}},
         clock=lambda: reference_time,
         selection_id_factory=lambda: selection_id,
     ))

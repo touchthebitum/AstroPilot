@@ -98,13 +98,13 @@ def registered_service(
     evidence=DEFAULT_EVIDENCE,
     accepted_at=ACCEPTED_AT,
     window_end=None,
-    primary_imaging_field_id=None,
-    alternative_imaging_field_id=None,
+    primary_imaging_field_id="sh2-129_ou4",
+    alternative_imaging_field_id="sh2-129_ou4",
     primary_provenance=CandidateProvenance.PROJECT,
     profile_projects=None,
-    primary_intent_provenance=(None, (), None),
-    alternative_intent_provenance=(None, (), None),
-    other_intent_provenance=None,
+    primary_intent_provenance=("sh2-129_ha", ("sh2-129_ha",), AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT),
+    alternative_intent_provenance=("sh2-129_ha", ("sh2-129_ha",), AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT),
+    other_intent_provenance=("sh2-129_ha", ("sh2-129_ha",), AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT),
 ):
     if evidence is DEFAULT_EVIDENCE:
         evidence = forecast_evidence(accepted_at - timedelta(minutes=30))
@@ -145,6 +145,13 @@ def registered_service(
             acquisition_intent_selection_status=intent_status,
         )
 
+    if profile_projects is None:
+        profile_projects = {key: {
+            "imaging_field_id": "sh2-129_ou4",
+            "acquisition_intent_targets": [{"acquisition_intent_id": intent, "target_hours": 2}
+                                           for intent in ("sh2-129_ha", "ou4_oiii")],
+            "acquisition_intent_progress": [{"acquisition_intent_id": "sh2-129_ha", "acquired_duration_manual": 0}, {"acquisition_intent_id": "ou4_oiii", "acquired_duration_manual": 0}],
+        } for key in ("M31", "M42", "M33")}
     primary = candidate(
         "M31",
         primary_imaging_field_id,
@@ -201,8 +208,8 @@ def registered_service(
 
 def test_unique_candidate_intent_is_copied_when_request_omits_it():
     provenance = (
-        "intent-A",
-        ("intent-A",),
+        "sh2-129_ha",
+        ("sh2-129_ha",),
         AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
     )
     service, composer, store, recommendation = registered_service(
@@ -216,17 +223,17 @@ def test_unique_candidate_intent_is_copied_when_request_omits_it():
     )
 
     stored = store.load_selection("selection-1")
-    assert stored.selected_acquisition_intent_id == "intent-A"
+    assert stored.selected_acquisition_intent_id == "sh2-129_ha"
     assert composer.calls[0]["selection"] is not candidate
     assert mission.selection_id == stored.selection_id == "selection-1"
-    assert mission.acquisition_intent_id == "intent-A"
+    assert mission.acquisition_intent_id == "sh2-129_ha"
     assert (candidate.final_score, candidate.decision_score, candidate.reasons) == scores_before
 
 
 def test_unique_candidate_intent_accepts_exact_same_request():
     provenance = (
-        "intent-A",
-        ("intent-A",),
+        "sh2-129_ha",
+        ("sh2-129_ha",),
         AcquisitionIntentSelectionStatus.PREFERRED,
     )
     service, _, store, _ = registered_service(
@@ -236,19 +243,19 @@ def test_unique_candidate_intent_accepts_exact_same_request():
     service.accept(selection(
         UserSelectionSource.PRIMARY_RECOMMENDATION,
         "M31",
-        selected_acquisition_intent_id="intent-A",
+        selected_acquisition_intent_id="sh2-129_ha",
     ))
 
     assert store.load_selection(
         "selection-1"
-    ).selected_acquisition_intent_id == "intent-A"
+    ).selected_acquisition_intent_id == "sh2-129_ha"
 
 
 def test_unique_candidate_intent_idempotent_replay_accepts_omission_or_same():
     service, composer, _, _ = registered_service(
         primary_intent_provenance=(
-            "intent-A",
-            ("intent-A",),
+            "sh2-129_ha",
+            ("sh2-129_ha",),
             AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
         ),
     )
@@ -269,14 +276,14 @@ def test_unique_candidate_intent_idempotent_replay_accepts_omission_or_same():
             UserSelectionSource.PRIMARY_RECOMMENDATION,
             "M31",
             selection_id="selection-retry-2",
-            selected_acquisition_intent_id="intent-A",
+            selected_acquisition_intent_id="sh2-129_ha",
         ),
         acceptance_request_id="request-1",
     )
 
     assert omitted == same == first
-    assert first.selection.selected_acquisition_intent_id == "intent-A"
-    assert first.mission.acquisition_intent_id == "intent-A"
+    assert first.selection.selected_acquisition_intent_id == "sh2-129_ha"
+    assert first.mission.acquisition_intent_id == "sh2-129_ha"
     assert len(composer.calls) == 1
 
 
@@ -284,8 +291,8 @@ def test_historical_none_intent_replay_keeps_canonical_lineage_unchanged():
     service, composer, store, _ = registered_service(
         availability=None,
         primary_intent_provenance=(
-            "intent-A",
-            ("intent-A",),
+            "sh2-129_ha",
+            ("sh2-129_ha",),
             AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
         ),
     )
@@ -323,8 +330,8 @@ def test_historical_none_intent_replay_keeps_canonical_lineage_unchanged():
 def test_unique_candidate_intent_rejects_different_request_before_mission():
     service, composer, store, _ = registered_service(
         primary_intent_provenance=(
-            "intent-A",
-            ("intent-A",),
+            "sh2-129_ha",
+            ("sh2-129_ha",),
             AcquisitionIntentSelectionStatus.PREFERRED,
         ),
     )
@@ -339,7 +346,7 @@ def test_unique_candidate_intent_rejects_different_request_before_mission():
         service.accept(selection(
             UserSelectionSource.PRIMARY_RECOMMENDATION,
             "M31",
-            selected_acquisition_intent_id="intent-B",
+            selected_acquisition_intent_id="ou4_oiii",
         ))
 
     assert composer.calls == []
@@ -347,12 +354,12 @@ def test_unique_candidate_intent_rejects_different_request_before_mission():
         store.load_selection("selection-1")
 
 
-@pytest.mark.parametrize("intent_id", ["intent-A", "intent-B"])
+@pytest.mark.parametrize("intent_id", ["sh2-129_ha", "ou4_oiii"])
 def test_multiple_viable_intents_accept_exact_explicit_choice(intent_id):
     service, _, store, _ = registered_service(
         primary_intent_provenance=(
             None,
-            ("intent-A", "intent-B"),
+            ("sh2-129_ha", "ou4_oiii"),
             AcquisitionIntentSelectionStatus.NO_CLEAR_PREFERENCE,
         ),
     )
@@ -373,14 +380,14 @@ def test_multiple_viable_intents_accept_exact_explicit_choice(intent_id):
     [
         (None, "acquisition_intent_selection_required"),
         ("intent-C", "selected_acquisition_intent_not_viable"),
-        (" intent-A ", "selected_acquisition_intent_not_viable"),
+        (" sh2-129_ha ", "selected_acquisition_intent_not_viable"),
     ],
 )
 def test_multiple_viable_intents_never_fall_back_or_normalize(intent_id, error):
     service, composer, _, recommendation = registered_service(
         primary_intent_provenance=(
             None,
-            ("intent-A", "intent-B"),
+            ("sh2-129_ha", "ou4_oiii"),
             AcquisitionIntentSelectionStatus.NO_CLEAR_PREFERENCE,
         ),
     )
@@ -414,7 +421,7 @@ def test_no_viable_intent_rejects_mission_creation_and_provided_identity():
     )
     blocked, composer, blocked_store, _ = registered_service(
         primary_imaging_field_id="sh2-129_ou4",
-        profile_projects={"M31": {"imaging_field_id": "sh2-129_ou4"}},
+        profile_projects={"M31": {"acquisition_intent_progress": [{"acquisition_intent_id": "sh2-129_ha", "acquired_duration_manual": 0}, {"acquisition_intent_id": "ou4_oiii", "acquired_duration_manual": 0}], "imaging_field_id": "sh2-129_ou4", "acquisition_intent_targets": [{"acquisition_intent_id": "sh2-129_ha", "target_hours": 2}]}},
         primary_intent_provenance=provenance,
     )
     with pytest.raises(
@@ -438,7 +445,7 @@ def test_no_viable_intent_rejects_mission_creation_and_provided_identity():
         rejected.accept(selection(
             UserSelectionSource.PRIMARY_RECOMMENDATION,
             "M31",
-            selected_acquisition_intent_id="intent-A",
+            selected_acquisition_intent_id="sh2-129_ha",
         ))
     assert composer.calls == []
 
@@ -451,7 +458,7 @@ def test_incoherent_single_viable_without_selected_intent_fails_closed():
     candidate.acquisition_intent_selection_status = (
         AcquisitionIntentSelectionStatus.NO_CLEAR_PREFERENCE
     )
-    candidate.viable_acquisition_intent_ids = ("intent-A",)
+    candidate.viable_acquisition_intent_ids = ("sh2-129_ha",)
 
     with pytest.raises(
         DecisionAcceptanceError,
@@ -460,28 +467,34 @@ def test_incoherent_single_viable_without_selected_intent_fails_closed():
         service.accept(selection(
             UserSelectionSource.PRIMARY_RECOMMENDATION,
             "M31",
-            selected_acquisition_intent_id="intent-A",
+            selected_acquisition_intent_id="sh2-129_ha",
         ))
 
     assert composer.calls == []
 
 
-def test_legacy_candidate_and_other_evaluated_target_keep_none_intent():
-    service, _, store, _ = registered_service()
-
-    mission = service.accept(
-        selection(UserSelectionSource.OTHER_EVALUATED_TARGET, "M33")
+@pytest.mark.parametrize("source,target", [
+    (UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"),
+    (UserSelectionSource.ALTERNATIVE, "M42"),
+    (UserSelectionSource.OTHER_EVALUATED_TARGET, "M33"),
+])
+def test_pre_intent_new_acceptance_rejects_before_allocation(source, target):
+    service, composer, store, _ = registered_service(
+        primary_imaging_field_id=None, alternative_imaging_field_id=None,
+        primary_intent_provenance=(None, (), None), alternative_intent_provenance=(None, (), None),
+        other_intent_provenance=None, profile_projects={key: {} for key in ("M31", "M42", "M33")},
     )
-
-    assert store.load_selection(
-        "selection-1"
-    ).selected_acquisition_intent_id is None
-    assert mission.acquisition_intent_id is None
+    service.mission_id_factory = lambda: pytest.fail("provenance must precede allocation")
+    with pytest.raises(DecisionAcceptanceError, match="acquisition_intent_required_for_mission"):
+        service.accept(selection(source, target))
+    assert composer.calls == []
+    with pytest.raises(DecisionAcceptanceError, match="selection_not_found"):
+        store.load_selection("selection-1")
 
 
 def test_modern_other_target_without_resolved_intent_rejects_before_allocation():
     service, composer, store, _ = registered_service(
-        profile_projects={"M33": {"imaging_field_id": "sh2-129_ou4"}},
+        profile_projects={"M33": {"acquisition_intent_progress": [{"acquisition_intent_id": "sh2-129_ha", "acquired_duration_manual": 0}, {"acquisition_intent_id": "ou4_oiii", "acquired_duration_manual": 0}], "imaging_field_id": "sh2-129_ou4", "acquisition_intent_targets": [{"acquisition_intent_id": "sh2-129_ha", "target_hours": 2}]}},
         other_intent_provenance=(
             None,
             (),
@@ -507,10 +520,10 @@ def test_modern_other_target_without_resolved_intent_rejects_before_allocation()
 
 def test_modern_other_target_propagates_resolved_intent_to_mission():
     service, composer, store, _ = registered_service(
-        profile_projects={"M33": {"imaging_field_id": "sh2-129_ou4"}},
+        profile_projects={"M33": {"acquisition_intent_progress": [{"acquisition_intent_id": "sh2-129_ha", "acquired_duration_manual": 0}, {"acquisition_intent_id": "ou4_oiii", "acquired_duration_manual": 0}], "imaging_field_id": "sh2-129_ou4", "acquisition_intent_targets": [{"acquisition_intent_id": "sh2-129_ha", "target_hours": 2}]}},
         other_intent_provenance=(
-            "intent-A",
-            ("intent-A",),
+            "sh2-129_ha",
+            ("sh2-129_ha",),
             AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
         ),
     )
@@ -520,9 +533,9 @@ def test_modern_other_target_propagates_resolved_intent_to_mission():
     )
 
     stored = store.load_selection("selection-1")
-    assert stored.selected_acquisition_intent_id == "intent-A"
+    assert stored.selected_acquisition_intent_id == "sh2-129_ha"
     assert composer.calls[0]["selection"] == stored
-    assert mission.acquisition_intent_id == "intent-A"
+    assert mission.acquisition_intent_id == "sh2-129_ha"
 
 
 @pytest.mark.parametrize(
@@ -568,7 +581,7 @@ def test_declined_selection_resolves_exact_decision_and_creates_no_mission():
             {
                 "primary_imaging_field_id": "sh2-129_ou4",
                 "profile_projects": {
-                    "M31": {"imaging_field_id": "sh2-129_ou4"}
+                    "M31": {"acquisition_intent_progress": [{"acquisition_intent_id": "sh2-129_ha", "acquired_duration_manual": 0}, {"acquisition_intent_id": "ou4_oiii", "acquired_duration_manual": 0}], "imaging_field_id": "sh2-129_ou4", "acquisition_intent_targets": [{"acquisition_intent_id": "sh2-129_ha", "target_hours": 2}]}
                 },
             },
         ),
@@ -578,7 +591,7 @@ def test_declined_selection_resolves_exact_decision_and_creates_no_mission():
             {
                 "alternative_imaging_field_id": "sh2-129_ou4",
                 "profile_projects": {
-                    "M42": {"imaging_field_id": "sh2-129_ou4"}
+                    "M42": {"acquisition_intent_progress": [{"acquisition_intent_id": "sh2-129_ha", "acquired_duration_manual": 0}, {"acquisition_intent_id": "ou4_oiii", "acquired_duration_manual": 0}], "imaging_field_id": "sh2-129_ou4", "acquisition_intent_targets": [{"acquisition_intent_id": "sh2-129_ha", "target_hours": 2}]}
                 },
             },
         ),
@@ -587,7 +600,7 @@ def test_declined_selection_resolves_exact_decision_and_creates_no_mission():
             "M33",
             {
                 "profile_projects": {
-                    "M33": {"imaging_field_id": "sh2-129_ou4"}
+                    "M33": {"acquisition_intent_progress": [{"acquisition_intent_id": "sh2-129_ha", "acquired_duration_manual": 0}, {"acquisition_intent_id": "ou4_oiii", "acquired_duration_manual": 0}], "imaging_field_id": "sh2-129_ou4", "acquisition_intent_targets": [{"acquisition_intent_id": "sh2-129_ha", "target_hours": 2}]}
                 },
             },
         ),
@@ -605,7 +618,7 @@ def test_acceptance_persists_canonical_selected_imaging_field(
     }[source]
     service, composer, store, _ = registered_service(
         **service_kwargs,
-        **{intent_key: ("intent-A", ("intent-A",), AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT)},
+        **{intent_key: ("sh2-129_ha", ("sh2-129_ha",), AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT)},
     )
 
     service.accept(selection(source, target))
@@ -628,25 +641,26 @@ def test_acceptance_persists_canonical_selected_imaging_field(
         (UserSelectionSource.DECLINED, None, {}),
     ],
 )
-def test_discovery_legacy_and_declined_persist_no_imaging_field(
-    source,
-    target,
-    service_kwargs,
-):
-    service, _, store, _ = registered_service(**service_kwargs)
-
-    service.accept(selection(source, target))
-
-    assert store.load_selection("selection-1").selected_imaging_field_id is None
-    if source is not UserSelectionSource.DECLINED:
-        assert store.load_mission("mission-1").imaging_field_id is None
+def test_discovery_legacy_and_declined_persist_no_imaging_field(source, target, service_kwargs):
+    service, composer, store, _ = registered_service(
+        **service_kwargs, primary_imaging_field_id=None,
+        primary_intent_provenance=(None, (), None), other_intent_provenance=None,
+        profile_projects={},
+    )
+    if source is UserSelectionSource.DECLINED:
+        assert service.accept(selection(source, target)) is None
+        assert store.load_selection("selection-1").selected_imaging_field_id is None
+    else:
+        with pytest.raises(DecisionAcceptanceError, match="acquisition_intent_required_for_mission"):
+            service.accept(selection(source, target))
+        assert composer.calls == []
 
 
 def test_mission_imaging_field_mismatch_fails_before_commit():
     service, composer, store, _ = registered_service(
-        primary_intent_provenance=("intent-A", ("intent-A",), AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT),
+        primary_intent_provenance=("sh2-129_ha", ("sh2-129_ha",), AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT),
         primary_imaging_field_id="sh2-129_ou4",
-        profile_projects={"M31": {"imaging_field_id": "sh2-129_ou4"}},
+        profile_projects={"M31": {"acquisition_intent_progress": [{"acquisition_intent_id": "sh2-129_ha", "acquired_duration_manual": 0}, {"acquisition_intent_id": "ou4_oiii", "acquired_duration_manual": 0}], "imaging_field_id": "sh2-129_ou4", "acquisition_intent_targets": [{"acquisition_intent_id": "sh2-129_ha", "target_hours": 2}]}},
     )
     original_create = composer.create
 
@@ -671,8 +685,8 @@ def test_mission_imaging_field_mismatch_fails_before_commit():
 def test_mission_acquisition_intent_mismatch_fails_before_commit():
     service, composer, store, _ = registered_service(
         primary_intent_provenance=(
-            "intent-A",
-            ("intent-A",),
+            "sh2-129_ha",
+            ("sh2-129_ha",),
             AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
         ),
     )
@@ -681,7 +695,7 @@ def test_mission_acquisition_intent_mismatch_fails_before_commit():
     def create_mismatched(**kwargs):
         return replace(
             original_create(**kwargs),
-            acquisition_intent_id="intent-B",
+            acquisition_intent_id="ou4_oiii",
         )
 
     composer.create = create_mismatched
@@ -701,6 +715,7 @@ def test_mission_acquisition_intent_mismatch_fails_before_commit():
 def test_candidate_profile_mismatch_fails_before_allocation_or_commit():
     service, composer, store, _ = registered_service(
         primary_imaging_field_id="sh2-129_ou4",
+        profile_projects={},
     )
     service.mission_id_factory = lambda: pytest.fail(
         "mismatch must stop before mission identity allocation"
@@ -740,9 +755,9 @@ def test_invalid_project_imaging_field_fails_closed_before_commit():
 
 def test_first_idempotent_acceptance_and_replay_return_canonical_lineage():
     service, composer, store, recommendation = registered_service(
-        primary_intent_provenance=("intent-A", ("intent-A",), AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT),
+        primary_intent_provenance=("sh2-129_ha", ("sh2-129_ha",), AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT),
         primary_imaging_field_id="sh2-129_ou4",
-        profile_projects={"M31": {"imaging_field_id": "sh2-129_ou4"}},
+        profile_projects={"M31": {"acquisition_intent_progress": [{"acquisition_intent_id": "sh2-129_ha", "acquired_duration_manual": 0}, {"acquisition_intent_id": "ou4_oiii", "acquired_duration_manual": 0}], "imaging_field_id": "sh2-129_ou4", "acquisition_intent_targets": [{"acquisition_intent_id": "sh2-129_ha", "target_hours": 2}]}},
     )
 
     first = service.accept_idempotently(
@@ -1088,9 +1103,34 @@ def test_legacy_intent_provenance_cannot_authorize_modern_field(source, target):
     service, composer, store, _ = registered_service(
         primary_imaging_field_id=('sh2-129_ou4' if target == 'M31' else None),
         profile_projects={target: {'imaging_field_id': 'sh2-129_ou4'}},
+        primary_intent_provenance=(None, (), None), other_intent_provenance=None,
     )
     service.mission_id_factory = lambda: pytest.fail('legacy context allocated a new mission')
     with pytest.raises(DecisionAcceptanceError, match='acquisition_intent_required_for_mission'):
         service.accept_idempotently(selection(source, target), acceptance_request_id='legacy-context')
     assert composer.calls == []
     assert store.load_acceptance('legacy-context') is None
+
+
+@pytest.mark.parametrize("damage", ["imaging_field_id", "acquisition_intent_targets",
+    "acquisition_intent_progress", "all", "unknown_progress", "legacy_read_only", "completed"])
+def test_modern_context_with_withdrawn_project_evidence_cannot_allocate(damage):
+    service, composer, store, _ = registered_service()
+    project = store._contexts["decision-1"].profile["projects"]["M31"]
+    if damage == "all":
+        project.clear()
+    elif damage == "unknown_progress":
+        project["acquisition_intent_progress"] = []
+    elif damage == "legacy_read_only":
+        project.clear()
+        project["decision_provenance"] = "legacy_read_only"
+    elif damage == "completed":
+        project["acquisition_intent_progress"][0]["acquired_duration_manual"] = 7200
+    else:
+        project.pop(damage)
+    service.mission_id_factory = lambda: pytest.fail("evidence withdrawal allocated a mission")
+    with pytest.raises(DecisionAcceptanceError):
+        service.accept_idempotently(selection(UserSelectionSource.PRIMARY_RECOMMENDATION, "M31"),
+            acceptance_request_id="damaged-context")
+    assert composer.calls == []
+    assert store.load_acceptance("damaged-context") is None

@@ -146,7 +146,7 @@ def test_completed_legacy_project_is_rejected_before_scoring(monkeypatch):
 
     assert result.candidates == ()
     assert len(result.rejections) == 1
-    assert result.rejections[0].basis is CandidateRejectionBasis.LEGACY_PROJECT_COMPLETED
+    assert result.rejections[0].basis is CandidateRejectionBasis.MODERN_PROVENANCE_MISSING
     assert result.rejections[0].catalog_key == "M31"
     assert result.rejections[0].evaluation_score == 95
 
@@ -170,11 +170,9 @@ def test_completed_legacy_project_cannot_beat_partial_project(monkeypatch):
         }},
     )
 
-    assert [candidate.catalog_key for candidate in result] == ["M42"]
-    assert [rejection.catalog_key for rejection in result.rejections] == ["M31"]
-    opportunity = OpportunityEngine().evaluate(candidates=list(result))
-    assert opportunity.candidate.catalog_key == "M42"
-    assert opportunity.action is Action.CONTINUE_PROJECT
+    assert not result
+    assert [rejection.catalog_key for rejection in result.rejections] == ["M31", "M42"]
+    assert OpportunityEngine().evaluate(candidates=list(result)) is None
 
 
 def test_modern_unknown_progress_remains_authoritative_over_legacy_completion(monkeypatch):
@@ -185,7 +183,7 @@ def test_modern_unknown_progress_remains_authoritative_over_legacy_completion(mo
             risk="FAIBLE", opportunity_ratio=1,
         ),
     )
-    project = {
+    project = {"acquisition_intent_progress": [],
         "hours": 10,
         "target_hours": 10,
         "importance": 5,
@@ -224,10 +222,9 @@ def test_incomplete_legacy_action_regressions(monkeypatch, hours, expected_actio
         }},
     )
 
-    assert len(result) == 1
-    assert result.rejections == ()
-    opportunity = OpportunityEngine().evaluate(candidates=list(result))
-    assert opportunity.action is expected_action
+    assert not result
+    assert result.rejections[0].basis is CandidateRejectionBasis.MODERN_PROVENANCE_MISSING
+    assert OpportunityEngine().evaluate(candidates=list(result)) is None
 
 
 def test_execution_credit_completes_intent_without_changing_legacy_ranking(monkeypatch):
@@ -262,63 +259,19 @@ def test_legacy_baseline_and_unknown_modern_degradation(monkeypatch, targeted):
                for key, score in (("M31", 75), ("M42", 65))]
     projects = {key: {"hours": 2, "target_hours": 20, "importance": 5} for key in ("M31", "M42")}
     if targeted:
-        projects["M31"].update(imaging_field_id=FIELD.imaging_field_id,
+        projects["M31"].update(acquisition_intent_progress=[], imaging_field_id=FIELD.imaging_field_id,
                                acquisition_intent_targets=[
                                    {"acquisition_intent_id": "sh2-129_ha", "target_hours": 2}])
     profile = {"projects": projects}
     candidates = astro_score.recommend_project_for_night(objects, profile=profile)
-    # Known legacy scores stay fixed; unknown modern risk uses the prudent bound.
-    # Identity, action and ranking remain explicit assertions below.
-    assert candidates.rejections == ()
-    assert {item.catalog_key: (item.final_score, item.decision_score, item.acquired_hours)
-            for item in candidates} == {
-                "M31": ((31.5, 31.5, 2.0) if targeted else
-                        (85.67500000000001, 85.67500000000001, 2.0)),
-                "M42": (77.625, 77.625, 2.0),
-            }
-    winner = "M42" if targeted else "M31"
-    alternative = "M31" if targeted else "M42"
-    modern = next(item for item in candidates if item.catalog_key == "M31")
+    assert [c.catalog_key for c in candidates] == (["M31"] if targeted else [])
+    assert [r.catalog_key for r in candidates.rejections] == (["M42"] if targeted else ["M31", "M42"])
     if targeted:
-        assert modern.acquisition_intent_selection_status is AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT
-        assert modern.acquisition_intent_remaining_progress[0].remaining_hours is None
-        assert modern.acquisition_intent_remaining_progress[0].acquired_hours is None
+        assert candidates[0].final_score == 31.5
+        assert candidates[0].acquisition_intent_selection_status is AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT
+        assert candidates[0].acquisition_intent_remaining_progress[0].remaining_hours is None
     else:
-        assert all(item.acquisition_intent_selection_status is None for item in candidates)
-        assert all(item.acquisition_intent_remaining_progress == () for item in candidates)
-    service = OpportunityRecommendationService(
-        opportunity_engine=OpportunityEngine(),
-        recommendation_engine=RecommendationEngine())
-    opportunity = OpportunityEngine().evaluate(candidates=list(candidates))
-    assert opportunity.action is Action.CONTINUE_PROJECT
-    assert opportunity.candidate.catalog_key == winner
-    assert [item.catalog_key for item in opportunity.shortlist_entries] == [alternative]
-    recommendation = service.build(candidates=list(candidates))
-    assert recommendation.opportunity.candidate.catalog_key == winner
-    assert recommendation.opportunity.action is Action.CONTINUE_PROJECT
-    assert recommendation.confidence is None
-
-    class Report:
-        def __init__(self):
-            self.calls = []
-        def run_tonight(self, **kwargs):
-            self.calls.append(kwargs)
-        def show_portfolio_completion_forecast(self, roadmap, **kwargs):
-            self.roadmap = roadmap
-
-    report = Report()
-    runner = TonightRunner(report_runner=report,
-                           portfolio_forecast_engine=SimpleNamespace(
-                               simulate_dynamic_portfolio_roadmap=lambda **kwargs: []),
-                           build_mission_input=lambda *args, **kwargs: None,
-                           recommend_project_for_night=astro_score.recommend_project_for_night,
-                           opportunity_recommendation_service=service)
-    runner.run(top_nights=[{"duration": 3, "top_objects": objects}],
-               night_capacities=[], profile=profile)
-    assert len(report.calls) == 1
-    assert report.calls[0]["recommendation"].opportunity.candidate.catalog_key == winner
-    assert report.calls[0]["recommendation"].opportunity.action is Action.CONTINUE_PROJECT
-    assert report.roadmap == []
+        assert OpportunityEngine().evaluate(candidates=list(candidates)) is None
 
 
 @pytest.mark.parametrize('legacy_hours', [0, 2, 200])
@@ -327,7 +280,7 @@ def test_legacy_session_and_totals_never_fill_missing_modern_progress(monkeypatc
     monkeypatch.setattr(astro_score.FilterInventoryLoader, 'load',
                         lambda: pytest.fail('modern intent read legacy filter inventory'))
     start = datetime(2026, 10, 7, 20, tzinfo=timezone.utc)
-    project = {'imaging_field_id': FIELD.imaging_field_id,
+    project = {"acquisition_intent_progress": [], 'imaging_field_id': FIELD.imaging_field_id,
                'acquisition_intent_targets': [
                    {'acquisition_intent_id': 'sh2-129_ha', 'target_hours': 2}],
                'hours': legacy_hours, 'target_hours': 2,

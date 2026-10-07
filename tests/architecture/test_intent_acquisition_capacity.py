@@ -91,8 +91,7 @@ def test_legacy_reads_and_profile_unchanged(monkeypatch):
     before = deepcopy(value)
     result = mission_input(monkeypatch, value, selected=None, field_id=None)
     assert result.acquisition_capacity is None
-    assert result.recommended_hours == 3
-    assert result.expected_gain == session_portfolio_gain("Sh2-129", 3, projects={"Sh2-129": value})
+    assert result.recommended_hours == result.expected_gain == 0
     assert project_remaining_hours("Sh2-129", {"Sh2-129": value}) == 3
     assert value == before
 
@@ -118,8 +117,9 @@ def test_disjoint_windows_are_not_added(monkeypatch):
 def test_partial_progress_is_rejected_without_legacy_fallback(monkeypatch):
     value = project(legacy_remaining=4)
     value["acquisition_intent_progress"][0] = {"acquisition_intent_id": "sh2-129_ha", "acquired_frames": 2}
-    with pytest.raises(ValueError, match="complete source"):
-        mission_input(monkeypatch, value)
+    result = mission_input(monkeypatch, value)
+    assert result.recommended_hours == result.expected_gain == 0
+    assert result.acquisition_capacity is None
 
 
 def test_preselection_cannot_authorize_mission(monkeypatch):
@@ -135,11 +135,12 @@ def test_unknown_modern_capacity_never_calls_future_legacy_fallback(monkeypatch)
     monkeypatch.setattr(astro_score.future_engine, "estimate", unexpected)
     value = project(legacy_remaining=4)
     value.pop("acquisition_intent_progress")
-    candidate = astro_score.recommend_project_for_night(
+    result = astro_score.recommend_project_for_night(
         [{"name": "Sh2-129", "catalog_key": "Sh2-129", "global_score": 75}],
         available_hours=2, profile={"projects": {"Sh2-129": value}},
-    ).candidates[0]
-    assert candidate.acquisition_intent_remaining_progress[0].remaining_hours is None
+    )
+    assert not result
+    assert result.rejections[0].basis.value == "modern_provenance_missing"
 
 
 def test_identified_execution_credit_reduces_only_selected_capacity(monkeypatch):

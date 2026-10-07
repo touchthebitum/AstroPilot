@@ -370,16 +370,11 @@ def test_legacy_project_keeps_absent_intent_provenance(
         "estimate",
         lambda *args, **kwargs: SimpleNamespace(risk="LOW", opportunity_ratio=1.0),
     )
-    candidate = astro_score.recommend_project_for_night(
-        _top_object(),
-        available_hours=2.0,
-        profile=_profile(project),
-    ).candidates[0]
-
-    assert candidate.imaging_field_id == project.get("imaging_field_id")
-    assert candidate.selected_acquisition_intent_id is None
-    assert candidate.viable_acquisition_intent_ids == ()
-    assert candidate.acquisition_intent_selection_status is None
+    result = astro_score.recommend_project_for_night(
+        _top_object(), available_hours=2.0, profile=_profile(project),
+    )
+    assert not result
+    assert result.rejections[0].basis.value == "modern_provenance_missing"
 
 
 def test_modern_project_passes_exact_selection_without_changing_score(
@@ -429,7 +424,7 @@ def test_modern_project_passes_exact_selection_without_changing_score(
         "build_candidate",
         recording_build,
     )
-    project = {
+    project = {"acquisition_intent_progress": [],
         "hours": 1.0,
         "target_hours": 4.0,
         "imaging_field_id": "sh2-129_ou4",

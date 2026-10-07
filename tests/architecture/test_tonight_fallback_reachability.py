@@ -1,3 +1,4 @@
+from conftest import modern_ranking_project
 """Exercise production ingress/services, preserving the boundary under audit."""
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -27,7 +28,7 @@ def profile():
         "preferences": {"bortle": 4},
         "active_equipment": "samyang_183",
         "available_equipment": ["samyang_183"],
-        "projects": {"M31": {"hours": 9.0, "target_hours": 10.0, "importance": 5}},
+        "projects": {"M31": modern_ranking_project({"hours": 9.0, "target_hours": 10.0, "importance": 5})},
     }
 
 
@@ -222,3 +223,6 @@ def test_same_length_lunar_array_with_wrong_timestamp_is_rejected():
                 "hourly_lunar_evidence": [{"time": start + timedelta(hours=1), "moon": 0}]},
             sky=SkyEngine(),
         )
+
+
+pytestmark = pytest.mark.usefixtures("selected_modern_ranking_intent")

@@ -136,3 +136,30 @@ def frozen_portfolio() -> PortfolioContext:
         average_progress=25.0,
     )
 
+
+
+def modern_ranking_project(values):
+    """Explicit modern capacity for ranking arithmetic fixtures.
+
+    These tests isolate score/risk arithmetic, not night intent eligibility.
+    Historical counters stay present for display assertions only.
+    """
+    return {**values, "imaging_field_id": "sh2-129_ou4",
+            "acquisition_intent_targets": [
+                {"acquisition_intent_id": "sh2-129_ha", "target_hours": values["target_hours"]}],
+            "acquisition_intent_progress": [
+                {"acquisition_intent_id": "sh2-129_ha",
+                 "acquired_duration_manual": values.get("hours", 0) * 3600}]}
+
+
+@pytest.fixture
+def selected_modern_ranking_intent(monkeypatch):
+    import astro_score
+    from decision.models.acquisition_intent_selection import (
+        AcquisitionIntentSelection, AcquisitionIntentSelectionStatus,
+    )
+    monkeypatch.setattr(astro_score, "compose_acquisition_intent_selection",
+        lambda **kwargs: AcquisitionIntentSelection(
+            "sh2-129_ha", ("sh2-129_ha",),
+            AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
+            ("ONLY_ELIGIBLE_INTENT",)))

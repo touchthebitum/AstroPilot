@@ -1,3 +1,4 @@
+from conftest import modern_ranking_project
 """Reachability of unknown diagnostics through production decision boundaries."""
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -38,7 +39,7 @@ def test_real_candidate_boundary_withdrawing_risk_never_improves_scores(monkeypa
     risk = [label]
     monkeypatch.setattr(astro_score.future_engine, 'estimate', lambda *a, **k:
         FutureOpportunity(10, risk[0], 1.0, 2, 5.0))
-    profile = {'projects': {'M31': {'hours': 2, 'target_hours': 10, 'importance': 5}},
+    profile = {'projects': {'M31': modern_ranking_project({'hours': 2, 'target_hours': 10, 'importance': 5})},
                'preferences': {'decision_mode': mode}}
     def candidate():
         return astro_score.recommend_project_for_night(
@@ -103,7 +104,7 @@ def test_real_roadmap_boundary_unknown_ratio_does_not_add_scarcity_bonus():
     class UnknownFuture:
         def estimate(self, *a, **k):
             return FutureOpportunity(0, 'INCONNU', 0.0, 0, 0.0)
-    project = {'hours': 0, 'target_hours': 10, 'importance': 0}
+    project = modern_ranking_project({'hours': 0, 'target_hours': 10, 'importance': 0})
     roadmap = PortfolioForecastEngine(UnknownFuture(), simulated_portfolio_score).simulate_dynamic_portfolio_roadmap(
         night_capacities=[{'hours': 2}], profile={'projects': {'M31': project}})
     assert roadmap[0]['score'] == simulated_portfolio_score(project, available_hours=2)
@@ -114,8 +115,8 @@ def test_real_roadmap_priority_unknown_cannot_outrank_explicit_low_priority():
     class UnknownFuture:
         def estimate(self, *a, **k):
             return FutureOpportunity(0, 'INCONNU', 0.0, 0, 0.0)
-    projects = {'unknown': {'hours': 0, 'target_hours': 10},
-                'known': {'hours': 0, 'target_hours': 10, 'importance': 1}}
+    projects = {'unknown': modern_ranking_project({'hours': 0, 'target_hours': 10}),
+                'known': modern_ranking_project({'hours': 0, 'target_hours': 10, 'importance': 1})}
     roadmap = PortfolioForecastEngine(UnknownFuture(), simulated_portfolio_score).simulate_dynamic_portfolio_roadmap(
         night_capacities=[{'hours': 2}], profile={'projects': projects})
     assert roadmap[0]['project'] == 'known'
@@ -158,7 +159,7 @@ def test_roadmap_unknown_capacity_never_becomes_five_hours_gain(capacities):
     engine = PortfolioForecastEngine(SimpleNamespace(estimate=lambda *a, **k:
         FutureOpportunity(0, 'INCONNU', 0, 0, 0)), simulated_portfolio_score)
     result = engine.simulate_dynamic_portfolio_roadmap(night_capacities=capacities,
-        profile={'projects': {'M31': {'hours': 0, 'target_hours': 10}}})
+        profile={'projects': {'M31': modern_ranking_project({'hours': 0, 'target_hours': 10})}})
     assert result == []
 
 
@@ -166,6 +167,9 @@ def test_roadmap_explicit_scenario_capacity_is_a_user_default():
     engine = PortfolioForecastEngine(SimpleNamespace(estimate=lambda *a, **k:
         FutureOpportunity(0, 'INCONNU', 0, 0, 0)), simulated_portfolio_score)
     result = engine.simulate_dynamic_portfolio_roadmap(avg_night_hours=5,
-        profile={'projects': {'M31': {'hours': 0, 'target_hours': 10}}})
+        profile={'projects': {'M31': modern_ranking_project({'hours': 0, 'target_hours': 10})}})
     assert sum(row['hours'] for row in result) == 10
     assert all(row['capacity'] == 5 for row in result)
+
+
+pytestmark = pytest.mark.usefixtures("selected_modern_ranking_intent")

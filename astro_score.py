@@ -1,3 +1,6 @@
+from decision.services.project_decision_provenance import (
+    ProjectDecisionProvenance, resolve_project_decision_provenance,
+)
 import json
 import requests
 import warnings
@@ -582,7 +585,12 @@ def build_mission_input(evaluation, *, profile=None, for_intent_selection=False)
     )
     project = projects.get(catalog_key, {})
     resolver = build_production_imaging_field_resolver()
-    targets = resolve_project_acquisition_intent_targets(project, resolver)
+    project_provenance = resolve_project_decision_provenance(project, resolver)
+    targets = (
+        resolve_project_acquisition_intent_targets(project, resolver)
+        if project_provenance is ProjectDecisionProvenance.MODERN_AUTHORIZED
+        else ()
+    )
     capacity = None
     if targets:
         field = resolve_project_imaging_field(project, resolver)
@@ -617,20 +625,20 @@ def build_mission_input(evaluation, *, profile=None, for_intent_selection=False)
                 if remaining_hours is not None else 0.0
             )
             expected_gain = acquisition_intent_session_gain(capacity, recommended_hours)
-    elif (evaluation.get("imaging_field_id") is not None
-          or evaluation.get("selected_acquisition_intent_id") is not None):
-        # An intent with no modern targets/progress cannot inherit duration or
-        # gain from legacy project totals. Historical inputs remain readable.
-        recommended_hours = 0.0
-        expected_gain = 0.0
-    else:
+    elif (catalog_key not in projects
+          and evaluation.get("imaging_field_id") is None
+          and evaluation.get("selected_acquisition_intent_id") is None):
+        # Discovery assessment has no project totals to promote.
         remaining_hours = evaluation.get("remaining_hours")
         recommended_hours = astronomical_hours
         if remaining_hours is not None:
             recommended_hours = min(recommended_hours, max(0, remaining_hours))
-        expected_gain = session_portfolio_gain(
-            catalog_key, recommended_hours, projects=projects,
-        )
+        expected_gain = 0.0
+    else:
+        # New input construction never promotes pre-intent totals to capacity.
+        # Historical MissionInput readers retain their original values.
+        recommended_hours = 0.0
+        expected_gain = 0.0
 
     selected_weather = evaluation.get("selected_window_weather")
     if selected_weather is not None:
@@ -656,7 +664,10 @@ def build_mission_input(evaluation, *, profile=None, for_intent_selection=False)
         bool(targets) or evaluation.get("imaging_field_id") is not None
         or evaluation.get("selected_acquisition_intent_id") is not None
     )
-    inventory = () if modern_intent else FilterInventoryLoader.load()
+    inventory = (
+        FilterInventoryLoader.load()
+        if catalog_key not in projects and not modern_intent else ()
+    )
 
     if inventory:
         target_data = CATALOG.get(catalog_key, {})
@@ -877,6 +888,19 @@ def recommend_project_for_night(
 
         if imaging_field_resolver is None:
             imaging_field_resolver = build_production_imaging_field_resolver()
+        project_provenance = resolve_project_decision_provenance(
+            projects[catalog_key], imaging_field_resolver,
+        )
+        if project_provenance is not ProjectDecisionProvenance.MODERN_AUTHORIZED:
+            rejections.append(CandidateRejection(
+                target=obj["name"], catalog_key=catalog_key,
+                provenance=CandidateProvenance.PROJECT,
+                basis=(CandidateRejectionBasis.LEGACY_READ_ONLY
+                       if project_provenance is ProjectDecisionProvenance.LEGACY_READ_ONLY
+                       else CandidateRejectionBasis.MODERN_PROVENANCE_MISSING),
+                evaluation_score=astro_score,
+            ))
+            continue
         imaging_field = resolve_project_imaging_field(
             projects[catalog_key],
             imaging_field_resolver,
