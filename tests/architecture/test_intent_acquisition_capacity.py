@@ -28,12 +28,12 @@ def project(*, acquired=0.5, legacy_remaining=0):
     }
 
 
-def mission_input(monkeypatch, value, *, selected="sh2-129_ha", profile_extra=None, **kwargs):
+def mission_input(monkeypatch, value, *, selected="sh2-129_ha", field_id="sh2-129_ou4", profile_extra=None, **kwargs):
     monkeypatch.setattr(astro_score.FilterInventoryLoader, "load", lambda: [])
     evaluation = {
         "catalog_key": "Sh2-129", "remaining_hours": project_remaining_hours("Sh2-129", {"Sh2-129": value}),
         "window": {"start": START, "end": START + timedelta(hours=4)},
-        "imaging_field_id": "sh2-129_ou4", "selected_acquisition_intent_id": selected,
+        "imaging_field_id": field_id, "selected_acquisition_intent_id": selected,
     }
     return astro_score.build_mission_input(evaluation, profile={"projects": {"Sh2-129": value}, **(profile_extra or {})}, **kwargs)
 
@@ -89,7 +89,7 @@ def test_selected_intent_only_and_user_duration_prorate_gain(monkeypatch):
 def test_legacy_reads_and_profile_unchanged(monkeypatch):
     value = {"hours": 1, "target_hours": 4}
     before = deepcopy(value)
-    result = mission_input(monkeypatch, value, selected=None)
+    result = mission_input(monkeypatch, value, selected=None, field_id=None)
     assert result.acquisition_capacity is None
     assert result.recommended_hours == 3
     assert result.expected_gain == session_portfolio_gain("Sh2-129", 3, projects={"Sh2-129": value})

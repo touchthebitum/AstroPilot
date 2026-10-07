@@ -33,7 +33,7 @@ class FilterInventoryLoader:
                     name=name,
                     filter_type=filter_type,
                     bandwidth_nm=raw_filter.get("bandwidth_nm"),
-                    source="inventory",
+                    source="legacy_inventory",
                 )
             )
 

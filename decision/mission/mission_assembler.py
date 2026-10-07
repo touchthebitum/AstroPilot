@@ -350,6 +350,13 @@ class MissionAssembler:
                 selected_filter=mission_input.selected_filter,
             )
 
+            # SelectedFilter has no exact optical profile identity. Keep it
+            # readable in historical inputs, but never authorize a new intent
+            # mission using a name/type or a self-declared source string.
+            if (mission_input.acquisition_intent_id is not None
+                    and mission_input.selected_filter is not None):
+                raise ValueError("legacy_filter_cannot_authorize_modern_mission")
+
         reasons = []
 
         for text in summary.positives:

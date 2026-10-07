@@ -448,15 +448,12 @@ class DecisionAcceptanceApplicationService:
             raise DecisionAcceptanceError(str(exc)) from exc
 
         try:
-            intent_provenance_expected = (
-                acquisition_intent_provenance_expected(context, selection)
-            )
+            acquisition_intent_provenance_expected(context, selection)
         except SelectedAcquisitionIntentResolutionError as exc:
             raise DecisionAcceptanceError(str(exc)) from exc
         if (
             selection.selected_imaging_field_id is not None
             and selection.selected_acquisition_intent_id is None
-            and intent_provenance_expected
         ):
             raise DecisionAcceptanceError(
                 "acquisition_intent_required_for_mission"

@@ -617,6 +617,12 @@ def build_mission_input(evaluation, *, profile=None, for_intent_selection=False)
                 if remaining_hours is not None else 0.0
             )
             expected_gain = acquisition_intent_session_gain(capacity, recommended_hours)
+    elif (evaluation.get("imaging_field_id") is not None
+          or evaluation.get("selected_acquisition_intent_id") is not None):
+        # An intent with no modern targets/progress cannot inherit duration or
+        # gain from legacy project totals. Historical inputs remain readable.
+        recommended_hours = 0.0
+        expected_gain = 0.0
     else:
         remaining_hours = evaluation.get("remaining_hours")
         recommended_hours = astronomical_hours
@@ -644,7 +650,13 @@ def build_mission_input(evaluation, *, profile=None, for_intent_selection=False)
 
     selected_filter = None
 
-    inventory = FilterInventoryLoader.load()
+    # Modern intents resolve exact setup profiles elsewhere. The old inventory
+    # carries only a display name/type and cannot supply that identity.
+    modern_intent = (
+        bool(targets) or evaluation.get("imaging_field_id") is not None
+        or evaluation.get("selected_acquisition_intent_id") is not None
+    )
+    inventory = () if modern_intent else FilterInventoryLoader.load()
 
     if inventory:
         target_data = CATALOG.get(catalog_key, {})

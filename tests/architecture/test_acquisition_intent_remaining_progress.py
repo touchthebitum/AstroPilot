@@ -319,3 +319,42 @@ def test_legacy_baseline_and_unknown_modern_degradation(monkeypatch, targeted):
     assert report.calls[0]["recommendation"].opportunity.candidate.catalog_key == winner
     assert report.calls[0]["recommendation"].opportunity.action is Action.CONTINUE_PROJECT
     assert report.roadmap == []
+
+
+@pytest.mark.parametrize('legacy_hours', [0, 2, 200])
+def test_legacy_session_and_totals_never_fill_missing_modern_progress(monkeypatch, legacy_hours):
+    from datetime import datetime, timedelta, timezone
+    monkeypatch.setattr(astro_score.FilterInventoryLoader, 'load',
+                        lambda: pytest.fail('modern intent read legacy filter inventory'))
+    start = datetime(2026, 10, 7, 20, tzinfo=timezone.utc)
+    project = {'imaging_field_id': FIELD.imaging_field_id,
+               'acquisition_intent_targets': [
+                   {'acquisition_intent_id': 'sh2-129_ha', 'target_hours': 2}],
+               'hours': legacy_hours, 'target_hours': 2,
+               'filter_targets': {'Ha': 2}}
+    profile = {'projects': {'Sh2-129': project}, 'sessions': [
+        {'object': 'Sh2-129', 'filter_type': 'Ha', 'hours': legacy_hours}]}
+    value = astro_score.build_mission_input({
+        'catalog_key': 'Sh2-129', 'imaging_field_id': FIELD.imaging_field_id,
+        'selected_acquisition_intent_id': 'sh2-129_ha',
+        'window': {'start': start, 'end': start + timedelta(hours=2)},
+        'remaining_hours': 2,
+    }, profile=profile)
+    assert value.selected_filter is None
+    assert value.acquisition_capacity.acquired_hours is None
+    assert value.acquisition_capacity.remaining_hours is None
+    assert value.recommended_hours == value.expected_gain == 0
+
+
+def test_modern_intent_without_modern_targets_does_not_inherit_legacy_gain(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    monkeypatch.setattr(astro_score.FilterInventoryLoader, 'load', lambda: ())
+    start = datetime(2026, 10, 7, 20, tzinfo=timezone.utc)
+    value = astro_score.build_mission_input({
+        'catalog_key': 'Sh2-129', 'imaging_field_id': FIELD.imaging_field_id,
+        'selected_acquisition_intent_id': 'sh2-129_ha',
+        'window': {'start': start, 'end': start + timedelta(hours=2)},
+        'remaining_hours': 12,
+    }, profile={'projects': {'Sh2-129': {'hours': 2, 'target_hours': 20}}})
+    assert value.acquisition_capacity is None
+    assert value.recommended_hours == value.expected_gain == 0

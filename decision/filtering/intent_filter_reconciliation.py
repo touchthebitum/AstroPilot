@@ -33,6 +33,7 @@ def reconcile_selected_filter(
     available_filters: Iterable[SelectedFilter],
     selected_filter: SelectedFilter | None,
 ) -> SelectedFilter | None:
+    """Reconcile legacy descriptions by type, without authorizing availability."""
     required_filter_type = resolve_required_filter_type(
         imaging_field_id,
         acquisition_intent_id,

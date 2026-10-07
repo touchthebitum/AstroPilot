@@ -598,7 +598,15 @@ def test_acceptance_persists_canonical_selected_imaging_field(
     target,
     service_kwargs,
 ):
-    service, composer, store, _ = registered_service(**service_kwargs)
+    intent_key = {
+        UserSelectionSource.PRIMARY_RECOMMENDATION: "primary_intent_provenance",
+        UserSelectionSource.ALTERNATIVE: "alternative_intent_provenance",
+        UserSelectionSource.OTHER_EVALUATED_TARGET: "other_intent_provenance",
+    }[source]
+    service, composer, store, _ = registered_service(
+        **service_kwargs,
+        **{intent_key: ("intent-A", ("intent-A",), AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT)},
+    )
 
     service.accept(selection(source, target))
     stored = store.load_selection("selection-1")
@@ -636,6 +644,7 @@ def test_discovery_legacy_and_declined_persist_no_imaging_field(
 
 def test_mission_imaging_field_mismatch_fails_before_commit():
     service, composer, store, _ = registered_service(
+        primary_intent_provenance=("intent-A", ("intent-A",), AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT),
         primary_imaging_field_id="sh2-129_ou4",
         profile_projects={"M31": {"imaging_field_id": "sh2-129_ou4"}},
     )
@@ -731,6 +740,7 @@ def test_invalid_project_imaging_field_fails_closed_before_commit():
 
 def test_first_idempotent_acceptance_and_replay_return_canonical_lineage():
     service, composer, store, recommendation = registered_service(
+        primary_intent_provenance=("intent-A", ("intent-A",), AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT),
         primary_imaging_field_id="sh2-129_ou4",
         profile_projects={"M31": {"imaging_field_id": "sh2-129_ou4"}},
     )
@@ -1068,3 +1078,19 @@ def test_missing_availability_still_allows_declining():
     )
     assert result.mission is None
     assert store.load_acceptance("decline-request") is not None
+
+
+@pytest.mark.parametrize('source,target', [
+    (UserSelectionSource.PRIMARY_RECOMMENDATION, 'M31'),
+    (UserSelectionSource.OTHER_EVALUATED_TARGET, 'M33'),
+])
+def test_legacy_intent_provenance_cannot_authorize_modern_field(source, target):
+    service, composer, store, _ = registered_service(
+        primary_imaging_field_id=('sh2-129_ou4' if target == 'M31' else None),
+        profile_projects={target: {'imaging_field_id': 'sh2-129_ou4'}},
+    )
+    service.mission_id_factory = lambda: pytest.fail('legacy context allocated a new mission')
+    with pytest.raises(DecisionAcceptanceError, match='acquisition_intent_required_for_mission'):
+        service.accept_idempotently(selection(source, target), acceptance_request_id='legacy-context')
+    assert composer.calls == []
+    assert store.load_acceptance('legacy-context') is None
