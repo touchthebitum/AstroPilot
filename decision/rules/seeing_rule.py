@@ -11,10 +11,11 @@ class SeeingRule(BaseRule):
         if seeing is None:
             return RuleContribution(
                 rule=self.name,
-                score=0,
+                score=-10,
                 confidence=0.3,
                 reason="Seeing indisponible",
                 details=f"Seeing : {seeing}",
+                evidence_status="unknown",
             )
 
         if seeing <= 1.2:
@@ -42,5 +43,6 @@ class SeeingRule(BaseRule):
             score=score,
             confidence=1.0,
             reason=reason,
-            details=""
+            details="",
+            evidence_status="known",
         )

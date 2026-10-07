@@ -121,7 +121,8 @@ def test_sampling_rule_returns_low_confidence_when_sampling_is_missing(
     contribution = SamplingRule().evaluate(context, profile=object())
 
     assert contribution.rule == "Sampling"
-    assert contribution.score == 0
+    assert contribution.score == -6
+    assert contribution.evidence_status == "unknown"
     assert contribution.confidence == 0.5
     assert contribution.reason == "Sampling indisponible"
     assert contribution.details == ""

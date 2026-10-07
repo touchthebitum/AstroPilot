@@ -9,6 +9,7 @@ class ResolutionEvaluation:
     suggestion: str
     pixels: float
     size_factor : str
+    evidence_status: str = "known"
 
 
 class ResolutionModel:
@@ -24,7 +25,8 @@ class ResolutionModel:
         if object_size_arcmin is None or pixel_size is None:
             return ResolutionEvaluation(
                 adequacy=0,
-                score=0,
+                score=-10,
+                evidence_status="unknown",
                 diagnostic="Résolution inconnue",
                 suggestion="Impossible d'évaluer.",
                 pixels=0,

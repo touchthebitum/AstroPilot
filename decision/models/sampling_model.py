@@ -6,6 +6,7 @@ class SamplingEvaluation:
     score: float
     diagnostic: str
     suggestion: str
+    evidence_status: str = "known"
 
 class SamplingModel:
 
@@ -58,7 +59,8 @@ class SamplingModel:
         if sampling_arcsec_pixel is None or seeing_arcsec is None or object_size_arcmin is None:
             return SamplingEvaluation(
                 adequacy=0,
-                score=0,
+                score=-6,
+                evidence_status="unknown",
                 diagnostic="Sampling inconnu",
                 suggestion="Impossible d'évaluer le sampling."
             )

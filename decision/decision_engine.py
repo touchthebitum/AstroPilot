@@ -1,3 +1,5 @@
+from math import isfinite
+
 from decision.rule_contribution import RuleContribution
 from decision.rules.sampling_rule import SamplingRule
 from decision.rules.seeing_rule import SeeingRule
@@ -27,6 +29,12 @@ class DecisionEngine:
             rule_key = contribution.rule.lower().replace(" ", "_")
 
             weight = weights.get(rule_key, contribution.weight)
+            # Match profile ingress for evidence-aware internal callers too.
+            if contribution.evidence_status is not None and (
+                isinstance(weight, bool) or not isinstance(weight, (int, float))
+                or not isfinite(weight) or weight < 0
+            ):
+                raise ValueError("evidence rule weight must be finite and non-negative")
             contribution.weight = weight
 
             total_score += contribution.score * weight

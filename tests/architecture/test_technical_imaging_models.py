@@ -18,7 +18,8 @@ def test_sampling_model_returns_unknown_when_inputs_are_missing(seeing, sampling
         sampling_arcsec_pixel=sampling,
     ) == SamplingEvaluation(
         adequacy=0,
-        score=0,
+        score=-6,
+        evidence_status="unknown",
         diagnostic="Sampling inconnu",
         suggestion="Impossible d'évaluer le sampling.",
     )
@@ -71,7 +72,8 @@ def test_resolution_model_returns_unknown_when_inputs_are_missing(
         pixel_size=pixel_size,
     ) == ResolutionEvaluation(
         adequacy=0,
-        score=0,
+        score=-10,
+        evidence_status="unknown",
         diagnostic="Résolution inconnue",
         suggestion="Impossible d'évaluer.",
         pixels=0,
