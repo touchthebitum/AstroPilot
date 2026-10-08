@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 
@@ -12,6 +12,8 @@ from astropilot.user_profile import (
 )
 from decision.forecast.forecast_run import ForecastRun
 from decision.mission.night_mission import NightMission
+from decision.mission.mission_input import MissionInput
+from decision.mission.mission_assembler import ProductiveWindowAssessment
 from decision.models.candidate_rejection import (
     CandidateBuildResult,
     CandidateRejection,
@@ -126,10 +128,21 @@ class TonightResult:
     candidate_rejections: tuple[CandidateRejection, ...] = ()
     actionability_refusal: ActionabilityRefusal | None = None
     timeline_start: datetime | None = None
+    # Internal live evidence, deliberately absent from TonightResponse/API.
+    alert_mission_input: MissionInput | None = field(default=None, repr=False, compare=False)
+    alert_assessment: ProductiveWindowAssessment | None = field(default=None, repr=False, compare=False)
+    alert_live_marker: object | None = field(default=None, repr=False, compare=False)
 
     @property
     def forecast_available(self) -> bool:
         return self.status is not TonightStatus.FORECAST_UNAVAILABLE
+
+
+_ALERT_LIVE_MARKER = object()
+
+
+def _live_alert_result(result):
+    return replace(result, alert_live_marker=_ALERT_LIVE_MARKER)
 
 
 class TonightApplicationService:
@@ -284,9 +297,11 @@ class TonightApplicationService:
         )
 
         timeline_start = None
+        alert_mission_input = None
+        alert_assessment = None
 
         def build_actionability_mission_input(evaluation):
-            nonlocal timeline_start
+            nonlocal timeline_start, alert_mission_input
             if isinstance(evaluation, Mapping):
                 evaluation = {
                     **evaluation,
@@ -301,10 +316,11 @@ class TonightApplicationService:
                 profile=effective_profile,
             )
             timeline_start = getattr(mission_input, "window_start", None)
-            return replace(
+            alert_mission_input = replace(
                 mission_input,
                 availability=inputs.availability,
             )
+            return alert_mission_input
 
         create_with_diagnostic = getattr(
             self.tonight_mission_service,
@@ -320,6 +336,7 @@ class TonightApplicationService:
                 build_mission_input=build_actionability_mission_input,
             )
             mission = assembly.mission
+            alert_assessment = assembly.assessment
             actionability_refusal = assembly.actionability_refusal
         else:
             mission = self.tonight_mission_service.create(
@@ -367,7 +384,7 @@ class TonightApplicationService:
                 timeline_start=timeline_start,
             )
 
-        return TonightResult(
+        return _live_alert_result(TonightResult(
             night,
             recommendation,
             mission,
@@ -375,4 +392,6 @@ class TonightApplicationService:
             forecast_evidence=forecast_evidence,
             candidate_rejections=candidate_rejections,
             timeline_start=timeline_start,
-        )
+            alert_mission_input=alert_mission_input,
+            alert_assessment=alert_assessment,
+        ))
