@@ -94,4 +94,5 @@ jobs:
           tests/architecture/test_opportunity_alert_windows_task_v1.py
           tests/architecture/test_opportunity_alert_windows_supervisor_v1.py
           tests/architecture/test_opportunity_alert_status_v1.py
+          tests/architecture/test_opportunity_alert_host_status_integration.py
           tests/architecture/test_opportunity_alert_host_v1.py
