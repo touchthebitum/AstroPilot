@@ -30,7 +30,9 @@ def build_task(*, python, config, data_dir, log_dir, user_id, state_dir=None,
     deployment = build_launch_agent(python=python, config=config, data_dir=data_dir,
                                    log_dir=log_dir, state_dir=state_dir)
     host_args = deployment['ProgramArguments'][4:]
-    args = ['-u', '-m', 'astropilot.opportunity_alert_windows_task_host',
+    args = ['-u', '-m', 'astropilot.opportunity_alert_windows_supervisor',
+            '--python', str(python), '--restart-seconds', str(restart_seconds),
+            '--restart-count', str(restart_count),
             '--log-dir', str(Path(log_dir).resolve()), *host_args]
     for value in [str(python), *args]:
         if any(ord(c) < 32 for c in value) or '%' in value:
@@ -58,9 +60,6 @@ def build_task(*, python, config, data_dir, log_dir, user_id, state_dir=None,
                         'Enabled': 'false', 'Hidden': 'false', 'RunOnlyIfIdle': 'false',
                         'WakeToRun': 'false', 'ExecutionTimeLimit': 'PT0S'}.items():
         add(settings, name, value)
-    restart = add(settings, 'RestartOnFailure')
-    add(restart, 'Interval', f'PT{restart_seconds}S')
-    add(restart, 'Count', restart_count)
     action = add(add(root, 'Actions', Context='AlertUser'), 'Exec')
     add(action, 'Command', deployment['ProgramArguments'][0])
     add(action, 'Arguments', subprocess.list2cmdline(args))
