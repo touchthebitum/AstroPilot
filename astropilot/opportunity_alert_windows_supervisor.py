@@ -116,6 +116,8 @@ def main(argv=None):
         paths = (args.python, args.config, args.data_dir, args.log_dir, args.state_dir)
         if any(p is not None and (not p.is_absolute() or '\0' in str(p)) for p in paths):
             raise ValueError('absolute_paths_required')
+        if os.name == 'nt' and any(p is not None and str(p).startswith(('\\\\', '//')) for p in paths):
+            raise ValueError('local_deployment_paths_required')
         if not args.python.is_file() or not args.data_dir.is_dir() or not args.log_dir.is_dir():
             raise ValueError('existing_deployment_required')
         if args.data_dir.resolve() == args.log_dir.resolve():

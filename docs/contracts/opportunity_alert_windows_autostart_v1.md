@@ -119,7 +119,9 @@ supervisor must exit without another host; direct duplicate host remains blocked
 Disable/End, verify both processes gone and no unwanted restart;
 record forced-stop effects and any absent shutdown event. Check manual duplicate
 fails without a cycle, Unicode/spaces paths, logs and rotation, installed wheel.
-No notifications or real host launches in CI. No durable outbox in this scope.
+CI launches only isolated disabled single-cycle hosts or duplicate-lock probes
+and inert children; no real notifications, network cycles or task registration.
+No durable outbox in this scope.
 After merge, use real trials to decide whether durable delivery retry is needed.
 
 References: [schema](https://learn.microsoft.com/en-us/windows/win32/taskschd/task-scheduler-schema),
