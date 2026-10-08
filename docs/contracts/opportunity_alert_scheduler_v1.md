@@ -2,7 +2,11 @@
 
 One scheduler identity binds one user/context, one fixed cadence and one dedicated
 state directory. Default cadence: one hour, anchored at Unix epoch UTC. Polling
-uses an injected aware clock; logical_time is the start of the current UTC slot.
+uses an injected aware clock; logical_time defaults to the start of the current UTC slot. A live host may
+supply explicit cycle_time within that same slot; the runner receives that UTC
+time while the watermark still identifies the slot. Other slots and naive
+cycle_time values are rejected before state I/O. This opt-in keeps live weather
+retrieval consistent with evaluation time without changing default callers.
 No polling before the anchor. Intervals must be positive integral seconds.
 
 Only the current slot is eligible: missed slots are discarded, never replayed in
