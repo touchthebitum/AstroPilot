@@ -84,3 +84,7 @@ jobs:
           tests/history/test_outcome_history_cursor_key.py::test_regular_existing_key_loads
           tests/history/test_outcome_history_cursor_key.py::test_existing_key_preserves_binary_bytes
           tests/history/test_outcome_history_cursor_key.py::test_key_open_includes_binary_flag
+      - name: Validate Windows notification adapter without sending notifications
+        run: >-
+          uv run --locked --no-sync python -m pytest -q
+          tests/architecture/test_opportunity_alert_windows_notification_v1.py

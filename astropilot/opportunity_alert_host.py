@@ -14,6 +14,7 @@ import sys
 from threading import Event
 
 from astropilot.opportunity_alert_notification import DisabledNotifier, MacOSNotifier, deliver_cycle
+from astropilot.opportunity_alert_windows_notification import WindowsNotifier
 from astropilot.opportunity_alert_ledger import FileOpportunityAlertLedger
 from astropilot.opportunity_alert_scheduler import (
     OpportunityAlertScheduler, SchedulerCadence, SchedulerStatus, utc,
@@ -95,7 +96,7 @@ def load_config(path) -> HostConfig:
         if policy.enabled and availability is None:
             raise ValueError('enabled_host_requires_explicit_availability')
         channel = doc.get('notification_channel', 'disabled')
-        if not isinstance(channel, str) or channel not in ('disabled', 'macos'):
+        if not isinstance(channel, str) or channel not in ('disabled', 'macos', 'windows'):
             raise ValueError('invalid_notification_channel')
         return HostConfig(cadence, policy, availability, channel)
     except (TypeError, ValueError, OverflowError) as error:
@@ -262,7 +263,8 @@ def main(argv=None):
                     'enabled': config.policy.enabled})
                 result = OpportunityAlertHost(scheduler=scheduler, policy=config.policy,
                     clock=clock, stop_event=stop, report=_emit,
-                    notifier=MacOSNotifier() if config.notification_channel == 'macos' else DisabledNotifier()).run(once=args.once)
+                    notifier={'disabled': DisabledNotifier, 'macos': MacOSNotifier,
+                        'windows': WindowsNotifier}[config.notification_channel]()).run(once=args.once)
                 _emit({'event': 'shutdown'})
                 if args.once and result is not None and (result.status is SchedulerStatus.ERROR
                         or (result.cycle is not None and result.cycle.status is OpportunityAlertCycleStatus.ERROR)):
