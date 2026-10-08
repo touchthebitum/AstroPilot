@@ -33,9 +33,11 @@ from decision.weather.weather_ingress import WeatherSnapshot
 from decision.services.tonight_application_service import TonightApplicationService
 
 
+@pytest.mark.parametrize("claim_alert", [False, True])
 @pytest.mark.parametrize("commitment", ["explicit", "omitted", "null"])
 def test_http_request_runs_real_application_composition_once(
     commitment,
+    claim_alert,
     request,
     monkeypatch,
     tmp_path,
@@ -313,10 +315,17 @@ def test_http_request_runs_real_application_composition_once(
             **({"availability": {"mode": "all_night"}} if commitment == "explicit"
                else {"availability": None} if commitment == "null" else {}),
             "bortle": 4,
+            "claim_opportunity_alert": claim_alert,
         },
     )
 
     assert response.status_code == 200
+    if claim_alert:
+        assert response.json()["opportunity_alert"]["reason_codes"] == ["alerts_disabled"]
+        assert response.json()["opportunity_alert"]["status"] == "no_alert"
+    else:
+        assert "opportunity_alert" not in response.json()
+    assert not (tmp_path / "opportunity_alert_ledger.json").exists()
     if commitment != "explicit":
         payload = response.json()
         assert payload["status"] == "user_availability_required"

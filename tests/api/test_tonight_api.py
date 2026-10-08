@@ -4031,3 +4031,20 @@ def test_soul_like_short_window_is_not_exposed_or_accepted_as_an_alternative(
     assert bypass_rejected.json()["detail"]["code"] == (
         "selected_target_not_actionable"
     )
+
+
+def test_alert_claim_respects_existing_http_weather_refusal():
+    reference = datetime(2026, 8, 29, 20, 0, tzinfo=timezone.utc)
+    weather = make_weather_snapshot(reference - timedelta(minutes=5),
+        valid_until=datetime(2026, 9, 1, 23, tzinfo=timezone.utc))
+    class Service:
+        def evaluate(self, **kwargs):
+            return make_result()
+    def forbidden_ledger():
+        pytest.fail('A refused Tonight response must never access the alert ledger')
+    client = TestClient(create_app(service_factory=Service,
+        weather_provider=lambda *args: weather, profile_provider=valid_profile,
+        clock=lambda: reference, alert_ledger_factory=forbidden_ledger))
+    response = client.post('/v1/tonight', json={'claim_opportunity_alert': True})
+    assert response.status_code == 409
+    assert response.json() == {'detail': {'code': 'opportunity_alert_tonight_refused'}}
