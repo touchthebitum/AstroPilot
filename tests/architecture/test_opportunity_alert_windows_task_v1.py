@@ -37,11 +37,12 @@ def test_definition(deployment):
                            'DisallowStartIfOnBatteries': 'false',
                            'StopIfGoingOnBatteries': 'false'}.items():
         assert value('t:Settings/t:' + name) == expected
-    assert value('t:Settings/t:RestartOnFailure/t:Count') == '3'
-    assert value('t:Settings/t:RestartOnFailure/t:Interval') == 'PT60S'
+    assert root.find('t:Settings/t:RestartOnFailure', NS) is None
     assert value('t:Actions/t:Exec/t:Command') == sys.executable
     args = value('t:Actions/t:Exec/t:Arguments')
-    assert args.startswith('-u -m astropilot.opportunity_alert_windows_task_host ')
+    assert args.startswith('-u -m astropilot.opportunity_alert_windows_supervisor ')
+    assert '--restart-count 3' in args
+    assert '--restart-seconds 60' in args
     for key in ('config', 'data_dir', 'log_dir'):
         assert '"' + str(deployment[key]) + '"' in args
     assert root.find('t:Triggers/t:BootTrigger', NS) is None

@@ -15,6 +15,7 @@ def main(argv=None):
     for name in ('log-dir', 'config', 'data-dir'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--state-dir', type=Path)
+    parser.add_argument('--once', action='store_true', help='Run the existing host for one cycle')
     args = parser.parse_args(argv)
     try:
         job = build_launch_agent(python=sys.executable, config=args.config,
@@ -24,7 +25,7 @@ def main(argv=None):
         with open(job['StandardOutPath'], 'a', encoding='utf-8', buffering=1) as stdout, \
              open(job['StandardErrorPath'], 'a', encoding='utf-8', buffering=1) as stderr:
             with redirect_stdout(stdout), redirect_stderr(stderr):
-                return host_main(job['ProgramArguments'][4:])
+                return host_main(job['ProgramArguments'][4:] + (['--once'] if args.once else []))
     except (ValueError, OSError):
         print('invalid_opportunity_alert_windows_task_host_configuration', file=sys.stderr)
         return 2
