@@ -28,6 +28,10 @@ from pydantic import (
     model_validator,
 )
 
+from astropilot.opportunity_alert_api import OpportunityAlertResponse, claim_opportunity_alert
+from astropilot.opportunity_alert_ledger import FileOpportunityAlertLedger
+from decision.models.opportunity_alert import OpportunityAlertPolicy
+
 from decision.models.lunar_evidence_snapshot import LunarEvidenceSnapshot
 from astropilot.equipment_catalog import EQUIPMENT_PROFILES
 from decision.definitions.production_imaging_fields import (
@@ -556,6 +560,7 @@ class SessionAvailabilityRequest(BaseModel):
 
 
 class TonightRequest(BaseModel):
+    claim_opportunity_alert: bool = Field(default=False, strict=True, description="Explicitly evaluate and durably claim an alert from this live Tonight result.")
     model_config = ConfigDict(
         extra="forbid",
         json_schema_extra={
@@ -1373,6 +1378,7 @@ class ActionabilityRefusalModel(
 
 
 class TonightResponseModel(BaseModel):
+    opportunity_alert: OpportunityAlertResponse | None = Field(default=None, exclude_if=lambda value: value is None)
     model_config = ConfigDict(
         json_schema_extra={
             "examples": [
@@ -1955,6 +1961,8 @@ def create_app(
     profile_provider: Callable = _production_profile_provider,
     clock: Callable[[], datetime] = _utc_now,
     selection_id_factory: Callable[[], str] = _generate_selection_id,
+    alert_policy_provider: Callable[[], OpportunityAlertPolicy] = OpportunityAlertPolicy,
+    alert_ledger_factory: Callable = FileOpportunityAlertLedger,
 ) -> FastAPI:
     application_version = canonical_version()
     resolved_service = None
@@ -2928,6 +2936,16 @@ def create_app(
 
         if isinstance(weather, WeatherSnapshot):
             payload["weather_trust"] = weather.trust_transport(weather_freshness)
+        if request.claim_opportunity_alert:
+            # Validate transport before the irreversible durable alert claim.
+            TonightResponseModel.model_validate(payload)
+            if weather_refused:
+                raise HTTPException(status_code=409,
+                    detail={"code": "opportunity_alert_tonight_refused"})
+            payload["opportunity_alert"] = claim_opportunity_alert(
+                result=result, policy=alert_policy_provider(),
+                ledger=alert_ledger_factory(), logical_time=reference_time_utc,
+            )
         return payload
 
     @application.post(
