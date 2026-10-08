@@ -1,3 +1,4 @@
+from tests.modern_mission_helpers import authorized_input
 from decision.models.session_availability import SessionAvailability, SessionAvailabilityMode
 from dataclasses import replace
 from datetime import timedelta
@@ -35,7 +36,7 @@ def _mission_input(frozen_time, weather, **overrides):
         "expected_gain": 4.0,
     }
     values.update(overrides)
-    return MissionInput(**values)
+    return authorized_input(MissionInput(**values))
 
 
 @pytest.fixture

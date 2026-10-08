@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from decision.mission.mission_assembler import MissionAssembler
+from decision.mission.mission_assembler import ProductiveWindowAssessment
 
 
 class ContextCaptured(Exception):
@@ -50,12 +50,9 @@ def test_mission_assembler_uses_selected_night_conditions(
     )
 
     with pytest.raises(ContextCaptured):
-        MissionAssembler.build(
+        ProductiveWindowAssessment.build(
             target="M31",
-            summary=summary,
             context=context,
-            equipment=["frozen setup"],
-            alternatives=["M42"],
             weather=replace(frozen_weather, **{
                 name: getattr(frozen_weather, name) * 2
                 for name in ("hourly_clouds", "hourly_humidity", "hourly_wind",

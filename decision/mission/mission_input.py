@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 from dataclasses import dataclass
 from datetime import datetime
 from decision.models.lunar_evidence_snapshot import (
@@ -10,6 +13,10 @@ from decision.weather.weather_forecast import WeatherForecast
 from decision.models.acquisition_intent_remaining_progress import (
     AcquisitionIntentRemainingProgress,
 )
+
+
+if TYPE_CHECKING:
+    from decision.mission.modern_mission_authorization import ModernMissionAuthorization
 
 
 @dataclass(frozen=True)
@@ -32,6 +39,7 @@ class MissionInput:
     evidence_only: bool = False
 
     lunar_evidence_snapshot: LunarEvidenceSnapshot | None = None
+    creation_authorization: ModernMissionAuthorization | None = None
 
     def __post_init__(self):
         if self.lunar_evidence_snapshot is not None and (

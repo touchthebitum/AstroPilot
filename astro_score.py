@@ -730,7 +730,7 @@ def build_mission_input(evaluation, *, profile=None, for_intent_selection=False)
             selected_filter=selected_filter,
         )
 
-    return MissionInput(
+    mission_input = MissionInput(
         window_start=window_start,
         window_end=window_end,
         astronomical_hours=astronomical_hours,
@@ -745,6 +745,10 @@ def build_mission_input(evaluation, *, profile=None, for_intent_selection=False)
         acquisition_capacity=capacity,
         evidence_only=bool(targets and for_intent_selection),
     )
+    from decision.mission.modern_mission_authorization import _issue_from_project
+    return replace(mission_input, creation_authorization=_issue_from_project(
+        mission_input, profile=profile, catalog_key=catalog_key,
+    ))
 
 
 def strategy_weights(mode="balanced"):

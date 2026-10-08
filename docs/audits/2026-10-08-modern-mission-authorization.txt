@@ -1,0 +1,102 @@
+P1 MISSIONASSEMBLER — CONTRAT DE CREATION MODERNE — 8 octobre 2026
+
+Cause racine
+MissionInput conserve des champs optionnels nécessaires à l'histoire et aux
+évaluations physiques. MissionAssembler vérifiait seulement les liens présents,
+sans exiger identité moderne, capacité intent et provenance autorisée.
+Deux tests normaux équivalents aux strict xfail de #329 ont échoué sur la baseline
+au dernier assert mission is None : une vraie NightMission était renvoyée, avec
+météo et productivité réelles, sans identité ou sans capacité.
+
+Baseline et isolation
+main après #328 : 54cdc8c42967b2055c8ef0a9f9ed927d4efe86f2.
+main == origin/main vérifié avant travail dans la copie d'audit et dans la copie P1.
+Copie isolée : Documents/Codex/2026-10-08/
+referenced-chatgpt-conversation-this-is-an-2/work/AstroPilot.
+Branche : fix/modern-mission-authorization.
+#329 reste OPEN/DRAFT au head 6ba955fcb4b8be30862ea699d2109965ad12ce03.
+Aucun merge de #329. Dépendance P2 nécessaire à la matrice duration réelle :
+commit cf43788, uniquement les trois lignes extrayant NightTimeline.slices.
+Le diff P2 est identique à #329. Aucun autre code de #329 intégré ; ses tests
+transversaux sont repris comme tests normaux de cette correction P1.
+Après merge de cette PR, #329 devra être réévaluée/rebasée : P2 déjà intégré,
+et ses deux strict xfail deviendraient XPASS. Aucun changement de #329 effectué.
+
+Architecture et cartographie
+- MissionInput : données historiques/physiques lisibles, plus autorisation typée
+  optionnelle. L'absence d'autorisation ne donne aucun droit de création.
+- ModernMissionAuthorization : capacité interne immutable à constructeur fermé,
+  émise uniquement par la factory moderne à partir de preuves de projet.
+- astro_score.build_mission_input : résout provenance moderne, field, targets,
+  progression et crédits ; la factory d'autorisation redérive indépendamment la
+  capacité et exige un profil optique exact et unique pour l'intent/setup actif.
+- MissionAssembler.build : revalide à chaque nouvelle création l'autorisation,
+  l'identité et la capacité liées, le seuil >=60 min et la disponibilité typée.
+  Input brut même complet, booléen, autorisation réutilisée après suppression/
+  changement de preuve : aucune mission. evidence_only et filtres legacy gardent
+  leurs rejets explicites existants. Diagnostics de création séparés des refus
+  de productivité via MissionAssemblyResult.creation_refusal.
+- MissionAssembler.preview : retourne ProductiveWindowAssessment uniquement.
+  Aucun NightMission engageant. ProductiveWindowAssessment.build reste compatible
+  avec les évaluations préselection/discovery existantes.
+- NightMissionBuilder : délègue au même assembler ; aucune voie alternative.
+- TonightMissionService : transporte l'input fourni par la factory ; ne peut
+  fabriquer l'autorisation manquante. Discovery sans projet donne no_mission.
+- TonightApplicationService : ajoute disponibilité et choix moderne à l'input ;
+  l'autorisation correspondante traverse ce chemin normal sans nouveau bypass.
+- UserSelectionMissionService : valide sélection et disponibilité, puis remplace
+  identité, snapshot lunaire et lineage sur l'input moderne. Le lien d'autorisation
+  est revérifié par l'assembler après ces remplacements.
+- DecisionAcceptanceApplicationService : conserve ses gardes projet/targets/
+  capacité et son chemin de replay canonique antérieur à la nouvelle création.
+- NightMission et codecs/stores historiques : aucun changement, aucun guard dans
+  le constructeur. Les lecteurs/replays v1-v10 restent fidèles. L'autorisation
+  est un droit de création interne, pas une donnée persistée ni une migration.
+- API et CLI : utilisent le builder/service/assembler commun ; tests existants
+  exécutés avec les régressions nouvelles à la frontière réelle.
+
+Contrat
+Field connu, intent connu et appartenant au field ; capacité typée pour cet
+intent égale à la dérivation du projet moderne (targets/progress/crédits),
+remaining_hours fini >=1h et non completed ; profil optique exact résolu pour
+le setup actif ; provenance moderne autorisée ; disponibilité utilisateur
+explicite ; evidence_only interdit ; SelectedFilter legacy interdit.
+L'autorisation lie field, intent, capacité et profil. Le booléen evidence_only
+ne constitue jamais une autorisation. Les mécanismes existants météo critique,
+ProductiveWindow continu, disponibilité, plafond et gain intent restent actifs.
+Il s'agit d'un contrat d'API interne Python, pas d'une isolation contre du code
+hostile qui disposerait déjà de l'accès arbitraire aux objets/processus Python.
+
+Validation
+Reproduction baseline : 2 échecs sans xfail, au dernier assert d'invariant.
+Après correction : les deux cas PASS normaux, aucun xfail dans le nouveau fichier.
+Matrice : 1920 compositions +7 suppressions de provenance ranking, complétées par
+336 cas à l'assembler réel (2 intents x7 progrès x8 masques x3 setups), suppression
+ou incohérence des preuves, capacité mismatch, constructeur fermé, aperçu physique,
+service/builder normal, input brut complet et capacité falsifiée à la factory.
+Tests antérieurs migrés vers une factory moderne réelle pour conserver lune,
+AQI, météo, durée/gain et composition filtre ; aucun mock du nouveau guard.
+Les assertions de gain nouveau utilisent la cible intent au lieu d'un gain brut.
+Suite complète pertinente avec Python 3.13.5, dépendances uv.lock et Node :
+8567 passed, 44 warnings Astropy, 68.06s ; hors tests/field_lab.
+Deux tests supplémentaires de robustesse ajoutés ensuite, exécutés avec la matrice,
+les tests persistence v1-v10, acceptance et sélection : 2508 passed.
+Première suite avant migration discovery : 8566 passed et 1 échec attendu du vieux
+contrat discovery. Corrigé en no_mission, suite complète verte ensuite.
+Premiers essais en sandbox limitée : tests socket indisponibles ; validation finale
+avec sockets locales autorisées. Aucun échec de harness dans les résultats finaux.
+git diff --check : OK. Aucun changement Field Lab, stations, codecs ou readers.
+Stash critique refs/stash == 223ec1f5904131d726b694655f137670c0ddeb0b,
+type commit, vérifié avant/après ; aucun pop/apply/drop, dépôt stash non modifié.
+
+Fichiers
+Production : astro_score.py ; decision/mission/mission_input.py ;
+mission_assembler.py ; modern_mission_authorization.py ;
+decision/services/session_availability_windowing.py (dépendance P2 isolée).
+Tests : modern_mission_helpers.py ; architecture/test_modern_mission_authorization.py ;
+test_mission_assembler_invariants.py ; test_mission_input_integrity.py ;
+test_typed_mission_input.py ; test_weather_productivity_mission_integration.py ;
+api/test_clean_machine_all_night_regression.py. Ce rapport.
+
+Verdict local : READY TO MERGE après revue ; PR en brouillon, aucun merge automatique.
+Le statut CI distant est rapporté séparément à la livraison.
