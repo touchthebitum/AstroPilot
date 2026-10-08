@@ -25,6 +25,7 @@ def deployment(tmp_path):
 
 def test_definition(deployment):
     xml = build_task(**deployment)
+    assert not xml.startswith('<?xml')  # COM BSTR must not claim UTF-8 bytes.
     root = ET.fromstring(xml)
     def value(path):
         return root.find(path, NS).text
@@ -98,7 +99,7 @@ def test_native_xml_validation_only(deployment):
     if os.name != 'nt':
         pytest.skip('Native Task Scheduler validation requires Windows')
     # TASK_VALIDATE_ONLY=1: validate definition without registration or execution.
-    script = "$ErrorActionPreference='Stop'; $doc=[xml][Console]::In.ReadToEnd(); $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $doc.SelectNodes('//*[local-name()=\"UserId\"]') | ForEach-Object { $_.InnerText=$sid }; $xml=$doc.OuterXml; $s=New-Object -ComObject Schedule.Service; $s.Connect(); $null=$s.GetFolder('\\').RegisterTask('AstroPilot-validation-only', $xml, 1, $null, $null, 3, $null)"
+    script = "$ErrorActionPreference='Stop'; [Console]::InputEncoding=[System.Text.UTF8Encoding]::new($false); $doc=[xml][Console]::In.ReadToEnd(); $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $doc.SelectNodes('//*[local-name()=\"UserId\"]') | ForEach-Object { $_.InnerText=$sid }; $xml=$doc.OuterXml; $s=New-Object -ComObject Schedule.Service; $s.Connect(); $null=$s.GetFolder('\\').RegisterTask('AstroPilot-validation-only', $xml, 1, $null, $null, 3, $null)"
     powershell = os.path.join(os.environ['SystemRoot'], 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
     result = subprocess.run([powershell, '-NoProfile', '-NonInteractive', '-Command', script],
                             input=build_task(**deployment), text=True, encoding='utf-8',

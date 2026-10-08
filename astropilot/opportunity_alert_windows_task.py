@@ -65,7 +65,8 @@ def build_task(*, python, config, data_dir, log_dir, user_id, state_dir=None,
     add(action, 'Command', deployment['ProgramArguments'][0])
     add(action, 'Arguments', subprocess.list2cmdline(args))
     ET.indent(root)
-    return ET.tostring(root, encoding='utf-8', xml_declaration=True).decode('utf-8')
+    # No encoding declaration: UTF-8 files and COM UTF-16 BSTR both accept it.
+    return ET.tostring(root, encoding='unicode', xml_declaration=False)
 
 
 def main(argv=None):
