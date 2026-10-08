@@ -14,8 +14,8 @@ ExecutionTimeLimit PT0S removes the native 72-hour default. No battery/idle/netw
 restriction; no wake or missed-slot replay. Task Scheduler provides logon
 autostart only. RestartOnFailure is removed: native trials on 2026-10-08 did not
 restart the failed host. An application supervisor owns the restart budget:
-one initial child launch plus at most 3 relaunches, 60 seconds apart by default
-(--restart-count 1..10; --restart-seconds 60..3600). Thus four consecutive
+at most 3 child launches in total, 60 seconds apart by default
+(--restart-count 1..10; --restart-seconds 60..3600). Thus three consecutive
 failures exhaust the default budget. Exit 0 stops supervision immediately;
 nonzero exit, Windows crash status or spawn failure consumes the budget.
 This does not retry alert delivery or business errors reported in cycles.
@@ -112,7 +112,7 @@ arguments and no RestartOnFailure. Preserve config backup, rename config.json,
 start through logon, observe child exit 2 while supervisor stays Running.
 Restore config before 60 seconds: a new child starts successfully without a new
 task invocation; LastRunTime remains the supervisor's original launch time.
-Repeat with Start-ScheduledTask. Leave config missing: initial plus three retries
+Repeat with Start-ScheduledTask. Leave config missing: initial plus two retries
 then supervisor nonzero/Ready. Kill only the host: observe delayed replacement.
 Clean child exit 0 does not restart. During Running and retry delay, duplicate
 supervisor must exit without another host; direct duplicate host remains blocked.

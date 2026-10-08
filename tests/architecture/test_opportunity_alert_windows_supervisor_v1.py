@@ -11,7 +11,7 @@ from astropilot import opportunity_alert_windows_supervisor as supervisor
 
 @pytest.mark.parametrize('codes,expected,launches,delays', [
     ([0], 0, 1, 0), ([2, 0], 0, 2, 1),
-    ([2, 2, 2, 2], 2, 4, 3), ([-9, 0], 0, 2, 1),
+    ([2, 2, 2], 2, 3, 2), ([-9, 0], 0, 2, 1),
     ([2, 0, 2], 0, 2, 1),
 ])
 def test_bounded_restarts(codes, expected, launches, delays):
@@ -62,7 +62,7 @@ def test_spawn_failure_is_bounded():
         launches.append(True)
         raise OSError('interpreter unavailable')
     assert supervisor.supervise(launch, Event(), wait=lambda _: False) == 2
-    assert len(launches) == 4
+    assert len(launches) == 3
 
 
 def test_unexpected_parent_exception_cleans_child(monkeypatch):

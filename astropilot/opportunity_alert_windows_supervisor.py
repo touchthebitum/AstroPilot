@@ -32,9 +32,9 @@ def stop_child(child):
 
 
 def supervise(launch, stop, *, restart_count=3, restart_seconds=60, wait=None):
-    """One initial launch plus at most restart_count delayed relaunches."""
+    """At most restart_count child launches, including the initial attempt."""
     wait = wait or stop.wait
-    for attempt in range(restart_count + 1):
+    for attempt in range(restart_count):
         if stop.is_set():
             return 0
         child = None
@@ -60,7 +60,7 @@ def supervise(launch, stop, *, restart_count=3, restart_seconds=60, wait=None):
         if code == 0 or stop.is_set():
             return 0
         print(f'opportunity_alert_supervisor_child_exit={code} attempt={attempt}', file=sys.stderr, flush=True)
-        if attempt == restart_count:
+        if attempt == restart_count - 1:
             print('opportunity_alert_supervisor_exhausted', file=sys.stderr, flush=True)
             # Windows crash statuses can exceed the signed exit-code range.
             return code if 1 <= code <= 255 else 1
