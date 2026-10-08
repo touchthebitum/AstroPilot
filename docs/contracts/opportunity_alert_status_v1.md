@@ -61,3 +61,31 @@ check accepted notification wording, force a notification failure in an isolated
 deployment, refresh, then cooperative stop and hard-stop stale behavior. Confirm
 no claim, delivery, configuration write or service start occurs on opening or
 refreshing. These are new status-view checks, not a repeat of #341 acceptance.
+
+## Post-merge host integration verification (#342)
+
+Main f2f2fbd3766e296eb2a509e89458be04b87faf26 already wires StatusObserver
+in the production host CLI. No additional decision or publication implementation
+is required. Tests in test_opportunity_alert_host_status_integration.py exercise
+that wiring through the real scheduler, runner and durable ledger, with external
+Tonight inputs and OS delivery substituted. They pass the host-produced snapshots
+through the read-only endpoint and execute the real presentation script.
+
+| Host boundary | Snapshot effect |
+| --- | --- |
+| Config loaded, host lock acquired, startup | enabled/channel/cadence; updated_at; stopped=false; retained success/delivery/error history |
+| COMPLETED + NO_ALERT or ALERT_EMITTED | last_success_at and updated_at; no invented notification |
+| Scheduler ERROR / cycle ERROR | scheduler_failed / cycle_failed; prior success retained |
+| Notification DELIVERED | notification acceptance by OS; no visibility guarantee |
+| Notification FAILED / SKIPPED | allowlisted delivery status/reason; delivery_failed only for FAILED |
+| Shutdown after once or cooperative stop | stopped=true; history retained |
+| Fatal error after observer creation | host_failed; existing exit behavior retained |
+| Snapshot write failure | fixed stderr diagnostic; cycle/claim/delivery/exit behavior retained |
+| Age exceeds max(120s, 2*cadence) | reader derives stale; host never writes a state field |
+
+The v1 format records the successful cycle timestamp, not an alert identifier
+or a claim payload. ALERT_EMITTED is verified against the existing host event
+and durable ledger; no private claim data is added to the status schema.
+Native deployment still requires upgrading both environments and choosing the
+same user data root. These integration tests neither install nor register an OS
+service. Windows CI is separate from Windows 11 GUI acceptance on Franck Testé.
