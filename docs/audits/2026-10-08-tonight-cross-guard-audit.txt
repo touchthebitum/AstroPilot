@@ -1,0 +1,143 @@
+AUDIT GLOBAL TONIGHT POST #328 — 8 octobre 2026
+Verdict : NEEDS FOLLOW-UP
+
+Baseline
+PR #328 MERGED le 7 octobre 2026 à 18:31:20 UTC (20:31:20 Zurich).
+Merge commit/main/origin/main : 54cdc8c42967b2055c8ef0a9f9ed927d4efe86f2.
+Head de la PR : ad73a3f9bc7f31d624da61bc885bdc71593acd32.
+Clone d'audit initialement propre, main == origin/main. Le checkout habituel
+astrophoto_app est ancien (71dace938379866e57eda809a7a71f757839ae82) et contient
+des modifications utilisateur ; il n'a pas été resynchronisé ni modifié.
+Stash critique 223ec1f5904131d726b694655f137670c0ddeb0b retrouvé dans le dépôt
+commun du worktree du 7 octobre /work/legacy-audit, stash@{0}, objet commit.
+Aucun pop/apply/drop, aucune écriture sur ce dépôt, aucun changement Field Lab.
+
+Méthode et limites
+Relecture des frontières profil/ranking, input, ProductiveWindow, fenêtre
+autorisée, assembler, service Tonight, CLI, API et acceptation persistée.
+Les tests HTTP/service/CLI existants sont réexécutés, pas seulement relus.
+Nouvelle matrice : 2 intents x 5 progrès x 4 disponibilités x 8 sous-ensembles
+de provenance x 6 états météo = 1920 cas du projet au timing final.
+Ha/OIII ; acquis 0/1.5/2.5/3/unknown sur cible 3h ; all_night/until/duration/
+None ; suppression de field/targets/progress, isolée et combinée ; suppression
+de chacun des cinq tableaux critiques. Durée physique 4h ; borne utilisateur
+restreinte 1.25h. Seule l'astrométrie est fixée ; validation météo, capacité,
+productivité, sélection de fenêtre et calcul du gain restent réels.
+Les contrôles positifs exigent une fenêtre lorsque les preuves sont complètes,
+et évitent une matrice faussement verte parce que tous les cas seraient rejetés.
+Sept cas supplémentaires suppriment tous les sous-ensembles non vides de
+provenance du winner : rejet M31, M42 identique au candidat initial. La sélection
+d'intent est fixée dans ces sept cas pour isoler le ranking ; les tests de
+composition de sélection réels sont exécutés séparément.
+Les axes filtre/lune/AQI/risque/capacité historique sont couverts par les tests
+existants de composition et transport. Aucun produit cartésien exhaustif de
+tous ces axes n'est revendiqué. Ce travail ne constitue pas une preuve formelle.
+
+Matrice des invariants demandés
+1. Suppression de preuve : OK sur les chemins profil -> timing/ranking testés.
+   Limite P1 sur l'assembler direct ; pas de certification globale.
+2. Unknown numérique : OK risk/future/roadmap et règles techniques conservatrices.
+   Les zéros de décision sont des bornes/sentinelles, pas des mesures observées.
+3. Disponibilité explicite : OK autorisation/timing, alternatives et API/CLI.
+4. Provenance moderne : OK projets/ranking/acceptation ; ECHEC accès assembler
+   direct, qui peut produire une mission sans identité ou sans capacité.
+5. Mission <= min(continu, disponibilité, reste intent) : OK matrice moderne.
+   Sans capacité à la frontière directe, le plafond intent n'est pas garanti.
+6. Gain/durée/plafond : OK matrice ; gain final = durée finale / cible intent,
+   borné par le reste. Un input direct non prouvé peut déclarer son propre gain.
+7. Filtre compatible : OK réconciliation Ha/OIII et rejet d'incompatibilité.
+   Aucun SelectedFilter legacy ne peut autoriser une mission moderne identifiée.
+   La résolution optique exacte est amont ; P1 pour les appels directs sans elle.
+8. Profil optique absent/ambigu : OK sélection réelle fail-closed ; aucune
+   promotion via available_filter_types. Frontière directe non autosuffisante.
+9. Lune historique : OK lecteurs v1-v10/replay/snapshot exact, legacy absent
+   explicite. Aucune modification des lecteurs/persistance historique.
+10. AQI partiel : decision_score None, decision_eligible False ; score diagnostic
+    normalisé peut augmenter, sans promotion décisionnelle. AQI post-sélection
+    non utilisé pour le ranking ; mission possible si seul un diagnostic AQI
+    est incomplet, mais météo critique incomplète ferme ProductiveWindow.
+    Seeing/Sampling/Resolution unknown restent pénalisés et marqués unknown.
+11. Legacy : lectures fidèles et replay canonique OK ; nouveau projet legacy
+    rejeté avant ranking/gain/acceptation. Limite générale assembler direct P1.
+12. Provenance partielle/totale : OK huit masques, ranking + durée/gain bornés.
+13. Disponibilité restrictive : OK until/duration/None ; tests existants couvrent
+    aussi 0/30/59/60/90/120/180/240 min. Missing ne devient pas all_night.
+14. Capacity history/profile/scenario/unknown : OK transport typé, historique
+    absent distinct de vide ; scénario/profil non observés sans éligibilité empirique.
+15. Frontières : gardes projets API/acceptation/CLI testés OK ; ECHEC assembler
+    direct (NightMissionBuilder délègue au même assembler sans garde additionnel).
+
+Findings confirmés
+P1 — Autorisation moderne non autosuffisante à l'assembler direct.
+MissionInput autorise identité/capacité absentes pour compatibilité historique.
+MissionAssembler.build valide certains liens si présents, mais n'exige pas
+field + intent + acquisition_capacity ni une preuve de résolution optique.
+Un input avec disponibilité explicite et météo complète crée réellement une
+NightMission positive : (a) identité totalement absente ; (b) field/intent connus
+mais capacité absente. Productivité et timing sont réels ; seuls les rapports
+annexes risque/saison sont neutralisés. Les deux reproductions échouent sur
+assert mission is None, et non sur une exception de fixture. Strict xfail avec
+raises=AssertionError ; --runxfail reproduit deux échecs d'invariant.
+Le chemin d'acceptation moderne des projets conserve ses gardes amont ; il
+n'est pas démontré qu'une requête HTTP utilisateur les contourne. Le finding
+porte sur la frontière interne demandée, pas sur une exploitation HTTP prouvée.
+Proposition PR architecturale séparée : distinguer données de replay, aperçu
+physique/discovery et input autorisé ; imposer à tout nouveau build une preuve
+typée field/intent/capacité/profil optique ; lecteurs historiques inchangés.
+Tests à fermer : assembler direct et NightMissionBuilder, suppression de chaque
+preuve d'autorisation, égalité du plafond/gain sur API/CLI/service.
+Ne pas simplement rendre les champs historiques obligatoires : cela casserait
+les lecteurs/replays et le contrat actuel des aperçus discovery.
+
+P2 — Mode duration incompatible avec le NightTimeline réel. CORRIGE LOCALEMENT.
+_validated_timeline itérait directement le conteneur NightTimeline, alors que
+les anciens tests lui donnaient une liste. TypeError : NightTimeline not iterable.
+Correction : extraire .slices si présent puis appliquer exactement la même
+validation numérique/temporelle. Aucun défaut/mesure inventé ni relaxation.
+La matrice reproduit l'erreur avant correction et verrouille après correction
+la durée 1.25h et le gain pour Ha/OIII avec productivité issue du moteur réel.
+
+P0 : aucun confirmé. P3 : aucun défaut supplémentaire confirmé.
+Le refus ambiguous_best_duration_window est un contrat existant explicitement
+testé. La matrice utilise un optimum unique pour distinguer ce refus du TypeError.
+La gestion produit d'un optimum ex aequo mériterait une décision séparée ; elle
+n'est pas corrigée ici et n'est pas présentée comme une nouvelle régression.
+
+Contradictions examinées
+Aperçu physique viable + mission bloquée sans availability : distinction voulue.
+AQI diagnostic partiel + mission : possible sans consommation décisionnelle AQI.
+Legacy sans snapshot + replay : absence conservée, pas de reconstruction.
+Risk unknown : aucune opportunité/scarcity bonus inventée ; règles techniques
+indépendantes Seeing/Sampling/Resolution sans contribution ImageQuality doublonnée.
+Reste intent <60 min + grande disponibilité : absence de mission, pas d'extension.
+Discovery sans projet : aperçu avec gain portefeuille zéro ; acceptation exige
+field/intent/provenance moderne. La sémantique aperçu vs mission autorisée doit
+être rendue explicite dans la PR architecturale proposée.
+
+Périmètre livré
+Une correction de trois lignes dans session_availability_windowing.py.
+Un fichier de tests transversaux : 1927 cas verts + deux reproductions P1 xfail.
+Ce rapport. Aucun changement Field Lab/stations/lecteurs historiques.
+Pas de merge automatique. Le P1 reste ouvert : ne pas déclarer le moteur durci
+structurellement tant que cette frontière n'est pas fermée.
+Priorité suivante : fermer le P1 d'autorisation interne, puis reprendre Field Lab
+Analyzer v1. Guardian Mode et alertes dépendent d'un contrat d'autorisation clair.
+
+Validation finale Python 3.13.5, dépendances uv.lock
+- Baseline ciblée API/e2e/acceptation/provenance/availability/météo/AQI :
+  539 passed en 9.91s.
+- Matrice et contrats duration/session : 1963 passed, 2 xfailed en 1.92s.
+- Sélection transversale risque/technique/capacité/optique/replay/matrice :
+  2789 passed, 2 xfailed en 3.04s.
+- Suite complète pertinente avec Node et sockets locales, hors tests/field_lab :
+  8230 passed, 2 xfailed, 44 warnings Astropy en 67.30s ; zéro échec inattendu.
+- --runxfail sur les deux cas directs : deux échecs reproduits au dernier
+  assert mission is None ; vraie NightMission renvoyée dans les deux cas.
+- git diff --check et audit de périmètre exact trois fichiers : OK.
+- Stash critique : hash/liste/type commit identiques après validations.
+Les premiers essais sur des Python incomplets n'ont pas collecté les tests.
+L'environnement isolé verrouillé a résolu ce problème. Une suite sans Node
+a 1 échec de harness Node absent, 8374 passed et 36 skipped. Une suite avec
+Node incluant Field Lab a été interrompue pendant le test volumineux de stockage
+Field Lab ; elle n'est pas revendiquée complète. La suite pertinente finale
+ci-dessus est celle utilisée pour le verdict. Aucun code Field Lab modifié.
