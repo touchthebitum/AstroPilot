@@ -444,6 +444,9 @@ def _productivity_between(slices, start_hour: float, end_hour: float) -> float:
 
 def _validated_timeline(assessment, total_hours: float):
     timeline = getattr(assessment.productivity, "timeline", None)
+    # Production productivity carries NightTimeline; historical/test projections
+    # may carry its slice sequence directly. Validate the same evidence in both.
+    timeline = getattr(timeline, "slices", timeline)
     if not timeline:
         raise ValueError("duration_window_temporal_evidence_required")
 
