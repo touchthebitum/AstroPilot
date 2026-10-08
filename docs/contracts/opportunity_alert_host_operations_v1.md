@@ -114,3 +114,8 @@ cycle. A killed process can lose its reserved cycle; the next slot is eligible.
 No service is installed or started automatically by this PR. Supervisor/OS
 auto-start deployment remains an operator action. No push, email, webhook or
 other notification channel is provided.
+
+For the opt-in macOS user-login integration, see
+[LaunchAgent operations](opportunity_alert_launchd_operations_v1.md) and the
+[supervision contract](opportunity_alert_supervision_v1.md). Generation performs
+no installation; Windows autostart remains a separate deployment change.
