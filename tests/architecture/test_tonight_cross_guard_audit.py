@@ -1,7 +1,7 @@
 """Cross-guard audit: project -> MissionInput -> productivity -> authorization.
 
 Only target astrometry is fixed; capacity, weather validation and windowing
-are production code. Direct assembly gaps are explicit strict xfails.
+are production code. Direct assembly guards are normal PASS regressions.
 """
 from copy import deepcopy
 from dataclasses import replace
@@ -113,7 +113,6 @@ def test_all_provenance_subsets_preserve_winner(monkeypatch, selected_modern_ran
     assert after.rejections[0].basis.value == "modern_provenance_missing"
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="P1: direct assembler lacks mandatory modern provenance/capacity guard")
 @pytest.mark.parametrize("identity", ["none", "field_intent_without_capacity"])
 def test_direct_assembler_cannot_authorize_unproven_modern_input(monkeypatch, identity, frozen_equipment):
     # Keep productivity/windowing real. Ancillary reports cannot supply authorization.

@@ -8,19 +8,16 @@ Deux tests normaux équivalents aux strict xfail de #329 ont échoué sur la bas
 au dernier assert mission is None : une vraie NightMission était renvoyée, avec
 météo et productivité réelles, sans identité ou sans capacité.
 
-Baseline et isolation
-main après #328 : 54cdc8c42967b2055c8ef0a9f9ed927d4efe86f2.
-main == origin/main vérifié avant travail dans la copie d'audit et dans la copie P1.
-Copie isolée : Documents/Codex/2026-10-08/
-referenced-chatgpt-conversation-this-is-an-2/work/AstroPilot.
-Branche : fix/modern-mission-authorization.
-#329 reste OPEN/DRAFT au head 6ba955fcb4b8be30862ea699d2109965ad12ce03.
-Aucun merge de #329. Dépendance P2 nécessaire à la matrice duration réelle :
-commit cf43788, uniquement les trois lignes extrayant NightTimeline.slices.
-Le diff P2 est identique à #329. Aucun autre code de #329 intégré ; ses tests
-transversaux sont repris comme tests normaux de cette correction P1.
-Après merge de cette PR, #329 devra être réévaluée/rebasée : P2 déjà intégré,
-et ses deux strict xfail deviendraient XPASS. Aucun changement de #329 effectué.
+Baseline et isolation — mise à jour après merge de #329
+main == origin/main : 098531d55c5bb176ecc3d5477b6669a717b3cc36.
+#329 MERGED à ce SHA ; ses trois lignes P2 NightTimeline.slices sont dans main.
+Rebase explicite --onto origin/main cf43788 : seul le commit architectural P1
+6af900f est repris ; cf43788 est exclu, sans duplication de P2.
+La matrice originale test_tonight_cross_guard_audit.py est conservée et ses
+2 cas P1 paramétrés deviennent PASS normaux par suppression du strict xfail.
+La matrice P1 renforcée reste dans test_modern_mission_authorization.py.
+Stash critique du dépôt principal vérifié : refs/stash =
+223ec1f5904131d726b694655f137670c0ddeb0b, objet commit ; aucune mutation.
 
 Architecture et cartographie
 - MissionInput : données historiques/physiques lisibles, plus autorisation typée
@@ -92,7 +89,7 @@ type commit, vérifié avant/après ; aucun pop/apply/drop, dépôt stash non mo
 Fichiers
 Production : astro_score.py ; decision/mission/mission_input.py ;
 mission_assembler.py ; modern_mission_authorization.py ;
-decision/services/session_availability_windowing.py (dépendance P2 isolée).
+P2 duration/NightTimeline déjà présent dans main, aucun diff de ce service.
 Tests : modern_mission_helpers.py ; architecture/test_modern_mission_authorization.py ;
 test_mission_assembler_invariants.py ; test_mission_input_integrity.py ;
 test_typed_mission_input.py ; test_weather_productivity_mission_integration.py ;
@@ -100,3 +97,16 @@ api/test_clean_machine_all_night_regression.py. Ce rapport.
 
 Verdict local : READY TO MERGE après revue ; PR en brouillon, aucun merge automatique.
 Le statut CI distant est rapporté séparément à la livraison.
+
+Validation après rebase sur #329
+Matrices audit original et autorisation renforcée : 4206 passed en 4.97s,
+zéro xfail/XPASS ; les quatre exécutions des deux reproductions P1 passent.
+Le rapport de validation initial ci-dessus décrit le précédent SHA ; les
+résultats de la nouvelle suite et la CI du nouveau head sont livrés séparément.
+Suite complète pertinente après rebase : 10509 passed, 44 warnings Astropy,
+74.44s, zéro xfail/XPASS et zéro skip ; hors tests/field_lab, avec Node.
+Premier lancement interrompu après constat de Node absent ; l'échec du
+harness d'aide a disparu lors du lancement complet avec Node disponible.
+git diff --check et audit de périmètre propres. Aucun diff P2, Field Lab,
+NightMission, codecs ou lecteurs historiques. Contrat P1 inchangé :
+range-diff confirme le patch architectural identique après rebase.
