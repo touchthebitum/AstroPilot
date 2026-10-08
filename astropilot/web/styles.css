@@ -639,3 +639,11 @@ html[data-ui-mode="simple"] .help-navigation [data-help-guide="complete"] { font
   .shell:has(#decision:not([hidden])) .intro { padding-top: 12px; }
   .shell:has(#decision:not([hidden])) .intro > p:last-child { font-size: 14px; }
 }
+
+#alerts-status-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; padding: 20px; color: var(--ink); background: var(--night-soft); border: 1px solid var(--line-bright); border-radius: var(--radius); overflow: auto; }
+#alerts-status-dialog::backdrop { background: rgba(1, 6, 12, .82); }
+#alerts-status-dialog :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+#alerts-status-dialog > *, #alerts-status-details dd { min-width: 0; overflow-wrap: anywhere; }
+#alerts-status-details { margin: 20px 0; }
+#alerts-status-details dt { color: var(--muted); margin-top: 12px; font-size: 13px; }
+#alerts-status-details dd { margin: 4px 0 0; }

@@ -30,6 +30,7 @@ from pydantic import (
 
 from astropilot.opportunity_alert_api import OpportunityAlertResponse, claim_opportunity_alert
 from astropilot.opportunity_alert_ledger import FileOpportunityAlertLedger
+from astropilot.opportunity_alert_status import read_status
 from decision.models.opportunity_alert import OpportunityAlertPolicy
 
 from decision.models.lunar_evidence_snapshot import LunarEvidenceSnapshot
@@ -2028,7 +2029,7 @@ def create_app(
         response = await call_next(request)
         if request.url.path == "/":
             response.headers["Cache-Control"] = "no-store"
-        elif request.url.path in {"/ui/app.js", "/ui/styles.css"}:
+        elif request.url.path in {"/ui/app.js", "/ui/alert-status.js", "/ui/styles.css"}:
             response.headers["Cache-Control"] = "no-cache"
         return response
 
@@ -2041,6 +2042,10 @@ def create_app(
     @application.get("/", include_in_schema=False)
     def tonight_ui():
         return HTMLResponse(ui_document)
+
+    @application.get("/v1/opportunity-alerts/status")
+    def opportunity_alert_status():
+        return JSONResponse(read_status(get_user_data_dir()), headers={"Cache-Control": "no-store"})
 
     @application.get("/v1/runtime-identity", include_in_schema=False)
     def runtime_identity():

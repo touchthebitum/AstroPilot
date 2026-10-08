@@ -16,6 +16,7 @@ from threading import Event
 from astropilot.opportunity_alert_notification import DisabledNotifier, MacOSNotifier, deliver_cycle
 from astropilot.opportunity_alert_windows_notification import WindowsNotifier
 from astropilot.opportunity_alert_ledger import FileOpportunityAlertLedger
+from astropilot.opportunity_alert_status import StatusObserver
 from astropilot.opportunity_alert_scheduler import (
     OpportunityAlertScheduler, SchedulerCadence, SchedulerStatus, utc,
 )
@@ -245,6 +246,11 @@ def main(argv=None):
     parser.add_argument('--once', action='store_true', help='Poll one current slot and exit')
     args = parser.parse_args(argv)
     previous_data_dir = os.environ.get('ASTROPILOT_DATA_DIR')
+    observer = None
+    def report(event):
+        _emit(event)
+        if observer is not None:
+            observer.record(event)
     try:
         config = load_config(args.config)
         data_dir = args.data_dir.expanduser().resolve()
@@ -259,13 +265,16 @@ def main(argv=None):
                     availability=config.availability), ledger=FileOpportunityAlertLedger(data_dir))
                 scheduler = OpportunityAlertScheduler(runner=runner, directory=state_dir,
                     clock=clock, cadence=config.cadence)
+                observer = StatusObserver(data_dir, clock=clock)
+                observer.start(enabled=config.policy.enabled, channel=config.notification_channel,
+                    interval_seconds=config.cadence.interval // timedelta(seconds=1))
                 _emit({'event': 'startup', 'interval_seconds': config.cadence.interval // timedelta(seconds=1),
                     'enabled': config.policy.enabled})
                 result = OpportunityAlertHost(scheduler=scheduler, policy=config.policy,
-                    clock=clock, stop_event=stop, report=_emit,
+                    clock=clock, stop_event=stop, report=report,
                     notifier={'disabled': DisabledNotifier, 'macos': MacOSNotifier,
                         'windows': WindowsNotifier}[config.notification_channel]()).run(once=args.once)
-                _emit({'event': 'shutdown'})
+                report({'event': 'shutdown'})
                 if args.once and result is not None and (result.status is SchedulerStatus.ERROR
                         or (result.cycle is not None and result.cycle.status is OpportunityAlertCycleStatus.ERROR)):
                     return 1
@@ -274,7 +283,7 @@ def main(argv=None):
         _emit({'event': 'error', 'reason': 'opportunity_alert_host_already_running'})
         return 1
     except Exception:
-        _emit({'event': 'error', 'reason': 'opportunity_alert_host_failed'})
+        report({'event': 'error', 'reason': 'opportunity_alert_host_failed'})
         return 1
     finally:
         if previous_data_dir is None:
