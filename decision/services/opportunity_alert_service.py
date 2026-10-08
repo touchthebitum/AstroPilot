@@ -23,7 +23,7 @@ from decision.weather.provider_reliability import VALUE_RANGES, WeatherVariable
 
 class OpportunityAlertLedger(Protocol):
     """One user per ledger. Durable implementations must claim atomically."""
-    def claim(self, *, key, family, logical_time, cooldown_minutes) -> bool: ...
+    def claim(self, *, key, family, logical_time, cooldown_minutes, policy_version=1) -> bool: ...
 
 
 class InMemoryOpportunityAlertLedger:
@@ -33,7 +33,9 @@ class InMemoryOpportunityAlertLedger:
         self._families = {}
         self._latest_time = None
 
-    def claim(self, *, key, family, logical_time, cooldown_minutes):
+    def claim(self, *, key, family, logical_time, cooldown_minutes, policy_version=1):
+        if type(policy_version) is not int or policy_version != 1:
+            raise ValueError("unsupported_alert_ledger_policy")
         with self._lock:
             if self._latest_time is not None and logical_time < self._latest_time:
                 return False
@@ -174,7 +176,7 @@ class OpportunityAlertService:
             mission.acquisition_intent_id, mission.site_name, authority.filter_profile_id]
         key = _hash(family + [start.isoformat(), end.isoformat(), mission.decision_id, mission.selection_id])
         if not self.ledger.claim(key=key, family=_hash(family), logical_time=logical_time,
-                cooldown_minutes=policy.cooldown_minutes):
+                cooldown_minutes=policy.cooldown_minutes, policy_version=policy.schema_version):
             return _no("duplicate_or_cooldown")
         alert = OpportunityAlert(key, candidate.catalog_key, mission.imaging_field_id,
             mission.acquisition_intent_id, mission.site_name, authority.filter_profile_id,
