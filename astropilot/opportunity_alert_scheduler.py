@@ -133,10 +133,13 @@ class OpportunityAlertScheduler:
         self.store = SchedulerStateStore(directory, cadence)
         self._guard = Lock()
 
-    def poll(self, *, policy, now=None, **tonight_inputs):
+    def poll(self, *, policy, now=None, cycle_time=None, **tonight_inputs):
         slot = self.cadence.slot(self.clock() if now is None else now)
         if slot is None:
             return SchedulerResult(SchedulerStatus.SKIPPED, None, 'before_anchor')
+        at = slot if cycle_time is None else utc(cycle_time)
+        if self.cadence.slot(at) != slot:
+            raise ValueError('scheduler_cycle_time_outside_slot')
         if not self._guard.acquire(blocking=False):
             return SchedulerResult(SchedulerStatus.OVERLAP, slot, 'cycle_in_progress')
         cycle = None
@@ -149,12 +152,12 @@ class OpportunityAlertScheduler:
                 doc['last_started_slot'] = slot.isoformat()
                 self.store.write(doc)
                 try:
-                    cycle = self.runner.run_cycle(policy=policy, logical_time=slot, **tonight_inputs)
+                    cycle = self.runner.run_cycle(policy=policy, logical_time=at, **tonight_inputs)
                     if not isinstance(cycle, OpportunityAlertCycleResult):
                         raise TypeError('invalid_cycle_result')
                 except Exception:
                     cycle = OpportunityAlertCycleResult(OpportunityAlertCycleStatus.ERROR,
-                        False, slot, ('scheduler_runner_failed',))
+                        False, at, ('scheduler_runner_failed',))
                 doc['last_completed_slot'] = slot.isoformat()
                 doc['last_result'] = {'status': cycle.status.value, 'reason_codes': list(cycle.reason_codes)}
                 self.store.write(doc)

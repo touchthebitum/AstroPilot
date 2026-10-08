@@ -189,3 +189,16 @@ assert s.poll(policy=None).status.value in ('COMPLETED', 'SKIPPED')
                 p.kill()
                 p.wait()
     assert (tmp_path / 'calls').read_text() == 'called\n'
+
+
+def test_explicit_live_cycle_time_preserves_slot_identity(tmp_path):
+    s, r = setup(tmp_path)
+    live = START + timedelta(minutes=45)
+    result = s.poll(policy=None, now=live, cycle_time=live)
+    assert result.slot == START
+    assert r.run_cycle.call_args.kwargs['logical_time'] == live
+    assert s.poll(policy=None, now=live, cycle_time=live).status is SchedulerStatus.SKIPPED
+    for invalid in (START - timedelta(seconds=1), START + timedelta(hours=1), START.replace(tzinfo=None)):
+        with pytest.raises(ValueError):
+            s.poll(policy=None, now=live, cycle_time=invalid)
+    assert r.run_cycle.call_count == 1
