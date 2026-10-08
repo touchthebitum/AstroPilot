@@ -232,6 +232,7 @@ def test_dependency_boundary():
     assert imports <= {'__future__', 'contextlib', 'dataclasses', 'datetime', 'pathlib', 'threading',
         'astropilot.opportunity_alert_ledger', 'astropilot.opportunity_alert_scheduler',
         'astropilot.opportunity_alert_notification', 'astropilot.opportunity_alert_windows_notification',
+        'astropilot.opportunity_alert_status',
         'decision.models.opportunity_alert', 'decision.models.session_availability',
         'decision.runners.opportunity_alert_runner', 'decision.services.tonight_application_service',
         'astropilot.user_profile', 'astro_score'}

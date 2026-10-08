@@ -11,6 +11,7 @@
     <title>Ce soir — NightMerit</title>
     <link rel="stylesheet" href="/ui/styles.css?v=__ASTROPILOT_ASSET_TOKEN__">
     <script src="/ui/help.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
+    <script src="/ui/alert-status.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
     <script src="/ui/app.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
   </head>
   <body>
@@ -27,6 +28,7 @@
         <time id="night-date">—</time>
       </div>
       <div class="header-actions">
+        <button class="secondary-button" id="alerts-status-open" type="button" aria-haspopup="dialog">État des alertes</button>
         <button class="secondary-button" id="help-open" type="button" aria-haspopup="dialog">Aide</button>
         <label class="ui-mode-control" for="ui-mode">Présentation
           <select id="ui-mode" aria-label="Mode de présentation">
@@ -710,6 +712,23 @@
       <span aria-hidden="true">·</span>
       <a href="https://open-meteo.com/" rel="noreferrer">Données météo par Open-Meteo.com</a>
     </footer>
+    <dialog id="alerts-status-dialog" aria-labelledby="alerts-status-title">
+      <header class="help-heading">
+        <h2 id="alerts-status-title">État des alertes</h2>
+        <button class="secondary-button" id="alerts-status-close" type="button" autofocus>Fermer</button>
+      </header>
+      <p id="alerts-status-summary" role="status" aria-live="polite"></p>
+      <dl id="alerts-status-details" hidden>
+        <dt>Alertes</dt><dd id="alerts-status-enabled"></dd>
+        <dt>Canal de notification</dt><dd id="alerts-status-channel"></dd>
+        <dt>Dernier cycle réussi</dt><dd id="alerts-status-success"></dd>
+        <dt>Dernière notification</dt><dd id="alerts-status-notification"></dd>
+        <dt>État relevé le</dt><dd id="alerts-status-updated"></dd>
+      </dl>
+      <p id="alerts-status-action"></p>
+      <p id="alerts-status-note" class="field-note">La configuration affichée est celle du dernier démarrage. Un cycle réussi ne signifie pas qu’une alerte a été trouvée. Une notification acceptée par le système ne garantit pas son affichage. Cette vue ne confirme pas que le service tourne encore.</p>
+      <button class="secondary-button" id="alerts-status-refresh" type="button">Actualiser l’état</button>
+    </dialog>
     <dialog id="help-dialog" aria-labelledby="help-title">
       <header class="help-heading">
         <h2 id="help-title">Aide NightMerit</h2>
