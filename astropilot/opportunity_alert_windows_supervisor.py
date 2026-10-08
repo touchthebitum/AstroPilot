@@ -81,8 +81,10 @@ def launch_child(command, job):
         child.stdin.close()
         return child
     except BaseException:
-        child.stdin.close()
-        stop_child(child)
+        try:
+            child.stdin.close()
+        finally:
+            stop_child(child)
         raise
 
 

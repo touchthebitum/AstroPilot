@@ -121,6 +121,31 @@ def test_failed_containment_never_releases_host(monkeypatch):
     assert calls == ['close', 'stop']
 
 
+def test_gate_eof_exits_before_host_import():
+    result = subprocess.run([sys.executable, '-u', '-m', supervisor.__name__, '--child'],
+                            input=b'', capture_output=True, timeout=20)
+    assert result.returncode == 2
+    assert result.stdout == b''
+    assert result.stderr == b''
+
+
+def test_stop_child_escalates_and_reaps():
+    calls = []
+    class Child:
+        def poll(self):
+            return None
+        def send_signal(self, signum):
+            calls.append(('signal', signum))
+        def wait(self, timeout):
+            calls.append(('wait', timeout))
+            if len(calls) == 2:
+                raise subprocess.TimeoutExpired('child', timeout)
+        def kill(self):
+            calls.append('kill')
+    supervisor.stop_child(Child())
+    assert calls[1:] == [('wait', 10), 'kill', ('wait', 10)]
+
+
 @pytest.fixture
 def deployment(tmp_path):
     root = tmp_path / 'Franck Testé 空间'
