@@ -90,7 +90,7 @@ ledger still suppresses already-claimed alerts.
 JSON diagnostics go to stdout. A supervisor may capture/rotate them externally.
 Inspect `status`, `cycle_status`, `slot` and `logical_time`:
 
-- COMPLETED + ALERT_EMITTED: durable ledger claim, no notification sent.
+- COMPLETED + ALERT_EMITTED: durable ledger claim; delivery has a separate notification event.
 - COMPLETED + NO_ALERT: existing Tonight/policy guards declined or disabled.
 - COMPLETED + ERROR: runner/preparation failed; no immediate retry.
 - ERROR: scheduler state unavailable/corrupt; no runner attempt when reservation fails.
@@ -113,9 +113,15 @@ cycle. A killed process can lose its reserved cycle; the next slot is eligible.
 
 No service is installed or started automatically by this PR. Supervisor/OS
 auto-start deployment remains an operator action. No push, email, webhook or
-other notification channel is provided.
+other notification channel is provided by the host core; optional macOS delivery is described below.
 
 For the opt-in macOS user-login integration, see
 [LaunchAgent operations](opportunity_alert_launchd_operations_v1.md) and the
 [supervision contract](opportunity_alert_supervision_v1.md). Generation performs
 no installation; Windows autostart remains a separate deployment change.
+
+## Optional notification channel
+
+See [notification v1](opportunity_alert_notification_v1.md) for the opt-in
+`notification_channel` config key, separate delivery results and macOS limitations.
+The default remains disabled.

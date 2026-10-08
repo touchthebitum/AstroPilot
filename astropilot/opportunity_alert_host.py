@@ -1,4 +1,4 @@
-"""Explicit foreground process host for Opportunity Alerts; no delivery channel."""
+"""Explicit foreground process host for Opportunity Alerts and optional delivery."""
 from __future__ import annotations
 
 import argparse
@@ -13,6 +13,7 @@ import signal
 import sys
 from threading import Event
 
+from astropilot.opportunity_alert_notification import DisabledNotifier, MacOSNotifier, deliver_cycle
 from astropilot.opportunity_alert_ledger import FileOpportunityAlertLedger
 from astropilot.opportunity_alert_scheduler import (
     OpportunityAlertScheduler, SchedulerCadence, SchedulerStatus, utc,
@@ -28,6 +29,7 @@ class HostConfig:
     cadence: SchedulerCadence
     policy: OpportunityAlertPolicy
     availability: SessionAvailability | None
+    notification_channel: str = 'disabled'
 
 
 def _unique(pairs):
@@ -53,8 +55,9 @@ def load_config(path) -> HostConfig:
     try:
         doc = json.loads(Path(path).read_text(encoding='utf-8'),
             object_pairs_hook=_unique, parse_constant=_reject_constant)
-        if (not isinstance(doc, dict) or set(doc) != {'schema_version', 'interval_seconds',
-                'policy', 'availability'} or type(doc['schema_version']) is not int
+        if (not isinstance(doc, dict) or not {'schema_version', 'interval_seconds', 'policy', 'availability'} <= set(doc)
+                or not set(doc) <= {'schema_version', 'interval_seconds', 'policy', 'availability',
+                    'notification_channel'} or type(doc['schema_version']) is not int
                 or doc['schema_version'] != 1 or type(doc['interval_seconds']) is not int
                 or doc['interval_seconds'] <= 0):
             raise ValueError('invalid_host_config')
@@ -91,7 +94,10 @@ def load_config(path) -> HostConfig:
             availability = SessionAvailability(**values)
         if policy.enabled and availability is None:
             raise ValueError('enabled_host_requires_explicit_availability')
-        return HostConfig(cadence, policy, availability)
+        channel = doc.get('notification_channel', 'disabled')
+        if not isinstance(channel, str) or channel not in ('disabled', 'macos'):
+            raise ValueError('invalid_notification_channel')
+        return HostConfig(cadence, policy, availability, channel)
     except (TypeError, ValueError, OverflowError) as error:
         raise ValueError('invalid_opportunity_alert_host_config') from error
 
@@ -179,7 +185,8 @@ def cycle_diagnostic(result):
 
 
 class OpportunityAlertHost:
-    def __init__(self, *, scheduler, policy, clock, stop_event, report, wait=None):
+    def __init__(self, *, scheduler, policy, clock, stop_event, report, wait=None, notifier=None):
+        self.notifier = DisabledNotifier() if notifier is None else notifier
         self.scheduler = scheduler
         self.policy = policy
         self.clock = clock
@@ -196,6 +203,10 @@ class OpportunityAlertHost:
             if last_slot is None or (slot is not None and slot > last_slot):
                 result = self.scheduler.poll(policy=self.policy, now=now, cycle_time=now)
                 self.report(cycle_diagnostic(result))
+                delivery = deliver_cycle(result.cycle, self.notifier)
+                if delivery is not None:
+                    self.report({'event': 'notification', 'status': delivery.status.value,
+                        'reason': delivery.reason})
                 if once:
                     return result
                 last_slot = slot if slot is not None else self.scheduler.cadence.anchor - self.scheduler.cadence.interval
@@ -226,7 +237,7 @@ def _emit(value):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='Host Opportunity Alerts cycles without notification delivery.')
+    parser = argparse.ArgumentParser(description='Host Opportunity Alerts cycles with optional notification delivery.')
     parser.add_argument('--config', type=Path, required=True, help='Explicit versioned JSON configuration')
     parser.add_argument('--data-dir', type=Path, required=True, help='Existing user profile and alert ledger directory')
     parser.add_argument('--state-dir', type=Path, help='Dedicated scheduler watermark directory')
@@ -250,7 +261,8 @@ def main(argv=None):
                 _emit({'event': 'startup', 'interval_seconds': config.cadence.interval // timedelta(seconds=1),
                     'enabled': config.policy.enabled})
                 result = OpportunityAlertHost(scheduler=scheduler, policy=config.policy,
-                    clock=clock, stop_event=stop, report=_emit).run(once=args.once)
+                    clock=clock, stop_event=stop, report=_emit,
+                    notifier=MacOSNotifier() if config.notification_channel == 'macos' else DisabledNotifier()).run(once=args.once)
                 _emit({'event': 'shutdown'})
                 if args.once and result is not None and (result.status is SchedulerStatus.ERROR
                         or (result.cycle is not None and result.cycle.status is OpportunityAlertCycleStatus.ERROR)):
