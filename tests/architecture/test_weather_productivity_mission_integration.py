@@ -1,3 +1,4 @@
+from tests.modern_mission_helpers import authorized_input
 from decision.models.session_availability import SessionAvailability, SessionAvailabilityMode
 from dataclasses import replace
 from datetime import timedelta
@@ -85,6 +86,7 @@ def _build_mission(rows, frozen_time, buttes_site):
         recommended_hours=1.0,
         expected_gain=2.0,
     )
+    mission_input = authorized_input(mission_input)
     context = SimpleNamespace(
         site=buttes_site,
         session=SimpleNamespace(

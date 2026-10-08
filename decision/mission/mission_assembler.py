@@ -268,6 +268,7 @@ class ProductiveWindowAssessment:
 class MissionAssemblyResult:
     mission: NightMission | None
     actionability_refusal: ActionabilityRefusal | None = None
+    creation_refusal: str | None = None
 
 
 def _mission_timing_for_availability(
@@ -330,6 +331,14 @@ def _mission_timing_assessment(
 class MissionAssembler:
 
     @staticmethod
+    def preview(*, target, context, weather=None, mission_input=None):
+        """Physical evaluation only: never constructs a NightMission."""
+        return ProductiveWindowAssessment.build(
+            target=target, context=context, weather=weather,
+            mission_input=mission_input,
+        )
+
+    @staticmethod
     def build(
         target,
         summary,
@@ -356,6 +365,23 @@ class MissionAssembler:
             if (mission_input.acquisition_intent_id is not None
                     and mission_input.selected_filter is not None):
                 raise ValueError("legacy_filter_cannot_authorize_modern_mission")
+
+        from decision.mission.modern_mission_authorization import authorization_refusal
+        refusal = authorization_refusal(mission_input)
+        if refusal is not None:
+            if _include_actionability_diagnostic:
+                if refusal != "user_availability_required":
+                    return MissionAssemblyResult(None, creation_refusal=refusal)
+                from decision.services.session_availability_windowing import (
+                    ActionabilityRefusal, ActionabilityRefusalConclusion,
+                    ActionabilityRefusalStatus,
+                )
+                return MissionAssemblyResult(None, ActionabilityRefusal(
+                    ActionabilityRefusalConclusion.USER_AVAILABILITY_REQUIRED,
+                    ActionabilityRefusalStatus.INSUFFICIENT_EVIDENCE,
+                    refusal, None, 60,
+                ))
+            return None
 
         reasons = []
 

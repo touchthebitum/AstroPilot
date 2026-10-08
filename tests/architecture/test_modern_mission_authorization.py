@@ -1,7 +1,7 @@
 """Cross-guard audit: project -> MissionInput -> productivity -> authorization.
 
 Only target astrometry is fixed; capacity, weather validation and windowing
-are production code. Direct assembly guards are normal PASS regressions.
+are production code. Direct assembly gaps are normal regression tests.
 """
 from copy import deepcopy
 from dataclasses import replace
@@ -128,3 +128,107 @@ def test_direct_assembler_cannot_authorize_unproven_modern_input(monkeypatch, id
         availability=A(M.ALL_NIGHT), **extra)
     mission = MissionAssembler.build("M31", NS(positives=[], negatives=[], confidence=1), context, [], [], mission_input=value)
     assert mission is None
+
+
+@pytest.fixture
+def assembly_environment(monkeypatch, frozen_equipment):
+    for name in ("ProjectRiskContextBuilder.build", "RiskEngine.evaluate", "SeasonAnalysis.analyze"):
+        monkeypatch.setattr("decision.mission.mission_assembler." + name, lambda *a, **k: None)
+    monkeypatch.setattr("decision.mission.mission_assembler.DynamicSeasonEngine.target_visibility_window", lambda *a, **k: [])
+    return dict(target="Sh2-129", summary=NS(positives=[], negatives=[], confidence=1),
+        context=NS(site=NS(name="Buttes", latitude=46.75, longitude=6.55),
+            weather=NS(seeing_arcsec=1.2), session=None, equipment=frozen_equipment,
+            sky=NS(target_altitude_deg=70, target=NS(name="Sh2-129", object_type="nebula", angular_size_arcmin=190))),
+        equipment=[], alternatives=[])
+
+
+def modern_source(acquired=0, *, equipment="samyang_183", removed=(), intent="sh2-129_ha"):
+    value = project(intent, acquired)
+    for key in removed:
+        value.pop(key)
+    return replace(astro_score.build_mission_input({"catalog_key": "Sh2-129",
+        "selected_acquisition_intent_id": intent, "selected_window_weather": weather(),
+        "window": {"start": START, "end": START + timedelta(hours=4)}},
+        profile={"active_equipment": equipment, "projects": {"Sh2-129": value}}), availability=availability("all"))
+
+
+@pytest.mark.parametrize("intent", ["sh2-129_ha", "ou4_oiii"])
+@pytest.mark.parametrize("acquired", [0, 1.5, 2, 2.01, 2.5, 3, None])
+@pytest.mark.parametrize("removed", MASKS)
+@pytest.mark.parametrize("equipment", ["samyang_183", None, "unknown"])
+def test_modern_creation_cross_boundary_matrix(assembly_environment, intent, acquired, removed, equipment):
+    value = modern_source(acquired, equipment=equipment, removed=removed, intent=intent)
+    mission = MissionAssembler.build(**assembly_environment, mission_input=value)
+    authorized = not removed and equipment == "samyang_183" and acquired is not None and acquired <= 2
+    if not authorized:
+        assert mission is None
+    else:
+        assert mission is not None
+        assert mission.recommended_hours <= min(4, 3 - acquired)
+        assert mission.expected_gain == round(mission.recommended_hours / 3 * 100, 2)
+
+
+@pytest.mark.parametrize("damage", ["identity", "intent", "capacity", "authority", "availability", "preview"])
+def test_authorization_is_bound_and_cannot_be_reused_after_evidence_deletion(assembly_environment, damage):
+    value = modern_source()
+    changes = {"identity": dict(imaging_field_id=None), "intent": dict(acquisition_intent_id=None, acquisition_capacity=None),
+        "capacity": dict(acquisition_capacity=None), "authority": dict(creation_authorization=True),
+        "availability": dict(availability=None), "preview": dict(evidence_only=True)}[damage]
+    value = replace(value, **changes)
+    if damage == "preview":
+        with pytest.raises(ValueError, match="preselection_evidence"):
+            MissionAssembler.build(**assembly_environment, mission_input=value)
+    else:
+        result = MissionAssembler.build(**assembly_environment, mission_input=value, _include_actionability_diagnostic=True)
+        assert result.mission is None
+        assert result.creation_refusal or result.actionability_refusal.cause_code
+
+
+def test_mismatched_capacity_rejected_before_creation():
+    value = modern_source()
+    with pytest.raises(ValueError, match="acquisition_capacity_intent_mismatch"):
+        replace(value, acquisition_capacity=replace(value.acquisition_capacity, acquisition_intent_id="ou4_oiii"))
+
+
+def test_authorization_has_no_public_boolean_constructor():
+    from decision.mission.modern_mission_authorization import ModernMissionAuthorization
+    with pytest.raises(TypeError, match="internal_factory"):
+        ModernMissionAuthorization(imaging_field_id="sh2-129_ou4", acquisition_intent_id="sh2-129_ha",
+            acquisition_capacity=modern_source().acquisition_capacity, filter_profile_id="baader_ha_highspeed_6_5nm")
+
+
+def test_preview_evaluates_physics_without_returning_engaging_mission(assembly_environment):
+    value = MissionInput(START, START + timedelta(hours=4), 4, weather(), 0, 4, 0, evidence_only=True)
+    preview = MissionAssembler.preview(target="Sh2-129", context=assembly_environment["context"], mission_input=value)
+    assert isinstance(preview, ProductiveWindowAssessment)
+    assert preview.productivity.productive_hours > 0
+    assert not hasattr(preview, "mission_id")
+
+
+def test_normal_service_and_builder_share_creation_guard(assembly_environment):
+    from decision.mission.mission_builder import NightMissionBuilder
+    from decision.services.tonight_mission_service import TonightMissionService
+    value = modern_source()
+    context = assembly_environment["context"]
+    summary = assembly_environment["summary"]
+    service = TonightMissionService(build_mission=NightMissionBuilder.build)
+    kwargs = dict(winner={"object_evaluations": {"Sh2-129": {}}},
+        objects=[dict(name="Sh2-129", decision_context=context, decision_summary=summary)], recommended_key="Sh2-129")
+    assert service.create(**kwargs, build_mission_input=lambda _: value) is not None
+    assert service.create(**kwargs, build_mission_input=lambda _: replace(value, creation_authorization=None)) is None
+
+
+def test_complete_raw_input_still_requires_factory_authorization(assembly_environment):
+    value = modern_source()
+    raw = replace(value, creation_authorization=None)
+    result = MissionAssembler.build(**assembly_environment, mission_input=raw, _include_actionability_diagnostic=True)
+    assert result.mission is None
+    assert result.creation_refusal == "modern_mission_authorization_required"
+
+
+def test_internal_factory_rederives_capacity_instead_of_trusting_supplied_total():
+    from decision.mission.modern_mission_authorization import _issue_from_project
+    value = modern_source()
+    forged = replace(value, acquisition_capacity=replace(value.acquisition_capacity, remaining_hours=30))
+    assert _issue_from_project(forged, profile={"active_equipment": "samyang_183",
+        "projects": {"Sh2-129": project("sh2-129_ha", 0)}}, catalog_key="Sh2-129") is None

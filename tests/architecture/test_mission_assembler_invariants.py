@@ -1,3 +1,4 @@
+from tests.modern_mission_helpers import authorized_input
 from dataclasses import replace
 from dataclasses import FrozenInstanceError, fields
 from datetime import timedelta
@@ -144,7 +145,10 @@ def mission_input(frozen_time, weather, **overrides):
         "selected_filter": None,
     }
     values.update(overrides)
-    return MissionInput(**values)
+    value = MissionInput(**values)
+    if "imaging_field_id" in overrides and overrides["imaging_field_id"] is None:
+        return value
+    return authorized_input(value)
 
 
 def test_mission_preserves_reasons_and_computed_results(
@@ -153,7 +157,7 @@ def test_mission_preserves_reasons_and_computed_results(
     context,
     isolated_dependencies,
 ):
-    selected_filter = object()
+    selected_filter = None
     input_data = mission_input(
         frozen_time,
         None,
@@ -178,7 +182,7 @@ def test_mission_preserves_reasons_and_computed_results(
     assert mission.window_start == input_data.window_start
     assert mission.window_end == input_data.window_start + timedelta(hours=1.5)
     assert mission.recommended_hours == 1.5
-    assert mission.expected_gain == 3.6
+    assert mission.expected_gain == 3.0
     assert mission.selected_filter is selected_filter
     assert mission.productivity is isolated_dependencies.productivity
 
@@ -263,6 +267,9 @@ def test_mission_copies_imaging_field_identity_exactly(
         mission_input=input_data,
     )
 
+    if imaging_field_id is None:
+        assert mission is None
+        return
     assert mission.imaging_field_id == imaging_field_id
     assert mission.risk_report is isolated_dependencies.risk
     assert mission.season_analysis is isolated_dependencies.season
@@ -297,7 +304,7 @@ def test_mission_copies_acquisition_intent_identity_exactly(
         mission_input=input_data,
     )
 
-    assert mission.acquisition_intent_id == " intent-A "
+    assert mission is None  # unknown intent cannot authorize new creation
 
 
 def test_mission_preserves_unknown_summary_confidence(
@@ -488,7 +495,7 @@ def test_mission_duration_uses_the_real_continuous_productive_window(
     )
 
     assert result.recommended_hours == 1.0
-    assert result.expected_gain == 3.0
+    assert result.expected_gain == result.recommended_hours / 50 * 100
 
 
 def test_expected_gain_is_unchanged_for_the_full_assessment_window(
@@ -520,7 +527,7 @@ def test_expected_gain_is_unchanged_for_the_full_assessment_window(
     )
 
     assert result.recommended_hours == 2.0
-    assert result.expected_gain == 6.0
+    assert result.expected_gain == 4.0
 
 
 def test_expected_gain_is_prorated_to_the_selected_actionable_hour(
@@ -558,7 +565,7 @@ def test_expected_gain_is_prorated_to_the_selected_actionable_hour(
     )
 
     assert result.recommended_hours == 1.0
-    assert result.expected_gain == 3.0
+    assert result.expected_gain == result.recommended_hours / 50 * 100
     assert result.expected_gain <= 6.0
 
 
@@ -591,7 +598,7 @@ def test_expected_gain_cannot_increase_when_selected_window_exceeds_gain_referen
     )
 
     assert result.recommended_hours == 2.0
-    assert result.expected_gain == 3.0
+    assert result.expected_gain == result.recommended_hours / 50 * 100
 
 
 def test_zero_reference_duration_never_transports_expected_gain(
@@ -761,7 +768,7 @@ def test_tonight_composes_intent_filter_through_real_input_and_assembler(
     inputs = []
 
     def build_input(value):
-        result = astro_score.build_mission_input(value, profile={"projects": {"Sh2-129": {
+        result = astro_score.build_mission_input(value, profile={"active_equipment": "samyang_183", "projects": {"Sh2-129": {
             "imaging_field_id": "sh2-129_ou4",
             "acquisition_intent_targets": [{"acquisition_intent_id": intent_id, "target_hours": 2}],
             "acquisition_intent_progress": [{"acquisition_intent_id": intent_id, "acquired_duration_manual": 0}],
@@ -840,7 +847,7 @@ def test_tonight_caps_duration_and_gain_by_intent_through_real_assembly(
         MissionAssembler.build(equipment=["setup"], alternatives=[], **kwargs))
     def build_input(value):
         from dataclasses import replace
-        result = astro_score.build_mission_input(value, profile={"projects": {"Sh2-129": project}})
+        result = astro_score.build_mission_input(value, profile={"active_equipment": "samyang_183", "projects": {"Sh2-129": project}})
         availability = (SessionAvailability(
             SessionAvailabilityMode.START_AND_DURATION, start=frozen_time,
             duration=timedelta(hours=user_hours),

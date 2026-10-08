@@ -50,7 +50,7 @@ def _weather_snapshot(*, reference_time: datetime):
     )
 
 
-def test_clean_profile_all_night_discovery_produces_consistent_decision(
+def test_clean_profile_all_night_discovery_cannot_create_modern_mission(
     monkeypatch,
     tmp_path,
 ):
@@ -116,6 +116,7 @@ def test_clean_profile_all_night_discovery_produces_consistent_decision(
         response.json(),
         tuple(consistency_issues),
     )
-    assert response.json()["status"] == "available"
+    assert response.json()["status"] == "no_mission"
+    assert response.json()["recommended_hours"] == 0
     assert response.json()["decision_id"]
     assert consistency_issues == []
