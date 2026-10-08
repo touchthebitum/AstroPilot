@@ -269,6 +269,7 @@ class MissionAssemblyResult:
     mission: NightMission | None
     actionability_refusal: ActionabilityRefusal | None = None
     creation_refusal: str | None = None
+    assessment: ProductiveWindowAssessment | None = None
 
 
 def _mission_timing_for_availability(
@@ -603,5 +604,5 @@ class MissionAssembler:
             dew_risk=dew_risk,
         )
         if _include_actionability_diagnostic:
-            return MissionAssemblyResult(mission=mission)
+            return MissionAssemblyResult(mission=mission, assessment=assessment)
         return mission
