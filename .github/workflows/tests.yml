@@ -88,3 +88,8 @@ jobs:
         run: >-
           uv run --locked --no-sync python -m pytest -q
           tests/architecture/test_opportunity_alert_windows_notification_v1.py
+      - name: Validate disabled Windows task XML without registering or launching
+        run: >-
+          uv run --locked --no-sync python -m pytest -q
+          tests/architecture/test_opportunity_alert_windows_task_v1.py
+          tests/architecture/test_opportunity_alert_host_v1.py

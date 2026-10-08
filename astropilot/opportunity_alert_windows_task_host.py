@@ -1,0 +1,34 @@
+"""Same-process stream adapter for Task Scheduler, without business behavior."""
+from __future__ import annotations
+
+import argparse
+from contextlib import redirect_stdout, redirect_stderr
+from pathlib import Path
+import sys
+
+from astropilot.opportunity_alert_host import main as host_main
+from astropilot.opportunity_alert_launchd import build_launch_agent
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    for name in ('log-dir', 'config', 'data-dir'):
+        parser.add_argument('--' + name, type=Path, required=True)
+    parser.add_argument('--state-dir', type=Path)
+    args = parser.parse_args(argv)
+    try:
+        job = build_launch_agent(python=sys.executable, config=args.config,
+                                data_dir=args.data_dir, log_dir=args.log_dir,
+                                state_dir=args.state_dir)
+        # Open both streams before starting host; preserve existing append history.
+        with open(job['StandardOutPath'], 'a', encoding='utf-8', buffering=1) as stdout, \
+             open(job['StandardErrorPath'], 'a', encoding='utf-8', buffering=1) as stderr:
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                return host_main(job['ProgramArguments'][4:])
+    except (ValueError, OSError):
+        print('invalid_opportunity_alert_windows_task_host_configuration', file=sys.stderr)
+        return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main())
