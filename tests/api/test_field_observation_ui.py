@@ -1527,8 +1527,10 @@ const waitForRequest = async (started) => {
     await new Promise(resolve => setTimeout(resolve, 1));
   }
 };
-const expireNetwork = async tab => {
-  await drainMicrotasks();
+const expireNetwork = async (tab, started) => {
+  // Async crypto may outlive a fixed number of event-loop turns under CI load.
+  // Wait for the actual deadline registration before triggering the fake timer.
+  await waitForRequest(() => tab.sandbox.networkTimers.size > 0 && started());
   assert.equal(tab.sandbox.networkTimers.size, 1);
   [...tab.sandbox.networkTimers.values()][0]();
 };
@@ -1909,7 +1911,7 @@ const projection = payload => ({...structuredClone(payload),
     let acquiredAfterDeadline = false;
     const waitingInventory = run(successor, 'restorePendingFieldObservationInventory()').then(() => { acquiredAfterDeadline = true; });
     await drainMicrotasks(); assert.equal(acquiredAfterDeadline, false);
-    await expireNetwork(hung); await submission; await waitingInventory;
+    await expireNetwork(hung, () => lateResolve !== undefined); await submission; await waitingInventory;
     assert.equal(acquiredAfterDeadline, true);
     assert.deepEqual(attempts, ['before', 'body'].includes(phase) ? ['GET'] : phase === 'post' ? ['GET', 'POST'] : ['GET', 'POST', 'GET']);
     assert.equal(hung.sandbox.networkTimers.size, 0);
@@ -1935,9 +1937,9 @@ const projection = payload => ({...structuredClone(payload),
     return new Promise(() => {});
   };
   const freshSubmission = run(fresh, 'submitFieldObservation({preventDefault(){}})');
-  await drainMicrotasks();
+  await waitForRequest(() => newPayload !== undefined);
   const newPendingRaw = shared.get(first.key); const newLockRaw = shared.get('astropilot.fieldObservationLock');
-  await expireNetwork(fresh); await freshSubmission;
+  await expireNetwork(fresh, () => newPayload !== undefined); await freshSubmission;
   assert.equal(shared.get(first.key), newPendingRaw); assert.equal(shared.get('astropilot.fieldObservationLock'), newLockRaw);
   const freshRetry = makeContext('fresh-retry');
   freshRetry.sandbox.canonical = {[newPayload.observation_id]: projection(newPayload)};
@@ -2293,7 +2295,7 @@ const projection = payload => ({...structuredClone(payload),
         return new Promise(resolve => { late = resolve; });
       };
       const refreshing = run(tab, 'refreshInvalidFieldObservationContext()');
-      await expireNetwork(tab); await refreshing;
+      await expireNetwork(tab, () => signal !== undefined); await refreshing;
       assert.ok(signal.aborted);
       assert.equal(run(tab, 'state.observationBusy'), false);
       assert.equal(run(tab, 'state.fieldObservationLock.status'), 'invalid');
@@ -2304,11 +2306,12 @@ const projection = payload => ({...structuredClone(payload),
       assert.equal(run(tab, 'state.fieldObservationLock.status'), 'invalid');
       assert.equal(tab.sandbox.state.currentDecision, decision);
       // Body decoding belongs to the same deadline, even after headers arrive.
+      let bodyStarted = false;
       tab.sandbox.fetch = async url => url.includes('/field-observations/')
         ? {ok: false, status: 404}
-        : {ok: true, json: () => new Promise(() => {})};
+        : {ok: true, json: () => {bodyStarted = true; return new Promise(() => {});}};
       const bodyRefresh = run(tab, 'refreshInvalidFieldObservationContext()');
-      await expireNetwork(tab); await bodyRefresh;
+      await expireNetwork(tab, () => bodyStarted); await bodyRefresh;
       assert.equal(run(tab, 'state.observationBusy'), false);
       assert.equal(run(tab, 'state.fieldObservationLock.status'), 'invalid');
       // Closing cancels the operation and ignores a transport that completes later.
@@ -2316,8 +2319,9 @@ const projection = payload => ({...structuredClone(payload),
         if (url.includes('/field-observations/')) return {ok: false, status: 404};
         signal = options.signal; return new Promise(resolve => {late = resolve;});
       };
+      signal = undefined;
       const closingRefresh = run(tab, 'refreshInvalidFieldObservationContext()');
-      await drainMicrotasks();
+      await waitForRequest(() => signal !== undefined);
       run(tab, 'invalidateFieldObservationOperation()');
       await closingRefresh;
       assert.ok(signal.aborted);
