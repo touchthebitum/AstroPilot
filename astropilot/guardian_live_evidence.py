@@ -1,19 +1,13 @@
 """Explicit modeled current-weather acquisition; no decision authority."""
 from datetime import datetime, timezone
-from http.client import HTTPSConnection
-import json
 import math
-import signal
-from contextlib import contextmanager
-from time import monotonic
 from typing import Protocol
-from urllib.parse import urlencode
+
+from astropilot.guardian_http_transport import BoundedHttpTransport
 
 from decision.models.guardian import GuardianEvidence, GuardianObservation
 
 PROVIDER_ID = 'open_meteo_current_v1'
-_FIELDS = ('rain', 'showers', 'wind_speed_10m', 'wind_gusts_10m',
-           'relative_humidity_2m', 'temperature_2m', 'dew_point_2m')
 
 
 class GuardianEvidenceProvider(Protocol):
@@ -29,63 +23,7 @@ def _number(value, low, high):
             and low <= value <= high)
 
 
-@contextmanager
-def _deadline(seconds):
-    # POSIX foreground only: interrupt DNS/connect/header/body without workers.
-    if not hasattr(signal, 'setitimer'):
-        raise GuardianAcquisitionError('deadline_unavailable')
-    if signal.getitimer(signal.ITIMER_REAL) != (0.0, 0.0):
-        raise GuardianAcquisitionError('deadline_unavailable')
-    def expired(*_):
-        raise TimeoutError()
-    previous = signal.signal(signal.SIGALRM, expired)
-    try:
-        signal.setitimer(signal.ITIMER_REAL, seconds)
-        yield
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
-
-
-def _transport(*, latitude, longitude, timeout_seconds):
-    with _deadline(timeout_seconds):
-        return _request(latitude=latitude, longitude=longitude, timeout_seconds=timeout_seconds)
-
-
-def _request(*, latitude, longitude, timeout_seconds):
-    deadline = monotonic() + timeout_seconds
-    connection = HTTPSConnection('api.open-meteo.com', timeout=timeout_seconds)
-    try:
-        params = urlencode({'latitude': latitude, 'longitude': longitude,
-            'current': ','.join(_FIELDS), 'timezone': 'UTC', 'timeformat': 'unixtime',
-            'temperature_unit': 'celsius', 'wind_speed_unit': 'kmh',
-            'precipitation_unit': 'mm', 'forecast_days': 1})
-        connection.request('GET', '/v1/forecast?' + params)
-        remaining = deadline - monotonic()
-        if remaining <= 0:
-            raise TimeoutError()
-        socket = connection.sock
-        socket.settimeout(remaining)
-        response = connection.getresponse()
-        if response.status != 200:
-            raise ValueError()
-        body = bytearray()
-        while True:
-            remaining = deadline - monotonic()
-            if remaining <= 0:
-                raise TimeoutError()
-            socket.settimeout(remaining)
-            chunk = response.read1(min(4096, 65537 - len(body)))
-            body.extend(chunk)
-            if len(body) > 65536:
-                raise ValueError()
-            if not chunk:
-                break
-        if monotonic() > deadline:
-            raise TimeoutError()
-        return json.loads(body)
-    finally:
-        connection.close()
+_transport = BoundedHttpTransport()
 
 
 class ProductionGuardianWeatherAdapter:

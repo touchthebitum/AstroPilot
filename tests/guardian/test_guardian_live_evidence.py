@@ -75,16 +75,6 @@ def test_architecture():
     imports += [a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names]
     assert not any(any(b in name for b in ('tonight','opportunity','field_lab','thread','subprocess')) for name in imports)
 
-def test_real_deadline_restores_handler():
-    import signal
-    from astropilot.guardian_live_evidence import _deadline
-    previous = signal.getsignal(signal.SIGALRM)
-    with pytest.raises(TimeoutError):
-        with _deadline(.01):
-            signal.pause()
-    assert signal.getsignal(signal.SIGALRM) == previous
-    assert signal.getitimer(signal.ITIMER_REAL) == (0, 0)
-
 @pytest.mark.parametrize('field', ['rain', 'wind_speed_10m', 'relative_humidity_2m', 'temperature_2m'])
 def test_wrong_units(field):
     doc = payload(); doc['current_units'][field] = 'wrong'
@@ -102,21 +92,6 @@ def test_periodic_failure_is_error():
     result = runner.run_cycle(logical_time=NOW)
     assert result.status.value == 'ERROR'
     assert result.errors == ('evidence_provider_error',)
-
-
-def test_transport_deadline_covers_blocked_connect(monkeypatch):
-    import signal
-    from astropilot import guardian_live_evidence as live
-    calls = []
-    class BlockedConnection:
-        def __init__(self, *args, **kwargs): pass
-        def request(self, *args):
-            calls.append('request'); signal.pause()
-        def close(self): calls.append('close')
-    monkeypatch.setattr(live, 'HTTPSConnection', BlockedConnection)
-    with pytest.raises(GuardianAcquisitionError):
-        live.ProductionGuardianWeatherAdapter(46,7,timeout_seconds=.01)(NOW)
-    assert calls == ['request', 'close']
 
 
 def test_no_workers_created():
@@ -151,32 +126,28 @@ def test_forecast_probability_never_substituted():
     assert acquire(doc).rain_eta_minutes is None
 
 
-def test_transport_one_request_no_redirect(monkeypatch):
-    from astropilot import guardian_live_evidence as live
+
+
+@pytest.mark.parametrize('forecast', [
+    {'hourly': {'time': [NOW.timestamp()+3600], 'rain': [1], 'showers': [0]}},
+    {'minutely_15': {'time': [NOW.timestamp()+900], 'rain': [1], 'showers': [0]}},
+    {'minutely_15': {'time': [NOW.timestamp()+900], 'precipitation_probability': [100]}},
+    {'minutely_15': {'time': [NOW.timestamp()+900], 'rain': [0], 'showers': [0]}},
+])
+def test_interval_or_probability_never_creates_eta(forecast):
+    doc = payload()
+    doc.update(forecast)
+    observation = acquire(doc)
+    assert observation.rain_eta_minutes is None
+    assert assess_guardian(observation, now=NOW).risk_level.name == 'UNKNOWN'
+
+
+def test_portable_provider_has_no_signal_requirement(monkeypatch):
+    import signal
+    from astropilot import guardian_http_transport as http
+    import subprocess
     import json
-    calls = []
-    class Socket:
-        def settimeout(self, value): assert 0 < value <= 2
-    class Response:
-        status = 200
-        def __init__(self): self.body = [json.dumps(payload()).encode(), b'']
-        def read1(self, size): return self.body.pop(0)
-    class Connection:
-        sock = Socket()
-        def __init__(self, host, timeout): assert host == 'api.open-meteo.com'; assert timeout == 2
-        def request(self, method, path): calls.append((method,path))
-        def getresponse(self): return Response()
-        def close(self): calls.append('close')
-    monkeypatch.setattr(live, 'HTTPSConnection', Connection)
-    assert live.ProductionGuardianWeatherAdapter(46,7,timeout_seconds=2)(NOW).wind_kmh.value == 4
-    assert len(calls) == 2
-    assert calls[0][0] == 'GET'
-    assert 'current=rain%2Cshowers' in calls[0][1]
-    assert calls[1] == 'close'
-
-
-def test_alarm_unavailable_fails_closed(monkeypatch):
-    from astropilot import guardian_live_evidence as live
-    monkeypatch.delattr(live.signal, 'setitimer')
-    with pytest.raises(GuardianAcquisitionError):
-        live.ProductionGuardianWeatherAdapter(46,7)(NOW)
+    monkeypatch.delattr(signal, 'setitimer', raising=False)
+    monkeypatch.setattr(http.subprocess, 'run', lambda *a, **k:
+        subprocess.CompletedProcess(a, 0, json.dumps(payload()).encode()))
+    assert ProductionGuardianWeatherAdapter(46, 7)(NOW).rain_active.value is False

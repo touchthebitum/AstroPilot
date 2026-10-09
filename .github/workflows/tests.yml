@@ -96,3 +96,20 @@ jobs:
           tests/architecture/test_opportunity_alert_status_v1.py
           tests/architecture/test_opportunity_alert_host_status_integration.py
           tests/architecture/test_opportunity_alert_host_v1.py
+
+  guardian-portable-transport:
+    name: Guardian transport ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          python-version: "3.12"
+          version: "0.12.5"
+      - run: uv sync --locked --extra test
+      - name: Validate native child lifetime and Guardian invariants without live HTTP
+        run: uv run --locked --no-sync python -m pytest -q tests/guardian
