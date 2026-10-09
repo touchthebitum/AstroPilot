@@ -1,9 +1,11 @@
 """Pure evaluation of caller-supplied evidence, independent of other engines."""
 from datetime import datetime
+from enum import Enum
 import math
 from decision.models.guardian import (
     GuardianAction, GuardianAssessment, GuardianEvidence, GuardianObservation,
-    GuardianPolicy, GuardianRiskLevel as Risk,
+    GuardianPolicy, GuardianRiskLevel as Risk, GuardianSessionContext,
+    GuardianSessionState as State, GuardianActionApplicability as Applicability,
 )
 
 
@@ -29,12 +31,47 @@ def _valid(name: str, evidence: GuardianEvidence | None, now: datetime, policy: 
     return value >= 0 and (name != 'humidity_percent' or value <= 100)
 
 
+class _Unset(Enum):
+    TOKEN = 'unset'
+
+
+_UNSET = _Unset.TOKEN
+_SESSION_MAX_AGE_SECONDS = 900
+
+
+def _session(context: GuardianSessionContext | None, now: datetime) -> tuple[State, Applicability, tuple[str, ...]]:
+    if context is None:
+        return State.UNKNOWN, Applicability.UNKNOWN, ('session_context:missing',)
+    if (not isinstance(context, GuardianSessionContext)
+            or context.version != 'guardian-session-v1'
+            or type(context.session_active) is not bool
+            or not isinstance(context.observed_at, datetime)
+            or context.observed_at.utcoffset() is None
+            or (context.session_id is not None and
+                (not isinstance(context.session_id, str) or not context.session_id.strip()))):
+        return State.UNKNOWN, Applicability.UNKNOWN, ('session_context:invalid',)
+    if not 0 <= (now - context.observed_at).total_seconds() <= _SESSION_MAX_AGE_SECONDS:
+        return State.UNKNOWN, Applicability.UNKNOWN, ('session_context:future_or_stale',)
+    if context.session_active:
+        return State.ACTIVE, Applicability.APPLICABLE, ()
+    return State.INACTIVE, Applicability.NOT_APPLICABLE, ()
+
+
 def assess_guardian(observation: GuardianObservation, *, now: datetime,
-                    session_active: bool, policy: GuardianPolicy = GuardianPolicy()) -> GuardianAssessment:
+                    session_active: bool | _Unset = _UNSET,
+                    session_context: GuardianSessionContext | None | _Unset = _UNSET,
+                    policy: GuardianPolicy = GuardianPolicy()) -> GuardianAssessment:
     if not isinstance(now, datetime) or now.utcoffset() is None:
         raise ValueError('now must be timezone aware')
-    if type(session_active) is not bool:
-        raise ValueError('session_active must be explicit boolean')
+    if session_active is not _UNSET:
+        if session_context is not _UNSET:
+            raise ValueError('Supply only one session context interface')
+        if type(session_active) is not bool:
+            raise ValueError('session_active must be explicit boolean')
+        session_context = GuardianSessionContext(session_active, now)
+    elif session_context is _UNSET:
+        session_context = None
+    state, applicability, session_reasons = _session(session_context, now)
     level = Risk.SAFE
     reasons = []
     complete = True
@@ -63,5 +100,11 @@ def assess_guardian(observation: GuardianObservation, *, now: datetime,
         level = max(level, channel_level)
     if not complete:
         level = Risk.UNKNOWN
-    return GuardianAssessment(level, GuardianAction(level.value), tuple(reasons), complete,
-                              complete, policy, now, sources, session_active)
+    return GuardianAssessment(
+        risk_level=level, action=GuardianAction(level.value), reasons=tuple(reasons),
+        evidence_complete=complete, decision_eligible=complete, policy=policy,
+        assessed_at=now, source_evidence=sources,
+        session_active=None if state is State.UNKNOWN else state is State.ACTIVE,
+        session_context=session_context, session_state=state,
+        action_applicability=applicability, session_reasons=session_reasons,
+    )
