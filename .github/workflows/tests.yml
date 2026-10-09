@@ -98,7 +98,7 @@ jobs:
           tests/architecture/test_opportunity_alert_host_v1.py
 
   guardian-portable-transport:
-    name: Guardian transport ${{ matrix.os }}
+    name: Guardian transport and supervision ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -111,5 +111,5 @@ jobs:
           python-version: "3.12"
           version: "0.12.5"
       - run: uv sync --locked --extra test
-      - name: Validate native child lifetime and Guardian invariants without live HTTP
+      - name: Validate native child lifetime and supervision without installing startup jobs or live HTTP
         run: uv run --locked --no-sync python -m pytest -q tests/guardian
