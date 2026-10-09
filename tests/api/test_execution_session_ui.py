@@ -104,6 +104,9 @@ let canonical = {execution: {execution_id: 'execution-1', mission_id: 'mission-1
   current_acquired_seconds: 3600, target_hours: 2, remaining_hours: 1, profile_revision: 7};
 let posts = 0;
 async function fetch(url, options) {
+  if (url.endsWith('/guardian-renewal')) return {ok: true, json: async () => ({
+    schema_version: 'guardian-explicit-renewal-v1', execution_id: 'execution-1',
+    guardian_mode_enabled: false, server_time: '2026-10-09T17:00:00Z'})};
   if (!options) return {ok: true, json: async () => [structuredClone(canonical)]};
   assert.equal(url, '/v1/executions/execution-1/intent-progress-credit');
   posts++;
@@ -180,6 +183,9 @@ let canonical = {execution: {execution_id: 'execution-1', mission_id: 'mission-1
   acquired_before_seconds: 0, session_credit_seconds: 0, acquired_after_seconds: 0,
   current_acquired_seconds: 0, target_hours: null, remaining_hours: null, profile_revision: 7};
 async function fetch(url, options) {
+  if (url.endsWith('/guardian-renewal')) return {ok: true, json: async () => ({
+    schema_version: 'guardian-explicit-renewal-v1', execution_id: 'execution-1',
+    guardian_mode_enabled: false, server_time: '2026-10-09T17:00:00Z'})};
   if (!options) return {ok: true, status: 200, json: async () => [structuredClone(canonical)]};
   writes++;
   if (lost) throw new Error('transport lost');

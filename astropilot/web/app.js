@@ -156,6 +156,116 @@ const historyState = {generation: 0, cursor: null, open: false};
 
 const SESSION_PENDING_KEY = "astropilot.pendingSession";
 
+const guardianUI = {status: null, displayStatus: null, generation: 0, pending: false, uncertain: false, message: "", readAt: 0};
+const GUARDIAN_UNCERTAIN = "Résultat incertain — vérifiez l’état avant de confirmer à nouveau.";
+
+function guardianEligible() {
+  const value = guardianUI.status;
+  const elapsed = Math.max(0, performance.now() - guardianUI.readAt);
+  return Boolean(value?.guardian_mode_enabled && value.execution_id === state.activeSessionId
+    && currentSession()?.execution.status === "in_progress" && value.owned_here
+    && value.renewal_eligible && value.owner_instance_id
+    && Date.parse(value.expires_at) >= Date.parse(value.server_time) + elapsed);
+}
+
+function renderGuardianRenewal() {
+  const value = guardianUI.status || guardianUI.displayStatus;
+  const exact = value?.execution_id === state.activeSessionId;
+  document.querySelector("#guardian-renewal").hidden = !exact || !value?.guardian_mode_enabled;
+  const eligible = guardianEligible();
+  const button = document.querySelector("#guardian-confirm");
+  button.hidden = !exact || !value?.guardian_mode_enabled || currentSession()?.execution.status !== "in_progress";
+  button.disabled = !eligible || guardianUI.pending || guardianUI.uncertain || state.sessionBusy;
+  text("#guardian-last-confirmation", value?.confirmed_at || "Aucune confirmation acceptée");
+  text("#guardian-deadline", value?.expires_at ? `${value.expires_at} (15 minutes)` : "Aucune échéance");
+  text("#guardian-ownership", eligible ? "Propriété confirmée à la dernière lecture · confirmation fraîche selon l’heure serveur"
+    : !guardianUI.status ? "Propriété et fraîcheur non vérifiées. Vérifiez l’état Guardian avant de poursuivre."
+    : "Renouvellement indisponible. Après expiration, redémarrage ou perte de propriété, une nouvelle session explicite est requise. Vous pouvez clôturer l’ancienne session.");
+  text("#guardian-message", guardianUI.message);
+}
+
+async function readGuardianRenewal(executionId = state.activeSessionId) {
+  const generation = ++guardianUI.generation;
+  guardianUI.status = null;
+  renderGuardianRenewal();
+  if (!executionId) return null;
+  const response = await fetch(`/v1/executions/${encodeURIComponent(executionId)}/guardian-renewal`, {cache: "no-store"});
+  if (!response.ok) throw new Error("guardian_status_unavailable");
+  const value = await response.json();
+  if (value.schema_version !== "guardian-explicit-renewal-v1" || value.execution_id !== executionId
+      || typeof value.guardian_mode_enabled !== "boolean" || !Number.isFinite(Date.parse(value.server_time))
+      || (value.guardian_mode_enabled && (typeof value.owner_instance_id !== "string" || !value.owner_instance_id))) {
+    throw new Error("guardian_status_invalid");
+  }
+  if (generation === guardianUI.generation && executionId === state.activeSessionId) {
+    guardianUI.status = value;
+    guardianUI.displayStatus = value;
+    guardianUI.readAt = performance.now();
+    renderGuardianRenewal();
+  }
+  return value;
+}
+
+async function refreshGuardianRenewal() {
+  try {
+    await readGuardianRenewal();
+    guardianUI.uncertain = false;
+    guardianUI.message = "État relu. Cette lecture ne prouve pas qu’une requête incertaine a été acceptée.";
+  } catch (_) {
+    guardianUI.message = "Statut Guardian indisponible. Vérifiez l’état avant de poursuivre.";
+  }
+  renderGuardianRenewal();
+}
+
+async function confirmGuardianRenewal() {
+  if (!guardianEligible() || guardianUI.pending || guardianUI.uncertain || state.sessionBusy) return;
+  const executionId = state.activeSessionId;
+  const owner = guardianUI.status.owner_instance_id;
+  const key = crypto.randomUUID();
+  guardianUI.pending = true;
+  guardianUI.message = "Confirmation en cours…";
+  renderGuardianRenewal();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(`/v1/executions/${encodeURIComponent(executionId)}/guardian-renewal`, {
+      method: "POST", signal: controller.signal,
+      headers: {"Content-Type": "application/json", "Idempotency-Key": key},
+      body: JSON.stringify({schema_version: "guardian-explicit-renewal-v1",
+        confirmation: "USER_CONFIRMS_ACQUISITION_CONTINUES", owner_instance_id: owner}),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      if (response.status >= 500 || result.ownership === "unknown") throw new Error("ambiguous");
+      guardianUI.message = "Confirmation refusée. Vérifiez le statut ; une nouvelle session explicite peut être requise.";
+    } else {
+      if (result.execution_id !== executionId || result.owner_instance_id !== owner
+          || result.confirmation_kind !== "USER_ASSERTION" || !Number.isFinite(Date.parse(result.confirmed_at))
+          || !Number.isFinite(Date.parse(result.expires_at)) || typeof result.replayed !== "boolean") throw new Error("ambiguous");
+      // No optimistic extension: only accepted server timestamps are presented.
+      if (executionId === state.activeSessionId && guardianUI.status) {
+        guardianUI.status = {...guardianUI.status, confirmed_at: result.confirmed_at, expires_at: result.expires_at};
+      }
+      guardianUI.message = result.replayed ? "Confirmation antérieure relue ; échéance originale conservée." : "Confirmation utilisateur acceptée.";
+    }
+    await readGuardianRenewal(executionId);
+  } catch (_) {
+    guardianUI.uncertain = true;
+    guardianUI.status = null;
+    guardianUI.message = GUARDIAN_UNCERTAIN;
+  } finally {
+    clearTimeout(timeout);
+    guardianUI.pending = false;
+    renderGuardianRenewal();
+  }
+}
+
+async function guardianTransitionHeaders(executionId) {
+  const value = await readGuardianRenewal(executionId);
+  return value.guardian_mode_enabled ? {"Idempotency-Key": crypto.randomUUID(),
+    "X-Guardian-Owner-Instance-Id": value.owner_instance_id} : {};
+}
+
 function sessionMessage(message) {
   text("#session-status", message);
 }
@@ -255,6 +365,7 @@ function renderSession() {
       : status === "in_progress" ? "Session en cours." : "Session prête à démarrer.");
   } else sessionMessage("Aucune session enregistrée pour cette mission.");
   renderObservationLinkage();
+  renderGuardianRenewal();
 }
 
 async function reloadSessions({ selectId = null } = {}) {
@@ -279,6 +390,7 @@ async function reloadSessions({ selectId = null } = {}) {
   }
   renderSession();
   syncFieldObservationContext();
+  try { await readGuardianRenewal(); } catch (_) { renderGuardianRenewal(); }
 }
 
 async function sessionCommand(command) {
@@ -311,14 +423,15 @@ async function sessionCommand(command) {
     state.sessionWriteUncertain = false;
     document.querySelectorAll(".session-panel button").forEach((button) => { button.disabled = false; });
     document.querySelector("#session-apply-credit").disabled = currentSession()?.execution.status !== "completed";
+    renderGuardianRenewal();
   }
 }
 
-async function postSession(url, body) {
+async function postSession(url, body, extraHeaders = {}) {
   const payload = JSON.stringify(body);
   state.sessionWriteAttempted = true;
   state.sessionWriteUncertain = true;
-  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload });
+  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...extraHeaders }, body: payload });
   state.sessionWriteUncertain = false;
   if (!response.ok) throw await sessionHttpError(response);
   return response.json();
@@ -327,11 +440,17 @@ async function postSession(url, body) {
 async function sessionHttpError(response) {
   const error = new Error("session_command_refused");
   error.status = response.status;
-  try { error.code = (await response.json()).detail?.code; } catch (_ignored) { /* status remains authoritative */ }
+  try {
+    const result = await response.json();
+    error.code = result.code || result.detail?.code;
+    error.executionCommit = result.execution_commit;
+    error.guardianPublication = result.guardian_publication;
+  } catch (_ignored) { /* status remains authoritative */ }
   return error;
 }
 
 function sessionRefusalMessage(error) {
+  if (error.executionCommit) return `Exécution : ${error.executionCommit === "committed" ? "transition enregistrée" : error.executionCommit === "not_committed" || error.executionCommit === "not_attempted" ? "transition non enregistrée" : "résultat incertain"}. Synchronisation Guardian : ${error.guardianPublication === "failed" ? "échouée" : "non confirmée"}. Vérifiez l’état avant de poursuivre.`;
   if (error.status === 409) return "Action refusée : la session ou le profil a changé. État actuel relu ; vérifiez avant de poursuivre.";
   if (error.status === 422) return "Action refusée : transition ou données invalides. Corrigez la saisie avant de poursuivre.";
   if (error.status === 503) return "Action impossible : données enregistrées incohérentes ou service indisponible. Rechargez la page.";
@@ -354,7 +473,7 @@ async function startSession(missionId) {
     await postSession("/v1/execution-transitions", {
       execution_id: session.execution.execution_id, mission_id: missionId,
       status: "in_progress", actual_start: new Date().toISOString(), actual_end: null, actual_duration: null,
-    });
+    }, await guardianTransitionHeaders(session.execution.execution_id));
   }
 }
 
@@ -367,7 +486,7 @@ async function closeSession(missionId, status) {
     execution_id: session.execution.execution_id, mission_id: missionId, status,
     actual_start: session.execution.actual_start, actual_end: end.toISOString(),
     actual_duration: Math.max(0, (end.getTime() - start.getTime()) / 1000),
-  });
+  }, await guardianTransitionHeaders(session.execution.execution_id));
 }
 
 async function recordSessionEvidence() {
@@ -6027,11 +6146,20 @@ ui.openSavedMission.addEventListener("click", () => {
   ui.mission.showModal();
 });
 document.querySelector("#session-choice").addEventListener("change", (event) => {
+  guardianUI.status = null;
+  guardianUI.message = "";
   state.activeSessionId = event.target.value || null;
+  void refreshGuardianRenewal();
   state.fieldObservationSelectedExecutionId = event.target.value || null;
   renderSession();
   syncFieldObservationContext();
 });
+document.querySelector("#guardian-confirm").addEventListener("click", confirmGuardianRenewal);
+document.querySelector("#guardian-refresh").addEventListener("click", refreshGuardianRenewal);
+// Presentation only. Never calls fetch, renew, start or stop.
+const guardianVisualTimer = setInterval(renderGuardianRenewal, 1000);
+// Node-based browser harnesses should not be kept alive by a visual timer.
+guardianVisualTimer?.unref?.();
 document.querySelector("#session-start").addEventListener("click", () => sessionCommand(startSession));
 document.querySelector("#session-complete").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "completed")));
 document.querySelector("#session-interrupt").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "interrupted")));
