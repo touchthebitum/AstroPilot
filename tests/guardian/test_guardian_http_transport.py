@@ -101,7 +101,8 @@ def test_body_cap(monkeypatch, size, ok):
     assert calls[-1] == 'close'
 
 
-@pytest.mark.parametrize('body', [b'{', b'{"x": NaN}', b'{"x": Infinity}', b'x'*65537])
+@pytest.mark.parametrize('body', [b'{', b'{"x": NaN}', b'{"x": Infinity}', b'x'*65537],
+                         ids=['malformed', 'nan', 'infinity', 'oversize'])
 def test_bad_child_output_fails_closed(monkeypatch, body):
     monkeypatch.setattr(transport.subprocess, 'run', lambda *a, **k:
         subprocess.CompletedProcess(a, 0, body))
