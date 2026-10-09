@@ -4,13 +4,14 @@ from typing import Callable
 from decision.models.guardian import (
     GuardianAssessment, GuardianObservation, GuardianSessionContext,
 )
+from decision.models.guardian_live_session import GuardianLiveSessionEvidence
 from decision.models.guardian_cycle import GuardianCycleResult, GuardianCycleStatus
 from decision.runners.guardian_runner import GuardianRunner
 
 
 class GuardianPeriodicRunner:
     def __init__(self, *, evidence_provider: Callable[[datetime], GuardianObservation],
-                 session_context_provider: Callable[[datetime], GuardianSessionContext | None],
+                 session_context_provider: Callable[[datetime], GuardianSessionContext | GuardianLiveSessionEvidence | None],
                  guardian_runner: GuardianRunner):
         self._evidence_provider = evidence_provider
         self._session_context_provider = session_context_provider
@@ -32,7 +33,7 @@ class GuardianPeriodicRunner:
             errors.append('evidence_provider_error')
         try:
             context = self._session_context_provider(logical_time)
-            if context is not None and not isinstance(context, GuardianSessionContext):
+            if context is not None and not isinstance(context, (GuardianSessionContext, GuardianLiveSessionEvidence)):
                 raise TypeError('Invalid session context')
         except Exception:
             context = None

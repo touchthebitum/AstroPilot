@@ -32,7 +32,7 @@ def test_complete_available_channels():
         assert evidence.provenance == 'FORECAST'
         assert 'open-meteo' in evidence.source
     assert result.dew_spread_c.value == 10
-    assert result.rain_eta_minutes is None
+    assert result.rain_eta_minutes.value is None
     assert assess_guardian(result, now=NOW).risk_level.name == 'UNKNOWN'
 
 @pytest.mark.parametrize('field,channel', [('rain','rain_active'), ('wind_gusts_10m','gust_kmh'),
@@ -123,7 +123,7 @@ def test_forecast_probability_never_substituted():
     doc['current']['precipitation_probability'] = 0
     doc['current']['precipitation'] = 0
     assert acquire(doc).rain_active is None
-    assert acquire(doc).rain_eta_minutes is None
+    assert acquire(doc).rain_eta_minutes.value is None
 
 
 
@@ -138,7 +138,7 @@ def test_interval_or_probability_never_creates_eta(forecast):
     doc = payload()
     doc.update(forecast)
     observation = acquire(doc)
-    assert observation.rain_eta_minutes is None
+    assert observation.rain_eta_minutes.value is None
     assert assess_guardian(observation, now=NOW).risk_level.name == 'UNKNOWN'
 
 

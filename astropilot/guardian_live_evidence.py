@@ -7,6 +7,8 @@ from astropilot.guardian_http_transport import BoundedHttpTransport
 
 from decision.models.guardian import GuardianEvidence, GuardianObservation
 
+from decision.models.guardian_rain import GuardianRainUncertainty
+
 PROVIDER_ID = 'open_meteo_current_v1'
 
 
@@ -69,6 +71,7 @@ class ProductionGuardianWeatherAdapter:
             dew = value('dew_point_2m', '°C', -100, 70)
             return GuardianObservation(
                 rain_active=evidence(rain_active, 'rain-and-showers'),
+                rain_eta_minutes=GuardianRainUncertainty(None, PROVIDER_ID, 'FORECAST', timestamp),
                 wind_kmh=evidence(value('wind_speed_10m', 'km/h', 0, 500), 'wind_speed_10m'),
                 gust_kmh=evidence(value('wind_gusts_10m', 'km/h', 0, 500), 'wind_gusts_10m'),
                 humidity_percent=evidence(value('relative_humidity_2m', '%', 0, 100), 'relative_humidity_2m'),

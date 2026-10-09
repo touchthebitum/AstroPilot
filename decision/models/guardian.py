@@ -1,8 +1,14 @@
 """Immutable Guardian v1 inputs and recommendations; no execution authority."""
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, IntEnum
 import math
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from decision.models.guardian_live_session import GuardianLiveSessionEvidence
 
 
 class GuardianRiskLevel(IntEnum):
@@ -104,7 +110,7 @@ class GuardianAssessment:
     assessed_at: datetime
     source_evidence: tuple[tuple[str, GuardianEvidence | None], ...]
     session_active: bool | None
-    session_context: GuardianSessionContext | None
+    session_context: GuardianSessionContext | GuardianLiveSessionEvidence | None
     session_state: GuardianSessionState
     action_applicability: GuardianActionApplicability
     session_reasons: tuple[str, ...]

@@ -8,6 +8,10 @@ from decision.models.guardian import (
     GuardianSessionState as State, GuardianActionApplicability as Applicability,
 )
 
+from decision.models.guardian_live_session import GuardianLiveSessionEvidence
+from decision.models.guardian_rain import GuardianRainUncertainty
+from decision.services.guardian_live_contracts import live_session, rain_onset_valid
+
 
 def _valid(name: str, evidence: GuardianEvidence | None, now: datetime, policy: GuardianPolicy) -> bool:
     if not isinstance(evidence, GuardianEvidence):
@@ -22,6 +26,8 @@ def _valid(name: str, evidence: GuardianEvidence | None, now: datetime, policy: 
     value = evidence.value
     if name == 'rain_active':
         return type(value) is bool
+    if name == 'rain_eta_minutes' and isinstance(evidence, GuardianRainUncertainty):
+        return rain_onset_valid(evidence)
     if name == 'rain_eta_minutes' and value is None:
         return True
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
@@ -39,7 +45,9 @@ _UNSET = _Unset.TOKEN
 _SESSION_MAX_AGE_SECONDS = 900
 
 
-def _session(context: GuardianSessionContext | None, now: datetime) -> tuple[State, Applicability, tuple[str, ...]]:
+def _session(context: GuardianSessionContext | GuardianLiveSessionEvidence | None, now: datetime) -> tuple[State, Applicability, tuple[str, ...]]:
+    if isinstance(context, GuardianLiveSessionEvidence):
+        return live_session(context, now)
     if context is None:
         return State.UNKNOWN, Applicability.UNKNOWN, ('session_context:missing',)
     if (not isinstance(context, GuardianSessionContext)
@@ -59,7 +67,7 @@ def _session(context: GuardianSessionContext | None, now: datetime) -> tuple[Sta
 
 def assess_guardian(observation: GuardianObservation, *, now: datetime,
                     session_active: bool | _Unset = _UNSET,
-                    session_context: GuardianSessionContext | None | _Unset = _UNSET,
+                    session_context: GuardianSessionContext | GuardianLiveSessionEvidence | None | _Unset = _UNSET,
                     policy: GuardianPolicy = GuardianPolicy()) -> GuardianAssessment:
     if not isinstance(now, datetime) or now.utcoffset() is None:
         raise ValueError('now must be timezone aware')

@@ -128,7 +128,8 @@ def test_process_control_exception_propagates():
 def test_architecture():
     root = Path(__file__).resolve().parents[2]
     allowed = {'dataclasses', 'datetime', 'enum', 'typing', 'decision.models.guardian',
-               'decision.models.guardian_cycle', 'decision.runners.guardian_runner'}
+               'decision.models.guardian_cycle', 'decision.models.guardian_live_session',
+               'decision.runners.guardian_runner'}
     for path in ['decision/models/guardian_cycle.py', 'decision/runners/guardian_periodic_runner.py']:
         tree = ast.parse((root/path).read_text())
         for node in ast.walk(tree):
