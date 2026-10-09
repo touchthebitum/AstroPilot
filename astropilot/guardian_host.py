@@ -31,6 +31,7 @@ class GuardianHostConfig:
     schema_version: int = 1
     weather_site: dict | None = None
     notification: GuardianNotificationPolicy = GuardianNotificationPolicy()
+    session_context: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,7 +63,7 @@ def load_config(path):
                          object_pairs_hook=_unique, parse_constant=_constant)
         if (not isinstance(doc, dict)
                 or not {'schema_version', 'interval_seconds', 'anchor'} <= set(doc)
-                or not set(doc) <= {'schema_version', 'interval_seconds', 'anchor', 'enabled', 'provider', 'weather_site', 'notification'}
+                or not set(doc) <= {'schema_version', 'interval_seconds', 'anchor', 'enabled', 'provider', 'weather_site', 'notification', 'session_context'}
                 or type(doc['schema_version']) is not int or doc['schema_version'] != 1
                 or type(doc['interval_seconds']) is not int or doc['interval_seconds'] <= 0
                 or type(doc.get('enabled', False)) is not bool
@@ -80,10 +81,19 @@ def load_config(path):
             if not isinstance(site, dict) or set(site) != {'latitude', 'longitude', 'timeout_seconds'}:
                 raise ValueError('weather_site_invalid')
             ProductionGuardianWeatherAdapter(**site)
+        session = doc.get('session_context')
+        if 'session_context' in doc:
+            from astropilot.guardian_session_store import PROVIDER_ID as SESSION_PROVIDER_ID
+            if (not isinstance(session, dict) or set(session) != {'provider', 'path'}
+                    or session['provider'] != SESSION_PROVIDER_ID
+                    or not isinstance(session['path'], str) or not session['path'].strip()
+                    or not Path(session['path']).is_absolute()):
+                raise ValueError('session_context_invalid')
         cadence = GuardianSchedulerCadence(interval=timedelta(seconds=doc['interval_seconds']),
                                           anchor=datetime.fromisoformat(doc['anchor']))
         return GuardianHostConfig(cadence, doc.get('enabled', False), provider, weather_site=site,
-            notification=GuardianNotificationPolicy.from_config(doc.get('notification', {})))
+            notification=GuardianNotificationPolicy.from_config(doc.get('notification', {})),
+            session_context=session)
     except (OSError, UnicodeError, ValueError, TypeError, OverflowError, RecursionError) as error:
         raise ValueError('config_invalid') from error
 
@@ -248,6 +258,10 @@ def main(argv=None, *, provider_factories=None, clock=None):
                     providers = factory()
                 if not isinstance(providers, GuardianHostProviders):
                     raise ValueError('invalid_provider_factory')
+                if config.session_context is not None:
+                    from astropilot.guardian_session_store import GuardianSessionStore
+                    providers = GuardianHostProviders(providers.evidence,
+                        GuardianSessionStore(config.session_context['path']))
                 phase = 'host'
                 host_clock = clock or (lambda: datetime.now(timezone.utc))
                 runner = GuardianPeriodicRunner(evidence_provider=providers.evidence,
