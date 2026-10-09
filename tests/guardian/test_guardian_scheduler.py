@@ -133,7 +133,7 @@ def test_missing_evidence_stays_fail_closed():
 def test_dependency_boundary_and_no_hidden_io(monkeypatch):
     path = Path(__file__).resolve().parents[2] / 'astropilot/guardian_scheduler.py'
     tree = ast.parse(path.read_text())
-    allowed = {'dataclasses', 'datetime', 'enum', 'threading', 'typing',
+    allowed = {'contextlib', 'astropilot.guardian_scheduler_state', 'dataclasses', 'datetime', 'enum', 'threading', 'typing',
         'decision.models.guardian_cycle', 'decision.runners.guardian_periodic_runner'}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import): assert all(n.name in allowed for n in node.names)

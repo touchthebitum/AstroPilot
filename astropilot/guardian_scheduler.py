@@ -1,4 +1,5 @@
-"""Caller-driven, in-memory Guardian scheduling; no evaluation or execution authority."""
+"""Caller-driven Guardian scheduling with optional durable reservations; no evaluation or execution authority."""
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -7,6 +8,9 @@ from typing import Callable
 
 from decision.models.guardian_cycle import GuardianCycleResult, GuardianCycleStatus
 from decision.runners.guardian_periodic_runner import GuardianPeriodicRunner
+
+from astropilot.guardian_scheduler_state import (GuardianSchedulerStateStore,
+    GuardianSchedulerStateError, GuardianSchedulerStateLocked)
 
 VERSION = 'guardian-scheduler-v1'
 
@@ -55,8 +59,8 @@ class GuardianSchedulerResult:
     def __post_init__(self):
         reasons = {
             GuardianSchedulerStatus.COMPLETED: {'cycle_completed'},
-            GuardianSchedulerStatus.SKIPPED: {'before_anchor', 'slot_already_reserved', 'cycle_in_progress'},
-            GuardianSchedulerStatus.ERROR: {'cycle_error'},
+            GuardianSchedulerStatus.SKIPPED: {'before_anchor', 'slot_already_reserved', 'cycle_in_progress', 'state_locked'},
+            GuardianSchedulerStatus.ERROR: {'cycle_error', 'state_error'},
         }
         if not isinstance(self.status, GuardianSchedulerStatus) or self.reason not in reasons[self.status]:
             raise ValueError('guardian_scheduler_invalid_result')
@@ -65,9 +69,10 @@ class GuardianSchedulerResult:
 
 
 class GuardianScheduler:
-    """One instance per context; reservations do not survive instance recreation."""
+    """One owner per context; inject a shared store for durable reservations."""
     def __init__(self, *, runner: GuardianPeriodicRunner, clock: Callable[[], datetime],
-                 cadence: GuardianSchedulerCadence):
+                 cadence: GuardianSchedulerCadence, state_store: GuardianSchedulerStateStore | None = None):
+        self._state_store = state_store
         self._runner = runner
         self._clock = clock
         self._cadence = cadence
@@ -81,18 +86,28 @@ class GuardianScheduler:
         if not self._guard.acquire(blocking=False):
             return GuardianSchedulerResult(GuardianSchedulerStatus.SKIPPED, slot, 'cycle_in_progress')
         try:
-            if self._last_reserved_slot is not None and slot <= self._last_reserved_slot:
-                return GuardianSchedulerResult(GuardianSchedulerStatus.SKIPPED, slot, 'slot_already_reserved')
-            self._last_reserved_slot = slot
-            try:
-                cycle = self._runner.run_cycle(logical_time=slot)
-                if (not isinstance(cycle, GuardianCycleResult) or cycle.logical_time != slot
-                        or not isinstance(cycle.status, GuardianCycleStatus)):
-                    raise TypeError('invalid_cycle_result')
-            except Exception:
-                return GuardianSchedulerResult(GuardianSchedulerStatus.ERROR, slot, 'cycle_error')
-            if cycle.status is GuardianCycleStatus.ERROR:
-                return GuardianSchedulerResult(GuardianSchedulerStatus.ERROR, slot, 'cycle_error', cycle)
-            return GuardianSchedulerResult(GuardianSchedulerStatus.COMPLETED, slot, 'cycle_completed', cycle)
+            with self._state_store.locked() if self._state_store is not None else nullcontext():
+                if (self._state_store is None and self._last_reserved_slot is not None
+                        and slot <= self._last_reserved_slot):
+                    return GuardianSchedulerResult(GuardianSchedulerStatus.SKIPPED, slot, 'slot_already_reserved')
+                if self._state_store is not None and not self._state_store.claim(slot, self._cadence):
+                    return GuardianSchedulerResult(GuardianSchedulerStatus.SKIPPED, slot, 'slot_already_reserved')
+                self._last_reserved_slot = slot
+                try:
+                    cycle = self._runner.run_cycle(logical_time=slot)
+                    if (not isinstance(cycle, GuardianCycleResult) or cycle.logical_time != slot
+                            or not isinstance(cycle.status, GuardianCycleStatus)):
+                        raise TypeError('invalid_cycle_result')
+                except Exception:
+                    return GuardianSchedulerResult(GuardianSchedulerStatus.ERROR, slot, 'cycle_error')
+                if cycle.status is GuardianCycleStatus.ERROR:
+                    return GuardianSchedulerResult(GuardianSchedulerStatus.ERROR, slot, 'cycle_error', cycle)
+                if self._state_store is not None:
+                    self._state_store.complete(slot, self._cadence)
+                return GuardianSchedulerResult(GuardianSchedulerStatus.COMPLETED, slot, 'cycle_completed', cycle)
+        except GuardianSchedulerStateLocked:
+            return GuardianSchedulerResult(GuardianSchedulerStatus.SKIPPED, slot, 'state_locked')
+        except GuardianSchedulerStateError:
+            return GuardianSchedulerResult(GuardianSchedulerStatus.ERROR, slot, 'state_error')
         finally:
             self._guard.release()
