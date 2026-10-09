@@ -514,6 +514,16 @@
             <label for="session-choice">Sessions de cette mission</label>
             <select id="session-choice"></select>
             <p id="session-status" role="status"></p>
+            <section id="guardian-renewal" hidden aria-label="Confirmation Guardian">
+              <p>Cette confirmation vient de vous. NightMerit ne vérifie pas techniquement que l’acquisition continue.</p>
+              <p>Les actions Guardian restent des recommandations, sans contrôle matériel.</p>
+              <p>Dernière confirmation : <span id="guardian-last-confirmation"></span></p>
+              <p>Échéance : <span id="guardian-deadline"></span></p>
+              <p id="guardian-ownership"></p>
+              <button id="guardian-confirm" type="button" disabled>Je confirme que l’acquisition est toujours en cours</button>
+              <button id="guardian-refresh" type="button">Vérifier l’état Guardian</button>
+              <p id="guardian-message" role="status" aria-live="polite"></p>
+            </section>
             <div id="session-close-actions" hidden>
               <button class="primary-button" id="session-complete" type="button">Terminer la session</button>
               <button class="secondary-button" id="session-interrupt" type="button">Interrompre la session</button>
