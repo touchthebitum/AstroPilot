@@ -1,7 +1,7 @@
 """Immutable Guardian v1 inputs and recommendations; no execution authority."""
 from dataclasses import dataclass
 from datetime import datetime
-from enum import IntEnum
+from enum import Enum, IntEnum
 import math
 
 
@@ -19,6 +19,26 @@ class GuardianAction(IntEnum):
     PREPARE_STOP = 2
     STOP_SESSION = 3
     EMERGENCY_STOP = 4
+
+
+class GuardianSessionState(Enum):
+    ACTIVE = 'ACTIVE'
+    INACTIVE = 'INACTIVE'
+    UNKNOWN = 'UNKNOWN'
+
+
+class GuardianActionApplicability(Enum):
+    APPLICABLE = 'APPLICABLE'
+    NOT_APPLICABLE = 'NOT_APPLICABLE'
+    UNKNOWN = 'UNKNOWN'
+
+
+@dataclass(frozen=True)
+class GuardianSessionContext:
+    session_active: bool
+    observed_at: datetime
+    session_id: str | None = None
+    version: str = 'guardian-session-v1'
 
 
 @dataclass(frozen=True)
@@ -83,5 +103,13 @@ class GuardianAssessment:
     policy: GuardianPolicy
     assessed_at: datetime
     source_evidence: tuple[tuple[str, GuardianEvidence | None], ...]
-    session_active: bool
+    session_active: bool | None
+    session_context: GuardianSessionContext | None
+    session_state: GuardianSessionState
+    action_applicability: GuardianActionApplicability
+    session_reasons: tuple[str, ...]
     hardware_action: None = None
+
+    @property
+    def operationally_applicable(self) -> bool:
+        return self.action_applicability is GuardianActionApplicability.APPLICABLE
