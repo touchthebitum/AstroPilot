@@ -344,3 +344,103 @@ def test_builtin_disabled_no_acquisition(tmp_path, monkeypatch):
     monkeypatch.setattr(live, '_transport', lambda **kw: pytest.fail('unexpected acquisition'))
     path = config(tmp_path, enabled=False, provider=live.PROVIDER_ID)
     assert main(['--config',str(path),'--data-dir',str(tmp_path),'--once']) == 0
+
+
+@pytest.mark.parametrize('failure', ['evidence_provider_error', 'session_provider_error',
+                                    'evaluation_error', 'combined'])
+@pytest.mark.parametrize('elapsed', [60, 600])
+def test_transient_cycle_continues_without_retry_burst_or_replay(tmp_path, failure, elapsed):
+    stop, current = Event(), [NOW]
+    evidence = Mock(return_value=GuardianObservation())
+    session = Mock(return_value=None)
+    evaluator = GuardianRunner()
+    evaluator.evaluate = Mock(wraps=evaluator.evaluate)
+    failing = Mock(side_effect=RuntimeError('private failure'))
+    if failure in ('evidence_provider_error', 'combined'):
+        evidence.side_effect = failing
+    if failure in ('session_provider_error', 'combined'):
+        session.side_effect = failing
+    if failure == 'evaluation_error':
+        evaluator.evaluate.side_effect = failing
+    runner = GuardianPeriodicRunner(evidence_provider=evidence,
+        session_context_provider=session, guardian_runner=evaluator)
+    def scheduler():
+        return GuardianScheduler(runner=runner, clock=lambda: current[0], cadence=CADENCE,
+            state_store=GuardianSchedulerStateStore(tmp_path))
+    active = scheduler()
+    active.poll = Mock(wraps=active.poll)
+    events, waits = [], []
+    notifier = Mock()
+    def wait(delay):
+        waits.append(delay)
+        if len(waits) == 1:
+            notifier.assert_not_called()
+            assert [e['event'] for e in events] == ['cycle', 'error']
+            # Restart against persisted state in the failed slot: never reacquire.
+            assert scheduler().poll().reason == 'slot_already_reserved'
+            assert evidence.call_count == session.call_count == 1
+            evidence.side_effect = session.side_effect = evaluator.evaluate.side_effect = None
+            current[0] += timedelta(seconds=elapsed)
+        else:
+            stop.set()
+    host = GuardianHost(scheduler=active, cadence=CADENCE, clock=lambda: current[0],
+        stop_event=stop, report=events.append, wait=wait, notifier=notifier)
+    assert host.run() == 0
+    assert active.poll.call_count == 2
+    cycles = [e for e in events if e['event'] == 'cycle']
+    assert [e['slot'] for e in cycles] == [NOW.isoformat(), current[0].isoformat()]
+    assert cycles[0]['status'] == cycles[0]['cycle_status'] == 'ERROR'
+    assert cycles[0]['decision_eligible'] is False
+    assert cycles[0]['action'] == 'EMERGENCY_STOP'
+    expected = ['evidence_provider_error', 'session_provider_error'] if failure == 'combined' else [failure]
+    assert cycles[0]['errors'] == expected
+    assert cycles[1]['status'] == 'COMPLETED'
+    assert events[1] == {'event': 'error', 'reason': 'cycle_error'}
+    assert not any(e['event'] == 'notification' for e in events[:3])
+    assert waits == [60, 60]
+    assert evidence.call_count == session.call_count == 2
+    assert scheduler().poll().reason == 'slot_already_reserved'
+    assert evidence.call_count == 2
+
+
+@pytest.mark.parametrize('failure', ['evidence_provider_error', 'session_provider_error', 'evaluation_error'])
+def test_transient_once_is_bounded(tmp_path, failure):
+    stop = Event()
+    evidence, session = Mock(return_value=GuardianObservation()), Mock(return_value=None)
+    evaluator = GuardianRunner()
+    target = {'evidence_provider_error': evidence, 'session_provider_error': session}.get(failure)
+    if target is not None:
+        target.side_effect = RuntimeError('private')
+    else:
+        evaluator.evaluate = Mock(side_effect=RuntimeError('private'))
+    runner = GuardianPeriodicRunner(evidence_provider=evidence,
+        session_context_provider=session, guardian_runner=evaluator)
+    scheduler = GuardianScheduler(runner=runner, clock=lambda: NOW, cadence=CADENCE,
+        state_store=GuardianSchedulerStateStore(tmp_path))
+    scheduler.poll = Mock(wraps=scheduler.poll)
+    wait, notifier, events = Mock(), Mock(), []
+    host = GuardianHost(scheduler=scheduler, cadence=CADENCE, clock=lambda: NOW,
+        stop_event=stop, report=events.append, wait=wait, notifier=notifier)
+    assert host.run(once=True) == 6
+    scheduler.poll.assert_called_once()
+    wait.assert_not_called()
+    notifier.assert_not_called()
+    assert [e['event'] for e in events] == ['cycle', 'error']
+
+
+@pytest.mark.parametrize('reason, errors', [('state_error', None), ('cycle_error', None),
+                                          ('cycle_error', ()), ('cycle_error', ('unexpected_error',)),
+                                          ('cycle_error', ('evidence_provider_error', 'unexpected_error'))])
+def test_unclassified_and_state_errors_remain_fatal(reason, errors):
+    from astropilot.guardian_scheduler import GuardianSchedulerResult, GuardianSchedulerStatus
+    from decision.models.guardian_cycle import GuardianCycleResult, GuardianCycleStatus
+    cycle = None if errors is None else GuardianCycleResult(GuardianCycleStatus.ERROR, NOW, None, errors)
+    scheduler = Mock()
+    scheduler.poll.return_value = GuardianSchedulerResult(GuardianSchedulerStatus.ERROR, NOW, reason, cycle)
+    wait, notifier = Mock(), Mock()
+    host = GuardianHost(scheduler=scheduler, cadence=CADENCE, clock=lambda: NOW,
+        stop_event=Event(), report=lambda e: None, wait=wait, notifier=notifier)
+    assert host.run() == (5 if reason == 'state_error' else 6)
+    scheduler.poll.assert_called_once()
+    wait.assert_not_called()
+    notifier.assert_not_called()
