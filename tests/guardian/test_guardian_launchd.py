@@ -129,7 +129,7 @@ def test_generated_disabled_process_from_other_cwd(tmp_path):
 
 def test_venv_interpreter_symlink_is_preserved(tmp_path):
     args = inputs(tmp_path)
-    interpreter = tmp_path / 'venv' / 'bin' / 'python'
+    interpreter = tmp_path / 'venv' / ('Scripts' if os.name == 'nt' else 'bin') / ('python.exe' if os.name == 'nt' else 'python')
     interpreter.parent.mkdir(parents=True)
     interpreter.symlink_to(sys.executable)
     assert build_launch_agent(**(args | {'python': interpreter}))['ProgramArguments'][0] == str(interpreter)

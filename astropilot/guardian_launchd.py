@@ -29,7 +29,8 @@ def build_launch_agent(*, python, config, data_dir, log_dir, state_dir=None,
         raise ValueError('invalid_restart_count')
     # Resolving a venv's interpreter symlink can select the base environment.
     python = _absolute(python)
-    if not python.is_file() or not os.access(python, os.X_OK):
+    if (not python.is_file() or not os.access(python, os.X_OK)
+            or (os.name == 'nt' and python.suffix.lower() != '.exe')):
         raise ValueError('executable_python_required')
     config = _absolute(config).resolve(strict=True)
     load_config(config)
