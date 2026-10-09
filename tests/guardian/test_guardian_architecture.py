@@ -5,20 +5,23 @@ import sys
 
 def test_dependency_boundary():
     root=Path(__file__).resolve().parents[2]
-    for filename in ('decision/models/guardian.py','decision/services/guardian_service.py'):
+    for filename in ('decision/models/guardian.py', 'decision/models/guardian_live_session.py',
+                     'decision/models/guardian_rain.py', 'decision/services/guardian_live_contracts.py',
+                     'decision/services/guardian_service.py'):
         tree=ast.parse((root/filename).read_text())
         imports=[]
         for node in ast.walk(tree):
             if isinstance(node,ast.Import): imports.extend(n.name for n in node.names)
             elif isinstance(node,ast.ImportFrom): imports.append(node.module or '')
-        assert all(name.split('.')[0] in sys.stdlib_module_names or name=='decision.models.guardian' for name in imports)
+        assert all(name.split('.')[0] in sys.stdlib_module_names or name in {'decision.models.guardian', 'decision.models.guardian_live_session',
+                 'decision.models.guardian_rain', 'decision.services.guardian_live_contracts'} for name in imports)
         assert not any(isinstance(node,ast.Call) and isinstance(node.func,ast.Name) and node.func.id in ('open','__import__','eval','exec') for node in ast.walk(tree))
 
 
 def test_runner_and_transport_dependency_boundaries():
     root=Path(__file__).resolve().parents[2]
     allowed={
-        'decision/runners/guardian_runner.py': {'decision.models.guardian','decision.services.guardian_service'},
+        'decision/runners/guardian_runner.py': {'decision.models.guardian','decision.models.guardian_live_session','decision.services.guardian_service'},
         'astropilot/guardian_api.py': {'pydantic','decision.models.guardian','decision.runners.guardian_runner'},
     }
     for filename, exceptions in allowed.items():
