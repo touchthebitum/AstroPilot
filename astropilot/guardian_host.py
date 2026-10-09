@@ -1,4 +1,4 @@
-"""Explicit foreground Guardian orchestration; no live acquisition or execution."""
+"""Explicit foreground Guardian orchestration with opt-in evidence acquisition."""
 import argparse
 from contextlib import contextmanager, redirect_stdout, redirect_stderr
 from dataclasses import dataclass
@@ -27,6 +27,7 @@ class GuardianHostConfig:
     enabled: bool = False
     provider: str | None = None
     schema_version: int = 1
+    weather_site: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +59,7 @@ def load_config(path):
                          object_pairs_hook=_unique, parse_constant=_constant)
         if (not isinstance(doc, dict)
                 or not {'schema_version', 'interval_seconds', 'anchor'} <= set(doc)
-                or not set(doc) <= {'schema_version', 'interval_seconds', 'anchor', 'enabled', 'provider'}
+                or not set(doc) <= {'schema_version', 'interval_seconds', 'anchor', 'enabled', 'provider', 'weather_site'}
                 or type(doc['schema_version']) is not int or doc['schema_version'] != 1
                 or type(doc['interval_seconds']) is not int or doc['interval_seconds'] <= 0
                 or type(doc.get('enabled', False)) is not bool
@@ -70,9 +71,15 @@ def load_config(path):
             raise ValueError('invalid_provider_identifier')
         if doc.get('enabled', False) and provider is None:
             raise ValueError('provider_required')
+        site = doc.get('weather_site')
+        if site is not None:
+            from astropilot.guardian_live_evidence import ProductionGuardianWeatherAdapter
+            if not isinstance(site, dict) or set(site) != {'latitude', 'longitude', 'timeout_seconds'}:
+                raise ValueError('weather_site_invalid')
+            ProductionGuardianWeatherAdapter(**site)
         cadence = GuardianSchedulerCadence(interval=timedelta(seconds=doc['interval_seconds']),
                                           anchor=datetime.fromisoformat(doc['anchor']))
-        return GuardianHostConfig(cadence, doc.get('enabled', False), provider)
+        return GuardianHostConfig(cadence, doc.get('enabled', False), provider, weather_site=site)
     except (OSError, UnicodeError, ValueError, TypeError, OverflowError, RecursionError) as error:
         raise ValueError('config_invalid') from error
 
@@ -206,7 +213,17 @@ def main(argv=None, *, provider_factories=None, clock=None):
                 if stop.is_set():
                     return 0
                 phase = 'provider'
-                factory = (provider_factories or {}).get(config.provider)
+                if provider_factories is None:
+                    from astropilot.guardian_live_evidence import PROVIDER_ID, ProductionGuardianWeatherAdapter
+                    def weather_factory():
+                        if config.weather_site is None:
+                            raise ValueError('weather_site_required')
+                        return GuardianHostProviders(
+                            ProductionGuardianWeatherAdapter(**config.weather_site), lambda _: None)
+                    registry = {PROVIDER_ID: weather_factory}
+                else:
+                    registry = provider_factories
+                factory = registry.get(config.provider)
                 if factory is None:
                     _emit({'event': 'error', 'reason': 'provider_unavailable'})
                     return 3

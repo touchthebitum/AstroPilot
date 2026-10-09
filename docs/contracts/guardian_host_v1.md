@@ -2,14 +2,15 @@
 
 Foreground orchestration only. CLI: `python -m astropilot.guardian_host
 --config CONFIG --data-dir DATA [--state-dir STATE] [--once]`.
-No OS autostart, notification, hardware, network acquisition, Tonight,
+No OS autostart, notification, hardware, implicit network acquisition, Tonight,
 Opportunity Alerts, Field Lab or NAS integration.
 
 ## Configuration and providers
 
 Strict UTF-8 JSON object: `schema_version` (integer 1), `interval_seconds`
 (positive integer), `anchor` (aware ISO timestamp), optional `enabled` (boolean,
-default false), optional `provider` (registry identifier, default null).
+default false), optional `provider` (registry identifier, default null), optional `weather_site` (strict explicit
+latitude/longitude/timeout configuration; see guardian_live_evidence_v1.md).
 No unknown/duplicate fields, coerced values or nonfinite numbers. Cadence is
 normalized to UTC and must match the existing durable store.
 
@@ -17,9 +18,9 @@ An enabled host requires an explicit provider identifier. Embedders call
 `main(argv, provider_factories={identifier: factory})`. Each trusted factory
 receives no arguments and returns `GuardianHostProviders(evidence, session)`;
 both callables receive the slot time under the periodic runner contract.
-There is no dynamic import or automatic provider discovery. The standalone CLI
-has an empty registry: enabled acquisition fails with `provider_unavailable`.
-This V1 is not production-ready for live acquisition. Providers must be bounded,
+There is no dynamic import or automatic provider discovery. The standalone CLI now has an explicit opt-in `open_meteo_current_v1` registry
+entry; see guardian_live_evidence_v1.md for weather_site config and limitations.
+Unknown provider IDs fail with `provider_unavailable`. Providers must be bounded,
 cooperative synchronous adapters; no host-owned threads/processes or retries.
 Default GuardianPolicy remains owned by GuardianRunner, not the host config.
 
@@ -63,7 +64,7 @@ exit emits shutdown; errors also emit error. `--once` performs at most one poll.
 {"schema_version":1,"interval_seconds":60,"anchor":"2026-10-09T00:00:00+00:00"}
 ```
 
-Enable only with `"enabled":true,"provider":"your_adapter"` and an explicit
+Enable injected providers with `"enabled":true,"provider":"your_adapter"` and an explicit
 trusted registry supplied by the embedding entrypoint. Factories must return
 synchronous callables without background workers; provider output is suppressed
 while constructing dependencies and polling. OS supervision/autostart or Guardian
