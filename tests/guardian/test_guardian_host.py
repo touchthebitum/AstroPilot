@@ -178,7 +178,7 @@ def test_actual_wait_interruptible():
 
 def test_host_dependency_boundary():
     tree = ast.parse((Path(__file__).resolve().parents[2] / 'astropilot/guardian_host.py').read_text())
-    allowed = {'astropilot.guardian_scheduler', 'astropilot.guardian_scheduler_state',
+    allowed = {'astropilot.guardian_scheduler', 'astropilot.guardian_scheduler_state', 'astropilot.guardian_live_evidence',
                'decision.runners.guardian_periodic_runner', 'decision.runners.guardian_runner'}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import): names = [n.name for n in node.names]
@@ -323,3 +323,24 @@ def test_windows_host_lock_backend(tmp_path, monkeypatch):
     fake.locking = Mock(side_effect=BlockingIOError(11, 'busy'))
     with pytest.raises(HostAlreadyRunning):
         with host_lock(tmp_path / '.guardian_host.lock'): pytest.fail('duplicate accepted')
+
+
+def test_builtin_registry_explicit(tmp_path, capsys, monkeypatch):
+    from astropilot import guardian_live_evidence as live
+    calls = []
+    monkeypatch.setattr(live.ProductionGuardianWeatherAdapter, '__call__',
+                        lambda self, t: calls.append(t) or GuardianObservation())
+    path = config(tmp_path, provider=live.PROVIDER_ID,
+                  weather_site={'latitude':46, 'longitude':7, 'timeout_seconds':2})
+    assert main(['--config',str(path),'--data-dir',str(tmp_path),'--once'], clock=lambda:NOW) == 0
+    assert calls == [NOW]
+    path = config(tmp_path, provider='open_meteo_current_v2')
+    assert main(['--config',str(path),'--data-dir',str(tmp_path),'--once']) == 3
+    assert calls == [NOW]
+
+
+def test_builtin_disabled_no_acquisition(tmp_path, monkeypatch):
+    from astropilot import guardian_live_evidence as live
+    monkeypatch.setattr(live, '_transport', lambda **kw: pytest.fail('unexpected acquisition'))
+    path = config(tmp_path, enabled=False, provider=live.PROVIDER_ID)
+    assert main(['--config',str(path),'--data-dir',str(tmp_path),'--once']) == 0
