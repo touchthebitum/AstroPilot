@@ -1,4 +1,5 @@
 """Opt-in explicit NightMerit execution caller; no background activity."""
+from astropilot.guardian_session_store import PublicationValidationError
 from datetime import datetime
 from threading import RLock
 
@@ -20,6 +21,16 @@ class GuardianSessionLifecycle:
         self._owner = None
         self._lock = RLock()
 
+    @property
+    def owner_execution_id(self):
+        with self._lock:
+            return self._owner
+
+    def revoke(self):
+        """Revoke eligibility without modifying evidence or execution history."""
+        with self._lock:
+            self._owner = None
+
     @staticmethod
     def _validate_time(observed_at):
         if not isinstance(observed_at, datetime) or observed_at.utcoffset() is None:
@@ -31,6 +42,9 @@ class GuardianSessionLifecycle:
             'CALLER_ASSERTED', session_id)
         try:
             self.store.write(evidence)
+        except PublicationValidationError:
+            self._owner = None
+            raise
         except Exception:
             self._owner = None
             # Remove last-good evidence on failure. If removal also fails, its
