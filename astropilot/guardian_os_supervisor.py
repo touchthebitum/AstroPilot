@@ -137,9 +137,13 @@ def main(argv=None):
                     with job_context as job:
                         def launch():
                             # Config/path/log changes fail before any new host launch.
-                            build_launch_agent(python=args.python, config=args.config,
-                                data_dir=args.data_dir, log_dir=args.log_dir,
-                                state_dir=args.state_dir)
+                            try:
+                                build_launch_agent(python=args.python, config=args.config,
+                                    data_dir=args.data_dir, log_dir=args.log_dir,
+                                    state_dir=args.state_dir)
+                            except OSError as error:
+                                # Deployment failure is fail-fast, not a spawn failure.
+                                raise ValueError('deployment_invalid') from error
                             return launch_child(command, job)
                         return supervise(launch, _stop, restart_count=args.restart_count,
                             restart_seconds=args.restart_seconds, wait=retry_wait)

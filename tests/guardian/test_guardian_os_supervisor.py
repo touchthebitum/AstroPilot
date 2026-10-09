@@ -234,14 +234,18 @@ with WindowsJob() as job:
             kernel.CloseHandle(handle)
 
 
-def test_config_becomes_invalid_during_wait_fails_fast(deployment, monkeypatch):
+@pytest.mark.parametrize('missing', [False, True])
+def test_config_becomes_invalid_during_wait_fails_fast(deployment, monkeypatch, missing):
     launches = []
     class Child:
         def wait(self, timeout):
             return 7
     monkeypatch.setattr(supervisor, 'launch_child', lambda *a: launches.append(True) or Child())
     def wait(seconds):
-        deployment[0].write_text('{}')
+        if missing:
+            deployment[0].unlink()
+        else:
+            deployment[0].write_text('{}')
         return False
     monkeypatch.setattr(supervisor, 'retry_wait', wait)
     assert supervisor.main(argv(deployment)) == 2
