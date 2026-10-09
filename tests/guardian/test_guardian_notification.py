@@ -62,7 +62,8 @@ def test_payload_wording_and_allowlist():
 def test_os_semantics(channel_type, platform, timeout, outcome, status):
     process = Mock(return_value=SimpleNamespace(returncode=outcome))
     if outcome == 'timeout': process.side_effect = subprocess.TimeoutExpired('private', timeout)
-    channel = channel_type(platform=platform, process=process)
+    options = {'system_root': r'C:\Windows'} if channel_type is WindowsChannel else {}
+    channel = channel_type(platform=platform, process=process, **options)
     result = channel.deliver('Guardian é " $(touch /tmp/x) ☄', 'Quotes \' ` & < > ; \\ Unicode 🪐')
     assert result.status is status
     args, kw = process.call_args
@@ -222,7 +223,7 @@ def test_windows_native_capacity_and_root_validation():
     assert len(title.encode('utf-16-le')) <= 126
     assert len(message.encode('utf-16-le')) <= 510
     process.reset_mock()
-    for root in ('relative','\\network\share',None):
+    for root in ('relative',r'\\network\share',None):
         invalid=WindowsChannel(platform='win32',process=process,system_root=root)
         if root is None: invalid.system_root=None
         assert invalid.deliver('title','message').reason == 'process_failed'

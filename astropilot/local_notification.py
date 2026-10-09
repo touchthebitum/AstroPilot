@@ -134,7 +134,7 @@ class WindowsChannel:
     def __init__(self, *, platform=None, process=None, system_root=None):
         self.platform = sys.platform if platform is None else platform
         self.process = subprocess.run if process is None else process
-        self.system_root = os.environ.get('SystemRoot', r'C:\Windows') if system_root is None else system_root
+        self.system_root = os.environ.get('SystemRoot', '') if system_root is None else system_root
 
     def deliver(self, title: str, message: str) -> DeliveryResult:
         if any(not isinstance(v, str) or '\x00' in v for v in (title, message)):
