@@ -28,6 +28,9 @@ from pydantic import (
     model_validator,
 )
 
+from astropilot.guardian_api import GuardianEvaluateRequest, GuardianEvaluateResponse, evaluate as evaluate_guardian
+from decision.runners.guardian_runner import GuardianRunner
+
 from astropilot.opportunity_alert_api import OpportunityAlertResponse, claim_opportunity_alert
 from astropilot.opportunity_alert_ledger import FileOpportunityAlertLedger
 from astropilot.opportunity_alert_status import read_status
@@ -1964,9 +1967,11 @@ def create_app(
     selection_id_factory: Callable[[], str] = _generate_selection_id,
     alert_policy_provider: Callable[[], OpportunityAlertPolicy] = OpportunityAlertPolicy,
     alert_ledger_factory: Callable = FileOpportunityAlertLedger,
+    guardian_runner: GuardianRunner | None = None,
 ) -> FastAPI:
     application_version = canonical_version()
     resolved_service = None
+    resolved_guardian_runner = guardian_runner if guardian_runner is not None else GuardianRunner()
 
     @asynccontextmanager
     async def lifespan(application):
@@ -1982,6 +1987,8 @@ def create_app(
         request: Request,
         exc: RequestValidationError,
     ):
+        if request.url.path == "/v1/guardian/evaluate":
+            return JSONResponse(status_code=422, content={"detail": {"code": "invalid_guardian_request"}})
         if request.url.path.endswith("/outcome-evaluation"):
             return JSONResponse(status_code=422, content={"detail": {"code": "invalid_outcome_evaluation_request"}})
         if request.url.path != "/v1/configuration":
@@ -2038,6 +2045,13 @@ def create_app(
         StaticFiles(directory=web_root),
         name="tonight-ui",
     )
+
+    @application.post("/v1/guardian/evaluate", response_model=GuardianEvaluateResponse)
+    def guardian_evaluate(request: GuardianEvaluateRequest):
+        try:
+            return evaluate_guardian(request, resolved_guardian_runner, clock())
+        except Exception:
+            raise HTTPException(status_code=500, detail={"code": "guardian_evaluation_failed"}) from None
 
     @application.get("/", include_in_schema=False)
     def tonight_ui():
