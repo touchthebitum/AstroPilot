@@ -178,7 +178,7 @@ def test_actual_wait_interruptible():
 
 def test_host_dependency_boundary():
     tree = ast.parse((Path(__file__).resolve().parents[2] / 'astropilot/guardian_host.py').read_text())
-    allowed = {'astropilot.guardian_scheduler', 'astropilot.guardian_scheduler_state', 'astropilot.guardian_live_evidence',
+    allowed = {'astropilot.guardian_notification', 'astropilot.guardian_scheduler', 'astropilot.guardian_scheduler_state', 'astropilot.guardian_live_evidence',
                'decision.runners.guardian_periodic_runner', 'decision.runners.guardian_runner'}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import): names = [n.name for n in node.names]

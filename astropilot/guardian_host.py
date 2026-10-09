@@ -13,6 +13,8 @@ import sys
 from threading import Event
 from typing import Callable
 
+from astropilot.guardian_notification import GuardianNotificationPolicy, deliver_cycle, local_notifier
+
 from astropilot.guardian_scheduler import (
     GuardianScheduler, GuardianSchedulerCadence, GuardianSchedulerStatus,
 )
@@ -28,6 +30,7 @@ class GuardianHostConfig:
     provider: str | None = None
     schema_version: int = 1
     weather_site: dict | None = None
+    notification: GuardianNotificationPolicy = GuardianNotificationPolicy()
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +62,7 @@ def load_config(path):
                          object_pairs_hook=_unique, parse_constant=_constant)
         if (not isinstance(doc, dict)
                 or not {'schema_version', 'interval_seconds', 'anchor'} <= set(doc)
-                or not set(doc) <= {'schema_version', 'interval_seconds', 'anchor', 'enabled', 'provider', 'weather_site'}
+                or not set(doc) <= {'schema_version', 'interval_seconds', 'anchor', 'enabled', 'provider', 'weather_site', 'notification'}
                 or type(doc['schema_version']) is not int or doc['schema_version'] != 1
                 or type(doc['interval_seconds']) is not int or doc['interval_seconds'] <= 0
                 or type(doc.get('enabled', False)) is not bool
@@ -79,7 +82,8 @@ def load_config(path):
             ProductionGuardianWeatherAdapter(**site)
         cadence = GuardianSchedulerCadence(interval=timedelta(seconds=doc['interval_seconds']),
                                           anchor=datetime.fromisoformat(doc['anchor']))
-        return GuardianHostConfig(cadence, doc.get('enabled', False), provider, weather_site=site)
+        return GuardianHostConfig(cadence, doc.get('enabled', False), provider, weather_site=site,
+            notification=GuardianNotificationPolicy.from_config(doc.get('notification', {})))
     except (OSError, UnicodeError, ValueError, TypeError, OverflowError, RecursionError) as error:
         raise ValueError('config_invalid') from error
 
@@ -149,7 +153,8 @@ def cycle_diagnostic(result):
 
 
 class GuardianHost:
-    def __init__(self, *, scheduler, cadence, clock, stop_event, report, wait=None):
+    def __init__(self, *, scheduler, cadence, clock, stop_event, report, wait=None, notifier=None):
+        self.notifier = notifier
         self.scheduler = scheduler
         self.cadence = cadence
         self.clock = clock
@@ -165,6 +170,10 @@ class GuardianHost:
             if result.status is GuardianSchedulerStatus.ERROR:
                 self.report({'event': 'error', 'reason': result.reason})
                 return 5 if result.reason == 'state_error' else 6
+            if result.status is GuardianSchedulerStatus.COMPLETED and self.notifier is not None:
+                with _quiet_dependencies():
+                    delivery = deliver_cycle(result.cycle, self.notifier)
+                self.report({'event': 'notification', 'status': delivery.status.value, 'reason': delivery.reason})
             if once:
                 return 0
             next_due = (self.cadence.anchor if result.slot is None
@@ -239,7 +248,8 @@ def main(argv=None, *, provider_factories=None, clock=None):
                     cadence=config.cadence,
                     state_store=GuardianSchedulerStateStore(args.state_dir or data_dir))
                 return GuardianHost(scheduler=scheduler, cadence=config.cadence,
-                    clock=host_clock, stop_event=stop, report=_emit).run(once=args.once)
+                    clock=host_clock, stop_event=stop, report=_emit,
+                    notifier=local_notifier(config.notification) if config.notification.enabled else None).run(once=args.once)
     except HostAlreadyRunning:
         _emit({'event': 'error', 'reason': 'host_already_running'})
         return 4
