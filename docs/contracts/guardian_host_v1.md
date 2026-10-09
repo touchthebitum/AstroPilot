@@ -38,8 +38,13 @@ claims prevent replay, including failed/crashed cycles.
 SIGINT/SIGTERM set a stop event. Wait is interruptible, capped at 60 seconds for
 wall-clock adjustments. A running synchronous cycle finishes before shutdown;
 providers cannot be forcibly interrupted. Signal handlers and locks are restored
-on every exit. No orphan threads/processes. Fatal cycle/state errors stop the
-host; there is no hidden retry. Disabled config exits without providers or state.
+on every exit. No orphan threads/processes. A classified `cycle_error` whose
+nonempty cycle errors contain only `evidence_provider_error`,
+`session_provider_error` or `evaluation_error` emits error diagnostics and
+continues at the next normal slot boundary. The cycle remains ERROR,
+EMERGENCY_STOP and decision_eligible=false; no decision notification is sent.
+There is no immediate retry, replay or catch-up burst. Missing/unclassified cycle
+results and state errors remain fatal. Disabled config exits without providers or state.
 
 ## Diagnostics and exits
 
@@ -54,7 +59,7 @@ even if its embedded assessment would otherwise be favorable.
 Exit 0: normal/disabled/cooperative stop, successful or skipped once poll.
 Exit 2: config/CLI error. Exit 3: unavailable/invalid/failing provider factory.
 Exit 4: duplicate host or host lock failure. Exit 5: scheduler state failure.
-Exit 6: cycle/provider/evaluation ERROR, including `--once`. Exit 1: unexpected
+Exit 6: fatal/unclassified cycle ERROR, or any cycle ERROR in `--once`. Exit 1: unexpected
 host failure. Public reasons are stable allowlisted codes. After startup, every
 exit emits shutdown; errors also emit error. `--once` performs at most one poll.
 

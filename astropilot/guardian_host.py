@@ -169,7 +169,15 @@ class GuardianHost:
             self.report(cycle_diagnostic(result))
             if result.status is GuardianSchedulerStatus.ERROR:
                 self.report({'event': 'error', 'reason': result.reason})
-                return 5 if result.reason == 'state_error' else 6
+                # Only classified transient failures may resume at the next boundary.
+                # The scheduler has already durably reserved this failed slot.
+                transient = (result.reason == 'cycle_error'
+                    and result.cycle is not None
+                    and bool(result.cycle.errors)
+                    and set(result.cycle.errors) <= {
+                        'evidence_provider_error', 'session_provider_error', 'evaluation_error'})
+                if once or not transient:
+                    return 5 if result.reason == 'state_error' else 6
             if result.status is GuardianSchedulerStatus.COMPLETED and self.notifier is not None:
                 with _quiet_dependencies():
                     delivery = deliver_cycle(result.cycle, self.notifier)
