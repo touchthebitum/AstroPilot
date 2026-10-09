@@ -1,5 +1,7 @@
 # Guardian Live Evidence Adapter v1
 
+Transport superseded by [v2](guardian_live_evidence_v2.md); mapping remains unchanged.
+
 Explicit opt-in provider `open_meteo_current_v1`. Acquisition only; GuardianService
 owns freshness/risk. No Tonight, Opportunity Alerts, Field Lab/NAS, workers,
 notification or hardware. Existing astro_score.fetch_weather uses the same
