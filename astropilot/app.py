@@ -28,6 +28,8 @@ from pydantic import (
     model_validator,
 )
 
+from astropilot.guardian_renewal_api import (GuardianRenewalAdapter, RenewalRequest, Rejection,
+    valid_key, valid_execution_id, response as guardian_response, unavailable as guardian_unavailable)
 from astropilot.guardian_api import GuardianEvaluateRequest, GuardianEvaluateResponse, evaluate as evaluate_guardian
 from decision.runners.guardian_runner import GuardianRunner
 
@@ -1968,17 +1970,36 @@ def create_app(
     alert_policy_provider: Callable[[], OpportunityAlertPolicy] = OpportunityAlertPolicy,
     alert_ledger_factory: Callable = FileOpportunityAlertLedger,
     guardian_runner: GuardianRunner | None = None,
+    guardian_renewal_enabled: bool | None = None,
+    guardian_attestation_path: Path | None = None,
+    guardian_command_capacity: int = 4096,
 ) -> FastAPI:
     application_version = canonical_version()
     resolved_service = None
+    guardian_adapter = None
+    renewal_enabled = (os.environ.get("ASTROPILOT_GUARDIAN_EXPLICIT_RENEWAL") == "1"
+                       if guardian_renewal_enabled is None else guardian_renewal_enabled)
     resolved_guardian_runner = guardian_runner if guardian_runner is not None else GuardianRunner()
 
     @asynccontextmanager
     async def lifespan(application):
-        nonlocal resolved_service
-        if service_factory is _production_service_factory and resolved_service is None:
+        nonlocal resolved_service, guardian_adapter
+        if (service_factory is _production_service_factory or renewal_enabled) and resolved_service is None:
             resolved_service = service_factory()
-        yield
+        if renewal_enabled:
+            if os.environ.get("WEB_CONCURRENCY", "1") != "1":
+                raise RuntimeError("guardian_single_worker_required")
+            configured_path = guardian_attestation_path or os.environ.get("ASTROPILOT_GUARDIAN_ATTESTATION_PATH")
+            if not configured_path:
+                raise RuntimeError("guardian_authoritative_attestation_path_required")
+            guardian_adapter = GuardianRenewalAdapter(resolved_service, configured_path, clock, guardian_command_capacity)
+            application.state.guardian_renewal = guardian_adapter
+        try:
+            yield
+        finally:
+            if guardian_adapter is not None:
+                guardian_adapter.close()
+                guardian_adapter = None
 
     application = FastAPI(title="AstroPilot API", version=application_version, lifespan=lifespan)
 
@@ -1987,6 +2008,8 @@ def create_app(
         request: Request,
         exc: RequestValidationError,
     ):
+        if request.url.path.endswith("/guardian-renewal") or (renewal_enabled and request.url.path == "/v1/execution-transitions"):
+            return guardian_unavailable("invalid_guardian_renewal_request", None, clock, 422)
         if request.url.path == "/v1/guardian/evaluate":
             return JSONResponse(status_code=422, content={"detail": {"code": "invalid_guardian_request"}})
         if request.url.path.endswith("/outcome-evaluation"):
@@ -2033,7 +2056,24 @@ def create_app(
 
     @application.middleware("http")
     async def ui_cache_policy(request: Request, call_next):
+        guardian_route = request.url.path.endswith("/guardian-renewal") or (renewal_enabled and request.url.path == "/v1/execution-transitions")
+        if guardian_route:
+            try:
+                request.state.guardian_receipt = clock()
+                if request.state.guardian_receipt.utcoffset() != timedelta(0):
+                    raise ValueError()
+            except Exception:
+                return guardian_unavailable("guardian_clock_unavailable", None, clock, 503)
+            # The launcher binds loopback; the API has no credential or CORS middleware.
+            # Reject browser commands from a different origin as well.
+            if request.method == "POST" and request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
+                return guardian_unavailable("invalid_guardian_renewal_request", None, clock, 422)
+            origin = request.headers.get("origin")
+            if request.method == "POST" and origin and origin != str(request.base_url).rstrip("/"):
+                return guardian_unavailable("invalid_guardian_renewal_request", None, clock, 422)
         response = await call_next(request)
+        if guardian_route:
+            response.headers["Cache-Control"] = "no-store"
         if request.url.path == "/":
             response.headers["Cache-Control"] = "no-store"
         elif request.url.path in {"/ui/app.js", "/ui/alert-status.js", "/ui/styles.css"}:
@@ -3771,7 +3811,28 @@ def create_app(
         response_model=ExecutionResponse,
         summary="Transition an exact execution",
     )
-    def transition_execution(request: ExecutionTransitionRequest):
+    def transition_execution(request: ExecutionTransitionRequest, http_request: Request):
+        if renewal_enabled:
+            if guardian_adapter is None:
+                return guardian_unavailable("guardian_state_unavailable", request.execution_id, clock, 503)
+            try:
+                valid_execution_id(request.execution_id)
+                key = valid_key(http_request.headers.get("Idempotency-Key"))
+                instance = http_request.headers.get("X-Guardian-Owner-Instance-Id")
+                if not instance:
+                    raise Rejection("invalid_guardian_renewal_request", 422)
+                destination = request.to_domain()
+                kind = {ExecutionStatus.IN_PROGRESS: "start", ExecutionStatus.COMPLETED: "stop",
+                        ExecutionStatus.INTERRUPTED: "stop"}.get(destination.status)
+                if kind is None:
+                    kind = "transition"
+                result = guardian_adapter.command(kind, request.execution_id, key, instance,
+                    destination, http_request.state.guardian_receipt, destination)
+                if result[0] == 200:
+                    return execution_response(result[1])
+                return guardian_response(result)
+            except Rejection as exc:
+                return guardian_response(guardian_adapter.error(exc.code, request.execution_id, exc.status))
         try:
             transitioned = execution_command("transition_execution")(
                 request.to_domain()
@@ -3779,6 +3840,43 @@ def create_app(
         except (ExecutionOutcomeApplicationError, ExecutionTransitionError) as exc:
             raise_execution_command_error(exc)
         return execution_response(transitioned)
+
+    @application.post("/v1/executions/{execution_id}/guardian-renewal")
+    def guardian_renewal(execution_id: str, body: RenewalRequest, request: Request):
+        try:
+            valid_execution_id(execution_id)
+            key = valid_key(request.headers.get("Idempotency-Key"))
+        except Rejection as exc:
+            return guardian_unavailable(exc.code, None, clock, exc.status)
+        if not renewal_enabled:
+            return guardian_unavailable("guardian_mode_disabled", execution_id, clock)
+        if guardian_adapter is None:
+            return guardian_unavailable("guardian_state_unavailable", execution_id, clock, 503)
+        return guardian_response(guardian_adapter.command("renew", execution_id, key,
+            body.owner_instance_id, body.model_dump_json(), request.state.guardian_receipt))
+
+    @application.get("/v1/executions/{execution_id}/guardian-renewal")
+    def guardian_renewal_status(execution_id: str, request: Request):
+        try:
+            valid_execution_id(execution_id)
+        except Rejection as exc:
+            return guardian_unavailable(exc.code, None, clock, exc.status)
+        if guardian_adapter is not None:
+            return guardian_response(guardian_adapter.status(execution_id))
+        if renewal_enabled:
+            return guardian_unavailable("guardian_state_unavailable", execution_id, clock, 503)
+        try:
+            execution = application_service().load_execution(execution_id)
+        except Exception:
+            return guardian_unavailable("guardian_state_unavailable", execution_id, clock, 503)
+        if execution is None:
+            return guardian_unavailable("execution_not_found", execution_id, clock, 404)
+        from astropilot.guardian_renewal_api import VERSION, stamp
+        return guardian_response((200, dict(schema_version=VERSION, execution_id=execution_id,
+            execution_status=execution.status.value, guardian_mode_enabled=False,
+            owner_instance_id=None, owned_here=False, confirmation_kind=None,
+            confirmed_at=None, expires_at=None, server_time=stamp(request.state.guardian_receipt),
+            renewal_eligible=False, ineligibility_reason="guardian_mode_disabled")))
 
     @application.post(
         "/v1/outcome-evidence",

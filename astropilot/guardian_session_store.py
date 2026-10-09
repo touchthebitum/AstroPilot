@@ -46,11 +46,16 @@ def _decode(doc):
         doc['source'], doc['provenance'], doc['session_id'], doc['version'])
 
 
+class PublicationValidationError(Exception):
+    """Validation failed before atomic publication; leave prior bytes untouched."""
+
+
 class GuardianSessionStore:
     """One authoritative file. Writers must explicitly renew ACTIVE and INACTIVE."""
 
-    def __init__(self, path):
+    def __init__(self, path, *, before_publish=None):
         self.path = Path(path)
+        self.before_publish = before_publish
 
     def write(self, evidence: GuardianLiveSessionEvidence):
         """Atomically replace an attestation; never synthesize a heartbeat time."""
@@ -75,6 +80,8 @@ class GuardianSessionStore:
                 handle.write(payload)
                 handle.flush()
                 os.fsync(handle.fileno())
+            if self.before_publish is not None:
+                self.before_publish()
             os.replace(temporary, self.path)
         finally:
             if temporary is not None:
