@@ -10,6 +10,7 @@ from pathlib import Path
 import platform
 import re
 import tomllib
+from time import perf_counter
 from typing import Annotated, Any, Callable, Literal
 from uuid import uuid4
 
@@ -2056,6 +2057,7 @@ def create_app(
 
     @application.middleware("http")
     async def ui_cache_policy(request: Request, call_next):
+        started = perf_counter() if os.environ.get("ASTROPILOT_SESSION_TIMING") == "1" else None
         guardian_route = request.url.path.endswith("/guardian-renewal") or (renewal_enabled and request.url.path == "/v1/execution-transitions")
         if guardian_route:
             try:
@@ -2072,6 +2074,9 @@ def create_app(
             if request.method == "POST" and origin and origin != str(request.base_url).rstrip("/"):
                 return guardian_unavailable("invalid_guardian_renewal_request", None, clock, 422)
         response = await call_next(request)
+        if started is not None and (guardian_route or request.url.path in {"/v1/executions", "/v1/execution-transitions"}
+                                   or request.url.path.endswith(("/executions", "/session"))):
+            response.headers["Server-Timing"] = f"session;dur={(perf_counter() - started) * 1000:.3f}"
         if guardian_route:
             response.headers["Cache-Control"] = "no-store"
         if request.url.path == "/":
@@ -3663,9 +3668,8 @@ def create_app(
                 raise HTTPException(status_code=503, detail={"code": "session_credit_inconsistent"})
         return relevant
 
-    def session_projection(aggregate, profile: dict) -> dict:
+    def session_projection(aggregate, profile: dict, service) -> dict:
         execution = aggregate.execution
-        service = application_service()
         mission = service.load_mission(execution.mission_id)
         if mission is None or mission.mission_id != execution.mission_id:
             raise HTTPException(status_code=503, detail={"code": "mission_provenance_invalid"})
@@ -3738,6 +3742,8 @@ def create_app(
     def read_sessions(mission_id: str | None = None, execution_id: str | None = None):
         try:
             service = application_service()
+            if renewal_enabled and hasattr(service, "session_read_snapshot"):
+                service = service.session_read_snapshot()
             if execution_id is not None:
                 aggregate = service.load_session(execution_id)
                 if aggregate is None:
@@ -3750,12 +3756,16 @@ def create_app(
             if not aggregates:
                 return []
             profile = load_user_profile()
-            projections = [session_projection(item, profile) for item in aggregates]
+            projections = [session_projection(item, profile, service) for item in aggregates]
             return sorted(projections, key=lambda item: (
                 datetime.fromisoformat(item["chronology_at"]).timestamp(),
                 item["execution"]["execution_id"]), reverse=True)
         except ExecutionOutcomeApplicationError as exc:
             raise HTTPException(status_code=503, detail={"code": str(exc)}) from exc
+        except (DecisionAcceptanceError, OSError) as exc:
+            if not renewal_enabled:
+                raise
+            raise HTTPException(status_code=503, detail={"code": "mission_provenance_invalid"}) from exc
         except UserProfileError as exc:
             raise HTTPException(status_code=503, detail={"code": "configuration_corrupt"}) from exc
 

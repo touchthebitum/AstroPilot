@@ -18,15 +18,13 @@ def test_guardian_copy_and_explicit_wiring():
     assert source.count('addEventListener("click", confirmGuardianRenewal)') == 1
     assert source.count('confirmGuardianRenewal') == 2, 'only the explicit click invokes renewal'
     assert source.count('confirmation: "USER_CONFIRMS_ACQUISITION_CONTINUES"') == 1
+    for selector in ['#session-start', '#session-complete', '#session-interrupt']:
+        binding = next(line for line in source.splitlines() if f'document.querySelector("{selector}").addEventListener' in line)
+        assert '{transition: true}' in binding
 
 
-def test_guardian_ui_transport_and_session_integration():
-    node = shutil.which('node')
-    if not node:
-        pytest.skip('Node required')
-    source = (WEB / 'app.js').read_text()
-    helpers = source[source.index('const SESSION_PENDING_KEY ='):source.index('async function recordSessionEvidence')]
-    harness = r'''
+def ui_harness():
+    return r'''
 const assert = require('node:assert/strict');
 const elements = new Map();
 const document = {querySelector(id) {
@@ -73,6 +71,15 @@ async function fetch(url, options = {}) {
 const button = () => document.querySelector('#guardian-confirm');
 const posts = () => requests.filter(x=>x.options.method === 'POST' && x.url.endsWith('/guardian-renewal'));
 '''
+
+
+def test_guardian_ui_transport_and_session_integration():
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node required')
+    source = (WEB / 'app.js').read_text()
+    helpers = source[source.index('const SESSION_PENDING_KEY ='):source.index('async function recordSessionEvidence')]
+    harness = ui_harness()
     checks = r'''
 (async()=> {
   await readGuardianRenewal();
@@ -151,4 +158,128 @@ const posts = () => requests.filter(x=>x.options.method === 'POST' && x.url.ends
 })().catch(error=>{console.error(error);process.exitCode=1});
 '''
     result = subprocess.run([node, '-'], input=harness + helpers + checks, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_session_transition_request_order_latency_and_reconciliation():
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node required')
+    source = (WEB / 'app.js').read_text()
+    helpers = source[source.index('const SESSION_PENDING_KEY ='):source.index('async function recordSessionEvidence')]
+    checks = r'''
+let failure = null, guardianReads = 0, created = false;
+const stored = new Map();
+localStorage.getItem = key => stored.get(key) || null;
+localStorage.setItem = (key,value) => stored.set(key,value);
+localStorage.removeItem = key => stored.delete(key);
+fetch = async (url,options={}) => {
+  requests.push({url,options}); ticks += 10;
+  if (url.endsWith('/executions') && options.method !== 'POST')
+    return {ok:true,json:async()=>created || state.sessions.length ? [structuredClone(item)] : []};
+  if (url.endsWith('/guardian-renewal')) {
+    guardianReads++;
+    if (failure === 'preflight' || (failure === 'final-read' && guardianReads === 2)) {
+      ticks += 15000;
+      throw Error('network unavailable');
+    }
+    const value = {...canonical,execution_id:item.execution.execution_id,execution_status:item.execution.status};
+    if (failure === 'invalid-status') value.guardian_mode_enabled = null;
+    if (['completed','interrupted'].includes(item.execution.status)) Object.assign(value,{
+      owned_here:false,renewal_eligible:false,confirmed_at:null,expires_at:null});
+    return {ok:true,json:async()=>value};
+  }
+  if (url.endsWith('/session')) return {ok:false,status:404};
+  if (url === '/v1/executions') {
+    created = true;
+    item.execution.execution_id = JSON.parse(options.body).execution_id;
+    item.execution.status = 'not_started';
+    return {ok:true,json:async()=>({...item.execution})};
+  }
+  assert.equal(url,'/v1/execution-transitions');
+  if (failure === 'refused') return {ok:false,status:409,json:async()=>({code:'changed'})};
+  const payload = JSON.parse(options.body);
+  item.execution = {...item.execution,...payload};
+  if (failure === 'lost') throw Error('response lost after commit');
+  if (failure === 'partial') return {ok:false,status:503,json:async()=>({
+    execution_commit:'committed',guardian_publication:'failed'})};
+  return {ok:true,status:200,json:async()=>{
+    if (failure === 'malformed') throw Error('truncated JSON');
+    return {...item.execution};
+  }};
+};
+const paths = () => requests.map(x=>`${x.options.method || 'GET'} ${x.url}`);
+const transitionPosts = () => requests.filter(x=>x.url === '/v1/execution-transitions');
+function reset(status='in_progress', enabled=true) {
+  failure=null;guardianReads=0;requests=[];ticks=0;created=false;stored.clear();
+  item.execution = {execution_id:'exact',mission_id:'mission',status,actual_start:'2026-10-09T17:00:00Z'};
+  state.sessions=[structuredClone(item)];state.activeSessionId='exact';state.sessionBusy=false;
+  canonical.guardian_mode_enabled=enabled;
+  guardianUI.status={...canonical};guardianUI.displayStatus={...canonical};
+  guardianUI.readAt=0;guardianUI.pending=false;guardianUI.uncertain=false;
+  guardianUI.message='Confirmation utilisateur acceptée.';
+}
+const run = action => sessionCommand(action === 'start' ? startSession : m=>closeSession(m,action),{transition:true});
+(async()=>{
+  for (const enabled of [true,false]) for (const action of ['start','completed','interrupted']) {
+    reset(action === 'start' ? 'not_started' : 'in_progress',enabled);
+    await run(action);
+    assert.deepEqual(paths(),[
+      'GET /v1/missions/mission/executions',
+      'GET /v1/executions/exact/guardian-renewal',
+      'POST /v1/execution-transitions',
+      'GET /v1/missions/mission/executions',
+      'GET /v1/executions/exact/guardian-renewal',
+    ]);
+    assert.equal(ticks,50,'only the required reads contribute logical latency');
+    assert.equal(transitionPosts().length,1);
+    assert.equal(JSON.parse(transitionPosts()[0].options.body).status,action === 'start' ? 'in_progress' : action);
+    const headers=transitionPosts()[0].options.headers;
+    if(enabled) {assert.equal(headers['X-Guardian-Owner-Instance-Id'],'owner');assert.ok(headers['Idempotency-Key']);}
+    else assert.deepEqual(headers,{'Content-Type':'application/json'});
+    if(action !== 'start') {
+      assert.equal(guardianUI.message,'');assert.equal(button().hidden,true);assert.equal(button().disabled,true);
+      assert.equal(document.querySelector('#guardian-message').textContent,'');
+      assert.equal(document.querySelector('#guardian-last-confirmation').textContent,'Aucune confirmation acceptée');
+      assert.equal(document.querySelector('#guardian-deadline').textContent,'Aucune échéance');
+      assert.match(document.querySelector('#guardian-ownership').textContent,/Session clôturée/);
+    }
+  }
+  reset('completed');state.sessions=[];state.activeSessionId=null;
+  await run('start');
+  assert.equal(transitionPosts().length,1,'new session still has one transition POST');
+  assert.equal(requests.filter(x=>x.url === '/v1/executions').length,1,'creation is separate from transition');
+  assert.equal(guardianReads,2,'no Guardian read during creation reconciliation');
+  assert.deepEqual(paths().map(x=>x.replace(/00000000-0000-4000-8000-\d+/g,'new')),[
+    'GET /v1/missions/mission/executions','GET /v1/executions/new/session','POST /v1/executions',
+    'GET /v1/missions/mission/executions','GET /v1/executions/new/guardian-renewal',
+    'POST /v1/execution-transitions','GET /v1/missions/mission/executions',
+    'GET /v1/executions/new/guardian-renewal']);
+  for(const enabled of [true,false]) for(const reason of ['preflight','invalid-status']) {
+    reset('in_progress',enabled);failure=reason;await run('completed');
+    assert.equal(transitionPosts().length,0,'never infer mode from an old snapshot');
+    assert.equal(guardianReads,1,'a failed preflight is not retried in recovery');
+    assert.equal(guardianUI.status,null);
+    assert.equal(ticks,reason === 'preflight' ? 15030 : 30,'never accumulate two network waits');
+  }
+  for(const reason of ['lost','malformed','partial','refused','final-read']) {
+    reset();failure=reason;await run('completed');
+    assert.equal(transitionPosts().length,1,'ambiguous responses never replay transition');
+    assert.equal(guardianReads,2);
+    if(['lost','malformed'].includes(reason)) assert.match(document.querySelector('#session-status').textContent,/réponse incertaine/);
+    if(reason === 'partial') assert.match(document.querySelector('#session-status').textContent,/transition enregistrée.*Guardian : échouée/);
+    if(reason === 'refused') assert.equal(currentSession().execution.status,'in_progress');
+    else {
+      assert.equal(guardianUI.message,'');assert.equal(button().hidden,true);
+      assert.equal(document.querySelector('#guardian-deadline').textContent,'Aucune échéance');
+    }
+    if(reason === 'final-read') assert.equal(guardianUI.status,null,'read failure never invents an INACTIVE attestation');
+    assert.equal(state.sessionBusy,false);
+  }
+  reset();guardianUI.pending=true;await run('completed');assert.equal(requests.length,0,'renewal and stop cannot overlap');
+  reset();state.sessionBusy=true;await run('completed');assert.equal(requests.length,0,'double click cannot post');
+  assert.equal(requests.filter(x=>x.options.method==='POST' && x.url.endsWith('/guardian-renewal')).length,0);
+})().catch(error=>{console.error(error);process.exitCode=1});
+'''
+    result = subprocess.run([node, '-'], input=ui_harness() + helpers + checks, text=True, capture_output=True)
     assert result.returncode == 0, result.stderr

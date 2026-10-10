@@ -156,6 +156,21 @@ const historyState = {generation: 0, cursor: null, open: false};
 
 const SESSION_PENDING_KEY = "astropilot.pendingSession";
 
+async function sessionFetch(url, options) {
+  if (globalThis.ASTROPILOT_SESSION_TIMING !== true) return fetch(url, options);
+  const started = performance.now();
+  try {
+    const response = await fetch(url, options);
+    console.info("session-request", options?.method || "GET", url,
+      performance.now() - started, response.status, response.headers?.get("Server-Timing"));
+    return response;
+  } catch (error) {
+    console.info("session-request", options?.method || "GET", url,
+      performance.now() - started, "network-error");
+    throw error;
+  }
+}
+
 const guardianUI = {status: null, displayStatus: null, generation: 0, pending: false, uncertain: false, message: "", readAt: 0};
 const GUARDIAN_UNCERTAIN = "Résultat incertain — vérifiez l’état avant de confirmer à nouveau.";
 
@@ -170,6 +185,7 @@ function guardianEligible() {
 
 function renderGuardianRenewal() {
   const value = guardianUI.status || guardianUI.displayStatus;
+  const closed = ["completed", "interrupted"].includes(currentSession()?.execution.status);
   const exact = value?.execution_id === state.activeSessionId;
   document.querySelector("#guardian-renewal").hidden = !exact || !value?.guardian_mode_enabled;
   const eligible = guardianEligible();
@@ -178,10 +194,11 @@ function renderGuardianRenewal() {
   button.disabled = !eligible || guardianUI.pending || guardianUI.uncertain || state.sessionBusy;
   const session = currentSession();
   const zone = missionTimezone(session?.mission, state.acceptedMission);
-  text("#guardian-last-confirmation", value?.confirmed_at
+  text("#guardian-last-confirmation", !closed && value?.confirmed_at
     ? missionDateTimeLabel(value.confirmed_at, zone) : "Aucune confirmation acceptée");
-  text("#guardian-deadline", value?.expires_at ? `${missionDateTimeLabel(value.expires_at, zone)} (15 minutes)` : "Aucune échéance");
-  text("#guardian-ownership", session?.execution.status === "not_started"
+  text("#guardian-deadline", !closed && value?.expires_at ? `${missionDateTimeLabel(value.expires_at, zone)} (15 minutes)` : "Aucune échéance");
+  text("#guardian-ownership", closed ? "Session clôturée. Confirmation Guardian indisponible."
+    : session?.execution.status === "not_started"
     ? "Démarrez cette session pour activer la confirmation Guardian et son échéance de 15 minutes."
     : eligible ? "Propriété confirmée à la dernière lecture · confirmation fraîche selon l’heure serveur"
     : !guardianUI.status ? "Propriété et fraîcheur non vérifiées. Vérifiez l’état Guardian avant de poursuivre."
@@ -194,7 +211,7 @@ async function readGuardianRenewal(executionId = state.activeSessionId) {
   guardianUI.status = null;
   renderGuardianRenewal();
   if (!executionId) return null;
-  const response = await fetch(`/v1/executions/${encodeURIComponent(executionId)}/guardian-renewal`, {cache: "no-store"});
+  const response = await sessionFetch(`/v1/executions/${encodeURIComponent(executionId)}/guardian-renewal`, {cache: "no-store"});
   if (!response.ok) throw new Error("guardian_status_unavailable");
   const value = await response.json();
   if (value.schema_version !== "guardian-explicit-renewal-v1" || value.execution_id !== executionId
@@ -233,7 +250,7 @@ async function confirmGuardianRenewal() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch(`/v1/executions/${encodeURIComponent(executionId)}/guardian-renewal`, {
+    const response = await sessionFetch(`/v1/executions/${encodeURIComponent(executionId)}/guardian-renewal`, {
       method: "POST", signal: controller.signal,
       headers: {"Content-Type": "application/json", "Idempotency-Key": key},
       body: JSON.stringify({schema_version: "guardian-explicit-renewal-v1",
@@ -315,6 +332,11 @@ function renderSession() {
   const session = currentSession();
   restoreSessionEvidenceInputs(session);
   const status = session?.execution.status;
+  if (["completed", "interrupted"].includes(status)) {
+    // A canonical session read makes an earlier renewal confirmation obsolete.
+    guardianUI.message = "";
+    guardianUI.uncertain = false;
+  }
   const knownStatus = ["not_started", "in_progress", "completed", "interrupted", "unconfirmed"].includes(status);
   const choice = document.querySelector("#session-choice");
   choice.replaceChildren();
@@ -373,10 +395,10 @@ function renderSession() {
   renderGuardianRenewal();
 }
 
-async function reloadSessions({ selectId = null } = {}) {
+async function reloadSessions({ selectId = null, readGuardian = true } = {}) {
   const missionId = state.acceptedMission?.mission_id;
   if (!missionId) return;
-  const response = await fetch(`/v1/missions/${encodeURIComponent(missionId)}/executions`);
+  const response = await sessionFetch(`/v1/missions/${encodeURIComponent(missionId)}/executions`);
   if (!response.ok) throw new Error("session_read_unavailable");
   const sessions = await response.json();
   if (state.acceptedMission?.mission_id !== missionId) return;
@@ -395,11 +417,13 @@ async function reloadSessions({ selectId = null } = {}) {
   }
   renderSession();
   syncFieldObservationContext();
-  try { await readGuardianRenewal(); } catch (_) { renderGuardianRenewal(); }
+  if (readGuardian) {
+    try { await readGuardianRenewal(); } catch (_) { renderGuardianRenewal(); }
+  }
 }
 
-async function sessionCommand(command) {
-  if (state.sessionBusy || !state.acceptedMission?.mission_id) return;
+async function sessionCommand(command, { transition = false } = {}) {
+  if (state.sessionBusy || guardianUI.pending || !state.acceptedMission?.mission_id) return;
   const baselineConfirmed = document.querySelector("#session-baseline-confirm").checked;
   state.sessionBusy = true;
   state.sessionWriteAttempted = false;
@@ -407,12 +431,14 @@ async function sessionCommand(command) {
   document.querySelectorAll(".session-panel button").forEach((button) => { button.disabled = true; });
   const missionId = state.acceptedMission.mission_id;
   try {
-    await reloadSessions();
+    // The transition reads its exact Guardian status once, immediately before POST.
+    await reloadSessions({readGuardian: !transition});
     await command(missionId, baselineConfirmed);
     await reloadSessions();
   } catch (error) {
     try {
-      await reloadSessions();
+      // Do not repeat a failed preflight Guardian read. After a write, reconcile.
+      await reloadSessions({readGuardian: !transition || state.sessionWriteAttempted});
       sessionMessage(state.sessionWriteUncertain
         ? "État relu après une réponse incertaine. Vérifiez la session avant de poursuivre."
         : state.sessionWriteAttempted && error?.status ? sessionRefusalMessage(error)
@@ -436,10 +462,14 @@ async function postSession(url, body, extraHeaders = {}) {
   const payload = JSON.stringify(body);
   state.sessionWriteAttempted = true;
   state.sessionWriteUncertain = true;
-  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...extraHeaders }, body: payload });
+  const response = await sessionFetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...extraHeaders }, body: payload });
+  if (!response.ok) {
+    state.sessionWriteUncertain = false;
+    throw await sessionHttpError(response);
+  }
+  const result = await response.json();
   state.sessionWriteUncertain = false;
-  if (!response.ok) throw await sessionHttpError(response);
-  return response.json();
+  return result;
 }
 
 async function sessionHttpError(response) {
@@ -468,10 +498,10 @@ async function startSession(missionId) {
     const pending = JSON.parse(localStorage.getItem(SESSION_PENDING_KEY) || "null");
     const executionId = pending?.mission_id === missionId ? pending.execution_id : crypto.randomUUID();
     localStorage.setItem(SESSION_PENDING_KEY, JSON.stringify({ mission_id: missionId, execution_id: executionId }));
-    const lookup = await fetch(`/v1/executions/${encodeURIComponent(executionId)}/session`);
+    const lookup = await sessionFetch(`/v1/executions/${encodeURIComponent(executionId)}/session`);
     if (lookup.status === 404) await postSession("/v1/executions", { execution_id: executionId, mission_id: missionId });
     else if (!lookup.ok) throw await sessionHttpError(lookup);
-    await reloadSessions({ selectId: executionId });
+    await reloadSessions({ selectId: executionId, readGuardian: false });
     session = currentSession();
   }
   if (session?.execution.status === "not_started") {
@@ -6165,9 +6195,9 @@ document.querySelector("#guardian-refresh").addEventListener("click", refreshGua
 const guardianVisualTimer = setInterval(renderGuardianRenewal, 1000);
 // Node-based browser harnesses should not be kept alive by a visual timer.
 guardianVisualTimer?.unref?.();
-document.querySelector("#session-start").addEventListener("click", () => sessionCommand(startSession));
-document.querySelector("#session-complete").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "completed")));
-document.querySelector("#session-interrupt").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "interrupted")));
+document.querySelector("#session-start").addEventListener("click", () => sessionCommand(startSession, {transition: true}));
+document.querySelector("#session-complete").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "completed"), {transition: true}));
+document.querySelector("#session-interrupt").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "interrupted"), {transition: true}));
 document.querySelector("#session-record-evidence").addEventListener("click", () => sessionCommand(recordSessionEvidence));
 document.querySelector("#session-apply-credit").addEventListener("click", () => sessionCommand(creditSession));
 document.querySelector("#observation-choose-decision").addEventListener("click", openRecentDecisions);

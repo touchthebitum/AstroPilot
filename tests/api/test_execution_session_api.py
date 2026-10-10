@@ -52,7 +52,7 @@ class Acceptance:
         return None
 
 
-def setup(tmp_path, monkeypatch, baseline=3600, target=True):
+def setup(tmp_path, monkeypatch, baseline=3600, target=True, guardian=False):
     monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
     acceptance = Acceptance()
 
@@ -64,7 +64,9 @@ def setup(tmp_path, monkeypatch, baseline=3600, target=True):
                 execution_lineage_store=FileExecutionLineageStore(tmp_path / "execution_lineage"),
                 profile_loader=load_user_profile, profile_saver=save_user_profile,
             )
-        return TestClient(create_app(service_factory=service))
+        return TestClient(create_app(service_factory=service,
+            guardian_renewal_enabled=guardian,
+            guardian_attestation_path=tmp_path / "guardian.json" if guardian else None))
 
     api = client()
     assert api.put("/v1/configuration", json={
@@ -392,3 +394,64 @@ def test_session_discovery_orders_missions_by_persisted_chronology(tmp_path, mon
     assert [item["execution"]["execution_id"] for item in sessions] == ["a-new", "z-old"]
     assert sessions[0]["chronology_at"] == (START + timedelta(days=1)).isoformat()
     assert all(item["mission"]["target"] == "Sh2-129" for item in sessions)
+
+
+def test_durable_guardian_start_renew_stop_and_opt_in_timing(tmp_path, monkeypatch):
+    from uuid import uuid4
+    from astropilot.guardian_session_store import GuardianSessionStore
+    from astropilot.guardian_renewal_api import VERSION
+    from decision.models.guardian import GuardianSessionState
+
+    monkeypatch.setenv('ASTROPILOT_SESSION_TIMING', '1')
+    factory = setup(tmp_path, monkeypatch, guardian=True)
+    calls = []
+    original = DurableTonightApplicationService.transition_execution
+
+    def counted(service, destination):
+        calls.append(destination.status.value)
+        return original(service, destination)
+
+    monkeypatch.setattr(DurableTonightApplicationService, 'transition_execution', counted)
+    # Session operations must never invoke weather transport or notifications.
+    def forbidden(*args, **kwargs):
+        pytest.fail('local Guardian session command invoked an external transport')
+    monkeypatch.setattr('requests.sessions.Session.request', forbidden)
+    monkeypatch.setattr('astropilot.guardian_http_transport.BoundedHttpTransport.__call__', forbidden)
+    with factory() as api:
+        r = api.post('/v1/executions', json={'execution_id': 'timing-one', 'mission_id': 'mission-ha'})
+        assert r.status_code == 200, r.text
+        for status in ['in_progress', 'completed']:
+            assert api.get('/v1/missions/mission-ha/executions').status_code == 200
+            read = api.get('/v1/executions/timing-one/guardian-renewal')
+            assert read.status_code == 200
+            assert read.headers['cache-control'] == 'no-store'
+            assert float(read.headers['server-timing'].split('dur=')[1]) >= 0
+            owner = read.json()['owner_instance_id']
+            r = api.post('/v1/execution-transitions', json={
+                'execution_id': 'timing-one', 'mission_id': 'mission-ha', 'status': status,
+                'actual_start': START.isoformat(),
+                'actual_end': (START + timedelta(minutes=1)).isoformat() if status == 'completed' else None,
+                'actual_duration': 60 if status == 'completed' else None,
+            }, headers={'Idempotency-Key': str(uuid4()), 'X-Guardian-Owner-Instance-Id': owner})
+            assert r.status_code == 200, r.text
+            assert 'server-timing' in r.headers
+            sessions = api.get('/v1/missions/mission-ha/executions').json()
+            assert sessions[0]['execution']['status'] == status
+            read = api.get('/v1/executions/timing-one/guardian-renewal')
+            assert read.json()['execution_status'] == status
+            if status == 'in_progress':
+                confirmation = api.post('/v1/executions/timing-one/guardian-renewal', json={
+                    'schema_version': VERSION, 'confirmation': 'USER_CONFIRMS_ACQUISITION_CONTINUES',
+                    'owner_instance_id': owner}, headers={'Idempotency-Key': str(uuid4())})
+                assert confirmation.status_code == 200
+                accepted = confirmation.json()
+                assert datetime.fromisoformat(accepted['expires_at']) - datetime.fromisoformat(accepted['confirmed_at']) == timedelta(minutes=15)
+                assert calls == ['in_progress'], 'manual renewal never transitions an execution'
+            else:
+                assert not read.json()['renewal_eligible']
+                assert read.json()['confirmed_at'] is None and read.json()['expires_at'] is None
+                evidence = GuardianSessionStore(tmp_path / 'guardian.json').read(datetime.now(timezone.utc))
+                assert evidence.state is GuardianSessionState.INACTIVE
+        assert calls == ['in_progress', 'completed']
+        monkeypatch.delenv('ASTROPILOT_SESSION_TIMING')
+        assert 'server-timing' not in api.get('/v1/executions/timing-one/guardian-renewal').headers
