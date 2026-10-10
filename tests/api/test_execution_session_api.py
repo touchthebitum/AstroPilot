@@ -455,3 +455,16 @@ def test_durable_guardian_start_renew_stop_and_opt_in_timing(tmp_path, monkeypat
         assert calls == ['in_progress', 'completed']
         monkeypatch.delenv('ASTROPILOT_SESSION_TIMING')
         assert 'server-timing' not in api.get('/v1/executions/timing-one/guardian-renewal').headers
+
+
+def test_session_timing_opt_in_reaches_ui_and_discovery(tmp_path, monkeypatch):
+    monkeypatch.setenv('ASTROPILOT_SESSION_TIMING', '1')
+    factory = setup(tmp_path, monkeypatch)
+    with factory() as api:
+        assert '<script>globalThis.ASTROPILOT_SESSION_TIMING = true;</script>' in api.get('/').text
+        assert api.get('/v1/execution-sessions').headers['Server-Timing'].startswith('session;dur=')
+    monkeypatch.delenv('ASTROPILOT_SESSION_TIMING')
+    with factory() as api:
+        assert 'globalThis.ASTROPILOT_SESSION_TIMING' not in api.get('/').text
+        assert '__ASTROPILOT_SESSION_TIMING__' not in api.get('/').text
+        assert 'Server-Timing' not in api.get('/v1/execution-sessions').headers

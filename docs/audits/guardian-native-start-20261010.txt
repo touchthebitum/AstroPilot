@@ -1,0 +1,124 @@
+Guardian native start audit — 2026-10-10 (Mac arm64)
+
+Base: origin/main a3fa1ae4690fa326f4355b65f6a0170f6762abdb, fetched today.
+Conclusion: the reported ~40 s delay is NOT reproduced, so its root cause is
+not established. Do not describe this PR as a latency fix or completed native
+validation of the user's original instance.
+
+Preservation
+An independent local clone was used. The existing main checkout, detached
+NightMerit-Guardian-Clean checkout, untracked files and stash
+223ec1f5904131d726b694655f137670c0ddeb0b were not modified.
+The source NightMerit-Guardian-UI-Test dataset and Guardian publication/lock
+were only read/copied. Isolated publication and writer lock paths were used.
+
+Dataset compatibility
+The complete copied dataset has 18 decision lineage files. Nine use schema 12,
+two schema 11, seven schema 10. This base accepts schemas 1–10. The initial
+mission executions GET returns 503 mission_provenance_invalid in 1.1429 s
+(TestClient, profiler active). Even after excluding newer schemas in a SECOND
+copy, f2911360-a1e0-4690-ad83-4e0e739ad37f.json fails invalid_enum_value.
+The original/full copy was retained. Nothing was downgraded or ignored in
+production. A compatible experimental subset retains five historical schema
+10 decision files plus the test decision, and only the test mission executions.
+This selection changes workload; it cannot prove the original 40 s is fixed.
+
+Measurements
+1. Base code, test-only compatible subset (TestClient, cProfile enabled):
+initial mission executions 15.8 ms; exact missing session GET 3.9 ms;
+create 8.0 ms; selected reload 8.8 ms; Guardian preflight 5.1 ms;
+transition 8.3 ms; final reload 8.7 ms; final Guardian 4.5 ms.
+
+2. Compatible historical subset (TestClient, cProfile enabled):
+initial reload 1824.2 ms; exact missing GET 6.0 ms; create 1587.9 ms;
+selected reload 15.9 ms; Guardian preflight 7.5 ms; transition 10.8 ms;
+final reload 11.3 ms; Guardian final 5.8 ms.
+Profile: two _load_all calls, 3.371 s cumulative, 12 aggregate deserializations.
+The first cold provenance snapshot and execution creation account for almost
+all measured server work. Warm session reads reuse validated provenance.
+Profiler overhead makes these figures unsuitable as native latency estimates.
+
+3. Actual Mac browser / loopback HTTP / launcher.run, compatible historical
+subset, diagnostics enabled, no profiler. Port 8001 avoids the running instance.
+Launcher log and isolated publication paths are in the workspace. This exercises
+the launcher/server code but not the macOS Cocoa wrapper used by launcher.main.
+New session path, client ms / Server-Timing ms:
+initial mission reload           21.9 / 13.883
+exact missing session GET        13.5 / 7.793 (404)
+POST create                    678.6 / 668.239
+selected reload                 12.0 / 5.578
+exact Guardian preflight        17.2 / 2.281
+POST transition                 20.9 / 12.975
+final reload                    10.3 / 6.762
+final exact Guardian             8.9 / 3.488
+Sum of fetch-to-headers times 783.3 ms, first-to-last response timestamp span
+771 ms (does not include time before the first request or final paint).
+
+Prepared session: the exact visible “Démarrer cette session” was clicked:
+initial reload                  32.2 / 20.206
+exact Guardian preflight        10.4 / 4.271
+POST transition                 12.0 / 9.356
+final reload                     8.5 / 5.753
+final exact Guardian             7.8 / 4.031
+Sum 70.9 ms; first-to-last response timestamp span 47 ms. Allowing the first
+request duration, sequence was about 79 ms. No create/exact session GET needed.
+Both paths reached “Session en cours” and were explicitly closed in the UI.
+Exactly one transition POST per start; no renewal POST was issued.
+
+Interpretation
+Provenance scans remain measurable during creation, but do not explain 40 s
+in this compatible reproduction. No evidence of a 40 s lock or timeout here.
+The writer file lock is nonblocking; Guardian serializes commands with RLock.
+This audit does not eliminate contention, Cocoa-wrapper behavior, browser
+behavior, or a different dataset in the original running instance.
+Complete copied data is incompatible with the selected base; that is a proven
+environment/data issue, not a proven root cause for the reported successful start.
+Before/after latency improvement: N/A. No backend performance behavior changed.
+
+Verified fixes
+ASTROPILOT_SESSION_TIMING=1 now activates the existing UI fetch timing logger
+in the served document, and Server-Timing also covers execution discovery.
+Previously server opt-in did not enable UI logging; manual console activation
+was necessary. Without the flag, no diagnostic script/header is emitted.
+The saved-mission button starts disabled, is enabled only for a valid selected
+persisted mission, updates on selection changes, and cannot fall back to a
+previously accepted mission when selection is invalid. Active state has readable
+text, cyan background/border, pointer, hover and keyboard focus. Disabled state
+has muted text, opacity and not-allowed cursor.
+Fail-closed responses and the start/renewal command sequence are unchanged.
+
+Follow-up for original-instance diagnosis
+Restart the exact clean base with the complete production-compatible dataset,
+ASTROPILOT_SESSION_TIMING=1 and explicit Guardian renewal/path variables.
+Capture the console session-request entries from the actual slow click, matching
+execution ID, server durations, HTTP statuses and runtime build. A 40 s client
+request with a short server duration directs investigation toward browser/network;
+a 40 s server duration identifies which endpoint to profile. Preserve the
+incompatible files separately before any future migration; do not patch schema
+numbers or suppress provenance validation.
+
+Comparable API checks (same compatible copied workload, no profiler):
+step | base ms | PR ms
+reload initial | 1145.3 | 857.9
+exact missing session | 3.8 | 3.9
+create execution | 753.9 | 662.5
+reload selected | 35.1 | 14.0
+guardian preflight | 9.7 | 9.8
+transition | 26.3 | 7.3
+reload final | 28.2 | 8.6
+guardian final | 7.7 | 3.1
+These single runs overlapped other test work; variation is not an improvement
+claim. This PR does not change endpoint work or the transition sequence.
+
+Validation: 796 passed, 3 skipped (Windows-only native checks), 19.43 s.
+Suites: tests/api/test_execution_session_api.py, test_execution_session_ui.py,
+test_guardian_renewal_ui.py, test_intent_choice_ui.py;
+tests/architecture/test_decision_acceptance_lineage_persistence.py;
+tests/guardian; tests/architecture/test_runtime_launcher.py.
+The macOS script compilation test fails inside the sandbox, passes outside it;
+the complete pertinent run passed with native compilation access. No notification
+was sent. git diff --check passed.
+
+Changed files: astropilot/app.py; astropilot/web/app.js, index.html, styles.css;
+tests/api/test_execution_session_api.py, test_execution_session_ui.py,
+test_intent_choice_ui.py; this audit report.

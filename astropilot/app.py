@@ -2053,7 +2053,9 @@ def create_app(
     ui_document = (web_root / "index.html").read_text(encoding="utf-8").replace(
         "__ASTROPILOT_ASSET_TOKEN__",
         ui_asset_token,
-    )
+    ).replace("__ASTROPILOT_SESSION_TIMING__",
+        "<script>globalThis.ASTROPILOT_SESSION_TIMING = true;</script>"
+        if os.environ.get("ASTROPILOT_SESSION_TIMING") == "1" else "")
 
     @application.middleware("http")
     async def ui_cache_policy(request: Request, call_next):
@@ -2074,7 +2076,7 @@ def create_app(
             if request.method == "POST" and origin and origin != str(request.base_url).rstrip("/"):
                 return guardian_unavailable("invalid_guardian_renewal_request", None, clock, 422)
         response = await call_next(request)
-        if started is not None and (guardian_route or request.url.path in {"/v1/executions", "/v1/execution-transitions"}
+        if started is not None and (guardian_route or request.url.path in {"/v1/executions", "/v1/execution-transitions", "/v1/execution-sessions"}
                                    or request.url.path.endswith(("/executions", "/session"))):
             response.headers["Server-Timing"] = f"session;dur={(perf_counter() - started) * 1000:.3f}"
         if guardian_route:

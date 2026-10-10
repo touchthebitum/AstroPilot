@@ -647,3 +647,9 @@ html[data-ui-mode="simple"] .help-navigation [data-help-guide="complete"] { font
 #alerts-status-details { margin: 20px 0; }
 #alerts-status-details dt { color: var(--muted); margin-top: 12px; font-size: 13px; }
 #alerts-status-details dd { margin: 4px 0 0; }
+
+/* Persisted mission entry: availability must be visible before hover. */
+#open-saved-mission:not(:disabled) { color: var(--ink); background: var(--cyan-soft); border-color: rgba(103,228,209,.65); cursor: pointer; }
+#open-saved-mission:not(:disabled):hover { border-color: var(--cyan); background: rgba(103,228,209,.2); }
+#open-saved-mission:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+#open-saved-mission:disabled { color: #95a3b5; background: rgba(255,255,255,.025); border-color: var(--line); opacity: .55; cursor: not-allowed; }

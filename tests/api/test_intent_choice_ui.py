@@ -252,7 +252,7 @@ def test_failed_recommendation_retains_restored_mission_until_success():
 const assert = require('node:assert/strict');
 const entry = {hidden: false};
 const ui = {savedMissionEntry: entry, recommendationSubmit: {disabled: false}, refresh: {disabled: false}};
-const saved = {source: 'persisted', mission: {target: 'M31'}};
+const saved = {mission_id: 'saved', source: 'persisted', mission: {target: 'M31'}};
 const state = {acceptedMission: saved, requestingRecommendation: false, currentDecision: null,
   configuration: {site: {latitude: 1, longitude: 2, timezone: "UTC"}}};
 let response;
@@ -291,10 +291,10 @@ def test_reopening_saved_mission_does_not_post_acceptance():
 const assert = require('node:assert/strict');
 let openSavedMission;
 let shown = 0;
-const saved = {source: 'persisted', mission: {target: 'M31'}};
+const saved = {mission_id: 'saved', source: 'persisted', mission: {target: 'M31'}};
 const state = {acceptedMission: saved, savedMissions: [saved]};
 const ui = {openSavedMission: {addEventListener(event, callback) { openSavedMission = callback; }},
-  savedMissionChoice: {value: ''}, mission: {showModal() { shown++; }}};
+  savedMissionChoice: {value: 'saved'}, mission: {showModal() { shown++; }}};
 function renderMission(mission) { assert.equal(mission, saved.mission); }
 function fetch() { throw new Error('reopening must not make a request'); }
 """ + listener + """
@@ -671,3 +671,32 @@ async function exerciseUniqueAndLegacy() {
   await exerciseUniqueAndLegacy();
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """)
+
+
+def test_saved_mission_button_availability_and_visual_states():
+    helpers = _javascript_between('function renderSavedMissionAvailability()', 'function invalidateAvailabilityForSiteChange(')
+    _run_javascript("""
+const assert = require('node:assert/strict');
+const ui = {openSavedMission: {disabled: false}, savedMissionChoice: {value: ''}};
+const state = {savedMissions: [{mission_id: 'valid', source: 'persisted', mission: {target: 'M31'}},
+  {mission_id: 'missing', source: 'persisted'}, {mission_id: 'draft', source: 'primary_recommendation', mission: {}}]};
+""" + helpers + """
+for (const id of ['', 'stale', 'missing', 'draft', 'valid']) {
+  ui.savedMissionChoice.value = id;
+  renderSavedMissionAvailability();
+  assert.equal(ui.openSavedMission.disabled, id !== 'valid');
+}
+state.savedMissions = [];
+renderSavedMissionAvailability();
+assert.equal(ui.openSavedMission.disabled, true);
+""")
+    root = Path(__file__).resolve().parents[2] / 'astropilot/web'
+    page = (root / 'index.html').read_text()
+    css = (root / 'styles.css').read_text()
+    assert 'id="open-saved-mission" type="button" disabled' in page
+    active = css.split('#open-saved-mission:not(:disabled) {', 1)[1].split('}', 1)[0]
+    disabled = css.split('#open-saved-mission:disabled {', 1)[1].split('}', 1)[0]
+    assert 'color: var(--ink)' in active and 'background: var(--cyan-soft)' in active
+    assert 'cursor: pointer' in active
+    assert 'opacity: .55' in disabled and 'cursor: not-allowed' in disabled
+    assert '#open-saved-mission:not(:disabled):hover' in css

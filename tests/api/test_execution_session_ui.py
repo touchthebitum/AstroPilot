@@ -482,3 +482,34 @@ assert.ok(label.endsWith(' · ' + zone));
 """
     result = subprocess.run([node, "-e", helpers + checks], env={**os.environ, "TZ": browser_zone}, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_session_timing_logs_once_without_retrying_or_changing_response():
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('Node.js is required for the dynamic UI test')
+    source = SCRIPT.read_text()
+    helper = source[source.index('async function sessionFetch('):source.index('const guardianUI =')]
+    harness = r'''
+const assert = require('node:assert/strict');
+let calls=0, ticks=0, fail=false; const logs=[];
+const console={info:(...args)=>logs.push(args),error:()=>{}};
+const performance={now:()=>ticks+=10};
+const response={status:200,headers:{get:name=>name==='Server-Timing'?'session;dur=8':null}};
+async function fetch() {calls++;if(fail)throw new Error('network');return response;}
+'''
+    checks = r'''
+(async()=>{
+  globalThis.ASTROPILOT_SESSION_TIMING=true;
+  assert.equal(await sessionFetch('/v1/execution-transitions',{method:'POST'}),response);
+  assert.deepEqual(logs[0],['session-request','POST','/v1/execution-transitions',10,200,'session;dur=8']);
+  fail=true;
+  await assert.rejects(()=>sessionFetch('/v1/execution-transitions',{method:'POST'}));
+  assert.equal(calls,2,'failed POST is never retried by instrumentation');
+  assert.equal(logs[1][4],'network-error');
+  globalThis.ASTROPILOT_SESSION_TIMING=false;fail=false;
+  await sessionFetch('/v1/executions/x/session');
+  assert.equal(calls,3);assert.equal(logs.length,2,'disabled timing emits no diagnostics');
+})().catch(()=>{process.exitCode=1;});
+'''
+    subprocess.run([node, '-e', harness + helper + checks], check=True, capture_output=True, text=True)
