@@ -17,6 +17,8 @@ from decision.acceptance_lineage_persistence import (
     DecisionAcceptanceAggregate,
     deserialize_decision_acceptance_aggregate,
     serialize_decision_acceptance_aggregate,
+    serialize_night_mission,
+    deserialize_night_mission,
     validate_lineage_identity,
 )
 from decision.mission.night_mission import NightMission
@@ -29,6 +31,37 @@ from decision.services.decision_acceptance_application import (
 class FileDecisionAcceptanceLineageStore:
     def __init__(self, directory: Path):
         self._directory = Path(directory)
+        self._session_snapshot = None
+        self._session_signature = None
+
+    def session_read_snapshot(self):
+        """Reuse only fully validated mission/selection provenance, while files match.
+
+        Guardian session reads check every file's identity and change timestamps.
+        No decision payloads, execution state, profile or Guardian status are cached.
+        """
+        with self._locked():
+            def signature():
+                result = []
+                for path in sorted(self._directory.glob("*.json")):
+                    info = path.stat()
+                    result.append((path.name, info.st_dev, info.st_ino, info.st_size,
+                                   info.st_mtime_ns, info.st_ctime_ns))
+                return tuple(result)
+
+            before = signature()
+            if self._session_snapshot is None or before != self._session_signature:
+                # Never leave a usable old snapshot after a failed revalidation.
+                self._session_snapshot = self._session_signature = None
+                aggregates = self._load_all()
+                snapshot = _SessionProvenanceSnapshot(
+                    [mission for aggregate in aggregates for mission in aggregate.missions],
+                    [selection for aggregate in aggregates for selection in aggregate.selections],
+                )
+                if signature() != before:
+                    raise AcceptanceLineageConflictError("decision_lineage_changed")
+                self._session_snapshot, self._session_signature = snapshot, before
+            return self._session_snapshot
 
     def _path(self, decision_id: str) -> Path:
         require_user_directory(self._directory)
@@ -401,3 +434,31 @@ class FileDecisionAcceptanceLineageStore:
         if len(matches) != 1:
             raise AcceptanceLineageConflictError("mission_id_conflict")
         return matches[0]
+
+
+class _SessionProvenanceSnapshot:
+    """Compact validated provenance; lookups preserve missing/duplicate failures."""
+
+    def __init__(self, missions, selections):
+        self._missions = {}
+        self._selections = {}
+        for mission in missions:
+            self._missions.setdefault(mission.mission_id, []).append(serialize_night_mission(mission))
+        for selection in selections:
+            self._selections.setdefault(selection.selection_id, []).append(selection)
+
+    @staticmethod
+    def _lookup(index, value, kind):
+        identity = validate_lineage_identity(value, field=f'{kind}_id')
+        matches = index.get(identity, [])
+        if not matches:
+            raise AcceptanceLineageNotFoundError(f'{kind}_not_found')
+        if len(matches) != 1:
+            raise AcceptanceLineageConflictError(f'{kind}_id_conflict')
+        return matches[0]
+
+    def load_mission(self, mission_id):
+        return deserialize_night_mission(self._lookup(self._missions, mission_id, 'mission'))
+
+    def load_selection(self, selection_id):
+        return self._lookup(self._selections, selection_id, 'selection')

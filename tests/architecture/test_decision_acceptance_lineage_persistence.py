@@ -1767,3 +1767,127 @@ def test_v10_file_store_preserves_exact_lunar_snapshot_in_decision_and_mission(t
     restored = deserialize_decision_acceptance_aggregate(payload)
     assert restored.missions[0].lunar_evidence_snapshot == snapshot
     assert serialize_decision_acceptance_aggregate(restored) == payload
+
+
+def test_guardian_session_snapshot_reuses_validated_provenance_and_invalidates(tmp_path, monkeypatch):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    aggregate = DecisionAcceptanceAggregate(context(), (selection(),), (mission(),))
+    store._write(aggregate)
+    calls = []
+    original = store._load_all
+
+    def counted():
+        calls.append(1)
+        return original()
+    monkeypatch.setattr(store, '_load_all', counted)
+    for _ in range(3):
+        snapshot = store.session_read_snapshot()
+        assert snapshot.load_mission('mission-1') == aggregate.missions[0]
+        assert snapshot.load_selection('selection-1') == aggregate.selections[0]
+        with pytest.raises(TypeError, match='immutable_mission_collection'):
+            snapshot.load_mission('mission-1').equipment.append('external-mutation')
+        assert snapshot.load_mission('mission-1') == aggregate.missions[0]
+    assert len(calls) == 1, 'hot reads never decode the history again'
+    assert not hasattr(snapshot, 'context'), 'full decision payloads must not be retained'
+    path = tmp_path / 'decision-1.json'
+    changed = replace(aggregate, missions=(replace(aggregate.missions[0], target='changed'),))
+    store._write(changed)
+    assert store.session_read_snapshot().load_mission('mission-1').target == 'changed'
+    assert len(calls) == 2, 'atomic replacement invalidates provenance'
+    path.write_text('corrupt')
+    with pytest.raises(AcceptanceLineageCorruptionError):
+        store.session_read_snapshot()
+    assert store._session_snapshot is None, 'failed validation drops the old cache'
+    store._write(aggregate)
+    assert store.session_read_snapshot().load_mission('mission-1') == aggregate.missions[0]
+    # An unrelated new malformed file cannot be concealed by a cache hit.
+    invalid = tmp_path / 'unrelated.json'
+    invalid.write_text('{}')
+    with pytest.raises(AcceptanceLineageCorruptionError):
+        store.session_read_snapshot()
+    invalid.unlink()
+    path.unlink()
+    with pytest.raises(AcceptanceLineageNotFoundError, match='mission_not_found'):
+        store.session_read_snapshot().load_mission('mission-1')
+
+
+def test_guardian_session_snapshot_preserves_duplicate_missing_and_change_failures(tmp_path, monkeypatch):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    first = DecisionAcceptanceAggregate(context(), (selection(),), (mission(),))
+    second = DecisionAcceptanceAggregate(context('decision-2'),
+        (selection(decision_id='decision-2'),), (mission(decision_id='decision-2'),))
+    store._write(first)
+    store._write(second)
+    snapshot = store.session_read_snapshot()
+    for method, identity in [(snapshot.load_mission, 'mission-1'), (snapshot.load_selection, 'selection-1')]:
+        with pytest.raises(AcceptanceLineageConflictError):
+            method(identity)
+    with pytest.raises(AcceptanceLineageNotFoundError):
+        snapshot.load_mission('missing')
+    with pytest.raises(AcceptanceLineageCorruptionError):
+        snapshot.load_selection('../unsafe')
+    original = store._load_all
+    store._session_snapshot = None
+    def changed_during_read():
+        result = original()
+        store._write(replace(first, missions=(replace(first.missions[0], target='external-change'),)))
+        return result
+    monkeypatch.setattr(store, '_load_all', changed_during_read)
+    with pytest.raises(AcceptanceLineageConflictError, match='decision_lineage_changed'):
+        store.session_read_snapshot()
+    assert store._session_snapshot is None
+
+
+def test_guardian_session_http_snapshot_preserves_projection_and_refuses_changed_history(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from astropilot.app import create_app
+    from decision.services.decision_acceptance_application import DecisionAcceptanceApplicationService
+    from decision.services.durable_tonight_application_service import DurableTonightApplicationService
+    field, intent = 'sh2-129_ou4', 'sh2-129_ha'
+    (tmp_path / 'decisions').mkdir()
+    store = FileDecisionAcceptanceLineageStore(tmp_path / 'decisions')
+    store._write(DecisionAcceptanceAggregate(context(),
+        (selection(selected_catalog_key='Sh2-129', selected_imaging_field_id=field, selected_acquisition_intent_id=intent),),
+        (mission(imaging_field_id=field, acquisition_intent_id=intent),)))
+    svc = DurableTonightApplicationService(application_service=object(), evidence_store=object(),
+        decision_id_factory=lambda: 'unused', acceptance_service=DecisionAcceptanceApplicationService(
+            selection_mission_service=object(), context_store=store, mission_id_factory=lambda: 'unused'),
+        execution_lineage_store=FileExecutionLineageStore(tmp_path / 'executions'))
+    for name in ['one', 'two']:
+        svc.create_execution(execution_id=name, mission_id='mission-1')
+    profile = {'profile_revision': 1, 'projects': {'Sh2-129': {'imaging_field_id': field,
+        'acquisition_intent_progress': [{'acquisition_intent_id': intent, 'acquired_duration_manual': 3600}],
+        'acquisition_intent_targets': [{'acquisition_intent_id': intent, 'target_hours': 2}]}},
+        'intent_progress_credits': {}, 'intent_progress_baselines': {}}
+    monkeypatch.setattr('astropilot.app.load_user_profile', lambda: profile)
+    calls = []
+    original = store._load_all
+    def counted():
+        calls.append(1)
+        return original()
+    monkeypatch.setattr(store, '_load_all', counted)
+    app = create_app(service_factory=lambda: svc, guardian_renewal_enabled=True,
+        guardian_attestation_path=tmp_path / 'guardian.json')
+    with TestClient(app) as api:
+        r = api.get('/v1/missions/mission-1/executions')
+        assert r.status_code == 200, r.text
+        expected = r.json()
+        assert len(calls) == 1, 'multiple sessions share one fully validated snapshot'
+        assert api.get('/v1/missions/mission-1/executions').json() == expected
+        assert len(calls) == 1, 'unchanged requests reuse compact provenance'
+        # Execution and profile remain freshly read on a provenance cache hit.
+        profile['projects']['Sh2-129']['acquisition_intent_progress'][0]['acquired_duration_manual'] = 1800
+        assert api.get('/v1/executions/one/session').json()['current_acquired_seconds'] == 1800
+        svc.transition_execution(Execution('one', 'mission-1', ExecutionStatus.IN_PROGRESS, START, None, None))
+        assert api.get('/v1/executions/one/session').json()['execution']['status'] == 'in_progress'
+        assert len(calls) == 1
+        (tmp_path / 'decisions' / 'invalid.json').write_text('{}')
+        r = api.get('/v1/missions/mission-1/executions')
+        assert r.status_code == 503 and r.json()['detail']['code'] == 'mission_provenance_invalid'
+        assert store._session_snapshot is None
+    # The legacy path does not activate the optimization.
+    (tmp_path / 'decisions' / 'invalid.json').unlink()
+    with TestClient(create_app(service_factory=lambda: svc, guardian_renewal_enabled=False)) as api:
+        before = len(calls)
+        assert api.get('/v1/missions/mission-1/executions').status_code == 200
+        assert len(calls) - before == 5

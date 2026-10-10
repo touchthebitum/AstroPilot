@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable
 from dataclasses import replace
 from uuid import uuid4
@@ -11,6 +12,7 @@ from decision.models.outcome_evaluation import (
 )
 from decision.services.decision_acceptance_application import (
     DecisionAcceptanceApplicationService,
+    DecisionAcceptanceError,
     InMemoryDecisionAcceptanceContextStore,
 )
 from decision.services.tonight_application_service import (
@@ -151,6 +153,20 @@ class DurableTonightApplicationService:
 
     def load_mission(self, mission_id: str):
         return self._decision_acceptance_service().load_mission(mission_id)
+
+    def session_read_snapshot(self):
+        acceptance = self._decision_acceptance_service()
+        factory = getattr(acceptance.context_store, "session_read_snapshot", None)
+        if factory is None:
+            return self
+        try:
+            snapshot = factory()
+        except ValueError as exc:
+            raise DecisionAcceptanceError(str(exc)) from exc
+        scoped = copy.copy(self)
+        scoped._acceptance_service = copy.copy(acceptance)
+        scoped._acceptance_service.context_store = snapshot
+        return scoped
 
     def latest_accepted_mission(self, *, profile, now):
         store = self._decision_acceptance_service().context_store
