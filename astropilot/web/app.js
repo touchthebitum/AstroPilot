@@ -5036,6 +5036,7 @@ async function restoreSavedMission() {
   state.acceptedMission = null;
   state.savedMissions = [];
   ui.savedMissionEntry.hidden = true;
+  if (ui.openSavedMission) ui.openSavedMission.disabled = true;
   let current = null;
   try {
     const response = await fetch("/v1/accepted-mission/current");
@@ -5101,6 +5102,13 @@ async function restoreSavedMission() {
     ui.savedMissionTarget.textContent = state.acceptedMission.mission.target;
     ui.savedMissionEntry.hidden = false;
   }
+  renderSavedMissionAvailability();
+}
+
+function renderSavedMissionAvailability() {
+  if (!ui.openSavedMission) return;
+  const selected = state.savedMissions.find(item => item.mission_id === ui.savedMissionChoice.value);
+  ui.openSavedMission.disabled = !selected?.mission || selected.source !== "persisted";
 }
 
 function invalidateAvailabilityForSiteChange(previousSite, nextSite) {
@@ -6173,10 +6181,11 @@ ui.openMission.addEventListener("click", () => acceptRecommendation({
   triggerButton: ui.openMission,
   selectedTarget: state.currentDecision?.target,
 }));
+ui.savedMissionChoice.addEventListener("change", renderSavedMissionAvailability);
 ui.openSavedMission.addEventListener("click", () => {
   const selected = state.savedMissions.find((item) => item.mission_id === ui.savedMissionChoice.value);
-  if (selected) state.acceptedMission = selected;
-  if (!state.acceptedMission?.mission || state.acceptedMission.source !== "persisted") return;
+  if (!selected?.mission || selected.source !== "persisted") return;
+  state.acceptedMission = selected;
   renderMission(state.acceptedMission.mission);
   ui.mission.showModal();
 });

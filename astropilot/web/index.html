@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="/ui/styles.css?v=__ASTROPILOT_ASSET_TOKEN__">
     <script src="/ui/help.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
     <script src="/ui/alert-status.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
+    __ASTROPILOT_SESSION_TIMING__
     <script src="/ui/app.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
   </head>
   <body>
@@ -235,7 +236,7 @@
             <div><strong>Missions enregistrées</strong><p id="saved-mission-target"></p>
               <label for="saved-mission-choice">Choisir une mission</label>
               <select id="saved-mission-choice"></select></div>
-            <button class="mission-button" id="open-saved-mission" type="button">Ouvrir la mission</button>
+            <button class="mission-button" id="open-saved-mission" type="button" disabled>Ouvrir la mission</button>
           </div>
           <fieldset class="availability-modes">
             <legend>Ma disponibilité</legend>
