@@ -176,9 +176,14 @@ function renderGuardianRenewal() {
   const button = document.querySelector("#guardian-confirm");
   button.hidden = !exact || !value?.guardian_mode_enabled || currentSession()?.execution.status !== "in_progress";
   button.disabled = !eligible || guardianUI.pending || guardianUI.uncertain || state.sessionBusy;
-  text("#guardian-last-confirmation", value?.confirmed_at || "Aucune confirmation acceptée");
-  text("#guardian-deadline", value?.expires_at ? `${value.expires_at} (15 minutes)` : "Aucune échéance");
-  text("#guardian-ownership", eligible ? "Propriété confirmée à la dernière lecture · confirmation fraîche selon l’heure serveur"
+  const session = currentSession();
+  const zone = missionTimezone(session?.mission, state.acceptedMission);
+  text("#guardian-last-confirmation", value?.confirmed_at
+    ? missionDateTimeLabel(value.confirmed_at, zone) : "Aucune confirmation acceptée");
+  text("#guardian-deadline", value?.expires_at ? `${missionDateTimeLabel(value.expires_at, zone)} (15 minutes)` : "Aucune échéance");
+  text("#guardian-ownership", session?.execution.status === "not_started"
+    ? "Démarrez cette session pour activer la confirmation Guardian et son échéance de 15 minutes."
+    : eligible ? "Propriété confirmée à la dernière lecture · confirmation fraîche selon l’heure serveur"
     : !guardianUI.status ? "Propriété et fraîcheur non vérifiées. Vérifiez l’état Guardian avant de poursuivre."
     : "Renouvellement indisponible. Après expiration, redémarrage ou perte de propriété, une nouvelle session explicite est requise. Vous pouvez clôturer l’ancienne session.");
   text("#guardian-message", guardianUI.message);
