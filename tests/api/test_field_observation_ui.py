@@ -216,7 +216,8 @@ async function fetch() { return {ok: true, json: async () => clone(serverSession
   assert.equal(state.fieldObservationDraftContext.execution_id, 'session-a');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    program = harness + source[source.index("function decisionSiteFingerprint("):source.index("function currentDecisionMatchesSite(")] + session_helpers + context_helpers + same_context + sync_context + choice_listener + checks
+    time_helpers = source[source.index("function missionTimezone("):source.index("function clock(")]
+    program = harness + time_helpers + source[source.index("function decisionSiteFingerprint("):source.index("function currentDecisionMatchesSite(")] + session_helpers + context_helpers + same_context + sync_context + choice_listener + checks
     command = [engine, "-e", program] if Path(engine).name == "node" else [engine, "-l", "JavaScript", "-e", program]
     result = subprocess.run(
         command,
