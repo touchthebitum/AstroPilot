@@ -29,17 +29,19 @@ datas = [
         "astropilot/knowledge/objects",
     ),
 ]
+datas += [(str(p), "astropilot/web") for p in (ROOT / "astropilot/web").glob("*") if p.is_file()]
+datas += [(str(ROOT / "astropilot/reference_stations_v1.json"), "astropilot")]
 datas += collect_data_files("timezonefinder_data")
 datas += collect_data_files("astropy_iers_data")
 datas += collect_data_files("tzdata")
 datas += copy_metadata("astropilot")
 
 analysis = Analysis(
-    [str(ROOT / "astropilot" / "launcher.py")],
+    [str(ROOT / "astropilot" / "portable_entry.py")],
     pathex=[str(ROOT)],
     binaries=[],
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=["astropilot.guardian_host", "astropilot.guardian_http_worker"],
     hookspath=[str(ROOT / "packaging" / "pyinstaller_hooks")],
     hooksconfig={},
     runtime_hooks=[str(build_identity_hook)],

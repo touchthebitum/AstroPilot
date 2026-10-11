@@ -219,6 +219,7 @@ def main(argv=None, *, provider_factories=None, clock=None):
     parser.add_argument('--data-dir', type=Path, required=True)
     parser.add_argument('--state-dir', type=Path)
     parser.add_argument('--once', action='store_true')
+    parser.add_argument('--evidence-file', type=Path, help='Explicit injected evidence JSON; no live execution authority.')
     started = False
     phase = 'config'
     try:
@@ -248,6 +249,13 @@ def main(argv=None, *, provider_factories=None, clock=None):
                         return GuardianHostProviders(
                             ProductionGuardianWeatherAdapter(**config.weather_site), lambda _: None)
                     registry = {PROVIDER_ID: weather_factory}
+                    if args.evidence_file is not None:
+                        from astropilot.guardian_api import GuardianEvaluateRequest
+                        def read_injected():
+                            return GuardianEvaluateRequest.model_validate_json(args.evidence_file.read_text(encoding='utf-8'))
+                        registry['injected_file_v1'] = lambda: GuardianHostProviders(
+                            lambda _: read_injected().observations.domain(),
+                            lambda _: None if (context := read_injected().session_context) is None else context.domain())
                 else:
                     registry = provider_factories
                 factory = registry.get(config.provider)

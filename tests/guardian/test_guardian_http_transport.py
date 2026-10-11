@@ -46,6 +46,7 @@ def connection_factory(body=b'{}', status=200, failure=None):
 @pytest.mark.parametrize('platform', ['darwin', 'linux', 'win32'])
 def test_portable_success_and_fixed_command(monkeypatch, platform):
     monkeypatch.setattr(sys, 'platform', platform)
+    monkeypatch.setattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000, raising=False)
     calls = []
     def run(command, **options):
         calls.append(command)
@@ -55,6 +56,10 @@ def test_portable_success_and_fixed_command(monkeypatch, platform):
         assert options['timeout'] <= 2
         assert options['stderr'] == subprocess.DEVNULL
         assert 'shell' not in options
+        if platform == 'win32':
+            assert options['creationflags'] == subprocess.CREATE_NO_WINDOW
+        else:
+            assert 'creationflags' not in options
         return subprocess.CompletedProcess(command, 0, b'{}')
     monkeypatch.setattr(transport.subprocess, 'run', run)
     assert transport.BoundedHttpTransport()(latitude=46, longitude=7, timeout_seconds=2) == {}
@@ -144,13 +149,33 @@ def test_invalid_config_before_process(monkeypatch, kw):
     with pytest.raises(transport.TransportError): transport.BoundedHttpTransport()(**options)
 
 
-def test_frozen_fails_closed(monkeypatch):
+def test_frozen_uses_same_executable_worker(monkeypatch):
     monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=b'{}')
+    monkeypatch.setattr(subprocess, 'run', run)
+    assert transport.BoundedHttpTransport()(latitude=40.4, longitude=-3.7, timeout_seconds=2) == {}
+    assert calls[0][:2] == [sys.executable, '--guardian-http-worker']
+    assert calls[0][2:4] == ['40.4', '-3.7']
+
+
+@pytest.mark.parametrize('failure', [
+    subprocess.TimeoutExpired('worker', 2), subprocess.CalledProcessError(1, 'worker'),
+])
+def test_frozen_worker_failure_remains_closed(monkeypatch, failure):
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    def run(command, **kwargs):
+        assert command[:2] == [sys.executable, '--guardian-http-worker']
+        assert 0 < kwargs['timeout'] <= 2
+        raise failure
+    monkeypatch.setattr(subprocess, 'run', run)
     with pytest.raises(transport.TransportError):
-        transport.BoundedHttpTransport()(latitude=46, longitude=7, timeout_seconds=2)
+        transport.BoundedHttpTransport()(latitude=40.4, longitude=-3.7, timeout_seconds=2)
 
 
-@pytest.mark.parametrize('phase', ['dns', 'connect', 'headers', 'read'])
+@pytest.mark.parametrize("phase", ["dns", "connect", "headers", "body"])
 def test_native_blocked_http_phase_is_killed(tmp_path, monkeypatch, phase):
     helper = tmp_path / 'blocked_http.py'
     marker = tmp_path / 'phase_entered'

@@ -28,13 +28,13 @@ def test_installed_package_exposes_astropilot_command():
 
 
 def test_project_declares_canonical_beta_version():
-    assert _pyproject()["project"]["version"] == "1.0.0b7"
+    assert _pyproject()["project"]["version"] == "1.0.0b8"
 
     lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
     astropilot_package = lock.split('name = "astropilot"', 1)[1].split(
         "[[package]]", 1
     )[0]
-    assert 'version = "1.0.0b7"' in astropilot_package
+    assert 'version = "1.0.0b8"' in astropilot_package
     assert 'version = "0.0.0"' not in astropilot_package
 
 
@@ -109,7 +109,7 @@ def test_launcher_and_internal_field_lab_entry_points_are_explicit():
 def test_spec_defines_arm64_windowed_onedir_application():
     spec = (ROOT / "AstroPilot.spec").read_text(encoding="utf-8")
 
-    assert 'astropilot" / "launcher.py"' in spec
+    assert 'astropilot" / "portable_entry.py"' in spec
     assert 'name="AstroPilot"' in spec
     assert "exclude_binaries=True" in spec
     assert "COLLECT(" in spec
@@ -138,7 +138,7 @@ def test_spec_collects_exact_runtime_assets_without_broad_hidden_imports():
     assert 'collect_data_files("astropy_iers_data")' in spec
     assert 'collect_data_files("tzdata")' in spec
     assert 'copy_metadata("astropilot")' in spec
-    assert "hiddenimports=[]" in spec
+    assert 'hiddenimports=["astropilot.guardian_host", "astropilot.guardian_http_worker"]' in spec
     assert "collect_submodules" not in spec
     assert "tests/data" not in spec
 
@@ -308,9 +308,9 @@ def test_tester_label_and_future_artifact_name_are_deterministic():
     build = _build_module()
 
     version = _pyproject()["project"]["version"]
-    assert build.tester_version_label(version) == "1.0.0-beta.7"
+    assert build.tester_version_label(version) == "1.0.0-beta.8"
     assert build.artifact_name(version, "arm64") == (
-        "AstroPilot-1.0.0-beta.7-macos-arm64.zip"
+        "AstroPilot-1.0.0-beta.8-macos-arm64.zip"
     )
 
 
@@ -336,7 +336,7 @@ def test_build_identity_is_injected_by_generated_ignored_runtime_hook():
 def test_fastapi_version_derives_from_canonical_project_version():
     from astropilot.app import canonical_version, create_app
 
-    assert canonical_version() == "1.0.0b7"
+    assert canonical_version() == "1.0.0b8"
     assert create_app().version == canonical_version()
 
 
@@ -597,3 +597,12 @@ def test_build_definition_has_no_local_paths_or_unrequested_release_formats():
     assert ".pkg" not in sources.lower()
     assert "--apple-id" not in sources
     assert "--password" not in sources
+
+
+def test_macos_bundle_routes_guardian_before_web_initialization():
+    source = (ROOT / "AstroPilot.spec").read_text(encoding="utf-8")
+    assert 'ROOT / "astropilot" / "portable_entry.py"' in source
+    assert 'hiddenimports=["astropilot.guardian_host", "astropilot.guardian_http_worker"]' in source
+    entry = (ROOT / "astropilot/portable_entry.py").read_text(encoding="utf-8")
+    assert entry.index("--guardian-http-worker") < entry.index("from astropilot.launcher")
+    assert entry.index('"--guardian"') < entry.index("from astropilot.launcher")

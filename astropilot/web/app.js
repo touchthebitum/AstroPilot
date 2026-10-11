@@ -3699,10 +3699,10 @@ function windowTimezone(decision) {
   } catch (_) { return "UTC"; }
 }
 
-// Restored DTOs contain no historical timezone. Never infer it from today's
-// configuration or the browser; keep known frontend context, otherwise use UTC.
+// Use the persisted site timezone, independent of current configuration or browser.
+// Older missions without historical timezone retain the UTC fallback.
 function missionTimezone(mission, context) {
-  const candidate = context?.windowTimezone ?? mission?.windowTimezone ?? "UTC";
+  const candidate = mission?.site_timezone ?? context?.windowTimezone ?? mission?.windowTimezone ?? "UTC";
   try {
     return new Intl.DateTimeFormat("fr-CH", {timeZone: candidate}).resolvedOptions().timeZone;
   } catch (_) { return "UTC"; }
@@ -5488,6 +5488,24 @@ const partialMessages = Object.freeze({
   no_productive_window: ["Aucun créneau suffisamment productif", "Une nuit astronomique existe, mais aucune fenêtre n’atteint le seuil opérationnel requis par NightMerit."],
 });
 
+const creationRefusalMessages = Object.freeze({
+  modern_mission_input_required: ["Données de mission manquantes", "Les données nécessaires à la création de la mission sont absentes."],
+  preselection_evidence_cannot_authorize_mission: ["Acquisition à sélectionner", "L’évaluation préliminaire ne suffit pas à créer une mission. Sélectionnez une acquisition dans le projet."],
+  modern_mission_authorization_required: ["Projet d’acquisition à configurer", "Le projet ne fournit pas les informations nécessaires pour autoriser une mission : acquisition sélectionnée, temps restant et filtre compatible."],
+  modern_mission_authorization_mismatch: ["Données d’acquisition incohérentes", "Le champ, l’acquisition ou le temps restant ne correspondent pas aux données autorisées du projet."],
+  modern_mission_capacity_insufficient: ["Temps d’acquisition restant insuffisant", "L’acquisition est terminée ou son temps restant n’atteint pas le minimum requis d’une heure."],
+  user_availability_required: ["Disponibilité à préciser", "Précisez votre disponibilité pour créer une mission."],
+  legacy_filter_cannot_authorize_modern_mission: ["Filtre compatible à configurer", "Le filtre historique ne fournit pas le profil optique précis requis pour cette acquisition."],
+});
+
+function creationRefusalMessage(payload) {
+  if (payload.creation_refusal === "modern_mission_authorization_required" && payload.provenance === "discovery") {
+    return ["Projet d’acquisition requis", "Cette cible a été trouvée en découverte. Aucun projet d’acquisition configuré ne permet encore de créer une mission. Configurez un projet avec une acquisition et un filtre compatibles."];
+  }
+  return creationRefusalMessages[payload.creation_refusal]
+    || ["Création de mission refusée", "La cause précise du refus n’est pas reconnue par cette version de l’interface."];
+}
+
 const actionabilityCauseLabels = Object.freeze({
   insufficient_actionable_productive_window: "aucune fenêtre productive continue n’atteint le seuil requis",
   productive_window_evidence_missing: "les preuves temporelles de fenêtre productive sont manquantes ou invalides",
@@ -5590,14 +5608,19 @@ function canEditRefusedAvailability(payload) {
 
 function showTonightUnavailable(payload) {
   const productiveRefusal = payload.status === "no_productive_window";
+  const creationRefused = payload.status === "no_mission" && Boolean(payload.creation_refusal);
   const [title, technical] = payload.status === "weather_refused"
     ? [payload.weather_decision.presentation.label, payload.weather_decision.presentation.summary]
     : productiveRefusal
     ? actionabilityRefusalMessage(payload.actionability_refusal)
+    : creationRefused
+    ? creationRefusalMessage(payload)
     : partialMessages[payload.status] || ["Décision indisponible", "Aucune recommandation exploitable."];
   const shortWindow = payload.actionability_refusal?.refusal_stage === "continuous_window_too_short";
   const editAvailability = canEditRefusedAvailability(payload);
-  const body = productiveRefusal
+  const body = creationRefused
+    ? technical
+    : productiveRefusal
     ? shortWindow
       ? `Le créneau utilisable est trop court pour lancer une mission. Réessayez plus tard si les conditions évoluent.${editAvailability ? " Vous pouvez revoir votre disponibilité, sans garantie de trouver un créneau suffisant." : ""}`
       : "Aucun créneau ne permet de lancer une mission dans les conditions évaluées. Réessayez plus tard lorsque les prévisions évoluent."

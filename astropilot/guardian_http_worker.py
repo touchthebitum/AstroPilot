@@ -51,11 +51,17 @@ def request(latitude, longitude, timeout_seconds):
         connection.close()
 
 
-if __name__ == '__main__':
+def main(argv=None):
+    args = sys.argv[1:] if argv is None else argv
     try:
-        if len(sys.argv) != 4:
+        if len(args) != 3:
             raise ValueError()
-        body = request(*(float(item) for item in sys.argv[1:]))
+        body = request(*(float(item) for item in args))
         sys.stdout.buffer.write(body)
     except Exception:
-        sys.exit(1)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

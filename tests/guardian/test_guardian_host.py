@@ -57,6 +57,28 @@ def test_start_restart_next_unknown(tmp_path, capsys):
     assert evidence.call_count == 2
 
 
+@pytest.mark.parametrize('payload,expected', [
+    ({'observations': {}, 'session_context': None}, 0),
+    ({'observations': {}, 'session_context': None, 'invalid': True}, 6),
+])
+def test_explicit_evidence_file_is_strict_and_fail_closed(tmp_path, capsys, payload, expected):
+    path = config(tmp_path, provider='injected_file_v1')
+    evidence = tmp_path / 'evidence.json'
+    evidence.write_text(json.dumps(payload), encoding='utf-8')
+    args = ['--config', str(path), '--data-dir', str(tmp_path / 'state'), '--once']
+    assert main(args, clock=lambda: NOW) == 3
+    capsys.readouterr()
+    assert main(args + ['--evidence-file', str(evidence)], clock=lambda: NOW) == expected
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    cycle = next(event for event in events if event['event'] == 'cycle')
+    assert cycle['decision_eligible'] is False
+    assert cycle['action'] == 'EMERGENCY_STOP'
+    if expected == 0:
+        assert cycle['risk'] == 'UNKNOWN'
+    else:
+        assert 'evidence_provider_error' in cycle['errors']
+
+
 def test_provider_error_consumed(tmp_path, capsys):
     providers = GuardianHostProviders(Mock(side_effect=RuntimeError('secret')), lambda t: None)
     code, events = invoke(tmp_path, capsys, providers=providers)
@@ -178,7 +200,7 @@ def test_actual_wait_interruptible():
 
 def test_host_dependency_boundary():
     tree = ast.parse((Path(__file__).resolve().parents[2] / 'astropilot/guardian_host.py').read_text())
-    allowed = {'astropilot.guardian_session_store', 'astropilot.guardian_notification', 'astropilot.guardian_scheduler', 'astropilot.guardian_scheduler_state', 'astropilot.guardian_live_evidence',
+    allowed = {'astropilot.guardian_api', 'astropilot.guardian_session_store', 'astropilot.guardian_notification', 'astropilot.guardian_scheduler', 'astropilot.guardian_scheduler_state', 'astropilot.guardian_live_evidence',
                'decision.runners.guardian_periodic_runner', 'decision.runners.guardian_runner'}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import): names = [n.name for n in node.names]

@@ -68,6 +68,7 @@ class NightMission:
     imaging_field_id: str | None = None
     acquisition_intent_id: str | None = None
 
+    site_timezone: str | None = None
     lunar_evidence_snapshot: LunarEvidenceSnapshot | None = None
 
     def __post_init__(self):

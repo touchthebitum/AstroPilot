@@ -27,17 +27,19 @@ class BoundedHttpTransport:
                 if (type(value) not in (int, float) or not math.isfinite(value)
                         or not low <= value <= high):
                     raise ValueError()
-            if timeout_seconds <= 0 or getattr(sys, 'frozen', False):
+            if timeout_seconds <= 0:
                 raise ValueError()
             remaining = timeout_seconds - (monotonic() - started)
             if remaining <= 0:
                 raise TimeoutError()
             # run kills and waits on TimeoutExpired, on both POSIX and Windows.
             result = subprocess.run(
-                [sys.executable, '-I', str(_WORKER), str(latitude), str(longitude),
-                 str(remaining)], timeout=remaining, check=True,
+                ([sys.executable, '--guardian-http-worker'] if getattr(sys, 'frozen', False)
+                 else [sys.executable, '-I', str(_WORKER)])
+                + [str(latitude), str(longitude), str(remaining)], timeout=remaining, check=True,
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL)
+                stdin=subprocess.DEVNULL,
+                **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}))
             if len(result.stdout) > MAX_BODY_BYTES:
                 raise ValueError()
             payload = json.loads(result.stdout, parse_constant=_reject_constant)
