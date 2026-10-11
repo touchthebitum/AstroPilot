@@ -24,7 +24,7 @@ def _build_module():
 def test_windows_spec_exists_and_defines_console_onedir_executable():
     source = SPEC_PATH.read_text(encoding="utf-8")
 
-    assert 'astropilot" / "launcher.py"' in source
+    assert 'astropilot" / "portable_entry.py"' in source
     assert 'name="AstroPilot"' in source
     assert "exclude_binaries=True" in source
     assert "COLLECT(" in source
@@ -59,7 +59,7 @@ def test_windows_spec_collects_exact_runtime_assets_without_broad_imports():
     assert 'collect_data_files("astropy_iers_data")' in source
     assert 'collect_data_files("tzdata")' in source
     assert 'copy_metadata("astropilot")' in source
-    assert "hiddenimports=[]" in source
+    assert 'hiddenimports=["astropilot.guardian_host", "astropilot.guardian_http_worker"]' in source
     assert "collect_submodules" not in source
 
 

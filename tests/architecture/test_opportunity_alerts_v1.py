@@ -67,6 +67,15 @@ def test_complete_alert(complete, policy):
     assert decision.alert.kind == "session_opportunity"
 
 
+def test_available_result_without_live_marker_cannot_claim(complete, policy):
+    from unittest.mock import Mock
+    ledger = Mock()
+    decision = decide(replace(complete, alert_live_marker=None), policy, ledger)
+    assert decision.status is OpportunityAlertStatus.NO_ALERT
+    assert decision.reason_codes == ("live_tonight_result_required",)
+    ledger.claim.assert_not_called()
+
+
 @pytest.mark.parametrize("damage", ["recommendation", "mission", "availability", "authority", "profile",
     "short", "gain_zero", "gain_negative", "gain_nan", "intent", "assessment", "weather",
     "forecast_evidence", "windows", "partial_aqi", "aqi_unknown", "lineage", "refusal", "legacy", "read_only"])

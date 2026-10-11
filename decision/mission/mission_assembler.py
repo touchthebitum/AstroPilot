@@ -557,6 +557,7 @@ class MissionAssembler:
             target=target,
             confidence=summary.confidence,
             site_name=context.site.name,
+            site_timezone=getattr(context.site, "timezone", None),
             mission_id=(
                 mission_input.mission_id
                 if mission_input is not None

@@ -49,9 +49,9 @@ function text(key, value) { values[key] = value; }
 function siteDateTime(value) { return value || "Non précisée"; }
 '''
     path = tmp_path / "reliability-render.js"
-    output = "\nconsole.log(JSON.stringify(output));\n" if Path(engine).name == "node" else "\nJSON.stringify(output);\n"
+    output = "\nconsole.log(JSON.stringify(output));\n" if Path(engine).stem.lower() == "node" else "\nJSON.stringify(output);\n"
     path.write_text(harness + weather_renderer + confidence_renderers + checks + output)
-    command = [engine] if Path(engine).name == "node" else [engine, "-l", "JavaScript"]
+    command = [engine] if Path(engine).stem.lower() == "node" else [engine, "-l", "JavaScript"]
     completed = subprocess.run(
         [*command, str(path)], text=True, capture_output=True, check=True,
     )
@@ -133,7 +133,7 @@ def test_root_serves_tonight_classic_ui():
     assert "Fiabilité de la recommandation" in response.text
     assert 'id="alternatives-section"' in response.text
     assert 'id="alternatives-list"' in response.text
-    assert 'src="/ui/app.js?v=1.0.0b7-' in response.text
+    assert 'src="/ui/app.js?v=1.0.0b8-' in response.text
     assert "__ASTROPILOT_ASSET_TOKEN__" not in response.text
 
 
@@ -713,10 +713,10 @@ const output = {
   otherMode: scenario("until", "2026-09-25T20:30", "2026-09-25T00:00"),
 };
 '''
-    output = "\nconsole.log(JSON.stringify(output));\n" if Path(engine).name == "node" else "\nJSON.stringify(output);\n"
+    output = "\nconsole.log(JSON.stringify(output));\n" if Path(engine).stem.lower() == "node" else "\nJSON.stringify(output);\n"
     path = tmp_path / "availability-overnight.js"
     path.write_text(harness + functions + output)
-    command = [engine] if Path(engine).name == "node" else [engine, "-l", "JavaScript"]
+    command = [engine] if Path(engine).stem.lower() == "node" else [engine, "-l", "JavaScript"]
     completed = subprocess.run(
         [*command, str(path)], text=True, capture_output=True, check=True,
     )
@@ -1152,7 +1152,7 @@ const rendered = actionabilityRefusalMessage({
   required_continuous_minutes: 60.00000000000001,
 });
 '''
-    if Path(engine).name == 'node':
+    if Path(engine).stem.lower() == 'node':
         harness += '\nconsole.log(JSON.stringify(rendered));\n'
         command = [engine]
     else:
@@ -1193,7 +1193,7 @@ def _execute_actionability_renderer(tmp_path, refusal):
         + json.dumps(refusal)
         + ');\n'
     )
-    if Path(engine).name == 'node':
+    if Path(engine).stem.lower() == 'node':
         harness += '\nconsole.log(JSON.stringify(rendered));\n'
         command = [engine]
     else:
@@ -1338,7 +1338,7 @@ function run() {
   return JSON.stringify(results);
 }
 '''
-    if Path(engine).name == 'node':
+    if Path(engine).stem.lower() == 'node':
         harness += '\nconsole.log(run());\n'
         command = [engine]
     else:
@@ -1427,7 +1427,7 @@ if (!ui.addObservationMessage.hidden) throw new Error("error button visible");
 '''
     path = tmp_path / 'field-observation-entry-points.js'
     path.write_text(harness)
-    command = [engine, str(path)] if Path(engine).name == 'node' else [
+    command = [engine, str(path)] if Path(engine).stem.lower() == 'node' else [
         engine, '-l', 'JavaScript', str(path)
     ]
     completed = subprocess.run(command, capture_output=True, text=True, check=False)
@@ -1552,6 +1552,14 @@ for (const invalid of [null,undefined,0,.5,'','PT','PT0M','PT-30M','PT0.5H','P1D
  assert.equal(canEditRefusedAvailability({status:'no_productive_window',actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}}),false);
 }
 state.availability=null;
+for (const mode of ['simple','pro']) {
+ appliedUiMode=mode;
+ showTonightUnavailable({status:'no_mission',provenance:'discovery',creation_refusal:'modern_mission_authorization_required'});
+ assert.equal(shown.title,'Projet d’acquisition requis');
+ assert.match(shown.body,/Aucun projet d’acquisition configuré/);
+ assert.doesNotMatch(shown.body,/Mission incomplète|Réessayez plus tard|modern_mission/);
+ assert.equal(document.querySelector('#message-edit-availability').hidden,true);
+}
 showTonightUnavailable({status:'no_recommendation'});
 assert.equal(document.querySelector('#message-edit-availability').hidden,true);
 '''

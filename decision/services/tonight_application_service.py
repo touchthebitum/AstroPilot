@@ -128,6 +128,7 @@ class TonightResult:
     candidate_rejections: tuple[CandidateRejection, ...] = ()
     actionability_refusal: ActionabilityRefusal | None = None
     timeline_start: datetime | None = None
+    creation_refusal: str | None = None
     # Internal live evidence, deliberately absent from TonightResponse/API.
     alert_mission_input: MissionInput | None = field(default=None, repr=False, compare=False)
     alert_assessment: ProductiveWindowAssessment | None = field(default=None, repr=False, compare=False)
@@ -328,6 +329,7 @@ class TonightApplicationService:
             None,
         )
         actionability_refusal = None
+        creation_refusal = None
         if create_with_diagnostic is not None:
             assembly = create_with_diagnostic(
                 winner=night,
@@ -338,6 +340,7 @@ class TonightApplicationService:
             mission = assembly.mission
             alert_assessment = assembly.assessment
             actionability_refusal = assembly.actionability_refusal
+            creation_refusal = assembly.creation_refusal
         else:
             mission = self.tonight_mission_service.create(
                 winner=night,
@@ -359,6 +362,7 @@ class TonightApplicationService:
                 candidate_rejections=candidate_rejections,
                 actionability_refusal=actionability_refusal,
                 timeline_start=timeline_start,
+                creation_refusal=creation_refusal,
             )
 
         DecisionConsistencyGate.validate_mission(mission)

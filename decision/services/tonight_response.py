@@ -463,6 +463,7 @@ class TonightResponse:
     ] = ()
     target_decision_status: TargetDecisionStatus | None = None
     actionability_refusal: ActionabilityRefusal | None = None
+    creation_refusal: str | None = None
     shortlist_entries: list[TonightShortlistEntryResponse] = field(
         default_factory=list
     )
@@ -942,6 +943,7 @@ class TonightResponse:
             ),
             target_decision_status=target_decision_status,
             actionability_refusal=actionability_refusal,
+            creation_refusal=None if refused else result.creation_refusal,
             shortlist_entries=shortlist_entries,
             alternatives=alternatives,
             rejected_targets=list(rejected_targets),

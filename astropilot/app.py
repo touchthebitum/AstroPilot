@@ -668,6 +668,7 @@ class AcceptedMissionResponse(BaseModel):
     confidence: float | str | None = None
     equipment: list[str] = Field(default_factory=list)
     site_name: str
+    site_timezone: str | None = None
     window_start: datetime | None = None
     window_end: datetime | None = None
     recommended_hours: float = 0.0
@@ -1582,6 +1583,7 @@ class TonightResponseModel(BaseModel):
     ) = None
     target_decision_status: TargetDecisionStatus | None = None
     actionability_refusal: ActionabilityRefusalModel | None = None
+    creation_refusal: str | None = None
     shortlist_entries: list[TonightShortlistEntryModel] = Field(
         default_factory=list
     )
@@ -1688,6 +1690,7 @@ def _accepted_mission_response(mission: NightMission) -> AcceptedMissionResponse
         confidence=mission.confidence,
         equipment=list(mission.equipment),
         site_name=mission.site_name,
+        site_timezone=mission.site_timezone,
         window_start=mission.window_start,
         window_end=mission.window_end,
         recommended_hours=float(mission.recommended_hours),

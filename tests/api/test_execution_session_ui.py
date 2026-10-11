@@ -513,3 +513,20 @@ async function fetch() {calls++;if(fail)throw new Error('network');return respon
 })().catch(()=>{process.exitCode=1;});
 '''
     subprocess.run([node, '-e', harness + helper + checks], check=True, capture_output=True, text=True)
+
+
+def test_reopened_mission_prefers_persisted_site_timezone():
+    node = shutil.which("node")
+    assert node is not None
+    source = SCRIPT.read_text(encoding="utf-8")
+    helpers = source[source.index("function missionTimezone("):source.index("function clock(")]
+    checks = """
+const assert = require('node:assert/strict');
+const mission = {site_timezone:'Europe/Madrid'};
+const zone = missionTimezone(mission, {windowTimezone:'Asia/Tokyo'});
+assert.equal(zone, 'Europe/Madrid');
+assert.ok(missionDateTimeLabel('2026-10-11T22:00:00+02:00', zone).includes('22:00'));
+assert.equal(missionTimezone({}, null), 'UTC');
+"""
+    result = subprocess.run([node, "-e", helpers + checks], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

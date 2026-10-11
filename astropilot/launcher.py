@@ -429,6 +429,12 @@ def _run_macos_application(
 
 
 def main() -> None:
+    if sys.argv[1:2] == ["--guardian-http-worker"]:
+        from astropilot.guardian_http_worker import main as worker_main
+        raise SystemExit(worker_main(sys.argv[2:]))
+    if sys.argv[1:2] == ["--guardian"]:
+        from astropilot.guardian_host import main as guardian_main
+        raise SystemExit(guardian_main(sys.argv[2:]))
     if sys.argv[1:] == ["--runtime-identity"]:
         print(json.dumps(runtime_identity_payload(), sort_keys=True))
         return
