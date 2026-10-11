@@ -27,11 +27,13 @@ excluded from the source commit.
 
 ## NO_MISSION qualification
 
-`NO_MISSION` remains `NO_ALERT`, without a ledger claim. A live-marked refused
-result returns `tonight_not_admissible`. The actual Tonight no-mission result
-does not carry the internal live marker, so the preceding existing gate returns
-`live_tonight_result_required`. The regression test records both outcomes;
-this PR does not relabel that diagnostic or add alert authority to a refusal.
+The follow-up diagnostic correction checks admissibility before live provenance:
+the actual Tonight `NO_MISSION` result returns `NO_ALERT` with
+`tonight_not_admissible`, without a ledger claim or an artificial live marker.
+An admissible `AVAILABLE` result still requires the live marker and all existing
+authority and evidence checks; without that marker it returns `NO_ALERT` with
+`live_tonight_result_required`. Both paths have regression tests. This correction
+changes refusal diagnostics only and was not part of the transferred Mac build.
 The macOS report does not establish native Opportunity Alerts validation.
 
 ## Validation boundary

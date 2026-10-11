@@ -69,10 +69,10 @@ class OpportunityAlertService:
         logical_time = logical_time.astimezone(timezone.utc)
         if not policy.enabled:
             return _no("alerts_disabled")
-        if result.alert_live_marker is not _ALERT_LIVE_MARKER:
-            return _no("live_tonight_result_required")
         if result.status is not TonightStatus.AVAILABLE or result.actionability_refusal is not None:
             return _no("tonight_not_admissible")
+        if result.alert_live_marker is not _ALERT_LIVE_MARKER:
+            return _no("live_tonight_result_required")
         if result.recommendation is None or result.mission is None:
             return _no("recommendation_and_mission_required")
         if result.forecast_evidence is None or not result.forecast_evidence.forecast_points:

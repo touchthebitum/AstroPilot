@@ -1,5 +1,4 @@
 from copy import deepcopy
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace as NS
 
@@ -17,7 +16,6 @@ from decision.models.session_availability import SessionAvailability, SessionAva
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 from decision.models.opportunity_alert import OpportunityAlertPolicy, OpportunityAlertStatus
 from decision.services.opportunity_alert_service import OpportunityAlertService
-from decision.services.tonight_application_service import _ALERT_LIVE_MARKER
 from unittest.mock import Mock
 
 
@@ -64,11 +62,6 @@ def test_empty_project_profile_preserves_creation_refusal_through_api(monkeypatc
                                     intent_ids=("test",), filter_profile_ids=("test",))
     alerts = OpportunityAlertService(ledger)
     decision = alerts.evaluate(result=result, policy=policy, logical_time=start)
-    assert decision.status is OpportunityAlertStatus.NO_ALERT
-    assert decision.reason_codes == ("live_tonight_result_required",)
-    # Even a live-marked result cannot authorize an alert without a mission.
-    decision = alerts.evaluate(result=replace(result, alert_live_marker=_ALERT_LIVE_MARKER),
-                               policy=policy, logical_time=start)
     assert decision.status is OpportunityAlertStatus.NO_ALERT
     assert decision.reason_codes == ("tonight_not_admissible",)
     ledger.claim.assert_not_called()
