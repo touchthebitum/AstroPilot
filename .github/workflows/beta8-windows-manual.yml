@@ -26,8 +26,6 @@ jobs:
       APPROVED_SHA: ${{ inputs.approved_sha }}
       UV_PROJECT_ENVIRONMENT: .venv-packaging
       UV_NO_ENV_FILE: "1"
-      UV_CACHE_DIR: ${{ runner.temp }}/beta8-uv-cache
-      ASTROPILOT_DATA_DIR: ${{ runner.temp }}/beta8-synthetic-data
 
     steps:
       - name: Require an explicit full source SHA
@@ -35,6 +33,13 @@ jobs:
           if ($env:APPROVED_SHA -cnotmatch '^[0-9a-f]{40}$') {
             throw 'approved_sha must be a full lowercase commit SHA.'
           }
+          if (-not $env:RUNNER_TEMP -or -not (Test-Path -LiteralPath $env:RUNNER_TEMP -PathType Container)) {
+            throw 'Runner temporary directory is unavailable.'
+          }
+          $cacheDir = Join-Path $env:RUNNER_TEMP 'beta8-uv-cache'
+          $dataDir = Join-Path $env:RUNNER_TEMP 'beta8-synthetic-data'
+          "UV_CACHE_DIR=$cacheDir" >> $env:GITHUB_ENV
+          "ASTROPILOT_DATA_DIR=$dataDir" >> $env:GITHUB_ENV
 
       - name: Check out exactly the approved sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
