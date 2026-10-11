@@ -1,3 +1,6 @@
+import builtins
+import runpy
+import ssl
 import subprocess
 import sys
 import time
@@ -9,6 +12,30 @@ from astropilot import guardian_http_transport as transport
 from astropilot import guardian_http_worker as worker
 
 
+@pytest.mark.parametrize('platform', ['darwin', 'linux', 'win32'])
+def test_launcher_entrypoint_dispatches_worker_before_app_imports(monkeypatch, platform):
+    launcher_path = Path(worker.__file__).with_name('launcher.py')
+    arguments = ['46', '7', '2', '/unused']
+    calls = []
+    original_import = builtins.__import__
+    def guarded_import(name, *args, **kwargs):
+        if any(name == module or name.startswith(module + '.') for module in
+               ('uvicorn', 'astropilot.app', 'astropilot.user_profile')):
+            pytest.fail('application dependency imported in worker mode: ' + name)
+        return original_import(name, *args, **kwargs)
+    def worker_main(args):
+        calls.append(args)
+        return 7
+    monkeypatch.setattr(builtins, '__import__', guarded_import)
+    monkeypatch.setattr(worker, 'main', worker_main)
+    monkeypatch.setattr(sys, 'platform', platform)
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    monkeypatch.setattr(sys, 'argv', ['AstroPilot', '--guardian-http-worker', *arguments])
+    with pytest.raises(SystemExit) as result:
+        runpy.run_path(str(launcher_path), run_name='__main__')
+    assert result.value.code == 7
+    assert calls == [arguments]
+
 class Socket:
     def settimeout(self, value):
         assert 0 < value <= 2
@@ -18,7 +45,9 @@ def connection_factory(body=b'{}', status=200, failure=None):
     calls = []
     class Connection:
         sock = Socket()
-        def __init__(self, host, timeout):
+        def __init__(self, host, timeout, *, context):
+            assert context.verify_mode == ssl.CERT_REQUIRED
+            assert context.check_hostname is True
             assert host == 'api.open-meteo.com'
             assert 0 < timeout <= 2
         def request(self, method, path):
@@ -45,6 +74,7 @@ def connection_factory(body=b'{}', status=200, failure=None):
 
 @pytest.mark.parametrize('platform', ['darwin', 'linux', 'win32'])
 def test_portable_success_and_fixed_command(monkeypatch, platform):
+    monkeypatch.setattr(sys, 'frozen', False, raising=False)
     monkeypatch.setattr(sys, 'platform', platform)
     calls = []
     def run(command, **options):
@@ -144,10 +174,51 @@ def test_invalid_config_before_process(monkeypatch, kw):
     with pytest.raises(transport.TransportError): transport.BoundedHttpTransport()(**options)
 
 
-def test_frozen_fails_closed(monkeypatch):
+@pytest.mark.parametrize('platform', ['darwin', 'win32'])
+@pytest.mark.parametrize('body', [b'{}', b'{', b'x' * 65537])
+def test_frozen_worker_uses_bundle_and_private_output(monkeypatch, body, platform):
+    monkeypatch.setattr(sys, 'platform', platform)
+    monkeypatch.setattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000, raising=False)
     monkeypatch.setattr(sys, 'frozen', True, raising=False)
-    with pytest.raises(transport.TransportError):
-        transport.BoundedHttpTransport()(latitude=46, longitude=7, timeout_seconds=2)
+    paths = []
+    def run(command, **options):
+        assert command[:2] == [sys.executable, '--guardian-http-worker']
+        assert options['env']['PYINSTALLER_RESET_ENVIRONMENT'] == '1'
+        assert options['stdout'] == subprocess.DEVNULL
+        if platform == 'win32':
+            assert options['creationflags'] == subprocess.CREATE_NO_WINDOW
+        else:
+            assert 'creationflags' not in options
+        assert options['timeout'] <= 2
+        output = Path(command[-1])
+        paths.append(output)
+        output.write_bytes(body)
+        return subprocess.CompletedProcess(command, 0, b'')
+    monkeypatch.setattr(subprocess, 'run', run)
+    if body == b'{}':
+        assert transport.BoundedHttpTransport()(latitude=46, longitude=7, timeout_seconds=2) == {}
+    else:
+        with pytest.raises(transport.TransportError):
+            transport.BoundedHttpTransport()(latitude=46, longitude=7, timeout_seconds=2)
+    assert paths and not paths[0].parent.exists()
+
+
+def test_worker_private_output_without_console(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, 'request', lambda *args: b'{}')
+    monkeypatch.setattr(sys, 'stdout', None)
+    output = tmp_path / 'weather.json'
+    assert worker.main(['46', '7', '2', str(output)]) == 0
+    assert output.read_bytes() == b'{}'
+
+
+def test_launcher_dispatches_worker_before_ui(monkeypatch):
+    from astropilot import launcher
+    monkeypatch.setattr(sys, 'argv', ['AstroPilot', '--guardian-http-worker', '46', '7', '2', '/unused'])
+    monkeypatch.setattr(worker, 'main', lambda args: 0 if args == ['46', '7', '2', '/unused'] else 1)
+    monkeypatch.setattr(launcher, '_run_macos_application', lambda: pytest.fail('UI started'))
+    with pytest.raises(SystemExit) as result:
+        launcher.main()
+    assert result.value.code == 0
 
 
 @pytest.mark.parametrize('phase', ['dns', 'connect', 'headers', 'read'])
@@ -223,3 +294,78 @@ def test_worker_architecture():
         assert not any(any(part in name for part in
             ('tonight', 'opportunity', 'field_lab', 'reference_station', 'thread', 'asyncio'))
             for name in imports)
+
+
+@pytest.mark.parametrize('platform', ['linux'])
+def test_unvalidated_frozen_platform_fails_closed(monkeypatch, platform):
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    monkeypatch.setattr(sys, 'platform', platform)
+    monkeypatch.setattr(subprocess, 'run', lambda *a, **kw: pytest.fail('process started'))
+    with pytest.raises(transport.TransportError):
+        transport.BoundedHttpTransport()(latitude=46, longitude=7, timeout_seconds=2)
+
+
+def test_worker_explicit_certifi_ca_with_strict_tls(monkeypatch):
+    monkeypatch.setenv('SSL_CERT_FILE', '/nonexistent/system-ca.pem')
+    monkeypatch.setenv('SSL_CERT_DIR', '/nonexistent/system-ca-directory')
+    real_create_context = worker.ssl.create_default_context
+    contexts = []
+    def create_context(*, cafile):
+        assert cafile == worker.certifi.where()
+        context = real_create_context(cafile=cafile)
+        contexts.append(context)
+        return context
+    monkeypatch.setattr(worker.ssl, 'create_default_context', create_context)
+    factory, calls = connection_factory()
+    monkeypatch.setattr(worker, 'HTTPSConnection', factory)
+    assert worker.request(46, 7, 2) == b'{}'
+    assert len(contexts) == 1
+    assert contexts[0].cert_store_stats()['x509_ca'] > 0
+    assert calls[-1] == 'close'
+
+
+def test_worker_missing_ca_fails_before_connection(monkeypatch):
+    monkeypatch.setattr(worker.certifi, 'where', lambda: '/nonexistent/guardian-ca.pem')
+    monkeypatch.setattr(worker, 'HTTPSConnection',
+                        lambda *a, **kw: pytest.fail('connection started'))
+    with pytest.raises(OSError):
+        worker.request(46, 7, 2)
+
+
+def test_worker_certificate_rejection_closes_without_retry(monkeypatch):
+    calls = []
+    class RejectedConnection:
+        def __init__(self, host, *, timeout, context):
+            assert context.verify_mode == ssl.CERT_REQUIRED
+            assert context.check_hostname is True
+        def request(self, *args):
+            calls.append('request')
+            raise ssl.SSLCertVerificationError('untrusted certificate')
+        def close(self):
+            calls.append('close')
+    monkeypatch.setattr(worker, 'HTTPSConnection', RejectedConnection)
+    with pytest.raises(ssl.SSLCertVerificationError):
+        worker.request(46, 7, 2)
+    assert calls == ['request', 'close']
+
+
+@pytest.mark.parametrize('platform', ['darwin', 'win32'])
+@pytest.mark.parametrize('failure', ['timeout', 'exit', 'missing'])
+def test_frozen_worker_failure_removes_private_output(monkeypatch, platform, failure):
+    monkeypatch.setattr(sys, 'platform', platform)
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    monkeypatch.setattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000, raising=False)
+    outputs = []
+    def run(command, **options):
+        output = Path(command[-1])
+        outputs.append(output)
+        if failure == 'timeout':
+            output.write_bytes(b'{}')
+            raise subprocess.TimeoutExpired(command, options['timeout'])
+        if failure == 'exit':
+            raise subprocess.CalledProcessError(1, command)
+        return subprocess.CompletedProcess(command, 0, b'')
+    monkeypatch.setattr(subprocess, 'run', run)
+    with pytest.raises(transport.TransportError, match='acquisition_failed'):
+        transport.BoundedHttpTransport()(latitude=46, longitude=7, timeout_seconds=2)
+    assert outputs and not outputs[0].parent.exists()

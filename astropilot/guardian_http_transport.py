@@ -1,5 +1,7 @@
 """Portable foreground HTTP deadline: one ephemeral child, always reaped."""
 import json
+import os
+from tempfile import TemporaryDirectory
 import math
 from pathlib import Path
 import subprocess
@@ -27,20 +29,35 @@ class BoundedHttpTransport:
                 if (type(value) not in (int, float) or not math.isfinite(value)
                         or not low <= value <= high):
                     raise ValueError()
-            if timeout_seconds <= 0 or getattr(sys, 'frozen', False):
+            if timeout_seconds <= 0 or (getattr(sys, 'frozen', False) and sys.platform not in {'darwin', 'win32'}):
                 raise ValueError()
             remaining = timeout_seconds - (monotonic() - started)
             if remaining <= 0:
                 raise TimeoutError()
             # run kills and waits on TimeoutExpired, on both POSIX and Windows.
-            result = subprocess.run(
-                [sys.executable, '-I', str(_WORKER), str(latitude), str(longitude),
-                 str(remaining)], timeout=remaining, check=True,
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL)
-            if len(result.stdout) > MAX_BODY_BYTES:
-                raise ValueError()
-            payload = json.loads(result.stdout, parse_constant=_reject_constant)
+            arguments = [str(latitude), str(longitude), str(remaining)]
+            with TemporaryDirectory(prefix='astropilot-guardian-') as temporary:
+                options = dict(timeout=remaining, check=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL)
+                if getattr(sys, 'frozen', False):
+                    output = Path(temporary) / 'weather.json'
+                    command = [sys.executable, '--guardian-http-worker', *arguments, str(output)]
+                    options['env'] = {**os.environ, 'PYINSTALLER_RESET_ENVIRONMENT': '1'}
+                    options['stdout'] = subprocess.DEVNULL
+                    if sys.platform == 'win32':
+                        options['creationflags'] = subprocess.CREATE_NO_WINDOW
+                else:
+                    command = [sys.executable, '-I', str(_WORKER), *arguments]
+                result = subprocess.run(command, **options)
+                if getattr(sys, 'frozen', False):
+                    with output.open('rb') as handle:
+                        body = handle.read(MAX_BODY_BYTES + 1)
+                else:
+                    body = result.stdout
+                if len(body) > MAX_BODY_BYTES:
+                    raise ValueError()
+                payload = json.loads(body, parse_constant=_reject_constant)
             if monotonic() - started >= timeout_seconds:
                 raise TimeoutError()
             return payload

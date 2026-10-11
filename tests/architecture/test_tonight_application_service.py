@@ -1120,3 +1120,25 @@ def test_unavailable_or_unknown_override_is_rejected_before_forecast(
             equipment=requested_equipment,
             bortle=3,
         )
+
+
+@pytest.mark.parametrize('nights,expected', [([], TonightStatus.NO_NIGHT),
+    ([{'date': date(2026, 8, 30)}], TonightStatus.NO_CANDIDATE),
+    ([{'date': date(2026, 8, 30)}], TonightStatus.NO_MISSION)])
+def test_live_early_exit_reaches_alert_admissibility_check(nights, expected):
+    from decision.models.opportunity_alert import OpportunityAlertPolicy
+    from decision.services.opportunity_alert_service import OpportunityAlertService, InMemoryOpportunityAlertLedger
+    candidate = make_candidate()
+    service, _, _ = make_service(forecast_nights=lambda *a, **kw: forecast_run(nights),
+        build_candidates=lambda *a, **kw: [candidate] if expected is TonightStatus.NO_MISSION else [],
+        recommendation=make_recommendation(candidate), mission=None)
+    result = service.evaluate(profile=make_profile(), weather=None,
+        reference_time_utc=REFERENCE_TIME, bortle=4,
+        availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT))
+    assert result.status is expected
+    decision = OpportunityAlertService(InMemoryOpportunityAlertLedger()).evaluate(
+        result=result, policy=OpportunityAlertPolicy(enabled=True, site_name='Buttes',
+        project_keys=('test',), intent_ids=('test',), filter_profile_ids=('test',)),
+        logical_time=REFERENCE_TIME)
+    assert decision.reason_codes == ('tonight_not_admissible',)
+    assert decision.alert is None

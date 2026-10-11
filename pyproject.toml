@@ -4,10 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astropilot"
-version = "1.0.0b7"
+version = "1.0.0b8"
 description = "Astrophotography planning and decision engine"
 requires-python = ">=3.11,<3.14"
 dependencies = [
+    "certifi>=2025.2",
     "astral>=3.2,<4.0",
     "astropy>=7.2,<8.0",
     "fastapi>=0.116,<1.0",
@@ -23,6 +24,7 @@ astropilot-field-lab = "astropilot.reference_station_cli:main"
 
 [project.optional-dependencies]
 packaging = [
+    "matplotlib>=3.10,<4.0",
     "pyinstaller>=6.22,<7.0",
     "pyobjc-framework-Cocoa>=11,<13; sys_platform == 'darwin'",
     "tzdata>=2025.2",

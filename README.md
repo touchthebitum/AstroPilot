@@ -2,23 +2,21 @@
 
 AI-powered astrophotography planning platform.
 
-Local release candidate: **1.0.0-beta.7** (canonical version `1.0.0b7`).
-This preparation does not build, tag, publish, or push beta.7. After the
-versioning commit, macOS and Windows must both be built and validated from that
-same commit. The future tag is `v1.0.0-beta.7`.
+Local release candidate: **1.0.0-beta.8** (canonical version `1.0.0b8`).
+This preparation does not build, sign, notarize, tag, publish, or push beta.8.
+macOS ARM64 and Windows x86_64 must be built from the same approved full source SHA.
+The existing beta.7 tag and release artifacts remain unchanged.
 
-The historical `v1.0.0-beta.6` tag is the comparison baseline. See the
-[beta.7 release notes](docs/release_notes_beta7.md) and
-[remaining release gates](docs/release_checklist.md).
+See [beta.8 preparation and validation gates](docs/beta8_preparation.md).
+Historical beta.7 notes and checklist remain available unchanged in
+[release notes](docs/release_notes_beta7.md) and [checklist](docs/release_checklist.md).
 
-## Product and technical identity for beta.7
+## Product and technical identity for beta.8
 
-**NightMerit is the user-visible application name.** To preserve upgrades and
-existing beta profiles, the distributed and technical identity remains
-**AstroPilot** for beta.7. In particular, beta.7 keeps `AstroPilot.app`,
-`AstroPilot.exe`, the AstroPilot installer, the existing bundle ID, existing
-data and log paths, and the Python package name `astropilot`. These technical
-artifacts and paths must not be renamed as part of beta.7.
+**NightMerit remains the user-visible application name.** The distributed and
+technical identity remains **AstroPilot**: `AstroPilot.app`, `AstroPilot.exe`,
+the installer AppId, bundle ID `fr.astropilot.desktop`, Python package name,
+and existing data/log paths are retained to preserve upgrade compatibility.
 
 Published historical baseline: **v1.0.0-beta.4** (canonical version `1.0.0b4`).
 

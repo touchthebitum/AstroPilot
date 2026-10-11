@@ -202,23 +202,23 @@ class TonightApplicationService:
         )
 
         if forecast_run is None:
-            return TonightResult(
+            return _live_alert_result(TonightResult(
                 None,
                 None,
                 None,
                 status=TonightStatus.FORECAST_UNAVAILABLE,
-            )
+            ))
 
         nights = forecast_run.nights
         forecast_evidence = forecast_run.evidence
         if not nights:
-            return TonightResult(
+            return _live_alert_result(TonightResult(
                 None,
                 None,
                 None,
                 status=TonightStatus.NO_NIGHT,
                 forecast_evidence=forecast_evidence,
-            )
+            ))
 
         night = sorted(nights, key=lambda item: item["date"])[0]
         top_objects = night.get("top_objects") or []
@@ -258,37 +258,37 @@ class TonightApplicationService:
             candidate_rejections = ()
 
         if not candidates:
-            return TonightResult(
+            return _live_alert_result(TonightResult(
                 night,
                 None,
                 None,
                 status=TonightStatus.NO_CANDIDATE,
                 forecast_evidence=forecast_evidence,
                 candidate_rejections=candidate_rejections,
-            )
+            ))
 
         recommendation = self.opportunity_recommendation_service.build(
             candidates=candidates,
         )
         if recommendation is None:
-            return TonightResult(
+            return _live_alert_result(TonightResult(
                 night,
                 None,
                 None,
                 status=TonightStatus.NO_RECOMMENDATION,
                 forecast_evidence=forecast_evidence,
                 candidate_rejections=candidate_rejections,
-            )
+            ))
 
         if inputs.availability is None:
-            return TonightResult(
+            return _live_alert_result(TonightResult(
                 night,
                 recommendation,
                 None,
                 status=TonightStatus.USER_AVAILABILITY_REQUIRED,
                 forecast_evidence=forecast_evidence,
                 candidate_rejections=candidate_rejections,
-            )
+            ))
 
         candidate = recommendation.opportunity.candidate
         recommended_key = candidate.get(
@@ -346,7 +346,7 @@ class TonightApplicationService:
                 build_mission_input=build_actionability_mission_input,
             )
         if mission is None:
-            return TonightResult(
+            return _live_alert_result(TonightResult(
                 night,
                 recommendation,
                 None,
@@ -359,21 +359,21 @@ class TonightApplicationService:
                 candidate_rejections=candidate_rejections,
                 actionability_refusal=actionability_refusal,
                 timeline_start=timeline_start,
-            )
+            ))
 
         DecisionConsistencyGate.validate_mission(mission)
 
         if not DecisionConsistencyGate.has_productive_window(mission):
             if actionability_refusal is None:
-                return TonightResult(
+                return _live_alert_result(TonightResult(
                     night,
                     recommendation,
                     None,
                     status=TonightStatus.NO_MISSION,
                     forecast_evidence=forecast_evidence,
                     candidate_rejections=candidate_rejections,
-                )
-            return TonightResult(
+                ))
+            return _live_alert_result(TonightResult(
                 night,
                 recommendation,
                 mission,
@@ -382,7 +382,7 @@ class TonightApplicationService:
                 candidate_rejections=candidate_rejections,
                 actionability_refusal=actionability_refusal,
                 timeline_start=timeline_start,
-            )
+            ))
 
         return _live_alert_result(TonightResult(
             night,

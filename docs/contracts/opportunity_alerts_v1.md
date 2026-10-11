@@ -12,7 +12,10 @@ modern mission authorization, continuous actionability and consistency validatio
 Retain the existing MissionInput and ProductiveWindowAssessment internally; never
 rerun weather, lunar, ranking, gain or productive-window engines for an alert.
 A process-local marker distinguishes live evaluation from historical/read-only
-results. A missing marker or retained evidence always fails closed. This is an
+results. All live evaluation outcomes carry this marker, including NO_MISSION
+and other early refusals. A live non-AVAILABLE result yields
+tonight_not_admissible; an unmarked result still yields
+live_tonight_result_required. A missing marker or retained evidence always fails closed. This is an
 internal accidental-replay guard, not a Python security sandbox.
 
 ## Outcomes and minimal policy

@@ -29,8 +29,13 @@ Exactly one GET is attempted, at most one when failure occurs before sending.
 
 Portability uses sys.executable and an absolute adjacent .py helper with -I:
 macOS/Linux/Windows CPython 3.11-3.13, independent of SIGALRM/main-thread status.
-Frozen executables fail closed: sys.executable is not a Python interpreter there.
-They need a dedicated packaged child entrypoint before operational deployment.
+Frozen macOS/Windows executables use the same bundle with --guardian-http-worker.
+The launcher dispatches this mode before starting the UI; the imported worker is
+collected by PyInstaller. PYINSTALLER_RESET_ENVIRONMENT=1 starts an independent
+child. A private temporary file carries the bounded JSON response because a
+windowed bundle has no Python stdout. The parent removes the file on success,
+failure or timeout. On Windows, CREATE_NO_WINDOW suppresses the child console. Frozen Linux still
+fails closed. Windows support requires native bundle validation before diffusion.
 OS process creation and kill/reap scheduling cannot have a hard real-time bound;
 as documented by Python, process creation itself may not be interruptible. The
 budget includes startup elapsed time and rejects late successful output. No

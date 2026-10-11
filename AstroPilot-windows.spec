@@ -24,6 +24,8 @@ datas = [
     (str(ROOT / "astropilot" / "web" / "index.html"), "astropilot/web"),
     (str(ROOT / "astropilot" / "web" / "app.js"), "astropilot/web"),
     (str(ROOT / "astropilot" / "web" / "styles.css"), "astropilot/web"),
+    (str(ROOT / "astropilot" / "web" / "help.js"), "astropilot/web"),
+    (str(ROOT / "astropilot" / "web" / "alert-status.js"), "astropilot/web"),
     (
         str(ROOT / "astropilot" / "knowledge" / "objects" / "*.json"),
         "astropilot/knowledge/objects",

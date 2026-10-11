@@ -28,13 +28,13 @@ def test_installed_package_exposes_astropilot_command():
 
 
 def test_project_declares_canonical_beta_version():
-    assert _pyproject()["project"]["version"] == "1.0.0b7"
+    assert _pyproject()["project"]["version"] == "1.0.0b8"
 
     lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
     astropilot_package = lock.split('name = "astropilot"', 1)[1].split(
         "[[package]]", 1
     )[0]
-    assert 'version = "1.0.0b7"' in astropilot_package
+    assert 'version = "1.0.0b8"' in astropilot_package
     assert 'version = "0.0.0"' not in astropilot_package
 
 
@@ -48,6 +48,7 @@ def test_packaging_dependencies_are_isolated_from_runtime_dependencies():
     project = _pyproject()["project"]
 
     assert project["dependencies"] == [
+        "certifi>=2025.2",
         "astral>=3.2,<4.0",
         "astropy>=7.2,<8.0",
         "fastapi>=0.116,<1.0",
@@ -308,9 +309,9 @@ def test_tester_label_and_future_artifact_name_are_deterministic():
     build = _build_module()
 
     version = _pyproject()["project"]["version"]
-    assert build.tester_version_label(version) == "1.0.0-beta.7"
+    assert build.tester_version_label(version) == "1.0.0-beta.8"
     assert build.artifact_name(version, "arm64") == (
-        "AstroPilot-1.0.0-beta.7-macos-arm64.zip"
+        "AstroPilot-1.0.0-beta.8-macos-arm64.zip"
     )
 
 
@@ -336,7 +337,7 @@ def test_build_identity_is_injected_by_generated_ignored_runtime_hook():
 def test_fastapi_version_derives_from_canonical_project_version():
     from astropilot.app import canonical_version, create_app
 
-    assert canonical_version() == "1.0.0b7"
+    assert canonical_version() == "1.0.0b8"
     assert create_app().version == canonical_version()
 
 
@@ -597,3 +598,21 @@ def test_build_definition_has_no_local_paths_or_unrequested_release_formats():
     assert ".pkg" not in sources.lower()
     assert "--apple-id" not in sources
     assert "--password" not in sources
+
+
+@pytest.mark.parametrize("spec_name", ["AstroPilot.spec", "AstroPilot-windows.spec"])
+def test_packaging_datas_include_every_local_asset_referenced_by_html(spec_name):
+    import ast
+    import glob
+    import re
+    tree = ast.parse((ROOT / spec_name).read_text())
+    assignment = next(n for n in tree.body if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == 'datas' for t in n.targets))
+    datas = eval(compile(ast.Expression(assignment.value), '<spec-datas>', 'eval'),
+        {'ROOT': ROOT, 'str': str})
+    bundled = {Path(path).name for pattern, target in datas if target == 'astropilot/web'
+        for path in glob.glob(pattern)}
+    html = (ROOT / 'astropilot/web/index.html').read_text()
+    referenced = set(re.findall(r'(?:src|href)="/ui/([^?"/]+)', html))
+    assert {'help.js', 'alert-status.js'} <= referenced
+    assert referenced <= bundled

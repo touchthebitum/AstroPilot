@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import sys
+
+if __name__ == "__main__" and sys.argv[1:2] == ["--guardian-http-worker"]:
+    from astropilot.guardian_http_worker import main as worker_main
+
+    raise SystemExit(worker_main(sys.argv[2:]))
+
 import errno
 import json
 import logging
@@ -9,7 +16,6 @@ from logging.handlers import RotatingFileHandler
 import platform
 from pathlib import Path
 import socket
-import sys
 import threading
 import time
 import webbrowser
@@ -429,6 +435,9 @@ def _run_macos_application(
 
 
 def main() -> None:
+    if sys.argv[1:2] == ["--guardian-http-worker"]:
+        from astropilot.guardian_http_worker import main as worker_main
+        raise SystemExit(worker_main(sys.argv[2:]))
     if sys.argv[1:] == ["--runtime-identity"]:
         print(json.dumps(runtime_identity_payload(), sort_keys=True))
         return

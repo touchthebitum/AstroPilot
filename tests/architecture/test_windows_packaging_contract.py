@@ -51,7 +51,7 @@ def test_windows_spec_excludes_macos_bundle_and_signing_behavior():
 def test_windows_spec_collects_exact_runtime_assets_without_broad_imports():
     source = SPEC_PATH.read_text(encoding="utf-8")
 
-    for asset in ("index.html", "app.js", "styles.css"):
+    for asset in ("index.html", "app.js", "styles.css", "help.js", "alert-status.js"):
         assert asset in source
     assert '"astropilot/web"' in source
     assert '"astropilot/knowledge/objects"' in source
