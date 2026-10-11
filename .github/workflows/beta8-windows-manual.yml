@@ -80,6 +80,11 @@ jobs:
           python-version: "3.13.5"
           enable-cache: false
 
+      - name: Install the exact packaging Python
+        run: |
+          uv python install 3.13.5
+          if ($LASTEXITCODE -ne 0) { throw 'Python 3.13.5 installation failed.' }
+
       - name: Check the lockfile and beta version
         run: |
           uv lock --check --no-build --no-python-downloads
