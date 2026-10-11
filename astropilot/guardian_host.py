@@ -44,6 +44,31 @@ class GuardianHostProviders:
             raise ValueError('invalid_providers')
 
 
+def _injected_file_providers(path):
+    from astropilot.guardian_api import GuardianEvaluateRequest
+    snapshot = None
+
+    def evidence(logical_time):
+        nonlocal snapshot
+        snapshot = None
+        payload = json.loads(path.read_text(encoding='utf-8'),
+                             object_pairs_hook=_unique, parse_constant=_constant)
+        request = GuardianEvaluateRequest.model_validate(payload)
+        observation = request.observations.domain()
+        snapshot = (logical_time, request.session_context)
+        return observation
+
+    def session(logical_time):
+        nonlocal snapshot
+        current, snapshot = snapshot, None
+        if current is None or current[0] != logical_time:
+            raise ValueError('injected_snapshot_unavailable')
+        context = current[1]
+        return None if context is None else context.domain()
+
+    return GuardianHostProviders(evidence, session)
+
+
 def _unique(pairs):
     doc = {}
     for key, value in pairs:
@@ -250,12 +275,7 @@ def main(argv=None, *, provider_factories=None, clock=None):
                             ProductionGuardianWeatherAdapter(**config.weather_site), lambda _: None)
                     registry = {PROVIDER_ID: weather_factory}
                     if args.evidence_file is not None:
-                        from astropilot.guardian_api import GuardianEvaluateRequest
-                        def read_injected():
-                            return GuardianEvaluateRequest.model_validate_json(args.evidence_file.read_text(encoding='utf-8'))
-                        registry['injected_file_v1'] = lambda: GuardianHostProviders(
-                            lambda _: read_injected().observations.domain(),
-                            lambda _: None if (context := read_injected().session_context) is None else context.domain())
+                        registry['injected_file_v1'] = lambda: _injected_file_providers(args.evidence_file)
                 else:
                     registry = provider_factories
                 factory = registry.get(config.provider)

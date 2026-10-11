@@ -79,6 +79,76 @@ def test_explicit_evidence_file_is_strict_and_fail_closed(tmp_path, capsys, payl
         assert 'evidence_provider_error' in cycle['errors']
 
 
+def _rain_payload(active, instant=NOW):
+    values = dict(rain_active=True, rain_eta_minutes=None, wind_kmh=5.0,
+                  gust_kmh=8.0, humidity_percent=50.0, dew_spread_c=8.0)
+    return {'observations': {name: {'value': value, 'source': 'isolated-test',
+                'provenance': 'OBSERVATION', 'timestamp': instant.isoformat()}
+                for name, value in values.items()},
+            'session_context': {'session_active': active, 'observed_at': instant.isoformat()}}
+
+
+def test_atomic_replacement_does_not_mix_observations_and_session(tmp_path, capsys, monkeypatch):
+    path = config(tmp_path, provider='injected_file_v1')
+    evidence = tmp_path / 'evidence.json'
+    evidence.write_text(json.dumps(_rain_payload(False)), encoding='utf-8')
+    original_read = Path.read_text
+    reads = []
+    def replace_after_read(file, *args, **kwargs):
+        contents = original_read(file, *args, **kwargs)
+        if file == evidence:
+            reads.append(contents)
+            replacement = evidence.with_suffix('.new')
+            replacement.write_text(json.dumps(_rain_payload(True)), encoding='utf-8')
+            replacement.replace(evidence)
+        return contents
+    monkeypatch.setattr(Path, 'read_text', replace_after_read)
+    assert main(['--config', str(path), '--data-dir', str(tmp_path / 'state'),
+                 '--once', '--evidence-file', str(evidence)], clock=lambda: NOW) == 0
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    cycle = next(event for event in events if event['event'] == 'cycle')
+    assert len(reads) == 1
+    assert cycle['risk'] == 'CRITICAL'
+    assert cycle['session_state'] == 'INACTIVE'
+    assert cycle['session_applicability'] == 'NOT_APPLICABLE'
+
+
+@pytest.mark.parametrize('payload', [
+    '{"observations":{},"session_context":null,"session_context":null}',
+    '{"observations":{},"observations":{},"session_context":null}',
+    '{"observations":{},"session_context":{"session_active":false,"session_active":true,"observed_at":"2026-10-09T00:00:00Z"}}',
+])
+def test_duplicate_injected_evidence_keys_fail_closed(tmp_path, capsys, payload):
+    path = config(tmp_path, provider='injected_file_v1')
+    evidence = tmp_path / 'evidence.json'
+    evidence.write_text(payload, encoding='utf-8')
+    assert main(['--config', str(path), '--data-dir', str(tmp_path / 'state'),
+                 '--once', '--evidence-file', str(evidence)], clock=lambda: NOW) == 6
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    cycle = next(event for event in events if event['event'] == 'cycle')
+    assert cycle['decision_eligible'] is False
+    assert cycle['action'] == 'EMERGENCY_STOP'
+    assert 'evidence_provider_error' in cycle['errors']
+
+
+def test_invalid_next_cycle_never_reuses_injected_snapshot(tmp_path):
+    from astropilot.guardian_host import _injected_file_providers
+    evidence = tmp_path / 'evidence.json'
+    evidence.write_text(json.dumps(_rain_payload(True)), encoding='utf-8')
+    providers = _injected_file_providers(evidence)
+    runner = GuardianPeriodicRunner(evidence_provider=providers.evidence,
+        session_context_provider=providers.session, guardian_runner=GuardianRunner())
+    assert runner.run_cycle(logical_time=NOW).decision_eligible is True
+    evidence.write_text('{', encoding='utf-8')
+    cycle = runner.run_cycle(logical_time=NOW + timedelta(seconds=60))
+    assert cycle.decision_eligible is False
+    assert cycle.assessment is None
+    assert cycle.errors == ('evidence_provider_error', 'session_provider_error')
+    recovered_at = NOW + timedelta(seconds=120)
+    evidence.write_text(json.dumps(_rain_payload(True, recovered_at)), encoding='utf-8')
+    assert runner.run_cycle(logical_time=recovered_at).decision_eligible is True
+
+
 def test_provider_error_consumed(tmp_path, capsys):
     providers = GuardianHostProviders(Mock(side_effect=RuntimeError('secret')), lambda t: None)
     code, events = invoke(tmp_path, capsys, providers=providers)

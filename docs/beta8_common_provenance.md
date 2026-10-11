@@ -36,6 +36,19 @@ authority and evidence checks; without that marker it returns `NO_ALERT` with
 changes refusal diagnostics only and was not part of the transferred Mac build.
 The macOS report does not establish native Opportunity Alerts validation.
 
+## Guardian review corrections
+
+The injected-file provider now reads and validates one immutable payload per
+cycle, sharing it between observations and session context. Previously an atomic
+replacement between two reads could combine observations from one version with
+the session state from another. A failed read clears the pending snapshot, so
+later cycles cannot reuse prior evidence. A subsequent valid cycle can recover.
+Duplicate JSON keys are rejected at every nesting level rather than accepting
+the last value. Regressions reproduce the replacement race and ambiguous JSON
+on the previous implementation and verify coherent, fail-closed behavior after
+the correction. These changes are follow-ups to the transferred Mac sources;
+they do not change the production weather provider or add execution authority.
+
 ## Validation boundary
 
 Windows validation uses Python 3.12.14 and an isolated environment synchronized
