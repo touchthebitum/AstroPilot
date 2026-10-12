@@ -14,6 +14,7 @@ import mmap
 import os
 import re
 import stat
+import struct
 import time
 import uuid
 
@@ -72,6 +73,40 @@ class Names:
         return position < self.count and self[position] == key
 
 
+class Records:
+    def __init__(self, mapped, width):
+        self.mapped, self.width = mapped, width
+    def __len__(self):
+        return len(self.mapped)//self.width
+    def __getitem__(self, position):
+        return self.mapped[position*self.width:(position+1)*self.width]
+
+
+class Generation:
+    def __init__(self, names, stream, row_fd, offsets=None, relations=None):
+        self.names, self.stream, self.row_fd = names, stream, row_fd
+        self.offsets, self.relations = offsets, relations
+    def __iter__(self):
+        return iter((self.names, self.stream))
+    def __getitem__(self, position):
+        return (self.names, self.stream)[position]
+    def related(self, run_id, store):
+        key = hashlib.sha256(run_id.encode()).digest()
+        position = bisect_left(self.relations, key+b'\0'*4)
+        while position < len(self.relations):
+            relation = self.relations[position]
+            if relation[:32] != key:
+                break
+            row = struct.unpack('>I', relation[32:])[0]
+            offset, length = struct.unpack('>QI', self.offsets[row])
+            value = json.loads(os.pread(self.row_fd, length, offset))
+            if (store._name(value['idempotency_key']) != self.names[row].hex()+'.json'
+                    or value.get('forecast_run_id') != run_id
+                    or value['artifact_type'] not in ('reference_comparison', 'reference_comparison_state')):
+                raise ValueError('field_lab_index_invalid_relation')
+            yield value
+
+
 @contextmanager
 def generation(store, root, max_names):
     if type(max_names) is not int or max_names < 1:
@@ -89,14 +124,21 @@ def generation(store, root, max_names):
         manifest = json.loads(store._read(fd, commit))
         prefix = commit.removesuffix('.commit.json')
         count = manifest.get('count')
-        if (type(manifest.get('schema_version')) is not int or manifest['schema_version'] != 1 or type(count) is not int
+        version = manifest.get('schema_version')
+        if (type(version) is not int or version not in (1, 2) or type(count) is not int
                 or not 0 <= count <= MAX_COUNT):
             raise ValueError('field_lab_index_invalid_manifest')
         if count > max_names:
             raise ValueError('field_lab_name_limit_exceeded')
         with ExitStack() as stack:
             handles = []
-            for suffix, size in (('.names', count*32), ('.rows', manifest.get('rows_bytes'))):
+            sizes = [('.names', count*32), ('.rows', manifest.get('rows_bytes'))]
+            if version == 2:
+                related_count = manifest.get('related_count')
+                if type(related_count) is not int or not 0 <= related_count <= count:
+                    raise ValueError('field_lab_index_invalid_manifest')
+                sizes.extend([('.offsets', count*12), ('.relations', related_count*36)])
+            for suffix, size in sizes:
                 handle = _open(fd, prefix+suffix)
                 stack.callback(os.close, handle)
                 if (type(size) is not int or not 0 <= size <= MAX_BYTES
@@ -113,7 +155,26 @@ def generation(store, root, max_names):
                     raise ValueError('field_lab_index_invalid_names')
                 previous = key
             rows = stack.enter_context(os.fdopen(os.dup(handles[1]), 'rb'))
-            yield names, rows
+            offsets = relations = None
+            if version == 2:
+                offsets = Records(stack.enter_context(mmap.mmap(handles[2], 0, access=mmap.ACCESS_READ)) if count else b'', 12)
+                relations = Records(stack.enter_context(mmap.mmap(handles[3], 0, access=mmap.ACCESS_READ)) if related_count else b'', 36)
+                end = 0
+                for i in range(count):
+                    offset, length = struct.unpack('>QI', offsets[i])
+                    if offset != end or not 0 < length <= MAX_ROW:
+                        raise ValueError('field_lab_index_invalid_offsets')
+                    end += length
+                if end != manifest['rows_bytes']:
+                    raise ValueError('field_lab_index_invalid_offsets')
+                previous = None
+                for i in range(related_count):
+                    value = relations[i]
+                    if ((previous is not None and value <= previous)
+                            or struct.unpack('>I', value[32:])[0] >= count):
+                        raise ValueError('field_lab_index_invalid_relations')
+                    previous = value
+            yield Generation(names, rows, handles[1], offsets, relations)
     finally:
         os.close(fd)
 
@@ -175,7 +236,16 @@ def build(store, *, max_names, force=False, workers=1, progress=None):
                         matched = sum(names.contains(n) for n in store._names(artifacts, max_names))
                         if matched != len(names):
                             raise ValueError('field_lab_index_missing_authoritative_fact')
-                        yield from rows(names, stream, store)
+                        for value in rows(names, stream, store):
+                            if (value['artifact_type'] in ('reference_comparison', 'reference_comparison_state')
+                                    and 'forecast_run_id' not in value):
+                                upgraded = envelope(store._name(value['idempotency_key']))
+                                old_fields = dict(upgraded)
+                                old_fields.pop('forecast_run_id', None)
+                                if old_fields != value:
+                                    raise ValueError('field_lab_metadata_mismatch')
+                                value = upgraded
+                            yield value
                     else:
                         names = None
                     pending = []
@@ -193,8 +263,8 @@ def build(store, *, max_names, force=False, workers=1, progress=None):
             def flush():
                 name, stream = temporary()
                 with stream:
-                    for key, value in sorted(chunk):
-                        stream.write(key.encode()+b' '+value)
+                    for key, relation, value in sorted(chunk):
+                        stream.write(key.encode()+b' '+relation+b' '+value)
                 runs.append(name)
                 chunk.clear()
 
@@ -202,7 +272,9 @@ def build(store, *, max_names, force=False, workers=1, progress=None):
                 document = (_json(value)+'\n').encode()
                 if len(document) > MAX_ROW:
                     raise ValueError('field_lab_index_row_too_large')
-                chunk.append((store._name(value['idempotency_key'])[:64], document))
+                relation = (hashlib.sha256(value['forecast_run_id'].encode()).hexdigest().encode()
+                            if value['artifact_type'] in ('reference_comparison', 'reference_comparison_state') else b'-')
+                chunk.append((store._name(value['idempotency_key'])[:64], relation, document))
                 total += 1
                 if total > count:
                     raise ValueError('field_lab_index_inventory_changed')
@@ -216,29 +288,51 @@ def build(store, *, max_names, force=False, workers=1, progress=None):
                 raise ValueError('field_lab_index_inventory_changed')
             names_tmp, names_out = temporary()
             rows_tmp, rows_out = temporary()
-            with names_out, rows_out, ExitStack() as stack:
+            offsets_tmp, offsets_out = temporary()
+            relations_tmp, relations_out = temporary()
+            with names_out, rows_out, offsets_out, relations_out, ExitStack() as stack:
                 streams = [stack.enter_context(os.fdopen(_open(fd, name), 'rb')) for name in runs]
                 previous_key = None
-                length, merged = 0, 0
+                length, merged, related_count = 0, 0, 0
+                relation_runs, relation_chunk = [], []
+                def flush_relations():
+                    name, stream = temporary()
+                    with stream:
+                        stream.write(b''.join(sorted(relation_chunk)))
+                    relation_runs.append(name)
+                    relation_chunk.clear()
                 for line in heapq.merge(*streams):
-                    key, document = line[:64], line[65:]
+                    key, relation, document = line.split(b' ', 2)
                     if previous_key is not None and key <= previous_key:
                         raise ValueError('field_lab_index_duplicate_identity')
                     previous_key = key
                     names_out.write(bytes.fromhex(key.decode()))
+                    offsets_out.write(struct.pack('>QI', length, len(document)))
                     rows_out.write(document)
+                    if relation != b'-':
+                        relation_chunk.append(bytes.fromhex(relation.decode())+struct.pack('>I', merged))
+                        related_count += 1
+                        if len(relation_chunk) == CHUNK:
+                            flush_relations()
                     length += len(document)
                     merged += 1
                     if length > MAX_BYTES:
                         raise ValueError('field_lab_index_too_large')
                 if merged != count:
                     raise ValueError('field_lab_index_inventory_changed')
-                for stream in (names_out, rows_out):
+                if relation_chunk:
+                    flush_relations()
+                relation_streams = [stack.enter_context(os.fdopen(_open(fd, name), 'rb')) for name in relation_runs]
+                for record in heapq.merge(*(iter(lambda stream=stream:stream.read(36), b'') for stream in relation_streams)):
+                    relations_out.write(record)
+                for stream in (names_out, rows_out, offsets_out, relations_out):
                     stream.flush()
                     os.fsync(stream.fileno())
-                manifest = dict(schema_version=1, count=count, rows_bytes=length,
-                                names_sha256=_hash(names_out.fileno()), rows_sha256=_hash(rows_out.fileno()))
-            for temporary_name, suffix in ((names_tmp, '.names'), (rows_tmp, '.rows')):
+                manifest = dict(schema_version=2, count=count, rows_bytes=length, related_count=related_count,
+                                names_sha256=_hash(names_out.fileno()), rows_sha256=_hash(rows_out.fileno()),
+                                offsets_sha256=_hash(offsets_out.fileno()), relations_sha256=_hash(relations_out.fileno()))
+            for temporary_name, suffix in ((names_tmp, '.names'), (rows_tmp, '.rows'),
+                                           (offsets_tmp, '.offsets'), (relations_tmp, '.relations')):
                 os.link(temporary_name, prefix+suffix, src_dir_fd=fd, dst_dir_fd=fd, follow_symlinks=False)
             os.fsync(fd)
             store._publish(fd, prefix+'.commit.json', _json(manifest))

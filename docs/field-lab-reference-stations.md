@@ -658,10 +658,13 @@ an index is not an authentication boundary against an owner rewriting both data
 and derived records.
 
 The name mapping is bounded to 64 MiB at the 2M ceiling, individual rows to 16 KiB,
-generation data to 2 GiB and external-sort chunks to 8192 rows. No global Python
-name/metadata list is materialized. Small configured ceilings still apply before
-row/payload decoding. Descriptor-relative no-follow opens and regular-file
-checks cover index generations too.
+generation data to 2 GiB and external-sort chunks to 8192 rows. Schema 2 adds
+checksum-protected row offsets and comparison-to-forecast references; all three
+fixed-width mappings together stay below 160 MiB at the ceiling. No global
+Python name/metadata list is materialized. Small configured ceilings still apply
+before row/payload decoding. Descriptor-relative no-follow opens and regular-file
+checks cover index generations too. Earlier schema-1 generations remain readable;
+an ordinary refresh upgrades the relevant scientific metadata and lookup tables.
 
 Once explicitly activated, the scheduled collector refreshes the generation
 after a successful cycle adds at least 1000 facts beyond its base. A refresh
@@ -678,6 +681,20 @@ the cross-process lock and each durable publication increments the count.
 measurement is now opt-in: `status --disk-usage` (or `usage(include_disk=True)`).
 Without it, `disk_bytes` is null and `disk_usage_measured` is false; capacity
 checks and normal collection never perform that unrelated inode-size scan.
+
+Indexed incremental comparisons hold one validated generation/inventory for the
+operation, build the observation revision index once, and load comparison states
+one forecast at a time through the derived lookup table. Actual comparison/state
+envelopes are still opened no-follow, decoded and checked against their metadata;
+an unchanged run does not bypass those scientific integrity checks. Parallel
+comparison reads use at most four workers, 32 queued metadata entries and a
+64 KiB envelope limit per selected comparison/state (oversized inputs fail closed).
+No revision time window is shortened: A→B→A revisions, ambiguous nearest ties,
+seals and existing cohort rules are preserved. Legacy stores keep the original
+algorithm. The collector requests `retain_results=False`, persisting each result
+without accumulating the unused full computation tuple; other callers retain
+their existing tuple API by default. Query tails are bounded to 16384 names;
+larger tails require an explicit index refresh before scientific computation.
 
 A comparison scan builds active observation revisions once, using canonical
 (station, variable, observed timestamp) identities and the existing deterministic

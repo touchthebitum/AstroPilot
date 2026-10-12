@@ -72,7 +72,7 @@ def test_interrupted_publication_still_visible_and_idempotent(indexed, monkeypat
         assert state['count'] == 5
 
 
-@pytest.mark.parametrize('suffix', ['.names', '.rows', '.commit.json'])
+@pytest.mark.parametrize('suffix', ['.names', '.rows', '.offsets', '.commit.json'])
 def test_corrupt_generation_fails_closed_and_force_rebuild_recovers(indexed, suffix):
     store, root = indexed
     generation = store.rebuild_metadata_index()['generation']

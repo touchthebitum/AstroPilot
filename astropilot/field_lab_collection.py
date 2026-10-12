@@ -190,7 +190,8 @@ def cycle(lab, *, clock=now_utc, client=None, capture=capture_forecast, toleranc
                 created += 1
         collected = lab.collect(client, clock=clock, tolerance_minutes=tolerance_minutes,
                                 revision_days=REVISION_DAYS, coalesce=True)
-        lab.comparisons(clock=clock, tolerance_minutes=tolerance_minutes, persist=True, incremental=True)
+        lab.comparisons(clock=clock, tolerance_minutes=tolerance_minutes, persist=True, incremental=True,
+                        retain_results=False)
         rows = periodic_report(lab, '24h', clock=clock, tolerance_minutes=tolerance_minutes)
         payload = {'schema_version': 1, 'rows': rows}
         lab.save('reference_report', digest(payload), payload, current.isoformat())

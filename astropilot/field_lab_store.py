@@ -192,13 +192,15 @@ class FileFieldLabStore:
         return hashlib.sha256(key.encode()).hexdigest() + ".json"
 
     @staticmethod
-    def _read(fd, name):
+    def _read(fd, name, *, max_bytes=_MAX_BYTES):
+        if type(max_bytes) is not int or not 1 <= max_bytes <= _MAX_BYTES:
+            raise ValueError('invalid_field_lab_document_limit')
         handle = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
         with os.fdopen(handle, "rb") as stream:
             if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
                 raise ValueError("field_lab_regular_file_required")
-            document = stream.read(_MAX_BYTES + 1)
-        if len(document) > _MAX_BYTES:
+            document = stream.read(max_bytes + 1)
+        if len(document) > max_bytes:
             raise ValueError("field_lab_document_too_large")
         return document.decode("utf-8")
 
@@ -291,11 +293,23 @@ class FileFieldLabStore:
         elif artifact.artifact_type in ('reference_acquisition', 'reference_observation'):
             times = [payload['observed_at_utc']]
         times = [datetime.fromisoformat(t.replace('Z', '+00:00')).astimezone(timezone.utc).isoformat(timespec='microseconds') for t in times]
-        return dict(point_count=len(times), artifact_type=artifact.artifact_type, source_id=artifact.source_id,
+        value = dict(point_count=len(times), artifact_type=artifact.artifact_type, source_id=artifact.source_id,
                     idempotency_key=artifact.idempotency_key, created_at_utc=artifact.created_at_utc,
                     time_min=min(times), time_max=max(times), variable=payload.get('variable'),
                     digest=artifact.digest, measurement_digest=measurement_digest,
                     prospective=payload.get('prospective'))
+        if artifact.artifact_type in ('reference_comparison', 'reference_comparison_state'):
+            value['forecast_run_id'] = payload.get('comparison', payload)['forecast_run_id']
+        return value
+
+    @classmethod
+    def metadata_matches(cls, artifact, metadata):
+        expected = cls._metadata(artifact)
+        # Older sidecars/generations predate this derived lookup field. Their
+        # envelope digest and every original field still have to match exactly.
+        if 'forecast_run_id' not in metadata:
+            expected.pop('forecast_run_id', None)
+        return expected == metadata
 
     @contextmanager
     def maintenance_lock(self):
@@ -359,6 +373,41 @@ class FileFieldLabStore:
                 if cached is None or count-len(cached[0]) < threshold:
                     return None
         return self.rebuild_metadata_index(max_names=max_names)
+
+    @contextmanager
+    def metadata_query(self, *, max_names=100000):
+        """One checked generation/inventory for bounded per-forecast queries."""
+        from astropilot.field_lab_index import generation
+        if not self._root.exists():
+            yield None
+            return
+        with self._directory(root_only=True) as root, self._directory() as artifacts:
+            try:
+                meta = os.open('metadata', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root)
+            except FileNotFoundError:
+                meta = None
+            try:
+                with generation(self, root, max_names) as cached:
+                    if cached is None or cached.relations is None:
+                        yield None
+                        return
+                    matched, tail = 0, []
+                    for name in self._names(artifacts, max_names):
+                        if cached.names.contains(name):
+                            matched += 1
+                        else:
+                            if len(tail) >= 16_384:
+                                raise ValueError('field_lab_index_refresh_required')
+                            tail.append(name)
+                    if matched != len(cached.names):
+                        raise ValueError('field_lab_index_missing_authoritative_fact')
+                    if meta is not None:
+                        for _ in self._names(meta, max_names):
+                            pass
+                    yield FieldLabMetadataQuery(self, artifacts, meta, cached, tail)
+            finally:
+                if meta is not None:
+                    os.close(meta)
 
     def _save_metadata(self, artifact):
         with self._directory(root_only=True) as root:
@@ -536,6 +585,66 @@ class FileFieldLabStore:
             if end is not None and meta['time_min'] > end:
                 continue
             artifact = self.load(idempotency_key=meta['idempotency_key'])
-            if artifact is None or artifact.digest != meta['digest'] or self._metadata(artifact) != meta:
+            if artifact is None or artifact.digest != meta['digest'] or not self.metadata_matches(artifact, meta):
                 raise ValueError('field_lab_metadata_mismatch')
             yield artifact
+
+
+class FieldLabMetadataQuery:
+    """Pinned metadata snapshot; selected scientific envelopes are never cached."""
+    def __init__(self, store, artifacts, meta, cached, tail):
+        self.store, self.artifacts, self.meta, self.cached, self.tail = store, artifacts, meta, cached, tail
+        self.related_tail = {}
+        for name in tail:
+            value = self._tail_metadata(name)
+            if value['artifact_type'] in ('reference_comparison', 'reference_comparison_state'):
+                self.related_tail.setdefault(value['forecast_run_id'], []).append(name)
+
+    def _tail_metadata(self, name):
+        value = self.store._legacy_metadata(self.artifacts, self.meta, name)
+        if (value['artifact_type'] in ('reference_comparison', 'reference_comparison_state')
+                and 'forecast_run_id' not in value):
+            artifact = FieldLabArtifact.decode(self.store._read(self.artifacts, name))
+            if not self.store.metadata_matches(artifact, value):
+                raise ValueError('field_lab_metadata_mismatch')
+            value = self.store._metadata(artifact)
+        return value
+
+    def iter_metadata(self):
+        from astropilot.field_lab_index import rows
+        self.cached.stream.seek(0)
+        yield from rows(self.cached.names, self.cached.stream, self.store)
+        for name in self.tail:
+            yield self._tail_metadata(name)
+
+    def comparison_artifacts(self, run_id, *, start=None, end=None):
+        from concurrent.futures import ThreadPoolExecutor
+        start = datetime.fromisoformat(start.replace('Z', '+00:00')).isoformat(timespec='microseconds') if start else None
+        end = datetime.fromisoformat(end.replace('Z', '+00:00')).isoformat(timespec='microseconds') if end else None
+        def metadata():
+            yield from self.cached.related(run_id, self.store)
+            for name in self.related_tail.get(run_id, ()):
+                yield self._tail_metadata(name)
+        def load(value):
+            if field_lab_root() != self.store._root:
+                raise ValueError('field_lab_configuration_changed')
+            # Comparison/state envelopes have a separate bounded parallel-read
+            # budget. Oversized scientific inputs fail closed before decoding.
+            artifact = FieldLabArtifact.decode(self.store._read(self.artifacts,
+                self.store._name(value['idempotency_key']), max_bytes=64*1024))
+            if (artifact.digest != value['digest']
+                    or not self.store.metadata_matches(artifact, value)):
+                raise ValueError('field_lab_metadata_mismatch')
+            return artifact
+        pending = []
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            for value in metadata():
+                if start is not None and value['time_max'] < start:
+                    continue
+                if end is not None and value['time_min'] > end:
+                    continue
+                pending.append(value)
+                if len(pending) == 32:
+                    yield from pool.map(load, pending)
+                    pending.clear()
+            yield from pool.map(load, pending)

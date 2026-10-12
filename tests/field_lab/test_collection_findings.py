@@ -34,10 +34,13 @@ def test_index_single_pass_unrelated_observations():
         assert index.candidate_visits <= 400
 
 
-def test_incremental_revision_a_b_a_and_last_computation(lab, monkeypatch):
+@pytest.mark.parametrize('indexed', [False, True])
+def test_incremental_revision_a_b_a_and_last_computation(lab, monkeypatch, indexed):
     lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
     a = next(o for o in observations() if o.variable == 'temperature_2m' and o.value is not None)
     lab.save_observation(a)
+    if indexed:
+        lab.store.rebuild_metadata_index()
     first = lab.comparisons(clock=lambda:T+timedelta(hours=2), persist=True, incremental=True)
     assert len(first) == 3
     with monkeypatch.context() as patch:
@@ -55,6 +58,43 @@ def test_incremental_revision_a_b_a_and_last_computation(lab, monkeypatch):
     rows = periodic_report(lab, '24h', clock=lambda:T+timedelta(hours=6))
     temperature = next(r for r in rows if r['station'] == 'NEU' and r['variable'] == 'temperature_2m')
     assert temperature['mean_bias'] == third[0].signed_error
+
+
+def test_indexed_comparisons_scope_states_per_run_and_keep_digest_checks(lab, monkeypatch):
+    lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
+    for observation in observations():
+        lab.save_observation(observation)
+    expected = lab.comparisons(clock=lambda:T+timedelta(hours=2))
+    lab.store.rebuild_metadata_index()
+    original = lab.comparison_states
+    def scoped(**kwargs):
+        assert kwargs.get('_artifacts') is not None, 'materialized entire history'
+        return original(**kwargs)
+    monkeypatch.setattr(lab, 'comparison_states', scoped)
+    actual = lab.comparisons(clock=lambda:T+timedelta(hours=2), persist=True, incremental=True)
+    assert actual == expected
+    lab.store.rebuild_metadata_index()
+    assert lab.comparisons(clock=lambda:T+timedelta(hours=3), persist=True, incremental=True) == ()
+    with lab.store.metadata_query(max_names=lab.max_artifacts) as query:
+        selected = list(query.comparison_artifacts(run().run_id))
+    target = next(a for a in selected if a.artifact_type == 'reference_comparison_state')
+    path = lab.store._root/'artifacts'/lab.store._name(target.idempotency_key)
+    value = json.loads(path.read_text())
+    value['payload']['input_signature'] = 'corrupt'
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match='digest_mismatch'):
+        lab.comparisons(clock=lambda:T+timedelta(hours=3), persist=True, incremental=True)
+
+
+def test_cycle_can_discard_computation_results_without_discarding_facts(lab):
+    lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
+    for observation in observations():
+        lab.save_observation(observation)
+    lab.store.rebuild_metadata_index()
+    assert lab.comparisons(clock=lambda:T+timedelta(hours=2), persist=True,
+                           incremental=True, retain_results=False) == ()
+    assert lab.computed_targets == 3
+    assert len(lab.comparison_states()) == 3
 
 
 def test_thousands_artifacts_status_and_short_report_payload_reads(lab, monkeypatch):

@@ -700,10 +700,11 @@ class ReferenceLab:
                         latest[key] = observation
         return count
 
-    def comparison_states(self, *, start=None, end=None, tolerance_minutes=10, historical=False):
+    def comparison_states(self, *, start=None, end=None, tolerance_minutes=10, historical=False, _artifacts=None):
         latest = {}
-        for artifact in self.store.iter_artifacts(max_names=self.max_artifacts,
-                artifact_type=('reference_comparison', 'reference_comparison_state'), start=start, end=end):
+        source = _artifacts if _artifacts is not None else self.store.iter_artifacts(max_names=self.max_artifacts,
+                artifact_type=('reference_comparison', 'reference_comparison_state'), start=start, end=end)
+        for artifact in source:
             payload = json.loads(artifact.payload_json)
             comparison = ReferenceComparison(**(payload['comparison'] if artifact.artifact_type == 'reference_comparison_state' else payload))
             if comparison.tolerance_minutes != tolerance_minutes or (comparison.cohort == 'historical_backfill') != historical:
@@ -715,22 +716,33 @@ class ReferenceLab:
         return latest
 
     def comparisons(self, *, clock=now_utc, tolerance_minutes=10, persist=False, historical=False,
-                    start=None, end=None, incremental=False):
+                    start=None, end=None, incremental=False, retain_results=True):
         if persist:
             with self.store.writer_lock(create=True, max_names=self.max_artifacts):
                 return self._comparisons(clock=clock, tolerance_minutes=tolerance_minutes, persist=True,
-                    historical=historical, start=start, end=end, incremental=incremental)
+                    historical=historical, start=start, end=end, incremental=incremental, retain_results=retain_results)
         return self._comparisons(clock=clock, tolerance_minutes=tolerance_minutes, historical=historical,
-                                 start=start, end=end)
+                                 start=start, end=end, retain_results=retain_results)
 
     def _comparisons(self, *, clock=now_utc, tolerance_minutes=10, persist=False, historical=False,
-                     start=None, end=None, incremental=False):
+                     start=None, end=None, incremental=False, retain_results=True):
+        from contextlib import nullcontext
+        context = self.store.metadata_query(max_names=self.max_artifacts) if incremental else nullcontext(None)
+        with context as query:
+            return self._comparisons_scoped(clock=clock, tolerance_minutes=tolerance_minutes,
+                persist=persist, historical=historical, start=start, end=end,
+                incremental=incremental, retain_results=retain_results, query=query)
+
+    def _comparisons_scoped(self, *, clock, tolerance_minutes, persist, historical,
+                            start, end, incremental, retain_results, query):
         validate_tolerance(tolerance_minutes)
         current = utc(clock())
-        states = self.comparison_states(start=start, end=end, tolerance_minutes=tolerance_minutes, historical=historical) if incremental else {}
+        states = self.comparison_states(start=start, end=end, tolerance_minutes=tolerance_minutes, historical=historical) if incremental and query is None else {}
         from types import SimpleNamespace
+        def metadata():
+            return query.iter_metadata() if query is not None else self.store.iter_metadata(max_names=self.max_artifacts)
         def observation_metadata():
-            for meta in self.store.iter_metadata(max_names=self.max_artifacts):
+            for meta in metadata():
                 if meta['artifact_type'] != 'reference_acquisition':
                     continue
                 stamp = utc(meta['time_min'])
@@ -750,12 +762,22 @@ class ReferenceLab:
             if signature != digest([o.acquisition_id for o in inputs(comparison.station_id, variable, utc(stamp))]):
                 changed_runs.add(run_id)
         def candidate_runs():
-            for meta in self.store.iter_metadata(max_names=self.max_artifacts):
+            for meta in metadata():
                 if meta['artifact_type'] != 'reference_forecast' or meta['prospective'] == historical:
                     continue
                 if (start and utc(meta['time_max']) < utc(start)) or (end and utc(meta['time_min']) > utc(end)):
                     continue
-                if incremental and meta['idempotency_key'] not in changed_runs and coverage.get(meta['idempotency_key'], 0) == meta['point_count']*len(VARIABLES):
+                run_states = states
+                changed = meta['idempotency_key'] in changed_runs
+                covered = coverage.get(meta['idempotency_key'], 0)
+                if query is not None:
+                    run_states = self.comparison_states(start=start, end=end,
+                        tolerance_minutes=tolerance_minutes, historical=historical,
+                        _artifacts=query.comparison_artifacts(meta['idempotency_key'], start=start, end=end))
+                    covered = len(run_states)
+                    changed = any(signature != digest([o.acquisition_id for o in inputs(comparison.station_id, variable, utc(stamp))])
+                        for (_, stamp, variable), (_, comparison, signature) in run_states.items())
+                if incremental and not changed and covered == meta['point_count']*len(VARIABLES):
                     continue
                 artifact = self.store.load(idempotency_key=meta['idempotency_key'])
                 if artifact is None or self.store._metadata(artifact) != meta:
@@ -763,11 +785,11 @@ class ReferenceLab:
                 run = ReferenceForecastRun(**json.loads(artifact.payload_json))
                 sealed = self.durable_seal(run)
                 if sealed is not None and (not run.prospective or all(utc(sealed) < utc(p['at']) for p in json.loads(run.snapshot_json)['points'])):
-                    yield run
+                    yield run, run_states
         self.last_index = index
         self.computed_targets = 0
         result = []
-        for run in candidate_runs():
+        for run, states in candidate_runs():
             if run.prospective == historical:
                 continue
             sealed = self.durable_seal(run)
@@ -790,7 +812,8 @@ class ReferenceLab:
                         decoded.append(observation)
                     comparison = compare_point(run, point, variable, decoded, tolerance_minutes, durable_sealed_at_utc=sealed)
                     self.computed_targets += 1
-                    result.append(comparison)
+                    if retain_results:
+                        result.append(comparison)
                     if persist:
                         payload = asdict(comparison)
                         self.save('reference_comparison', digest(payload), payload, canonical_utc(current), run.station_id)
