@@ -78,7 +78,7 @@ jobs:
           pktmon start --capture --comp nics --pkt-size 0 --file-name (Join-Path $out 'network.etl')
           if ($LASTEXITCODE -ne 0) { throw 'Capture start failed' }
           try {
-            uv run --locked --no-sync python ../operations/tooling/weather_clients.py --source . --out "$out"
+            uv run --locked --no-sync python ../operations/tooling/weather_ip_matrix.py --source . --out "$out" --start-epoch "${{ inputs.start_epoch }}"
             if ($LASTEXITCODE -ne 0) { throw 'Diagnostic harness error' }
           } finally {
             pktmon counters > (Join-Path $out 'capture-counters.txt')
@@ -92,7 +92,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Beta8-weather-packet-capture-${{ inputs.approved_sha }}
+          name: Beta8-weather-synchronized-capture-${{ inputs.approved_sha }}
           path: ${{ runner.temp }}/weather-diagnostics/*
           include-hidden-files: false
           retention-days: 30
