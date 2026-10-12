@@ -242,3 +242,33 @@ def test_reentrant_writer_keeps_the_smaller_publication_ceiling(indexed):
                 store.save(fact('nested-refused'))
         assert outer['stop_at'] == original_stop and outer['count'] == 8
     assert store.load(idempotency_key='nested-refused') is None
+
+
+def test_writer_snapshot_is_reentrant_tracks_publications_and_rechecks_next_time(indexed, monkeypatch):
+    store, root = indexed
+    store.rebuild_metadata_index()
+    with store.writer_lock():
+        original_names = store._names
+        monkeypatch.setattr(store, '_names', lambda *args:pytest.fail('repeated locked inventory'))
+        first = store.iter_metadata()
+        one = next(first)
+        assert len(list(store.iter_metadata())) == 4
+        assert len(list(first)) == 3  # Nested scans did not reset its file offset.
+        store.save(fact('snapshot-new'))
+        assert len(list(store.iter_metadata())) == 5
+        with pytest.raises(ValueError, match='invalid_field_lab_name_limit'):
+            list(store.iter_metadata(max_names=0))
+        monkeypatch.setattr(store, '_names', original_names)
+    with store.writer_lock() as state:
+        assert state['count'] == 5
+
+
+def test_writer_snapshot_keeps_a_failed_sidecar_publication_visible(indexed, monkeypatch):
+    store, root = indexed
+    store.rebuild_metadata_index()
+    with store.writer_lock():
+        monkeypatch.setattr(store, '_save_metadata', lambda artifact:(_ for _ in ()).throw(OSError('crash')))
+        with pytest.raises(OSError):
+            store.save(fact('visible-before-sidecar'))
+        assert store.capacity_count() == 5
+        assert len(list(store.iter_metadata())) == 5

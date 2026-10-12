@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, contextmanager
 import hashlib
 import heapq
+import io
 import json
 import mmap
 import os
@@ -86,10 +87,16 @@ class Generation:
     def __init__(self, names, stream, row_fd, offsets=None, relations=None):
         self.names, self.stream, self.row_fd = names, stream, row_fd
         self.offsets, self.relations = offsets, relations
+        self.active = True
     def __iter__(self):
         return iter((self.names, self.stream))
     def __getitem__(self, position):
         return (self.names, self.stream)[position]
+    def iter_metadata(self, store):
+        # Independent positional readers allow nested scans while a candidate
+        # iterator is suspended. dup() alone would share the file offset.
+        with io.BufferedReader(PositionalReader(self), buffer_size=1024*1024) as stream:
+            yield from rows(self.names, stream, store)
     def related(self, run_id, store):
         key = hashlib.sha256(run_id.encode()).digest()
         # A bounded for-loop makes cursor progress structural, not dependent
@@ -106,6 +113,20 @@ class Generation:
                     or value['artifact_type'] not in ('reference_comparison', 'reference_comparison_state')):
                 raise ValueError('field_lab_index_invalid_relation')
             yield value
+
+
+class PositionalReader(io.RawIOBase):
+    def __init__(self, generation):
+        self.generation, self.position = generation, 0
+    def readable(self):
+        return True
+    def readinto(self, target):
+        if not self.generation.active:
+            raise RuntimeError('field_lab_metadata_snapshot_closed')
+        data = os.pread(self.generation.row_fd, len(target), self.position)
+        target[:len(data)] = data
+        self.position += len(data)
+        return len(data)
 
 
 @contextmanager
@@ -175,7 +196,11 @@ def generation(store, root, max_names):
                             or struct.unpack('>I', value[32:])[0] >= count):
                         raise ValueError('field_lab_index_invalid_relations')
                     previous = value
-            yield Generation(names, rows, handles[1], offsets, relations)
+            view = Generation(names, rows, handles[1], offsets, relations)
+            try:
+                yield view
+            finally:
+                view.active = False
     finally:
         os.close(fd)
 

@@ -150,17 +150,20 @@ def cycle(lab, *, clock=now_utc, client=None, capture=capture_forecast, toleranc
     from astropilot.reference_station_lab import validate_tolerance
     validate_tolerance(tolerance_minutes)
     current = utc(clock())
-    items = tuple(artifacts(lab, ('catalog_activation_event', 'collection_success')))
-    activations = [a for a in items if a.artifact_type == 'catalog_activation_event']
-    sync_due = not activations or current-max(utc(a.created_at_utc) for a in activations) >= timedelta(days=7)
-    runs = tuple(lab.iter_facts(artifact_type='reference_forecast', start=(current-timedelta(hours=12)).isoformat()))
-    plan = dict(catalogue_due=sync_due, forecast_interval_hours=12, horizon_hours=24,
-                revision_horizon_days=REVISION_DAYS, dry_run=dry_run)
     if dry_run:
+        items = tuple(artifacts(lab, ('catalog_activation_event', 'collection_success')))
+        activations = [a for a in items if a.artifact_type == 'catalog_activation_event']
+        sync_due = not activations or current-max(utc(a.created_at_utc) for a in activations) >= timedelta(days=7)
+        plan = dict(catalogue_due=sync_due, forecast_interval_hours=12, horizon_hours=24,
+                    revision_horizon_days=REVISION_DAYS, dry_run=True)
         return dict(plan, writes=0, network_calls=0)
     with cycle_lock(lab):
-        # Re-read after locking: another cycle may have completed while planning.
+        # Plan only after locking; no duplicate speculative inventory scans.
         items = tuple(artifacts(lab, ('catalog_activation_event', 'collection_success')))
+        activations = [a for a in items if a.artifact_type == 'catalog_activation_event']
+        sync_due = not activations or current-max(utc(a.created_at_utc) for a in activations) >= timedelta(days=7)
+        plan = dict(catalogue_due=sync_due, forecast_interval_hours=12, horizon_hours=24,
+                    revision_horizon_days=REVISION_DAYS, dry_run=False)
         successes = [a for a in items if a.artifact_type == 'collection_success']
         if successes and current-max(utc(a.created_at_utc) for a in successes) < timedelta(hours=1):
             return dict(plan, no_op=True, writes=0, network_calls=0)
