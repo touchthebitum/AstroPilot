@@ -21,7 +21,8 @@ def _run_javascript(source: str) -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js is required for the dynamic UI test")
-    source = (_javascript_between("function siteTimezone()", "function decisionSiteFingerprint(")
+    source = (_javascript_between("function pendingIntentChoice(subject) {", "function chosenIntent(")
+              + _javascript_between("function siteTimezone()", "function decisionSiteFingerprint(")
               .split("function siteConfigurationIdentity", 1)[0]
               + _javascript_between("function windowTimezone(", "function clock(") + source)
     result = subprocess.run(
@@ -700,3 +701,18 @@ assert.equal(ui.openSavedMission.disabled, true);
     assert 'cursor: pointer' in active
     assert 'opacity: .55' in disabled and 'cursor: not-allowed' in disabled
     assert '#open-saved-mission:not(:disabled):hover' in css
+
+
+def test_pending_choice_requires_explicit_live_flag_and_complete_options():
+    helpers = _javascript_between("function intentMode(subject) {", "const intentStatusLabels")
+    _run_javascript("const assert = require('node:assert/strict');\n" + helpers + """
+const subject = {status:'no_mission', creation_refusal:'preselection_evidence_cannot_authorize_mission',
+  acquisition_intent_choice_available:true, acquisition_intent_selection_status:'no_clear_preference',
+  selected_acquisition_intent_id:null, viable_acquisition_intent_ids:['ha','oiii'],
+  acquisition_intent_options:[{acquisition_intent_id:'ha',label:'Hα'},{acquisition_intent_id:'oiii',label:'OIII'}]};
+assert.equal(pendingIntentChoice(subject),true);
+assert.equal(pendingIntentChoice({...subject,acquisition_intent_choice_available:false}),false);
+assert.equal(pendingIntentChoice({...subject,status:'weather_refused'}),false);
+assert.equal(pendingIntentChoice({...subject,acquisition_intent_options:[]}),false);
+assert.equal(pendingIntentChoice({...subject,selected_acquisition_intent_id:'ha'}),false);
+""")

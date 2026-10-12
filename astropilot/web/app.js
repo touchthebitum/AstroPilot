@@ -4076,6 +4076,13 @@ function renderIntentChoice(container, subject, selectId) {
   container.append(label, select);
 }
 
+function pendingIntentChoice(subject) {
+  return subject?.acquisition_intent_choice_available === true
+    && subject.status === "no_mission"
+    && subject.creation_refusal === "preselection_evidence_cannot_authorize_mission"
+    && intentMode(subject) === "multiple";
+}
+
 function chosenIntent(subject, container) {
   const mode = intentMode(subject);
   if (mode === "legacy") return null;
@@ -4155,7 +4162,7 @@ function acceptanceControls() {
 function intentReady(button) {
   const decision = state.currentDecision;
   if (!decision) return false;
-  if (button === ui.openMission && (decision.target_decision_status !== "recommended"
+  if (button === ui.openMission && ((decision.target_decision_status !== "recommended" && !pendingIntentChoice(decision))
       || !decision.decision_id || !decision.catalog_key)) return false;
   const subject = button === ui.openMission ? decision
     : (decision.alternatives || []).find((item) => item.catalog_key === button.dataset.catalogKey);
@@ -4387,12 +4394,13 @@ function renderDecision(decision) {
   const weatherDecision = decision.weather_decision;
 
   text("#night-date", dateLabel(decision.night_date));
-  const recommended = decision.target_decision_status === "recommended";
-  const insufficient = decision.target_decision_status === "insufficient_evidence";
+  const pendingChoice = pendingIntentChoice(decision);
+  const recommended = decision.target_decision_status === "recommended" || pendingChoice;
+  const insufficient = decision.target_decision_status === "insufficient_evidence" && !pendingChoice;
   const noAcquisition = intentMode(decision) === "none";
   const intentUnavailable = intentMode(decision) === "unavailable";
-  text("#target-label", recommended && !noAcquisition && !intentUnavailable ? "Cible prioritaire" : "Cible évaluée");
-  text("#recommendation", noAcquisition
+  text("#target-label", pendingChoice ? "Acquisitions possibles" : recommended && !noAcquisition && !intentUnavailable ? "Cible prioritaire" : "Cible évaluée");
+  text("#recommendation", pendingChoice ? "Choisissez votre prise de vue" : noAcquisition
     ? "Aucune acquisition recommandée cette nuit"
     : intentUnavailable ? "Prise de vue à confirmer"
     : recommended
@@ -4468,7 +4476,7 @@ function renderDecision(decision) {
   const actionablePrimary = Boolean(
     decision.decision_id
     && decision.catalog_key
-    && decision.target_decision_status === "recommended"
+    && (decision.target_decision_status === "recommended" || pendingIntentChoice(decision))
   );
   ui.openMission.hidden = !actionablePrimary || ["none", "unavailable"].includes(intentMode(decision));
   ui.openMission.disabled = !actionablePrimary || !intentReady(ui.openMission);
@@ -5803,7 +5811,7 @@ async function acceptRecommendation({
     }
     const validPrimary = source === "primary_recommendation"
       && selectedCatalogKey === decision.catalog_key
-      && decision.target_decision_status === "recommended";
+      && (decision.target_decision_status === "recommended" || pendingIntentChoice(decision));
     const validAlternative = source === "alternative"
       && (decision.alternatives || []).some((alternative) => (
         alternative.catalog_key === selectedCatalogKey
@@ -6045,7 +6053,7 @@ async function loadTonight(availability) {
       return;
     }
 
-    if (payload.status !== "available") {
+    if (payload.status !== "available" && !pendingIntentChoice(payload)) {
       showTonightUnavailable(payload);
       return;
     }

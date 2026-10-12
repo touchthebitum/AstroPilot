@@ -810,6 +810,11 @@ def test_unselected_comparative_lunar_evidence_is_a_refusal_not_a_mission():
         bortle=3, availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT))
     assert result.status is TonightStatus.NO_MISSION
     assert result.creation_refusal == "preselection_evidence_cannot_authorize_mission"
+    from astropilot.app import _acquisition_intent_choice_available
+    from dataclasses import replace
+    assert _acquisition_intent_choice_available(result)
+    assert not _acquisition_intent_choice_available(replace(result, creation_refusal=None))
+    assert not _acquisition_intent_choice_available(replace(result, status=TonightStatus.NO_PRODUCTIVE_WINDOW))
     assert result.mission is None
     builder.assert_not_called()
     mission_service.create_with_actionability_diagnostic.assert_not_called()
@@ -818,3 +823,27 @@ def test_unselected_comparative_lunar_evidence_is_a_refusal_not_a_mission():
     assert payload["selected_acquisition_intent_id"] is None
     assert payload["lunar_evidence_snapshot"] is not None
     assert len(payload["viable_acquisition_intent_ids"]) == 2
+    from dataclasses import replace
+    from fastapi.testclient import TestClient
+    from astropilot.app import create_app
+    from decision.weather.weather_ingress import WeatherSnapshot
+    from datetime import timedelta
+    weather = WeatherSnapshot(payload={"hourly":{}}, provider="Open-Meteo",
+        retrieved_at_utc=START-timedelta(minutes=5), requested_latitude=47.1,
+        requested_longitude=6.8, grid_latitude=47.1, grid_longitude=6.8,
+        grid_distance_km=0, elevation_m=800, timezone="Europe/Zurich",
+        timezone_source="coordinates_local", utc_offset_seconds=7200,
+        valid_from=START-timedelta(hours=1), valid_until=START+timedelta(hours=47),
+        hour_count=48, completeness=1)
+    for refusal, expected in [(result.creation_refusal,True), (None,False)]:
+        registered = Mock()
+        stub = SimpleNamespace(evaluate=lambda **k:replace(result,
+            decision_id="choice-test", creation_refusal=refusal),
+            register_decision_context=registered)
+        with TestClient(create_app(service_factory=lambda:stub,
+                weather_provider=lambda *a:weather, profile_provider=lambda:profile,
+                clock=lambda:START)) as client:
+            response=client.post('/v1/tonight',json={'availability':{'mode':'all_night'}})
+            assert response.status_code==200
+            assert response.json()['acquisition_intent_choice_available'] is expected
+            assert registered.call_args.kwargs['primary_catalog_key'] == ('Sh2-129' if expected else None)
