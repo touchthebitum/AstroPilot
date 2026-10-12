@@ -104,6 +104,7 @@ class Generation:
                     or value.get('forecast_run_id') != run_id
                     or value['artifact_type'] not in ('reference_comparison', 'reference_comparison_state')):
                 raise ValueError('field_lab_index_invalid_relation')
+            position += 1
             yield value
 
 
