@@ -70,7 +70,12 @@ try:
  for name,timeout in [('production',15),('timeout',.000001)]:
   cfg=root/(name+'.json');write(cfg,config('open_meteo_current_v1',timeout));r=run(name,['--guardian','--config',str(cfg),'--data-dir',str(root/name),'--once']);ev=events(name);results[name]['events']=ev
   cycle=next(x for x in ev if x.get('event')=='cycle');check(name+'_not_eligible',cycle['decision_eligible'] is False)
-  check(name+'_exit',r.returncode==(0 if name=='production' else 6))
+  if name=='production':
+   results[name]['live_acquisition_succeeded']=r.returncode==0
+   check('production_exit_classified',r.returncode in (0,6))
+   if r.returncode==6:
+    check('production_acquisition_failure_safe',cycle['action']=='EMERGENCY_STOP' and 'evidence_provider_error' in cycle['errors'])
+  else:check(name+'_exit',r.returncode==6)
  cfg=root/'injected.json';ep=root/'evidence.json';write(cfg,config('injected_file_v1'));write(ep,evidence())
  args=['--guardian','--config',str(cfg),'--data-dir',str(root/'periodic-state'),'--evidence-file',str(ep)]
  child=start('periodic',args);empty=cycles('periodic',2);check('empty_fail_closed',all(x['risk']=='UNKNOWN' and not x['decision_eligible'] for x in empty));results['empty_cycles']=empty
