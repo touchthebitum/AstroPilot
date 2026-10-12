@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from enum import Enum
+from zoneinfo import ZoneInfo
 
 from astropilot.user_profile import (
     UserProfileError,
@@ -43,6 +44,37 @@ class TonightStatus(str, Enum):
 
 class TonightEquipmentSelectionError(ValueError):
     code = "invalid_tonight_equipment"
+
+
+def _select_forecast_night(nights, availability, weather):
+    """A dated availability selects its evening, including the following dawn.
+
+    Undated modes retain Tonight's earliest-forecast behavior. Never substitute
+    another evening when the requested one is missing from the forecast.
+    """
+    anchor = (
+        availability.start or availability.end
+        if availability is not None
+        else None
+    )
+    if anchor is None:
+        return min(nights, key=lambda item: item["date"])
+    if isinstance(weather, WeatherSnapshot):
+        anchor = anchor.astimezone(ZoneInfo(weather.timezone))
+    evening = anchor.date()
+    if anchor.hour < 12:
+        evening -= timedelta(days=1)
+    return next(
+        (
+            night for night in nights
+            if (
+                date.fromisoformat(night["date"])
+                if isinstance(night["date"], str)
+                else night["date"]
+            ) == evening
+        ),
+        None,
+    )
 
 
 def resolve_tonight_equipment(profile, requested_equipment) -> str:
@@ -221,7 +253,15 @@ class TonightApplicationService:
                 forecast_evidence=forecast_evidence,
             )
 
-        night = sorted(nights, key=lambda item: item["date"])[0]
+        night = _select_forecast_night(nights, inputs.availability, weather)
+        if night is None:
+            return TonightResult(
+                None,
+                None,
+                None,
+                status=TonightStatus.NO_NIGHT,
+                forecast_evidence=forecast_evidence,
+            )
         top_objects = night.get("top_objects") or []
         weather_snapshot = (
             weather if isinstance(weather, WeatherSnapshot) else None
