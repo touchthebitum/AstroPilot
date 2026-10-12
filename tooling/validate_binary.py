@@ -94,9 +94,9 @@ try:
   sock.bind(('127.0.0.1',8000))
  write(root/'data/user_profile.json',{'location':{'name':'Synthetic validation Madrid','latitude':40.4,'longitude':-3.7},'preferences':{'bortle':4},'active_equipment':'samyang_183','available_equipment':['samyang_183'],'projects':{},'sessions':[],'profile_revision':1})
  child=start('web',[]);opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
- def request(path,body=None):
+ def request(path,body=None,timeout=20):
   req=urllib.request.Request('http://127.0.0.1:8000'+path,data=None if body is None else json.dumps(body).encode(),headers={'Content-Type':'application/json'})
-  with opener.open(req,timeout=20) as response:return response.status,response.read()
+  with opener.open(req,timeout=timeout) as response:return response.status,response.read()
  end=time.monotonic()+60
  while time.monotonic()<end:
   try:status,body=request('/v1/runtime-identity');break
@@ -111,6 +111,17 @@ try:
  except urllib.error.HTTPError as e:check('invalid_api_422',e.code==422)
  else:raise AssertionError('invalid API accepted')
  for name in ['help.js','alert-status.js']:check('web_serves_'+name,request('/ui/'+name)[1]==(source/'astropilot/web'/name).read_bytes())
+ # Live full-night preparation, synthetic profile only; preserve TLS defaults.
+ t=time.monotonic()
+ try:
+  status,body=request('/v1/tonight',{'availability':{'mode':'all_night'}},timeout=240)
+ except urllib.error.HTTPError as error:
+  status,body=error.code,error.read()
+ payload=json.loads(body)
+ results['tonight']={'http_status':status,'seconds':time.monotonic()-t,'status':payload.get('status'),'creation_refusal':payload.get('creation_refusal'),'detail':payload.get('detail')}
+ check('tonight_no_internal_error',status in (200,503))
+ if status==200:check('tonight_response_structured',payload.get('status') in ('available','no_mission','no_night','no_candidate','no_recommendation','no_productive_window','weather_refused'))
+ else:check('tonight_unavailable_safe',payload.get('detail',{}).get('code') in ('weather_unavailable','weather_invalid','weather_insufficient','weather_stale'))
  results['web_stop']=stop(child)
 except Exception as error:
  results['error']=type(error).__name__+': '+str(error);raise

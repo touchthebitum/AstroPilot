@@ -38,7 +38,7 @@ jobs:
             !/data/user_profile.json
       - name: Guard exact source and isolated directories
         run: |
-          if ($env:APPROVED_SHA -cne '3a39f4de1f620ccfcae2f2cd01f7719551ba1d38') { throw 'Unexpected product SHA' }
+          if ($env:APPROVED_SHA -cne '05cd54e2e4b4ea63e4415d1930765d0ec69ce756') { throw 'Unexpected product SHA' }
           if ((git rev-parse HEAD).Trim() -cne $env:APPROVED_SHA) { throw 'Checkout mismatch' }
           if (git status --porcelain) { throw 'Dirty source' }
           $iso = Join-Path $env:RUNNER_TEMP 'beta8-common-isolation'
