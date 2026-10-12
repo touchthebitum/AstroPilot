@@ -57,7 +57,7 @@ jobs:
         run: |
           uv python install 3.13.5
           if ($LASTEXITCODE -ne 0) { throw 'Python setup failed' }
-          uv sync --locked
+          uv sync --locked --extra packaging
           if ($LASTEXITCODE -ne 0) { throw 'Runtime setup failed' }
           if (Test-Path astropilot.egg-info) { Move-Item astropilot.egg-info (Join-Path $env:RUNNER_TEMP 'weather-generated-metadata') }
           if (git status --porcelain --untracked-files=all) { throw 'Source changed' }
@@ -74,10 +74,22 @@ jobs:
           $unpacked = Join-Path $env:RUNNER_TEMP 'delivered-portable'
           Expand-Archive -LiteralPath $zip.FullName -DestinationPath $unpacked
           "DIAGNOSTIC_BINARY=$(Join-Path $unpacked 'AstroPilot\AstroPilot.exe')" >> $env:GITHUB_ENV
-      - name: Compare binary and source on the same runner
+      - name: Build a diagnostic twin without modifying product sources
+        run: |
+          $env:DIAGNOSTIC_SOURCE_ROOT = (Get-Location).Path
+          $env:DIAGNOSTIC_RUNTIME_HOOK = (Resolve-Path ../operations/tooling/weather_runtime_hook.py).Path
+          $env:ASTROPILOT_BUILD_COMMIT = '3a39f4d'
+          $env:PYINSTALLER_CONFIG_DIR = Join-Path $env:RUNNER_TEMP 'weather-pyinstaller-cache'
+          $dest = Join-Path $env:RUNNER_TEMP 'weather-diagnostic-dist'
+          $build = Join-Path $env:RUNNER_TEMP 'weather-diagnostic-build'
+          uv run --locked --no-sync python -m PyInstaller --noconfirm --clean --distpath "$dest" --workpath "$build" ../operations/tooling/diagnostic_windows.spec
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic twin build failed' }
+          "DIAGNOSTIC_TWIN=$(Join-Path $dest 'AstroPilot/AstroPilot.exe')" >> $env:GITHUB_ENV
+          if (git status --porcelain --untracked-files=all) { throw 'Product source changed' }
+      - name: Compare original artifact, diagnostic twin and Python
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'weather-diagnostics'
-          uv run --locked --no-sync python ../operations/tooling/weather_matrix.py --source . --binary "$env:DIAGNOSTIC_BINARY" --out "$out"
+          uv run --locked --no-sync python ../operations/tooling/weather_twin.py --original "$env:DIAGNOSTIC_BINARY" --diagnostic "$env:DIAGNOSTIC_TWIN" --source . --out "$out"
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic harness error' }
           if (git status --porcelain --untracked-files=all) { throw 'Source changed' }
       - name: Preserve diagnostic report
