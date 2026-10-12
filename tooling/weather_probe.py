@@ -31,7 +31,7 @@ def tcp(*args,**kwargs):
  result['phase']='tcp';t=time.monotonic()
  try:r=old_connect(*args,**kwargs)
  finally:result['timings']['tcp_including_dns']=time.monotonic()-t
- result['peer']=r.getpeername();result['phase']='tls_handshake';return r
+ result['local']=r.getsockname();result['peer']=r.getpeername();result['phase']='tls_handshake';return r
 worker.HTTPSConnection=Connection;socket.getaddrinfo=dns;socket.create_connection=tcp
 try:
  body=worker.request(40.4,-3.7,15);payload=json.loads(body);assert isinstance(payload.get('current'),dict);result.update(success=True,body_bytes=len(body),phase='completed')

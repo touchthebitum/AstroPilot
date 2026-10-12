@@ -64,17 +64,35 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Runtime setup failed' }
           if (Test-Path astropilot.egg-info) { Move-Item astropilot.egg-info (Join-Path $env:RUNNER_TEMP 'weather-generated-metadata') }
           if (git status --porcelain --untracked-files=all) { throw 'Source changed' }
-      - name: Compare three synchronized IP addresses with verified hostname TLS
+      - name: Capture only Open-Meteo TCP traffic during verified TLS trials
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'weather-diagnostics'
-          uv run --locked --no-sync python ../operations/tooling/weather_clients.py --source . --out "$out"
-          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic harness error' }
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          pktmon filter remove
+          foreach ($ip in @('188.40.99.226','94.130.142.35','167.114.211.86')) {
+            pktmon filter add "meteo-$ip" -i $ip -t TCP -p 443
+            if ($LASTEXITCODE -ne 0) { throw 'Capture filter failed' }
+          }
+          pktmon list > (Join-Path $out 'capture-components.txt')
+          pktmon filter list > (Join-Path $out 'capture-filters.txt')
+          pktmon start --capture --comp nics --pkt-size 0 --file-name (Join-Path $out 'network.etl')
+          if ($LASTEXITCODE -ne 0) { throw 'Capture start failed' }
+          try {
+            uv run --locked --no-sync python ../operations/tooling/weather_clients.py --source . --out "$out"
+            if ($LASTEXITCODE -ne 0) { throw 'Diagnostic harness error' }
+          } finally {
+            pktmon counters > (Join-Path $out 'capture-counters.txt')
+            pktmon stop
+            pktmon etl2pcap (Join-Path $out 'network.etl') --out (Join-Path $out 'network.pcapng')
+            if ($LASTEXITCODE -ne 0) { throw 'Capture conversion failed' }
+            pktmon etl2txt (Join-Path $out 'network.etl') --out (Join-Path $out 'network.txt')
+          }
           if (git status --porcelain --untracked-files=all) { throw 'Source changed' }
       - name: Preserve diagnostic report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Beta8-weather-TLS-clients-${{ inputs.approved_sha }}
+          name: Beta8-weather-packet-capture-${{ inputs.approved_sha }}
           path: ${{ runner.temp }}/weather-diagnostics/*
           include-hidden-files: false
           retention-days: 30
