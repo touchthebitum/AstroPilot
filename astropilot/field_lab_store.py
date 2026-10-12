@@ -328,6 +328,38 @@ class FileFieldLabStore:
         from astropilot.field_lab_index import build
         return build(self, max_names=max_names, force=force, workers=workers, progress=progress)
 
+    def capacity_count(self, *, max_names=100000):
+        """Reuse only this thread's already validated, pinned writer boundary.
+
+        Every independent writer still recounts under the cross-process lock.
+        Durable publications increment this count before sidecar publication.
+        """
+        if type(max_names) is not int or max_names < 1:
+            raise ValueError('invalid_field_lab_name_limit')
+        if field_lab_root() != self._root:
+            raise ValueError('field_lab_configuration_changed')
+        state = getattr(_WRITERS, 'state', None)
+        if state is not None and state['identity'] == (os.getpid(), str(self._root)):
+            if state['count'] > max_names:
+                raise ValueError('field_lab_name_limit_exceeded')
+            return state['count']
+        return sum(1 for _ in self.iter_metadata(max_names=max_names))
+
+    def refresh_metadata_index(self, *, count, max_names=100000, threshold=1000):
+        """Refresh an explicitly activated index after a successful collection.
+
+        This threshold is only a maintenance hint. Admission never trusts it;
+        readers always validate the real inventory and include every new fact.
+        """
+        from astropilot.field_lab_index import generation
+        if type(threshold) is not int or threshold < 1:
+            raise ValueError('invalid_field_lab_index_refresh_threshold')
+        with self._directory(root_only=True) as root:
+            with generation(self, root, max_names) as cached:
+                if cached is None or count-len(cached[0]) < threshold:
+                    return None
+        return self.rebuild_metadata_index(max_names=max_names)
+
     def _save_metadata(self, artifact):
         with self._directory(root_only=True) as root:
             try:

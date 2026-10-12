@@ -51,12 +51,25 @@ def artifacts(lab, artifact_type=None):
     return lab.store.iter_artifacts(max_names=lab.max_artifacts, artifact_type=artifact_type)
 
 
-def usage(lab, *, clock=now_utc, include_disk=False):
+def _capacity_fields(lab, count):
+    policy = capacity_policy(lab.max_artifacts)
+    effective = policy['effective_stop_at']
+    return dict(count=count, capacity=lab.max_artifacts,
+                operational_soft_limit=policy['operational_soft_limit'],
+                remaining=max(0, policy['stop_at']-count-1),
+                reserved_budget=policy['reserved_budget'], effective_stop_at=effective,
+                warning=count >= effective*WARNING, blocked=count >= effective,
+                would_block_next_cycle=count >= effective)
+
+
+def usage(lab, *, clock=now_utc, include_disk=False, _visitor=None):
     current = utc(clock())
-    count, recent, size = 0, 0, None
+    count, recent, size = 0, 0, 0 if include_disk else None
     kinds = Counter()
     oldest = newest = None
     for meta in lab.store.iter_metadata(max_names=lab.max_artifacts):
+        if _visitor is not None:
+            _visitor(meta)
         stamp = utc(meta['created_at_utc'])
         count += 1
         kinds[meta['artifact_type']] += 1
@@ -75,23 +88,18 @@ def usage(lab, *, clock=now_utc, include_disk=False):
         return total
     if include_disk and field_lab_root().exists():
         size = directory_bytes(field_lab_root())
-    policy = capacity_policy(lab.max_artifacts)
-    stop_at = policy['stop_at']
-    reserve = policy['reserved_budget']
-    effective = policy['effective_stop_at']
+    result = _capacity_fields(lab, count)
+    effective = result['effective_stop_at']
     rate = recent/7
-    return dict(count=count, by_type=dict(sorted(kinds.items())), capacity=lab.max_artifacts,
-                operational_soft_limit=policy['operational_soft_limit'],
-                remaining=max(0, stop_at-count-1), reserved_budget=reserve, effective_stop_at=effective,
+    return dict(result, by_type=dict(sorted(kinds.items())),
                 growth_per_day_7d=rate, estimated_days_to_stop=(effective-count)/rate if rate else None,
                 oldest=oldest.isoformat() if oldest else None, newest=newest.isoformat() if newest else None,
-                disk_bytes=size, disk_usage_measured=include_disk,
-                warning=count >= effective*WARNING,
-                blocked=count >= effective, would_block_next_cycle=count >= effective)
+                disk_bytes=size, disk_usage_measured=include_disk)
 
 
 def check_capacity(lab, reserve=None):
-    result = usage(lab)
+    result = _capacity_fields(lab, lab.store.capacity_count(max_names=lab.max_artifacts))
+    result['disk_usage_measured'] = False
     if reserve is None:
         reserve = result['reserved_budget']
     stop_at = capacity_policy(lab.max_artifacts)['stop_at']
@@ -312,13 +320,16 @@ def status(lab, *, include_disk=False):
     latest = {}
     last_observed = None
     errors = 0
-    for meta in lab.store.iter_metadata(max_names=lab.max_artifacts):
+    current = now_utc()
+    def visit(meta):
+        nonlocal last_observed, errors
         kind, stamp = meta['artifact_type'], meta['created_at_utc']
         latest[kind] = max(latest.get(kind, stamp), stamp)
         if kind == 'reference_acquisition':
             last_observed = max(last_observed or meta['time_max'], meta['time_max'])
-        errors += kind == 'collection_error' and utc(stamp) >= now_utc()-timedelta(days=7)
-    return dict(root=str(field_lab_root()), usage=usage(lab, include_disk=include_disk), scheduler=scheduler('status'),
+        errors += kind == 'collection_error' and utc(stamp) >= current-timedelta(days=7)
+    value = usage(lab, clock=lambda:current, include_disk=include_disk, _visitor=visit)
+    return dict(root=str(field_lab_root()), usage=value, scheduler=scheduler('status'),
                 last_success=latest.get('collection_success'), last_forecast=latest.get('reference_forecast'),
                 last_acquisition=latest.get('reference_acquisition'), last_official_observation=last_observed,
                 last_comparison=latest.get('reference_comparison_state'),
@@ -378,7 +389,17 @@ def scheduled_main():
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     try:
-        result = cycle(ReferenceLab(max_artifacts=CAPACITY))
+        lab = ReferenceLab(max_artifacts=CAPACITY)
+        result = cycle(lab)
+        if 'usage' in result:
+            try:
+                refreshed = lab.store.refresh_metadata_index(count=result['usage']['count'], max_names=CAPACITY)
+                if refreshed is not None:
+                    logger.info('metadata index refreshed: %s', json.dumps(refreshed))
+            except (ValueError, RuntimeError, OSError) as error:
+                # Collection is already durable. Keep the prior index and the
+                # complete legacy tail; never claim that maintenance succeeded.
+                logger.warning('metadata index refresh failed: %s', error)
         logger.info(json.dumps(result, allow_nan=False))
         return 0
     except Exception as error:

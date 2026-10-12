@@ -629,6 +629,56 @@ time bounds. The tuple-returning `facts()` compatibility API remains for existin
 callers, while the cycle uses filtered scans. Metadata scans remain O(total files)
 and incur filesystem I/O; they are not a database range index.
 
+#### Optional compact metadata generations
+
+`astropilot-field-lab optimize` explicitly activates an index on an initialized
+store. `--workers 1..8` bounds parallel envelope reads (default one worker).
+The first build validates every authoritative envelope, digest and filename under
+the same exclusive writer lock. It can be slow on a large existing HDD store;
+this is maintenance, not a collection throughput measurement.
+
+Each generation consists of a sorted fixed-width name table, sequential metadata
+rows, and a durable immutable commit containing their SHA-256 hashes and sizes.
+The commit is published last. Failed/interrupted builds cannot become visible;
+readers keep the preceding generation or use the original sidecar/envelope path.
+An index checksum/structure failure stops reads before results are accepted.
+`optimize --force` rebuilds from authoritative envelopes even when the prior
+derived generation is corrupt. Previous generations, scientific files and old
+sidecars remain retained. Only scratch files created by a build are cleaned up.
+
+Every indexed scan still preflights the bounded real artifact inventory, refuses
+unexpected names, links and nonregular entries, and verifies that every indexed
+name is still present. It also checks sidecar entry types without opening each
+indexed sidecar. New artifacts absent from the generation use the original
+no-follow sidecar/envelope fallback, so an interrupted publication never hides a
+fact. Validated compact metadata supersedes retained sidecars for indexed facts;
+filtered scientific loads still validate the actual envelope and derived fields.
+The existing same-owner mutation/directory-move threat model remains unchanged;
+an index is not an authentication boundary against an owner rewriting both data
+and derived records.
+
+The name mapping is bounded to 64 MiB at the 2M ceiling, individual rows to 16 KiB,
+generation data to 2 GiB and external-sort chunks to 8192 rows. No global Python
+name/metadata list is materialized. Small configured ceilings still apply before
+row/payload decoding. Descriptor-relative no-follow opens and regular-file
+checks cover index generations too.
+
+Once explicitly activated, the scheduled collector refreshes the generation
+after a successful cycle adds at least 1000 facts beyond its base. A refresh
+reuses checksum-verified base metadata and validates new envelopes, rather than
+reopening all old files. Retained generations consume additional disk space.
+A maintenance failure is logged explicitly; it neither rolls back durable facts
+nor excludes the complete legacy tail. Without an activated index, collection
+does not silently migrate storage. CLI maintenance remains available explicitly.
+
+Capacity admission reuses the exact count only inside the current thread's
+already validated writer boundary; each independent writer still recounts under
+the cross-process lock and each durable publication increments the count.
+`status` computes its statistics in a single metadata pass. Exhaustive disk-size
+measurement is now opt-in: `status --disk-usage` (or `usage(include_disk=True)`).
+Without it, `disk_bytes` is null and `disk_usage_measured` is false; capacity
+checks and normal collection never perform that unrelated inode-size scan.
+
 A comparison scan builds active observation revisions once, using canonical
 (station, variable, observed timestamp) identities and the existing deterministic
 retrieval-time/digest revision ordering. Sorted timelines provide nearest lookup

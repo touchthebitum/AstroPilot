@@ -184,3 +184,47 @@ def test_disk_scan_is_explicit_and_not_part_of_admission(indexed, monkeypatch):
     assert usage(lab)['disk_bytes'] is None
     assert usage(lab, include_disk=True)['disk_bytes'] > 0
     assert check_capacity(lab)['disk_usage_measured'] is False
+
+
+def test_locked_capacity_reuses_exact_count_and_recounts_next_writer(indexed, monkeypatch):
+    store, root = indexed
+    store.rebuild_metadata_index()
+    read = store.iter_metadata
+    with store.writer_lock() as state:
+        monkeypatch.setattr(store, 'iter_metadata', lambda **kw:pytest.fail('redundant locked recount'))
+        assert store.capacity_count() == 4
+        store.save(fact('locked-new'))
+        assert store.capacity_count() == 5
+        with pytest.raises(ValueError, match='name_limit_exceeded'):
+            store.capacity_count(max_names=4)
+    monkeypatch.setattr(store, 'iter_metadata', read)
+    with store.writer_lock() as state:
+        assert state['count'] == 5
+
+
+def test_refresh_is_opt_in_and_retains_old_generations(indexed):
+    store, root = indexed
+    assert store.refresh_metadata_index(count=4, threshold=1) is None
+    assert not (root/'metadata-index').exists()
+    store.rebuild_metadata_index()
+    first = set((root/'metadata-index').iterdir())
+    store.save(fact('new'))
+    assert store.refresh_metadata_index(count=5, threshold=2) is None
+    assert store.refresh_metadata_index(count=5, threshold=1)['indexed_count'] == 5
+    assert first <= set((root/'metadata-index').iterdir())
+
+
+def test_status_only_scans_metadata_once(indexed, monkeypatch):
+    import astropilot.field_lab_collection as collection
+    store, root = indexed
+    store.rebuild_metadata_index()
+    lab = ReferenceLab()
+    original = lab.store.iter_metadata
+    calls = []
+    def counted(**kwargs):
+        calls.append(1)
+        yield from original(**kwargs)
+    monkeypatch.setattr(lab.store, 'iter_metadata', counted)
+    monkeypatch.setattr(collection, 'scheduler', lambda *args, **kw:{})
+    assert collection.status(lab)['usage']['count'] == 4
+    assert len(calls) == 1

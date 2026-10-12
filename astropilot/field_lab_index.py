@@ -74,6 +74,8 @@ class Names:
 
 @contextmanager
 def generation(store, root, max_names):
+    if type(max_names) is not int or max_names < 1:
+        raise ValueError('invalid_field_lab_name_limit')
     try:
         fd = os.open('metadata-index', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root)
     except FileNotFoundError:
@@ -87,7 +89,7 @@ def generation(store, root, max_names):
         manifest = json.loads(store._read(fd, commit))
         prefix = commit.removesuffix('.commit.json')
         count = manifest.get('count')
-        if (manifest.get('schema_version') != 1 or type(count) is not int
+        if (type(manifest.get('schema_version')) is not int or manifest['schema_version'] != 1 or type(count) is not int
                 or not 0 <= count <= MAX_COUNT):
             raise ValueError('field_lab_index_invalid_manifest')
         if count > max_names:
