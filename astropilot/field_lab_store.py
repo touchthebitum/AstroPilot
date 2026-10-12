@@ -297,6 +297,37 @@ class FileFieldLabStore:
                     digest=artifact.digest, measurement_digest=measurement_digest,
                     prospective=payload.get('prospective'))
 
+    @contextmanager
+    def maintenance_lock(self):
+        """Same exclusive writer boundary, without trusting a damaged index.
+
+        Maintenance publishes only derived generations, after validating the
+        bounded authoritative inventory. It cannot nest inside scientific writes.
+        """
+        if fcntl is None or os.name != 'posix':
+            raise RuntimeError('field_lab_secure_lock_unavailable')
+        with _process_writer():
+            state = getattr(_WRITERS, 'state', None)
+            if state is not None and state['identity'][0] == os.getpid():
+                raise RuntimeError('field_lab_writer_busy')
+            with self._directory(root_only=True) as root:
+                handle = os.open('.writer.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                 0o600, dir_fd=root)
+                try:
+                    if not stat.S_ISREG(os.fstat(handle).st_mode):
+                        raise ValueError('field_lab_lock_regular_file_required')
+                    try:
+                        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError as error:
+                        raise RuntimeError('field_lab_writer_busy') from error
+                    yield root
+                finally:
+                    os.close(handle)
+
+    def rebuild_metadata_index(self, *, max_names=100000, force=False, workers=1, progress=None):
+        from astropilot.field_lab_index import build
+        return build(self, max_names=max_names, force=force, workers=workers, progress=progress)
+
     def _save_metadata(self, artifact):
         with self._directory(root_only=True) as root:
             try:
@@ -333,26 +364,46 @@ class FileFieldLabStore:
                     meta = None
                 try:
                     with self._directory() as fd:
+                        from astropilot.field_lab_index import generation, rows
+                        with generation(self, root, max_names) as cached:
+                            if cached is not None:
+                                names, stream = cached
+                                # All authoritative names and types are checked
+                                # before yielding any index row or decoding facts.
+                                matched = sum(names.contains(n) for n in self._names(fd, max_names))
+                                if matched != len(names):
+                                    raise ValueError('field_lab_index_missing_authoritative_fact')
+                                if meta is not None:
+                                    for _ in self._names(meta, max_names):
+                                        pass
+                                yield from rows(names, stream, self)
+                                for name in self._names(fd, max_names):
+                                    if not names.contains(name):
+                                        yield self._legacy_metadata(fd, meta, name)
+                                return
                         # Constant-memory preflight preserves fail-closed limits.
                         for _ in self._names(fd, max_names):
                             pass
                         for name in self._names(fd, max_names):
-                            try:
-                                value = json.loads(self._read(meta, name)) if meta is not None else None
-                            except FileNotFoundError:
-                                value = None
-                            if value is None:
-                                artifact = FieldLabArtifact.decode(self._read(fd, name))
-                                value = self._metadata(artifact)
-                            if self._name(value['idempotency_key']) != name:
-                                raise ValueError('field_lab_identity_mismatch')
-                            yield value
+                            yield self._legacy_metadata(fd, meta, name)
                 finally:
                     if meta is not None:
                         os.close(meta)
         except FileNotFoundError:
             if self._root.exists():
                 raise
+
+    def _legacy_metadata(self, fd, meta, name):
+        try:
+            value = json.loads(self._read(meta, name)) if meta is not None else None
+        except FileNotFoundError:
+            value = None
+        if value is None:
+            artifact = FieldLabArtifact.decode(self._read(fd, name))
+            value = self._metadata(artifact)
+        if self._name(value['idempotency_key']) != name:
+            raise ValueError('field_lab_identity_mismatch')
+        return value
 
     @staticmethod
     def _names(fd, max_names):

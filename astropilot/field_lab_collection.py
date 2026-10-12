@@ -51,9 +51,9 @@ def artifacts(lab, artifact_type=None):
     return lab.store.iter_artifacts(max_names=lab.max_artifacts, artifact_type=artifact_type)
 
 
-def usage(lab, *, clock=now_utc):
+def usage(lab, *, clock=now_utc, include_disk=False):
     current = utc(clock())
-    count, recent, size = 0, 0, 0
+    count, recent, size = 0, 0, None
     kinds = Counter()
     oldest = newest = None
     for meta in lab.store.iter_metadata(max_names=lab.max_artifacts):
@@ -73,7 +73,7 @@ def usage(lab, *, clock=now_utc):
                 elif stat.S_ISDIR(info.st_mode):
                     total += directory_bytes(entry.path)
         return total
-    if field_lab_root().exists():
+    if include_disk and field_lab_root().exists():
         size = directory_bytes(field_lab_root())
     policy = capacity_policy(lab.max_artifacts)
     stop_at = policy['stop_at']
@@ -85,7 +85,8 @@ def usage(lab, *, clock=now_utc):
                 remaining=max(0, stop_at-count-1), reserved_budget=reserve, effective_stop_at=effective,
                 growth_per_day_7d=rate, estimated_days_to_stop=(effective-count)/rate if rate else None,
                 oldest=oldest.isoformat() if oldest else None, newest=newest.isoformat() if newest else None,
-                disk_bytes=size, warning=count >= effective*WARNING,
+                disk_bytes=size, disk_usage_measured=include_disk,
+                warning=count >= effective*WARNING,
                 blocked=count >= effective, would_block_next_cycle=count >= effective)
 
 
@@ -307,7 +308,7 @@ def _scheduler(operation, *, runner=subprocess.run):
     return scheduler('status', runner=runner)
 
 
-def status(lab):
+def status(lab, *, include_disk=False):
     latest = {}
     last_observed = None
     errors = 0
@@ -317,7 +318,7 @@ def status(lab):
         if kind == 'reference_acquisition':
             last_observed = max(last_observed or meta['time_max'], meta['time_max'])
         errors += kind == 'collection_error' and utc(stamp) >= now_utc()-timedelta(days=7)
-    return dict(root=str(field_lab_root()), usage=usage(lab), scheduler=scheduler('status'),
+    return dict(root=str(field_lab_root()), usage=usage(lab, include_disk=include_disk), scheduler=scheduler('status'),
                 last_success=latest.get('collection_success'), last_forecast=latest.get('reference_forecast'),
                 last_acquisition=latest.get('reference_acquisition'), last_official_observation=last_observed,
                 last_comparison=latest.get('reference_comparison_state'),

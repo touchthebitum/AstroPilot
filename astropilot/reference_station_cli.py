@@ -15,7 +15,11 @@ def parser():
     root = argparse.ArgumentParser(prog='astropilot-field-lab')
     commands = root.add_subparsers(dest='command', required=True)
     commands.add_parser('init')
-    commands.add_parser('status')
+    status = commands.add_parser('status')
+    status.add_argument('--disk-usage', action='store_true', help='Explicit exhaustive disk-size scan')
+    optimize = commands.add_parser('optimize')
+    optimize.add_argument('--force', action='store_true', help='Rebuild from every authoritative envelope')
+    optimize.add_argument('--workers', type=int, choices=range(1, 9), default=1)
     scheduler = commands.add_parser('scheduler')
     scheduler.add_argument('operation', choices=['install', 'status', 'enable', 'disable', 'uninstall'])
     stations = commands.add_parser('stations').add_subparsers(dest='operation', required=True)
@@ -86,6 +90,8 @@ def execute(args):
         return scheduler(args.operation)
     lab = ReferenceLab()
     lab.max_artifacts = CAPACITY
+    if args.command == 'optimize':
+        return lab.store.rebuild_metadata_index(max_names=CAPACITY, force=args.force, workers=args.workers)
     mutates = (args.command in ('forecast-run', 'observations', 'compare', 'cycle')
                or (args.command == 'stations' and args.operation == 'sync')
                or getattr(args, 'export', False)) and not getattr(args, 'dry_run', False)
@@ -105,7 +111,7 @@ def execute(args):
 def _execute(args, lab):
     from astropilot.field_lab_collection import status, cycle, periodic_report
     if args.command == 'status':
-        return status(lab)
+        return status(lab, include_disk=getattr(args, 'disk_usage', False))
     if args.command == 'cycle':
         return cycle(lab, tolerance_minutes=args.tolerance_minutes, dry_run=args.dry_run)
     if args.command == 'stations':
