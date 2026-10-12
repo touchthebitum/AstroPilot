@@ -256,7 +256,10 @@ def test_worker_architecture():
             for name in imports)
 
 
-@pytest.mark.parametrize('body', [b'{}', b'{', b'x' * 65537, b'{"x": NaN}', b'{"x": Infinity}'])
+@pytest.mark.parametrize(
+    'body', [b'{}', b'{', b'x' * 65537, b'{"x": NaN}', b'{"x": Infinity}'],
+    ids=['valid', 'malformed', 'oversize', 'nan', 'infinity'],
+)
 def test_frozen_worker_uses_bundle_and_private_output(monkeypatch, body):
     monkeypatch.setattr(sys, 'platform', 'darwin')
     monkeypatch.setattr(sys, 'frozen', True, raising=False)
