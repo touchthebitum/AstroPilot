@@ -682,6 +682,19 @@ measurement is now opt-in: `status --disk-usage` (or `usage(include_disk=True)`)
 Without it, `disk_bytes` is null and `disk_usage_measured` is false; capacity
 checks and normal collection never perform that unrelated inode-size scan.
 
+Inside one global writer boundary, schema-2 readers reuse the pinned,
+checksum-verified generation and the fully preflighted inventory. Independent
+writers still repeat all checks after acquiring the lock. Nested scans use
+independent positional read buffers, so one scan cannot reset another's cursor.
+Every durable new fact is registered before sidecar publication and is visible
+to subsequent scans, even if sidecar publication fails. Metadata for facts
+created by this writer may be cached with a 4 KiB per-row/16 MiB encoded-total
+budget; scientific payloads are still read and verified. The 16384-name query
+tail is enforced before any publication that would exceed it. Planning occurs
+after the writer lock for real cycles; dry runs remain read-only. Noncooperating
+same-owner mutations during a writer boundary remain outside the threat model,
+as for the existing locked count and immutable-publication contract.
+
 Indexed incremental comparisons hold one validated generation/inventory for the
 operation, build the observation revision index once, and load comparison states
 one forecast at a time through the derived lookup table. Actual comparison/state
