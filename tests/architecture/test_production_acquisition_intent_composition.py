@@ -771,3 +771,50 @@ def test_removing_exact_modern_profile_cannot_improve_intent_actionability():
                        capabilities=SetupFilterCapabilities('legacy', ('Ha',), ()))
     assert known.selected_acquisition_intent_id == 'sh2-129_ha'
     assert unknown.selected_acquisition_intent_id is None
+
+
+def test_unselected_comparative_lunar_evidence_is_a_refusal_not_a_mission():
+    from unittest.mock import Mock
+    from decision.engines.project_selection_engine import ProjectSelectionEngine
+    from decision.forecast.forecast_run import ForecastRun
+    from decision.opportunity.action import Action
+    from decision.opportunity.opportunity import Opportunity
+    from decision.recommendation.recommendation import Recommendation
+    from decision.services.tonight_application_service import TonightApplicationService, TonightStatus
+    from decision.services.tonight_response import TonightResponse
+    from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
+    from astropilot.app import TonightResponseModel
+
+    selection = _compose(estimator=CrossingEstimator())
+    candidate = ProjectSelectionEngine.build_candidate(
+        name="Sh2-129", catalog_key="Sh2-129", priority=1,
+        astro_score=80, final_score=90, decision_score=80, portfolio_score=0,
+        global_score=80, setup_score=80, best_setup="samyang_183",
+        closure_bonus=0, reasons=[], strategy_scores={}, acquired_hours=0,
+        imaging_field_id="sh2-129_ou4", acquisition_intent_selection=selection)
+    assert candidate.selected_acquisition_intent_id is None
+    assert candidate.lunar_evidence_snapshot is not None
+    builder = Mock(side_effect=AssertionError("Unselected intent must not construct a mission"))
+    mission_service = Mock()
+    night = {"date": "2026-09-01", "top_objects": [], "object_evaluations": {}}
+    service = TonightApplicationService(
+        forecast_nights=lambda *a, **k: ForecastRun([night], DecisionForecastEvidence(())),
+        build_candidates=lambda *a, **k: [candidate],
+        opportunity_recommendation_service=SimpleNamespace(build=lambda **k: Recommendation(
+            opportunity=Opportunity(action=Action.CONTINUE_PROJECT, candidate=candidate), confidence=None)),
+        tonight_mission_service=mission_service, build_mission_input=builder)
+    profile = {"location": {"name":"Test", "latitude":47.1, "longitude":6.8},
+               "active_equipment":"samyang_183", "available_equipment":["samyang_183"],
+               "preferences":{"bortle":3}, "projects":{}}
+    result = service.evaluate(profile=profile, weather=object(), reference_time_utc=START,
+        bortle=3, availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT))
+    assert result.status is TonightStatus.NO_MISSION
+    assert result.creation_refusal == "preselection_evidence_cannot_authorize_mission"
+    assert result.mission is None
+    builder.assert_not_called()
+    mission_service.create_with_actionability_diagnostic.assert_not_called()
+    payload = TonightResponseModel.model_validate(TonightResponse.from_result(result).to_dict()).model_dump()
+    assert payload["creation_refusal"] == result.creation_refusal
+    assert payload["selected_acquisition_intent_id"] is None
+    assert payload["lunar_evidence_snapshot"] is not None
+    assert len(payload["viable_acquisition_intent_ids"]) == 2
