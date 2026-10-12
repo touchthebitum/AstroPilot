@@ -289,7 +289,7 @@ def test_legacy_comparison_does_not_claim_scientific_time_as_execution(lab):
     assert value['last_comparison'] is None and value['comparison_time_unavailable']
 
 
-@pytest.mark.parametrize('count', [0, 14999, 15000, 17999, 203999, 204000, 254999, 255000, 269999])
+@pytest.mark.parametrize('count', [0, 15000, 17999, 563999, 564000, 704999, 705000, 719999])
 def test_scheduler_capacity_boundaries_offline(lab, monkeypatch, count):
     import astropilot.field_lab_collection as collection
     from astropilot.field_lab_capacity import capacity_policy
@@ -304,17 +304,17 @@ def test_scheduler_capacity_boundaries_offline(lab, monkeypatch, count):
     monkeypatch.setattr(collection, 'launch_agents_path', lambda:collection.field_lab_root()/'mock-launch-agents'/'test.plist')
     collection.scheduler('install', runner=runner)
     monkeypatch.setattr(collection.sys, 'platform', 'darwin')
-    # Synthetic metadata exercises exact admission counts without 270k disk writes.
+    # Synthetic metadata exercises exact admission counts without 720k disk writes.
     monkeypatch.setattr(lab.store.__class__, 'iter_metadata', lambda self, **kw:iter([
         dict(created_at_utc=canonical_utc(T), artifact_type='synthetic', time_max=canonical_utc(T))
     ] * count))
     policy = capacity_policy(collection.CAPACITY)
-    assert policy == dict(operational_soft_limit=300000, stop_at=270000,
-                          reserved_budget=15000, effective_stop_at=255000)
+    assert policy == dict(operational_soft_limit=800000, stop_at=720000,
+                          reserved_budget=15000, effective_stop_at=705000)
     value = status(lab)['usage']
     calls.clear()  # Admission assertions exclude the simulated status probe.
-    assert value['warning'] == (count >= 204000)
-    assert value['blocked'] == value['would_block_next_cycle'] == (count >= 255000)
+    assert value['warning'] == (count >= 564000)
+    assert value['blocked'] == value['would_block_next_cycle'] == (count >= 705000)
     if value['blocked']:
         with pytest.raises(ValueError, match='capacity_stop'):
             check_capacity(lab)
@@ -405,15 +405,15 @@ def test_multiweek_publication_stop_preserves_facts_and_idempotency(lab, direct_
             return lab.store.save(artifact)
         return lab.save('test', key, {'value': 1}, T)
     with lab.store.writer_lock(max_names=CAPACITY) as state:
-        # Exercise the real publication boundary without 270k filesystem writes.
-        assert state['stop_at'] == capacity_policy(CAPACITY)['stop_at'] == 270000
-        state['count'] = 269998
+        # Exercise the real publication boundary without 720k filesystem writes.
+        assert state['stop_at'] == capacity_policy(CAPACITY)['stop_at'] == 720000
+        state['count'] = 719998
         assert publish('last-allowed')
-        assert state['count'] == 269999
+        assert state['count'] == 719999
         assert not publish('last-allowed')
         with pytest.raises(ValueError, match='capacity_stop_scientific_facts_preserved'):
             publish('refused')
-        assert state['count'] == 269999
+        assert state['count'] == 719999
     assert lab.store.load(idempotency_key='refused') is None
     assert lab.store.load(idempotency_key='existing').document() == before
     assert usage(lab)['count'] == 2

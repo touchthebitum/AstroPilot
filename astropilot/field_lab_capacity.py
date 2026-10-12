@@ -1,7 +1,7 @@
 """Shared operating thresholds for admission and locked publications."""
-# Proposed six-week envelope: 17,999 existing + 42 * 5,000 new artifacts.
+# Proposed six-week envelope: 17,999 existing + 42 * 15,000 new artifacts.
 # NAS throughput/disk/recovery validation is required before deployment.
-OPERATIONAL_SOFT_LIMIT = 300_000
+OPERATIONAL_SOFT_LIMIT = 800_000
 RESERVED_BUDGET = 15_000
 WARNING = .80
 STOP = .90

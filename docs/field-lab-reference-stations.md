@@ -553,15 +553,15 @@ of infinite storage or a completed indexed/compacted long-term backend.
 
 The **2,000,000 artifact ceiling is an enumeration safety guard, not an
 operational capacity promise**. The proposed operational soft limit is
-**300,000 artifacts**. Writes stop strictly below 90% of the smaller of the
+**800,000 artifacts**. Writes stop strictly below 90% of the smaller of the
 configured ceiling and this soft limit. Before a CLI mutation or cycle begins,
 it reserves the smaller of 15,000 artifacts and one sixth of that stop threshold:
 normally **15,000** with the collector's 2M enumeration ceiling.
-Consequently `effective_stop_at=255,000`, `blocked=true` at 255,000, and warning
-starts at 80% of the effective threshold (**204,000**). The cycle and CLI refuse
+Consequently `effective_stop_at=705,000`, `blocked=true` at 705,000, and warning
+starts at 80% of the effective threshold (**564,000**). The cycle and CLI refuse
 at exactly that blocked boundary, before network activity. A batch already admitted
 can consume its remaining write budget, but each publication rechecks its shared
-in-lock count and cannot reach the hard write stop (**270,000**). Partial immutable
+in-lock count and cannot reach the hard write stop (**720,000**). Partial immutable
 facts remain valid if a batch exhausts its budget; retry does not invent observations.
 Smaller configured enumeration ceilings still reduce these thresholds (a 20,000
 ceiling retains the old 18,000 / 3,000 / 15,000 policy).
@@ -574,12 +574,15 @@ admission headroom check, not a per-cycle maximum; an admitted cycle may consume
 all remaining writes below the strict stop. Error recording also checks admission,
 so a capacity failure may appear only in the bounded collector log/stderr.
 
-Sizing is provisional because the actual NAS daily growth is unknown. Starting
-from 17,999 artifacts, six weeks at an assumed **5,000 new artifacts/day** gives
-227,999 artifacts, below the 255,000 admission boundary. The remaining admission
-headroom is 237,001 artifacts, about **47.4 days** at that assumed rate. A higher
-rate or revision burst shortens this horizon; these numbers are not measured
-throughput or a storage performance guarantee.
+The source-copy validation observed approximately **11,912 artifacts/day** over
+a short 1.511-day window including startup and revision bursts. The earlier 5,000/day
+assumption did not cover six weeks at that observed rate. The revised design uses
+**15,000 new artifacts/day**, more than 25% above the short observed average.
+Starting from 17,999 artifacts, six weeks gives **647,999**, leaving **57,001**
+artifacts below the 705,000 admission boundary. This is about 45.8 days of remaining
+admission headroom at the 15,000/day design rate, or 57.7 days at the short observed
+rate. Higher sustained growth or larger bursts shorten the horizon; no fixed
+throughput or storage performance guarantee follows from these calculations.
 
 `usage` exposes `capacity`, `operational_soft_limit`, `warning`, `blocked`,
 `remaining` (individual writes available below the hard stop), `reserved_budget`,
@@ -592,7 +595,7 @@ a stopped or newly started collector can understate the recent rate.
 scan/status and cycle latency on a representative copy approaching the proposed
 threshold, disk growth/free space, maximum batch growth, and interrupted-batch
 recovery/idempotent retry. Existing synthetic regressions prove boundary behavior
-and bounded payload decoding, not NAS performance at 300,000 artifacts. Retain
+and bounded payload decoding, not NAS performance at 800,000 artifacts. Retain
 the report materialization limit of 20,000 and use shorter report periods when
 required. No data deletion, expiry, compaction, scheduler activation, or NAS restart
 is part of this capacity change; longer-term compaction still needs its own design.
