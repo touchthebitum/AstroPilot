@@ -368,7 +368,11 @@ class FileFieldLabStore:
                     raise ValueError('field_lab_unexpected_artifact_file')
                 if entry.is_symlink():
                     raise OSError('field_lab_regular_file_required')
-                if not stat.S_ISREG(entry.stat(follow_symlinks=False).st_mode):
+                # scandir uses the directory's type information when available,
+                # and falls back to lstat for unknown types. Avoid an unconditional
+                # inode lookup for every name on large disk-backed inventories.
+                # Payload/sidecar opens still use O_NOFOLLOW and fstat in _read.
+                if not entry.is_file(follow_symlinks=False):
                     raise ValueError('field_lab_regular_file_required')
                 count += 1
                 if count > max_names:
