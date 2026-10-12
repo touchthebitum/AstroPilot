@@ -552,25 +552,50 @@ silently removed. This is the request's calculated-capacity fallback, not a clai
 of infinite storage or a completed indexed/compacted long-term backend.
 
 The **2,000,000 artifact ceiling is an enumeration safety guard, not an
-operational capacity promise**. The operational soft limit is **20,000 artifacts**.
-Writes stop strictly below 90% of the smaller of the configured ceiling and this
-soft limit. Before a CLI mutation or cycle begins, it reserves the smaller of
-15,000 artifacts and one sixth of that stop threshold: normally **3,000**.
-Consequently `effective_stop_at=15,000`, `blocked=true` at 15,000, and warning
-starts at 80% of the effective threshold (**12,000**). The cycle and CLI refuse
+operational capacity promise**. The proposed operational soft limit is
+**300,000 artifacts**. Writes stop strictly below 90% of the smaller of the
+configured ceiling and this soft limit. Before a CLI mutation or cycle begins,
+it reserves the smaller of 15,000 artifacts and one sixth of that stop threshold:
+normally **15,000** with the collector's 2M enumeration ceiling.
+Consequently `effective_stop_at=255,000`, `blocked=true` at 255,000, and warning
+starts at 80% of the effective threshold (**204,000**). The cycle and CLI refuse
 at exactly that blocked boundary, before network activity. A batch already admitted
-can consume its reserve, but each publication rechecks its shared in-lock count
-and cannot reach the hard write stop (**18,000**). Partial immutable facts remain
-valid if a batch exhausts its budget; retry does not invent observations.
+can consume its remaining write budget, but each publication rechecks its shared
+in-lock count and cannot reach the hard write stop (**270,000**). Partial immutable
+facts remain valid if a batch exhausts its budget; retry does not invent observations.
+Smaller configured enumeration ceilings still reduce these thresholds (a 20,000
+ceiling retains the old 18,000 / 3,000 / 15,000 policy).
+
+The NAS stop reported on 2026-10-09 at **17,999** artifacts is consistent with
+exhaustion inside an admitted batch under the old 20,000 soft limit: entry stopped
+at 15,000 but publication refused the write that would reach 18,000. This is a
+code-based explanation, not a verified diagnosis from NAS logs. The reserve is an
+admission headroom check, not a per-cycle maximum; an admitted cycle may consume
+all remaining writes below the strict stop. Error recording also checks admission,
+so a capacity failure may appear only in the bounded collector log/stderr.
+
+Sizing is provisional because the actual NAS daily growth is unknown. Starting
+from 17,999 artifacts, six weeks at an assumed **5,000 new artifacts/day** gives
+227,999 artifacts, below the 255,000 admission boundary. The remaining admission
+headroom is 237,001 artifacts, about **47.4 days** at that assumed rate. A higher
+rate or revision burst shortens this horizon; these numbers are not measured
+throughput or a storage performance guarantee.
 
 `usage` exposes `capacity`, `operational_soft_limit`, `warning`, `blocked`,
 `remaining` (individual writes available below the hard stop), `reserved_budget`,
 `effective_stop_at`, and `would_block_next_cycle`. The growth estimate uses the
-effective entry boundary, not the 2M guard. The 10k-artifact synthetic regression
-is evidence for bounded scans and decoding, not a production throughput promise
-or proof of sustained operation at the soft limit. There is no advertised
-160-day operating horizon. Increase capacity only after representative filesystem,
-latency, disk-growth and recovery measurements, and a compaction design.
+effective entry boundary, not the 2M guard. Use `growth_per_day_7d` and
+`estimated_days_to_stop` to revise the horizon once collection is representative;
+a stopped or newly started collector can understate the recent rate.
+
+**Do not redeploy on the NAS before validation.** Before approval, measure metadata
+scan/status and cycle latency on a representative copy approaching the proposed
+threshold, disk growth/free space, maximum batch growth, and interrupted-batch
+recovery/idempotent retry. Existing synthetic regressions prove boundary behavior
+and bounded payload decoding, not NAS performance at 300,000 artifacts. Retain
+the report materialization limit of 20,000 and use shorter report periods when
+required. No data deletion, expiry, compaction, scheduler activation, or NAS restart
+is part of this capacity change; longer-term compaction still needs its own design.
 
 All scientific writers and the scheduler use the same `.writer.lock` in the
 validated dedicated root. A process/thread reentrant boundary covers planning,
