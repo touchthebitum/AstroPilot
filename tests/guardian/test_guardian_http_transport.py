@@ -1,3 +1,4 @@
+import ssl
 import subprocess
 import sys
 import time
@@ -18,7 +19,9 @@ def connection_factory(body=b'{}', status=200, failure=None):
     calls = []
     class Connection:
         sock = Socket()
-        def __init__(self, host, timeout):
+        def __init__(self, host, timeout, *, context):
+            assert context.verify_mode == ssl.CERT_REQUIRED
+            assert context.check_hostname is True
             assert host == 'api.open-meteo.com'
             assert 0 < timeout <= 2
         def request(self, method, path):
@@ -149,7 +152,10 @@ def test_invalid_config_before_process(monkeypatch, kw):
     with pytest.raises(transport.TransportError): transport.BoundedHttpTransport()(**options)
 
 
-def test_frozen_uses_same_executable_worker(monkeypatch):
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_frozen_uses_same_executable_worker(monkeypatch, platform):
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     monkeypatch.setattr(sys, 'frozen', True, raising=False)
     calls = []
     def run(command, **kwargs):
@@ -248,3 +254,80 @@ def test_worker_architecture():
         assert not any(any(part in name for part in
             ('tonight', 'opportunity', 'field_lab', 'reference_station', 'thread', 'asyncio'))
             for name in imports)
+
+
+@pytest.mark.parametrize(
+    'body', [b'{}', b'{', b'x' * 65537, b'{"x": NaN}', b'{"x": Infinity}'],
+    ids=['valid', 'malformed', 'oversize', 'nan', 'infinity'],
+)
+def test_frozen_worker_uses_bundle_and_private_output(monkeypatch, body):
+    monkeypatch.setattr(sys, 'platform', 'darwin')
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    paths = []
+    def run(command, **options):
+        assert command[:2] == [sys.executable, '--guardian-http-worker']
+        assert options['env']['PYINSTALLER_RESET_ENVIRONMENT'] == '1'
+        assert options['timeout'] <= 2
+        output = Path(command[-1])
+        paths.append(output)
+        output.write_bytes(body)
+        return subprocess.CompletedProcess(command, 0, b'')
+    monkeypatch.setattr(subprocess, 'run', run)
+    if body == b'{}':
+        assert transport.BoundedHttpTransport()(latitude=46, longitude=7, timeout_seconds=2) == {}
+    else:
+        with pytest.raises(transport.TransportError):
+            transport.BoundedHttpTransport()(latitude=46, longitude=7, timeout_seconds=2)
+    assert paths and not paths[0].parent.exists()
+
+
+def test_worker_private_output_without_console(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, 'request', lambda *args: b'{}')
+    monkeypatch.setattr(sys, 'stdout', None)
+    output = tmp_path / 'weather.json'
+    assert worker.main(['46', '7', '2', str(output)]) == 0
+    assert output.read_bytes() == b'{}'
+
+
+def test_worker_explicit_certifi_ca_with_strict_tls(monkeypatch):
+    monkeypatch.setenv('SSL_CERT_FILE', '/nonexistent/system-ca.pem')
+    monkeypatch.setenv('SSL_CERT_DIR', '/nonexistent/system-ca-directory')
+    real_create_context = worker.ssl.create_default_context
+    contexts = []
+    def create_context(*, cafile):
+        assert cafile == worker.certifi.where()
+        context = real_create_context(cafile=cafile)
+        contexts.append(context)
+        return context
+    monkeypatch.setattr(worker.ssl, 'create_default_context', create_context)
+    factory, calls = connection_factory()
+    monkeypatch.setattr(worker, 'HTTPSConnection', factory)
+    assert worker.request(46, 7, 2) == b'{}'
+    assert len(contexts) == 1
+    assert contexts[0].cert_store_stats()['x509_ca'] > 0
+    assert calls[-1] == 'close'
+
+
+def test_worker_missing_ca_fails_before_connection(monkeypatch):
+    monkeypatch.setattr(worker.certifi, 'where', lambda: '/nonexistent/guardian-ca.pem')
+    monkeypatch.setattr(worker, 'HTTPSConnection',
+                        lambda *a, **kw: pytest.fail('connection started'))
+    with pytest.raises(OSError):
+        worker.request(46, 7, 2)
+
+
+def test_worker_certificate_rejection_closes_without_retry(monkeypatch):
+    calls = []
+    class RejectedConnection:
+        def __init__(self, host, *, timeout, context):
+            assert context.verify_mode == ssl.CERT_REQUIRED
+            assert context.check_hostname is True
+        def request(self, *args):
+            calls.append('request')
+            raise ssl.SSLCertVerificationError('untrusted certificate')
+        def close(self):
+            calls.append('close')
+    monkeypatch.setattr(worker, 'HTTPSConnection', RejectedConnection)
+    with pytest.raises(ssl.SSLCertVerificationError):
+        worker.request(46, 7, 2)
+    assert calls == ['request', 'close']

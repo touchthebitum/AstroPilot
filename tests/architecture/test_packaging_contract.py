@@ -48,6 +48,7 @@ def test_packaging_dependencies_are_isolated_from_runtime_dependencies():
     project = _pyproject()["project"]
 
     assert project["dependencies"] == [
+        "certifi>=2025.2",
         "astral>=3.2,<4.0",
         "astropy>=7.2,<8.0",
         "fastapi>=0.116,<1.0",

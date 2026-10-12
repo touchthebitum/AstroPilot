@@ -65,6 +65,7 @@ source = { editable = "." }
 dependencies = [
     { name = "astral" },
     { name = "astropy" },
+    { name = "certifi" },
     { name = "fastapi" },
     { name = "requests" },
     { name = "timezonefinder" },
@@ -86,6 +87,7 @@ test = [
 requires-dist = [
     { name = "astral", specifier = ">=3.2,<4.0" },
     { name = "astropy", specifier = ">=7.2,<8.0" },
+    { name = "certifi", specifier = ">=2025.2" },
     { name = "fastapi", specifier = ">=0.116,<1.0" },
     { name = "httpx2", marker = "extra == 'test'", specifier = ">=2.0,<3.0" },
     { name = "pyinstaller", marker = "extra == 'packaging'", specifier = ">=6.22,<7.0" },

@@ -1,5 +1,7 @@
 """Portable foreground HTTP deadline: one ephemeral child, always reaped."""
 import json
+import os
+from tempfile import TemporaryDirectory
 import math
 from pathlib import Path
 import subprocess
@@ -33,16 +35,31 @@ class BoundedHttpTransport:
             if remaining <= 0:
                 raise TimeoutError()
             # run kills and waits on TimeoutExpired, on both POSIX and Windows.
-            result = subprocess.run(
-                ([sys.executable, '--guardian-http-worker'] if getattr(sys, 'frozen', False)
-                 else [sys.executable, '-I', str(_WORKER)])
-                + [str(latitude), str(longitude), str(remaining)], timeout=remaining, check=True,
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}))
-            if len(result.stdout) > MAX_BODY_BYTES:
-                raise ValueError()
-            payload = json.loads(result.stdout, parse_constant=_reject_constant)
+            arguments = [str(latitude), str(longitude), str(remaining)]
+            frozen_macos = getattr(sys, 'frozen', False) and sys.platform == 'darwin'
+            with TemporaryDirectory(prefix='astropilot-guardian-') as temporary:
+                options = dict(timeout=remaining, check=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL)
+                if sys.platform == 'win32':
+                    options['creationflags'] = subprocess.CREATE_NO_WINDOW
+                if getattr(sys, 'frozen', False):
+                    command = [sys.executable, '--guardian-http-worker', *arguments]
+                else:
+                    command = [sys.executable, '-I', str(_WORKER), *arguments]
+                if frozen_macos:
+                    output = Path(temporary) / 'weather.json'
+                    command.append(str(output))
+                    options['env'] = {**os.environ, 'PYINSTALLER_RESET_ENVIRONMENT': '1'}
+                result = subprocess.run(command, **options)
+                if frozen_macos:
+                    with output.open('rb') as handle:
+                        body = handle.read(MAX_BODY_BYTES + 1)
+                else:
+                    body = result.stdout
+                if len(body) > MAX_BODY_BYTES:
+                    raise ValueError()
+                payload = json.loads(body, parse_constant=_reject_constant)
             if monotonic() - started >= timeout_seconds:
                 raise TimeoutError()
             return payload

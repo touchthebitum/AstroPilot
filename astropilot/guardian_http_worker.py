@@ -2,6 +2,9 @@
 from http.client import HTTPSConnection
 import math
 import sys
+import ssl
+
+import certifi
 from time import monotonic
 from urllib.parse import urlencode
 
@@ -19,7 +22,9 @@ def request(latitude, longitude, timeout_seconds):
     if timeout_seconds <= 0:
         raise ValueError()
     deadline = monotonic() + timeout_seconds
-    connection = HTTPSConnection('api.open-meteo.com', timeout=timeout_seconds)
+    context = ssl.create_default_context(cafile=certifi.where())
+    connection = HTTPSConnection('api.open-meteo.com', timeout=timeout_seconds,
+                                 context=context)
     try:
         params = urlencode({'latitude': latitude, 'longitude': longitude,
             'current': ','.join(_FIELDS), 'timezone': 'UTC', 'timeformat': 'unixtime',
@@ -54,14 +59,18 @@ def request(latitude, longitude, timeout_seconds):
 def main(argv=None):
     args = sys.argv[1:] if argv is None else argv
     try:
-        if len(args) != 3:
+        if len(args) not in (3, 4):
             raise ValueError()
-        body = request(*(float(item) for item in args))
-        sys.stdout.buffer.write(body)
+        body = request(*(float(item) for item in args[:3]))
+        if len(args) == 4:
+            from pathlib import Path
+            Path(args[3]).write_bytes(body)
+        else:
+            sys.stdout.buffer.write(body)
+        return 0
     except Exception:
         return 1
-    return 0
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     sys.exit(main())
