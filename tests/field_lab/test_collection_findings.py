@@ -97,7 +97,8 @@ def test_cycle_can_discard_computation_results_without_discarding_facts(lab):
     assert len(lab.comparison_states()) == 3
 
 
-def test_thousands_artifacts_status_and_short_report_payload_reads(lab, monkeypatch):
+@pytest.mark.parametrize('indexed', [False, True])
+def test_thousands_artifacts_status_and_short_report_payload_reads(lab, monkeypatch, indexed):
     lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
     for o in observations():
         lab.save_observation(o)
@@ -105,6 +106,9 @@ def test_thousands_artifacts_status_and_short_report_payload_reads(lab, monkeypa
     with lab.store.writer_lock(max_names=lab.max_artifacts):
         for i in range(10_000):
             lab.save('synthetic', 'large-'+str(i), {'padding':'x'*2048}, T-timedelta(days=40))
+    expected = periodic_report(lab, '24h', clock=lambda:T+timedelta(hours=2))
+    if indexed:
+        lab.store.rebuild_metadata_index(max_names=lab.max_artifacts)
     original = FieldLabArtifact.decode.__func__
     decoded = []
     def spy(cls, document):
@@ -115,14 +119,17 @@ def test_thousands_artifacts_status_and_short_report_payload_reads(lab, monkeypa
     assert status(lab)['usage']['count'] >= 10_000
     assert decoded == []
     monkeypatch.setattr(lab, 'comparisons', lambda **kw:pytest.fail('persisted report reconstructed'))
-    assert periodic_report(lab, '24h', clock=lambda:T+timedelta(hours=2))
+    assert periodic_report(lab, '24h', clock=lambda:T+timedelta(hours=2)) == expected
     assert 'synthetic' not in decoded and 'reference_acquisition' not in decoded
     assert len(decoded) <= 10
     assert list(lab.facts(artifact_type='reference_acquisition', station_id='CDF', stream=True)) == []
 
 
-def test_report_guard_before_payload_decode(lab, monkeypatch):
+@pytest.mark.parametrize('indexed', [False, True])
+def test_report_guard_before_payload_decode(lab, monkeypatch, indexed):
     lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
+    if indexed:
+        lab.store.rebuild_metadata_index(max_names=lab.max_artifacts)
     import astropilot.field_lab_collection as collection
     monkeypatch.setattr(collection, 'REPORT_LIMIT', 2)
     monkeypatch.setattr(FieldLabArtifact, 'decode', classmethod(lambda *a:pytest.fail('payload decoded before report limit')))

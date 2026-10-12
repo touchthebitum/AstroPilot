@@ -116,22 +116,36 @@ def cycle_lock(lab):
 
 
 def periodic_report(lab, period='all', *, clock=now_utc, tolerance_minutes=10, historical=False):
+    with lab.store.metadata_query(max_names=lab.max_artifacts) as query:
+        return _periodic_report(lab, period, clock=clock, tolerance_minutes=tolerance_minutes,
+                                historical=historical, query=query)
+
+
+def _periodic_report(lab, period, *, clock, tolerance_minutes, historical, query):
     days = {'24h': 1, '7d': 7, '30d': 30, 'all': None}[period]
     current = utc(clock())
     start = (current-timedelta(days=days)).isoformat(timespec='microseconds') if days else None
     end = current.isoformat(timespec='microseconds')
     # Exact percentiles retain values: explicitly bound this materialization.
-    count = sum(1 for m in lab.store.iter_metadata(max_names=lab.max_artifacts)
-                if m['artifact_type'] in ('reference_comparison', 'reference_comparison_state')
-                and (start is None or m['time_max'] >= start) and m['time_min'] <= end)
-    if count > REPORT_LIMIT:
-        raise ValueError('field_lab_report_operational_limit_exceeded_use_shorter_period')
-    states = lab.comparison_states(start=start, end=end, tolerance_minutes=tolerance_minutes, historical=historical)
+    metadata = query.iter_metadata() if query is not None else lab.store.iter_metadata(max_names=lab.max_artifacts)
+    count, targets, selected_runs = 0, 0, set()
+    for m in metadata:
+        if (start is not None and m['time_max'] < start) or m['time_min'] > end:
+            continue
+        if m['artifact_type'] in ('reference_comparison', 'reference_comparison_state'):
+            count += 1
+            if count > REPORT_LIMIT:
+                raise ValueError('field_lab_report_operational_limit_exceeded_use_shorter_period')
+            if query is not None:
+                selected_runs.add(m['forecast_run_id'])
+        elif m['artifact_type'] == 'reference_forecast':
+            targets += m['point_count']*3
+    selected = (artifact for run_id in sorted(selected_runs)
+                for artifact in query.comparison_artifacts(run_id, start=start, end=end)) if query is not None else None
+    states = lab.comparison_states(start=start, end=end, tolerance_minutes=tolerance_minutes,
+                                   historical=historical, _artifacts=selected)
     comparisons = tuple(value[1] for value in states.values())
     if not comparisons:
-        targets = sum(m['point_count']*3 for m in lab.store.iter_metadata(max_names=lab.max_artifacts)
-                      if m['artifact_type'] == 'reference_forecast' and
-                      (start is None or m['time_max'] >= start) and m['time_min'] <= end)
         if targets > REPORT_LIMIT:
             raise ValueError('field_lab_report_operational_limit_exceeded_use_shorter_period')
         # Read-only compatibility reconstruction, filtered at the target boundary.
