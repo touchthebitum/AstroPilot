@@ -67,3 +67,26 @@ are reported separately; they do not justify relaxing storage safeguards.
 The transferred native macOS validation is distinct from these Windows tests.
 The macOS binary was signed ad hoc, without notarization or confirmed Gatekeeper
 acceptance. No release, tag, publication or merge is performed here.
+
+## macOS transport follow-up — 12 October 2026
+
+PR #368 is already merged into main at
+`fd891c92c2145a43b03cf0045638e29bd3331d99`. Its web-resource packaging,
+portable dispatcher and NO_MISSION refusal checks are retained.
+
+Two remaining corrections come from the local Mac checkout and the independently
+prepared Beta8 commit `59d00b7e92ef3430b07a23f55608d61c78047bb3`.
+The HTTP worker matches that commit byte for byte. It explicitly uses certifi's
+CA bundle with certificate and hostname verification enabled; certifi is now a
+direct locked runtime dependency. The frozen macOS transport receives bounded
+JSON via a private temporary file because a windowed executable has no Python
+stdout. The child resets the PyInstaller environment and is still killed and
+reaped on timeout. The Windows/Linux stdout path and Windows CREATE_NO_WINDOW
+flag from main are preserved; the older Mac-only refusal of frozen Windows is
+not replayed.
+
+These fixes have a separate provenance from the transferred MacBook Air build
+based on bdc0865. The archived Mac-mini reports describe HTTPS-worker validation
+of the 59d00b7 preparation; those reports are supporting evidence, not a claim
+that the new common branch has native Windows validation or Apple notarization.
+No application data, validation profiles, binaries or test logs are committed.
