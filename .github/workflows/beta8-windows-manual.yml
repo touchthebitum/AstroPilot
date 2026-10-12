@@ -83,6 +83,10 @@ jobs:
           Copy-Item (Join-Path $validation 'validation.json') dist/beta8-artifacts/native-windows-validation.json
           Compress-Archive -Path (Join-Path $validation 'logs/*') -DestinationPath dist/beta8-artifacts/native-windows-validation-logs.zip
           if (git status --porcelain --untracked-files=all) { throw 'Source changed during native tests' }
+      - name: Validate extracted ZIP and installer in disposable runner temp
+        run: |
+          uv run --locked --no-sync python ../operations/tooling/validate_windows_artifacts.py
+          if ($LASTEXITCODE -ne 0) { throw 'Portable or installer validation failed' }
       - name: Preserve diagnostic result even on failure
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

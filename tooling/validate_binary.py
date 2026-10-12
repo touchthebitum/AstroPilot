@@ -78,7 +78,9 @@ try:
  new_slots={x['slot'] for x in events('restart') if x.get('event')=='cycle' and x.get('status')=='COMPLETED'}
  check('no_completed_slot_replay',not old_slots.intersection(new_slots))
  # Isolated web start only after confirming its fixed port is free.
- with socket.socket() as sock:sock.bind(('127.0.0.1',8000))
+ with socket.socket() as sock:
+  sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+  sock.bind(('127.0.0.1',8000))
  write(root/'data/user_profile.json',{'location':{'name':'Synthetic validation Madrid','latitude':40.4,'longitude':-3.7},'preferences':{'bortle':4},'active_equipment':'samyang_183','available_equipment':['samyang_183'],'projects':{},'sessions':[],'profile_revision':1})
  child=start('web',[]);opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
  def request(path,body=None):
