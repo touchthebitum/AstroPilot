@@ -297,6 +297,20 @@ class TonightApplicationService:
             candidate.get("name"),
         )
 
+        # Comparative lunar evidence belongs to the candidate until an intent
+        # is selected. It cannot be attached to an unidentified mission input.
+        if (candidate.lunar_evidence_snapshot is not None
+                and candidate.selected_acquisition_intent_id is None):
+            return TonightResult(
+                night,
+                recommendation,
+                None,
+                status=TonightStatus.NO_MISSION,
+                forecast_evidence=forecast_evidence,
+                candidate_rejections=candidate_rejections,
+                creation_refusal="preselection_evidence_cannot_authorize_mission",
+            )
+
         timeline_start = None
         alert_mission_input = None
         alert_assessment = None

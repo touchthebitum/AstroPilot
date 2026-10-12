@@ -36,6 +36,7 @@ class SkyEngine:
 
     def __init__(self, context=None):
         self.context = context or {}
+        self._hour_geometry_cache = {}
 
     @staticmethod
     def astronomical_night_window(
@@ -385,6 +386,15 @@ class SkyEngine:
         lat,
         lon,
     ):
+        # Geometry is independent of weather and scoring. Keep a bounded,
+        # per-engine cache; ISO offsets distinguish both sides of a DST fold.
+        key = (hour["time"].isoformat(), observer.latitude, observer.longitude,
+               getattr(observer, "elevation", 0), lat, lon,
+               target_obj["ra"], target_obj["dec"])
+        cached = self._hour_geometry_cache.get(key)
+        if cached is not None:
+            return dict(cached)
+
         moon_elevation = moon.elevation(
             observer,
             hour["time"]
@@ -406,11 +416,15 @@ class SkyEngine:
             lon
         )
 
-        return {
+        geometry = {
             "moon_elevation": moon_elevation,
             "target_altitude": target_alt,
             "moon_target_sep": moon_sep,
         }
+        if len(self._hour_geometry_cache) >= 256:
+            self._hour_geometry_cache.clear()
+        self._hour_geometry_cache[key] = geometry
+        return dict(geometry)
 
 
     def score_hour(self, hour,moon_illumination,observer,lat,lon,target_obj,bortle,target,goal,):
