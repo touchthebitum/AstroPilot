@@ -1,5 +1,5 @@
 import argparse,datetime,json,os,pathlib,subprocess,sys,time
-p=argparse.ArgumentParser();p.add_argument('--original',required=True);p.add_argument('--diagnostic',required=True);p.add_argument('--source',required=True);p.add_argument('--out',required=True);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--original',required=True);p.add_argument('--diagnostic',required=True);p.add_argument('--source',required=True);p.add_argument('--out',required=True);a=p.parse_args();a.source=str(pathlib.Path(a.source).resolve())
 root=pathlib.Path(a.out).resolve();root.mkdir(parents=True,exist_ok=False);result={'source_sha':'3a39f4de1f620ccfcae2f2cd01f7719551ba1d38','diagnostic_twin_only':True,'trials':[]};env=os.environ.copy()
 for key in ['HOME','USERPROFILE','APPDATA','LOCALAPPDATA','ASTROPILOT_DATA_DIR','TMP','TEMP']:
  d=root/key;d.mkdir();env[key]=str(d)
