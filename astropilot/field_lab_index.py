@@ -92,8 +92,9 @@ class Generation:
         return (self.names, self.stream)[position]
     def related(self, run_id, store):
         key = hashlib.sha256(run_id.encode()).digest()
-        position = bisect_left(self.relations, key+b'\0'*4)
-        while position < len(self.relations):
+        # A bounded for-loop makes cursor progress structural, not dependent
+        # on a yield/resume branch remembering to advance a position.
+        for position in range(bisect_left(self.relations, key+b'\0'*4), len(self.relations)):
             relation = self.relations[position]
             if relation[:32] != key:
                 break
@@ -104,7 +105,6 @@ class Generation:
                     or value.get('forecast_run_id') != run_id
                     or value['artifact_type'] not in ('reference_comparison', 'reference_comparison_state')):
                 raise ValueError('field_lab_index_invalid_relation')
-            position += 1
             yield value
 
 
