@@ -251,11 +251,20 @@ class FileFieldLabStore:
         """One reentrant process/thread and POSIX cross-process writer boundary."""
         if fcntl is None or os.name != 'posix':
             raise RuntimeError('field_lab_secure_lock_unavailable')
+        if type(max_names) is not int or max_names < 1:
+            raise ValueError('invalid_field_lab_name_limit')
         with _process_writer():
             state = getattr(_WRITERS, 'state', None)
             identity = (os.getpid(), str(self._root))
             if state is not None and state['identity'] == identity:
-                yield state
+                if state['count'] > max_names:
+                    raise ValueError('field_lab_name_limit_exceeded')
+                previous_stop = state['stop_at']
+                state['stop_at'] = min(previous_stop, capacity_policy(max_names)['stop_at'])
+                try:
+                    yield state
+                finally:
+                    state['stop_at'] = previous_stop
                 return
             if state is not None and state['identity'][0] == os.getpid():
                 raise ValueError('field_lab_nested_writer_root_changed')

@@ -726,6 +726,7 @@ class ReferenceLab:
 
     def _comparisons(self, *, clock=now_utc, tolerance_minutes=10, persist=False, historical=False,
                      start=None, end=None, incremental=False, retain_results=True):
+        validate_tolerance(tolerance_minutes)
         from contextlib import nullcontext
         context = self.store.metadata_query(max_names=self.max_artifacts) if incremental else nullcontext(None)
         with context as query:

@@ -228,3 +228,17 @@ def test_status_only_scans_metadata_once(indexed, monkeypatch):
     monkeypatch.setattr(collection, 'scheduler', lambda *args, **kw:{})
     assert collection.status(lab)['usage']['count'] == 4
     assert len(calls) == 1
+
+
+def test_reentrant_writer_keeps_the_smaller_publication_ceiling(indexed):
+    store, root = indexed
+    with store.writer_lock(max_names=100000) as outer:
+        original_stop = outer['stop_at']
+        with store.writer_lock(max_names=10) as inner:
+            assert inner['stop_at'] == 9
+            for i in range(4):
+                store.save(fact('nested-'+str(i)))
+            with pytest.raises(ValueError, match='capacity_stop'):
+                store.save(fact('nested-refused'))
+        assert outer['stop_at'] == original_stop and outer['count'] == 8
+    assert store.load(idempotency_key='nested-refused') is None
