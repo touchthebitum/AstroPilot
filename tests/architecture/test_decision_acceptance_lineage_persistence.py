@@ -1791,7 +1791,9 @@ def test_acceptance_history_cache_is_compact_and_revalidates_external_changes(tm
     store._load_all()[0].profile['location'] = 'external-mutation'
     assert store._load_all()[0].profile == entry.profile
     changed = replace(aggregate, missions=(replace(mission(), target='changed'),))
-    (tmp_path / 'decision-1.json').write_text(serialize_decision_acceptance_aggregate(changed))
+    (tmp_path / 'decision-1.json').write_text(
+        serialize_decision_acceptance_aggregate(changed), encoding='utf-8',
+    )
     assert store.load_mission('mission-1').target == 'changed'
     assert len(calls) == 2
     (tmp_path / 'new.json').write_text('{}')
@@ -1811,7 +1813,10 @@ def test_acceptance_history_detects_change_during_validation(tmp_path, monkeypat
     original = store._load_path
     def changed(path):
         result = original(path)
-        path.write_text(serialize_decision_acceptance_aggregate(result))
+        # Valid JSON whitespace changes the size regardless of timestamp resolution.
+        path.write_text(
+            serialize_decision_acceptance_aggregate(result) + ' ', encoding='utf-8',
+        )
         return result
     monkeypatch.setattr(store, '_load_path', changed)
     with pytest.raises(AcceptanceLineageConflictError, match='decision_lineage_changed'):
