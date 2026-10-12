@@ -38,7 +38,7 @@ jobs:
             !/data/user_profile.json
       - name: Guard exact source and isolated directories
         run: |
-          if ($env:APPROVED_SHA -cne '05cd54e2e4b4ea63e4415d1930765d0ec69ce756') { throw 'Unexpected product SHA' }
+          if ($env:APPROVED_SHA -cne 'fc7c972bc10d6ec59268ddf9078dc42d70acbce7') { throw 'Unexpected product SHA' }
           if ((git rev-parse HEAD).Trim() -cne $env:APPROVED_SHA) { throw 'Checkout mismatch' }
           if (git status --porcelain) { throw 'Dirty source' }
           $iso = Join-Path $env:RUNNER_TEMP 'beta8-common-isolation'
@@ -87,6 +87,17 @@ jobs:
         run: |
           uv run --locked --no-sync python ../operations/tooling/validate_windows_artifacts.py
           if ($LASTEXITCODE -ne 0) { throw 'Portable or installer validation failed' }
+      - name: Validate explicit acquisition choice and lineage on Windows
+        run: |
+          $env:UV_PROJECT_ENVIRONMENT = '.venv-validation'
+          uv sync --locked --extra test
+          if ($LASTEXITCODE -ne 0) { throw 'Validation dependencies failed' }
+          node --version
+          if ($LASTEXITCODE -ne 0) { throw 'Node required for UI tests' }
+          uv run --locked --no-sync python -m pytest tests/api/test_intent_choice_ui.py tests/services/test_user_selection_mission.py tests/services/test_decision_acceptance_application.py tests/architecture/test_decision_acceptance_lineage_persistence.py tests/architecture/test_production_acquisition_intent_composition.py tests/architecture/test_tonight_creation_refusal.py -q --junitxml=dist/beta8-artifacts/windows-intent-tests.xml
+          if ($LASTEXITCODE -ne 0) { throw 'Acquisition and lineage tests failed' }
+          if (Test-Path astropilot.egg-info) { Move-Item astropilot.egg-info (Join-Path $env:RUNNER_TEMP 'generated-beta8-test-egg-info') }
+          if (git status --porcelain --untracked-files=all) { throw 'Source changed during tests' }
       - name: Preserve diagnostic result even on failure
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
