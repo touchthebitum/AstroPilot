@@ -1,13 +1,19 @@
 name: Isolated Windows weather diagnosis f70f2e4
 on:
   workflow_dispatch:
+    inputs:
+      start_epoch:
+        required: true
+        type: string
 permissions:
   contents: read
   actions: read
 jobs:
   diagnosis:
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 25
+    env:
+      TRIAL_START_EPOCH: ${{ inputs.start_epoch }}
     defaults:
       run:
         shell: pwsh
@@ -62,7 +68,7 @@ jobs:
             pktmon start --capture --comp nics --pkt-size 0 --file-name (Join-Path $out 'network.etl')
             if ($LASTEXITCODE -ne 0) { throw 'Capture failed' }
             $capturing = $true
-            uv run --locked --no-sync python ../operations/tooling/capture_weather_fixed_f70.py
+            uv run --locked --no-sync python ../operations/tooling/capture_weather_sync_f70.py
             if ($LASTEXITCODE -ne 0) { throw 'Trials failed' }
           } finally {
             [IO.File]::WriteAllBytes($hosts, $original)
@@ -83,7 +89,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: Windows-weather-fixed-capture-f70
+          name: Windows-weather-sync-capture-f70
           path: |
             ${{ runner.temp }}/weather-fixed-capture/*.json
             ${{ runner.temp }}/weather-fixed-capture/*.log
