@@ -59,7 +59,13 @@ try:
  for name in ['index.html','app.js','styles.css','help.js','alert-status.js']:
   check('asset_'+name,(resources/'astropilot/web'/name).read_bytes()==(source/'astropilot/web'/name).read_bytes())
  env['SSL_CERT_FILE']='/nonexistent/validation-ca.pem';env['SSL_CERT_DIR']='/nonexistent/validation-certs'
- output=root/'weather.json';r=run('worker',['--guardian-http-worker','40.4','-3.7','15',str(output)])
+ output=root/'weather.json';results['worker_attempts']=[]
+ for attempt in range(1,4):
+  began=time.monotonic()
+  r=run('worker-'+str(attempt),['--guardian-http-worker','40.4','-3.7','15',str(output)])
+  results['worker_attempts'].append({'attempt':attempt,'exit':r.returncode,'elapsed_seconds':round(time.monotonic()-began,3)})
+  if r.returncode==0:break
+  if attempt<3:time.sleep(10)
  check('worker_exit',r.returncode==0);weather=json.loads(output.read_text());check('worker_weather_fields',isinstance(weather.get('current'),dict) and isinstance(weather.get('current_units'),dict))
  for name,timeout in [('production',15),('timeout',.000001)]:
   cfg=root/(name+'.json');write(cfg,config('open_meteo_current_v1',timeout));r=run(name,['--guardian','--config',str(cfg),'--data-dir',str(root/name),'--once']);ev=events(name);results[name]['events']=ev

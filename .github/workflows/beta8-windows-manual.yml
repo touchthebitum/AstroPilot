@@ -95,5 +95,7 @@ jobs:
           path: |
             source/dist/beta8-artifacts/*
             ${{ runner.temp }}/beta8-native-binary-validation/validation.json
+            ${{ runner.temp }}/beta8-native-portable-validation/validation.json
+            ${{ runner.temp }}/beta8-native-portable-validation/logs/*
           if-no-files-found: warn
           retention-days: 30
