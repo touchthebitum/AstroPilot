@@ -38,7 +38,7 @@ jobs:
             !/data/user_profile.json
       - name: Guard exact source and isolated directories
         run: |
-          if ($env:APPROVED_SHA -cne 'fc7c972bc10d6ec59268ddf9078dc42d70acbce7') { throw 'Unexpected product SHA' }
+          if ($env:APPROVED_SHA -cne 'f70f2e4476b4ae7b58d1275615b9d4cd6d725ce2') { throw 'Unexpected product SHA' }
           if ((git rev-parse HEAD).Trim() -cne $env:APPROVED_SHA) { throw 'Checkout mismatch' }
           if (git status --porcelain) { throw 'Dirty source' }
           $iso = Join-Path $env:RUNNER_TEMP 'beta8-common-isolation'
@@ -94,9 +94,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Validation dependencies failed' }
           node --version
           if ($LASTEXITCODE -ne 0) { throw 'Node required for UI tests' }
-          $portableTests = uv run --locked --no-sync python ../operations/tooling/prepare_windows_lineage_tests.py
-          if ($LASTEXITCODE -ne 0) { throw 'Portable fixture preparation failed' }
-          uv run --locked --no-sync python -m pytest tests/api/test_intent_choice_ui.py tests/services/test_user_selection_mission.py tests/services/test_decision_acceptance_application.py "$portableTests" tests/architecture/test_production_acquisition_intent_composition.py tests/architecture/test_tonight_creation_refusal.py -q --junitxml=dist/beta8-artifacts/windows-intent-tests.xml
+          uv run --locked --no-sync python -m pytest tests/api/test_intent_choice_ui.py tests/services/test_user_selection_mission.py tests/services/test_decision_acceptance_application.py tests/architecture/test_decision_acceptance_lineage_persistence.py tests/architecture/test_production_acquisition_intent_composition.py tests/architecture/test_tonight_creation_refusal.py -q --junitxml=dist/beta8-artifacts/windows-intent-tests.xml
           if ($LASTEXITCODE -ne 0) { throw 'Acquisition and lineage tests failed' }
           if (Test-Path astropilot.egg-info) { Move-Item astropilot.egg-info (Join-Path $env:RUNNER_TEMP 'generated-beta8-test-egg-info') }
           if (git status --porcelain --untracked-files=all) { throw 'Source changed during tests' }
