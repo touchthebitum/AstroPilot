@@ -51,12 +51,25 @@ def artifacts(lab, artifact_type=None):
     return lab.store.iter_artifacts(max_names=lab.max_artifacts, artifact_type=artifact_type)
 
 
-def usage(lab, *, clock=now_utc):
+def _capacity_fields(lab, count):
+    policy = capacity_policy(lab.max_artifacts)
+    effective = policy['effective_stop_at']
+    return dict(count=count, capacity=lab.max_artifacts,
+                operational_soft_limit=policy['operational_soft_limit'],
+                remaining=max(0, policy['stop_at']-count-1),
+                reserved_budget=policy['reserved_budget'], effective_stop_at=effective,
+                warning=count >= effective*WARNING, blocked=count >= effective,
+                would_block_next_cycle=count >= effective)
+
+
+def usage(lab, *, clock=now_utc, include_disk=False, _visitor=None):
     current = utc(clock())
-    count, recent, size = 0, 0, 0
+    count, recent, size = 0, 0, 0 if include_disk else None
     kinds = Counter()
     oldest = newest = None
     for meta in lab.store.iter_metadata(max_names=lab.max_artifacts):
+        if _visitor is not None:
+            _visitor(meta)
         stamp = utc(meta['created_at_utc'])
         count += 1
         kinds[meta['artifact_type']] += 1
@@ -73,24 +86,20 @@ def usage(lab, *, clock=now_utc):
                 elif stat.S_ISDIR(info.st_mode):
                     total += directory_bytes(entry.path)
         return total
-    if field_lab_root().exists():
+    if include_disk and field_lab_root().exists():
         size = directory_bytes(field_lab_root())
-    policy = capacity_policy(lab.max_artifacts)
-    stop_at = policy['stop_at']
-    reserve = policy['reserved_budget']
-    effective = policy['effective_stop_at']
+    result = _capacity_fields(lab, count)
+    effective = result['effective_stop_at']
     rate = recent/7
-    return dict(count=count, by_type=dict(sorted(kinds.items())), capacity=lab.max_artifacts,
-                operational_soft_limit=policy['operational_soft_limit'],
-                remaining=max(0, stop_at-count-1), reserved_budget=reserve, effective_stop_at=effective,
+    return dict(result, by_type=dict(sorted(kinds.items())),
                 growth_per_day_7d=rate, estimated_days_to_stop=(effective-count)/rate if rate else None,
                 oldest=oldest.isoformat() if oldest else None, newest=newest.isoformat() if newest else None,
-                disk_bytes=size, warning=count >= effective*WARNING,
-                blocked=count >= effective, would_block_next_cycle=count >= effective)
+                disk_bytes=size, disk_usage_measured=include_disk)
 
 
 def check_capacity(lab, reserve=None):
-    result = usage(lab)
+    result = _capacity_fields(lab, lab.store.capacity_count(max_names=lab.max_artifacts))
+    result['disk_usage_measured'] = False
     if reserve is None:
         reserve = result['reserved_budget']
     stop_at = capacity_policy(lab.max_artifacts)['stop_at']
@@ -107,22 +116,36 @@ def cycle_lock(lab):
 
 
 def periodic_report(lab, period='all', *, clock=now_utc, tolerance_minutes=10, historical=False):
+    with lab.store.metadata_query(max_names=lab.max_artifacts) as query:
+        return _periodic_report(lab, period, clock=clock, tolerance_minutes=tolerance_minutes,
+                                historical=historical, query=query)
+
+
+def _periodic_report(lab, period, *, clock, tolerance_minutes, historical, query):
     days = {'24h': 1, '7d': 7, '30d': 30, 'all': None}[period]
     current = utc(clock())
     start = (current-timedelta(days=days)).isoformat(timespec='microseconds') if days else None
     end = current.isoformat(timespec='microseconds')
     # Exact percentiles retain values: explicitly bound this materialization.
-    count = sum(1 for m in lab.store.iter_metadata(max_names=lab.max_artifacts)
-                if m['artifact_type'] in ('reference_comparison', 'reference_comparison_state')
-                and (start is None or m['time_max'] >= start) and m['time_min'] <= end)
-    if count > REPORT_LIMIT:
-        raise ValueError('field_lab_report_operational_limit_exceeded_use_shorter_period')
-    states = lab.comparison_states(start=start, end=end, tolerance_minutes=tolerance_minutes, historical=historical)
+    metadata = query.iter_metadata() if query is not None else lab.store.iter_metadata(max_names=lab.max_artifacts)
+    count, targets, selected_runs = 0, 0, set()
+    for m in metadata:
+        if (start is not None and m['time_max'] < start) or m['time_min'] > end:
+            continue
+        if m['artifact_type'] in ('reference_comparison', 'reference_comparison_state'):
+            count += 1
+            if count > REPORT_LIMIT:
+                raise ValueError('field_lab_report_operational_limit_exceeded_use_shorter_period')
+            if query is not None:
+                selected_runs.add(m['forecast_run_id'])
+        elif m['artifact_type'] == 'reference_forecast':
+            targets += m['point_count']*3
+    selected = (artifact for run_id in sorted(selected_runs)
+                for artifact in query.comparison_artifacts(run_id, start=start, end=end)) if query is not None else None
+    states = lab.comparison_states(start=start, end=end, tolerance_minutes=tolerance_minutes,
+                                   historical=historical, _artifacts=selected)
     comparisons = tuple(value[1] for value in states.values())
     if not comparisons:
-        targets = sum(m['point_count']*3 for m in lab.store.iter_metadata(max_names=lab.max_artifacts)
-                      if m['artifact_type'] == 'reference_forecast' and
-                      (start is None or m['time_max'] >= start) and m['time_min'] <= end)
         if targets > REPORT_LIMIT:
             raise ValueError('field_lab_report_operational_limit_exceeded_use_shorter_period')
         # Read-only compatibility reconstruction, filtered at the target boundary.
@@ -141,17 +164,20 @@ def cycle(lab, *, clock=now_utc, client=None, capture=capture_forecast, toleranc
     from astropilot.reference_station_lab import validate_tolerance
     validate_tolerance(tolerance_minutes)
     current = utc(clock())
-    items = tuple(artifacts(lab, ('catalog_activation_event', 'collection_success')))
-    activations = [a for a in items if a.artifact_type == 'catalog_activation_event']
-    sync_due = not activations or current-max(utc(a.created_at_utc) for a in activations) >= timedelta(days=7)
-    runs = tuple(lab.iter_facts(artifact_type='reference_forecast', start=(current-timedelta(hours=12)).isoformat()))
-    plan = dict(catalogue_due=sync_due, forecast_interval_hours=12, horizon_hours=24,
-                revision_horizon_days=REVISION_DAYS, dry_run=dry_run)
     if dry_run:
+        items = tuple(artifacts(lab, ('catalog_activation_event', 'collection_success')))
+        activations = [a for a in items if a.artifact_type == 'catalog_activation_event']
+        sync_due = not activations or current-max(utc(a.created_at_utc) for a in activations) >= timedelta(days=7)
+        plan = dict(catalogue_due=sync_due, forecast_interval_hours=12, horizon_hours=24,
+                    revision_horizon_days=REVISION_DAYS, dry_run=True)
         return dict(plan, writes=0, network_calls=0)
     with cycle_lock(lab):
-        # Re-read after locking: another cycle may have completed while planning.
+        # Plan only after locking; no duplicate speculative inventory scans.
         items = tuple(artifacts(lab, ('catalog_activation_event', 'collection_success')))
+        activations = [a for a in items if a.artifact_type == 'catalog_activation_event']
+        sync_due = not activations or current-max(utc(a.created_at_utc) for a in activations) >= timedelta(days=7)
+        plan = dict(catalogue_due=sync_due, forecast_interval_hours=12, horizon_hours=24,
+                    revision_horizon_days=REVISION_DAYS, dry_run=False)
         successes = [a for a in items if a.artifact_type == 'collection_success']
         if successes and current-max(utc(a.created_at_utc) for a in successes) < timedelta(hours=1):
             return dict(plan, no_op=True, writes=0, network_calls=0)
@@ -181,7 +207,8 @@ def cycle(lab, *, clock=now_utc, client=None, capture=capture_forecast, toleranc
                 created += 1
         collected = lab.collect(client, clock=clock, tolerance_minutes=tolerance_minutes,
                                 revision_days=REVISION_DAYS, coalesce=True)
-        lab.comparisons(clock=clock, tolerance_minutes=tolerance_minutes, persist=True, incremental=True)
+        lab.comparisons(clock=clock, tolerance_minutes=tolerance_minutes, persist=True, incremental=True,
+                        retain_results=False)
         rows = periodic_report(lab, '24h', clock=clock, tolerance_minutes=tolerance_minutes)
         payload = {'schema_version': 1, 'rows': rows}
         lab.save('reference_report', digest(payload), payload, current.isoformat())
@@ -307,17 +334,20 @@ def _scheduler(operation, *, runner=subprocess.run):
     return scheduler('status', runner=runner)
 
 
-def status(lab):
+def status(lab, *, include_disk=False):
     latest = {}
     last_observed = None
     errors = 0
-    for meta in lab.store.iter_metadata(max_names=lab.max_artifacts):
+    current = now_utc()
+    def visit(meta):
+        nonlocal last_observed, errors
         kind, stamp = meta['artifact_type'], meta['created_at_utc']
         latest[kind] = max(latest.get(kind, stamp), stamp)
         if kind == 'reference_acquisition':
             last_observed = max(last_observed or meta['time_max'], meta['time_max'])
-        errors += kind == 'collection_error' and utc(stamp) >= now_utc()-timedelta(days=7)
-    return dict(root=str(field_lab_root()), usage=usage(lab), scheduler=scheduler('status'),
+        errors += kind == 'collection_error' and utc(stamp) >= current-timedelta(days=7)
+    value = usage(lab, clock=lambda:current, include_disk=include_disk, _visitor=visit)
+    return dict(root=str(field_lab_root()), usage=value, scheduler=scheduler('status'),
                 last_success=latest.get('collection_success'), last_forecast=latest.get('reference_forecast'),
                 last_acquisition=latest.get('reference_acquisition'), last_official_observation=last_observed,
                 last_comparison=latest.get('reference_comparison_state'),
@@ -377,7 +407,17 @@ def scheduled_main():
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     try:
-        result = cycle(ReferenceLab(max_artifacts=CAPACITY))
+        lab = ReferenceLab(max_artifacts=CAPACITY)
+        result = cycle(lab)
+        if 'usage' in result:
+            try:
+                refreshed = lab.store.refresh_metadata_index(count=result['usage']['count'], max_names=CAPACITY)
+                if refreshed is not None:
+                    logger.info('metadata index refreshed: %s', json.dumps(refreshed))
+            except (ValueError, RuntimeError, OSError) as error:
+                # Collection is already durable. Keep the prior index and the
+                # complete legacy tail; never claim that maintenance succeeded.
+                logger.warning('metadata index refresh failed: %s', error)
         logger.info(json.dumps(result, allow_nan=False))
         return 0
     except Exception as error:

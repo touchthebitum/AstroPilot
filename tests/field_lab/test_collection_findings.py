@@ -34,10 +34,13 @@ def test_index_single_pass_unrelated_observations():
         assert index.candidate_visits <= 400
 
 
-def test_incremental_revision_a_b_a_and_last_computation(lab, monkeypatch):
+@pytest.mark.parametrize('indexed', [False, True])
+def test_incremental_revision_a_b_a_and_last_computation(lab, monkeypatch, indexed):
     lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
     a = next(o for o in observations() if o.variable == 'temperature_2m' and o.value is not None)
     lab.save_observation(a)
+    if indexed:
+        lab.store.rebuild_metadata_index()
     first = lab.comparisons(clock=lambda:T+timedelta(hours=2), persist=True, incremental=True)
     assert len(first) == 3
     with monkeypatch.context() as patch:
@@ -57,7 +60,45 @@ def test_incremental_revision_a_b_a_and_last_computation(lab, monkeypatch):
     assert temperature['mean_bias'] == third[0].signed_error
 
 
-def test_thousands_artifacts_status_and_short_report_payload_reads(lab, monkeypatch):
+def test_indexed_comparisons_scope_states_per_run_and_keep_digest_checks(lab, monkeypatch):
+    lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
+    for observation in observations():
+        lab.save_observation(observation)
+    expected = lab.comparisons(clock=lambda:T+timedelta(hours=2))
+    lab.store.rebuild_metadata_index()
+    original = lab.comparison_states
+    def scoped(**kwargs):
+        assert kwargs.get('_artifacts') is not None, 'materialized entire history'
+        return original(**kwargs)
+    monkeypatch.setattr(lab, 'comparison_states', scoped)
+    actual = lab.comparisons(clock=lambda:T+timedelta(hours=2), persist=True, incremental=True)
+    assert actual == expected
+    lab.store.rebuild_metadata_index()
+    assert lab.comparisons(clock=lambda:T+timedelta(hours=3), persist=True, incremental=True) == ()
+    with lab.store.metadata_query(max_names=lab.max_artifacts) as query:
+        selected = list(query.comparison_artifacts(run().run_id))
+    target = next(a for a in selected if a.artifact_type == 'reference_comparison_state')
+    path = lab.store._root/'artifacts'/lab.store._name(target.idempotency_key)
+    value = json.loads(path.read_text())
+    value['payload']['input_signature'] = 'corrupt'
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match='digest_mismatch'):
+        lab.comparisons(clock=lambda:T+timedelta(hours=3), persist=True, incremental=True)
+
+
+def test_cycle_can_discard_computation_results_without_discarding_facts(lab):
+    lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
+    for observation in observations():
+        lab.save_observation(observation)
+    lab.store.rebuild_metadata_index()
+    assert lab.comparisons(clock=lambda:T+timedelta(hours=2), persist=True,
+                           incremental=True, retain_results=False) == ()
+    assert lab.computed_targets == 3
+    assert len(lab.comparison_states()) == 3
+
+
+@pytest.mark.parametrize('indexed', [False, True])
+def test_thousands_artifacts_status_and_short_report_payload_reads(lab, monkeypatch, indexed):
     lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
     for o in observations():
         lab.save_observation(o)
@@ -65,6 +106,9 @@ def test_thousands_artifacts_status_and_short_report_payload_reads(lab, monkeypa
     with lab.store.writer_lock(max_names=lab.max_artifacts):
         for i in range(10_000):
             lab.save('synthetic', 'large-'+str(i), {'padding':'x'*2048}, T-timedelta(days=40))
+    expected = periodic_report(lab, '24h', clock=lambda:T+timedelta(hours=2))
+    if indexed:
+        lab.store.rebuild_metadata_index(max_names=lab.max_artifacts)
     original = FieldLabArtifact.decode.__func__
     decoded = []
     def spy(cls, document):
@@ -75,14 +119,17 @@ def test_thousands_artifacts_status_and_short_report_payload_reads(lab, monkeypa
     assert status(lab)['usage']['count'] >= 10_000
     assert decoded == []
     monkeypatch.setattr(lab, 'comparisons', lambda **kw:pytest.fail('persisted report reconstructed'))
-    assert periodic_report(lab, '24h', clock=lambda:T+timedelta(hours=2))
+    assert periodic_report(lab, '24h', clock=lambda:T+timedelta(hours=2)) == expected
     assert 'synthetic' not in decoded and 'reference_acquisition' not in decoded
     assert len(decoded) <= 10
     assert list(lab.facts(artifact_type='reference_acquisition', station_id='CDF', stream=True)) == []
 
 
-def test_report_guard_before_payload_decode(lab, monkeypatch):
+@pytest.mark.parametrize('indexed', [False, True])
+def test_report_guard_before_payload_decode(lab, monkeypatch, indexed):
     lab.save_run(run(), clock=lambda:T-timedelta(minutes=58))
+    if indexed:
+        lab.store.rebuild_metadata_index(max_names=lab.max_artifacts)
     import astropilot.field_lab_collection as collection
     monkeypatch.setattr(collection, 'REPORT_LIMIT', 2)
     monkeypatch.setattr(FieldLabArtifact, 'decode', classmethod(lambda *a:pytest.fail('payload decoded before report limit')))
@@ -289,10 +336,11 @@ def test_legacy_comparison_does_not_claim_scientific_time_as_execution(lab):
     assert value['last_comparison'] is None and value['comparison_time_unavailable']
 
 
-@pytest.mark.parametrize('count', [0, 2999, 3000, 11999, 12000, 14999, 15000])
+@pytest.mark.parametrize('count', [0, 15000, 17999, 563999, 564000, 704999, 705000, 719999])
 def test_scheduler_capacity_boundaries_offline(lab, monkeypatch, count):
     import astropilot.field_lab_collection as collection
     from astropilot.field_lab_capacity import capacity_policy
+    lab.max_artifacts = collection.CAPACITY
     initialize()
     calls = []
     runner = lambda argv, **kwargs: calls.append(argv) or SimpleNamespace(returncode=1 if argv[1] == 'print' else 0)
@@ -303,26 +351,30 @@ def test_scheduler_capacity_boundaries_offline(lab, monkeypatch, count):
     monkeypatch.setattr(collection, 'launch_agents_path', lambda:collection.field_lab_root()/'mock-launch-agents'/'test.plist')
     collection.scheduler('install', runner=runner)
     monkeypatch.setattr(collection.sys, 'platform', 'darwin')
-    # Synthetic metadata exercises exact admission counts without 15k disk writes.
+    # Synthetic metadata exercises exact admission counts without 720k disk writes.
     monkeypatch.setattr(lab.store.__class__, 'iter_metadata', lambda self, **kw:iter([
         dict(created_at_utc=canonical_utc(T), artifact_type='synthetic', time_max=canonical_utc(T))
     ] * count))
     policy = capacity_policy(collection.CAPACITY)
-    assert policy == dict(operational_soft_limit=20000, stop_at=18000,
-                          reserved_budget=3000, effective_stop_at=15000)
+    assert policy == dict(operational_soft_limit=800000, stop_at=720000,
+                          reserved_budget=15000, effective_stop_at=705000)
     value = status(lab)['usage']
     calls.clear()  # Admission assertions exclude the simulated status probe.
-    assert value['warning'] == (count >= 12000)
-    assert value['blocked'] == value['would_block_next_cycle'] == (count >= 15000)
+    assert value['warning'] == (count >= 564000)
+    assert value['blocked'] == value['would_block_next_cycle'] == (count >= 705000)
     if value['blocked']:
         with pytest.raises(ValueError, match='capacity_stop'):
             check_capacity(lab)
         with pytest.raises(ValueError, match='capacity_stop'):
             collection.scheduler('enable', runner=runner)
+        with pytest.raises(ValueError, match='capacity_stop'):
+            collection.cycle(lab, clock=lambda:T,
+                client=SimpleNamespace(stations=lambda:pytest.fail('blocked cycle contacted network')),
+                capture=lambda *a, **kw:pytest.fail('blocked cycle captured forecast'))
         assert calls == []
         assert not collection.launch_agents_path().exists()
     else:
-        assert check_capacity(lab)['reserved_budget'] == 3000
+        assert check_capacity(lab)['reserved_budget'] == 15000
         collection.scheduler('enable', runner=runner)
         assert any(argv[1] == 'bootstrap' for argv in calls)
 
@@ -384,3 +436,31 @@ def test_compare_export_full_active_state_idempotent(lab, monkeypatch, capsys, f
                  lab.store.iter_artifacts(artifact_type='reference_report')]
     assert len(persisted) == 2  # Identical exports deduplicate, revised export remains complete.
     assert all(len(rows) == 6 for rows in persisted)
+
+
+@pytest.mark.parametrize('direct_store', [False, True])
+def test_multiweek_publication_stop_preserves_facts_and_idempotency(lab, direct_store):
+    from astropilot.field_lab_collection import CAPACITY
+    from astropilot.field_lab_capacity import capacity_policy
+    lab.max_artifacts = CAPACITY
+    lab.save('test', 'existing', {'value': 1}, T)
+    before = lab.store.load(idempotency_key='existing').document()
+    def publish(key):
+        if direct_store:
+            artifact = FieldLabArtifact.create(artifact_type='test', source_id='MeteoSwiss',
+                idempotency_key=key, payload={'value': 1}, created_at_utc=canonical_utc(T))
+            return lab.store.save(artifact)
+        return lab.save('test', key, {'value': 1}, T)
+    with lab.store.writer_lock(max_names=CAPACITY) as state:
+        # Exercise the real publication boundary without 720k filesystem writes.
+        assert state['stop_at'] == capacity_policy(CAPACITY)['stop_at'] == 720000
+        state['count'] = 719998
+        assert publish('last-allowed')
+        assert state['count'] == 719999
+        assert not publish('last-allowed')
+        with pytest.raises(ValueError, match='capacity_stop_scientific_facts_preserved'):
+            publish('refused')
+        assert state['count'] == 719999
+    assert lab.store.load(idempotency_key='refused') is None
+    assert lab.store.load(idempotency_key='existing').document() == before
+    assert usage(lab)['count'] == 2

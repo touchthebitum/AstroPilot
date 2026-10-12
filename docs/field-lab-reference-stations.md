@@ -552,25 +552,53 @@ silently removed. This is the request's calculated-capacity fallback, not a clai
 of infinite storage or a completed indexed/compacted long-term backend.
 
 The **2,000,000 artifact ceiling is an enumeration safety guard, not an
-operational capacity promise**. The operational soft limit is **20,000 artifacts**.
-Writes stop strictly below 90% of the smaller of the configured ceiling and this
-soft limit. Before a CLI mutation or cycle begins, it reserves the smaller of
-15,000 artifacts and one sixth of that stop threshold: normally **3,000**.
-Consequently `effective_stop_at=15,000`, `blocked=true` at 15,000, and warning
-starts at 80% of the effective threshold (**12,000**). The cycle and CLI refuse
+operational capacity promise**. The proposed operational soft limit is
+**800,000 artifacts**. Writes stop strictly below 90% of the smaller of the
+configured ceiling and this soft limit. Before a CLI mutation or cycle begins,
+it reserves the smaller of 15,000 artifacts and one sixth of that stop threshold:
+normally **15,000** with the collector's 2M enumeration ceiling.
+Consequently `effective_stop_at=705,000`, `blocked=true` at 705,000, and warning
+starts at 80% of the effective threshold (**564,000**). The cycle and CLI refuse
 at exactly that blocked boundary, before network activity. A batch already admitted
-can consume its reserve, but each publication rechecks its shared in-lock count
-and cannot reach the hard write stop (**18,000**). Partial immutable facts remain
-valid if a batch exhausts its budget; retry does not invent observations.
+can consume its remaining write budget, but each publication rechecks its shared
+in-lock count and cannot reach the hard write stop (**720,000**). Partial immutable
+facts remain valid if a batch exhausts its budget; retry does not invent observations.
+Smaller configured enumeration ceilings still reduce these thresholds (a 20,000
+ceiling retains the old 18,000 / 3,000 / 15,000 policy).
+
+The NAS stop reported on 2026-10-09 at **17,999** artifacts is consistent with
+exhaustion inside an admitted batch under the old 20,000 soft limit: entry stopped
+at 15,000 but publication refused the write that would reach 18,000. This is a
+code-based explanation, not a verified diagnosis from NAS logs. The reserve is an
+admission headroom check, not a per-cycle maximum; an admitted cycle may consume
+all remaining writes below the strict stop. Error recording also checks admission,
+so a capacity failure may appear only in the bounded collector log/stderr.
+
+The source-copy validation observed approximately **11,912 artifacts/day** over
+a short 1.511-day window including startup and revision bursts. The earlier 5,000/day
+assumption did not cover six weeks at that observed rate. The revised design uses
+**15,000 new artifacts/day**, more than 25% above the short observed average.
+Starting from 17,999 artifacts, six weeks gives **647,999**, leaving **57,001**
+artifacts below the 705,000 admission boundary. This is about 45.8 days of remaining
+admission headroom at the 15,000/day design rate, or 57.7 days at the short observed
+rate. Higher sustained growth or larger bursts shorten the horizon; no fixed
+throughput or storage performance guarantee follows from these calculations.
 
 `usage` exposes `capacity`, `operational_soft_limit`, `warning`, `blocked`,
 `remaining` (individual writes available below the hard stop), `reserved_budget`,
 `effective_stop_at`, and `would_block_next_cycle`. The growth estimate uses the
-effective entry boundary, not the 2M guard. The 10k-artifact synthetic regression
-is evidence for bounded scans and decoding, not a production throughput promise
-or proof of sustained operation at the soft limit. There is no advertised
-160-day operating horizon. Increase capacity only after representative filesystem,
-latency, disk-growth and recovery measurements, and a compaction design.
+effective entry boundary, not the 2M guard. Use `growth_per_day_7d` and
+`estimated_days_to_stop` to revise the horizon once collection is representative;
+a stopped or newly started collector can understate the recent rate.
+
+**Do not redeploy on the NAS before validation.** Before approval, measure metadata
+scan/status and cycle latency on a representative copy approaching the proposed
+threshold, disk growth/free space, maximum batch growth, and interrupted-batch
+recovery/idempotent retry. Existing synthetic regressions prove boundary behavior
+and bounded payload decoding, not NAS performance at 800,000 artifacts. Retain
+the report materialization limit of 20,000 and use shorter report periods when
+required. No data deletion, expiry, compaction, scheduler activation, or NAS restart
+is part of this capacity change; longer-term compaction still needs its own design.
 
 All scientific writers and the scheduler use the same `.writer.lock` in the
 validated dedicated root. A process/thread reentrant boundary covers planning,
@@ -600,6 +628,95 @@ same-owner process rewriting the derived metadata and hiding facts.
 time bounds. The tuple-returning `facts()` compatibility API remains for existing
 callers, while the cycle uses filtered scans. Metadata scans remain O(total files)
 and incur filesystem I/O; they are not a database range index.
+
+#### Optional compact metadata generations
+
+`astropilot-field-lab optimize` explicitly activates an index on an initialized
+store. `--workers 1..8` bounds parallel envelope reads (default one worker).
+The first build validates every authoritative envelope, digest and filename under
+the same exclusive writer lock. It can be slow on a large existing HDD store;
+this is maintenance, not a collection throughput measurement.
+
+Each generation consists of a sorted fixed-width name table, sequential metadata
+rows, and a durable immutable commit containing their SHA-256 hashes and sizes.
+The commit is published last. Failed/interrupted builds cannot become visible;
+readers keep the preceding generation or use the original sidecar/envelope path.
+An index checksum/structure failure stops reads before results are accepted.
+`optimize --force` rebuilds from authoritative envelopes even when the prior
+derived generation is corrupt. Previous generations, scientific files and old
+sidecars remain retained. Only scratch files created by a build are cleaned up.
+
+Every indexed scan still preflights the bounded real artifact inventory, refuses
+unexpected names, links and nonregular entries, and verifies that every indexed
+name is still present. It also checks sidecar entry types without opening each
+indexed sidecar. New artifacts absent from the generation use the original
+no-follow sidecar/envelope fallback, so an interrupted publication never hides a
+fact. Validated compact metadata supersedes retained sidecars for indexed facts;
+filtered scientific loads still validate the actual envelope and derived fields.
+The existing same-owner mutation/directory-move threat model remains unchanged;
+an index is not an authentication boundary against an owner rewriting both data
+and derived records.
+
+The name mapping is bounded to 64 MiB at the 2M ceiling, individual rows to 16 KiB,
+generation data to 2 GiB and external-sort chunks to 8192 rows. Schema 2 adds
+checksum-protected row offsets and comparison-to-forecast references; all three
+fixed-width mappings together stay below 160 MiB at the ceiling. No global
+Python name/metadata list is materialized. Small configured ceilings still apply
+before row/payload decoding. Descriptor-relative no-follow opens and regular-file
+checks cover index generations too. Earlier schema-1 generations remain readable;
+an ordinary refresh upgrades the relevant scientific metadata and lookup tables.
+
+Once explicitly activated, the scheduled collector refreshes the generation
+after a successful cycle adds at least 1000 facts beyond its base. A refresh
+reuses checksum-verified base metadata and validates new envelopes, rather than
+reopening all old files. Retained generations consume additional disk space.
+A maintenance failure is logged explicitly; it neither rolls back durable facts
+nor excludes the complete legacy tail. Without an activated index, collection
+does not silently migrate storage. CLI maintenance remains available explicitly.
+
+Capacity admission reuses the exact count only inside the current thread's
+already validated writer boundary; each independent writer still recounts under
+the cross-process lock and each durable publication increments the count.
+`status` computes its statistics in a single metadata pass. Exhaustive disk-size
+measurement is now opt-in: `status --disk-usage` (or `usage(include_disk=True)`).
+Without it, `disk_bytes` is null and `disk_usage_measured` is false; capacity
+checks and normal collection never perform that unrelated inode-size scan.
+
+Inside one global writer boundary, schema-2 readers reuse the pinned,
+checksum-verified generation and the fully preflighted inventory. Independent
+writers still repeat all checks after acquiring the lock. Nested scans use
+independent positional read buffers, so one scan cannot reset another's cursor.
+Every durable new fact is registered before sidecar publication and is visible
+to subsequent scans, even if sidecar publication fails. Metadata for facts
+created by this writer may be cached with a 4 KiB per-row/16 MiB encoded-total
+budget; scientific payloads are still read and verified. The 16384-name query
+tail is enforced before any publication that would exceed it. Planning occurs
+after the writer lock for real cycles; dry runs remain read-only. Noncooperating
+same-owner mutations during a writer boundary remain outside the threat model,
+as for the existing locked count and immutable-publication contract.
+
+Indexed incremental comparisons hold one validated generation/inventory for the
+operation, build the observation revision index once, and load comparison states
+one forecast at a time through the derived lookup table. Actual comparison/state
+envelopes are still opened no-follow, decoded and checked against their metadata;
+an unchanged run does not bypass those scientific integrity checks. Parallel
+comparison reads use at most four workers, 32 queued metadata entries and a
+64 KiB envelope limit per selected comparison/state (oversized inputs fail closed).
+No revision time window is shortened: A→B→A revisions, ambiguous nearest ties,
+seals and existing cohort rules are preserved. Legacy stores keep the original
+algorithm. The collector requests `retain_results=False`, persisting each result
+without accumulating the unused full computation tuple; other callers retain
+their existing tuple API by default. Query tails are bounded to 16384 names;
+larger tails require an explicit index refresh before scientific computation.
+
+Indexed periodic reports hold one checked generation/inventory for their complete
+operation. One metadata pass counts the window's comparison/state envelopes,
+checks the unchanged 20000-entry materialization limit before scientific loads,
+and counts forecast targets for the legacy reconstruction fallback. The derived
+forecast lookup then reads and validates every selected scientific envelope with
+the same bounded parallel reads. Cohort, tolerance, time-window and latest-state
+selection remain unchanged. Reports reuse the existing writer view inside a cycle;
+independent read-only reports perform their own full inventory preflight.
 
 A comparison scan builds active observation revisions once, using canonical
 (station, variable, observed timestamp) identities and the existing deterministic

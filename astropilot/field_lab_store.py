@@ -192,13 +192,15 @@ class FileFieldLabStore:
         return hashlib.sha256(key.encode()).hexdigest() + ".json"
 
     @staticmethod
-    def _read(fd, name):
+    def _read(fd, name, *, max_bytes=_MAX_BYTES):
+        if type(max_bytes) is not int or not 1 <= max_bytes <= _MAX_BYTES:
+            raise ValueError('invalid_field_lab_document_limit')
         handle = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
         with os.fdopen(handle, "rb") as stream:
             if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
                 raise ValueError("field_lab_regular_file_required")
-            document = stream.read(_MAX_BYTES + 1)
-        if len(document) > _MAX_BYTES:
+            document = stream.read(max_bytes + 1)
+        if len(document) > max_bytes:
             raise ValueError("field_lab_document_too_large")
         return document.decode("utf-8")
 
@@ -249,11 +251,20 @@ class FileFieldLabStore:
         """One reentrant process/thread and POSIX cross-process writer boundary."""
         if fcntl is None or os.name != 'posix':
             raise RuntimeError('field_lab_secure_lock_unavailable')
+        if type(max_names) is not int or max_names < 1:
+            raise ValueError('invalid_field_lab_name_limit')
         with _process_writer():
             state = getattr(_WRITERS, 'state', None)
             identity = (os.getpid(), str(self._root))
             if state is not None and state['identity'] == identity:
-                yield state
+                if state['count'] > max_names:
+                    raise ValueError('field_lab_name_limit_exceeded')
+                previous_stop = state['stop_at']
+                state['stop_at'] = min(previous_stop, capacity_policy(max_names)['stop_at'])
+                try:
+                    yield state
+                finally:
+                    state['stop_at'] = previous_stop
                 return
             if state is not None and state['identity'][0] == os.getpid():
                 raise ValueError('field_lab_nested_writer_root_changed')
@@ -266,13 +277,15 @@ class FileFieldLabStore:
                         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     except BlockingIOError as error:
                         raise RuntimeError('field_lab_writer_busy') from error
-                    state = dict(identity=identity, count=sum(1 for _ in self.iter_metadata(max_names=max_names)),
-                                 stop_at=capacity_policy(max_names)['stop_at'])
-                    _WRITERS.state = state
-                    try:
-                        yield state
-                    finally:
-                        _WRITERS.state = None
+                    with self.metadata_query(max_names=max_names) as query:
+                        source = query.iter_metadata() if query is not None else self.iter_metadata(max_names=max_names)
+                        state = dict(identity=identity, count=sum(1 for _ in source),
+                                     stop_at=capacity_policy(max_names)['stop_at'], metadata_query=query)
+                        _WRITERS.state = state
+                        try:
+                            yield state
+                        finally:
+                            _WRITERS.state = None
                 finally:
                     os.close(handle)
 
@@ -291,11 +304,136 @@ class FileFieldLabStore:
         elif artifact.artifact_type in ('reference_acquisition', 'reference_observation'):
             times = [payload['observed_at_utc']]
         times = [datetime.fromisoformat(t.replace('Z', '+00:00')).astimezone(timezone.utc).isoformat(timespec='microseconds') for t in times]
-        return dict(point_count=len(times), artifact_type=artifact.artifact_type, source_id=artifact.source_id,
+        value = dict(point_count=len(times), artifact_type=artifact.artifact_type, source_id=artifact.source_id,
                     idempotency_key=artifact.idempotency_key, created_at_utc=artifact.created_at_utc,
                     time_min=min(times), time_max=max(times), variable=payload.get('variable'),
                     digest=artifact.digest, measurement_digest=measurement_digest,
                     prospective=payload.get('prospective'))
+        if artifact.artifact_type in ('reference_comparison', 'reference_comparison_state'):
+            value['forecast_run_id'] = payload.get('comparison', payload)['forecast_run_id']
+            if not isinstance(value['forecast_run_id'], str) or _ID.fullmatch(value['forecast_run_id']) is None:
+                raise ValueError('invalid_field_lab_identity')
+        return value
+
+    @classmethod
+    def metadata_matches(cls, artifact, metadata):
+        expected = cls._metadata(artifact)
+        # Older sidecars/generations predate this derived lookup field. Their
+        # envelope digest and every original field still have to match exactly.
+        if 'forecast_run_id' not in metadata:
+            expected.pop('forecast_run_id', None)
+        return expected == metadata
+
+    @contextmanager
+    def maintenance_lock(self):
+        """Same exclusive writer boundary, without trusting a damaged index.
+
+        Maintenance publishes only derived generations, after validating the
+        bounded authoritative inventory. It cannot nest inside scientific writes.
+        """
+        if fcntl is None or os.name != 'posix':
+            raise RuntimeError('field_lab_secure_lock_unavailable')
+        with _process_writer():
+            state = getattr(_WRITERS, 'state', None)
+            if state is not None and state['identity'][0] == os.getpid():
+                raise RuntimeError('field_lab_writer_busy')
+            with self._directory(root_only=True) as root:
+                handle = os.open('.writer.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                 0o600, dir_fd=root)
+                try:
+                    if not stat.S_ISREG(os.fstat(handle).st_mode):
+                        raise ValueError('field_lab_lock_regular_file_required')
+                    try:
+                        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError as error:
+                        raise RuntimeError('field_lab_writer_busy') from error
+                    yield root
+                finally:
+                    os.close(handle)
+
+    def rebuild_metadata_index(self, *, max_names=100000, force=False, workers=1, progress=None):
+        from astropilot.field_lab_index import build
+        return build(self, max_names=max_names, force=force, workers=workers, progress=progress)
+
+    def capacity_count(self, *, max_names=100000):
+        """Reuse only this thread's already validated, pinned writer boundary.
+
+        Every independent writer still recounts under the cross-process lock.
+        Durable publications increment this count before sidecar publication.
+        """
+        if type(max_names) is not int or max_names < 1:
+            raise ValueError('invalid_field_lab_name_limit')
+        if field_lab_root() != self._root:
+            raise ValueError('field_lab_configuration_changed')
+        state = getattr(_WRITERS, 'state', None)
+        if state is not None and state['identity'] == (os.getpid(), str(self._root)):
+            if state['count'] > max_names:
+                raise ValueError('field_lab_name_limit_exceeded')
+            return state['count']
+        return sum(1 for _ in self.iter_metadata(max_names=max_names))
+
+    def refresh_metadata_index(self, *, count, max_names=100000, threshold=1000):
+        """Refresh an explicitly activated index after a successful collection.
+
+        This threshold is only a maintenance hint. Admission never trusts it;
+        readers always validate the real inventory and include every new fact.
+        """
+        from astropilot.field_lab_index import generation
+        if type(threshold) is not int or threshold < 1:
+            raise ValueError('invalid_field_lab_index_refresh_threshold')
+        with self._directory(root_only=True) as root:
+            with generation(self, root, max_names) as cached:
+                if cached is None or count-len(cached[0]) < threshold:
+                    return None
+        return self.rebuild_metadata_index(max_names=max_names)
+
+    @contextmanager
+    def metadata_query(self, *, max_names=100000):
+        """One checked generation/inventory for bounded per-forecast queries."""
+        from astropilot.field_lab_index import generation
+        _capabilities()
+        if type(max_names) is not int or max_names < 1:
+            raise ValueError('invalid_field_lab_name_limit')
+        if field_lab_root() != self._root:
+            raise ValueError('field_lab_configuration_changed')
+        state = getattr(_WRITERS, 'state', None)
+        if state is not None and state['identity'] == (os.getpid(), str(self._root)):
+            query = state.get('metadata_query')
+            if query is not None:
+                if state['count'] > max_names:
+                    raise ValueError('field_lab_name_limit_exceeded')
+                yield query
+                return
+        if not self._root.exists():
+            yield None
+            return
+        with self._directory(root_only=True) as root, self._directory() as artifacts:
+            try:
+                meta = os.open('metadata', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root)
+            except FileNotFoundError:
+                meta = None
+            try:
+                with generation(self, root, max_names) as cached:
+                    if cached is None or cached.relations is None:
+                        yield None
+                        return
+                    matched, tail = 0, []
+                    for name in self._names(artifacts, max_names):
+                        if cached.names.contains(name):
+                            matched += 1
+                        else:
+                            if len(tail) >= 16_384:
+                                raise ValueError('field_lab_index_refresh_required')
+                            tail.append(name)
+                    if matched != len(cached.names):
+                        raise ValueError('field_lab_index_missing_authoritative_fact')
+                    if meta is not None:
+                        for _ in self._names(meta, max_names):
+                            pass
+                    yield FieldLabMetadataQuery(self, artifacts, meta, cached, tail)
+            finally:
+                if meta is not None:
+                    os.close(meta)
 
     def _save_metadata(self, artifact):
         with self._directory(root_only=True) as root:
@@ -325,6 +463,19 @@ class FileFieldLabStore:
         Missing sidecars after interruption never hide authoritative facts. Readers
         never migrate storage; a writer publishes sidecars for new artifacts.
         """
+        _capabilities()
+        if type(max_names) is not int or max_names < 1:
+            raise ValueError('invalid_field_lab_name_limit')
+        state = getattr(_WRITERS, 'state', None)
+        if state is not None and state['identity'] == (os.getpid(), str(self._root)):
+            query = state.get('metadata_query')
+            if query is not None:
+                if field_lab_root() != self._root:
+                    raise ValueError('field_lab_configuration_changed')
+                if state['count'] > max_names:
+                    raise ValueError('field_lab_name_limit_exceeded')
+                yield from query.iter_metadata()
+                return
         try:
             with self._directory(root_only=True) as root:
                 try:
@@ -333,26 +484,46 @@ class FileFieldLabStore:
                     meta = None
                 try:
                     with self._directory() as fd:
+                        from astropilot.field_lab_index import generation, rows
+                        with generation(self, root, max_names) as cached:
+                            if cached is not None:
+                                names, stream = cached
+                                # All authoritative names and types are checked
+                                # before yielding any index row or decoding facts.
+                                matched = sum(names.contains(n) for n in self._names(fd, max_names))
+                                if matched != len(names):
+                                    raise ValueError('field_lab_index_missing_authoritative_fact')
+                                if meta is not None:
+                                    for _ in self._names(meta, max_names):
+                                        pass
+                                yield from rows(names, stream, self)
+                                for name in self._names(fd, max_names):
+                                    if not names.contains(name):
+                                        yield self._legacy_metadata(fd, meta, name)
+                                return
                         # Constant-memory preflight preserves fail-closed limits.
                         for _ in self._names(fd, max_names):
                             pass
                         for name in self._names(fd, max_names):
-                            try:
-                                value = json.loads(self._read(meta, name)) if meta is not None else None
-                            except FileNotFoundError:
-                                value = None
-                            if value is None:
-                                artifact = FieldLabArtifact.decode(self._read(fd, name))
-                                value = self._metadata(artifact)
-                            if self._name(value['idempotency_key']) != name:
-                                raise ValueError('field_lab_identity_mismatch')
-                            yield value
+                            yield self._legacy_metadata(fd, meta, name)
                 finally:
                     if meta is not None:
                         os.close(meta)
         except FileNotFoundError:
             if self._root.exists():
                 raise
+
+    def _legacy_metadata(self, fd, meta, name):
+        try:
+            value = json.loads(self._read(meta, name)) if meta is not None else None
+        except FileNotFoundError:
+            value = None
+        if value is None:
+            artifact = FieldLabArtifact.decode(self._read(fd, name))
+            value = self._metadata(artifact)
+        if self._name(value['idempotency_key']) != name:
+            raise ValueError('field_lab_identity_mismatch')
+        return value
 
     @staticmethod
     def _names(fd, max_names):
@@ -368,7 +539,11 @@ class FileFieldLabStore:
                     raise ValueError('field_lab_unexpected_artifact_file')
                 if entry.is_symlink():
                     raise OSError('field_lab_regular_file_required')
-                if not stat.S_ISREG(entry.stat(follow_symlinks=False).st_mode):
+                # scandir uses the directory's type information when available,
+                # and falls back to lstat for unknown types. Avoid an unconditional
+                # inode lookup for every name on large disk-backed inventories.
+                # Payload/sidecar opens still use O_NOFOLLOW and fstat in _read.
+                if not entry.is_file(follow_symlinks=False):
                     raise ValueError('field_lab_regular_file_required')
                 count += 1
                 if count > max_names:
@@ -392,12 +567,17 @@ class FileFieldLabStore:
             existing = self.load(idempotency_key=artifact.idempotency_key)
             if existing is None and state['count'] + 1 >= state['stop_at']:
                 raise ValueError('field_lab_capacity_stop_scientific_facts_preserved')
+            query = state.get('metadata_query')
+            if existing is None and query is not None and len(query.tail) >= 16_384:
+                raise ValueError('field_lab_index_refresh_required')
             if artifact.artifact_type == 'reference_seal_commit':
                 saved = self._publish(fd, self._name(artifact.idempotency_key), document, rollback=True)
             else:
                 saved = self._publish(fd, self._name(artifact.idempotency_key), document)
             if saved:
                 state['count'] += 1
+                if query is not None:
+                    query.add(artifact)
         self._save_metadata(artifact)
         return saved
 
@@ -449,6 +629,79 @@ class FileFieldLabStore:
             if end is not None and meta['time_min'] > end:
                 continue
             artifact = self.load(idempotency_key=meta['idempotency_key'])
-            if artifact is None or artifact.digest != meta['digest'] or self._metadata(artifact) != meta:
+            if artifact is None or artifact.digest != meta['digest'] or not self.metadata_matches(artifact, meta):
                 raise ValueError('field_lab_metadata_mismatch')
             yield artifact
+
+
+class FieldLabMetadataQuery:
+    """Pinned metadata snapshot; selected scientific envelopes are never cached."""
+    def __init__(self, store, artifacts, meta, cached, tail):
+        self.store, self.artifacts, self.meta, self.cached, self.tail = store, artifacts, meta, cached, tail
+        self.own_metadata, self.own_bytes = {}, 0
+        self.related_tail = {}
+        for name in tail:
+            value = self._tail_metadata(name)
+            if value['artifact_type'] in ('reference_comparison', 'reference_comparison_state'):
+                self.related_tail.setdefault(value['forecast_run_id'], []).append(name)
+
+    def _tail_metadata(self, name):
+        if name in self.own_metadata:
+            return self.own_metadata[name]
+        value = self.store._legacy_metadata(self.artifacts, self.meta, name)
+        if (value['artifact_type'] in ('reference_comparison', 'reference_comparison_state')
+                and 'forecast_run_id' not in value):
+            artifact = FieldLabArtifact.decode(self.store._read(self.artifacts, name))
+            if not self.store.metadata_matches(artifact, value):
+                raise ValueError('field_lab_metadata_mismatch')
+            value = self.store._metadata(artifact)
+        return value
+
+    def iter_metadata(self):
+        yield from self.cached.iter_metadata(self.store)
+        for name in self.tail:
+            yield self._tail_metadata(name)
+
+    def add(self, artifact):
+        """Register a durable publication before its possibly interrupted sidecar."""
+        name = self.store._name(artifact.idempotency_key)
+        self.tail.append(name)
+        value = self.store._metadata(artifact)
+        if value['artifact_type'] in ('reference_comparison', 'reference_comparison_state'):
+            self.related_tail.setdefault(value['forecast_run_id'], []).append(name)
+        length = len(_json(value).encode())
+        if length <= 4096 and self.own_bytes+length <= 16*1024**2:
+            self.own_metadata[name] = value
+            self.own_bytes += length
+
+    def comparison_artifacts(self, run_id, *, start=None, end=None):
+        from concurrent.futures import ThreadPoolExecutor
+        start = datetime.fromisoformat(start.replace('Z', '+00:00')).isoformat(timespec='microseconds') if start else None
+        end = datetime.fromisoformat(end.replace('Z', '+00:00')).isoformat(timespec='microseconds') if end else None
+        def metadata():
+            yield from self.cached.related(run_id, self.store)
+            for name in self.related_tail.get(run_id, ()):
+                yield self._tail_metadata(name)
+        def load(value):
+            if field_lab_root() != self.store._root:
+                raise ValueError('field_lab_configuration_changed')
+            # Comparison/state envelopes have a separate bounded parallel-read
+            # budget. Oversized scientific inputs fail closed before decoding.
+            artifact = FieldLabArtifact.decode(self.store._read(self.artifacts,
+                self.store._name(value['idempotency_key']), max_bytes=64*1024))
+            if (artifact.digest != value['digest']
+                    or not self.store.metadata_matches(artifact, value)):
+                raise ValueError('field_lab_metadata_mismatch')
+            return artifact
+        pending = []
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            for value in metadata():
+                if start is not None and value['time_max'] < start:
+                    continue
+                if end is not None and value['time_min'] > end:
+                    continue
+                pending.append(value)
+                if len(pending) == 32:
+                    yield from pool.map(load, pending)
+                    pending.clear()
+            yield from pool.map(load, pending)
