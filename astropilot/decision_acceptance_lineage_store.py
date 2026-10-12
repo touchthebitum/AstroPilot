@@ -5,6 +5,9 @@ from astropilot.field_lab_paths import require_user_directory
 import os
 import sys
 import tempfile
+from copy import deepcopy
+from dataclasses import dataclass
+from threading import RLock
 from pathlib import Path
 
 from astropilot.file_lock import exclusive_file_lock
@@ -33,6 +36,8 @@ class FileDecisionAcceptanceLineageStore:
         self._directory = Path(directory)
         self._session_snapshot = None
         self._session_signature = None
+        self._validated_history = {}
+        self._history_lock = RLock()
 
     def session_read_snapshot(self):
         """Reuse only fully validated mission/selection provenance, while files match.
@@ -98,14 +103,54 @@ class FileDecisionAcceptanceLineageStore:
                 "invalid_lineage_aggregate"
             ) from error
 
-    def _load_all(self) -> list[DecisionAcceptanceAggregate]:
+    def _load_all(self) -> list[_ValidatedHistoryEntry]:
+        with self._history_lock:
+            return self._validated_entries()
+
+    def _validated_entries(self) -> list[_ValidatedHistoryEntry]:
+        """Keep compact provenance only after full validation of each file.
+
+        Every scan still checks the complete directory, including new files.
+        Changed files are decoded again; decision payloads are never retained.
+        Return independent values so callers cannot mutate validated state.
+        """
         require_user_directory(self._directory)
         if not self._directory.exists():
+            self._validated_history.clear()
             return []
-        return [
-            self._load_path(path)
-            for path in sorted(self._directory.glob("*.json"))
-        ]
+        def signature():
+            return {
+                path: (info.st_dev, info.st_ino, info.st_size,
+                       info.st_mtime_ns, info.st_ctime_ns)
+                for path in sorted(self._directory.glob("*.json"))
+                for info in (path.stat(),)
+            }
+        before = signature()
+        entries = []
+        try:
+            for path, identity in before.items():
+                cached = self._validated_history.get(path)
+                if cached is None or cached[0] != identity:
+                    aggregate = self._load_path(path)
+                    entry = _ValidatedHistoryEntry(
+                        aggregate.decision_id,
+                        deepcopy({key: aggregate.context.profile.get(key) for key in
+                                  ("location", "active_equipment", "profile_revision")}),
+                        aggregate.selections,
+                        tuple(serialize_night_mission(mission) for mission in aggregate.missions),
+                        aggregate.acceptance_requests,
+                    )
+                    self._validated_history[path] = (identity, entry)
+                else:
+                    entry = cached[1]
+                entries.append(entry)
+            if signature() != before:
+                raise AcceptanceLineageConflictError("decision_lineage_changed")
+        except Exception:
+            self._validated_history.clear()
+            raise
+        self._validated_history = {path: self._validated_history[path] for path in before}
+        return deepcopy(entries)
 
     def _write(self, aggregate: DecisionAcceptanceAggregate) -> None:
         path = self._path(aggregate.decision_id)
@@ -125,6 +170,8 @@ class FileDecisionAcceptanceLineageStore:
                 temporary.flush()
                 os.fsync(temporary.fileno())
             os.replace(temporary_path, path)
+            with self._history_lock:
+                self._validated_history.pop(path, None)
             temporary_path = None
         finally:
             if temporary_path is not None:
@@ -310,6 +357,8 @@ class FileDecisionAcceptanceLineageStore:
                     "acceptance_lineage_conflict"
                 )
 
+            # Only the selected decision needs its full context for the write.
+            target = self._load_path(path)
             updated = DecisionAcceptanceAggregate(
                 context=target.context,
                 selections=target.selections + (selection,),
@@ -396,9 +445,9 @@ class FileDecisionAcceptanceLineageStore:
         matches = [
             (selection, mission)
             for aggregate in self._load_all()
-            if aggregate.context.profile.get("location") == profile.get("location")
-            and aggregate.context.profile.get("active_equipment") == profile.get("active_equipment")
-            and aggregate.context.profile.get("profile_revision") == profile.get("profile_revision")
+            if aggregate.profile.get("location") == profile.get("location")
+            and aggregate.profile.get("active_equipment") == profile.get("active_equipment")
+            and aggregate.profile.get("profile_revision") == profile.get("profile_revision")
             for mission in aggregate.missions
             for selection in aggregate.selections
             if selection.selection_id == mission.selection_id
@@ -434,6 +483,19 @@ class FileDecisionAcceptanceLineageStore:
         if len(matches) != 1:
             raise AcceptanceLineageConflictError("mission_id_conflict")
         return matches[0]
+
+
+@dataclass(frozen=True)
+class _ValidatedHistoryEntry:
+    decision_id: str
+    profile: dict
+    selections: tuple
+    mission_documents: tuple
+    acceptance_requests: tuple
+
+    @property
+    def missions(self):
+        return tuple(deserialize_night_mission(document) for document in self.mission_documents)
 
 
 class _SessionProvenanceSnapshot:
