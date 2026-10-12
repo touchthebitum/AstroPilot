@@ -709,6 +709,15 @@ without accumulating the unused full computation tuple; other callers retain
 their existing tuple API by default. Query tails are bounded to 16384 names;
 larger tails require an explicit index refresh before scientific computation.
 
+Indexed periodic reports hold one checked generation/inventory for their complete
+operation. One metadata pass counts the window's comparison/state envelopes,
+checks the unchanged 20000-entry materialization limit before scientific loads,
+and counts forecast targets for the legacy reconstruction fallback. The derived
+forecast lookup then reads and validates every selected scientific envelope with
+the same bounded parallel reads. Cohort, tolerance, time-window and latest-state
+selection remain unchanged. Reports reuse the existing writer view inside a cycle;
+independent read-only reports perform their own full inventory preflight.
+
 A comparison scan builds active observation revisions once, using canonical
 (station, variable, observed timestamp) identities and the existing deterministic
 retrieval-time/digest revision ordering. Sorted timelines provide nearest lookup
