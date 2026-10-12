@@ -67,14 +67,14 @@ jobs:
       - name: Compare three synchronized IP addresses with verified hostname TLS
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'weather-diagnostics'
-          uv run --locked --no-sync python ../operations/tooling/weather_ip_matrix.py --source . --out "$out" --start-epoch "${{ inputs.start_epoch }}"
+          uv run --locked --no-sync python ../operations/tooling/weather_clients.py --source . --out "$out"
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic harness error' }
           if (git status --porcelain --untracked-files=all) { throw 'Source changed' }
       - name: Preserve diagnostic report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Beta8-weather-IP-comparison-${{ inputs.approved_sha }}
+          name: Beta8-weather-TLS-clients-${{ inputs.approved_sha }}
           path: ${{ runner.temp }}/weather-diagnostics/*
           include-hidden-files: false
           retention-days: 30
