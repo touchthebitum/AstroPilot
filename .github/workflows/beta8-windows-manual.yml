@@ -41,17 +41,52 @@ jobs:
           if ((git rev-parse HEAD).Trim() -cne 'f70f2e4476b4ae7b58d1275615b9d4cd6d725ce2') { throw 'SHA mismatch' }
           gh run download 38285317664 --repo $env:GITHUB_REPOSITORY --name Beta8-common-windows-f70f2e4476b4ae7b58d1275615b9d4cd6d725ce2 --dir (Join-Path $env:RUNNER_TEMP 'weather-download')
           if ($LASTEXITCODE -ne 0) { throw 'Artifact download failed' }
-      - name: Compare binary and independent TLS clients
+      - name: Capture fixed-IP TCP and TLS trials in disposable runner
         run: |
           $env:UV_PROJECT_ENVIRONMENT = Join-Path $env:RUNNER_TEMP 'weather-python-environment'
           uv sync --locked --no-install-project
           if ($LASTEXITCODE -ne 0) { throw 'Dependencies failed' }
-          uv run --locked --no-sync python ../operations/tooling/diagnose_weather_f70.py
-          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic failed' }
+          $out = Join-Path $env:RUNNER_TEMP 'weather-fixed-capture'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $hosts = Join-Path $env:windir 'System32/drivers/etc/hosts'
+          $original = [IO.File]::ReadAllBytes($hosts)
+          $capturing = $false
+          try {
+            [IO.File]::AppendAllText($hosts, "`n188.40.99.226 api.open-meteo.com # isolated AstroPilot trial`n")
+            Clear-DnsClientCache
+            pktmon filter remove
+            pktmon filter add meteo-fixed -i 188.40.99.226 -t TCP -p 443
+            if ($LASTEXITCODE -ne 0) { throw 'Packet filter failed' }
+            pktmon list > (Join-Path $out 'capture-components.txt')
+            pktmon filter list > (Join-Path $out 'capture-filters.txt')
+            pktmon start --capture --comp nics --pkt-size 0 --file-name (Join-Path $out 'network.etl')
+            if ($LASTEXITCODE -ne 0) { throw 'Capture failed' }
+            $capturing = $true
+            uv run --locked --no-sync python ../operations/tooling/capture_weather_fixed_f70.py
+            if ($LASTEXITCODE -ne 0) { throw 'Trials failed' }
+          } finally {
+            [IO.File]::WriteAllBytes($hosts, $original)
+            Clear-DnsClientCache
+            if ($capturing) {
+              pktmon counters > (Join-Path $out 'capture-counters.txt')
+              pktmon stop
+              pktmon etl2pcap (Join-Path $out 'network.etl') --out (Join-Path $out 'network.pcapng')
+              if ($LASTEXITCODE -ne 0) { throw 'PCAP conversion failed' }
+              pktmon etl2txt (Join-Path $out 'network.etl') --out (Join-Path $out 'network.txt')
+            }
+            pktmon filter remove
+            $restored = [Convert]::ToBase64String([IO.File]::ReadAllBytes($hosts)) -ceq [Convert]::ToBase64String($original)
+            @{hosts_restored=$restored;capture_stopped=$capturing} | ConvertTo-Json | Set-Content (Join-Path $out 'cleanup.json')
+            if (-not $restored) { throw 'Hosts restoration failed' }
+          }
           if (git status --porcelain --untracked-files=all) { throw 'Source changed' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: Windows-weather-f70-diagnostic
-          path: ${{ runner.temp }}/weather-f70-diagnostic/results/*
+          name: Windows-weather-fixed-capture-f70
+          path: |
+            ${{ runner.temp }}/weather-fixed-capture/*.json
+            ${{ runner.temp }}/weather-fixed-capture/*.log
+            ${{ runner.temp }}/weather-fixed-capture/network.*
+            ${{ runner.temp }}/weather-fixed-capture/capture-*.txt
           retention-days: 30
