@@ -1,4 +1,4 @@
-name: Beta8 Windows existing artifact weather diagnostics
+name: Beta8 Windows paired IP diagnostics
 on:
   workflow_dispatch:
     inputs:
@@ -61,42 +61,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Runtime setup failed' }
           if (Test-Path astropilot.egg-info) { Move-Item astropilot.egg-info (Join-Path $env:RUNNER_TEMP 'weather-generated-metadata') }
           if (git status --porcelain --untracked-files=all) { throw 'Source changed' }
-      - name: Download the delivered artifact and verify its exact ZIP hash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $download = Join-Path $env:RUNNER_TEMP 'delivered-artifact'
-          gh run download 38221698395 --repo touchthebitum/AstroPilot --name Beta8-common-windows-3a39f4de1f620ccfcae2f2cd01f7719551ba1d38 --dir "$download"
-          if ($LASTEXITCODE -ne 0) { throw 'Artifact retrieval failed' }
-          $zip = Get-ChildItem -LiteralPath $download -Recurse -Filter 'AstroPilot-1.0.0b8-windows-x86_64-portable.zip'
-          if (@($zip).Count -ne 1) { throw 'Unexpected ZIP inventory' }
-          if ((Get-FileHash -LiteralPath $zip.FullName -Algorithm SHA256).Hash.ToLower() -cne '269c3fc9d49a0587a1280c1457b57475ce8bd27ca23ae3ee20c87ce3c9ce6575') { throw 'Delivered ZIP hash mismatch' }
-          $unpacked = Join-Path $env:RUNNER_TEMP 'delivered-portable'
-          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $unpacked
-          "DIAGNOSTIC_BINARY=$(Join-Path $unpacked 'AstroPilot\AstroPilot.exe')" >> $env:GITHUB_ENV
-      - name: Build a diagnostic twin without modifying product sources
-        run: |
-          $env:DIAGNOSTIC_SOURCE_ROOT = (Get-Location).Path
-          $env:DIAGNOSTIC_RUNTIME_HOOK = (Resolve-Path ../operations/tooling/weather_runtime_hook.py).Path
-          $env:ASTROPILOT_BUILD_COMMIT = '3a39f4d'
-          $env:PYINSTALLER_CONFIG_DIR = Join-Path $env:RUNNER_TEMP 'weather-pyinstaller-cache'
-          $dest = Join-Path $env:RUNNER_TEMP 'weather-diagnostic-dist'
-          $build = Join-Path $env:RUNNER_TEMP 'weather-diagnostic-build'
-          uv run --locked --no-sync python -m PyInstaller --noconfirm --clean --distpath "$dest" --workpath "$build" ../operations/tooling/diagnostic_windows.spec
-          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic twin build failed' }
-          "DIAGNOSTIC_TWIN=$(Join-Path $dest 'AstroPilot/AstroPilot.exe')" >> $env:GITHUB_ENV
-          if (git status --porcelain --untracked-files=all) { throw 'Product source changed' }
-      - name: Compare original artifact, diagnostic twin and Python
+      - name: Compare both IP addresses with verified hostname TLS
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'weather-diagnostics'
-          uv run --locked --no-sync python ../operations/tooling/weather_twin.py --original "$env:DIAGNOSTIC_BINARY" --diagnostic "$env:DIAGNOSTIC_TWIN" --source . --out "$out"
+          uv run --locked --no-sync python ../operations/tooling/weather_ip_matrix.py --source . --out "$out"
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic harness error' }
           if (git status --porcelain --untracked-files=all) { throw 'Source changed' }
       - name: Preserve diagnostic report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Beta8-weather-diagnostics-${{ inputs.approved_sha }}
+          name: Beta8-weather-IP-comparison-${{ inputs.approved_sha }}
           path: ${{ runner.temp }}/weather-diagnostics/*
           include-hidden-files: false
           retention-days: 30

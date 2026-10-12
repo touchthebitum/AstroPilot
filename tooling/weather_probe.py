@@ -1,12 +1,13 @@
 """Read-only probe of the exact source HTTP worker, with external phase telemetry."""
 import argparse,hashlib,importlib.util,json,pathlib,socket,sys,time
-p=argparse.ArgumentParser();p.add_argument('--source',required=True);p.add_argument('--out',required=True);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--source',required=True);p.add_argument('--out',required=True);p.add_argument('--connect-ip',choices=['188.40.99.226','94.130.142.35']);a=p.parse_args()
 source=pathlib.Path(a.source);spec=importlib.util.spec_from_file_location('exact_weather_worker',source/'astropilot/guardian_http_worker.py');worker=importlib.util.module_from_spec(spec);spec.loader.exec_module(worker)
 result={'phase':'tls_context','timings':{},'dns':[],'success':False,'ca_sha256':hashlib.sha256(pathlib.Path(worker.certifi.where()).read_bytes()).hexdigest()};began=time.monotonic()
 old_dns=socket.getaddrinfo
 old_connect=socket.create_connection
 class Connection(worker.HTTPSConnection):
  def connect(self):
+  result['hostname']=self.host;result['connect_ip']=a.connect_ip;result['tls_verification']={'verify_mode':int(self._context.verify_mode),'check_hostname':self._context.check_hostname};assert self.host=='api.open-meteo.com' and self._context.check_hostname and int(self._context.verify_mode)==2
   result['phase']='connect';t=time.monotonic()
   try:super().connect()
   finally:result['timings']['connection_including_tls']=time.monotonic()-t
@@ -21,7 +22,9 @@ class Connection(worker.HTTPSConnection):
   return r
 def dns(*args,**kwargs):
  result['phase']='dns';t=time.monotonic()
- try:r=old_dns(*args,**kwargs)
+ try:
+  if a.connect_ip and args[0]=='api.open-meteo.com':args=(a.connect_ip,)+args[1:]
+  r=old_dns(*args,**kwargs)
  finally:result['timings']['dns']=time.monotonic()-t
  result['dns']=[{'family':v[0],'address':v[4][0]} for v in r];result['phase']='tcp';return r
 def tcp(*args,**kwargs):
