@@ -5,6 +5,9 @@ on:
       approved_sha:
         required: true
         type: string
+      start_epoch:
+        required: true
+        type: string
 permissions:
   contents: read
   actions: read
@@ -61,10 +64,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Runtime setup failed' }
           if (Test-Path astropilot.egg-info) { Move-Item astropilot.egg-info (Join-Path $env:RUNNER_TEMP 'weather-generated-metadata') }
           if (git status --porcelain --untracked-files=all) { throw 'Source changed' }
-      - name: Compare both IP addresses with verified hostname TLS
+      - name: Compare three synchronized IP addresses with verified hostname TLS
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'weather-diagnostics'
-          uv run --locked --no-sync python ../operations/tooling/weather_ip_matrix.py --source . --out "$out"
+          uv run --locked --no-sync python ../operations/tooling/weather_ip_matrix.py --source . --out "$out" --start-epoch "${{ inputs.start_epoch }}"
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic harness error' }
           if (git status --porcelain --untracked-files=all) { throw 'Source changed' }
       - name: Preserve diagnostic report

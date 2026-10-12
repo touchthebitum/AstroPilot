@@ -1,6 +1,6 @@
 """Read-only probe of the exact source HTTP worker, with external phase telemetry."""
 import argparse,hashlib,importlib.util,json,pathlib,socket,sys,time
-p=argparse.ArgumentParser();p.add_argument('--source',required=True);p.add_argument('--out',required=True);p.add_argument('--connect-ip',choices=['188.40.99.226','94.130.142.35']);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--source',required=True);p.add_argument('--out',required=True);p.add_argument('--connect-ip',choices=['188.40.99.226','94.130.142.35','167.114.211.86']);a=p.parse_args()
 source=pathlib.Path(a.source);spec=importlib.util.spec_from_file_location('exact_weather_worker',source/'astropilot/guardian_http_worker.py');worker=importlib.util.module_from_spec(spec);spec.loader.exec_module(worker)
 result={'phase':'tls_context','timings':{},'dns':[],'success':False,'ca_sha256':hashlib.sha256(pathlib.Path(worker.certifi.where()).read_bytes()).hexdigest()};began=time.monotonic()
 old_dns=socket.getaddrinfo
