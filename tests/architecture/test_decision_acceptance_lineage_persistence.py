@@ -1770,6 +1770,55 @@ def test_v10_file_store_preserves_exact_lunar_snapshot_in_decision_and_mission(t
     assert serialize_decision_acceptance_aggregate(restored) == payload
 
 
+def test_acceptance_history_cache_is_compact_and_revalidates_external_changes(tmp_path, monkeypatch):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    aggregate = DecisionAcceptanceAggregate(context(), (selection(),), (mission(),))
+    store._write(aggregate)
+    calls = []
+    original = store._load_path
+
+    def counted(path):
+        calls.append(path.name)
+        return original(path)
+    monkeypatch.setattr(store, '_load_path', counted)
+    assert store.load_mission('mission-1') == mission()
+    assert store.load_selection('selection-1') == selection()
+    assert calls == ['decision-1.json']
+    entry = next(iter(store._validated_history.values()))[1]
+    assert not hasattr(entry, 'context')
+    assert set(entry.profile) == {'location', 'active_equipment', 'profile_revision'}
+    # Returned data must not become authority for later reads.
+    store._load_all()[0].profile['location'] = 'external-mutation'
+    assert store._load_all()[0].profile == entry.profile
+    changed = replace(aggregate, missions=(replace(mission(), target='changed'),))
+    (tmp_path / 'decision-1.json').write_text(serialize_decision_acceptance_aggregate(changed))
+    assert store.load_mission('mission-1').target == 'changed'
+    assert len(calls) == 2
+    (tmp_path / 'new.json').write_text('{}')
+    with pytest.raises(AcceptanceLineageCorruptionError):
+        store.load_mission('mission-1')
+    assert not store._validated_history
+    (tmp_path / 'new.json').unlink()
+    (tmp_path / 'decision-1.json').unlink()
+    with pytest.raises(AcceptanceLineageNotFoundError):
+        store.load_mission('mission-1')
+
+
+def test_acceptance_history_detects_change_during_validation(tmp_path, monkeypatch):
+    store = FileDecisionAcceptanceLineageStore(tmp_path)
+    aggregate = DecisionAcceptanceAggregate(context())
+    store._write(aggregate)
+    original = store._load_path
+    def changed(path):
+        result = original(path)
+        path.write_text(serialize_decision_acceptance_aggregate(result))
+        return result
+    monkeypatch.setattr(store, '_load_path', changed)
+    with pytest.raises(AcceptanceLineageConflictError, match='decision_lineage_changed'):
+        store.load_acceptance('request-1')
+    assert not store._validated_history
+
+
 def test_guardian_session_snapshot_reuses_validated_provenance_and_invalidates(tmp_path, monkeypatch):
     store = FileDecisionAcceptanceLineageStore(tmp_path)
     aggregate = DecisionAcceptanceAggregate(context(), (selection(),), (mission(),))

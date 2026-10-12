@@ -1115,7 +1115,7 @@ def test_weather_refusal_keeps_global_confidence_cartouche_off_blocked_screen():
         "ui.recommendationSubmit.addEventListener", 1
     )[0]
     refusal = load_tonight.split('if (payload.status === "weather_refused") {', 1)[1].split(
-        'if (payload.status !== "available")', 1
+        'if (payload.status !== "available" &&', 1
     )[0]
 
     assert '<div id="recommendation-confidence" class="recommendation-reliability" hidden' in page
@@ -1273,6 +1273,8 @@ def test_primary_status_render_executes_without_fabricating_missing_values(tmp_p
         pytest.skip('A JavaScript runtime is required for the render execution test')
     script = make_client().get('/ui/app.js').text
     render = 'function renderDecision(decision) {' + script.split('function renderDecision(decision) {', 1)[1].split('const customEquipmentFields', 1)[0]
+    pending = 'function pendingIntentChoice(subject) {' + script.split('function pendingIntentChoice(subject) {', 1)[1].split('function chosenIntent(', 1)[0]
+    render = pending + render
     confidence = 'function formatRecommendationConfidence(confidence) {' + script.split('function formatRecommendationConfidence(confidence) {', 1)[1].split('function clearAlternatives', 1)[0]
     harness = '''
 const values = {};

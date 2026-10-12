@@ -1386,6 +1386,7 @@ class ActionabilityRefusalModel(
 
 
 class TonightResponseModel(BaseModel):
+    acquisition_intent_choice_available: bool = False
     opportunity_alert: OpportunityAlertResponse | None = Field(default=None, exclude_if=lambda value: value is None)
     model_config = ConfigDict(
         json_schema_extra={
@@ -1624,6 +1625,22 @@ class TonightResponseModel(BaseModel):
     target_explanations: list[TargetExplanationResponseModel] = Field(
         default_factory=list
     )
+
+
+def _acquisition_intent_choice_available(result) -> bool:
+    """Expose a live eligible comparison, never authorize a default mission."""
+    if (result.status is not TonightStatus.NO_MISSION
+            or result.creation_refusal != "preselection_evidence_cannot_authorize_mission"
+            or result.recommendation is None):
+        return False
+    candidate = result.recommendation.opportunity.candidate
+    viable = set(candidate.viable_acquisition_intent_ids)
+    eligible = {item.acquisition_intent_id for item in candidate.acquisition_intent_assessments
+                if item.status.value == "eligible"}
+    return (candidate.lunar_evidence_snapshot is not None
+            and candidate.selected_acquisition_intent_id is None
+            and getattr(candidate.acquisition_intent_selection_status, "value", None) == "no_clear_preference"
+            and len(viable) >= 2 and viable <= eligible)
 
 
 def _intent_options(candidate) -> list[dict[str, str]]:
@@ -2960,6 +2977,9 @@ def create_app(
                 ),
                 "acquisition_intent_options": _intent_options(candidate),
             })
+        payload["acquisition_intent_choice_available"] = (
+            _acquisition_intent_choice_available(result) and not weather_refused
+        )
         register_decision_context = getattr(
             application_service(),
             "register_decision_context",
@@ -2985,7 +3005,8 @@ def create_app(
                 availability=inputs.availability,
                 primary_catalog_key=(
                     opportunity.candidate.catalog_key
-                    if payload["target_decision_status"] == "recommended"
+                    if (payload["target_decision_status"] == "recommended"
+                        or payload["acquisition_intent_choice_available"])
                     else None
                 ),
                 exposed_alternative_catalog_keys=tuple(
