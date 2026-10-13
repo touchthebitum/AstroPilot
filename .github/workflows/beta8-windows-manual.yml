@@ -11,6 +11,7 @@ on:
         default: false
 permissions:
   contents: read
+  actions: read
 jobs:
   windows:
     if: ${{ !inputs.validation_only }}
@@ -130,6 +131,15 @@ jobs:
           version: '0.12.6'
           python-version: '3.13.5'
           enable-cache: false
+      - name: Retrieve exact built binary for launcher smoke test
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $artifacts = Join-Path $env:RUNNER_TEMP 'pr376-built-artifacts'
+          gh run download 38355628182 --repo touchthebitum/AstroPilot --name PR376-windows-a6f5bd8e454d3de28dd9cc5f23408efabca6e0a1 --dir "$artifacts"
+          if ($LASTEXITCODE -ne 0) { throw 'Binary artifact download failed' }
+          "PR376_ARCHIVE_ROOT=$artifacts" >> $env:GITHUB_ENV
       - name: Qualify portable harness with synthetic profiles only
         shell: pwsh
         run: |

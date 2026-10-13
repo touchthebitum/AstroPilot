@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import zipfile
+import urllib.request
 
 
 assert sys.platform == 'win32'
@@ -178,6 +179,50 @@ with socket.socket() as listener:
     finally:
         child.close()
 findings.append({'check':'unrelated_server_refused','passed':True})
+
+if os.environ.get('PR376_ARCHIVE_ROOT'):
+    archive=next(Path(os.environ['PR376_ARCHIVE_ROOT']).rglob('AstroPilot-1.0.0b8-windows-x86_64-portable.zip'))
+    assert digest(archive)=='ef74d48133f46de22c6166fdec3eb63c384c1eb324301cdd5422d1511b4d21f7'
+    smoke=WORK/'real-binary-smoke'
+    smoke.mkdir()
+    extracted=smoke/'extracted'
+    safe_extract(archive,extracted)
+    env={k:v for k,v in os.environ.items() if not k.upper().startswith(('ASTROPILOT_','NIGHTMERIT_'))}
+    for key in ('HOME','USERPROFILE','APPDATA','LOCALAPPDATA','TEMP','TMP','ASTROPILOT_DATA_DIR'):
+        directory=smoke/key
+        directory.mkdir()
+        env[key]=str(directory)
+    (Path(env['ASTROPILOT_DATA_DIR'])/'user_profile.json').write_text(json.dumps({
+        'location':{'name':'Synthetic validation Madrid','latitude':40.4,'longitude':-3.7},
+        'preferences':{'bortle':4},'active_equipment':'samyang_183',
+        'available_equipment':['samyang_183'],'projects':{},'sessions':[],'profile_revision':1}))
+    noop=smoke/'browser-noop.py'
+    noop.write_text('pass\n')
+    env['BROWSER']='"'+sys.executable+'" "'+str(noop)+'" %s'
+    child=IsolatedProcess([str(extracted/'AstroPilot/AstroPilot.exe')],smoke,env)
+    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        deadline=time.monotonic()+90
+        while time.monotonic()<deadline:
+            assert child.poll() is None, 'Real executable exited during startup'
+            if child.listener_pid() is not None:
+                with opener.open('http://127.0.0.1:8000/v1/runtime-identity',timeout=5) as response:
+                    identity=json.load(response)
+                break
+            time.sleep(.2)
+        else:
+            raise AssertionError('Real executable did not become ready')
+        assert identity['build']=='a6f5bd8' and identity['version']=='1.0.0b8'
+        with opener.open('http://127.0.0.1:8000/',timeout=5) as response:
+            assert response.status==200
+    finally:
+        child.close()
+    deadline=time.monotonic()+5
+    while IsolatedProcess.listening_pids() and time.monotonic()<deadline:
+        time.sleep(.1)
+    assert child.stopped and not IsolatedProcess.listening_pids()
+    findings.append({'check':'exact_real_binary_with_shipped_job_launcher','passed':True,
+                     'identity':identity,'only_GET_requests':True})
 
 report={'passed':True,'platform':sys.platform,'python':sys.version,
         'checks':findings,'profile':'synthetic only','real_user_data_accessed':False}
