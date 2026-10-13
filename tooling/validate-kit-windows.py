@@ -134,6 +134,7 @@ for scenario, expected in [('good','PASS'), ('wrong-night','FAIL'),
         env['KIT_FIXTURE_SCENARIO']=scenario
         return original_launch(argv,cwd,env)
     fixture.write_text(SERVER.replace("case=root.parent.name", "case=os.environ['KIT_FIXTURE_SCENARIO']"))
+    launch_with_scenario.listening_pids=IsolatedProcess.listening_pids
     module.IsolatedProcess=launch_with_scenario
     answers=iter(['2026-10-14','20:30','23:00'])
     original_input=builtins.input
@@ -155,8 +156,7 @@ for scenario, expected in [('good','PASS'), ('wrong-night','FAIL'),
         assert '/v1/decision-selections' not in requests
     else:
         assert requests.count('/v1/decision-selections')==2
-    with socket.socket() as probe:
-        probe.bind(('127.0.0.1',8000))
+    assert not IsolatedProcess.listening_pids()
     with zipfile.ZipFile(results[0].parent.with_suffix('.zip')) as bundle:
         assert 'comparison.json' in bundle.namelist()
         assert not any('/data/' in name or name.endswith('user_profile.json') for name in bundle.namelist())
@@ -164,6 +164,7 @@ for scenario, expected in [('good','PASS'), ('wrong-night','FAIL'),
 
 # A real unrelated listener is refused before any API POST.
 with socket.socket() as listener:
+    listener.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
     listener.bind(('127.0.0.1',8000))
     listener.listen()
     child=IsolatedProcess([sys.executable,'-c','import time; time.sleep(60)'],WORK,os.environ.copy())

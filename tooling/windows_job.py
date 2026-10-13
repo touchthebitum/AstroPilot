@@ -172,8 +172,9 @@ class IsolatedProcess:
         finally:
             self.kernel.CloseHandle(handle)
 
-    def listener_pid(self, port=8000):
-        """Read native TCP ownership; never trust an unrelated local server."""
+    @staticmethod
+    def listening_pids(port=8000):
+        """TIME_WAIT connections are not listening servers."""
         api = ctypes.WinDLL('iphlpapi', use_last_error=True).GetExtendedTcpTable
         api.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD), wintypes.BOOL,
                        wintypes.ULONG, ctypes.c_int, wintypes.ULONG]
@@ -193,12 +194,16 @@ class IsolatedProcess:
             rows = (_TcpRow * count).from_buffer(buf, ctypes.sizeof(wintypes.DWORD))
             pids = {row.pid for row in rows if row.state == 2
                     and socket.ntohs(row.local_port & 0xffff) == port}
-            if not pids:
-                return None
-            if len(pids) != 1 or not all(self.owns_pid(pid) for pid in pids):
-                raise RuntimeError('Le port appartient à un autre processus : aucun appel API autorisé.')
-            return next(iter(pids))
+            return pids
         raise RuntimeError('Inventaire TCP instable.')
+
+    def listener_pid(self, port=8000):
+        pids = self.listening_pids(port)
+        if not pids:
+            return None
+        if len(pids) != 1 or not all(self.owns_pid(pid) for pid in pids):
+            raise RuntimeError('Le port appartient à un autre processus : aucun appel API autorisé.')
+        return next(iter(pids))
 
     def close(self):
         if not self._handle:

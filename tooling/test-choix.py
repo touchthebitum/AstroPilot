@@ -69,8 +69,8 @@ def main():
         end_dt += datetime.timedelta(days=1)
     if end_dt-start_dt > datetime.timedelta(hours=24):
         raise SystemExit('Le créneau doit durer au plus 24 heures.')
-    with socket.socket() as check:
-        check.bind(('127.0.0.1',8000))
+    if IsolatedProcess.listening_pids():
+        raise SystemExit('Le port 8000 est occupé. Fermez AstroPilot avant le test.')
     archive = BASE/'AstroPilot-PR376-a6f5bd8-portable.zip'
     if not archive.is_file():
         raise SystemExit('Archive du binaire corrigé absente. Extrayez tout le nouveau kit.')
@@ -120,8 +120,8 @@ def main():
             noop = root/'noop.py'
             noop.write_text('pass\n',encoding='utf-8')
             env['BROWSER'] = '"'+sys.executable+'" "'+str(noop)+'" %s'
-            with socket.socket() as check:
-                check.bind(('127.0.0.1',8000))
+            if IsolatedProcess.listening_pids():
+                raise RuntimeError('Le port 8000 est occupé ; aucun serveur existant ne sera utilisé.')
             log = (root/'binary.log').open('w',encoding='utf-8')
             child = IsolatedProcess([str(exe)], cwd=root, env=env)
             OWNER = child
@@ -188,8 +188,8 @@ def main():
                 case['binary_stopped'] = child is None or child.stopped
                 OWNER = None
                 try:
-                    with socket.socket() as check:
-                        check.bind(('127.0.0.1',8000))
+                    if IsolatedProcess.listening_pids():
+                        raise OSError('Un serveur écoute encore sur le port 8000.')
                     case['port_released'] = True
                 except OSError:
                     case['port_released'] = False
