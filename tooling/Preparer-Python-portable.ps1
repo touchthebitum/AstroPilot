@@ -15,7 +15,7 @@ try {
         if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $item.Value) { throw "Empreinte Python incorrecte : $($item.Name)" }
     }
     $python = Join-Path $runtime 'python.exe'
-    & $python -c 'import ssl,struct,sys; assert sys.version_info[:3]==(3,13,5) and struct.calcsize("P")==8; print("Python portable verifie ; aucune installation Windows.")'
+    & $python (Join-Path $PSScriptRoot 'verifier-python.py')
     if ($LASTEXITCODE -ne 0) { throw 'Verification Python echouee.' }
     if ($RuntimeCheckOnly) { exit 0 }
     & $python (Join-Path $PSScriptRoot 'test-choix.py')
