@@ -1,4 +1,4 @@
-name: Beta8 requested-night Windows candidate build and validation
+name: PR376 Windows candidate build and validation
 on:
   workflow_dispatch:
     inputs:
@@ -38,7 +38,7 @@ jobs:
             !/data/user_profile.json
       - name: Guard exact source and isolated directories
         run: |
-          if ($env:APPROVED_SHA -cne 'e0805da015d79956d1e940d8118c5a74a972c5b1') { throw 'Unexpected product SHA' }
+          if ($env:APPROVED_SHA -cne 'a6f5bd8e454d3de28dd9cc5f23408efabca6e0a1') { throw 'Unexpected product SHA' }
           if ((git rev-parse HEAD).Trim() -cne $env:APPROVED_SHA) { throw 'Checkout mismatch' }
           if (git status --porcelain) { throw 'Dirty source' }
           $iso = Join-Path $env:RUNNER_TEMP 'beta8-common-isolation'
@@ -102,7 +102,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Beta8-common-windows-${{ inputs.approved_sha }}
+          name: PR376-windows-${{ inputs.approved_sha }}
           path: |
             source/dist/beta8-artifacts/*
             ${{ runner.temp }}/beta8-native-binary-validation/validation.json
