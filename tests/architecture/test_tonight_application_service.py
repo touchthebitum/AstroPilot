@@ -169,22 +169,40 @@ def test_missing_requested_evening_does_not_evaluate_another_night():
     assert calls == []
 
 
-def test_requested_evening_uses_site_timezone_without_changing_forecast_clock():
+@pytest.mark.parametrize(
+    "site_timezone,start_utc,expected_evening",
+    [
+        ("Europe/Zurich", "2026-10-13T10:00:00+00:00", date(2026, 10, 13)),
+        ("America/Los_Angeles", "2026-10-14T03:00:00+00:00", date(2026, 10, 13)),
+        ("Asia/Tokyo", "2026-10-13T15:30:00+00:00", date(2026, 10, 13)),
+        # Both occurrences of the repeated 02:30 belong to the same evening.
+        ("Europe/Zurich", "2026-10-25T00:30:00+00:00", date(2026, 10, 24)),
+        ("Europe/Zurich", "2026-10-25T01:30:00+00:00", date(2026, 10, 24)),
+        # Instants on either side of the spring-forward gap also agree.
+        ("Europe/Zurich", "2026-03-29T00:30:00+00:00", date(2026, 3, 28)),
+        ("Europe/Zurich", "2026-03-29T01:30:00+00:00", date(2026, 3, 28)),
+    ],
+)
+def test_requested_evening_uses_site_timezone_without_changing_forecast_clock(
+    site_timezone, start_utc, expected_evening,
+):
     weather = WeatherSnapshot(
         payload={}, provider="Open-Meteo", retrieved_at_utc=REFERENCE_TIME,
         requested_latitude=47.12, requested_longitude=7.04,
         grid_latitude=47.12, grid_longitude=7.04, grid_distance_km=0,
-        elevation_m=800, timezone="Europe/Zurich", timezone_source="coordinates_local",
+        elevation_m=800, timezone=site_timezone, timezone_source="coordinates_local",
         utc_offset_seconds=7200, valid_from=REFERENCE_TIME,
         valid_until=REFERENCE_TIME+timedelta(days=7), hour_count=168, completeness=1,
     )
-    # Noon at the site is still 10:00 UTC. Selection must use the site's date
-    # boundary while freshness and forecasting continue to use the real clock.
+    # The transport uses UTC; selection must use the site's civil evening.
+    # Forecasting and freshness continue to use the actual reference clock.
     availability = SessionAvailability(SessionAvailabilityMode.START_AND_DURATION,
-        start=datetime(2026, 10, 13, 10, tzinfo=timezone.utc),
+        start=datetime.fromisoformat(start_utc),
         duration=timedelta(hours=12))
-    nights = [{"date":date(2026,10,12),"top_objects":[]},
-              {"date":date(2026,10,13),"top_objects":[]}]
+    nights = [
+        {"date": expected_evening - timedelta(days=1), "top_objects": []},
+        {"date": expected_evening, "top_objects": []},
+    ]
     calls = []
 
     def forecast(*args, **kwargs):
