@@ -5,10 +5,15 @@ on:
       approved_sha:
         required: true
         type: string
+      validation_only:
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   windows:
+    if: ${{ !inputs.validation_only }}
     runs-on: windows-2022
     timeout-minutes: 45
     defaults:
@@ -110,3 +115,35 @@ jobs:
             ${{ runner.temp }}/beta8-native-portable-validation/logs/*
           if-no-files-found: warn
           retention-days: 30
+
+  kit-harness:
+    if: ${{ inputs.validation_only }}
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          sparse-checkout: tooling
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: '0.12.6'
+          python-version: '3.13.5'
+          enable-cache: false
+      - name: Qualify portable harness with synthetic profiles only
+        shell: pwsh
+        run: |
+          uv run --no-project --python 3.13.5 python tooling/validate-kit-windows.py
+          if ($LASTEXITCODE -ne 0) { throw 'Kit harness qualification failed' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: PR376-kit-harness-validation
+          path: ${{ runner.temp }}/pr376-kit-qualification/**/comparison.json
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: PR376-kit-native-safety
+          path: ${{ runner.temp }}/pr376-kit-qualification/validation-kit.json
+          if-no-files-found: warn
