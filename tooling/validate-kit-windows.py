@@ -85,7 +85,7 @@ assert child.stopped
 findings.append({'check':'suspended_launch_and_descendant_cleanup','passed':True})
 
 # Extraction cannot traverse out of the new kit directory.
-for name in ('../escape.txt', '/escape.txt', 'C:/escape.txt', 'a\\escape.txt'):
+for name in ('../escape.txt', '/escape.txt', 'C:/escape.txt', 'a/../escape.txt'):
     z = WORK/(hashlib.sha256(name.encode()).hexdigest()+'.zip')
     with zipfile.ZipFile(z,'w') as bundle:
         bundle.writestr(name,'fixture')
@@ -94,7 +94,7 @@ for name in ('../escape.txt', '/escape.txt', 'C:/escape.txt', 'a\\escape.txt'):
     except RuntimeError:
         pass
     else:
-        raise AssertionError('Unsafe ZIP accepted')
+        raise AssertionError('Unsafe ZIP accepted: '+name)
 findings.append({'check':'archive_path_refusal','passed':True})
 
 for scenario, expected in [('good','PASS'), ('wrong-night','FAIL'),

@@ -133,7 +133,21 @@ jobs:
       - name: Qualify portable harness with synthetic profiles only
         shell: pwsh
         run: |
-          uv run --no-project --python 3.13.5 python tooling/validate-kit-windows.py
+          $pythonZip = Join-Path $env:RUNNER_TEMP 'python-3.13.5-embed-amd64.zip'
+          Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.13.5/python-3.13.5-embed-amd64.zip' -OutFile $pythonZip
+          if ((Get-FileHash $pythonZip -Algorithm SHA256).Hash.ToLowerInvariant() -cne '7d2650fd9d1b9d002d4a315d5f354247fd6a44f30517c7ef577b08f57a0fb6d9') { throw 'Python archive hash mismatch' }
+          $runtime = Join-Path $PWD 'tooling/python-portable-3.13.5'
+          Expand-Archive -LiteralPath $pythonZip -DestinationPath $runtime
+          Add-Content -LiteralPath (Join-Path $runtime 'python313._pth') -Value '..'
+          $manifest = @{}
+          Get-ChildItem -LiteralPath $runtime -Recurse -File | ForEach-Object {
+            $rel = 'python-portable-3.13.5/' + $_.Name
+            $manifest[$rel] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          }
+          $manifest | ConvertTo-Json | Set-Content tooling/Manifest-Python.json
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File tooling/Preparer-Python-portable.ps1 -RuntimeCheckOnly
+          if ($LASTEXITCODE -ne 0) { throw 'Portable runtime verification failed' }
+          & (Join-Path $runtime 'python.exe') tooling/validate-kit-windows.py
           if ($LASTEXITCODE -ne 0) { throw 'Kit harness qualification failed' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
