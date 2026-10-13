@@ -48,6 +48,7 @@ class Handler(BaseHTTPRequestHandler):
      'catalog_key':'Sh2-129','acquisition_intent_choice_available':True,
      'viable_acquisition_intent_ids':(['sh2-129_ha','ou4_oiii'] if case!='refused' else []),
      'acquisition_intent_assessments':[]}
+   if case=='no-night': body['night_date']=None
    self.reply(body)
   elif self.path=='/v1/decision-selections':
    intent=data['acquisition_intent_id']
@@ -98,7 +99,7 @@ for name in ('../escape.txt', '/escape.txt', 'C:/escape.txt', 'a/../escape.txt')
 findings.append({'check':'archive_path_refusal','passed':True})
 
 for scenario, expected in [('good','PASS'), ('wrong-night','FAIL'),
-                           ('wrong-filter','FAIL'), ('refused','NOT_VALIDATED')]:
+                           ('wrong-filter','FAIL'), ('refused','NOT_VALIDATED'), ('no-night','NOT_VALIDATED')]:
     kit = WORK/scenario
     kit.mkdir()
     for name in ('test-choix.py','windows_job.py','kit_safety.py'):
@@ -150,7 +151,7 @@ for scenario, expected in [('good','PASS'), ('wrong-night','FAIL'),
     assert all(c['binary_stopped'] and c['port_released'] for c in report['cases'])
     assert json.loads((kit/'profil-Mac-reference/user_profile.json').read_text())=={'projects':{}}
     requests=''.join(p.read_text() for p in kit.rglob('requests.log'))
-    if scenario in ('wrong-night','refused'):
+    if scenario in ('wrong-night','refused','no-night'):
         assert '/v1/decision-selections' not in requests
     else:
         assert requests.count('/v1/decision-selections')==2

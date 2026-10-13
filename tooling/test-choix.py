@@ -109,7 +109,8 @@ def main():
             root.mkdir()
             data = root/'data'
             shutil.copytree(reference,data)
-            env = os.environ.copy()
+            env = {key:value for key,value in os.environ.items()
+                   if not key.upper().startswith(('ASTROPILOT_', 'NIGHTMERIT_'))}
             for key in ['HOME','USERPROFILE','APPDATA','LOCALAPPDATA','TMP','TEMP','TMPDIR','XDG_CACHE_HOME','XDG_CONFIG_HOME','XDG_DATA_HOME']:
                 directory = root/key
                 directory.mkdir()
@@ -125,6 +126,7 @@ def main():
             child = IsolatedProcess([str(exe)], cwd=root, env=env)
             OWNER = child
             case['launcher_pid'] = child.pid
+            log.write('Launcher contained in Windows Job; PID='+str(child.pid)+'\n'); log.flush()
             try:
                 deadline = time.time()+120
                 while time.time()<deadline:
@@ -153,6 +155,10 @@ def main():
                 expected_night = (start_dt.date()-datetime.timedelta(days=1) if start_dt.hour<12 else start_dt.date()).isoformat()
                 case['requested_night'] = expected_night
                 case['intent_assessments'] = decision.get('acquisition_intent_assessments',[])
+                if tonight['http']==200 and case['night_date'] is None:
+                    case.update(result='NOT_VALIDATED',reason='requested_night_not_available',detail=decision)
+                    print(intent,': aucune nuit disponible ; aucune confirmation.',flush=True)
+                    continue
                 if tonight['http']==200 and case['night_date']!=expected_night:
                     case.update(result='FAIL',reason='requested_night_mismatch' if case['night_date'] is not None else 'requested_night_missing')
                     print('Nuit renvoyée différente du créneau :',case['night_date'],expected_night,flush=True)
@@ -189,6 +195,7 @@ def main():
                     case['port_released'] = False
                     raise RuntimeError('Le port 8000 n’est pas libéré ; test suivant annulé.')
                 if log is not None:
+                    log.write('Job stopped; descendants reaped; port 8000 released.\n')
                     log.close()
                     log = None
                 child = None
@@ -227,9 +234,11 @@ def main():
                     entry = out/intent/name
                     if entry.is_file():
                         bundle.write(entry,intent+'/'+name)
-            for entry in sorted(out.rglob('*.log')):
-                if entry.name != 'binary.log' and entry.is_file():
-                    bundle.write(entry,entry.relative_to(out).as_posix())
+            for intent in ['sh2-129_ha','ou4_oiii']:
+                for location in ['LOCALAPPDATA','APPDATA']:
+                    for entry in sorted((out/intent/location).rglob('*.log')):
+                        if entry.is_file():
+                            bundle.write(entry,entry.relative_to(out).as_posix())
         print('Résultat global :',report['overall_result'],flush=True)
         print('ZIP à joindre dans le chat :',result_zip,flush=True)
         print('Référence Mac du kit inchangée :',report.get('original_files_unchanged','non vérifié'),flush=True)
