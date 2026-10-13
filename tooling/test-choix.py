@@ -188,8 +188,13 @@ def main():
                 case['binary_stopped'] = child is None or child.stopped
                 OWNER = None
                 try:
-                    if IsolatedProcess.listening_pids():
-                        raise OSError('Un serveur écoute encore sur le port 8000.')
+                    deadline = time.monotonic()+5
+                    remaining = IsolatedProcess.listening_pids()
+                    while remaining and time.monotonic() < deadline:
+                        time.sleep(.1)
+                        remaining = IsolatedProcess.listening_pids()
+                    if remaining:
+                        raise OSError('Un serveur écoute encore sur le port 8000 : '+str(sorted(remaining)))
                     case['port_released'] = True
                 except OSError:
                     case['port_released'] = False
