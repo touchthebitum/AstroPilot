@@ -1,5 +1,6 @@
 """Native kit qualification with synthetic inputs, never a real user profile."""
 import builtins
+import datetime
 import hashlib
 import importlib.util
 import json
@@ -26,7 +27,7 @@ from kit_safety import safe_extract
 
 SERVER = r'''
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import json, os, pathlib, sys
+import json, os, pathlib, sys, datetime
 root=pathlib.Path.cwd()
 class Handler(BaseHTTPRequestHandler):
  def log_message(self, *args): pass
@@ -44,7 +45,8 @@ class Handler(BaseHTTPRequestHandler):
   assert data_dir == root/'data'
   (data_dir/'fixture-write.json').write_text('{}')
   if self.path=='/v1/tonight':
-   day=data['availability']['start_local'][:10]
+   start=datetime.datetime.fromisoformat(data['availability']['start_local'])
+   day=(start.date()-datetime.timedelta(days=1) if start.hour<12 else start.date()).isoformat()
    body={'night_date':('2026-10-13' if case=='wrong-night' else day),'decision_id':'fixture-decision',
      'catalog_key':'Sh2-129','acquisition_intent_choice_available':True,
      'viable_acquisition_intent_ids':(['sh2-129_ha','ou4_oiii'] if case!='refused' else []),
@@ -103,7 +105,7 @@ for name in ('../escape.txt', '/escape.txt', 'C:/escape.txt', 'a/../escape.txt')
         raise AssertionError('Unsafe ZIP accepted: '+name)
 findings.append({'check':'archive_path_refusal','passed':True})
 
-for scenario, expected in [('good','PASS'), ('wrong-night','FAIL'),
+for scenario, expected in [('good','PASS'), ('after-midnight','PASS'), ('invalid-date-retry','PASS'), ('wrong-night','FAIL'),
                            ('wrong-filter','FAIL'), ('null-filter','FAIL'), ('legacy-source','FAIL'), ('wrong-bandwidth','FAIL'), ('refused','NOT_VALIDATED'), ('no-night','NOT_VALIDATED')]:
     kit = WORK/scenario
     kit.mkdir()
@@ -141,7 +143,9 @@ for scenario, expected in [('good','PASS'), ('wrong-night','FAIL'),
     fixture.write_text(SERVER.replace("case=root.parent.name", "case=os.environ['KIT_FIXTURE_SCENARIO']"))
     launch_with_scenario.listening_pids=IsolatedProcess.listening_pids
     module.IsolatedProcess=launch_with_scenario
-    answers=iter(['2026-10-14','20:30','23:00'])
+    answers=iter(['2026-10-16','02:45','04:15'] if scenario=='after-midnight' else
+                 ['12026-10-16','02:45','04:15','2026-10-14','20:30','23:00'] if scenario=='invalid-date-retry' else
+                 ['2026-10-14','20:30','23:00'])
     original_input=builtins.input
     builtins.input=lambda prompt:next(answers)
     try:
@@ -152,6 +156,8 @@ for scenario, expected in [('good','PASS'), ('wrong-night','FAIL'),
     assert len(results)==1
     report=json.loads(results[0].read_text())
     assert report['overall_result']==expected, report
+    if scenario=='after-midnight':
+        assert all(c['requested_night']=='2026-10-15' for c in report['cases'])
     assert report['original_files_unchanged'] is True
     assert all(p.stopped for p in launched)
     assert all(c['binary_stopped'] and c['port_released'] for c in report['cases'])
