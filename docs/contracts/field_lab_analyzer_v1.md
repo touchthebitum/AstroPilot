@@ -7,6 +7,8 @@ from a prior `scan` of the frozen export. Preserve that inventory independently;
 do not rescan a reduced corpus to replace it during the same audit.
 Report outputs carry forward the supplied inventory, including when it differs
 from the current corpus; they never silently establish a replacement baseline.
+An explicitly supplied JSON `null` inventory is rejected before any output
+directory is created; it cannot establish a replacement baseline.
 Inventory reads are bounded to 256 MiB, covering the 800,000-artifact operational
 corpus with store SHA-256 filenames; larger exports are explicitly rejected.
 No network, production engines, Tonight, mission, actionability, ledger,

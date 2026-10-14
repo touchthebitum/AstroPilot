@@ -384,3 +384,46 @@ def test_inventory_bound_covers_operational_corpus():
     one = json.dumps({'schema_version':1,'kind':'field_lab_inventory','artifacts':[item]},indent=2)
     two = json.dumps({'schema_version':1,'kind':'field_lab_inventory','artifacts':[item,item]},indent=2)
     assert len(one)+(800000-1)*(len(two)-len(one))+1 < a.INVENTORY_LIMIT
+
+
+def test_null_inventory_cannot_rebaseline_two_reports(tmp_path):
+    raw = tmp_path/'raw'; raw.mkdir()
+    sealed_forecast(raw); d = artifact(raw)
+    artifact(raw, payload=dict(d['payload'], value=9), key='revision')
+    baseline = tmp_path/'baseline'
+    a.main(['scan', '--input', str(raw), '--output', str(baseline)])
+    original_inventory = (baseline/'inventory.json').read_bytes()
+    (raw/'artifacts'/'revision.json').unlink()
+    before = {p.name:p.read_bytes() for p in (raw/'artifacts').iterdir()}
+    bad = tmp_path/'null.json'; bad.write_text('null')
+    first = tmp_path/'first'; second = tmp_path/'second'
+    with pytest.raises(ValueError, match='invalid_inventory_manifest'):
+        a.main(['report', '--input', str(raw), '--output', str(first),
+                '--inventory', str(bad)])
+    assert not first.exists()
+    # The second report cannot consume a silently generated replacement inventory.
+    with pytest.raises(FileNotFoundError):
+        a.main(['report', '--input', str(raw), '--output', str(second),
+                '--inventory', str(first/'inventory.json')])
+    assert not second.exists()
+    # Using the actual frozen baseline still blocks the reduced corpus.
+    a.main(['report', '--input', str(raw), '--output', str(second),
+            '--inventory', str(baseline/'inventory.json')])
+    result = json.loads((second/'report.json').read_text())
+    assert result['verdict'] == 'INSUFFICIENT' and result['inventory_status'] == 'changed'
+    assert result['metrics'] == []
+    assert (second/'inventory.json').read_bytes() == original_inventory
+    assert (baseline/'inventory.json').read_bytes() == original_inventory
+    assert before == {p.name:p.read_bytes() for p in (raw/'artifacts').iterdir()}
+
+
+@pytest.mark.parametrize('command', ['scan', 'normalize', 'report'])
+def test_explicit_null_inventory_is_rejected_before_outputs(tmp_path, command):
+    raw = tmp_path/'raw'; raw.mkdir(); artifact(raw)
+    bad = tmp_path/'null.json'; bad.write_text('null')
+    with pytest.raises(ValueError, match='invalid_inventory_manifest'):
+        a.read_inventory(bad)
+    out = tmp_path/'out'
+    with pytest.raises(ValueError, match='invalid_inventory_manifest'):
+        a.main([command, '--input', str(raw), '--output', str(out), '--inventory', str(bad)])
+    assert not out.exists()

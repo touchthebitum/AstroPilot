@@ -324,7 +324,11 @@ def read_inventory(path):
         data = stream.read(INVENTORY_LIMIT + 1)
     if len(data) > INVENTORY_LIMIT:
         raise ValueError('inventory_too_large')
-    return load_json(data)
+    manifest = load_json(data)
+    # A supplied null is malformed evidence, not the absence of --inventory.
+    if manifest is None:
+        raise ValueError('invalid_inventory_manifest')
+    return manifest
 
 
 def seal_chain(d, index):
