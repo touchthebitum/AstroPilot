@@ -733,6 +733,7 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
                     "available_equipment": ["fra400_2600"],
                 },
                 "reference_time_utc": REFERENCE_TIME,
+                "availability": SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
             },
         )
     ]

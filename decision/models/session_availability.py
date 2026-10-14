@@ -62,3 +62,12 @@ class SessionAvailability:
             and timeline_value(self.end) <= timeline_value(self.start)
         ):
             raise ValueError("session_availability_end_must_follow_start")
+
+
+def requested_evening(availability, zone):
+    """Return the site's civil evening for a dated availability, otherwise None."""
+    anchor = availability.start or availability.end if availability is not None else None
+    if anchor is None:
+        return None
+    anchor = anchor.astimezone(zone)
+    return anchor.date() - timedelta(days=1) if anchor.hour < 12 else anchor.date()

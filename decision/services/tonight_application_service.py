@@ -19,7 +19,7 @@ from decision.models.candidate_rejection import (
     CandidateBuildResult,
     CandidateRejection,
 )
-from decision.models.session_availability import SessionAvailability
+from decision.models.session_availability import SessionAvailability, requested_evening
 from decision.recommendation.recommendation import Recommendation
 from decision.services.session_availability_windowing import ActionabilityRefusal
 from decision.validation.decision_consistency import DecisionConsistencyGate
@@ -52,18 +52,11 @@ def _select_forecast_night(nights, availability, weather):
     Undated modes retain Tonight's earliest-forecast behavior. Never substitute
     another evening when the requested one is missing from the forecast.
     """
-    anchor = (
-        availability.start or availability.end
-        if availability is not None
-        else None
-    )
-    if anchor is None:
+    anchor = availability.start or availability.end if availability is not None else None
+    zone = ZoneInfo(weather.timezone) if isinstance(weather, WeatherSnapshot) else getattr(anchor, 'tzinfo', None)
+    evening = requested_evening(availability, zone)
+    if evening is None:
         return min(nights, key=lambda item: item["date"])
-    if isinstance(weather, WeatherSnapshot):
-        anchor = anchor.astimezone(ZoneInfo(weather.timezone))
-    evening = anchor.date()
-    if anchor.hour < 12:
-        evening -= timedelta(days=1)
     return next(
         (
             night for night in nights
@@ -232,6 +225,7 @@ class TonightApplicationService:
             weather=weather,
             profile=effective_profile,
             reference_time_utc=reference_time_utc,
+            availability=inputs.availability,
         )
 
         if forecast_run is None:

@@ -1434,7 +1434,7 @@ def recommend_filter(target_name, obj):
 
     return [selected_filter.name]
 
-def compute_best_window_for_object(
+def compute_windows_for_object(
     sky,
     hours,
     illumination,
@@ -1445,6 +1445,8 @@ def compute_best_window_for_object(
     target,
     obj_name,
     profile,
+    *,
+    limit=3,
 ):
     preferences = profile.get("preferences", {})
 
@@ -1459,13 +1461,17 @@ def compute_best_window_for_object(
         target_obj=TARGET_OBJECTS[obj_name],
         window_size=preferences.get("window_size", 2),
         min_altitude_deg=resolve_minimum_altitude_deg(preferences),
+        limit=limit,
     )
 
-    if not top_windows:
-        return None
+    return sorted(top_windows, key=lambda x: x["score"], reverse=True)
 
-    top_windows.sort(key=lambda x: x["score"], reverse=True)
-    return top_windows[0]
+
+def compute_best_window_for_object(sky, hours, illumination, city_info, lat, lon,
+                                   bortle, target, obj_name, profile):
+    windows = compute_windows_for_object(sky, hours, illumination, city_info,
+                                        lat, lon, bortle, target, obj_name, profile)
+    return windows[0] if windows else None
 
 
 def select_best_setup_for_object(
@@ -1912,21 +1918,27 @@ def evaluate_object(
     target,
     profile,
     weather=None,
+    availability=None,
 ):
-    best = compute_best_window_for_object(
-        sky,
-        hours,
-        illumination,
-        city_info,
-        lat,
-        lon,
-        bortle,
-        target,
-        obj_name,
-        profile,
-    )
-
-    if best is None:
+    if availability is None:
+        best = compute_best_window_for_object(sky, hours, illumination, city_info,
+            lat, lon, bortle, target, obj_name, profile)
+        windows = [best] if best is not None else []
+    else:
+        windows = compute_windows_for_object(sky, hours, illumination, city_info,
+            lat, lon, bortle, target, obj_name, profile, limit=None)
+        from decision.models.session_availability import SessionAvailabilityMode
+        from decision.time_math import timeline_value
+        lower = availability.start
+        upper = availability.end
+        if availability.mode is SessionAvailabilityMode.START_AND_DURATION:
+            upper = (lower.astimezone(timezone.utc) + availability.duration).astimezone(lower.tzinfo)
+        windows = [
+            window for window in windows
+            if (lower is None or timeline_value(window["end"]) > timeline_value(lower))
+            and (upper is None or timeline_value(window["start"]) < timeline_value(upper))
+        ]
+    if not windows:
         return None
 
     best_setup, best_setup_score, setup_ranking = (
@@ -1935,20 +1947,10 @@ def evaluate_object(
             profile=profile,
         )
     )
-    best["best_setup"] = best_setup
-    best["setup_score"] = best_setup_score
-    best["global_score"] = best["score"] + best_setup_score
-
-    best["setup_reasons"] = setup_ranking[0].get("reasons", []) if setup_ranking else []
-
-    best["arcsec_pixel"] = setup_ranking[0].get("arcsec_pixel") if setup_ranking else None
-
     selected_setup_profile = (
         resolve_equipment_definition(profile, best_setup)
-        if best_setup is not None
-        else None
+        if best_setup is not None else None
     )
-
     if selected_setup_profile is None:
         return None
 
@@ -1959,41 +1961,64 @@ def evaluate_object(
 
     decision_engine = build_decision_engine()
 
-    decision_context = build_decision_context(
-        obj_name=obj_name,
-        best=best,
-        selected_setup_profile=selected_setup_profile,
-        profile=profile,
-        illumination=illumination,
-        site_name=city_info.name,
-        lat=lat,
-        lon=lon,
-        bortle=bortle,
-    )
+    first_evaluation = None
+    for best in windows:
+        best = dict(best)
+        best["best_setup"] = best_setup
+        best["setup_score"] = best_setup_score
+        best["global_score"] = best["score"] + best_setup_score
+        best["setup_reasons"] = setup_ranking[0].get("reasons", [])
+        best["arcsec_pixel"] = setup_ranking[0].get("arcsec_pixel")
+        decision_context = build_decision_context(
+            obj_name=obj_name,
+            best=best,
+            selected_setup_profile=selected_setup_profile,
+            profile=profile,
+            illumination=illumination,
+            site_name=city_info.name,
+            lat=lat,
+            lon=lon,
+            bortle=bortle,
+        )
 
-    contributions, _ = decision_engine.evaluate(
-        decision_context,
-        profile,
-    )
+        contributions, _ = decision_engine.evaluate(
+            decision_context,
+            profile,
+        )
 
-    from decision.engines.decision_summary_engine import DecisionSummaryEngine
+        from decision.engines.decision_summary_engine import DecisionSummaryEngine
 
-    summary = DecisionSummaryEngine.build(contributions)
+        summary = DecisionSummaryEngine.build(contributions)
 
-    
-    return build_object_evaluation_result(
-        obj_name=obj_name,
-        best=best,
-        best_setup=best_setup,
-        best_setup_score=best_setup_score,
-        setup_ranking=setup_ranking,
-        remaining_hours=remaining_hours,
-        summary=summary,
-        decision_context=decision_context,
-        weather=weather,
-        hours=hours,
-        sky=sky,
-    )
+
+        evaluation = build_object_evaluation_result(
+            obj_name=obj_name,
+            best=best,
+            best_setup=best_setup,
+            best_setup_score=best_setup_score,
+            setup_ranking=setup_ranking,
+            remaining_hours=remaining_hours,
+            summary=summary,
+            decision_context=decision_context,
+            weather=weather,
+            hours=hours,
+            sky=sky,
+        )
+
+        if availability is None:
+            return evaluation
+        if first_evaluation is None:
+            first_evaluation = evaluation
+        from decision.mission.mission_assembler import ProductiveWindowAssessment
+        from decision.services.session_availability_windowing import select_physical_productive_window
+        mission_input = build_mission_input(evaluation, profile=profile, for_intent_selection=True)
+        assessment = ProductiveWindowAssessment.build(target=obj_name,
+            context=decision_context, mission_input=mission_input)
+        if select_physical_productive_window(assessment, availability) is not None:
+            return evaluation
+    # Keep the best overlapping evidence so ordinary guards can explain a refusal.
+    return first_evaluation
+
 
 def build_forecast_result(
     *,
@@ -2160,6 +2185,7 @@ def forecast_astro(
     profile=None,
     *,
     reference_time_utc: datetime,
+    availability=None,
 ) -> ForecastRun:
     if not isinstance(reference_time_utc, datetime):
         raise ValueError("invalid_reference_time")
@@ -2200,8 +2226,12 @@ def forecast_astro(
         )
     )
     today = normalized_reference_time.astimezone(resolved_zone).date()
+    from decision.models.session_availability import requested_evening
+    requested_date = requested_evening(availability, resolved_zone)
     for d in range(7):
         night_date = today + timedelta(days=d)
+        if requested_date is not None and night_date != requested_date:
+            continue
 
         night_context = forecast_engine.forecast_one_night(
             night_date=night_date,
@@ -2212,6 +2242,7 @@ def forecast_astro(
             bortle=bortle,
             target=target,
             profile=profile,
+            **({"availability": availability} if availability is not None else {}),
         )
 
         if night_context is None:

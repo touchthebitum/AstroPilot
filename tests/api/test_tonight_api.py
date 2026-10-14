@@ -4050,3 +4050,27 @@ def test_alert_claim_respects_existing_http_weather_refusal():
     response = client.post('/v1/tonight', json={'claim_opportunity_alert': True})
     assert response.status_code == 409
     assert response.json() == {'detail': {'code': 'opportunity_alert_tonight_refused'}}
+
+
+def test_duration_ambiguity_is_a_serializable_refusal_not_an_http_error():
+    source = ProductiveWindowAssessment(
+        window_start=LINEAGE_START, window_end=LINEAGE_START + timedelta(hours=2),
+        recommended_hours=2, expected_gain=1, maximum_mission_hours=2,
+        productivity=SimpleNamespace(
+            windows=(SimpleNamespace(start_hour=0., end_hour=2., productive=True,
+                productivity=0.8),),
+            timeline=(SimpleNamespace(start_hour=0., end_hour=2., productivity_score=0.8),)))
+    selection = availability_windowing.evaluate_physical_productive_window(source,
+        SessionAvailability(SessionAvailabilityMode.DURATION, duration=timedelta(hours=1)))
+    assert selection.window is None
+    result = replace(make_result(), mission=None, status=TonightStatus.NO_PRODUCTIVE_WINDOW,
+        actionability_refusal=selection.refusal)
+    response = make_client(result=result).post('/v1/tonight',
+        json={'availability':{'mode':'duration','duration':'PT1H'}})
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload['status'] == 'no_productive_window'
+    assert payload['actionability_refusal']['cause_code'] == 'ambiguous_best_duration_window'
+    assert payload['actionability_refusal']['best_productive_window_minutes'] == 60
+    assert payload['actionability_refusal']['refusal_stage'] is None
+    assert payload['acquisition_intent_options'] == []

@@ -461,3 +461,12 @@ def test_sh2_129_ou4_intents_can_both_be_eligible_without_a_winner():
         item.status is AcquisitionIntentEligibilityStatus.ELIGIBLE
         for item in assessments
     )
+
+
+@pytest.mark.parametrize("intent", [HA_INTENT, OIII_INTENT])
+def test_ambiguous_duration_refuses_each_intent_with_typed_reason(intent):
+    source = productive_window(120)
+    source.productivity.timeline = (SimpleNamespace(start_hour=0., end_hour=2., productivity_score=0.8),)
+    availability = SessionAvailability(SessionAvailabilityMode.DURATION, duration=timedelta(hours=1))
+    assert_not_eligible(evaluate(intent, window=source, availability=availability),
+        AcquisitionIntentEligibilityReason.AMBIGUOUS_BEST_DURATION_WINDOW)
