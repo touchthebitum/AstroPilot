@@ -376,7 +376,14 @@ def evaluate_physical_productive_window(
             and candidate[1] == best_productivity
         )
         if len(best_candidates) != 1:
-            raise ValueError("ambiguous_best_duration_window")
+            # Refuse an arbitrary commitment without interrupting other candidates.
+            return _refusal(
+                status=ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL,
+                cause_code=(
+                    AcquisitionIntentEligibilityReason.AMBIGUOUS_BEST_DURATION_WINDOW.value
+                ),
+                best_minutes=best_duration.total_seconds() / 60,
+            )
         _, _, selected_start, selected_end = best_candidates[0]
         return ActionableProductiveWindowSelection(
             window=SessionAvailabilityWindow(selected_start, selected_end),
