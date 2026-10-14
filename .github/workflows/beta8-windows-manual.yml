@@ -1,4 +1,4 @@
-name: PR376-377 Windows candidate build and validation
+name: PR379 Windows candidate build and validation
 on:
   workflow_dispatch:
     inputs:
@@ -54,7 +54,7 @@ jobs:
             !/data/user_profile.json
       - name: Guard exact source and isolated directories
         run: |
-          if ($env:APPROVED_SHA -cne 'c6b8b8b5dfb2a456ca6365e6355cc9389a6004d7') { throw 'Unexpected product SHA' }
+          if ($env:APPROVED_SHA -cne 'a29513447355b05cbcceda85a10d6dc1f90da3fb') { throw 'Unexpected product SHA' }
           if ((git rev-parse HEAD).Trim() -cne $env:APPROVED_SHA) { throw 'Checkout mismatch' }
           if (git status --porcelain) { throw 'Dirty source' }
           $iso = Join-Path $env:RUNNER_TEMP 'beta8-common-isolation'
@@ -110,7 +110,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Validation dependencies failed' }
           node --version
           if ($LASTEXITCODE -ne 0) { throw 'Node required for UI tests' }
-          uv run --locked --no-sync python -m pytest tests/architecture/test_modern_selected_filter.py tests/architecture/test_mission_assembler_invariants.py tests/architecture/test_modern_mission_authorization.py tests/architecture/test_mission_input_filter_inventory.py tests/architecture/test_tonight_application_service.py tests/architecture/test_session_availability.py tests/api/test_intent_choice_ui.py tests/services/test_user_selection_mission.py tests/services/test_decision_acceptance_application.py tests/architecture/test_decision_acceptance_lineage_persistence.py tests/architecture/test_production_acquisition_intent_composition.py tests/architecture/test_tonight_creation_refusal.py -q --junitxml=dist/beta8-artifacts/windows-intent-tests.xml
+          uv run --locked --no-sync python -m pytest tests/architecture/test_availability_window_preselection.py tests/architecture/test_forecast_engine_contracts.py tests/architecture/test_modern_selected_filter.py tests/architecture/test_mission_assembler_invariants.py tests/architecture/test_modern_mission_authorization.py tests/architecture/test_mission_input_filter_inventory.py tests/architecture/test_tonight_application_service.py tests/architecture/test_session_availability.py tests/api/test_intent_choice_ui.py tests/services/test_user_selection_mission.py tests/services/test_decision_acceptance_application.py tests/architecture/test_decision_acceptance_lineage_persistence.py tests/architecture/test_production_acquisition_intent_composition.py tests/architecture/test_tonight_creation_refusal.py -q --junitxml=dist/beta8-artifacts/windows-intent-tests.xml
           if ($LASTEXITCODE -ne 0) { throw 'Acquisition and lineage tests failed' }
           if (Test-Path astropilot.egg-info) { Move-Item astropilot.egg-info (Join-Path $env:RUNNER_TEMP 'generated-beta8-test-egg-info') }
           if (git status --porcelain --untracked-files=all) { throw 'Source changed during tests' }
@@ -118,7 +118,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: PR376-377-windows-${{ inputs.approved_sha }}
+          name: PR379-windows-${{ inputs.approved_sha }}
           path: |
             source/dist/beta8-artifacts/*
             ${{ runner.temp }}/beta8-native-binary-validation/validation.json
@@ -147,7 +147,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $artifacts = Join-Path $env:RUNNER_TEMP 'pr376-built-artifacts'
-          gh run download ${{ inputs.build_run }} --repo touchthebitum/AstroPilot --name PR376-377-windows-c6b8b8b5dfb2a456ca6365e6355cc9389a6004d7 --dir "$artifacts"
+          gh run download ${{ inputs.build_run }} --repo touchthebitum/AstroPilot --name PR379-windows-a29513447355b05cbcceda85a10d6dc1f90da3fb --dir "$artifacts"
           if ($LASTEXITCODE -ne 0) { throw 'Binary artifact download failed' }
           "PR376_ARCHIVE_ROOT=$artifacts" >> $env:GITHUB_ENV
           "KIT_EXPECTED_PORTABLE_SHA=${{ inputs.portable_sha256 }}" >> $env:GITHUB_ENV
@@ -173,13 +173,13 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: PR376-377-kit-harness-validation
+          name: PR379-kit-harness-validation
           path: ${{ runner.temp }}/pr376-kit-qualification/**/comparison.json
           if-no-files-found: warn
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: PR376-377-kit-native-safety
+          name: PR379-kit-native-safety
           path: ${{ runner.temp }}/pr376-kit-qualification/validation-kit.json
           if-no-files-found: warn
 
@@ -213,7 +213,7 @@ jobs:
             !/data/user_profile.json
       - name: Guard exact source and isolate build
         run: |
-          if ('${{ inputs.approved_sha }}' -cne 'c6b8b8b5dfb2a456ca6365e6355cc9389a6004d7') { throw 'Unexpected source SHA' }
+          if ('${{ inputs.approved_sha }}' -cne 'a29513447355b05cbcceda85a10d6dc1f90da3fb') { throw 'Unexpected source SHA' }
           if ((git rev-parse HEAD).Trim() -cne '${{ inputs.approved_sha }}') { throw 'Source SHA mismatch' }
           $iso = Join-Path $env:RUNNER_TEMP 'hourly-diagnostic-build'
           New-Item -ItemType Directory -Path $iso -ErrorAction Stop
@@ -255,7 +255,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: PR376-377-hourly-diagnostic-runtime
+          name: PR379-hourly-diagnostic-runtime
           path: |
             source/dist-diagnostic/*
             ${{ runner.temp }}/hourly-diagnostic-qualification/qualification.json

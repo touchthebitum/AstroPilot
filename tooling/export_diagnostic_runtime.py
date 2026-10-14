@@ -6,7 +6,7 @@ import subprocess
 import zipfile
 
 source = Path.cwd()
-assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == 'c6b8b8b5dfb2a456ca6365e6355cc9389a6004d7'
+assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == 'a29513447355b05cbcceda85a10d6dc1f90da3fb'
 library = source / '.venv-diagnostic/Lib/site-packages'
 assert library.is_dir()
 tracked = subprocess.check_output(['git', 'ls-files'], text=True).splitlines()
@@ -30,7 +30,7 @@ with zipfile.ZipFile(out / 'diagnostic-runtime.zip', 'w', zipfile.ZIP_DEFLATED) 
         bundle.write(path, name)
     bundle.writestr('Manifest-runtime.json', json.dumps(manifest, indent=2))
 (out / 'Runtime-provenance.json').write_text(json.dumps({
-    'source_sha': 'c6b8b8b5dfb2a456ca6365e6355cc9389a6004d7',
+    'source_sha': 'a29513447355b05cbcceda85a10d6dc1f90da3fb',
     'uv_lock_sha256': hashlib.sha256((source / 'uv.lock').read_bytes()).hexdigest(),
     'runtime_zip_sha256': hashlib.sha256((out / 'diagnostic-runtime.zip').read_bytes()).hexdigest(),
     'files': len(files), 'profile': 'no user profile included', 'libraries': 'uv sync --locked on Windows, Python 3.13.5',

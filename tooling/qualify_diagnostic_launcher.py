@@ -17,7 +17,7 @@ with zipfile.ZipFile(root / 'Configuration-Mac-reference.zip', 'w') as bundle:
     bundle.writestr('user_profile.json', profile)
 (root / 'Manifest-configuration-Mac.json').write_text(json.dumps({'user_profile.json': hashlib.sha256(profile).hexdigest()}))
 (root / 'Kit-provenance.json').write_text(json.dumps({
-    'source_sha': 'c6b8b8b5dfb2a456ca6365e6355cc9389a6004d7',
+    'source_sha': 'a29513447355b05cbcceda85a10d6dc1f90da3fb',
     'mac_reference_zip_sha256': hashlib.sha256((root / 'Configuration-Mac-reference.zip').read_bytes()).hexdigest()}))
 manifest = json.loads((root / 'Manifest-runtime.json').read_text(encoding='utf-8'))
 for name in ('diagnostic_launcher.py', 'diagnostic_worker.py', 'test_choix_helpers.py', 'kit_safety.py', 'windows_job.py'):

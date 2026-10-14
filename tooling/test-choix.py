@@ -5,7 +5,7 @@ from windows_job import IsolatedProcess
 from kit_safety import guard_placement, safe_extract, reject_links
 PROVENANCE = json.loads((BASE/'Kit-provenance.json').read_text(encoding='utf-8'))
 EXPECTED = PROVENANCE['portable_zip_sha256']
-BUILD = PROVENANCE.get('build', 'c6b8b8b')
+BUILD = PROVENANCE.get('build', 'a295134')
 OWNER = None
 local = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -63,8 +63,8 @@ def main():
     while True:
         try:
             day = input('Date locale AAAA-MM-JJ (exemple 2026-10-16) : ').strip()
-            start = input('Début HH:MM (Entrée = 02:45) : ').strip() or '02:45'
-            end = input('Fin HH:MM (Entrée = 04:15) : ').strip() or '04:15'
+            start = input('Début HH:MM (Entrée = 01:45) : ').strip() or '01:45'
+            end = input('Fin HH:MM (Entrée = 03:15) : ').strip() or '03:15'
             if len(day)!=10 or len(start)!=5 or len(end)!=5:
                 raise ValueError('format')
             start_dt = datetime.datetime.fromisoformat(day+'T'+start)
@@ -75,10 +75,10 @@ def main():
                 raise ValueError('durée')
             break
         except ValueError:
-            print('Date ou heure incorrecte. Exemple : 2026-10-16, 02:45, 04:15. Recommencez.',flush=True)
+            print('Date ou heure incorrecte. Exemple : 2026-10-16, 01:45, 03:15. Recommencez.',flush=True)
     if IsolatedProcess.listening_pids():
         raise SystemExit('Le port 8000 est occupé. Fermez AstroPilot avant le test.')
-    archive = BASE/'AstroPilot-PR376-377-c6b8b8b-portable.zip'
+    archive = BASE/'AstroPilot-PR379-a295134-portable.zip'
     if not archive.is_file():
         raise SystemExit('Archive du binaire corrigé absente. Extrayez tout le nouveau kit.')
     with archive.open('rb') as file:
@@ -88,7 +88,7 @@ def main():
     if out.resolve().is_relative_to(source):
         raise SystemExit('Le kit doit se trouver hors du dossier de données réel.')
     out.mkdir()
-    report = {'build':BUILD,'source_sha':'c6b8b8b5dfb2a456ca6365e6355cc9389a6004d7','portable_zip_sha256':EXPECTED,'source_directory':str(source),'availability':{'mode':'fixed_window','start_local':start_dt.isoformat(timespec='minutes'),'end_local':end_dt.isoformat(timespec='minutes')},'cases':[]}
+    report = {'build':BUILD,'source_sha':'a29513447355b05cbcceda85a10d6dc1f90da3fb','portable_zip_sha256':EXPECTED,'source_directory':str(source),'availability':{'mode':'fixed_window','start_local':start_dt.isoformat(timespec='minutes'),'end_local':end_dt.isoformat(timespec='minutes')},'cases':[]}
     before = None
     child = None
     log = None

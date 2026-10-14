@@ -244,7 +244,7 @@ def run(root, first_night, weather_override=None):
               'threshold': PRODUCTIVE_SLICE_THRESHOLD,
               'minimum_continuous_minutes': MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW.total_seconds() / 60,
               'thresholds_unchanged': True, 'no_confirmation_sent': True,
-              'source_sha': 'c6b8b8b5dfb2a456ca6365e6355cc9389a6004d7',
+              'source_sha': 'a29513447355b05cbcceda85a10d6dc1f90da3fb',
               'snapshot_scope': 'one freshly acquired snapshot; real current clock; no historical freshness bypass'}
     save(root, 'diagnostic.json', result)
     summary = ['Diagnostic Hα/OIII : ' + result['status'],
