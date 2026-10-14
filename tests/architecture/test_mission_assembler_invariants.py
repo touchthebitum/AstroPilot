@@ -183,7 +183,8 @@ def test_mission_preserves_reasons_and_computed_results(
     assert mission.window_end == input_data.window_start + timedelta(hours=1.5)
     assert mission.recommended_hours == 1.5
     assert mission.expected_gain == 3.0
-    assert mission.selected_filter is selected_filter
+    assert mission.selected_filter.filter_type == 'Ha'
+    assert mission.selected_filter.source == 'authorized_optical_profile'
     assert mission.productivity is isolated_dependencies.productivity
 
 
@@ -240,7 +241,8 @@ def test_eligible_intent_without_legacy_filter_remains_actionable(
     )
 
     assert result.mission is not None
-    assert result.mission.selected_filter is None
+    assert result.mission.selected_filter.filter_type == 'Ha'
+    assert result.mission.selected_filter.source == 'authorized_optical_profile'
     assert result.actionability_refusal is None
 
 
@@ -787,7 +789,9 @@ def test_tonight_composes_intent_filter_through_real_input_and_assembler(
     )
     expected = None  # A legacy type match is not an exact modern profile identity.
     assert inputs[0].selected_filter is expected
-    assert mission.selected_filter is expected
+    assert mission.selected_filter.filter_type == required_type
+    assert mission.selected_filter.bandwidth_nm == 6.5
+    assert mission.selected_filter.source == 'authorized_optical_profile'
     assert mission.imaging_field_id == inputs[0].imaging_field_id == "sh2-129_ou4"
     assert mission.acquisition_intent_id == inputs[0].acquisition_intent_id == intent_id
     if expected is not None:
