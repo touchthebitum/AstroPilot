@@ -4084,6 +4084,9 @@ def test_weather_failure_is_correlated_in_isolated_persistent_log_and_recovers(m
     from astropilot.weather_diagnostics import HEADER
     monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(tmp_path/'data'))
     log_path=tmp_path/'Logs'/'AstroPilot.log'
+    import logging
+    logger = logging.getLogger('astropilot.launcher')
+    previous_level, previous_propagate = logger.level, logger.propagate
     logger,_=_configure_launcher_logger(log_path=log_path)
     response=requests.Response()
     response.status_code=200
@@ -4131,3 +4134,5 @@ def test_weather_failure_is_correlated_in_isolated_persistent_log_and_recovers(m
             if getattr(handler,'_astropilot_launcher_handler',False):
                 logger.removeHandler(handler)
                 handler.close()
+        logger.setLevel(previous_level)
+        logger.propagate = previous_propagate
