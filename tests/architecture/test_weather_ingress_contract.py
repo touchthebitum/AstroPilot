@@ -235,13 +235,27 @@ def test_unix_weather_hours_cross_spring_dst_as_distinct_utc_instants():
     assert second.isoformat() == "2026-03-29T03:00:00+02:00"
 
 
+@pytest.fixture
+def diagnostic_logs(caplog):
+    import logging
+    logger = logging.getLogger('astropilot.launcher.weather')
+    previous_propagate = logger.propagate
+    logger.addHandler(caplog.handler)
+    logger.propagate = False
+    try:
+        yield caplog
+    finally:
+        logger.removeHandler(caplog.handler)
+        logger.propagate = previous_propagate
+
+
 @pytest.mark.parametrize("failure,category,status", [
     ('ReadTimeout','read_timeout',None), ('ConnectTimeout','connect_timeout',None),
     ('SSLError','tls_error',None), ('ConnectionError','connection_error',None),
     ('Timeout','timeout',None), ('HTTPError','http_error',429), ('HTTPError','http_error',503),
     ('RequestException','request_error',None), ('RuntimeError','unexpected_error',None),
 ])
-def test_fetch_weather_records_sanitized_failure_without_retry(monkeypatch, caplog, failure, category, status):
+def test_fetch_weather_records_sanitized_failure_without_retry(monkeypatch, diagnostic_logs, failure, category, status):
     import json
     import requests
     import astro_score
@@ -260,7 +274,7 @@ def test_fetch_weather_records_sanitized_failure_without_retry(monkeypatch, capl
     with weather_diagnostic_context('request-test-id'):
         assert astro_score.fetch_weather(46.7508,6.5495) is None
     records = [json.loads(r.message.removeprefix('weather_diagnostic '))
-               for r in caplog.records if r.message.startswith('weather_diagnostic ')]
+               for r in diagnostic_logs.records if r.message.startswith('weather_diagnostic ')]
     assert len(records)==1
     record=records[0]
     assert record['diagnostic_id']=='request-test-id'
@@ -269,13 +283,13 @@ def test_fetch_weather_records_sanitized_failure_without_retry(monkeypatch, capl
     assert record['http_status']==status
     assert record['duration_ms']>=0
     assert datetime.fromisoformat(record['occurred_at_utc']).utcoffset()==timedelta(0)
-    assert 'SECRET' not in caplog.text and 'private.invalid' not in caplog.text
-    assert '46.7508' not in caplog.text
+    assert 'SECRET' not in diagnostic_logs.text and 'private.invalid' not in diagnostic_logs.text
+    assert '46.7508' not in diagnostic_logs.text
     assert len(calls)==1 and calls[0]['timeout']==15
 
 
 @pytest.mark.parametrize('payload,category', [(None,'response_not_json'), ({},'invalid_weather_payload')])
-def test_fetch_weather_preserves_invalid_payload_refusal(monkeypatch, caplog, payload, category):
+def test_fetch_weather_preserves_invalid_payload_refusal(monkeypatch, diagnostic_logs, payload, category):
     import json
     import requests
     import astro_score
@@ -285,12 +299,12 @@ def test_fetch_weather_preserves_invalid_payload_refusal(monkeypatch, caplog, pa
     monkeypatch.setattr(astro_score.requests,'get',lambda *a,**k:response)
     with pytest.raises(WeatherIngressError):
         astro_score.fetch_weather(46.7508,6.5495)
-    record=json.loads(caplog.records[-1].message.removeprefix('weather_diagnostic '))
+    record=json.loads(diagnostic_logs.records[-1].message.removeprefix('weather_diagnostic '))
     assert record['category']==category
-    assert 'SECRET' not in caplog.text
+    assert 'SECRET' not in diagnostic_logs.text
 
 
-def test_fetch_weather_after_failure_still_validates_the_real_payload(monkeypatch, caplog):
+def test_fetch_weather_after_failure_still_validates_the_real_payload(monkeypatch, diagnostic_logs):
     import json
     import requests
     import astro_score
@@ -303,13 +317,13 @@ def test_fetch_weather_after_failure_still_validates_the_real_payload(monkeypatc
     monkeypatch.setattr(astro_score.requests,'get',lambda *a,**k:response)
     snapshot=astro_score.fetch_weather(46.7508,6.5495)
     assert snapshot.hour_count==48 and snapshot.completeness==1
-    records=[json.loads(r.message.removeprefix('weather_diagnostic ')) for r in caplog.records]
+    records=[json.loads(r.message.removeprefix('weather_diagnostic ')) for r in diagnostic_logs.records]
     assert records[-1]['event']=='weather_fetch_succeeded'
     assert records[-1]['category']=='validated'
     assert records[-1]['diagnostic_id']!=records[-2]['diagnostic_id']
 
 
-def test_diagnostic_context_is_nested_thread_isolated_and_resets(caplog):
+def test_diagnostic_context_is_nested_thread_isolated_and_resets(diagnostic_logs):
     import json
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
@@ -327,7 +341,7 @@ def test_diagnostic_context_is_nested_thread_isolated_and_resets(caplog):
     with ThreadPoolExecutor(max_workers=2) as pool:
         results=[pool.submit(worker, identifier) for identifier in ('one','two')]
         for result in results: result.result(timeout=10)
-    records=[json.loads(r.message.removeprefix('weather_diagnostic ')) for r in caplog.records]
+    records=[json.loads(r.message.removeprefix('weather_diagnostic ')) for r in diagnostic_logs.records]
     assert sorted(r['diagnostic_id'] for r in records if r['event']=='outer')==['one','two']
     assert sorted(r['diagnostic_id'] for r in records if r['event']=='restored')==['one','two']
     assert sorted(r['diagnostic_id'] for r in records if r['event']=='nested')==['one-nested','two-nested']

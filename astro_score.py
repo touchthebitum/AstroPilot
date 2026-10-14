@@ -417,7 +417,7 @@ def fetch_weather(lat: float, lon: float) -> WeatherSnapshot | None:
         payload = response.json()
     except (TypeError, ValueError) as exc:
         log_weather("weather_fetch_failed", category="response_not_json", started=started,
-                    http_status=response.status_code)
+                    http_status=getattr(response, "status_code", None))
         raise WeatherIngressError(["response_not_json"]) from exc
 
     try:
@@ -430,10 +430,10 @@ def fetch_weather(lat: float, lon: float) -> WeatherSnapshot | None:
         )
     except WeatherIngressError:
         log_weather("weather_fetch_failed", category="invalid_weather_payload", started=started,
-                    http_status=response.status_code)
+                    http_status=getattr(response, "status_code", None))
         raise
     log_weather("weather_fetch_succeeded", category="validated", started=started,
-                http_status=response.status_code)
+                http_status=getattr(response, "status_code", None))
     return snapshot
 
 
