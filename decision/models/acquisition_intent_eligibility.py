@@ -15,6 +15,7 @@ class AcquisitionIntentEligibilityReason(str, Enum):
     INTENT_NOT_TARGETED_BY_PROJECT = "intent_not_targeted_by_project"
     INTENT_TARGET_COMPLETED = "intent_target_completed"
     REQUIRED_FILTER_UNAVAILABLE = "required_filter_unavailable"
+    AMBIGUOUS_BEST_DURATION_WINDOW = "ambiguous_best_duration_window"
     INSUFFICIENT_ACTIONABLE_PRODUCTIVE_WINDOW = (
         "insufficient_actionable_productive_window"
     )

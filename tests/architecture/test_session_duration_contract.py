@@ -146,14 +146,13 @@ def test_duration_selects_a_unique_best_central_subwindow():
 def test_duration_tie_preserves_the_existing_fail_closed_contract():
     source = assessment([0.8, 0.8])
 
-    with pytest.raises(ValueError, match="ambiguous_best_duration_window"):
-        select_continuous_actionable_productive_window(
-            source,
-            SessionAvailability(
-                SessionAvailabilityMode.DURATION,
-                duration=timedelta(hours=1),
-            ),
-        )
+    availability = SessionAvailability(
+        SessionAvailabilityMode.DURATION, duration=timedelta(hours=1))
+    assert select_continuous_actionable_productive_window(source, availability) is None
+    selection = evaluate_continuous_actionable_productive_window(source, availability)
+    assert selection.refusal.cause_code == "ambiguous_best_duration_window"
+    assert selection.refusal.status.value == "constraints_refusal"
+    assert selection.refusal.best_productive_window_minutes == 60
 
 
 @pytest.mark.parametrize(
