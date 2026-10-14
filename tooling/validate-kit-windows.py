@@ -61,8 +61,12 @@ class Handler(BaseHTTPRequestHandler):
    if case=='null-filter': selected=None
    if case=='legacy-source': selected['source']='legacy_inventory'
    if case=='wrong-bandwidth': selected['bandwidth_nm']=7
+   start_time=os.environ['KIT_FIXTURE_START']
+   end_time=os.environ['KIT_FIXTURE_END']
+   if case=='wrong-window': start_time='2026-10-14T21:00' if 'T02:45' in start_time else '2026-10-14T18:00'
+   if case=='short-window': end_time=(datetime.datetime.fromisoformat(start_time)+datetime.timedelta(minutes=30)).isoformat()
    self.reply({'status':'accepted','selected_acquisition_intent_id':intent,
-     'mission':{'acquisition_intent_id':intent,'selected_filter':selected}})
+     'mission':{'acquisition_intent_id':intent,'selected_filter':selected,'window_start':start_time+'+02:00','window_end':end_time+'+02:00'}})
   else: raise AssertionError('Unexpected mutating endpoint')
 HTTPServer(('127.0.0.1',8000),Handler).serve_forever()
 '''
@@ -106,7 +110,7 @@ for name in ('../escape.txt', '/escape.txt', 'C:/escape.txt', 'a/../escape.txt')
 findings.append({'check':'archive_path_refusal','passed':True})
 
 for scenario, expected in [('good','PASS'), ('after-midnight','PASS'), ('invalid-date-retry','PASS'), ('wrong-night','FAIL'),
-                           ('wrong-filter','FAIL'), ('null-filter','FAIL'), ('legacy-source','FAIL'), ('wrong-bandwidth','FAIL'), ('refused','NOT_VALIDATED'), ('no-night','NOT_VALIDATED')]:
+                           ('wrong-filter','FAIL'), ('wrong-window','FAIL'), ('short-window','FAIL'), ('null-filter','FAIL'), ('legacy-source','FAIL'), ('wrong-bandwidth','FAIL'), ('refused','NOT_VALIDATED'), ('no-night','NOT_VALIDATED')]:
     kit = WORK/scenario
     kit.mkdir()
     for name in ('test-choix.py','windows_job.py','kit_safety.py'):
@@ -139,6 +143,8 @@ for scenario, expected in [('good','PASS'), ('after-midnight','PASS'), ('invalid
     original_launch=launch
     def launch_with_scenario(argv,cwd,env):
         env['KIT_FIXTURE_SCENARIO']=scenario
+        env['KIT_FIXTURE_START']='2026-10-16T02:45' if scenario=='after-midnight' else '2026-10-14T20:30'
+        env['KIT_FIXTURE_END']='2026-10-16T04:15' if scenario=='after-midnight' else '2026-10-14T23:00'
         return original_launch(argv,cwd,env)
     fixture.write_text(SERVER.replace("case=root.parent.name", "case=os.environ['KIT_FIXTURE_SCENARIO']"))
     launch_with_scenario.listening_pids=IsolatedProcess.listening_pids

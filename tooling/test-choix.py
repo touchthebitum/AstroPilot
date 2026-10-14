@@ -181,7 +181,17 @@ def main():
                 body = accepted['body']
                 mission = body.get('mission') or {}
                 expected_filter = {'sh2-129_ha':'Ha', 'ou4_oiii':'OIII'}[intent]
-                valid = (accepted['http']==200 and body.get('status')=='accepted'
+                try:
+                    mission_start = datetime.datetime.fromisoformat(mission['window_start'])
+                    mission_end = datetime.datetime.fromisoformat(mission['window_end'])
+                    window_valid = (mission_start.utcoffset() is not None and mission_end.utcoffset() is not None
+                        and mission_start.replace(tzinfo=None) >= start_dt
+                        and mission_end.replace(tzinfo=None) <= end_dt
+                        and mission_end.astimezone(datetime.timezone.utc) - mission_start.astimezone(datetime.timezone.utc)
+                            >= datetime.timedelta(hours=1))
+                except (KeyError, TypeError, ValueError):
+                    window_valid = False
+                valid = (window_valid and accepted['http']==200 and body.get('status')=='accepted'
                          and body.get('selected_acquisition_intent_id')==intent
                          and mission.get('acquisition_intent_id')==intent
                          and isinstance(mission.get('selected_filter'), dict)
@@ -189,7 +199,7 @@ def main():
                          and mission['selected_filter'].get('bandwidth_nm')==6.5
                          and mission['selected_filter'].get('source')=='authorized_optical_profile'
                          and case['night_date']==expected_night)
-                case.update(result='PASS' if valid else 'FAIL',confirmation_http=accepted['http'],confirmation_seconds=accepted['seconds'],returned_intent=mission.get('acquisition_intent_id'),selected_filter=mission.get('selected_filter'),window_start=mission.get('window_start'),window_end=mission.get('window_end'))
+                case.update(result='PASS' if valid else 'FAIL',mission_window_within_availability=window_valid,confirmation_http=accepted['http'],confirmation_seconds=accepted['seconds'],returned_intent=mission.get('acquisition_intent_id'),selected_filter=mission.get('selected_filter'),window_start=mission.get('window_start'),window_end=mission.get('window_end'))
                 print(intent,case['result'],'préparation',round(tonight['seconds'],2),'s ; confirmation',round(accepted['seconds'],2),'s',flush=True)
             finally:
                 if child is not None:
