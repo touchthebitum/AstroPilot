@@ -384,6 +384,9 @@ class MissionAssembler:
                 ))
             return None
 
+        from decision.filtering.authorized_selected_filter import authorized_selected_filter
+        selected_filter = authorized_selected_filter(mission_input.creation_authorization)
+
         reasons = []
 
         for text in summary.positives:
@@ -591,11 +594,7 @@ class MissionAssembler:
             window_end=mission_window_end,
             recommended_hours=mission_recommended_hours,
             expected_gain=mission_expected_gain,
-            selected_filter=(
-                mission_input.selected_filter
-                if mission_input is not None
-                else None
-                ),
+            selected_filter=selected_filter,
             risk_report=risk,
             season_analysis=season_analysis,
             productivity=productivity,
