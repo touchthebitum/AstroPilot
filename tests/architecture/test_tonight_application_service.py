@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -43,6 +44,7 @@ from decision.models.session_availability import (
     SessionAvailabilityMode,
 )
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
+from decision.weather.weather_ingress import WeatherSnapshot
 
 
 FORECAST_EVIDENCE = DecisionForecastEvidence(())
@@ -99,6 +101,120 @@ def test_tonight_equipment_resolver_rejects_invalid_custom_definition():
 
 def forecast_run(nights):
     return ForecastRun(nights=nights, evidence=FORECAST_EVIDENCE)
+
+
+@pytest.mark.parametrize(
+    "availability,expected_evening",
+    [
+        (SessionAvailability(SessionAvailabilityMode.FIXED_WINDOW,
+            start=datetime(2026, 10, 13, 20, 30, tzinfo=ZoneInfo("Europe/Zurich")),
+            end=datetime(2026, 10, 13, 23, tzinfo=ZoneInfo("Europe/Zurich"))), "2026-10-13"),
+        (SessionAvailability(SessionAvailabilityMode.START_AND_DURATION,
+            start=datetime(2026, 10, 13, 22, tzinfo=ZoneInfo("Europe/Zurich")),
+            duration=timedelta(hours=3)), "2026-10-13"),
+        (SessionAvailability(SessionAvailabilityMode.UNTIL,
+            end=datetime(2026, 10, 14, 5, tzinfo=ZoneInfo("Europe/Zurich"))), "2026-10-13"),
+        (SessionAvailability(SessionAvailabilityMode.FIXED_WINDOW,
+            start=datetime(2026, 10, 14, 1, tzinfo=ZoneInfo("Europe/Zurich")),
+            end=datetime(2026, 10, 14, 4, tzinfo=ZoneInfo("Europe/Zurich"))), "2026-10-13"),
+        (SessionAvailability(SessionAvailabilityMode.FIXED_WINDOW,
+            start=datetime(2026, 10, 13, 23, tzinfo=ZoneInfo("Europe/Zurich")),
+            end=datetime(2026, 10, 14, 4, tzinfo=ZoneInfo("Europe/Zurich"))), "2026-10-13"),
+        (SessionAvailability(SessionAvailabilityMode.ALL_NIGHT), "2026-10-12"),
+        (SessionAvailability(SessionAvailabilityMode.DURATION,
+            duration=timedelta(hours=2)), "2026-10-12"),
+        (None, "2026-10-12"),
+    ],
+)
+def test_dated_availability_evaluates_requested_evening(availability, expected_evening):
+    nights = [
+        {"date": "2026-10-13", "duration": 8, "top_objects": [{"catalog_key":"Sh2-129"}]},
+        {"date": "2026-10-12", "duration": 9, "top_objects": [{"catalog_key":"IC1396"}]},
+    ]
+    calls = []
+
+    def candidates(objects, **kwargs):
+        calls.append((objects, kwargs))
+        return []
+
+    service, _, _ = make_service(
+        forecast_nights=lambda *args, **kwargs: forecast_run(nights),
+        build_candidates=candidates,
+    )
+    result = service.evaluate(profile=make_profile(), weather=object(),
+        reference_time_utc=REFERENCE_TIME, bortle=3, availability=availability)
+    selected = next(n for n in nights if n["date"] == expected_evening)
+    assert result.night is selected
+    assert result.forecast_evidence is FORECAST_EVIDENCE
+    assert calls[0][0] == selected["top_objects"]
+    assert calls[0][1]["available_hours"] == selected["duration"]
+    assert calls[0][1]["session_availability"] is availability
+
+
+def test_missing_requested_evening_does_not_evaluate_another_night():
+    calls = []
+    service, _, _ = make_service(
+        forecast_nights=lambda *args, **kwargs: forecast_run([
+            {"date": date(2026, 10, 12), "top_objects": []}]),
+        build_candidates=lambda *args, **kwargs: calls.append(args),
+    )
+    result = service.evaluate(profile=make_profile(), weather=object(),
+        reference_time_utc=REFERENCE_TIME, bortle=3,
+        availability=SessionAvailability(SessionAvailabilityMode.START_AND_DURATION,
+            start=datetime(2026, 10, 20, 21, tzinfo=ZoneInfo("Europe/Zurich")),
+            duration=timedelta(hours=2)))
+    assert result.status is TonightStatus.NO_NIGHT
+    assert result.night is None
+    assert result.forecast_evidence is FORECAST_EVIDENCE
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "site_timezone,start_utc,expected_evening",
+    [
+        ("Europe/Zurich", "2026-10-13T10:00:00+00:00", date(2026, 10, 13)),
+        ("America/Los_Angeles", "2026-10-14T03:00:00+00:00", date(2026, 10, 13)),
+        ("Asia/Tokyo", "2026-10-13T15:30:00+00:00", date(2026, 10, 13)),
+        # Both occurrences of the repeated 02:30 belong to the same evening.
+        ("Europe/Zurich", "2026-10-25T00:30:00+00:00", date(2026, 10, 24)),
+        ("Europe/Zurich", "2026-10-25T01:30:00+00:00", date(2026, 10, 24)),
+        # Instants on either side of the spring-forward gap also agree.
+        ("Europe/Zurich", "2026-03-29T00:30:00+00:00", date(2026, 3, 28)),
+        ("Europe/Zurich", "2026-03-29T01:30:00+00:00", date(2026, 3, 28)),
+    ],
+)
+def test_requested_evening_uses_site_timezone_without_changing_forecast_clock(
+    site_timezone, start_utc, expected_evening,
+):
+    weather = WeatherSnapshot(
+        payload={}, provider="Open-Meteo", retrieved_at_utc=REFERENCE_TIME,
+        requested_latitude=47.12, requested_longitude=7.04,
+        grid_latitude=47.12, grid_longitude=7.04, grid_distance_km=0,
+        elevation_m=800, timezone=site_timezone, timezone_source="coordinates_local",
+        utc_offset_seconds=7200, valid_from=REFERENCE_TIME,
+        valid_until=REFERENCE_TIME+timedelta(days=7), hour_count=168, completeness=1,
+    )
+    # The transport uses UTC; selection must use the site's civil evening.
+    # Forecasting and freshness continue to use the actual reference clock.
+    availability = SessionAvailability(SessionAvailabilityMode.START_AND_DURATION,
+        start=datetime.fromisoformat(start_utc),
+        duration=timedelta(hours=12))
+    nights = [
+        {"date": expected_evening - timedelta(days=1), "top_objects": []},
+        {"date": expected_evening, "top_objects": []},
+    ]
+    calls = []
+
+    def forecast(*args, **kwargs):
+        calls.append(kwargs)
+        return forecast_run(nights)
+
+    service, _, _ = make_service(forecast_nights=forecast,
+        build_candidates=lambda *args, **kwargs: [])
+    result = service.evaluate(profile=make_profile(),weather=weather,
+        reference_time_utc=REFERENCE_TIME,bortle=3,availability=availability)
+    assert result.night is nights[1]
+    assert calls[0]["reference_time_utc"] == REFERENCE_TIME
 
 
 class RecordingRecommendationService:
