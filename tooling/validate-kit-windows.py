@@ -31,8 +31,8 @@ import json, os, pathlib, sys, datetime
 root=pathlib.Path.cwd()
 class Handler(BaseHTTPRequestHandler):
  def log_message(self, *args): pass
- def reply(self, body):
-  data=json.dumps(body).encode(); self.send_response(200)
+ def reply(self, body, status=200):
+  data=json.dumps(body).encode(); self.send_response(status)
   self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(data)))
   self.end_headers(); self.wfile.write(data)
  def do_GET(self):
@@ -45,13 +45,19 @@ class Handler(BaseHTTPRequestHandler):
   assert data_dir == root/'data'
   (data_dir/'fixture-write.json').write_text('{}')
   if self.path=='/v1/tonight':
-   start=datetime.datetime.fromisoformat(data['availability']['start_local'])
+   if case=='server-error':
+    self.reply({'detail':'synthetic server failure'},500); return
+   start=datetime.datetime.fromisoformat(data['availability'].get('start_local','2026-10-14T20:30:00'))
    day=(start.date()-datetime.timedelta(days=1) if start.hour<12 else start.date()).isoformat()
    body={'night_date':('2026-10-13' if case=='wrong-night' else day),'decision_id':'fixture-decision',
      'catalog_key':'Sh2-129','acquisition_intent_choice_available':True,
      'viable_acquisition_intent_ids':(['sh2-129_ha','ou4_oiii'] if case!='refused' else []),
      'acquisition_intent_assessments':[]}
    if case=='no-night': body['night_date']=None
+   if case=='duration-refused':
+    body['viable_acquisition_intent_ids']=[]
+    body['acquisition_intent_assessments']=[{'reason_codes':['ambiguous_best_duration_window']}]
+   if case.startswith('duration-'): assert data['availability']=={'mode':'duration','duration':'PT60M'}
    self.reply(body)
   elif self.path=='/v1/decision-selections':
    intent=data['acquisition_intent_id']
@@ -64,6 +70,7 @@ class Handler(BaseHTTPRequestHandler):
    start_time=os.environ['KIT_FIXTURE_START']
    end_time=os.environ['KIT_FIXTURE_END']
    if case=='wrong-window': start_time='2026-10-14T21:00' if 'T02:45' in start_time else '2026-10-14T18:00'
+   if case=='duration-long': end_time='2026-10-14T23:30:00'
    if case=='short-window': end_time=(datetime.datetime.fromisoformat(start_time)+datetime.timedelta(minutes=30)).isoformat()
    self.reply({'status':'accepted','selected_acquisition_intent_id':intent,
      'mission':{'acquisition_intent_id':intent,'selected_filter':selected,'window_start':start_time+'+02:00','window_end':end_time+'+02:00'}})
@@ -109,7 +116,7 @@ for name in ('../escape.txt', '/escape.txt', 'C:/escape.txt', 'a/../escape.txt')
         raise AssertionError('Unsafe ZIP accepted: '+name)
 findings.append({'check':'archive_path_refusal','passed':True})
 
-for scenario, expected in [('good','PASS'), ('after-midnight','PASS'), ('invalid-date-retry','PASS'), ('wrong-night','FAIL'),
+for scenario, expected in [('duration-good','PASS'), ('duration-refused','CONTROLLED_REFUSAL'), ('duration-long','FAIL'), ('server-error','FAIL'), ('good','PASS'), ('after-midnight','PASS'), ('invalid-date-retry','PASS'), ('wrong-night','FAIL'),
                            ('wrong-filter','FAIL'), ('wrong-window','FAIL'), ('short-window','FAIL'), ('null-filter','FAIL'), ('legacy-source','FAIL'), ('wrong-bandwidth','FAIL'), ('refused','NOT_VALIDATED'), ('no-night','NOT_VALIDATED')]:
     kit = WORK/scenario
     kit.mkdir()
@@ -145,6 +152,7 @@ for scenario, expected in [('good','PASS'), ('after-midnight','PASS'), ('invalid
         env['KIT_FIXTURE_SCENARIO']=scenario
         env['KIT_FIXTURE_START']='2026-10-16T02:45' if scenario=='after-midnight' else '2026-10-14T20:30'
         env['KIT_FIXTURE_END']='2026-10-16T04:15' if scenario=='after-midnight' else '2026-10-14T23:00'
+        if scenario=='duration-good': env['KIT_FIXTURE_END']='2026-10-14T21:30'
         return original_launch(argv,cwd,env)
     fixture.write_text(SERVER.replace("case=root.parent.name", "case=os.environ['KIT_FIXTURE_SCENARIO']"))
     launch_with_scenario.listening_pids=IsolatedProcess.listening_pids
@@ -152,12 +160,17 @@ for scenario, expected in [('good','PASS'), ('after-midnight','PASS'), ('invalid
     answers=iter(['2026-10-16','02:45','04:15'] if scenario=='after-midnight' else
                  ['12026-10-16','02:45','04:15','2026-10-14','20:30','23:00'] if scenario=='invalid-date-retry' else
                  ['2026-10-14','20:30','23:00'])
+    if scenario.startswith('duration-'):
+        answers=iter(['60'])
+    original_argv=sys.argv
+    sys.argv=['test-choix.py']+(['--duration'] if scenario.startswith('duration-') else [])
     original_input=builtins.input
     builtins.input=lambda prompt:next(answers)
     try:
         module.main()
     finally:
         builtins.input=original_input
+        sys.argv=original_argv
     results=list(kit.glob('resultats-choix-*/comparison.json'))
     assert len(results)==1
     report=json.loads(results[0].read_text())
@@ -169,7 +182,7 @@ for scenario, expected in [('good','PASS'), ('after-midnight','PASS'), ('invalid
     assert all(c['binary_stopped'] and c['port_released'] for c in report['cases'])
     assert json.loads((kit/'profil-Mac-reference/user_profile.json').read_text())=={'projects':{}}
     requests=''.join(p.read_text() for p in kit.rglob('requests.log'))
-    if scenario in ('wrong-night','refused','no-night'):
+    if scenario in ('wrong-night','refused','no-night','duration-refused','server-error'):
         assert '/v1/decision-selections' not in requests
     else:
         assert requests.count('/v1/decision-selections')==2

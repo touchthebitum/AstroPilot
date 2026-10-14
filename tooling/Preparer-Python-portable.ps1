@@ -1,4 +1,4 @@
-param([switch]$RuntimeCheckOnly)
+param([switch]$RuntimeCheckOnly, [switch]$DurationOnly)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 try {
@@ -18,7 +18,8 @@ try {
     & $python (Join-Path $PSScriptRoot 'verifier-python.py')
     if ($LASTEXITCODE -ne 0) { throw 'Verification Python echouee.' }
     if ($RuntimeCheckOnly) { exit 0 }
-    & $python (Join-Path $PSScriptRoot 'test-choix.py')
+    if ($DurationOnly) { & $python (Join-Path $PSScriptRoot 'test-choix.py') --duration }
+    else { & $python (Join-Path $PSScriptRoot 'test-choix.py') }
     if ($LASTEXITCODE -ne 0) { throw 'Test interrompu avant la fin. Conservez le message affiche.' }
 } catch {
     Write-Host "Arret : $($_.Exception.Message)"
