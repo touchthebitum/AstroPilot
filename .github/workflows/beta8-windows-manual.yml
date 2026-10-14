@@ -11,6 +11,10 @@ on:
       portable_sha256:
         required: false
         type: string
+      diagnostic_only:
+        required: false
+        type: boolean
+        default: false
       validation_only:
         required: false
         type: boolean
@@ -20,7 +24,7 @@ permissions:
   actions: read
 jobs:
   windows:
-    if: ${{ !inputs.validation_only }}
+    if: ${{ !inputs.validation_only && !inputs.diagnostic_only }}
     runs-on: windows-2022
     timeout-minutes: 45
     defaults:
@@ -124,7 +128,7 @@ jobs:
           retention-days: 30
 
   kit-harness:
-    if: ${{ inputs.validation_only }}
+    if: ${{ inputs.validation_only && !inputs.diagnostic_only }}
     runs-on: windows-2022
     timeout-minutes: 10
     steps:
@@ -177,4 +181,83 @@ jobs:
         with:
           name: PR376-377-kit-native-safety
           path: ${{ runner.temp }}/pr376-kit-qualification/validation-kit.json
+          if-no-files-found: warn
+
+  hourly-diagnostic:
+    if: ${{ inputs.diagnostic_only }}
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: source
+    env:
+      UV_PROJECT_ENVIRONMENT: .venv-diagnostic
+      UV_NO_ENV_FILE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: operations
+          sparse-checkout: tooling
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.approved_sha }}
+          path: source
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/user_profile.json
+            !/user_filters.json
+            !/data/user_profile.json
+      - name: Guard exact source and isolate build
+        run: |
+          if ('${{ inputs.approved_sha }}' -cne 'c6b8b8b5dfb2a456ca6365e6355cc9389a6004d7') { throw 'Unexpected source SHA' }
+          if ((git rev-parse HEAD).Trim() -cne '${{ inputs.approved_sha }}') { throw 'Source SHA mismatch' }
+          $iso = Join-Path $env:RUNNER_TEMP 'hourly-diagnostic-build'
+          New-Item -ItemType Directory -Path $iso -ErrorAction Stop
+          foreach ($entry in @{HOME='home';USERPROFILE='home';APPDATA='appdata';LOCALAPPDATA='localappdata';ASTROPILOT_DATA_DIR='data';UV_CACHE_DIR='cache';TMP='tmp';TEMP='tmp'}.GetEnumerator()) {
+            $dir = Join-Path $iso $entry.Value
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            "$($entry.Key)=$dir" >> $env:GITHUB_ENV
+          }
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: '0.12.6'
+          python-version: '3.13.5'
+          enable-cache: false
+      - name: Export locked Windows libraries and exact production source
+        run: |
+          uv sync --locked --extra test --extra packaging
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency synchronization failed' }
+          uv run --locked --no-sync python ../operations/tooling/export_diagnostic_runtime.py
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime export failed' }
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'Tracked source changed' }
+      - name: Qualify shipped portable interpreter and unchanged diagnostic engine
+        run: |
+          $pythonZip = Join-Path $env:RUNNER_TEMP 'python-3.13.5-embed-amd64.zip'
+          Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.13.5/python-3.13.5-embed-amd64.zip' -OutFile $pythonZip
+          if ((Get-FileHash $pythonZip -Algorithm SHA256).Hash.ToLowerInvariant() -cne '7d2650fd9d1b9d002d4a315d5f354247fd6a44f30517c7ef577b08f57a0fb6d9') { throw 'Python archive hash mismatch' }
+          $tooling = Join-Path $PWD '../operations/tooling'
+          $runtime = Join-Path $tooling 'python-portable-3.13.5'
+          Expand-Archive -LiteralPath $pythonZip -DestinationPath $runtime
+          Add-Content -LiteralPath (Join-Path $runtime 'python313._pth') -Value @('..','../source','../runtime-libs')
+          Expand-Archive -LiteralPath (Join-Path $PWD 'dist-diagnostic/diagnostic-runtime.zip') -DestinationPath $tooling
+          $work = Join-Path $env:RUNNER_TEMP 'hourly-diagnostic-qualification'
+          & (Join-Path $runtime 'python.exe') -B (Join-Path $tooling 'qualify_diagnostic.py') $work
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic qualification failed' }
+          Copy-Item (Join-Path $work 'qualification.json') dist-diagnostic/Qualification-diagnostic-Windows.json
+          & (Join-Path $runtime 'python.exe') -B (Join-Path $tooling 'qualify_diagnostic_launcher.py')
+          if ($LASTEXITCODE -ne 0) { throw 'Coordinator qualification failed' }
+          Copy-Item (Get-ChildItem (Join-Path $tooling 'resultats-diagnostic-*/isolation.json') | Select-Object -First 1).FullName dist-diagnostic/Qualification-isolation-Windows.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: PR376-377-hourly-diagnostic-runtime
+          path: |
+            source/dist-diagnostic/*
+            ${{ runner.temp }}/hourly-diagnostic-qualification/qualification.json
+          retention-days: 30
           if-no-files-found: warn
