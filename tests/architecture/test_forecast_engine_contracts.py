@@ -249,3 +249,14 @@ def test_evaluate_night_uses_unknown_setup_and_fresh_top_object_lists():
 
     assert first.setup_name == "inconnu"
     assert second.top_objects_for_night == []
+
+
+def test_availability_reaches_each_object_evaluation():
+    from decision.models.session_availability import SessionAvailability, SessionAvailabilityMode
+    availability = SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)
+    captured = []
+    engine = _engine(evaluate_object=lambda **kwargs: captured.append(kwargs), target_objects={'M31': {}})
+    engine.evaluate_targets(sky=object(), hours=[], weather=object(), illumination=0,
+        moon_rise=None, moon_set=None, city_info=object(), lat=46.9, lon=6.5,
+        bortle=4, target='deep_sky', profile={}, decision_engine=object(), availability=availability)
+    assert len(captured) == 1 and captured[0]['availability'] is availability

@@ -96,6 +96,7 @@ class ForecastEngine:
         target,
         profile,
         decision_engine,
+        availability=None,
     ):
         all_results = []
 
@@ -112,6 +113,7 @@ class ForecastEngine:
                 bortle=bortle,
                 target=target,
                 profile=profile,
+                **({"availability": availability} if availability is not None else {}),
             )
 
             if result is not None:
@@ -179,6 +181,7 @@ class ForecastEngine:
         bortle,
         target,
         profile,
+        availability=None,
     ):
         row_zone = (
             rows[0].get("time").tzinfo
@@ -255,6 +258,7 @@ class ForecastEngine:
             target=target,
             profile=profile,
             decision_engine=decision_engine,
+            availability=availability,
         )
 
         night_evaluation = self.evaluate_night(
