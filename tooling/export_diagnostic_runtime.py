@@ -34,5 +34,5 @@ with zipfile.ZipFile(out / 'diagnostic-runtime.zip', 'w', zipfile.ZIP_DEFLATED) 
     'uv_lock_sha256': hashlib.sha256((source / 'uv.lock').read_bytes()).hexdigest(),
     'runtime_zip_sha256': hashlib.sha256((out / 'diagnostic-runtime.zip').read_bytes()).hexdigest(),
     'files': len(files), 'profile': 'no user profile included', 'libraries': 'uv sync --locked on Windows, Python 3.13.5',
-}), indent=2))
+}, indent=2))
 print('Exported', len(files), 'source and dependency files')

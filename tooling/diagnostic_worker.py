@@ -234,8 +234,9 @@ def run(root, first_night, weather_override=None):
             writer.writerows(slices)
     suggestions = [{'availability': c['availability'], 'night_date': c['body']['night_date'],
                     'case': c['index'], 'label': c['label']} for c in cases if c['both_offered']]
-    suggestions.sort(key=lambda item: (item['availability']['start_local'],
-                                      item['label'].startswith('full-night')))
+    suggestions.sort(key=lambda item: (item['night_date'], item['label'].startswith('full-night'),
+        dt.datetime.fromisoformat(item['availability']['end_local']) - dt.datetime.fromisoformat(item['availability']['start_local']),
+        item['availability']['start_local']))
     result = {'status': 'TESTABLE_WINDOW_FOUND' if suggestions else 'NO_TESTABLE_WINDOW',
               'suggestions': suggestions, 'cases': len(cases), 'candidate_windows_considered': len(candidates),
               'candidate_search_limit': 24, 'search_is_exhaustive': False,
