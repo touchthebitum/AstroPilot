@@ -35,7 +35,7 @@ def worker(data, command):
             profile_loader=load_user_profile, profile_saver=save_user_profile)
     with TestClient(create_app(service_factory=service), raise_server_exceptions=False) as api:
         if command['method'] == 'INIT':
-            r = api.put('/v1/configuration', json={'site':{'name':'Qualification only','latitude':46.9,'longitude':6.6,'bortle':4},
+            r = api.put('/v1/configuration', json={'expected_revision':load_user_profile()['profile_revision'] if (data/'user_profile.json').exists() else 0,'site':{'name':'Qualification only','latitude':46.9,'longitude':6.6,'bortle':4},
                 'equipment':{'preset_id':'samyang_183'}, 'projects':{'Sh2-129':{'hours':2,'target_hours':20,'importance':9}}})
             assert r.status_code == 200, r.text
             r = api.put('/v1/projects/Sh2-129/progress', json={'expected_revision':load_user_profile()['profile_revision'],
