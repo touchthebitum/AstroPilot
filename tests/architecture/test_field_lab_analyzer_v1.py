@@ -24,7 +24,9 @@ def artifact(root, payload=None, kind='reference_observation', key='one', **chan
 def test_valid_and_input_unchanged(tmp_path):
     raw=tmp_path/'raw';raw.mkdir();artifact(raw)
     before={p.name:p.read_bytes() for p in (raw/'artifacts').iterdir()}
-    a.main(['report','--input',str(raw),'--output',str(tmp_path/'out')])
+    a.main(['scan','--input',str(raw),'--output',str(tmp_path/'baseline')])
+    a.main(['report','--input',str(raw),'--output',str(tmp_path/'out'),
+            '--inventory',str(tmp_path/'baseline'/'inventory.json')])
     assert before=={p.name:p.read_bytes() for p in (raw/'artifacts').iterdir()}
     assert json.loads((tmp_path/'out'/'scan.json').read_text())['valid']==1
 
@@ -62,25 +64,33 @@ def observation():
           '2026-10-08T10:00:00.000000Z',10,'°C','unverified',('obs',))
 
 
+def verified_match(forecast, observations, tolerance):
+    # Unit matching checks operate inside an already verified inventory boundary.
+    return a.match(forecast, observations, tolerance, evidence_complete=True)
+
+
 def test_matching_and_evidence_monotonicity():
-    f=point();o=observation();p=a.match(f,[o],10)
+    f=point();o=observation();p=verified_match(f,[o],10)
     assert p.status=='comparable' and p.signed_error==2 and p.offset_minutes==0
     near=replace(o,at_utc='2026-10-08T10:05:00.000000Z')
-    assert a.match(f,[near],10).offset_minutes==5
-    assert a.match(f,[near],4).status=='non_comparable'
+    assert verified_match(f,[near],10).offset_minutes==-5
+    assert verified_match(f,[near],4).status=='non_comparable'
     for reduced in [replace(f,sealed_at_utc=None),replace(f,prospective=None)]:
-        assert a.match(reduced,[o],10).status=='non_comparable'
-    assert a.match(f,[],10).confidence=='unknown'
-    assert a.match(f,[replace(o,quality=None)],10).status=='non_comparable'
-    assert a.match(f,[near,replace(o,at_utc='2026-10-08T09:55:00.000000Z')],10).reason=='ambiguous_observation'
-    assert a.match(f,[o,replace(o,value=9)],10).reason=='ambiguous_observation'
-    assert a.match(replace(f,variable='wind_speed_10m'),[replace(o,variable='wind_speed_10m')],10).signed_error is None
+        assert verified_match(reduced,[o],10).status=='non_comparable'
+    assert verified_match(f,[],10).confidence=='unknown'
+    assert verified_match(f,[replace(o,quality=None)],10).status=='non_comparable'
+    assert verified_match(f,[near,replace(o,at_utc='2026-10-08T09:55:00.000000Z')],10).reason=='ambiguous_observation'
+    assert verified_match(f,[o,replace(o,value=9)],10).reason=='ambiguous_observation'
+    assert verified_match(replace(f,variable='wind_speed_10m'),[replace(o,variable='wind_speed_10m')],10).signed_error is None
 
 
 def test_output_guards_and_determinism(tmp_path):
     raw=tmp_path/'raw';raw.mkdir();artifact(raw)
     with pytest.raises(ValueError):a.main(['scan','--input',str(raw),'--output',str(raw/'out')])
-    for n in ['x','y']:a.main(['report','--input',str(raw),'--output',str(tmp_path/n)])
+    a.main(['scan','--input',str(raw),'--output',str(tmp_path/'baseline')])
+    for n in ['x','y']:
+        a.main(['report','--input',str(raw),'--output',str(tmp_path/n),
+                '--inventory',str(tmp_path/'baseline'/'inventory.json')])
     assert {p.name:p.read_bytes() for p in (tmp_path/'x').iterdir()}=={p.name:p.read_bytes() for p in (tmp_path/'y').iterdir()}
     link=tmp_path/'link';link.symlink_to(raw,target_is_directory=True)
     with pytest.raises(ValueError):a.main(['scan','--input',str(raw),'--output',str(link/'out')])
@@ -114,12 +124,12 @@ def sealed_forecast(root):
 
 def test_real_seal_chain_and_removal(tmp_path):
     run=sealed_forecast(tmp_path);artifact(tmp_path)
-    obs,fs=a.normalize(a.scan(tmp_path)[0]);assert a.match(fs[0],obs,10).signed_error==2
+    obs,fs=a.normalize(a.scan(tmp_path)[0]);assert verified_match(fs[0],obs,10).signed_error==2
     for prefix in ['seal-','candidate-','commit-']:
         rows=a.scan(tmp_path)[0]
         reduced=[r for r in rows if not r.identity.startswith(prefix)]
         obs,fs=a.normalize(reduced)
-        assert a.match(fs[0],obs,10).reason=='missing_durable_seal'
+        assert verified_match(fs[0],obs,10).reason=='missing_durable_seal'
     rows=a.scan(tmp_path)[0]
     altered=[]
     for row in rows:
@@ -148,3 +158,272 @@ def test_duplicate_fields_identity_conflict_and_unknown_payload(tmp_path):
     other=dict(d,payload=dict(d['payload'],value=20));other['digest']=a.digest(other['payload'])
     (tmp_path/'artifacts'/'conflict.json').write_text(a.canonical(other))
     assert all(r.status=='invalid' for r in a.scan(tmp_path)[0] if r.identity=='one')
+
+
+def test_zero_usable_pairs_is_insufficient(tmp_path):
+    sealed_forecast(tmp_path)
+    artifact(tmp_path, payload=dict(schema_version=1, station_id='BAS', source='MeteoSwiss',
+        variable='temperature_2m', observed_at_utc='2026-10-08T10:00:00Z',
+        retrieved_at_utc='2026-10-08T11:00:00Z', value=None, unit='°C',
+        quality='missing', parameter='tre200s0', asset_href='https://example.test'))
+    rows, _ = a.scan(tmp_path)
+    pairs, summary = a.report(rows, 10, inventory=a.inventory_manifest(rows))
+    assert summary.inventory_status == 'verified'
+    assert summary.verdict == 'INSUFFICIENT' and summary.metrics == []
+    assert len(pairs) == 1 and pairs[0].signed_error is None
+    assert summary.pair_status == {'unknown_or_invalid_observation': 1}
+
+
+def test_inventory_prevents_favorable_revision_removal(tmp_path):
+    sealed_forecast(tmp_path)
+    d = artifact(tmp_path)
+    artifact(tmp_path, payload=dict(d['payload'], value=9), key='revision')
+    rows, _ = a.scan(tmp_path)
+    manifest = a.inventory_manifest(rows)
+    pairs, summary = a.report(rows, 10, inventory=manifest)
+    assert pairs[0].reason == 'ambiguous_observation'
+    assert summary.verdict == 'INSUFFICIENT'
+    (tmp_path/'artifacts'/'revision.json').unlink()
+    reduced, _ = a.scan(tmp_path)
+    pairs, summary = a.report(reduced, 10, inventory=manifest)
+    assert summary.inventory_status == 'changed'
+    assert summary.verdict == 'INSUFFICIENT' and summary.metrics == []
+    assert pairs[0].reason == 'unverified_evidence_inventory'
+    assert pairs[0].confidence == 'unknown' and pairs[0].signed_error is None
+
+
+@pytest.mark.parametrize('change', ['removed', 'renamed', 'changed', 'added'])
+def test_inventory_changes_block_metrics(tmp_path, change):
+    sealed_forecast(tmp_path)
+    d = artifact(tmp_path)
+    rows, _ = a.scan(tmp_path)
+    manifest = a.inventory_manifest(rows)
+    pairs, summary = a.report(rows, 10, inventory=manifest)
+    assert summary.verdict == 'USABLE_WITH_GAPS' and summary.metrics[0]['count'] == 1
+    assert pairs[0].signed_error == 2
+    path = tmp_path/'artifacts'/'one.json'
+    if change == 'removed':
+        path.unlink()
+    elif change == 'renamed':
+        path.rename(path.with_name('renamed.json'))
+    elif change == 'changed':
+        artifact(tmp_path, payload=dict(d['payload'], value=9))
+    else:
+        artifact(tmp_path, payload=d['payload'], key='duplicate')
+    rows, _ = a.scan(tmp_path)
+    pairs, summary = a.report(rows, 10, inventory=manifest)
+    assert summary.inventory_status == 'changed' and summary.metrics == []
+    assert summary.verdict == 'INSUFFICIENT'
+    assert all(p.status == 'non_comparable' and p.signed_error is None for p in pairs)
+
+
+def test_missing_inventory_cannot_authorize_metrics(tmp_path):
+    sealed_forecast(tmp_path); artifact(tmp_path)
+    rows, _ = a.scan(tmp_path)
+    pairs, summary = a.report(rows, 10)
+    assert summary.inventory_status == 'missing' and summary.metrics == []
+    assert pairs[0].reason == 'unverified_evidence_inventory'
+    assert a.match(point(), [observation()], 10).signed_error is None
+    with pytest.raises(SystemExit):
+        a.main(['report', '--input', str(tmp_path), '--output', str(tmp_path/'out')])
+    assert not (tmp_path/'out').exists()
+
+
+@pytest.mark.parametrize('manifest', [[], {},
+    {'schema_version': True, 'kind': 'field_lab_inventory', 'artifacts': []},
+    {'schema_version': 1, 'kind': 'field_lab_inventory', 'artifacts': [
+        {'path': '../outside', 'byte_sha256': None}]},
+    {'schema_version': 1, 'kind': 'field_lab_inventory', 'artifacts': [
+        {'path': 'one.json', 'byte_sha256': 'bad'}]},
+    {'schema_version': 1, 'kind': 'field_lab_inventory', 'artifacts': [
+        {'path': 'one.json', 'byte_sha256': None}, {'path': 'one.json', 'byte_sha256': None}]}])
+def test_malformed_inventory_rejected(manifest):
+    with pytest.raises(ValueError, match='invalid_inventory_manifest'):
+        a.inventory_status([], manifest)
+
+
+@pytest.mark.parametrize('field,value', [
+    ('transport', []), ('transport', None), ('station', []), ('units', []),
+    ('points', {}), ('points', [[]]),
+    ('points', [{'at': '2026-10-08T10:00:00Z', 'values': []}])])
+def test_malformed_forecast_isolated_by_scan(tmp_path, field, value):
+    run = sealed_forecast(tmp_path)
+    path = tmp_path/'artifacts'/(run+'.json')
+    d = json.loads(path.read_text()); p = d['payload']
+    snapshot = json.loads(p['snapshot_json']); snapshot[field] = value
+    p['snapshot_json'] = a.canonical(snapshot)
+    p['run_id'] = a.digest({k:v for k,v in p.items() if k != 'run_id'})
+    d['idempotency_key'] = p['run_id']; d['digest'] = a.digest(p)
+    path.write_text(a.canonical(d))
+    artifact(tmp_path)
+    rows, inventory = a.scan(tmp_path)
+    bad = next(r for r in rows if r.kind == 'reference_forecast')
+    assert bad.status == 'invalid' and bad.issues == ('invalid_forecast_structure',)
+    assert next(r for r in rows if r.identity == 'one').status == 'valid'
+    assert inventory['invalid'] == 1
+
+
+@pytest.mark.parametrize('kind', ['reference_comparison', 'reference_comparison_state', 'reference_report'])
+def test_stored_derivatives_are_indexed_without_scientific_validation(tmp_path, kind):
+    sealed_forecast(tmp_path); artifact(tmp_path)
+    artifact(tmp_path, payload={'arithmetic': 'unchecked', 'forecast_digest': 'unknown'},
+             kind=kind, key='stored')
+    rows, inventory = a.scan(tmp_path)
+    stored = next(r for r in rows if r.identity == 'stored')
+    assert stored.status == 'unsupported' and stored.document['payload']['arithmetic'] == 'unchecked'
+    assert inventory['unsupported'] == 1
+    pairs, summary = a.report(rows, 10, inventory=a.inventory_manifest(rows))
+    assert len(pairs) == 1 and pairs[0].signed_error == 2
+    assert summary.metrics[0]['count'] == 1
+
+
+@pytest.mark.parametrize('at,offset', [
+    ('2026-10-08T09:55:00Z', 5), ('2026-10-08T10:05:00Z', -5)])
+def test_offset_is_target_minus_observation(at, offset):
+    pair = verified_match(point(), [replace(observation(), at_utc=at)], 10)
+    assert pair.offset_minutes == offset and pair.signed_error == 2
+
+
+@pytest.mark.parametrize('eligible', [True, None, 0, 'false'])
+def test_calibration_remains_forbidden(tmp_path, eligible):
+    artifact(tmp_path, calibration_eligible=eligible)
+    assert a.scan(tmp_path)[0][0].issues == ('production_eligible_forbidden',)
+
+
+def test_cli_reduced_export_keeps_raw_bytes_and_blocks_all_metrics(tmp_path):
+    raw = tmp_path/'raw'; raw.mkdir()
+    sealed_forecast(raw); d = artifact(raw)
+    artifact(raw, payload=dict(d['payload'], value=9), key='revision')
+    baseline = tmp_path/'baseline'
+    a.main(['scan', '--input', str(raw), '--output', str(baseline)])
+    manifest_path = baseline/'inventory.json'
+    original_manifest = manifest_path.read_bytes()
+    (raw/'artifacts'/'revision.json').unlink()
+    remaining = {p.name: p.read_bytes() for p in (raw/'artifacts').iterdir()}
+    out = tmp_path/'out'
+    a.main(['report', '--input', str(raw), '--output', str(out),
+            '--inventory', str(manifest_path)])
+    result = json.loads((out/'report.json').read_text())
+    assert result['inventory_status'] == 'changed' and result['verdict'] == 'INSUFFICIENT'
+    assert result['metrics'] == []
+    pair = json.loads((out/'pairs.jsonl').read_text())
+    assert pair['reason'] == 'unverified_evidence_inventory' and pair['signed_error'] is None
+    assert 'Evidence inventory: changed' in (out/'report.md').read_text()
+    assert json.loads((out/'inventory.json').read_text()) == json.loads(original_manifest)
+    assert remaining == {p.name: p.read_bytes() for p in (raw/'artifacts').iterdir()}
+    assert original_manifest == manifest_path.read_bytes()
+
+
+@pytest.mark.parametrize('field', ['artifact_type', 'idempotency_key'])
+def test_malformed_envelope_identity_does_not_interrupt_inventory(tmp_path, field):
+    artifact(tmp_path, **{field: []})
+    rows, summary = a.scan(tmp_path)
+    assert rows[0].status == 'invalid' and summary['invalid'] == 1
+
+
+@pytest.mark.parametrize('quality', [[], {}, None, 0, True])
+@pytest.mark.parametrize('kind', ['reference_observation', 'reference_acquisition'])
+def test_malformed_quality_isolated_before_report(tmp_path, quality, kind):
+    sealed_forecast(tmp_path)
+    d = artifact(tmp_path)
+    artifact(tmp_path, payload=dict(d['payload'], quality=quality), kind=kind, key='bad-qc')
+    rows, summary = a.scan(tmp_path)
+    bad = next(r for r in rows if r.identity == 'bad-qc')
+    assert bad.status == 'invalid' and bad.issues == ('invalid_observation_quality_type',)
+    assert summary['invalid'] == 1
+    pairs, report = a.report(rows, 10, inventory=a.inventory_manifest(rows))
+    assert pairs[0].signed_error == 2 and report.metrics[0]['count'] == 1
+    assert 'bad-qc' not in pairs[0].observation.evidence
+
+
+def test_unknown_quality_string_cannot_authorize_errors(tmp_path):
+    sealed_forecast(tmp_path)
+    d = artifact(tmp_path)
+    artifact(tmp_path, payload=dict(d['payload'], quality='unknown'))
+    rows, _ = a.scan(tmp_path)
+    pairs, report = a.report(rows, 10, inventory=a.inventory_manifest(rows))
+    assert pairs[0].signed_error is None and report.metrics == []
+    assert report.verdict == 'INSUFFICIENT'
+
+
+def test_real_inventory_above_previous_64_mib_limit(tmp_path):
+    # Real valid, unique entries reproduce the multiweek size failure without
+    # constructing hundreds of thousands of source artifacts or calling a collector.
+    path = tmp_path/'inventory.json'
+    count = 357000
+    with path.open('w') as stream:
+        stream.write('{"schema_version":1,"kind":"field_lab_inventory","artifacts":[\n')
+        for i in range(count):
+            if i:
+                stream.write(',\n')
+            stream.write('    {\n      "byte_sha256": "'+'b'*64+'",\n      "path": "'+format(i,'064x')+'.json"\n    }')
+        stream.write('\n]}\n')
+    assert 64*1024*1024 < path.stat().st_size < a.INVENTORY_LIMIT
+    before = path.stat().st_size
+    manifest = a.read_inventory(path)
+    assert len(manifest['artifacts']) == count
+    assert a.inventory_status([], manifest) == 'changed'
+    assert path.stat().st_size == before
+
+
+@pytest.mark.parametrize('extra', [0, 1])
+def test_inventory_read_size_boundary(tmp_path, monkeypatch, extra):
+    path = tmp_path/'inventory.json'
+    data = a.canonical({'schema_version':1,'kind':'field_lab_inventory','artifacts':[]})
+    monkeypatch.setattr(a, 'INVENTORY_LIMIT', len(data.encode()))
+    path.write_text(data+' '*extra)
+    if extra:
+        with pytest.raises(ValueError, match='inventory_too_large'):
+            a.read_inventory(path)
+    else:
+        assert a.inventory_status([], a.read_inventory(path)) == 'verified'
+
+
+def test_inventory_bound_covers_operational_corpus():
+    item = {'path':'a'*64+'.json','byte_sha256':'b'*64}
+    one = json.dumps({'schema_version':1,'kind':'field_lab_inventory','artifacts':[item]},indent=2)
+    two = json.dumps({'schema_version':1,'kind':'field_lab_inventory','artifacts':[item,item]},indent=2)
+    assert len(one)+(800000-1)*(len(two)-len(one))+1 < a.INVENTORY_LIMIT
+
+
+def test_null_inventory_cannot_rebaseline_two_reports(tmp_path):
+    raw = tmp_path/'raw'; raw.mkdir()
+    sealed_forecast(raw); d = artifact(raw)
+    artifact(raw, payload=dict(d['payload'], value=9), key='revision')
+    baseline = tmp_path/'baseline'
+    a.main(['scan', '--input', str(raw), '--output', str(baseline)])
+    original_inventory = (baseline/'inventory.json').read_bytes()
+    (raw/'artifacts'/'revision.json').unlink()
+    before = {p.name:p.read_bytes() for p in (raw/'artifacts').iterdir()}
+    bad = tmp_path/'null.json'; bad.write_text('null')
+    first = tmp_path/'first'; second = tmp_path/'second'
+    with pytest.raises(ValueError, match='invalid_inventory_manifest'):
+        a.main(['report', '--input', str(raw), '--output', str(first),
+                '--inventory', str(bad)])
+    assert not first.exists()
+    # The second report cannot consume a silently generated replacement inventory.
+    with pytest.raises(FileNotFoundError):
+        a.main(['report', '--input', str(raw), '--output', str(second),
+                '--inventory', str(first/'inventory.json')])
+    assert not second.exists()
+    # Using the actual frozen baseline still blocks the reduced corpus.
+    a.main(['report', '--input', str(raw), '--output', str(second),
+            '--inventory', str(baseline/'inventory.json')])
+    result = json.loads((second/'report.json').read_text())
+    assert result['verdict'] == 'INSUFFICIENT' and result['inventory_status'] == 'changed'
+    assert result['metrics'] == []
+    assert (second/'inventory.json').read_bytes() == original_inventory
+    assert (baseline/'inventory.json').read_bytes() == original_inventory
+    assert before == {p.name:p.read_bytes() for p in (raw/'artifacts').iterdir()}
+
+
+@pytest.mark.parametrize('command', ['scan', 'normalize', 'report'])
+def test_explicit_null_inventory_is_rejected_before_outputs(tmp_path, command):
+    raw = tmp_path/'raw'; raw.mkdir(); artifact(raw)
+    bad = tmp_path/'null.json'; bad.write_text('null')
+    with pytest.raises(ValueError, match='invalid_inventory_manifest'):
+        a.read_inventory(bad)
+    out = tmp_path/'out'
+    with pytest.raises(ValueError, match='invalid_inventory_manifest'):
+        a.main([command, '--input', str(raw), '--output', str(out), '--inventory', str(bad)])
+    assert not out.exists()

@@ -12,10 +12,12 @@ import stat
 
 DOMAIN = 'field_lab_reference_station'
 LIMIT = 16 * 1024 * 1024
+# Supports the 800k operational corpus (~151 MB with store SHA-256 filenames),
+# while retaining a bounded read independent of collector/runtime imports.
+INVENTORY_LIMIT = 256 * 1024 * 1024
 KINDS = frozenset(('reference_observation', 'reference_acquisition', 'reference_forecast',
                   'reference_seal', 'reference_seal_completion', 'reference_seal_commit',
-                  'collection_success', 'reference_comparison', 'reference_comparison_state',
-                  'reference_report', 'reference_catalogue', 'catalog_activation_event',
+                  'collection_success', 'reference_catalogue', 'catalog_activation_event',
                   'official_asset_activation'))
 VARIABLES = {'temperature_2m': ('°C', 'tre200s0'),
              'relative_humidity_2m': ('%', 'ure200s0'),
@@ -160,6 +162,7 @@ class ReportSummary:
     metrics: list[dict]
     pair_status: dict[str, int]
     limits: tuple[str, ...]
+    inventory_status: str = 'unverified'
     schema_version: int = 1
 
 
@@ -172,6 +175,8 @@ def check_payload(d):
                     'value', 'unit', 'quality', 'parameter', 'asset_href', 'schema_version')
         if not all(k in p for k in required):
             raise ValueError('missing_observation_fields')
+        if not isinstance(p['quality'], str):
+            raise ValueError('invalid_observation_quality_type')
         if p['station_id'] != d['source_id'] or p['source'] != 'MeteoSwiss':
             raise ValueError('invalid_observation_provenance')
         if p['variable'] not in VARIABLES or (p['unit'], p['parameter']) != VARIABLES[p['variable']]:
@@ -182,6 +187,10 @@ def check_payload(d):
             raise ValueError('invalid_value')
     elif kind == 'reference_forecast':
         s = load_json(p['snapshot_json'])
+        if (type(s) is not dict or type(s.get('station')) is not dict
+                or type(s.get('transport', {})) is not dict
+                or type(s.get('units')) is not dict or type(s.get('points')) is not list):
+            raise ValueError('invalid_forecast_structure')
         if p['run_id'] != d['idempotency_key'] or p['run_id'] != digest({k:v for k,v in p.items() if k != 'run_id'}):
             raise ValueError('run_identity_mismatch')
         if s['station']['station_id'] != d['source_id']:
@@ -195,6 +204,8 @@ def check_payload(d):
             raise ValueError('invalid_provider_identity')
         times = []
         for point in s['points']:
+            if type(point) is not dict or type(point.get('values')) is not dict:
+                raise ValueError('invalid_forecast_structure')
             target = instant(point['at']); times.append(target)
             if p['prospective'] and max(created, retrieved) >= target:
                 raise ValueError('leakage_detected')
@@ -248,10 +259,12 @@ def scan(root):
             if digest(d['payload']) != d.get('digest'):
                 raise ValueError('digest_mismatch')
             check_payload(d)
-        except (OSError, UnicodeError, ValueError, TypeError, KeyError) as error:
+        except (OSError, UnicodeError, ValueError, TypeError, KeyError, OverflowError) as error:
             issues.append(str(error) if isinstance(error, ValueError) else type(error).__name__)
         kind = d.get('artifact_type') if isinstance(d, dict) else None
         identity = d.get('idempotency_key') if isinstance(d, dict) else None
+        kind = kind if isinstance(kind, str) else None
+        identity = identity if isinstance(identity, str) else None
         status = 'invalid' if issues else ('valid' if kind in KINDS else 'unsupported')
         rows.append(SourceArtifact(path.name, byte_sha, identity, kind, d, status, tuple(issues)))
     # Conflicting identity records cannot be rescued by deterministic ordering.
@@ -273,6 +286,49 @@ def scan(root):
                    max_created=max((stamp(x.document['created_at_utc']) for x in valid),default=None),
                    artifacts=[asdict(x) for x in rows])
     return rows, summary
+
+
+def inventory_manifest(rows):
+    """Byte identities of a separately established, trusted export boundary."""
+    return dict(schema_version=1, kind='field_lab_inventory', artifacts=[
+        dict(path=row.path, byte_sha256=row.byte_sha256) for row in rows])
+
+
+def inventory_status(rows, manifest):
+    if manifest is None:
+        return 'missing'
+    if (type(manifest) is not dict or set(manifest) != {'schema_version', 'kind', 'artifacts'}
+            or type(manifest['schema_version']) is not int or manifest['schema_version'] != 1
+            or manifest['kind'] != 'field_lab_inventory' or type(manifest['artifacts']) is not list):
+        raise ValueError('invalid_inventory_manifest')
+    expected = {}
+    for item in manifest['artifacts']:
+        if (type(item) is not dict or set(item) != {'path', 'byte_sha256'}
+                or not isinstance(item['path'], str) or not item['path']
+                or Path(item['path']).name != item['path'] or item['path'] in expected):
+            raise ValueError('invalid_inventory_manifest')
+        sha = item['byte_sha256']
+        if sha is not None and (not isinstance(sha, str) or len(sha) != 64
+                                or any(c not in '0123456789abcdef' for c in sha)):
+            raise ValueError('invalid_inventory_manifest')
+        expected[item['path']] = sha
+    actual = {row.path: row.byte_sha256 for row in rows}
+    return 'verified' if len(actual) == len(rows) and actual == expected else 'changed'
+
+
+def read_inventory(path):
+    handle = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(handle, 'rb') as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError('regular_inventory_file_required')
+        data = stream.read(INVENTORY_LIMIT + 1)
+    if len(data) > INVENTORY_LIMIT:
+        raise ValueError('inventory_too_large')
+    manifest = load_json(data)
+    # A supplied null is malformed evidence, not the absence of --inventory.
+    if manifest is None:
+        raise ValueError('invalid_inventory_manifest')
+    return manifest
 
 
 def seal_chain(d, index):
@@ -324,7 +380,7 @@ def normalize(rows):
     return sorted(obs,key=lambda x:canonical(asdict(x))), sorted(forecasts,key=lambda x:canonical(asdict(x)))
 
 
-def match(forecast, observations, tolerance):
+def match(forecast, observations, tolerance, *, evidence_complete=False):
     if not number(tolerance) or not 0 <= tolerance <= 60:
         raise ValueError('tolerance_0_to_60_minutes')
     target = instant(forecast.at_utc)
@@ -335,10 +391,13 @@ def match(forecast, observations, tolerance):
         distance = min(abs((instant(o.at_utc)-target).total_seconds()) for o in candidates)
         nearest = [o for o in candidates if abs((instant(o.at_utc)-target).total_seconds())==distance]
     o = nearest[0] if len(nearest)==1 else None
-    offset = (instant(o.at_utc)-target).total_seconds()/60 if o else None
+    # Same convention as the stored reference comparisons: target minus observation.
+    offset = (target-instant(o.at_utc)).total_seconds()/60 if o else None
     reason = 'missing_observation' if not nearest else 'ambiguous_observation'
     error = None
-    if o:
+    if evidence_complete is not True:
+        reason = 'unverified_evidence_inventory'
+    elif o:
         if abs(offset) > tolerance:
             reason = 'outside_tolerance'
         elif forecast.sealed_at_utc is None:
@@ -379,7 +438,10 @@ def coverage(observations):
     return [dict(site=k[0],source=k[1],variable=k[2],unit=k[3],**grid(ts,600)) for k,ts in sorted(groups.items())]
 
 
-def report(rows, observations, forecasts, tolerance):
+def report(rows, tolerance, *, inventory=None):
+    boundary = inventory_status(rows, inventory)
+    # Derive scientific inputs from the checked rows, never caller-selected subsets.
+    observations, forecasts = normalize(rows)
     groups = defaultdict(list)
     for o in observations:
         groups[(o.site,o.variable,o.source,o.unit,'observation')].append(o.value)
@@ -394,7 +456,8 @@ def report(rows, observations, forecasts, tolerance):
     by_measure = defaultdict(list)
     for o in observations:
         by_measure[(o.site,o.variable)].append(o)
-    pairs = [match(f,by_measure[(f.site,f.variable)],tolerance) for f in forecasts]
+    pairs = [match(f,by_measure[(f.site,f.variable)],tolerance,
+                   evidence_complete=boundary == 'verified') for f in forecasts]
     errors=defaultdict(list)
     for p in pairs:
         if p.signed_error is not None:
@@ -402,7 +465,7 @@ def report(rows, observations, forecasts, tolerance):
     metrics=[asdict(MetricRecord(*k,len(es),sum(es)/len(es),sum(abs(e) for e in es)/len(es)))
              for k,es in sorted(errors.items(),key=lambda kv:canonical(kv[0]))]
     cycles = [x.document['payload']['at_utc'] for x in rows if x.status=='valid' and x.kind=='collection_success']
-    summary = ReportSummary('USABLE_WITH_GAPS' if observations and forecasts else 'INSUFFICIENT',
+    summary = ReportSummary('USABLE_WITH_GAPS' if metrics else 'INSUFFICIENT',
               coverage(observations),[grid(cycles,3600)] if cycles else [],distributions,metrics,
               dict(sorted(Counter(p.reason for p in pairs).items())),
               ('Descriptive offline analysis only; no production policy changes.',
@@ -410,7 +473,9 @@ def report(rows, observations, forecasts, tolerance):
                'Wind aggregation unverified; excluded from errors.',
                'No NightMerit outcomes, OIII/Hα, Moon, transparency, seeing or AQI labels.',
                'Gap rates describe sampled instants, not scheduler failures.',
-               'Forecast runs overlap; errors are not independent samples.'))
+               'Forecast runs overlap; errors are not independent samples.',
+               'Metrics require an unchanged trusted inventory; pre-inventory omissions cannot be detected.'),
+              inventory_status=boundary)
     return pairs,summary
 
 
@@ -441,7 +506,10 @@ def main(argv=None):
     parser.add_argument('command',choices=('scan','normalize','report'))
     parser.add_argument('--input',required=True);parser.add_argument('--output',required=True)
     parser.add_argument('--tolerance-minutes',type=float,default=10)
+    parser.add_argument('--inventory',help='Trusted inventory.json from a prior scan; required for report')
     args=parser.parse_args(argv)
+    if args.command == 'report' and not args.inventory:
+        parser.error('report requires --inventory from a prior scan')
     if not number(args.tolerance_minutes) or not 0 <= args.tolerance_minutes <= 60:
         raise ValueError('tolerance_0_to_60_minutes')
     # Validate destination before any output creation; scan reads raw only.
@@ -450,14 +518,20 @@ def main(argv=None):
     if dest==raw or raw in dest.parents or requested.exists() or requested.is_symlink() or any(p.is_symlink() for p in requested.parents) or dest.parts[:2] in (('/', 'Volumes'),('/', 'share')):
         raise ValueError('new_local_output_outside_input_required')
     rows,inventory=scan(raw)
+    manifest = read_inventory(args.inventory) if args.inventory else None
+    if manifest is not None:
+        inventory_status(rows, manifest)
     out=output_directory(raw,requested);write_json(out/'scan.json',inventory)
+    # Carry the trusted boundary forward; a changed report must not rebaseline itself.
+    write_json(out/'inventory.json', manifest if manifest is not None else inventory_manifest(rows))
     if args.command!='scan':
         observations,forecasts=normalize(rows)
         write_lines(out/'observations.jsonl',observations);write_lines(out/'forecasts.jsonl',forecasts)
         if args.command=='report':
-            pairs,summary=report(rows,observations,forecasts,args.tolerance_minutes)
+            pairs,summary=report(rows,args.tolerance_minutes,inventory=manifest)
             write_lines(out/'pairs.jsonl',pairs);write_json(out/'report.json',asdict(summary))
             text=['# Field Lab Analyzer v1', '', 'Verdict: '+summary.verdict,
+                  'Evidence inventory: '+summary.inventory_status,
                   f'Artifacts: {len(rows)}; observations: {len(observations)}; forecast values: {len(forecasts)}.',
                   '', 'Matching exclusions/counts: '+canonical(summary.pair_status),'',
                   '## Provider errors (forecast minus observation)', '',

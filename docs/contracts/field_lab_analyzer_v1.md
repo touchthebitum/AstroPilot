@@ -2,6 +2,15 @@
 
 Offline/read-only tool: `python -m astropilot.field_lab_analyzer
 {scan,normalize,report} --input RAW_STORE --output LOCAL_NEW_DIRECTORY`.
+`report` additionally requires `--inventory TRUSTED_SCAN_DIRECTORY/inventory.json`
+from a prior `scan` of the frozen export. Preserve that inventory independently;
+do not rescan a reduced corpus to replace it during the same audit.
+Report outputs carry forward the supplied inventory, including when it differs
+from the current corpus; they never silently establish a replacement baseline.
+An explicitly supplied JSON `null` inventory is rejected before any output
+directory is created; it cannot establish a replacement baseline.
+Inventory reads are bounded to 256 MiB, covering the 800,000-artifact operational
+corpus with store SHA-256 filenames; larger exports are explicitly rejected.
 No network, production engines, Tonight, mission, actionability, ledger,
 notifications, scheduler or collector imports. All dependencies are stdlib.
 No production policy is written or applied. Reports contain findings only.
@@ -14,7 +23,13 @@ unique nearest matching within configurable tolerance (default 10 minutes)
 
 Input symlinks/nonregular files and unknown schemas are rejected as evidence;
 16 MiB per artifact cap. Unsupported artifact types are indexed, not interpreted.
+Stored `reference_comparison`, `reference_comparison_state` and `reference_report`
+are unsupported evidence: their envelope/digest is checked, but their payload,
+joins and arithmetic are not certified and never authorize new metrics.
 Missing provenance invalidates evidence; naive/invalid timestamps are rejected.
+Observation quality must be a string; non-scalar or other malformed types are
+rejected per artifact before deduplication. Unknown quality strings remain
+non-comparable and never authorize errors.
 No unknown field is converted into favorable evidence. `calibration_eligible`
 must be false. Output must be new, outside the raw root and outside /Volumes
 or /share; output symlinks/ancestors resolving into raw storage are refused.
@@ -43,7 +58,17 @@ time, and a valid forecast -> seal -> candidate -> commit identity/digest/time
 chain. Wind, unknown variables, missing QC/values/seals and historical forecasts
 remain non-comparable. Stored reports/comparisons never authorize new metrics.
 Removing required evidence must not improve confidence or comparability for
-a retained pair; metrics always publish eligible counts and exclusions.
+a retained pair within the established inventory. Report verifies every frozen
+relative filename and byte SHA before authorizing errors; missing, added, renamed
+or changed files block all pairs with `unverified_evidence_inventory`. Missing
+inventory also blocks metrics, and malformed inventories are rejected. Matching
+defaults to unverified and needs an explicitly verified evidence boundary.
+Reports derive normalized inputs from the scanned rows, not caller subsets.
+This detects changes after the baseline, not omissions before it or deliberate
+replacement of the trusted baseline. Byte hashes establish consistency, not
+external authenticity or NAS completeness. Metrics publish counts and exclusions.
+Temporal offset is forecast target minus observation time, matching the collector;
+signed error remains forecast value minus observed value.
 
 Coverage gaps use the explicit ten-minute observation grid between each group's
 first/last timestamps; hourly cycle gaps use success attestations. Neither
@@ -53,6 +78,10 @@ min/max/mean by source/site/variable/unit; no quality score or favorable default
 Determinism applies to unchanged input bytes, file names and arguments; no wall
 clock, absolute input path or output path enters artifacts. Live input additions
 are excluded after discovery; immutable files must not change during reading.
-Outputs: scan.json; observations.jsonl and forecasts.jsonl for normalize/report;
-pairs.jsonl, report.json and report.md for report. Empty corpus is INSUFFICIENT.
+Outputs: scan.json and inventory.json; observations.jsonl and forecasts.jsonl for
+normalize/report; pairs.jsonl, report.json and report.md for report. Report exposes
+inventory_status (`verified`, `changed` or `missing`). Empty corpus or zero
+comparable pairs is INSUFFICIENT; USABLE_WITH_GAPS requires at least one descriptive
+metric and never implies calibration eligibility. Nested forecast structures are
+validated per file so malformed evidence does not interrupt other records.
 The actual NAS audit precedes this contract; no collector/NAS code changes.
