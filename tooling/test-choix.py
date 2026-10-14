@@ -5,7 +5,7 @@ from windows_job import IsolatedProcess
 from kit_safety import guard_placement, safe_extract, reject_links
 PROVENANCE = json.loads((BASE/'Kit-provenance.json').read_text(encoding='utf-8'))
 EXPECTED = PROVENANCE['portable_zip_sha256']
-BUILD = PROVENANCE.get('build', 'a295134')
+BUILD = PROVENANCE.get('build', '69f886d')
 OWNER = None
 local = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -78,7 +78,7 @@ def main():
             print('Date ou heure incorrecte. Exemple : 2026-10-16, 01:45, 03:15. Recommencez.',flush=True)
     if IsolatedProcess.listening_pids():
         raise SystemExit('Le port 8000 est occupé. Fermez AstroPilot avant le test.')
-    archive = BASE/'AstroPilot-PR379-a295134-portable.zip'
+    archive = BASE/'AstroPilot-PR379-69f886d-portable.zip'
     if not archive.is_file():
         raise SystemExit('Archive du binaire corrigé absente. Extrayez tout le nouveau kit.')
     with archive.open('rb') as file:
@@ -88,7 +88,7 @@ def main():
     if out.resolve().is_relative_to(source):
         raise SystemExit('Le kit doit se trouver hors du dossier de données réel.')
     out.mkdir()
-    report = {'build':BUILD,'source_sha':'a29513447355b05cbcceda85a10d6dc1f90da3fb','portable_zip_sha256':EXPECTED,'source_directory':str(source),'availability':{'mode':'fixed_window','start_local':start_dt.isoformat(timespec='minutes'),'end_local':end_dt.isoformat(timespec='minutes')},'cases':[]}
+    report = {'build':BUILD,'source_sha':'69f886dea355a7b017a2f02ff34c9bb5d5f7a344','portable_zip_sha256':EXPECTED,'source_directory':str(source),'availability':{'mode':'fixed_window','start_local':start_dt.isoformat(timespec='minutes'),'end_local':end_dt.isoformat(timespec='minutes')},'cases':[]}
     before = None
     child = None
     log = None

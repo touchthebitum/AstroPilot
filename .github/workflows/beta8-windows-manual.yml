@@ -54,7 +54,7 @@ jobs:
             !/data/user_profile.json
       - name: Guard exact source and isolated directories
         run: |
-          if ($env:APPROVED_SHA -cne 'a29513447355b05cbcceda85a10d6dc1f90da3fb') { throw 'Unexpected product SHA' }
+          if ($env:APPROVED_SHA -cne '69f886dea355a7b017a2f02ff34c9bb5d5f7a344') { throw 'Unexpected product SHA' }
           if ((git rev-parse HEAD).Trim() -cne $env:APPROVED_SHA) { throw 'Checkout mismatch' }
           if (git status --porcelain) { throw 'Dirty source' }
           $iso = Join-Path $env:RUNNER_TEMP 'beta8-common-isolation'
@@ -147,7 +147,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $artifacts = Join-Path $env:RUNNER_TEMP 'pr376-built-artifacts'
-          gh run download ${{ inputs.build_run }} --repo touchthebitum/AstroPilot --name PR379-windows-a29513447355b05cbcceda85a10d6dc1f90da3fb --dir "$artifacts"
+          gh run download ${{ inputs.build_run }} --repo touchthebitum/AstroPilot --name PR379-windows-69f886dea355a7b017a2f02ff34c9bb5d5f7a344 --dir "$artifacts"
           if ($LASTEXITCODE -ne 0) { throw 'Binary artifact download failed' }
           "PR376_ARCHIVE_ROOT=$artifacts" >> $env:GITHUB_ENV
           "KIT_EXPECTED_PORTABLE_SHA=${{ inputs.portable_sha256 }}" >> $env:GITHUB_ENV
@@ -213,7 +213,7 @@ jobs:
             !/data/user_profile.json
       - name: Guard exact source and isolate build
         run: |
-          if ('${{ inputs.approved_sha }}' -cne 'a29513447355b05cbcceda85a10d6dc1f90da3fb') { throw 'Unexpected source SHA' }
+          if ('${{ inputs.approved_sha }}' -cne '69f886dea355a7b017a2f02ff34c9bb5d5f7a344') { throw 'Unexpected source SHA' }
           if ((git rev-parse HEAD).Trim() -cne '${{ inputs.approved_sha }}') { throw 'Source SHA mismatch' }
           $iso = Join-Path $env:RUNNER_TEMP 'hourly-diagnostic-build'
           New-Item -ItemType Directory -Path $iso -ErrorAction Stop

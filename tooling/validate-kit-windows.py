@@ -36,7 +36,7 @@ class Handler(BaseHTTPRequestHandler):
   self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(data)))
   self.end_headers(); self.wfile.write(data)
  def do_GET(self):
-  self.reply({'application':'astropilot','build':'a295134','version':'1.0.0b8'})
+  self.reply({'application':'astropilot','build':'69f886d','version':'1.0.0b8'})
  def do_POST(self):
   data=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
   with (root/'requests.log').open('a') as f: f.write(self.path+'\n')
@@ -118,7 +118,7 @@ for scenario, expected in [('good','PASS'), ('after-midnight','PASS'), ('invalid
     cfg = kit/'Configuration-Mac-reference.zip'
     with zipfile.ZipFile(cfg,'w') as bundle:
         bundle.writestr('user_profile.json','{"projects":{}}')
-    binary = kit/'AstroPilot-PR379-a295134-portable.zip'
+    binary = kit/'AstroPilot-PR379-69f886d-portable.zip'
     payload=b'synthetic Windows executable placeholder, never executed'
     with zipfile.ZipFile(binary,'w') as bundle:
         bundle.writestr('AstroPilot/AstroPilot.exe',payload)
@@ -228,7 +228,7 @@ if os.environ.get('PR376_ARCHIVE_ROOT'):
             time.sleep(.2)
         else:
             raise AssertionError('Real executable did not become ready')
-        assert identity['build']=='a295134' and identity['version']=='1.0.0b8'
+        assert identity['build']=='69f886d' and identity['version']=='1.0.0b8'
         with opener.open('http://127.0.0.1:8000/',timeout=5) as response:
             assert response.status==200
     finally:
