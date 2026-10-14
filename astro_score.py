@@ -3,6 +3,8 @@ from decision.services.project_decision_provenance import (
 )
 import json
 import requests
+from time import perf_counter
+from astropilot.weather_diagnostics import log_weather
 import warnings
 from dataclasses import replace
 from math import isfinite
@@ -384,33 +386,55 @@ def fetch_weather(lat: float, lon: float) -> WeatherSnapshot | None:
             ])
     }
 
+    started = perf_counter()
     try:
         response = requests.get(url, params=params, timeout=15)
         response.raise_for_status()
-    except requests.exceptions.ReadTimeout:
-        print("Erreur météo : timeout Open-Meteo")
+    except requests.exceptions.RequestException as exc:
+        if isinstance(exc, requests.exceptions.SSLError):
+            category = "tls_error"
+        elif isinstance(exc, requests.exceptions.ConnectTimeout):
+            category = "connect_timeout"
+        elif isinstance(exc, requests.exceptions.ReadTimeout):
+            category = "read_timeout"
+        elif isinstance(exc, requests.exceptions.Timeout):
+            category = "timeout"
+        elif isinstance(exc, requests.exceptions.HTTPError):
+            category = "http_error"
+        elif isinstance(exc, requests.exceptions.ConnectionError):
+            category = "connection_error"
+        else:
+            category = "request_error"
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        log_weather("weather_fetch_failed", category=category, started=started,
+                    http_status=status if isinstance(status, int) and not isinstance(status, bool) else None)
         return None
-
-    except requests.exceptions.HTTPError as e:
-        print(f"Erreur HTTP Open-Meteo : {e}")
-        return None
-
-    except Exception as e:
-        print(f"ERREUR : prévisions météo indisponibles ({type(e).__name__})")
+    except Exception:
+        log_weather("weather_fetch_failed", category="unexpected_error", started=started)
         return None
 
     try:
         payload = response.json()
     except (TypeError, ValueError) as exc:
+        log_weather("weather_fetch_failed", category="response_not_json", started=started,
+                    http_status=getattr(response, "status_code", None))
         raise WeatherIngressError(["response_not_json"]) from exc
 
-    return validate_weather_payload(
-        payload,
-        requested_latitude=lat,
-        requested_longitude=lon,
-        requested_timezone=timezone_name,
-        retrieved_at_utc=datetime.now(timezone.utc),
-    )
+    try:
+        snapshot = validate_weather_payload(
+            payload,
+            requested_latitude=lat,
+            requested_longitude=lon,
+            requested_timezone=timezone_name,
+            retrieved_at_utc=datetime.now(timezone.utc),
+        )
+    except WeatherIngressError:
+        log_weather("weather_fetch_failed", category="invalid_weather_payload", started=started,
+                    http_status=getattr(response, "status_code", None))
+        raise
+    log_weather("weather_fetch_succeeded", category="validated", started=started,
+                http_status=getattr(response, "status_code", None))
+    return snapshot
 
 
 def show_multi_night_portfolio_roadmap(

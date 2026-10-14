@@ -233,3 +233,116 @@ def test_unix_weather_hours_cross_spring_dst_as_distinct_utc_instants():
         snapshot.payload["hourly"]["time"][1], timezone.utc
     ).astimezone(ZoneInfo(snapshot.timezone))
     assert second.isoformat() == "2026-03-29T03:00:00+02:00"
+
+
+@pytest.fixture
+def diagnostic_logs(caplog):
+    import logging
+    logger = logging.getLogger('astropilot.launcher.weather')
+    previous_propagate = logger.propagate
+    logger.addHandler(caplog.handler)
+    logger.propagate = False
+    try:
+        yield caplog
+    finally:
+        logger.removeHandler(caplog.handler)
+        logger.propagate = previous_propagate
+
+
+@pytest.mark.parametrize("failure,category,status", [
+    ('ReadTimeout','read_timeout',None), ('ConnectTimeout','connect_timeout',None),
+    ('SSLError','tls_error',None), ('ConnectionError','connection_error',None),
+    ('Timeout','timeout',None), ('HTTPError','http_error',429), ('HTTPError','http_error',503),
+    ('RequestException','request_error',None), ('RuntimeError','unexpected_error',None),
+])
+def test_fetch_weather_records_sanitized_failure_without_retry(monkeypatch, diagnostic_logs, failure, category, status):
+    import json
+    import requests
+    import astro_score
+    from astropilot.weather_diagnostics import weather_diagnostic_context
+    secret = 'token=SECRET https://private.invalid/path?latitude=46.7508'
+    error_type = RuntimeError if failure=='RuntimeError' else getattr(requests.exceptions, failure)
+    error = error_type(secret)
+    if status is not None:
+        error.response = requests.Response()
+        error.response.status_code = status
+    calls = []
+    def fail(*args, **kwargs):
+        calls.append(kwargs)
+        raise error
+    monkeypatch.setattr(astro_score.requests, 'get', fail)
+    with weather_diagnostic_context('request-test-id'):
+        assert astro_score.fetch_weather(46.7508,6.5495) is None
+    records = [json.loads(r.message.removeprefix('weather_diagnostic '))
+               for r in diagnostic_logs.records if r.message.startswith('weather_diagnostic ')]
+    assert len(records)==1
+    record=records[0]
+    assert record['diagnostic_id']=='request-test-id'
+    assert record['event']=='weather_fetch_failed'
+    assert record['category']==category
+    assert record['http_status']==status
+    assert record['duration_ms']>=0
+    assert datetime.fromisoformat(record['occurred_at_utc']).utcoffset()==timedelta(0)
+    assert 'SECRET' not in diagnostic_logs.text and 'private.invalid' not in diagnostic_logs.text
+    assert '46.7508' not in diagnostic_logs.text
+    assert len(calls)==1 and calls[0]['timeout']==15
+
+
+@pytest.mark.parametrize('payload,category', [(None,'response_not_json'), ({},'invalid_weather_payload')])
+def test_fetch_weather_preserves_invalid_payload_refusal(monkeypatch, diagnostic_logs, payload, category):
+    import json
+    import requests
+    import astro_score
+    response=requests.Response()
+    response.status_code=200
+    response._content=b'not JSON SECRET' if payload is None else json.dumps(payload).encode()
+    monkeypatch.setattr(astro_score.requests,'get',lambda *a,**k:response)
+    with pytest.raises(WeatherIngressError):
+        astro_score.fetch_weather(46.7508,6.5495)
+    record=json.loads(diagnostic_logs.records[-1].message.removeprefix('weather_diagnostic '))
+    assert record['category']==category
+    assert 'SECRET' not in diagnostic_logs.text
+
+
+def test_fetch_weather_after_failure_still_validates_the_real_payload(monkeypatch, diagnostic_logs):
+    import json
+    import requests
+    import astro_score
+    response=requests.Response()
+    response.status_code=200
+    response._content=json.dumps(valid_payload()).encode()
+    def fail(*a,**k): raise requests.exceptions.ReadTimeout('SECRET')
+    monkeypatch.setattr(astro_score.requests,'get',fail)
+    assert astro_score.fetch_weather(46.7508,6.5495) is None
+    monkeypatch.setattr(astro_score.requests,'get',lambda *a,**k:response)
+    snapshot=astro_score.fetch_weather(46.7508,6.5495)
+    assert snapshot.hour_count==48 and snapshot.completeness==1
+    records=[json.loads(r.message.removeprefix('weather_diagnostic ')) for r in diagnostic_logs.records]
+    assert records[-1]['event']=='weather_fetch_succeeded'
+    assert records[-1]['category']=='validated'
+    assert records[-1]['diagnostic_id']!=records[-2]['diagnostic_id']
+
+
+def test_diagnostic_context_is_nested_thread_isolated_and_resets(diagnostic_logs):
+    import json
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from time import perf_counter
+    from astropilot.weather_diagnostics import log_weather, weather_diagnostic_context
+    barrier=Barrier(2)
+    def worker(identifier):
+        with weather_diagnostic_context(identifier):
+            barrier.wait(timeout=5)
+            log_weather('outer',category='available',started=perf_counter())
+            with weather_diagnostic_context(identifier+'-nested'):
+                log_weather('nested',category='available',started=perf_counter())
+            log_weather('restored',category='available',started=perf_counter())
+        log_weather('outside',category='available',started=perf_counter())
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results=[pool.submit(worker, identifier) for identifier in ('one','two')]
+        for result in results: result.result(timeout=10)
+    records=[json.loads(r.message.removeprefix('weather_diagnostic ')) for r in diagnostic_logs.records]
+    assert sorted(r['diagnostic_id'] for r in records if r['event']=='outer')==['one','two']
+    assert sorted(r['diagnostic_id'] for r in records if r['event']=='restored')==['one','two']
+    assert sorted(r['diagnostic_id'] for r in records if r['event']=='nested')==['one-nested','two-nested']
+    assert all(r['diagnostic_id'] not in ('one','two') for r in records if r['event']=='outside')

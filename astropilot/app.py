@@ -31,6 +31,7 @@ from pydantic import (
 
 from astropilot.guardian_renewal_api import (GuardianRenewalAdapter, RenewalRequest, Rejection,
     valid_key, valid_execution_id, response as guardian_response, unavailable as guardian_unavailable)
+from astropilot.weather_diagnostics import HEADER as WEATHER_DIAGNOSTIC_HEADER, log_weather, weather_diagnostic_context
 from astropilot.guardian_api import GuardianEvaluateRequest, GuardianEvaluateResponse, evaluate as evaluate_guardian
 from decision.runners.guardian_runner import GuardianRunner
 
@@ -2536,7 +2537,7 @@ def create_app(
             },
         },
     )
-    def tonight(request: TonightRequest):
+    def tonight(request: TonightRequest, response: Response):
         reference_time_utc = clock()
         try:
             profile = dict(profile_provider())
@@ -2622,11 +2623,16 @@ def create_app(
         effective_bortle = inputs.bortle
 
         weather_freshness: WeatherFreshness | None = None
+        weather_diagnostic_id = uuid4().hex
+        weather_started = perf_counter()
+        response.headers[WEATHER_DIAGNOSTIC_HEADER] = weather_diagnostic_id
+        diagnostic_headers = {WEATHER_DIAGNOSTIC_HEADER: weather_diagnostic_id}
         try:
-            weather = weather_provider(
-                location["latitude"],
-                location["longitude"],
-            )
+            with weather_diagnostic_context(weather_diagnostic_id):
+                weather = weather_provider(
+                    location["latitude"],
+                    location["longitude"],
+                )
             if weather is not None and not isinstance(weather, WeatherSnapshot):
                 raise WeatherIngressError(["invalid_weather_snapshot"])
             if weather is not None:
@@ -2635,6 +2641,8 @@ def create_app(
                     reference_time_utc=reference_time_utc,
                 )
         except WeatherIngressError as exc:
+            log_weather("tonight_weather_refused", category=exc.code,
+                        started=weather_started, http_status=503, diagnostic_id=weather_diagnostic_id)
             messages = {
                 "weather_insufficient": "Weather coverage is insufficient.",
                 "weather_stale": (
@@ -2644,24 +2652,34 @@ def create_app(
             message = messages.get(exc.code, "Weather data failed validation.")
             raise HTTPException(
                 status_code=503,
+                headers=diagnostic_headers,
                 detail={"code": exc.code, "message": message},
             ) from exc
         except LocationTimeError as exc:
+            log_weather("tonight_weather_refused", category="location_timezone_error",
+                        started=weather_started, http_status=503, diagnostic_id=weather_diagnostic_id)
             raise HTTPException(
                 status_code=503,
+                headers=diagnostic_headers,
                 detail={
                     "code": exc.code,
                     "message": "The location timezone could not be resolved.",
                 },
             ) from exc
         if weather is None:
+            log_weather("tonight_weather_refused", category="weather_unavailable",
+                        started=weather_started, http_status=503, diagnostic_id=weather_diagnostic_id)
             raise HTTPException(
                 status_code=503,
+                headers=diagnostic_headers,
                 detail={
                     "code": "weather_unavailable",
                     "message": "Weather data is temporarily unavailable.",
                 },
             )
+
+        log_weather("tonight_weather_available", category="available", started=weather_started,
+                    diagnostic_id=weather_diagnostic_id)
 
         try:
             result = application_service().evaluate(

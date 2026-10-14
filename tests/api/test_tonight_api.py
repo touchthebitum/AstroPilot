@@ -4074,3 +4074,65 @@ def test_duration_ambiguity_is_a_serializable_refusal_not_an_http_error():
     assert payload['actionability_refusal']['best_productive_window_minutes'] == 60
     assert payload['actionability_refusal']['refusal_stage'] is None
     assert payload['acquisition_intent_options'] == []
+
+
+def test_weather_failure_is_correlated_in_isolated_persistent_log_and_recovers(monkeypatch, tmp_path):
+    import json
+    import requests
+    import astro_score
+    from astropilot.launcher import _configure_launcher_logger
+    from astropilot.weather_diagnostics import HEADER
+    monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(tmp_path/'data'))
+    log_path=tmp_path/'Logs'/'AstroPilot.log'
+    import logging
+    logger = logging.getLogger('astropilot.launcher')
+    previous_level, previous_propagate = logger.level, logger.propagate
+    logger,_=_configure_launcher_logger(log_path=log_path)
+    response=requests.Response()
+    response.status_code=200
+    # A real valid ingress payload, aligned with the deterministic API clock.
+    from decision.weather.weather_ingress import REQUIRED_HOURLY_UNITS
+    start=DEFAULT_WEATHER_REFERENCE_TIME.replace(hour=0)
+    payload={'latitude':46.7508,'longitude':6.5495,'elevation':800,
+        'timezone':'Europe/Zurich','utc_offset_seconds':7200,
+        'hourly_units':{'time':'unixtime',**REQUIRED_HOURLY_UNITS},
+        'hourly':{'time':[int((start+timedelta(hours=i)).timestamp()) for i in range(48)]}}
+    for key,value in {'cloud_cover':20,'cloud_cover_low':10,'cloud_cover_mid':5,
+        'cloud_cover_high':5,'precipitation':0,'relative_humidity_2m':65,
+        'visibility':24000,'wind_speed_10m':8,'temperature_2m':12}.items():
+        payload['hourly'][key]=[value]*48
+    response._content=json.dumps(payload).encode()
+    class Service:
+        def evaluate(self, **kwargs):
+            assert kwargs['weather'].completeness==1
+            return TonightResult(None,None,None,status=TonightStatus.NO_NIGHT)
+    client=TestClient(create_app(service_factory=lambda:Service(),
+        weather_provider=astro_score.fetch_weather,profile_provider=valid_profile,
+        clock=lambda:datetime.now(timezone.utc)))
+    def fail(*a,**k): raise requests.exceptions.SSLError('SECRET https://private.invalid')
+    try:
+        monkeypatch.setattr(astro_score.requests,'get',fail)
+        failed=client.post('/v1/tonight',json={})
+        assert failed.status_code==503
+        assert failed.json()['detail']['code']=='weather_unavailable'
+        first_id=failed.headers[HEADER]
+        monkeypatch.setattr(astro_score.requests,'get',lambda *a,**k:response)
+        recovered=client.post('/v1/tonight',json={})
+        assert recovered.status_code==200, recovered.json()
+        second_id=recovered.headers[HEADER]
+        assert first_id!=second_id
+        contents=log_path.read_text()
+        assert 'SECRET' not in contents and 'private.invalid' not in contents
+        events=[json.loads(line.split('weather_diagnostic ',1)[1]) for line in contents.splitlines()]
+        assert [(x['event'],x['category']) for x in events if x['diagnostic_id']==first_id]==[
+            ('weather_fetch_failed','tls_error'),('tonight_weather_refused','weather_unavailable')]
+        assert [(x['event'],x['category']) for x in events if x['diagnostic_id']==second_id]==[
+            ('weather_fetch_succeeded','validated'),('tonight_weather_available','available')]
+        assert not (tmp_path/'data'/'user_profile.json').exists()
+    finally:
+        for handler in tuple(logger.handlers):
+            if getattr(handler,'_astropilot_launcher_handler',False):
+                logger.removeHandler(handler)
+                handler.close()
+        logger.setLevel(previous_level)
+        logger.propagate = previous_propagate
