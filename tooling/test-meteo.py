@@ -25,11 +25,11 @@ def snapshot(root):
     result = {}
     for directory, dirs, files in os.walk(root, followlinks=False):
         for name in dirs+files:
-            item = pathlib.Path(directory)/name
+            item = Path(directory)/name
             if item.is_symlink() or (hasattr(item,'is_junction') and item.is_junction()):
                 raise RuntimeError('Lien ou jonction dans la configuration : arrêt sans copie.')
         for name in files:
-            item = pathlib.Path(directory)/name
+            item = Path(directory)/name
             with item.open('rb') as file:
                 result[str(item.relative_to(root))] = hashlib.file_digest(file,'sha256').hexdigest()
     return result
