@@ -12,7 +12,17 @@ def worker(data, command):
     os.environ['ASTROPILOT_DATA_DIR'] = str(data)
     import socket
     def forbidden(*a, **k): raise AssertionError('Network forbidden in qualification')
-    socket.socket.connect = forbidden
+    # Windows asyncio creates an internal numeric loopback socket pair.
+    # Permit that plumbing while still refusing every external connection.
+    original_connect = socket.socket.connect
+    import ipaddress
+    def connect_loopback(sock, address):
+        if isinstance(address, tuple) and isinstance(address[0], str):
+            try: local = ipaddress.ip_address(address[0]).is_loopback
+            except ValueError: local = False
+            if local: return original_connect(sock, address)
+        return forbidden()
+    socket.socket.connect = connect_loopback
     socket.create_connection = forbidden
     from datetime import timedelta
     from types import SimpleNamespace
