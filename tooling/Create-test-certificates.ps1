@@ -2,9 +2,10 @@ param([Parameter(Mandatory=$true)][string]$OutputDirectory)
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 foreach ($entry in @(@{Name='valid';HostName='api.open-meteo.com'}, @{Name='wrong';HostName='wrong.invalid'})) {
-    $rsa = [System.Security.Cryptography.RSA]::Create()
-    $rsa.KeySize = 2048
-    if ($rsa -is [System.Security.Cryptography.RSACryptoServiceProvider]) { $rsa.PersistKeyInCsp = $false }
+    $csp = [System.Security.Cryptography.CspParameters]::new(24)
+    $csp.Flags = [System.Security.Cryptography.CspProviderFlags]::CreateEphemeralKey
+    $rsa = [System.Security.Cryptography.RSACryptoServiceProvider]::new(2048,$csp)
+    $rsa.PersistKeyInCsp = $false
     $request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
         ('CN=' + $entry.HostName), $rsa, [System.Security.Cryptography.HashAlgorithmName]::SHA256,
         [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
