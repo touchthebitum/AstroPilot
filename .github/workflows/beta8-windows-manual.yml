@@ -1,51 +1,32 @@
-name: Beta 8 Windows x86_64 candidate (manual)
-
+name: Isolated session replay and restart qualification
 on:
   workflow_dispatch:
     inputs:
       approved_sha:
-        description: Full 40-character SHA of the reviewed beta 8 sources
+        description: Exact reviewed product source
         required: true
         type: string
-
 permissions:
   contents: read
-
-concurrency:
-  group: beta8-windows-${{ inputs.approved_sha }}
-  cancel-in-progress: false
-
 jobs:
-  candidate:
-    runs-on: windows-2022
-    timeout-minutes: 60
-    defaults:
-      run:
-        shell: pwsh
-    env:
-      APPROVED_SHA: ${{ inputs.approved_sha }}
-      UV_PROJECT_ENVIRONMENT: .venv-packaging
-      UV_NO_ENV_FILE: "1"
-
+  session:
+    name: Session qualification ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
-      - name: Require an explicit full source SHA
-        run: |
-          if ($env:APPROVED_SHA -cnotmatch '^[0-9a-f]{40}$') {
-            throw 'approved_sha must be a full lowercase commit SHA.'
-          }
-          if (-not $env:RUNNER_TEMP -or -not (Test-Path -LiteralPath $env:RUNNER_TEMP -PathType Container)) {
-            throw 'Runner temporary directory is unavailable.'
-          }
-          $cacheDir = Join-Path $env:RUNNER_TEMP 'beta8-uv-cache'
-          $dataDir = Join-Path $env:RUNNER_TEMP 'beta8-synthetic-data'
-          "UV_CACHE_DIR=$cacheDir" >> $env:GITHUB_ENV
-          "ASTROPILOT_DATA_DIR=$dataDir" >> $env:GITHUB_ENV
-
-      - name: Check out exactly the approved sources
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: operations
+          persist-credentials: false
+          sparse-checkout: tooling/session-qualification
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ inputs.approved_sha }}
-          fetch-depth: 1
+          path: source
           persist-credentials: false
           sparse-checkout-cone-mode: false
           sparse-checkout: |
@@ -53,69 +34,47 @@ jobs:
             !/user_profile.json
             !/user_filters.json
             !/data/user_profile.json
-
-      - name: Check the source identity and runner tools
-        run: |
-          $headSha = (git rev-parse HEAD).Trim()
-          if ($LASTEXITCODE -ne 0 -or $headSha -cne $env:APPROVED_SHA) {
-            throw 'Checkout does not match approved_sha.'
-          }
-          $dirty = git status --porcelain --untracked-files=all
-          if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'Checkout is not clean.' }
-          if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { throw 'x86_64 required.' }
-          $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-          if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
-            throw 'Expected Inno Setup compiler is missing; do not install dynamically.'
-          }
-          $env:ISCC_PATH = $compiler
-          $env:INNO_SETUP_VERSION = (Get-Item -LiteralPath $compiler).VersionInfo.FileVersion
-          "ISCC_PATH=$compiler" >> $env:GITHUB_ENV
-          "INNO_SETUP_VERSION=$env:INNO_SETUP_VERSION" >> $env:GITHUB_ENV
-          New-Item -ItemType Directory -Path $env:ASTROPILOT_DATA_DIR -ErrorAction Stop
-
-      - name: Set up locked packaging tools
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
         with:
-          version: "0.12.6"
-          python-version: "3.13.5"
-          enable-cache: false
-
-      - name: Install the exact packaging Python
+          python-version: '3.12'
+          version: '0.12.5'
+      - name: Install isolated dependencies and require exact source
+        working-directory: source
+        shell: pwsh
         run: |
-          uv python install 3.13.5
-          if ($LASTEXITCODE -ne 0) { throw 'Python 3.13.5 installation failed.' }
-
-      - name: Check the lockfile and beta version
+          if ('${{ inputs.approved_sha }}' -cne 'e110de5f0a2b8b8c9f7558beba0bd074d2c042b1') { throw 'Unexpected product source' }
+          if ((git rev-parse HEAD).Trim() -cne '${{ inputs.approved_sha }}') { throw 'Source mismatch' }
+          $env:UV_CACHE_DIR = Join-Path $env:RUNNER_TEMP 'session-uv-cache'
+          uv sync --locked --extra test
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+          node --version
+          if ($LASTEXITCODE -ne 0) { throw 'Node required' }
+          New-Item -ItemType Directory -Force tooling/session-qualification | Out-Null
+          Copy-Item ../operations/tooling/session-qualification/qualify.py tooling/session-qualification/qualify.py
+      - name: Qualify durable APIs with fresh processes and synthetic profile
+        working-directory: source
+        shell: pwsh
         run: |
-          uv lock --check --no-build --no-python-downloads
-          if ($LASTEXITCODE -ne 0) { throw 'Lockfile check failed.' }
-          uv run --no-project --no-sync python -c "import tomllib; p=tomllib.load(open('pyproject.toml','rb')); assert p['project']['version']=='1.0.0b8'"
-          if ($LASTEXITCODE -ne 0) { throw 'Expected beta 8.' }
-
-      - name: Build the onedir candidate
+          $env:UV_NO_ENV_FILE = '1'
+          uv run --locked --no-sync python tooling/session-qualification/qualify.py (Join-Path $env:RUNNER_TEMP 'session-process-proof')
+          if ($LASTEXITCODE -ne 0) { throw 'Session qualification failed' }
+      - name: Qualify regressions in isolated profile and home
+        working-directory: source
+        shell: pwsh
         run: |
-          uv run --no-project --no-sync python scripts/build_windows.py
-          if ($LASTEXITCODE -ne 0) { throw 'Windows build failed.' }
-
-      - name: Reject user data and credentials before installer packaging
-        run: |
-          uv run --locked --no-sync python scripts/prepare_beta8_windows_artifacts.py --approved-sha "$env:APPROVED_SHA" --check-payload-only
-          if ($LASTEXITCODE -ne 0) { throw 'Payload validation failed; installer not created.' }
-
-      - name: Build the per-user installer
-        run: |
-          uv run --locked --no-sync python scripts/build_windows_installer.py --iscc "$env:ISCC_PATH"
-          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed.' }
-
-      - name: Prepare portable ZIP, checksums and provenance
-        run: |
-          uv run --locked --no-sync python scripts/prepare_beta8_windows_artifacts.py --approved-sha "$env:APPROVED_SHA"
-          if ($LASTEXITCODE -ne 0) { throw 'Artifact checks failed.' }
-
-      - name: Store candidate artifacts only (no release publication)
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+          $iso = Join-Path $env:RUNNER_TEMP 'session-focused'
+          foreach ($entry in @{HOME='home';USERPROFILE='home';APPDATA='appdata';LOCALAPPDATA='localappdata';ASTROPILOT_DATA_DIR='data';TMP='tmp';TEMP='tmp';TMPDIR='tmp';XDG_CACHE_HOME='cache'}.GetEnumerator()) {
+            $dir = Join-Path $iso $entry.Value
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            [Environment]::SetEnvironmentVariable($entry.Key, $dir)
+          }
+          uv run --locked --no-sync python -m pytest -q tests/api/test_execution_session_api.py tests/api/test_execution_session_ui.py tests/api/test_project_progress_api.py tests/services/test_intent_progress_credit.py tests/services/test_execution_outcome_application.py tests/services/test_execution_transition.py tests/architecture/test_execution_lineage_persistence.py tests/guardian/test_guardian_session_lifecycle.py --junitxml="$env:RUNNER_TEMP/session-focused/junit.xml"
+          if ($LASTEXITCODE -ne 0) { throw 'Regression qualification failed' }
+      - name: Export synthetic proof only, no profile or keys
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: AstroPilot-beta8-windows-x86_64-${{ inputs.approved_sha }}
-          path: dist/beta8-artifacts/*
-          if-no-files-found: error
-          retention-days: 30
+          name: session-qualification-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/session-process-proof/qualification.json
+            ${{ runner.temp }}/session-focused/junit.xml
