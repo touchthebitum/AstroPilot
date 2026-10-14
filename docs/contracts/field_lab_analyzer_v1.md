@@ -7,6 +7,8 @@ from a prior `scan` of the frozen export. Preserve that inventory independently;
 do not rescan a reduced corpus to replace it during the same audit.
 Report outputs carry forward the supplied inventory, including when it differs
 from the current corpus; they never silently establish a replacement baseline.
+Inventory reads are bounded to 256 MiB, covering the 800,000-artifact operational
+corpus with store SHA-256 filenames; larger exports are explicitly rejected.
 No network, production engines, Tonight, mission, actionability, ledger,
 notifications, scheduler or collector imports. All dependencies are stdlib.
 No production policy is written or applied. Reports contain findings only.
@@ -23,6 +25,9 @@ Stored `reference_comparison`, `reference_comparison_state` and `reference_repor
 are unsupported evidence: their envelope/digest is checked, but their payload,
 joins and arithmetic are not certified and never authorize new metrics.
 Missing provenance invalidates evidence; naive/invalid timestamps are rejected.
+Observation quality must be a string; non-scalar or other malformed types are
+rejected per artifact before deduplication. Unknown quality strings remain
+non-comparable and never authorize errors.
 No unknown field is converted into favorable evidence. `calibration_eligible`
 must be false. Output must be new, outside the raw root and outside /Volumes
 or /share; output symlinks/ancestors resolving into raw storage are refused.

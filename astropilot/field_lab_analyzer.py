@@ -12,6 +12,9 @@ import stat
 
 DOMAIN = 'field_lab_reference_station'
 LIMIT = 16 * 1024 * 1024
+# Supports the 800k operational corpus (~151 MB with store SHA-256 filenames),
+# while retaining a bounded read independent of collector/runtime imports.
+INVENTORY_LIMIT = 256 * 1024 * 1024
 KINDS = frozenset(('reference_observation', 'reference_acquisition', 'reference_forecast',
                   'reference_seal', 'reference_seal_completion', 'reference_seal_commit',
                   'collection_success', 'reference_catalogue', 'catalog_activation_event',
@@ -172,6 +175,8 @@ def check_payload(d):
                     'value', 'unit', 'quality', 'parameter', 'asset_href', 'schema_version')
         if not all(k in p for k in required):
             raise ValueError('missing_observation_fields')
+        if not isinstance(p['quality'], str):
+            raise ValueError('invalid_observation_quality_type')
         if p['station_id'] != d['source_id'] or p['source'] != 'MeteoSwiss':
             raise ValueError('invalid_observation_provenance')
         if p['variable'] not in VARIABLES or (p['unit'], p['parameter']) != VARIABLES[p['variable']]:
@@ -316,8 +321,8 @@ def read_inventory(path):
     with os.fdopen(handle, 'rb') as stream:
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
             raise ValueError('regular_inventory_file_required')
-        data = stream.read(64 * 1024 * 1024 + 1)
-    if len(data) > 64 * 1024 * 1024:
+        data = stream.read(INVENTORY_LIMIT + 1)
+    if len(data) > INVENTORY_LIMIT:
         raise ValueError('inventory_too_large')
     return load_json(data)
 

@@ -319,3 +319,68 @@ def test_malformed_envelope_identity_does_not_interrupt_inventory(tmp_path, fiel
     artifact(tmp_path, **{field: []})
     rows, summary = a.scan(tmp_path)
     assert rows[0].status == 'invalid' and summary['invalid'] == 1
+
+
+@pytest.mark.parametrize('quality', [[], {}, None, 0, True])
+@pytest.mark.parametrize('kind', ['reference_observation', 'reference_acquisition'])
+def test_malformed_quality_isolated_before_report(tmp_path, quality, kind):
+    sealed_forecast(tmp_path)
+    d = artifact(tmp_path)
+    artifact(tmp_path, payload=dict(d['payload'], quality=quality), kind=kind, key='bad-qc')
+    rows, summary = a.scan(tmp_path)
+    bad = next(r for r in rows if r.identity == 'bad-qc')
+    assert bad.status == 'invalid' and bad.issues == ('invalid_observation_quality_type',)
+    assert summary['invalid'] == 1
+    pairs, report = a.report(rows, 10, inventory=a.inventory_manifest(rows))
+    assert pairs[0].signed_error == 2 and report.metrics[0]['count'] == 1
+    assert 'bad-qc' not in pairs[0].observation.evidence
+
+
+def test_unknown_quality_string_cannot_authorize_errors(tmp_path):
+    sealed_forecast(tmp_path)
+    d = artifact(tmp_path)
+    artifact(tmp_path, payload=dict(d['payload'], quality='unknown'))
+    rows, _ = a.scan(tmp_path)
+    pairs, report = a.report(rows, 10, inventory=a.inventory_manifest(rows))
+    assert pairs[0].signed_error is None and report.metrics == []
+    assert report.verdict == 'INSUFFICIENT'
+
+
+def test_real_inventory_above_previous_64_mib_limit(tmp_path):
+    # Real valid, unique entries reproduce the multiweek size failure without
+    # constructing hundreds of thousands of source artifacts or calling a collector.
+    path = tmp_path/'inventory.json'
+    count = 357000
+    with path.open('w') as stream:
+        stream.write('{"schema_version":1,"kind":"field_lab_inventory","artifacts":[\n')
+        for i in range(count):
+            if i:
+                stream.write(',\n')
+            stream.write('    {\n      "byte_sha256": "'+'b'*64+'",\n      "path": "'+format(i,'064x')+'.json"\n    }')
+        stream.write('\n]}\n')
+    assert 64*1024*1024 < path.stat().st_size < a.INVENTORY_LIMIT
+    before = path.stat().st_size
+    manifest = a.read_inventory(path)
+    assert len(manifest['artifacts']) == count
+    assert a.inventory_status([], manifest) == 'changed'
+    assert path.stat().st_size == before
+
+
+@pytest.mark.parametrize('extra', [0, 1])
+def test_inventory_read_size_boundary(tmp_path, monkeypatch, extra):
+    path = tmp_path/'inventory.json'
+    data = a.canonical({'schema_version':1,'kind':'field_lab_inventory','artifacts':[]})
+    monkeypatch.setattr(a, 'INVENTORY_LIMIT', len(data.encode()))
+    path.write_text(data+' '*extra)
+    if extra:
+        with pytest.raises(ValueError, match='inventory_too_large'):
+            a.read_inventory(path)
+    else:
+        assert a.inventory_status([], a.read_inventory(path)) == 'verified'
+
+
+def test_inventory_bound_covers_operational_corpus():
+    item = {'path':'a'*64+'.json','byte_sha256':'b'*64}
+    one = json.dumps({'schema_version':1,'kind':'field_lab_inventory','artifacts':[item]},indent=2)
+    two = json.dumps({'schema_version':1,'kind':'field_lab_inventory','artifacts':[item,item]},indent=2)
+    assert len(one)+(800000-1)*(len(two)-len(one))+1 < a.INVENTORY_LIMIT
