@@ -35,7 +35,7 @@ class Handler(BaseHTTPRequestHandler):
   self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(data)))
   self.end_headers(); self.wfile.write(data)
  def do_GET(self):
-  self.reply({'application':'astropilot','build':'a6f5bd8','version':'1.0.0b8'})
+  self.reply({'application':'astropilot','build':'c6b8b8b','version':'1.0.0b8'})
  def do_POST(self):
   data=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
   with (root/'requests.log').open('a') as f: f.write(self.path+'\n')
@@ -55,8 +55,12 @@ class Handler(BaseHTTPRequestHandler):
    intent=data['acquisition_intent_id']
    filt='Ha' if intent=='sh2-129_ha' else 'OIII'
    if case=='wrong-filter': filt='L'
+   selected={'filter_type':filt,'bandwidth_nm':6.5,'source':'authorized_optical_profile'}
+   if case=='null-filter': selected=None
+   if case=='legacy-source': selected['source']='legacy_inventory'
+   if case=='wrong-bandwidth': selected['bandwidth_nm']=7
    self.reply({'status':'accepted','selected_acquisition_intent_id':intent,
-     'mission':{'acquisition_intent_id':intent,'selected_filter':{'filter_type':filt}}})
+     'mission':{'acquisition_intent_id':intent,'selected_filter':selected}})
   else: raise AssertionError('Unexpected mutating endpoint')
 HTTPServer(('127.0.0.1',8000),Handler).serve_forever()
 '''
@@ -100,7 +104,7 @@ for name in ('../escape.txt', '/escape.txt', 'C:/escape.txt', 'a/../escape.txt')
 findings.append({'check':'archive_path_refusal','passed':True})
 
 for scenario, expected in [('good','PASS'), ('wrong-night','FAIL'),
-                           ('wrong-filter','FAIL'), ('refused','NOT_VALIDATED'), ('no-night','NOT_VALIDATED')]:
+                           ('wrong-filter','FAIL'), ('null-filter','FAIL'), ('legacy-source','FAIL'), ('wrong-bandwidth','FAIL'), ('refused','NOT_VALIDATED'), ('no-night','NOT_VALIDATED')]:
     kit = WORK/scenario
     kit.mkdir()
     for name in ('test-choix.py','windows_job.py','kit_safety.py'):
@@ -108,7 +112,7 @@ for scenario, expected in [('good','PASS'), ('wrong-night','FAIL'),
     cfg = kit/'Configuration-Mac-reference.zip'
     with zipfile.ZipFile(cfg,'w') as bundle:
         bundle.writestr('user_profile.json','{"projects":{}}')
-    binary = kit/'AstroPilot-PR376-a6f5bd8-portable.zip'
+    binary = kit/'AstroPilot-PR376-377-c6b8b8b-portable.zip'
     payload=b'synthetic Windows executable placeholder, never executed'
     with zipfile.ZipFile(binary,'w') as bundle:
         bundle.writestr('AstroPilot/AstroPilot.exe',payload)
@@ -182,7 +186,7 @@ findings.append({'check':'unrelated_server_refused','passed':True})
 
 if os.environ.get('PR376_ARCHIVE_ROOT'):
     archive=next(Path(os.environ['PR376_ARCHIVE_ROOT']).rglob('AstroPilot-1.0.0b8-windows-x86_64-portable.zip'))
-    assert digest(archive)=='ef74d48133f46de22c6166fdec3eb63c384c1eb324301cdd5422d1511b4d21f7'
+    assert digest(archive)==os.environ['KIT_EXPECTED_PORTABLE_SHA']
     smoke=WORK/'real-binary-smoke'
     smoke.mkdir()
     extracted=smoke/'extracted'
@@ -212,7 +216,7 @@ if os.environ.get('PR376_ARCHIVE_ROOT'):
             time.sleep(.2)
         else:
             raise AssertionError('Real executable did not become ready')
-        assert identity['build']=='a6f5bd8' and identity['version']=='1.0.0b8'
+        assert identity['build']=='c6b8b8b' and identity['version']=='1.0.0b8'
         with opener.open('http://127.0.0.1:8000/',timeout=5) as response:
             assert response.status==200
     finally:

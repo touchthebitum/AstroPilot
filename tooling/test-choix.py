@@ -5,7 +5,7 @@ from windows_job import IsolatedProcess
 from kit_safety import guard_placement, safe_extract, reject_links
 PROVENANCE = json.loads((BASE/'Kit-provenance.json').read_text(encoding='utf-8'))
 EXPECTED = PROVENANCE['portable_zip_sha256']
-BUILD = 'a6f5bd8'
+BUILD = PROVENANCE.get('build', 'c6b8b8b')
 OWNER = None
 local = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -60,18 +60,25 @@ def main():
     actual_profile = {key.replace('\\','/'):value for key,value in snapshot(source).items()}
     if actual_profile != expected_profile:
         raise SystemExit('La référence Mac du kit a changé. Utilisez un nouveau dossier extrait du kit.')
-    day = input('Date locale à tester AAAA-MM-JJ (Entrée = '+datetime.date.today().isoformat()+') : ').strip() or datetime.date.today().isoformat()
-    start = input('Début local HH:MM (Entrée = 20:30) : ').strip() or '20:30'
-    end = input('Fin locale HH:MM (Entrée = 23:00) : ').strip() or '23:00'
-    start_dt = datetime.datetime.fromisoformat(day+'T'+start)
-    end_dt = datetime.datetime.fromisoformat(day+'T'+end)
-    if end_dt <= start_dt:
-        end_dt += datetime.timedelta(days=1)
-    if end_dt-start_dt > datetime.timedelta(hours=24):
-        raise SystemExit('Le créneau doit durer au plus 24 heures.')
+    while True:
+        try:
+            day = input('Date locale AAAA-MM-JJ (exemple 2026-10-16) : ').strip()
+            start = input('Début HH:MM (Entrée = 02:45) : ').strip() or '02:45'
+            end = input('Fin HH:MM (Entrée = 04:15) : ').strip() or '04:15'
+            if len(day)!=10 or len(start)!=5 or len(end)!=5:
+                raise ValueError('format')
+            start_dt = datetime.datetime.fromisoformat(day+'T'+start)
+            end_dt = datetime.datetime.fromisoformat(day+'T'+end)
+            if end_dt <= start_dt:
+                end_dt += datetime.timedelta(days=1)
+            if end_dt-start_dt > datetime.timedelta(hours=24):
+                raise ValueError('durée')
+            break
+        except ValueError:
+            print('Date ou heure incorrecte. Exemple : 2026-10-16, 02:45, 04:15. Recommencez.',flush=True)
     if IsolatedProcess.listening_pids():
         raise SystemExit('Le port 8000 est occupé. Fermez AstroPilot avant le test.')
-    archive = BASE/'AstroPilot-PR376-a6f5bd8-portable.zip'
+    archive = BASE/'AstroPilot-PR376-377-c6b8b8b-portable.zip'
     if not archive.is_file():
         raise SystemExit('Archive du binaire corrigé absente. Extrayez tout le nouveau kit.')
     with archive.open('rb') as file:
@@ -81,7 +88,7 @@ def main():
     if out.resolve().is_relative_to(source):
         raise SystemExit('Le kit doit se trouver hors du dossier de données réel.')
     out.mkdir()
-    report = {'build':BUILD,'source_sha':'a6f5bd8e454d3de28dd9cc5f23408efabca6e0a1','portable_zip_sha256':EXPECTED,'source_directory':str(source),'availability':{'mode':'fixed_window','start_local':start_dt.isoformat(timespec='minutes'),'end_local':end_dt.isoformat(timespec='minutes')},'cases':[]}
+    report = {'build':BUILD,'source_sha':'c6b8b8b5dfb2a456ca6365e6355cc9389a6004d7','portable_zip_sha256':EXPECTED,'source_directory':str(source),'availability':{'mode':'fixed_window','start_local':start_dt.isoformat(timespec='minutes'),'end_local':end_dt.isoformat(timespec='minutes')},'cases':[]}
     before = None
     child = None
     log = None
@@ -179,6 +186,8 @@ def main():
                          and mission.get('acquisition_intent_id')==intent
                          and isinstance(mission.get('selected_filter'), dict)
                          and mission['selected_filter'].get('filter_type')==expected_filter
+                         and mission['selected_filter'].get('bandwidth_nm')==6.5
+                         and mission['selected_filter'].get('source')=='authorized_optical_profile'
                          and case['night_date']==expected_night)
                 case.update(result='PASS' if valid else 'FAIL',confirmation_http=accepted['http'],confirmation_seconds=accepted['seconds'],returned_intent=mission.get('acquisition_intent_id'),selected_filter=mission.get('selected_filter'),window_start=mission.get('window_start'),window_end=mission.get('window_end'))
                 print(intent,case['result'],'préparation',round(tonight['seconds'],2),'s ; confirmation',round(accepted['seconds'],2),'s',flush=True)
@@ -240,7 +249,7 @@ def main():
                     if entry.is_file():
                         bundle.write(entry,intent+'/'+name)
             for intent in ['sh2-129_ha','ou4_oiii']:
-                for location in ['LOCALAPPDATA','APPDATA']:
+                for location in ['LOCALAPPDATA','APPDATA','data']:
                     for entry in sorted((out/intent/location).rglob('*.log')):
                         if entry.is_file():
                             bundle.write(entry,entry.relative_to(out).as_posix())
