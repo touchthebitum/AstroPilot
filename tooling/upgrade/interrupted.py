@@ -72,7 +72,12 @@ def windows_interrupt(case,threshold,previous_inventory):
     target=case/'Applications/AstroPilot'
     expected=u.bundle_inventory(u.payload_root());actual=u.bundle_inventory(target)
     matching=sum(actual.get(k)==v for k,v in expected.items())
-    assert matching<len(expected),('Interruption did not leave incomplete payload',matching)
+    final_log=log.read_text(encoding='utf-8-sig',errors='replace')
+    assert 'Installation process succeeded.' not in final_log,'Installer completed before kill'
+    if threshold<800:
+        assert matching<len(expected),('Early/middle checkpoint missed partial payload',matching)
+    # Late copy can already match every payload byte because remaining old files
+    # are identical; that does not mean installer finalization has completed.
     # A hard-killed Inno process can leave an unpublished uninstall temporary.
     # Record only files newly created by this interrupted installer, never delete
     # them or broaden the product cleanup. Repair must preserve these exact bytes.
@@ -87,7 +92,7 @@ def windows_interrupt(case,threshold,previous_inventory):
         'checkpoint_successful_copy_count':observed.count('Successfully installed the file.'),
         'requested_copy_threshold':threshold,'installer_returncode':child.returncode,
         'observed_before_success':True,'payload_matching_files':matching,'payload_files':len(expected),
-        'payload_incomplete':True,'interrupted_log_sha256':u.digest(log)})
+        'payload_incomplete':matching<len(expected),'post_kill_success_marker_absent':True,'interrupted_log_sha256':u.digest(log)})
 
 def mac_copy_interrupt(case,inplace):
     target=case/'Applications/AstroPilot.app'
