@@ -751,6 +751,8 @@ def load_user_profile():
             f"Profil utilisateur JSON invalide : {profile_path} "
             f"(ligne {exc.lineno}, colonne {exc.colno})."
         ) from exc
+    except (UnicodeError, RecursionError, ValueError) as exc:
+        raise UserProfileError("Profil utilisateur JSON illisible.") from exc
 
     validated = validate_user_profile(profile, profile_path)
     validated.setdefault("profile_revision", 0)
@@ -792,6 +794,8 @@ def _load_current_profile(path: Path) -> dict | None:
             f"Profil utilisateur JSON invalide : {path} "
             f"(ligne {exc.lineno}, colonne {exc.colno})."
         ) from exc
+    except (UnicodeError, RecursionError, ValueError) as exc:
+        raise UserProfileError("Profil utilisateur JSON illisible.") from exc
     return validate_user_profile(profile, path)
 
 
