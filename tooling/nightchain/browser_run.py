@@ -15,6 +15,14 @@ try:
  r=subprocess.run([os.environ.get('NODE_BINARY','node'),str(Path(__file__).with_name('browser.cjs'))],env=os.environ.copy(),timeout=180);assert r.returncode==0,'Browser scenario failed'
 finally:
  child.terminate();child.wait(timeout=30);log.close()
+ pidfile=CASE/'browser-pid.json'
+ if pidfile.exists():
+  pid=json.loads(pidfile.read_text())['pid']
+  if os.name=='nt':subprocess.run(['taskkill','/PID',str(pid),'/T','/F'],capture_output=True)
+  else:
+   import signal
+   try:os.kill(pid,signal.SIGTERM)
+   except ProcessLookupError:pass
 if os.environ['UI_INTENT']!='site_changed':assert profile_hash()==before
 with TestClient(app()) as c:
  result=json.loads((CASE/'browser-result.json').read_text());current=c.get('/v1/accepted-mission/current');assert current.status_code==200,current.json()

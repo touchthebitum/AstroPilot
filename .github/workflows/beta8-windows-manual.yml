@@ -54,6 +54,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
           node --version
           if ($LASTEXITCODE -ne 0) { throw 'Native Node required' }
+          uv run --locked --no-sync python ../operations/tooling/nightchain/setup_browser.py
+          if ($LASTEXITCODE -ne 0) { throw 'Testing browser setup failed' }
+          $env:CHROME_BINARY=Get-Content (Join-Path $env:RUNNER_TEMP 'night-chain-browser-tool/binary-path.txt') -Raw
+          $env:CHROME_BINARY=$env:CHROME_BINARY.Trim()
           $env:PRODUCT_SOURCE=(Get-Location).Path
           $env:NIGHT_CHAIN_PROOF=Join-Path $env:RUNNER_TEMP 'night-chain-proof'
           uv run --locked --no-sync python ../operations/tooling/nightchain/run.py
@@ -71,6 +75,7 @@ jobs:
         with:
           name: night-chain-${{ matrix.os }}
           path: |
+            ${{ runner.temp }}/night-chain-browser-tool/provenance.json
             ${{ runner.temp }}/night-chain-proof/qualification.json
             ${{ runner.temp }}/night-chain-proof/*/result.json
             ${{ runner.temp }}/night-chain-proof/*/browser-result.json

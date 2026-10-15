@@ -1,18 +1,19 @@
 const fs=require('fs'),path=require('path'),cp=require('child_process'),assert=require('assert');
 const root=process.env.CASE_ROOT, intent=process.env.UI_INTENT;
 const candidates=process.platform==='win32'?[`${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`,`${process.env['PROGRAMFILES(X86)']}\\Microsoft\\Edge\\Application\\msedge.exe`]:['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'];
-const chrome=candidates.find(fs.existsSync);assert(chrome,'No native Chromium browser');
+const chrome=[process.env.CHROME_BINARY,...candidates].filter(Boolean).find(fs.existsSync);assert(chrome,'No native Chromium browser');
 const profile=path.join(root,'browser-profile');fs.mkdirSync(profile);const log=fs.openSync(path.join(root,'browser.log'),'w');
-const child=cp.spawn(chrome,['--headless=new','--no-first-run','--no-default-browser-check','--disable-background-networking','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore',log,log]});
+const child=cp.spawn(chrome,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--disable-background-networking','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore',log,log]});
+fs.writeFileSync(path.join(root,'browser-pid.json'),JSON.stringify({pid:child.pid,profile}));
 const pause=ms=>new Promise(r=>setTimeout(r,ms));let ws,serial=0,pending=new Map();
 async function waitFor(fn,label,ms=90000){const end=Date.now()+ms;while(Date.now()<end){const x=await fn();if(x)return x;await pause(150);}throw Error(`Timeout ${label}`);}
-async function send(method,params={}){const id=++serial;return new Promise((resolve,reject)=>{pending.set(id,{resolve,reject});ws.send(JSON.stringify({id,method,params}));});}
+async function send(method,params={}){const id=++serial;return new Promise((resolve,reject)=>{console.log('CDP',method);const timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timeout '+method));},30000);pending.set(id,{resolve,reject,timer});ws.send(JSON.stringify({id,method,params}));});}
 async function evaluate(expression){const r=await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;}
 (async()=>{
  try{
   await waitFor(()=>fs.existsSync(path.join(profile,'DevToolsActivePort')),'Chrome debugger');const port=fs.readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').split('\n')[0];
-  const target=await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,{method:'PUT'})).json();ws=new WebSocket(target.webSocketDebuggerUrl);await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j;});
-  ws.onmessage=event=>{const r=JSON.parse(event.data);if(r.id&&pending.has(r.id)){const p=pending.get(r.id);pending.delete(r.id);r.error?p.reject(Error(JSON.stringify(r.error))):p.resolve(r.result);}};
+  const target=await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,{method:'PUT',signal:AbortSignal.timeout(15000)})).json();ws=new WebSocket(target.webSocketDebuggerUrl);await new Promise((r,j)=>{const timer=setTimeout(()=>j(Error('WebSocket open timeout')),15000);ws.onopen=()=>{clearTimeout(timer);r();};ws.onerror=j;});
+  ws.onmessage=event=>{const r=JSON.parse(event.data);if(r.id&&pending.has(r.id)){const p=pending.get(r.id);pending.delete(r.id);clearTimeout(p.timer);r.error?p.reject(Error(JSON.stringify(r.error))):p.resolve(r.result);}};
   await send('Page.enable');await send('Runtime.enable');await send('Emulation.setDeviceMetricsOverride',{width:1280,height:1200,deviceScaleFactor:1,mobile:false});await send('Emulation.setTimezoneOverride',{timezoneId:'Europe/Zurich'});
   await send('Page.addScriptToEvaluateOnNewDocument',{source:`const RealDate=Date; window.Date=class extends RealDate {constructor(...args){super(...(args.length?args:['2026-10-14T12:00:00Z']));} static now(){return RealDate.parse('2026-10-14T12:00:00Z');}};window.__qualificationTraffic=[];const realFetch=window.fetch.bind(window);window.fetch=async(...args)=>{const response=await realFetch(...args);if(['POST','PUT'].includes(args[1]?.method)){const body=await response.clone().json().catch(()=>null);window.__qualificationTraffic.push({url:String(args[0]),request:JSON.parse(args[1].body||'null'),http:response.status,body});}return response;};`});
   await send('Page.navigate',{url:'http://127.0.0.1:8000/'});
