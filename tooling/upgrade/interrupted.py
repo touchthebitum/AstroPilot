@@ -78,7 +78,7 @@ def windows_interrupt(case,threshold,previous_inventory):
     # them or broaden the product cleanup. Repair must preserve these exact bytes.
     orphans={}
     for key,value in actual.items():
-        if key not in expected and key not in BASE_SENTINELS and re.fullmatch(r'is-[A-Za-z0-9]+\.tmp',key):
+        if key not in expected and key not in BASE_SENTINELS and re.fullmatch(r'is-[A-Za-z0-9]+\.tmp',Path(key).name):
             assert key not in previous_inventory,'Unexpected pre-existing temporary'
             p=target/key;content=p.read_bytes();orphans[key]={'sha256':u.digest(p),'size':len(content)}
             u.SENTINELS[key]=content
