@@ -1,8 +1,11 @@
-name: Isolated installed upgrade qualification
+name: Isolated corrected Windows upgrade qualification
 on:
   workflow_dispatch:
     inputs:
       approved_sha:
+        required: true
+        type: string
+      candidate_run:
         required: true
         type: string
 permissions:
@@ -41,13 +44,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ('${{ inputs.approved_sha }}' -cne 'ee5df1456d0a60e9149ae792efc601e8e57f7c68') { throw 'Unexpected SHA' }
+          if ('${{ inputs.approved_sha }}' -cne 'feb74d8032ac8d626e235ba04aeecd3f4ec9e381') { throw 'Unexpected SHA' }
           if ((git rev-parse HEAD).Trim() -cne '${{ inputs.approved_sha }}') { throw 'Wrong source' }
+          $env:APPROVED_SHA='${{ inputs.approved_sha }}'
           $env:UV_CACHE_DIR=Join-Path $env:RUNNER_TEMP 'upgrade-uv-cache'
           uv sync --locked --extra test
           if ($LASTEXITCODE -ne 0) { throw 'Dependencies failed' }
           $inputRoot=Join-Path $env:RUNNER_TEMP 'upgrade-inputs'
-          gh run download 38757167105 -R touchthebitum/AstroPilot --name AstroPilot-beta8-windows-x86_64-ee5df1456d0a60e9149ae792efc601e8e57f7c68 --dir (Join-Path $inputRoot 'current')
+          gh run download ${{ inputs.candidate_run }} -R touchthebitum/AstroPilot --name AstroPilot-beta8-windows-x86_64-feb74d8032ac8d626e235ba04aeecd3f4ec9e381 --dir (Join-Path $inputRoot 'current')
           if ($LASTEXITCODE -ne 0) { throw 'Current download failed' }
           gh run download 38732731103 -R touchthebitum/AstroPilot --name AstroPilot-beta8-windows-x86_64-0dcde494c8450176f445cc29b28d004eddb60734 --dir (Join-Path $inputRoot 'modern')
           if ($LASTEXITCODE -ne 0) { throw 'Previous download failed' }
@@ -59,6 +63,7 @@ jobs:
         working-directory: source
         shell: pwsh
         run: |
+          $env:APPROVED_SHA='${{ inputs.approved_sha }}'
           $env:PRODUCT_SOURCE=(Get-Location).Path
           $env:UPGRADE_PROOF=Join-Path $env:RUNNER_TEMP 'installed-upgrade-proof'
           $inputRoot=Join-Path $env:RUNNER_TEMP 'upgrade-inputs'
@@ -73,96 +78,6 @@ jobs:
         if: always()
         with:
           name: installed-upgrade-windows
-          path: |
-            ${{ runner.temp }}/installed-upgrade-proof/upgrade-qualification.json
-            ${{ runner.temp }}/installed-upgrade-proof/*/*.log
-
-  macos:
-    name: Installed upgrade Mac
-    runs-on: macos-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          path: operations
-          sparse-checkout: tooling/upgrade
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ inputs.approved_sha }}
-          path: source
-          persist-credentials: false
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /*
-            !/user_profile.json
-            !/user_filters.json
-            !/data/user_profile.json
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: e5789c767d76ca335e96b3be34b50fe6328429c1
-          path: previous-source
-          persist-credentials: false
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /*
-            !/user_profile.json
-            !/user_filters.json
-            !/data/user_profile.json
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
-        with:
-          version: '0.12.6'
-          python-version: '3.13.5'
-          enable-cache: false
-      - name: Build exact current and previous bundles without test dependencies
-        shell: pwsh
-        run: |
-          if ('${{ inputs.approved_sha }}' -cne 'ee5df1456d0a60e9149ae792efc601e8e57f7c68') { throw 'Unexpected SHA' }
-          $iso=Join-Path $env:RUNNER_TEMP 'upgrade-build-environment'
-          foreach ($entry in @{HOME='home';ASTROPILOT_DATA_DIR='data';TMP='tmp';TEMP='tmp';TMPDIR='tmp';XDG_CACHE_HOME='cache';PYINSTALLER_CONFIG_DIR='pyinstaller'}.GetEnumerator()) {
-            $dir=Join-Path $iso $entry.Value
-            New-Item -ItemType Directory -Force $dir | Out-Null
-            [Environment]::SetEnvironmentVariable($entry.Key,$dir)
-          }
-          foreach ($folder in @('source','previous-source')) {
-            Push-Location $folder
-            $env:UV_PROJECT_ENVIRONMENT='.venv-packaging'
-            uv sync --locked --extra packaging
-            if ($LASTEXITCODE -ne 0) { throw 'Packaging dependencies failed' }
-            uv run --locked --no-sync python scripts/build_macos.py
-            if ($LASTEXITCODE -ne 0) { throw 'Bundle build failed' }
-            Pop-Location
-          }
-      - name: Retrieve published beta7 and qualify installed bundle replacement
-        working-directory: source
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $legacy=Join-Path $env:RUNNER_TEMP 'legacy-mac'
-          gh release download v1.0.0-beta.7 -R touchthebitum/AstroPilot --pattern '*macos-arm64*' --dir $legacy
-          if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
-          $zip=Join-Path $legacy 'AstroPilot-1.0.0-beta.7-macos-arm64.zip'
-          $expected=((Get-Content ($zip+'.sha256')).Trim() -split '\s+')[0]
-          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) { throw 'Published archive mismatch' }
-          & /usr/bin/ditto -x -k $zip (Join-Path $legacy 'unpacked')
-          if ($LASTEXITCODE -ne 0) { throw 'Bundle extraction failed' }
-          $env:UV_PROJECT_ENVIRONMENT='.venv-qualification'
-          uv sync --locked --extra test
-          if ($LASTEXITCODE -ne 0) { throw 'Qualification dependencies failed' }
-          $env:PRODUCT_SOURCE=(Get-Location).Path
-          $env:UPGRADE_PROOF=Join-Path $env:RUNNER_TEMP 'installed-upgrade-proof'
-          $env:CURRENT_CANDIDATE=Join-Path $env:PRODUCT_SOURCE 'dist/AstroPilot.app'
-          $env:CURRENT_PAYLOAD=$env:CURRENT_CANDIDATE
-          $env:LEGACY_CANDIDATE=Join-Path $legacy 'unpacked/AstroPilot.app'
-          $env:MODERN_CANDIDATE=Join-Path (Split-Path $env:PRODUCT_SOURCE) 'previous-source/dist/AstroPilot.app'
-          $env:MODERN_SHA='e5789c767d76ca335e96b3be34b50fe6328429c1'
-          uv run --locked --no-sync python ../operations/tooling/upgrade/qualify.py
-          if ($LASTEXITCODE -ne 0) { throw 'Installed upgrade qualification failed' }
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: installed-upgrade-macos
           path: |
             ${{ runner.temp }}/installed-upgrade-proof/upgrade-qualification.json
             ${{ runner.temp }}/installed-upgrade-proof/*/*.log

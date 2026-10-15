@@ -7,7 +7,7 @@ import zipfile
 
 root=Path(os.environ['RUNNER_TEMP'])/'upgrade-inputs'
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
-for folder,expected in [('current','ee5df1456d0a60e9149ae792efc601e8e57f7c68'),('modern','0dcde494c8450176f445cc29b28d004eddb60734')]:
+for folder,expected in [('current',os.environ['APPROVED_SHA']),('modern','0dcde494c8450176f445cc29b28d004eddb60734')]:
  d=root/folder;metadata=json.loads((d/'provenance.json').read_text(encoding='utf-8-sig'))
  assert metadata['source_sha']==expected
  for name,record in metadata['artifacts'].items():assert sha(d/name)==record['sha256']

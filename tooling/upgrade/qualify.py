@@ -14,7 +14,8 @@ import urllib.request
 import urllib.error
 
 SOURCE=Path(os.environ['PRODUCT_SOURCE']).resolve()
-SHA='ee5df1456d0a60e9149ae792efc601e8e57f7c68'
+SHA=os.environ.get('APPROVED_SHA','ee5df1456d0a60e9149ae792efc601e8e57f7c68')
+SENTINELS={'user-note.txt':b'User note must survive upgrade','_internal/qualification-keep.dll':b'Unrelated component must survive upgrade'}
 WINDOWS=os.name=='nt'
 OUT=Path(os.environ['UPGRADE_PROOF']).resolve()
 CURRENT=Path(os.environ['CURRENT_CANDIDATE']).resolve()
@@ -115,6 +116,11 @@ def install(candidate,case,upgrade=False):
         stage.rename(target)
         exe=target/'Contents/MacOS/AstroPilot'
     assert exe.is_file(),('installed executable missing',exe)
+    if WINDOWS and not upgrade:
+        for name,content in SENTINELS.items():
+            sentinel=target/name;sentinel.parent.mkdir(parents=True,exist_ok=True);sentinel.write_bytes(content)
+        if case.name=='legacy':
+            assert all((target/'_internal'/name).is_file() for name in ('libcrypto-3.dll','libssl-3.dll'))
     if upgrade:
         expected=bundle_inventory(payload_root())
         actual=bundle_inventory(target)
@@ -123,6 +129,9 @@ def install(candidate,case,upgrade=False):
         if WINDOWS:
             # Inno's own uninstall metadata is expected. Other residue is reported.
             residue=[x for x in extras if not Path(x).name.startswith('unins')]
+            assert set(residue)==set(SENTINELS),('Unexpected runtime residue',residue)
+            assert all((target/name).read_bytes()==content for name,content in SENTINELS.items())
+            assert not any((target/'_internal'/name).exists() for name in ('libcrypto-3.dll','libssl-3.dll'))
         else: residue=extras;assert not residue,residue
         if not WINDOWS:
             subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict',str(target)],check=True,timeout=60)
