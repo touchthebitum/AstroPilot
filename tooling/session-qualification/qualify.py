@@ -3,6 +3,8 @@ Synthetic accepted lineage is seeded via production stores (not acceptance/weath
 Only explicitly supplied sandbox directories are used; no hardware or network.
 """
 import os, sys, json, pathlib, subprocess, hashlib, platform, shutil
+from uuid import uuid4
+BOOT_ID = uuid4().hex
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
@@ -60,7 +62,7 @@ def worker(data, command):
                 lineage.commit_selection_and_mission(fixtures.selection(selection_id=sid,decision_id=did,
                     selected_catalog_key='Sh2-129',selected_imaging_field_id='sh2-129_ou4',selected_acquisition_intent_id=intent),
                     fixtures.mission(mission_id=mid,decision_id=did,selection_id=sid,imaging_field_id='sh2-129_ou4',acquisition_intent_id=intent))
-            return {'http':200,'body':{'seeded_synthetic_accepted_lineage':True},'pid':os.getpid()}
+            return {'http':200,'body':{'seeded_synthetic_accepted_lineage':True},'pid':os.getpid(), 'boot_id':BOOT_ID}
         payload=command.get('json')
         if isinstance(payload,dict) and payload.get('expected_revision')=='CURRENT':
             payload['expected_revision']=load_user_profile()['profile_revision']
@@ -72,7 +74,7 @@ def worker(data, command):
                 return original(path, target)
             pathlib.Path.replace = fail_replace
         r=api.request(command['method'],command['path'],json=payload)
-        return {'http':r.status_code,'body':r.json() if 'application/json' in r.headers.get('content-type','') else {'non_json_error':r.text},'pid':os.getpid(), 'diagnostic_id':r.headers.get('X-Persistence-Diagnostic-ID')}
+        return {'http':r.status_code,'body':r.json() if 'application/json' in r.headers.get('content-type','') else {'non_json_error':r.text},'pid':os.getpid(), 'boot_id':BOOT_ID, 'diagnostic_id':r.headers.get('X-Persistence-Diagnostic-ID')}
 
 def inventory(directory, include_logs=True):
     return {str(p.relative_to(directory)):hashlib.sha256(p.read_bytes()).hexdigest() for p in directory.rglob('*') if p.is_file() and (include_logs or p.relative_to(directory).parts[0] != 'Logs')}
@@ -161,7 +163,8 @@ def qualify(destination, reference=None):
     sessions=call('all sessions after restart','GET','/v1/execution-sessions')
     assert len(sessions)==3
     assert len(json.loads((data/'user_profile.json').read_text())['intent_progress_credits'])==2
-    assert len({r['pid'] for r in results})==len(results),'Each command must run in a new process'
+    assert len({r['boot_id'] for r in results})==len(results),'Each invocation must have a new interpreter boot identity'
+    # The OS may legitimately reuse a PID after the previous child exited.
     if reference: assert inventory(reference)==before,'Reference changed'
     persistence_events=[json.loads(line.split('persistence_diagnostic ',1)[1]) for line in (data/'Logs'/'AstroPilot.log').read_text(encoding='utf-8').splitlines() if 'persistence_diagnostic ' in line]
     correlated=[row for row in results if row.get('diagnostic_id') and row['http'] in (200,503)]
