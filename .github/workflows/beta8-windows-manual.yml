@@ -8,6 +8,12 @@ on:
         required: true
         type: string
 
+      kit_only:
+        description: Validate only the manual kit syntax and process ownership guard
+        required: false
+        type: boolean
+        default: false
+
 permissions:
   contents: read
 
@@ -17,6 +23,7 @@ concurrency:
 
 jobs:
   candidate:
+    if: ${{ !inputs.kit_only }}
     runs-on: windows-2022
     timeout-minutes: 60
     defaults:
@@ -123,6 +130,11 @@ jobs:
           uv run --locked --no-sync python ../operations/tooling/packaged/prepare_windows.py --approved-sha "$env:APPROVED_SHA"
           if ($LASTEXITCODE -ne 0) { throw 'Artifact checks failed.' }
 
+      - name: Parse manual isolated Windows kit
+        run: |
+          $tokens=$null; $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:GITHUB_WORKSPACE 'operations/tooling/packaged/manual_kit.ps1'),[ref]$tokens,[ref]$errors) | Out-Null
+          if ($errors.Count) { $errors | Format-List; throw 'Manual kit syntax invalid' }
       - name: Qualify real binary sessions and restart in synthetic copies
         run: |
           uv sync --locked --extra test --extra packaging
@@ -137,3 +149,36 @@ jobs:
           path: source/dist/beta8-artifacts/*
           if-no-files-found: error
           retention-days: 30
+
+  kit-validation:
+    if: ${{ inputs.kit_only }}
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          sparse-checkout: tooling/packaged
+      - name: Validate manual kit syntax and listener ownership
+        shell: pwsh
+        run: |
+          $tokens=$null; $errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'tooling/packaged/manual_kit.ps1'),[ref]$tokens,[ref]$errors)
+          if ($errors.Count) { $errors | Format-List; throw 'Syntax invalid' }
+          $guard=$ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-Owned'},$true)
+          Invoke-Expression $guard.Extent.Text
+          $script:p=$null
+          $refused=$false
+          try { Assert-Owned } catch { $refused=$true }
+          if (-not $refused) { throw 'Missing process accepted' }
+          $listener=[System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback,8000)
+          try {
+            $listener.Start()
+            $script:p=Get-Process -Id $PID
+            Assert-Owned
+            $listener.Stop()
+            $refused=$false
+            try { Assert-Owned } catch { $refused=$true }
+            if (-not $refused) { throw 'Missing owned listener accepted' }
+          } finally { $listener.Stop(); $script:p=$null }
+          'PASS: syntax; absent process/listener refused; own listener accepted'
