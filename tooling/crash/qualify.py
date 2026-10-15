@@ -54,7 +54,7 @@ def qualify(output):
     base=make_case(output/'uncredited')
     calls=[]
     def call(*args,**kwargs):
-        result=request(*args,**kwargs);calls.append({'boot_id':result['boot_id'],'pid':result['pid']});return result['body']
+        result=request(*args,**kwargs);calls.append({'boot_id':result['boot_id'],'pid':result['pid'],'case':args[0].name,'method':args[1],'path':args[2] if len(args)>2 else None,'http':result['http']});return result['body']
     call(base,'INIT')
     for label,seconds in [('ha',1800),('oiii',900)]:
         eid='crash-execution-'+label;mid='qualification-mission-'+label
@@ -136,7 +136,7 @@ def qualify(output):
     boots=[x['boot_id'] for x in calls]+[x['killed_process']['boot_id'] for x in cases]
     assert len(boots)==len(set(boots))
     proof={'result':'PASS','product_sha':SHA,'os':platform.platform(),'python':platform.python_version(),
-           'cases':cases,'fresh_process_count':len(boots),'source_snapshots_unchanged':True,
+           'cases':cases,'requests':calls,'source_snapshot_inventories':snapshots,'fresh_process_count':len(boots),'source_snapshots_unchanged':True,
            'real_profile_used':False,'source_diff_empty':True,'instrumentation':'test only; parent kill/TerminateProcess',
            'limits':['not power loss','not packaged UI','credit profile persistence boundary']}
     (output/'crash-qualification.json').write_text(json.dumps(proof,indent=2)+'\n',encoding='utf-8')
