@@ -1,4 +1,4 @@
-name: Isolated Mac browser diagnosis
+name: Isolated night availability confirmation qualification
 on:
   workflow_dispatch:
     inputs:
@@ -8,33 +8,82 @@ on:
 permissions:
   contents: read
 jobs:
-  diagnose:
-    runs-on: macos-latest
-    timeout-minutes: 12
+  night-chain:
+    name: Night selection UI and API ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          path: operations
           sparse-checkout: tooling/nightchain
           persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.approved_sha }}
+          path: source
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/user_profile.json
+            !/user_filters.json
+            !/data/user_profile.json
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
         with:
           version: '0.12.6'
           python-version: '3.13.5'
           enable-cache: false
-      - name: Compare static navigation with isolated browser environments
-        shell: bash
+      - name: Qualify requested night availability and confirmations in isolated profiles
+        working-directory: source
+        shell: pwsh
         run: |
-          test '${{ inputs.approved_sha }}' = dad6e438b8ba0f5ce52d59457ce503e030911d80
-          export NATIVE_TEST_HOME="$HOME"
-          export NATIVE_TEST_TMPDIR="$TMPDIR"
-          uv python find
-          uv run --no-project python tooling/nightchain/setup_browser.py
-          export CHROME_BINARY="$(cat "$RUNNER_TEMP/night-chain-browser-tool/binary-path.txt")"
-          uv run --no-project python tooling/nightchain/diagnose.py
+          if ('${{ inputs.approved_sha }}' -cne 'dad6e438b8ba0f5ce52d59457ce503e030911d80') { throw 'Unexpected source SHA' }
+          if ((git rev-parse HEAD).Trim() -cne '${{ inputs.approved_sha }}') { throw 'Wrong checkout' }
+          $env:BROWSER_NATIVE_HOME=$env:HOME
+          $iso=Join-Path $env:RUNNER_TEMP 'night-chain-environment'
+          foreach ($entry in @{HOME='home';USERPROFILE='home';APPDATA='appdata';LOCALAPPDATA='localappdata';ASTROPILOT_DATA_DIR='data';TMP='tmp';TEMP='tmp';TMPDIR='tmp';XDG_CACHE_HOME='cache';UV_CACHE_DIR='uv-cache'}.GetEnumerator()) {
+            $dir=Join-Path $iso $entry.Value
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            [Environment]::SetEnvironmentVariable($entry.Key,$dir)
+          }
+          uv sync --locked --extra test
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+          node ../operations/tooling/nightchain/browser_environment.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Browser environment regression failed' }
+          node --version
+          if ($LASTEXITCODE -ne 0) { throw 'Native Node required' }
+          uv run --locked --no-sync python ../operations/tooling/nightchain/setup_browser.py
+          if ($LASTEXITCODE -ne 0) { throw 'Testing browser setup failed' }
+          $env:CHROME_BINARY=Get-Content (Join-Path $env:RUNNER_TEMP 'night-chain-browser-tool/binary-path.txt') -Raw
+          $env:CHROME_BINARY=$env:CHROME_BINARY.Trim()
+          $env:PRODUCT_SOURCE=(Get-Location).Path
+          $env:NIGHT_CHAIN_PROOF=Join-Path $env:RUNNER_TEMP 'night-chain-proof'
+          uv run --locked --no-sync python ../operations/tooling/nightchain/run.py
+          if ($LASTEXITCODE -ne 0) { throw 'API qualification failed' }
+          foreach ($intent in @('sh2-129_ha','ou4_oiii','site_changed')) {
+            $env:CASE_ROOT=Join-Path $env:NIGHT_CHAIN_PROOF ('ui-'+$intent)
+            New-Item -ItemType Directory -Force $env:CASE_ROOT | Out-Null
+            Set-Content (Join-Path $env:CASE_ROOT 'QUALIFICATION_ONLY') 'PUBLIC FIXTURE ONLY'
+            $env:UI_INTENT=$intent
+            uv run --locked --no-sync python ../operations/tooling/nightchain/browser_run.py
+            if ($LASTEXITCODE -ne 0) { throw 'Browser confirmation failed' }
+          }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: mac-browser-diagnosis
+          name: night-chain-${{ matrix.os }}
           path: |
-            ${{ runner.temp }}/mac-browser-diagnosis
             ${{ runner.temp }}/night-chain-browser-tool/provenance.json
+            ${{ runner.temp }}/night-chain-proof/qualification.json
+            ${{ runner.temp }}/night-chain-proof/*/result.json
+            ${{ runner.temp }}/night-chain-proof/*/browser-result.json
+            ${{ runner.temp }}/night-chain-proof/*/browser-environment.json
+            ${{ runner.temp }}/night-chain-proof/*/ui.png
+            ${{ runner.temp }}/night-chain-proof/*/ui.txt
+            ${{ runner.temp }}/night-chain-proof/*/*.log
+            ${{ runner.temp }}/night-chain-proof/*/weather-fixture.json

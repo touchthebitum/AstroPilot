@@ -1,9 +1,11 @@
 const fs=require('fs'),path=require('path'),cp=require('child_process'),assert=require('assert');
+const {browserEnvironment}=require('./browser_environment.cjs');
 const root=process.env.CASE_ROOT, intent=process.env.UI_INTENT;
 const candidates=process.platform==='win32'?[`${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`,`${process.env['PROGRAMFILES(X86)']}\\Microsoft\\Edge\\Application\\msedge.exe`]:['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'];
 const chrome=[process.env.CHROME_BINARY,...candidates].filter(Boolean).find(fs.existsSync);assert(chrome,'No native Chromium browser');
 const profile=path.join(root,'browser-profile');fs.mkdirSync(profile);const log=fs.openSync(path.join(root,'browser.log'),'w');
-const child=cp.spawn(chrome,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--disable-background-networking','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore',log,log]});
+const child=cp.spawn(chrome,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--disable-background-networking','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore',log,log],env:browserEnvironment(process.env,{platform:process.platform})});
+fs.writeFileSync(path.join(root,'browser-environment.json'),JSON.stringify({mac_ci_native_home:process.platform==='darwin'&&process.env.GITHUB_ACTIONS==='true',application_home:process.env.HOME,browser_home:browserEnvironment(process.env,{platform:process.platform}).HOME,browser_profile:profile,application_data:process.env.ASTROPILOT_DATA_DIR}));
 fs.writeFileSync(path.join(root,'browser-pid.json'),JSON.stringify({pid:child.pid,profile}));
 const hardLimit=setTimeout(()=>{if(child.exitCode===null){if(process.platform==='win32')cp.spawnSync('taskkill',['/PID',String(child.pid),'/T','/F']);else child.kill('SIGKILL');}process.exit(1);},150000);
 const pause=ms=>new Promise(r=>setTimeout(r,ms));let ws,serial=0,pending=new Map();
