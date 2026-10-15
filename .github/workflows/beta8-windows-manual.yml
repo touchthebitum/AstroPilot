@@ -1,4 +1,4 @@
-name: Exact main Windows manual kit qualification
+name: Windows existing-copy resume qualification
 on:
   workflow_dispatch:
     inputs:
@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: operations
-          sparse-checkout: tooling/packaged
+          sparse-checkout: tooling
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -55,20 +55,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Dependencies failed' }
           gh run download 38732731103 --repo touchthebitum/AstroPilot --name AstroPilot-beta8-windows-x86_64-0dcde494c8450176f445cc29b28d004eddb60734 --dir (Join-Path $env:RUNNER_TEMP 'official-kit-artifacts')
           if ($LASTEXITCODE -ne 0) { throw 'Official artifact download failed' }
-          uv run --locked --no-sync python ../operations/tooling/packaged/prepare_manual_kit_ci.py
+          uv run --locked --no-sync python ../operations/tooling/resume/seed_source.py
           if ($LASTEXITCODE -ne 0) { throw 'Synthetic kit failed' }
-      - name: Exercise shipped launcher with public synthetic API actions and verify exported proof
+      - name: Qualify existing-copy resume with refusals and tolerant confirmation
         shell: powershell
         run: |
           $tokens=$null;$errors=$null
-          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:KIT_TEST_ROOT 'Lancer-qualification.ps1'),[ref]$tokens,[ref]$errors) | Out-Null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:GITHUB_WORKSPACE 'operations/tooling/resume/Reprendre-test.ps1'),[ref]$tokens,[ref]$errors) | Out-Null
           if ($errors.Count) { throw ($errors | Out-String) }
-          & (Join-Path $env:GITHUB_WORKSPACE 'operations/tooling/packaged/qualify_manual_kit.ps1')
+          & (Join-Path $env:GITHUB_WORKSPACE 'operations/tooling/resume/qualify_resume.ps1')
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: native-manual-kit-0dcde49
+          name: native-resume-kit-0dcde49
           path: |
-            ${{ env.KIT_TEST_ROOT }}/Native-kit-validation.json
-            ${{ env.KIT_TEST_ROOT }}/resultats-candidat-*.zip
+            ${{ runner.temp }}/resume-native-kit/proof-*.json
+            ${{ runner.temp }}/resume-native-kit/resultats-reprise-*.zip
           if-no-files-found: warn
