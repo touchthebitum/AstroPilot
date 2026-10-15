@@ -416,6 +416,10 @@ def test_upgrade_removes_beta2_metadata_and_runtime_reports_beta4(
             else:
                 path.unlink()
         shutil.copytree(payload, internal, dirs_exist_ok=True)
+        # The frozen application starts in a fresh process after installation.
+        # Invalidate this simulation's discovery cache after replacing metadata;
+        # Windows directory timestamps may not distinguish these rapid writes.
+        importlib.invalidate_caches()
         monkeypatch.setattr(sys, "path", [str(internal), str(internal / "metadata.zip")])
         assert not old.exists()
         assert app_module.canonical_version() == "1.0.0b4"
