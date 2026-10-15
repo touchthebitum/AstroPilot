@@ -133,7 +133,7 @@ def install(candidate,case,upgrade=False):
 def check_assets():
     for asset in ('index.html','app.js','styles.css','help.js','alert-status.js'):
         expected=(SOURCE/'astropilot/web'/asset).read_bytes()
-        if asset=='index.html':expected=expected.decode().replace('__ASTROPILOT_ASSET_TOKEN__','1.0.0b8-'+SHA[:7]).replace('__ASTROPILOT_SESSION_TIMING__','').encode()
+        if asset=='index.html':expected=(SOURCE/'astropilot/web/index.html').read_text(encoding='utf-8').replace('__ASTROPILOT_ASSET_TOKEN__','1.0.0b8-'+SHA[:7]).replace('__ASTROPILOT_SESSION_TIMING__','').encode()
         with OPENER.open('http://127.0.0.1:8000'+('/' if asset=='index.html' else '/ui/'+asset),timeout=20) as r:
             assert r.read()==expected,asset
 
