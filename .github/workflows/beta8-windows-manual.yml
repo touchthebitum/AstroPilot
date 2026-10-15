@@ -1,4 +1,4 @@
-name: Isolated corrected Windows upgrade qualification
+name: Isolated interrupted upgrade Windows Mac
 on:
   workflow_dispatch:
     inputs:
@@ -13,7 +13,7 @@ permissions:
   actions: read
 jobs:
   windows:
-    name: Installed upgrade Windows
+    name: Interrupted upgrade Windows
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
@@ -44,14 +44,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ('${{ inputs.approved_sha }}' -cne 'feb74d8032ac8d626e235ba04aeecd3f4ec9e381') { throw 'Unexpected SHA' }
+          if ('${{ inputs.approved_sha }}' -cne 'dad6e438b8ba0f5ce52d59457ce503e030911d80') { throw 'Unexpected SHA' }
           if ((git rev-parse HEAD).Trim() -cne '${{ inputs.approved_sha }}') { throw 'Wrong source' }
           $env:APPROVED_SHA='${{ inputs.approved_sha }}'
           $env:UV_CACHE_DIR=Join-Path $env:RUNNER_TEMP 'upgrade-uv-cache'
           uv sync --locked --extra test
           if ($LASTEXITCODE -ne 0) { throw 'Dependencies failed' }
           $inputRoot=Join-Path $env:RUNNER_TEMP 'upgrade-inputs'
-          gh run download ${{ inputs.candidate_run }} -R touchthebitum/AstroPilot --name AstroPilot-beta8-windows-x86_64-feb74d8032ac8d626e235ba04aeecd3f4ec9e381 --dir (Join-Path $inputRoot 'current')
+          gh run download ${{ inputs.candidate_run }} -R touchthebitum/AstroPilot --name AstroPilot-beta8-windows-x86_64-dad6e438b8ba0f5ce52d59457ce503e030911d80 --dir (Join-Path $inputRoot 'current')
           if ($LASTEXITCODE -ne 0) { throw 'Current download failed' }
           gh run download 38732731103 -R touchthebitum/AstroPilot --name AstroPilot-beta8-windows-x86_64-0dcde494c8450176f445cc29b28d004eddb60734 --dir (Join-Path $inputRoot 'modern')
           if ($LASTEXITCODE -ne 0) { throw 'Previous download failed' }
@@ -72,12 +72,92 @@ jobs:
           $env:LEGACY_CANDIDATE=Join-Path $inputRoot 'legacy/AstroPilot-1.0.0b7-windows-x86_64-setup.exe'
           $env:MODERN_CANDIDATE=Join-Path $inputRoot 'modern/AstroPilot-1.0.0b8-windows-x86_64-setup.exe'
           $env:MODERN_SHA='0dcde494c8450176f445cc29b28d004eddb60734'
-          uv run --locked --no-sync python ../operations/tooling/upgrade/qualify.py
+          uv run --locked --no-sync python ../operations/tooling/upgrade/interrupted.py
           if ($LASTEXITCODE -ne 0) { throw 'Installed upgrade qualification failed' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: installed-upgrade-windows
+          name: interrupted-upgrade-windows
           path: |
-            ${{ runner.temp }}/installed-upgrade-proof/upgrade-qualification.json
+            ${{ runner.temp }}/installed-upgrade-proof/interrupted-qualification.json
+            ${{ runner.temp }}/installed-upgrade-proof/*/*.log
+  macos:
+    name: Interrupted upgrade Mac
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: operations
+          sparse-checkout: tooling/upgrade
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.approved_sha }}
+          path: source
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/user_profile.json
+            !/user_filters.json
+            !/data/user_profile.json
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: e5789c767d76ca335e96b3be34b50fe6328429c1
+          path: previous-source
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/user_profile.json
+            !/user_filters.json
+            !/data/user_profile.json
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: '0.12.6'
+          python-version: '3.13.5'
+          enable-cache: false
+      - name: Build exact current and previous bundles without test dependencies
+        shell: pwsh
+        run: |
+          if ('${{ inputs.approved_sha }}' -cne 'dad6e438b8ba0f5ce52d59457ce503e030911d80') { throw 'Unexpected SHA' }
+          $iso=Join-Path $env:RUNNER_TEMP 'upgrade-build-environment'
+          foreach ($entry in @{HOME='home';ASTROPILOT_DATA_DIR='data';TMP='tmp';TEMP='tmp';TMPDIR='tmp';XDG_CACHE_HOME='cache';PYINSTALLER_CONFIG_DIR='pyinstaller'}.GetEnumerator()) {
+            $dir=Join-Path $iso $entry.Value
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            [Environment]::SetEnvironmentVariable($entry.Key,$dir)
+          }
+          foreach ($folder in @('source','previous-source')) {
+            Push-Location $folder
+            $env:UV_PROJECT_ENVIRONMENT='.venv-packaging'
+            uv sync --locked --extra packaging
+            if ($LASTEXITCODE -ne 0) { throw 'Packaging dependencies failed' }
+            uv run --locked --no-sync python scripts/build_macos.py
+            if ($LASTEXITCODE -ne 0) { throw 'Bundle build failed' }
+            Pop-Location
+          }
+      - name: Qualify interrupted bundle replacement and recovery
+        working-directory: source
+        shell: pwsh
+        run: |
+          $env:APPROVED_SHA='${{ inputs.approved_sha }}'
+          $env:UV_PROJECT_ENVIRONMENT='.venv-qualification'
+          uv sync --locked --extra test
+          if ($LASTEXITCODE -ne 0) { throw 'Qualification dependencies failed' }
+          $env:PRODUCT_SOURCE=(Get-Location).Path
+          $env:UPGRADE_PROOF=Join-Path $env:RUNNER_TEMP 'installed-upgrade-proof'
+          $env:CURRENT_CANDIDATE=Join-Path $env:PRODUCT_SOURCE 'dist/AstroPilot.app'
+          $env:CURRENT_PAYLOAD=$env:CURRENT_CANDIDATE
+          $env:LEGACY_CANDIDATE=$env:CURRENT_CANDIDATE
+          $env:MODERN_CANDIDATE=Join-Path (Split-Path $env:PRODUCT_SOURCE) 'previous-source/dist/AstroPilot.app'
+          $env:MODERN_SHA='e5789c767d76ca335e96b3be34b50fe6328429c1'
+          uv run --locked --no-sync python ../operations/tooling/upgrade/interrupted.py
+          if ($LASTEXITCODE -ne 0) { throw 'Installed upgrade qualification failed' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: interrupted-upgrade-macos
+          path: |
+            ${{ runner.temp }}/installed-upgrade-proof/interrupted-qualification.json
             ${{ runner.temp }}/installed-upgrade-proof/*/*.log
