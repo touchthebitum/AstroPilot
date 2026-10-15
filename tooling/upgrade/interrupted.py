@@ -37,7 +37,7 @@ def verify(case,exe,sha,before,label):
 def installer_args(candidate,case,log):
     return [str(candidate),'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NOICONS','/TASKS=',f'/LOG={log}']
 
-def windows_interrupt(case,threshold):
+def windows_interrupt(case,threshold,previous_inventory):
     # A private job object contains only this child and its descendants.
     # Closing/terminating it cannot affect other installers or an existing app.
     from ctypes import wintypes
@@ -79,6 +79,7 @@ def windows_interrupt(case,threshold):
     orphans={}
     for key,value in actual.items():
         if key not in expected and key not in BASE_SENTINELS and re.fullmatch(r'is-[A-Za-z0-9]+\.tmp',key):
+            assert key not in previous_inventory,'Unexpected pre-existing temporary'
             p=target/key;content=p.read_bytes();orphans[key]={'sha256':u.digest(p),'size':len(content)}
             u.SENTINELS[key]=content
     record({'case':case.name,'stage':'interrupted','result':'PASS','method':'TerminateJobObject owned installer tree',
@@ -178,7 +179,7 @@ def main():
         before=u.authority(case/'data');shutil.copytree(case/'data',case/'frozen-data')
         program=case/'Applications'/('AstroPilot' if u.WINDOWS else 'AstroPilot.app')
         frozen_program=u.bundle_inventory(program)
-        if u.WINDOWS:windows_interrupt(case,threshold)
+        if u.WINDOWS:windows_interrupt(case,threshold,frozen_program)
         elif label=='promotion_gap':exe=mac_promotion_gap(case)
         else:mac_copy_interrupt(case,label=='inplace_copy')
         assert u.authority(case/'data')==before,'Interruption changed data'
