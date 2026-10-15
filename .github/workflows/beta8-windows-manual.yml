@@ -8,6 +8,7 @@ on:
         type: string
 permissions:
   contents: read
+  actions: read
 jobs:
   session:
     name: Session qualification ${{ matrix.os }}
@@ -76,4 +77,60 @@ jobs:
           name: session-qualification-${{ matrix.os }}
           path: |
             ${{ runner.temp }}/session-process-proof/restore-qualification.json
+            ${{ runner.temp }}/session-process-proof/trusted-inventory.json
+            ${{ runner.temp }}/session-process-proof/logical-snapshot.zip
             ${{ runner.temp }}/session-focused/junit.xml
+
+  cross-restore:
+    name: Cross restore ${{ matrix.os }}
+    needs: session
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            source_artifact: session-qualification-macos-latest
+          - os: macos-latest
+            source_artifact: session-qualification-windows-2022
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: operations
+          persist-credentials: false
+          sparse-checkout: tooling/restore-qualification
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.approved_sha }}
+          path: source
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          python-version: '3.12'
+          version: '0.12.5'
+      - name: Prepare exact sources and retrieve the other platform's synthetic archive
+        working-directory: source
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ('${{ inputs.approved_sha }}' -cne '435db8ab800e13021eefd7a85f3516ab14a9d051') { throw 'Unexpected product source' }
+          if ((git rev-parse HEAD).Trim() -cne '${{ inputs.approved_sha }}') { throw 'Source mismatch' }
+          uv sync --locked --extra test
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+          New-Item -ItemType Directory -Force tooling/restore-qualification | Out-Null
+          Copy-Item ../operations/tooling/restore-qualification/*.py tooling/restore-qualification/
+          gh run download $env:GITHUB_RUN_ID --repo $env:GITHUB_REPOSITORY --name '${{ matrix.source_artifact }}' --dir (Join-Path $env:RUNNER_TEMP 'cross-input')
+          if ($LASTEXITCODE -ne 0) { throw 'Synthetic archive download failed' }
+      - name: Restore and replay with production composition on the other OS
+        working-directory: source
+        shell: pwsh
+        run: |
+          uv run --locked --no-sync python tooling/restore-qualification/cross_restore.py (Join-Path $env:RUNNER_TEMP 'cross-proof') (Join-Path $env:RUNNER_TEMP 'cross-input')
+          if ($LASTEXITCODE -ne 0) { throw 'Cross restoration failed' }
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cross-restoration-${{ matrix.os }}
+          path: ${{ runner.temp }}/cross-proof/cross-restore-qualification.json
