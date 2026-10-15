@@ -5,6 +5,7 @@ const chrome=[process.env.CHROME_BINARY,...candidates].filter(Boolean).find(fs.e
 const profile=path.join(root,'browser-profile');fs.mkdirSync(profile);const log=fs.openSync(path.join(root,'browser.log'),'w');
 const child=cp.spawn(chrome,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--disable-background-networking','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore',log,log]});
 fs.writeFileSync(path.join(root,'browser-pid.json'),JSON.stringify({pid:child.pid,profile}));
+const hardLimit=setTimeout(()=>{if(child.exitCode===null){if(process.platform==='win32')cp.spawnSync('taskkill',['/PID',String(child.pid),'/T','/F']);else child.kill('SIGKILL');}process.exit(1);},150000);
 const pause=ms=>new Promise(r=>setTimeout(r,ms));let ws,serial=0,pending=new Map();
 async function waitFor(fn,label,ms=90000){const end=Date.now()+ms;while(Date.now()<end){const x=await fn();if(x)return x;await pause(150);}throw Error(`Timeout ${label}`);}
 async function send(method,params={}){const id=++serial;return new Promise((resolve,reject)=>{console.log('CDP',method);const timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timeout '+method));},30000);pending.set(id,{resolve,reject,timer});ws.send(JSON.stringify({id,method,params}));});}
@@ -36,5 +37,5 @@ async function evaluate(expression){const r=await send('Runtime.evaluate',{expre
   await waitFor(()=>evaluate(`Boolean(document.querySelector('#mission-filter')?.textContent.includes(${JSON.stringify(intent==='ou4_oiii'?'OIII':'Ha')}))`),'rendered mission filter',15000);
   await evaluate("document.querySelector('#mission-filter').scrollIntoView({block:'center'});true");const text=await evaluate('document.body.innerText');const screenshot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});fs.writeFileSync(path.join(root,'ui.png'),Buffer.from(screenshot.data,'base64'));fs.writeFileSync(path.join(root,'ui.txt'),text);
   fs.writeFileSync(path.join(root,'browser-result.json'),JSON.stringify({result:'PASS',browser:chrome,intent,prepared,accepted,ui_text:text,requested_night_text:requestedNightText,real_dom_interaction:true,backend_response_replaced:false,clock_fixture:'2026-10-14T12:00:00Z',timezone:'Europe/Zurich'},null,2));
- }finally{if(ws)ws.close();if(process.platform==='win32')cp.spawnSync('taskkill',['/PID',String(child.pid),'/T','/F']);else child.kill('SIGTERM');fs.closeSync(log);}
+ }finally{clearTimeout(hardLimit);if(ws)ws.close();if(process.platform==='win32')cp.spawnSync('taskkill',['/PID',String(child.pid),'/T','/F']);else child.kill('SIGTERM');fs.closeSync(log);}
 })().catch(error=>{console.error(error);process.exitCode=1;});
