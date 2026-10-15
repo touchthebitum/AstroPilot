@@ -18,7 +18,7 @@ WORKER=Path(__file__).with_name('worker.py')
 INTERPRETER=str(Path(getattr(sys,'_base_executable',sys.executable)).resolve())
 BOOTSTRAP="import runpy,site,sys;site.addsitedir(sys.argv[1]);sys.argv=sys.argv[2:];runpy.run_path(sys.argv[0],run_name='__main__')"
 def child_command(data,command):
-    return [INTERPRETER,'-c',BOOTSTRAP,sysconfig.get_paths()['purelib'],str(WORKER),str(data),json.dumps(command)]
+    return [INTERPRETER,'-S','-c',BOOTSTRAP,sysconfig.get_paths()['purelib'],str(WORKER),str(data),json.dumps(command)]
 
 def inventory(root,logical=False):
     return {p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
@@ -150,7 +150,7 @@ def qualify(output):
     assert len(boots)==len(set(boots))
     proof={'result':'PASS','product_sha':SHA,'os':platform.platform(),'python':platform.python_version(),
            'legacy_launcher_probe':launcher_probe,'cases':cases,'requests':calls,'source_snapshot_inventories':snapshots,'fresh_process_count':len(boots),'source_snapshots_unchanged':True,
-           'real_profile_used':False,'source_diff_empty':True,'instrumentation':'test only; parent kill/TerminateProcess',
+           'real_profile_used':False,'source_diff_empty':True,'child_global_site_disabled':True,'instrumentation':'test only; parent kill/TerminateProcess',
            'limits':['not power loss','not packaged UI','credit profile persistence boundary']}
     (output/'crash-qualification.json').write_text(json.dumps(proof,indent=2)+'\n',encoding='utf-8')
     print(json.dumps({k:v for k,v in proof.items() if k!='cases'}))

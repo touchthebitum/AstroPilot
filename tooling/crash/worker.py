@@ -7,6 +7,7 @@ import tempfile
 import threading
 
 sys.path.insert(0,str(Path(__file__).resolve().parent))
+assert sys.flags.no_site == 1, "Worker requires explicit locked-venv packages only"
 import session_seed as seed
 
 data = Path(sys.argv[1]).resolve()
