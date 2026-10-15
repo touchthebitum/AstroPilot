@@ -37,6 +37,7 @@ jobs:
         with:
           python-version: '3.12'
           version: '0.12.5'
+          enable-cache: false
       - name: Install locked dependencies for the exact product
         working-directory: source
         shell: pwsh
