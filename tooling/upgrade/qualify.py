@@ -124,6 +124,8 @@ def install(candidate,case,upgrade=False):
             # Inno's own uninstall metadata is expected. Other residue is reported.
             residue=[x for x in extras if not Path(x).name.startswith('unins')]
         else: residue=extras;assert not residue,residue
+        if not WINDOWS:
+            subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict',str(target)],check=True,timeout=60)
         ROWS.append({'step':case.name+' installed current','payload_matches':True,'extra_payload_files':residue,
                      'previous_app_dir_without_override':WINDOWS})
     return exe
