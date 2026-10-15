@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 
+sys.path.insert(0,str(Path(__file__).resolve().parent))
 import session_seed as seed
 
 data = Path(sys.argv[1]).resolve()
@@ -16,7 +17,7 @@ marker = data.parent/'suspended.json'
 def suspend(point, status=None):
     if stage != point:
         return
-    record = {'stage':point,'pid':os.getpid(),'boot_id':seed.BOOT_ID,'status':status}
+    record = {'stage':point,'pid':os.getpid(),'boot_id':seed.BOOT_ID,'status':status,'parent_pid':os.getppid()}
     pending = marker.with_suffix('.tmp')
     with pending.open('w',encoding='utf-8') as f:
         json.dump(record,f);f.flush();os.fsync(f.fileno())

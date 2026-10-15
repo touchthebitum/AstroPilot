@@ -7,11 +7,18 @@ import platform
 import shutil
 import subprocess
 import sys
+import sysconfig
 import time
 
 SOURCE=Path(os.environ['PRODUCT_SOURCE']).resolve()
 SHA='ee5df1456d0a60e9149ae792efc601e8e57f7c68'
 WORKER=Path(__file__).with_name('worker.py')
+# Windows venv python.exe can be a redirector. Launch the actual interpreter
+# directly, adding this locked venv's packages before loading our test worker.
+INTERPRETER=str(Path(getattr(sys,'_base_executable',sys.executable)).resolve())
+BOOTSTRAP="import runpy,site,sys;site.addsitedir(sys.argv[1]);sys.argv=sys.argv[2:];runpy.run_path(sys.argv[0],run_name='__main__')"
+def child_command(data,command):
+    return [INTERPRETER,'-c',BOOTSTRAP,sysconfig.get_paths()['purelib'],str(WORKER),str(data),json.dumps(command)]
 
 def inventory(root,logical=False):
     return {p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
@@ -27,7 +34,7 @@ def env_for(case):
 
 def request(case,method,path=None,body=None):
     command={'method':method,'path':path,'json':body}
-    child=subprocess.run([sys.executable,str(WORKER),str(case/'data'),json.dumps(command)],
+    child=subprocess.run(child_command(case/'data',command),
         cwd=SOURCE,env=env_for(case),text=True,capture_output=True,timeout=90)
     assert child.returncode==0,(child.returncode,child.stderr,child.stdout)
     result=json.loads(child.stdout)
@@ -52,6 +59,11 @@ def qualify(output):
     assert not subprocess.check_output(['git','diff','--name-only','HEAD'],cwd=SOURCE,text=True).strip()
     output.mkdir(parents=True,exist_ok=False)
     base=make_case(output/'uncredited')
+    identity_code="import json,os;print(json.dumps({'pid':os.getpid(),'parent_pid':os.getppid()}))"
+    probe=subprocess.Popen([sys.executable,'-c',identity_code],env=env_for(base),stdout=subprocess.PIPE,text=True)
+    probe_output,_=probe.communicate(timeout=30)
+    assert probe.returncode==0
+    launcher_probe={'spawned_pid':probe.pid,**json.loads(probe_output)}
     calls=[]
     def call(*args,**kwargs):
         result=request(*args,**kwargs);calls.append({'boot_id':result['boot_id'],'pid':result['pid'],'case':args[0].name,'method':args[1],'path':args[2] if len(args)>2 else None,'http':result['http']});return result['body']
@@ -84,7 +96,7 @@ def qualify(output):
         profile_before=json.loads((case/'data/user_profile.json').read_text(encoding='utf-8'))
         command={'method':'POST','path':route(label),'json':credit_body(label),'crash_stage':stage}
         with (case/'stdout.log').open('w',encoding='utf-8') as stdout,(case/'stderr.log').open('w',encoding='utf-8') as stderr:
-          child=subprocess.Popen([sys.executable,str(WORKER),str(case/'data'),json.dumps(command)],
+          child=subprocess.Popen(child_command(case/'data',command),
             cwd=SOURCE,env=env_for(case),stdout=stdout,stderr=stderr)
           try:
             deadline=time.monotonic()+90
@@ -94,7 +106,8 @@ def qualify(output):
                 assert time.monotonic()<deadline,('suspension timeout',case.name)
                 time.sleep(.05)
             reached=json.loads(marker.read_text(encoding='utf-8'))
-            assert reached['pid']==child.pid and reached['stage']==stage
+            assert reached['pid']==child.pid and reached['stage']==stage,(reached,child.pid)
+            assert reached['parent_pid']==os.getpid(),reached
             assert child.poll() is None
             child.kill();code=child.wait(timeout=30)
             assert code!=0,code
@@ -136,7 +149,7 @@ def qualify(output):
     boots=[x['boot_id'] for x in calls]+[x['killed_process']['boot_id'] for x in cases]
     assert len(boots)==len(set(boots))
     proof={'result':'PASS','product_sha':SHA,'os':platform.platform(),'python':platform.python_version(),
-           'cases':cases,'requests':calls,'source_snapshot_inventories':snapshots,'fresh_process_count':len(boots),'source_snapshots_unchanged':True,
+           'legacy_launcher_probe':launcher_probe,'cases':cases,'requests':calls,'source_snapshot_inventories':snapshots,'fresh_process_count':len(boots),'source_snapshots_unchanged':True,
            'real_profile_used':False,'source_diff_empty':True,'instrumentation':'test only; parent kill/TerminateProcess',
            'limits':['not power loss','not packaged UI','credit profile persistence boundary']}
     (output/'crash-qualification.json').write_text(json.dumps(proof,indent=2)+'\n',encoding='utf-8')
