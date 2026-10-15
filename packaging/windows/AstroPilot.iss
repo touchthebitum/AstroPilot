@@ -35,8 +35,13 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 [InstallDelete]
 ; Retire only AstroPilot distribution metadata left by older onedir payloads.
 ; Processed before payload copy, which restores metadata supplied by the new build.
-; Never target application data or other packages.
+; Never target application data or unrelated package metadata.
 Type: filesandordirs; Name: "{app}\_internal\astropilot-*.dist-info"
+
+; Retire the two OpenSSL filenames shipped by beta7. InstallDelete runs
+; before Files, so any current payload with the same names is copied back.
+Type: files; Name: "{app}\_internal\libcrypto-3.dll"
+Type: files; Name: "{app}\_internal\libssl-3.dll"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
