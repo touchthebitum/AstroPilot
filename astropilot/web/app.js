@@ -486,6 +486,7 @@ async function sessionHttpError(response) {
 
 function sessionRefusalMessage(error) {
   if (error.executionCommit) return `Exécution : ${error.executionCommit === "committed" ? "transition enregistrée" : error.executionCommit === "not_committed" || error.executionCommit === "not_attempted" ? "transition non enregistrée" : "résultat incertain"}. Synchronisation Guardian : ${error.guardianPublication === "failed" ? "échouée" : "non confirmée"}. Vérifiez l’état avant de poursuivre.`;
+  if (error.code === "intent_progress_persistence_unavailable") return "Enregistrement de la progression non confirmé. Vérifiez l’état relu avant de réessayer.";
   if (error.status === 409) return "Action refusée : la session ou le profil a changé. État actuel relu ; vérifiez avant de poursuivre.";
   if (error.status === 422) return "Action refusée : transition ou données invalides. Corrigez la saisie avant de poursuivre.";
   if (error.status === 503) return "Action impossible : données enregistrées incohérentes ou service indisponible. Rechargez la page.";

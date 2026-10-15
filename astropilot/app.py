@@ -31,6 +31,8 @@ from pydantic import (
 
 from astropilot.guardian_renewal_api import (GuardianRenewalAdapter, RenewalRequest, Rejection,
     valid_key, valid_execution_id, response as guardian_response, unavailable as guardian_unavailable)
+from astropilot.persistence_diagnostics import HEADER as PERSISTENCE_DIAGNOSTIC_HEADER, log_credit_persistence
+from decision.services.intent_progress_credit import IntentProgressPersistenceError
 from astropilot.weather_diagnostics import HEADER as WEATHER_DIAGNOSTIC_HEADER, log_weather, weather_diagnostic_context
 from astropilot.guardian_api import GuardianEvaluateRequest, GuardianEvaluateResponse, evaluate as evaluate_guardian
 from decision.runners.guardian_runner import GuardianRunner
@@ -2229,22 +2231,36 @@ def create_app(
                                 detail={"code": code}) from exc
 
     @application.post("/v1/executions/{execution_id}/intent-progress-credit")
-    def post_intent_progress_credit(execution_id: str, request: IntentProgressCreditRequest):
+    def post_intent_progress_credit(execution_id: str, request: IntentProgressCreditRequest, response: Response):
+        diagnostic_id = uuid4().hex
+        started = perf_counter()
+        headers = {PERSISTENCE_DIAGNOSTIC_HEADER: diagnostic_id}
+        response.headers[PERSISTENCE_DIAGNOSTIC_HEADER] = diagnostic_id
         try:
             status, credit, revision = application_service().apply_intent_progress_credit(
                 execution_id=execution_id, evidence_ids=request.evidence_ids,
                 expected_revision=request.expected_revision,
                 confirm_historical_baseline=request.confirm_historical_baseline,
             )
+            log_credit_persistence("intent_progress_credit_result", diagnostic_id=diagnostic_id,
+                category=status, started=started, http_status=200)
             return {"status": status, "profile_revision": revision, **credit}
+        except IntentProgressPersistenceError as exc:
+            log_credit_persistence("intent_progress_persistence_failed", diagnostic_id=diagnostic_id,
+                category=exc.category, started=started, http_status=503)
+            raise HTTPException(status_code=503, headers=headers, detail={
+                "code": "intent_progress_persistence_unavailable",
+                "category": exc.category,
+                "message": "Progress persistence could not be confirmed. Reload the session before retrying.",
+            }) from exc
         except ProfileRevisionConflictError as exc:
-            raise HTTPException(status_code=409, detail={"code": "profile_revision_conflict"}) from exc
+            raise HTTPException(status_code=409, headers=headers, detail={"code": "profile_revision_conflict"}) from exc
         except IntentProgressCreditError as exc:
             code = str(exc)
             raise HTTPException(status_code=409 if code.endswith("conflict") or "baseline" in code else 422,
-                                detail={"code": code}) from exc
+                                headers=headers, detail={"code": code}) from exc
         except (ExecutionOutcomeApplicationError, DecisionAcceptanceError) as exc:
-            raise HTTPException(status_code=422, detail={"code": str(exc)}) from exc
+            raise HTTPException(status_code=422, headers=headers, detail={"code": str(exc)}) from exc
         except UserProfileError as exc:
             code = str(exc)
             if code.startswith("intent_progress_"):
@@ -2253,8 +2269,8 @@ def create_app(
                 except UserProfileError:
                     pass
                 else:
-                    raise HTTPException(status_code=409, detail={"code": code}) from exc
-            raise HTTPException(status_code=503, detail={"code": "configuration_corrupt"}) from exc
+                    raise HTTPException(status_code=409, headers=headers, detail={"code": code}) from exc
+            raise HTTPException(status_code=503, headers=headers, detail={"code": "configuration_corrupt"}) from exc
 
     @application.get(
         "/v1/configuration",
