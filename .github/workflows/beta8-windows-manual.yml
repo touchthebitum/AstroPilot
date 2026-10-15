@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 20
     env:
       PRODUCT_SOURCE: ${{ github.workspace }}/source
-      KIT_TEST_ROOT: ${{ runner.temp }}/manual-kit-runtime
+      KIT_TEST_ROOT: ${{ github.workspace }}/manual-kit-runtime
       UV_NO_ENV_FILE: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -69,6 +69,6 @@ jobs:
         with:
           name: native-manual-kit-0dcde49
           path: |
-            ${{ runner.temp }}/manual-kit-runtime/Native-kit-validation.json
-            ${{ runner.temp }}/manual-kit-runtime/resultats-candidat-*.zip
+            ${{ env.KIT_TEST_ROOT }}/Native-kit-validation.json
+            ${{ env.KIT_TEST_ROOT }}/resultats-candidat-*.zip
           if-no-files-found: warn
