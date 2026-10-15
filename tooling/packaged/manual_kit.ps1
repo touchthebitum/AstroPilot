@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = $PSScriptRoot
-$run = Join-Path $root ('essai-isole-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,6))
+$run = Join-Path ([System.IO.Path]::GetTempPath()) ('essai-isole-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,6))
 New-Item -ItemType Directory -Path $run | Out-Null
 $manifest = Get-Content -Raw (Join-Path $root 'Manifest-kit.json') | ConvertFrom-Json
 foreach ($item in $manifest.files) {
