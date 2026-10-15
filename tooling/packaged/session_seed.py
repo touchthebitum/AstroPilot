@@ -39,6 +39,24 @@ def worker(data, command):
     import importlib.util
     spec = importlib.util.spec_from_file_location('lineage_fixture', ROOT / 'tests/architecture/test_decision_acceptance_lineage_persistence.py')
     fixtures = importlib.util.module_from_spec(spec); spec.loader.exec_module(fixtures)
+    # Explicit synthetic UI fixture, independent of live weather or actual equipment.
+    from dataclasses import replace
+    from datetime import datetime, timezone, date
+    from decision.mission.night_planner import NightTask
+    fixtures.START = datetime(2026, 10, 15, 20, 0, tzinfo=timezone.utc)
+    fixtures.END = fixtures.START + timedelta(hours=4)
+    original_mission = fixtures.mission
+    def synthetic_mission(**kwargs):
+        label = 'Halpha' if kwargs.get('acquisition_intent_id') == 'sh2-129_ha' else 'OIII'
+        return replace(original_mission(**kwargs), target='TEST ISOLE Sh2-129 / Ou4 - '+label,
+            site_name='COPIE DE TEST', site_timezone='Europe/Zurich',
+            tasks=[NightTask('22:00', '22:05', 'TEST UNIQUEMENT', 'Aucune acquisition materielle', 0, 0.0)])
+    fixtures.mission = synthetic_mission
+    original_context = fixtures.context
+    def synthetic_context(*args, **kwargs):
+        value = original_context(*args, **kwargs)
+        return replace(value, night={**value.night, 'date':date(2026,10,15)})
+    fixtures.context = synthetic_context
     lineage = FileDecisionAcceptanceLineageStore(data / 'decision_lineage')
     with TestClient(create_app(guardian_renewal_enabled=False), raise_server_exceptions=False) as api:
         if command['method'] == 'INIT':
@@ -53,7 +71,7 @@ def worker(data, command):
                 did,sid,mid = [f'qualification-{x}-{label}' for x in ('decision','selection','mission')]
                 lineage.create_context(fixtures.context(did))
                 lineage.commit_selection_and_mission(fixtures.selection(selection_id=sid,decision_id=did,
-                    selected_catalog_key='Sh2-129',selected_imaging_field_id='sh2-129_ou4',selected_acquisition_intent_id=intent),
+                    selected_at=fixtures.START-timedelta(minutes=15),selected_catalog_key='Sh2-129',selected_imaging_field_id='sh2-129_ou4',selected_acquisition_intent_id=intent),
                     fixtures.mission(mission_id=mid,decision_id=did,selection_id=sid,imaging_field_id='sh2-129_ou4',acquisition_intent_id=intent))
             return {'http':200,'body':{'seeded_synthetic_accepted_lineage':True},'pid':os.getpid(), 'boot_id':BOOT_ID}
         if command['method']=='GUARDIAN':

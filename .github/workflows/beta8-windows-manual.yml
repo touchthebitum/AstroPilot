@@ -1,67 +1,31 @@
-name: Packaged main qualification (operations only)
-
+name: Exact main Windows manual kit qualification
 on:
   workflow_dispatch:
     inputs:
       approved_sha:
-        description: Full 40-character SHA of the reviewed beta 8 sources
         required: true
         type: string
-
-      kit_only:
-        description: Validate only the manual kit syntax and process ownership guard
-        required: false
-        type: boolean
-        default: false
-
 permissions:
   contents: read
-
-concurrency:
-  group: beta8-windows-${{ inputs.approved_sha }}
-  cancel-in-progress: false
-
+  actions: read
 jobs:
-  candidate:
-    if: ${{ !inputs.kit_only }}
+  kit-validation:
     runs-on: windows-2022
-    timeout-minutes: 60
-    defaults:
-      run:
-        shell: pwsh
-        working-directory: source
+    timeout-minutes: 20
     env:
-      APPROVED_SHA: ${{ inputs.approved_sha }}
-      UV_PROJECT_ENVIRONMENT: .venv-packaging
-      UV_NO_ENV_FILE: "1"
       PRODUCT_SOURCE: ${{ github.workspace }}/source
-
+      KIT_TEST_ROOT: ${{ runner.temp }}/manual-kit-runtime
+      UV_NO_ENV_FILE: '1'
     steps:
-      - name: Require an explicit full source SHA
-        working-directory: ${{ github.workspace }}
-        run: |
-          if ($env:APPROVED_SHA -cnotmatch '^[0-9a-f]{40}$') {
-            throw 'approved_sha must be a full lowercase commit SHA.'
-          }
-          if (-not $env:RUNNER_TEMP -or -not (Test-Path -LiteralPath $env:RUNNER_TEMP -PathType Container)) {
-            throw 'Runner temporary directory is unavailable.'
-          }
-          $cacheDir = Join-Path $env:RUNNER_TEMP 'beta8-uv-cache'
-          $dataDir = Join-Path $env:RUNNER_TEMP 'beta8-synthetic-data'
-          "UV_CACHE_DIR=$cacheDir" >> $env:GITHUB_ENV
-          "ASTROPILOT_DATA_DIR=$dataDir" >> $env:GITHUB_ENV
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: operations
-          persist-credentials: false
           sparse-checkout: tooling/packaged
-      - name: Check out exactly the approved sources
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ inputs.approved_sha }}
           path: source
-          fetch-depth: 1
           persist-credentials: false
           sparse-checkout-cone-mode: false
           sparse-checkout: |
@@ -69,116 +33,42 @@ jobs:
             !/user_profile.json
             !/user_filters.json
             !/data/user_profile.json
-
-      - name: Check the source identity and runner tools
-        run: |
-          $headSha = (git rev-parse HEAD).Trim()
-          if ($LASTEXITCODE -ne 0 -or $headSha -cne $env:APPROVED_SHA) {
-            throw 'Checkout does not match approved_sha.'
-          }
-          $dirty = git status --porcelain --untracked-files=all
-          if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'Checkout is not clean.' }
-          if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { throw 'x86_64 required.' }
-          $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-          if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
-            throw 'Expected Inno Setup compiler is missing; do not install dynamically.'
-          }
-          $env:ISCC_PATH = $compiler
-          $env:INNO_SETUP_VERSION = (Get-Item -LiteralPath $compiler).VersionInfo.FileVersion
-          "ISCC_PATH=$compiler" >> $env:GITHUB_ENV
-          "INNO_SETUP_VERSION=$env:INNO_SETUP_VERSION" >> $env:GITHUB_ENV
-          New-Item -ItemType Directory -Path $env:ASTROPILOT_DATA_DIR -ErrorAction Stop
-
-      - name: Set up locked packaging tools
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
         with:
-          version: "0.12.6"
-          python-version: "3.13.5"
+          version: '0.12.6'
+          python-version: '3.13.5'
           enable-cache: false
-
-      - name: Install the exact packaging Python
+      - name: Prepare public synthetic kit with the exact official binary
+        working-directory: source
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          uv python install 3.13.5
-          if ($LASTEXITCODE -ne 0) { throw 'Python 3.13.5 installation failed.' }
-
-      - name: Check the lockfile and beta version
-        run: |
-          uv lock --check --no-build --no-python-downloads
-          if ($LASTEXITCODE -ne 0) { throw 'Lockfile check failed.' }
-          uv run --no-project --no-sync python -c "import tomllib; p=tomllib.load(open('pyproject.toml','rb')); assert p['project']['version']=='1.0.0b8'"
-          if ($LASTEXITCODE -ne 0) { throw 'Expected beta 8.' }
-
-      - name: Build the onedir candidate
-        run: |
-          uv run --no-project --no-sync python scripts/build_windows.py
-          if ($LASTEXITCODE -ne 0) { throw 'Windows build failed.' }
-          if (Test-Path astropilot.egg-info) { Move-Item astropilot.egg-info (Join-Path $env:RUNNER_TEMP 'generated-packaging-egg-info') }
-          if (git status --porcelain --untracked-files=all) { throw 'Product checkout changed' }
-
-      - name: Reject user data and credentials before installer packaging
-        run: |
-          uv run --locked --no-sync python ../operations/tooling/packaged/prepare_windows.py --approved-sha "$env:APPROVED_SHA" --check-payload-only
-          if ($LASTEXITCODE -ne 0) { throw 'Payload validation failed; installer not created.' }
-
-      - name: Build the per-user installer
-        run: |
-          uv run --locked --no-sync python scripts/build_windows_installer.py --iscc "$env:ISCC_PATH"
-          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed.' }
-
-      - name: Prepare portable ZIP, checksums and provenance
-        run: |
-          uv run --locked --no-sync python ../operations/tooling/packaged/prepare_windows.py --approved-sha "$env:APPROVED_SHA"
-          if ($LASTEXITCODE -ne 0) { throw 'Artifact checks failed.' }
-
-      - name: Parse manual isolated Windows kit
-        run: |
-          $tokens=$null; $errors=$null
-          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:GITHUB_WORKSPACE 'operations/tooling/packaged/manual_kit.ps1'),[ref]$tokens,[ref]$errors) | Out-Null
-          if ($errors.Count) { $errors | Format-List; throw 'Manual kit syntax invalid' }
-      - name: Qualify real binary sessions and restart in synthetic copies
-        run: |
-          uv sync --locked --extra test --extra packaging
-          if ($LASTEXITCODE -ne 0) { throw 'Test dependencies failed' }
-          uv run --locked --no-sync python ../operations/tooling/packaged/qualify_binary.py
-          if ($LASTEXITCODE -ne 0) { throw 'Packaged session qualification failed' }
-      - name: Store candidate artifacts only (no release publication)
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: AstroPilot-beta8-windows-x86_64-${{ inputs.approved_sha }}
-          path: source/dist/beta8-artifacts/*
-          if-no-files-found: error
-          retention-days: 30
-
-  kit-validation:
-    if: ${{ inputs.kit_only }}
-    runs-on: windows-2022
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-          sparse-checkout: tooling/packaged
-      - name: Validate manual kit syntax and listener ownership
+          if ((git rev-parse HEAD).Trim() -cne '0dcde494c8450176f445cc29b28d004eddb60734') { throw 'Wrong source' }
+          $iso=Join-Path $env:RUNNER_TEMP 'kit-preparation'
+          foreach ($entry in @{HOME='home';USERPROFILE='home';APPDATA='appdata';LOCALAPPDATA='localappdata';ASTROPILOT_DATA_DIR='data';UV_CACHE_DIR='cache';TMP='tmp';TEMP='tmp';TMPDIR='tmp'}.GetEnumerator()) {
+            $directory=Join-Path $iso $entry.Value
+            New-Item -ItemType Directory -Force $directory | Out-Null
+            [Environment]::SetEnvironmentVariable($entry.Key,$directory)
+          }
+          uv sync --locked --extra test
+          if ($LASTEXITCODE -ne 0) { throw 'Dependencies failed' }
+          gh run download 38732731103 --repo touchthebitum/AstroPilot --name AstroPilot-beta8-windows-x86_64-0dcde494c8450176f445cc29b28d004eddb60734 --dir (Join-Path $env:RUNNER_TEMP 'official-kit-artifacts')
+          if ($LASTEXITCODE -ne 0) { throw 'Official artifact download failed' }
+          uv run --locked --no-sync python ../operations/tooling/packaged/prepare_manual_kit_ci.py
+          if ($LASTEXITCODE -ne 0) { throw 'Synthetic kit failed' }
+      - name: Exercise shipped launcher with public synthetic API actions and verify exported proof
         shell: powershell
         run: |
-          $tokens=$null; $errors=$null
-          $ast=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'tooling/packaged/manual_kit.ps1'),[ref]$tokens,[ref]$errors)
-          if ($errors.Count) { $errors | Format-List; throw 'Syntax invalid' }
-          $guard=$ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-Owned'},$true)
-          Invoke-Expression $guard.Extent.Text
-          $script:p=$null
-          $refused=$false
-          try { Assert-Owned } catch { $refused=$true }
-          if (-not $refused) { throw 'Missing process accepted' }
-          $listener=[System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback,8000)
-          try {
-            $listener.Start()
-            $script:p=Get-Process -Id $PID
-            Assert-Owned
-            $listener.Stop()
-            $refused=$false
-            try { Assert-Owned } catch { $refused=$true }
-            if (-not $refused) { throw 'Missing owned listener accepted' }
-          } finally { $listener.Stop(); $script:p=$null }
-          'PASS: syntax; absent process/listener refused; own listener accepted'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:KIT_TEST_ROOT 'Lancer-qualification.ps1'),[ref]$tokens,[ref]$errors) | Out-Null
+          if ($errors.Count) { throw ($errors | Out-String) }
+          & (Join-Path $env:GITHUB_WORKSPACE 'operations/tooling/packaged/qualify_manual_kit.ps1')
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: native-manual-kit-0dcde49
+          path: |
+            ${{ runner.temp }}/manual-kit-runtime/Native-kit-validation.json
+            ${{ runner.temp }}/manual-kit-runtime/resultats-candidat-*.zip
+          if-no-files-found: warn

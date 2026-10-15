@@ -20,7 +20,7 @@ Expand-Archive -LiteralPath (Join-Path $root 'Profil-Mac-test.zip') -Destination
 Expand-Archive -LiteralPath (Join-Path $root 'AstroPilot-1.0.0b8-windows-x86_64-portable.zip') -DestinationPath (Join-Path $run 'runtime')
 $exe = Join-Path $run 'runtime/AstroPilot/AstroPilot.exe'
 $p = $null
-$proof = [ordered]@{product_sha='e5789c767d76ca335e96b3be34b50fe6328429c1';synthetic=$true;ui_validation='manual';result='NOT_VALIDATED'}
+$proof = [ordered]@{product_sha='0dcde494c8450176f445cc29b28d004eddb60734';synthetic=$true;ui_validation='manual';result='NOT_VALIDATED'}
 function Assert-Owned {
  if (-not $script:p -or $script:p.HasExited) { throw 'Le processus de test n''est plus actif' }
  $owners=@(Get-NetTCPConnection -State Listen -LocalPort 8000 -ErrorAction Stop | Where-Object { $_.LocalAddress -eq '127.0.0.1' -and $_.OwningProcess -eq $script:p.Id })
@@ -33,11 +33,26 @@ function Invoke-Owned {
  if ($Body) { $args.Body=$Body }
  Invoke-RestMethod @args
 }
+function Get-Authority-Inventory {
+ $result=@{}
+ $profile=Join-Path $env:ASTROPILOT_DATA_DIR 'user_profile.json'
+ $result['user_profile.json']=(Get-FileHash -Algorithm SHA256 -LiteralPath $profile).Hash
+ foreach ($store in @('decision_lineage','execution_lineage','decision_forecast_evidence','field_observations','outcome_evaluations')) {
+  $directory=Join-Path $env:ASTROPILOT_DATA_DIR $store
+  if (Test-Path -LiteralPath $directory) {
+   Get-ChildItem -LiteralPath $directory -Recurse -File -Filter '*.json' | ForEach-Object {
+    $relative=$_.FullName.Substring($env:ASTROPILOT_DATA_DIR.Length+1).Replace('\','/')
+    $result[$relative]=(Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash
+   }
+  }
+ }
+ return ($result.GetEnumerator() | Sort-Object Key | ForEach-Object { $_.Key+'='+$_.Value }) -join "`n"
+}
 function Start-Owned {
  $script:p = Start-Process -FilePath $exe -WorkingDirectory $run -PassThru -RedirectStandardOutput (Join-Path $run ('stdout-'+[guid]::NewGuid()+'.log')) -RedirectStandardError (Join-Path $run ('stderr-'+[guid]::NewGuid()+'.log'))
  for ($i=0;$i -lt 120;$i++) {
   if ($script:p.HasExited) { throw 'Le candidat s''est arrêté.' }
-  try { $id = Invoke-Owned -Uri 'http://127.0.0.1:8000/v1/runtime-identity'; if ($id.build -cne 'e5789c7') { throw 'Build incorrect' }; $proof.runtime=$id; return } catch { Start-Sleep -Milliseconds 500 }
+  try { $id = Invoke-Owned -Uri 'http://127.0.0.1:8000/v1/runtime-identity'; if ($id.application -cne 'astropilot' -or $id.version -cne '1.0.0b8' -or $id.architecture -cne 'x86_64' -or $id.build -cne '0dcde49') { throw 'Build incorrect' }; $proof.runtime=$id; return } catch { Start-Sleep -Milliseconds 500 }
  }
  throw 'Démarrage non confirmé'
 }
@@ -54,7 +69,9 @@ try {
  }
  Start-Process 'http://127.0.0.1:8000/'
  Write-Host 'COPIE ISOLEE. Suivre Lisez-moi.txt : Hα puis OIII, durées fictives 30 et 15 minutes.'
- Read-Host 'Quand les deux crédits sont affichés, appuyer sur Entrée pour redémarrer et vérifier' | Out-Null
+ if ((Read-Host 'Les deux crédits sont-ils affichés ? Taper OUI pour redémarrer et vérifier') -cne 'OUI') { throw 'Validation visuelle initiale non confirmée' }
+ $proof.ui_before_restart_confirmed=$true
+ $authorityBefore=Get-Authority-Inventory
  $before = (Get-FileHash -Algorithm SHA256 (Join-Path $env:ASTROPILOT_DATA_DIR 'user_profile.json')).Hash
  Stop-Owned
  Start-Sleep -Seconds 2
@@ -80,11 +97,15 @@ try {
  $ha=@($progress.intent_progress_breakdown | Where-Object acquisition_intent_id -eq 'sh2-129_ha')[0]
  $oiii=@($progress.intent_progress_breakdown | Where-Object acquisition_intent_id -eq 'ou4_oiii')[0]
  if ($ha.effective_total_seconds -ne 5400 -or $oiii.effective_total_seconds -ne 900) { throw 'Totaux incorrects' }
- $proof.sessions=$rows;$proof.ha_seconds=5400;$proof.oiii_seconds=900;$proof.profile_unchanged_by_replay=$true;$proof.restart=$true;$proof.result='PASS'
+ if ((Get-Authority-Inventory) -cne $authorityBefore) { throw 'Donnees durables modifiees par le redemarrage ou rejeu' }
+ $proof.authority_unchanged_after_restart_replay=$true
+ $proof.sessions=$rows;$proof.ha_seconds=5400;$proof.oiii_seconds=900;$proof.profile_unchanged_by_replay=$true;$proof.restart=$true;$proof.result='AUTOMATED_CHECKS_PASS_UI_PENDING'
  Write-Host 'Recharger la page pour vérifier les deux crédits après redémarrage.'
- Read-Host 'Après vérification visuelle, Entrée pour exporter et arrêter' | Out-Null
+ if ((Read-Host 'Les deux crédits sont-ils conservés après rechargement ? Taper OUI pour exporter') -cne 'OUI') { throw 'Validation visuelle après redémarrage non confirmée' }
+ $proof.ui_after_restart_confirmed=$true; $proof.result='PASS'
+ if ($env:NIGHTMERIT_KIT_CI -eq '1') { $proof.result='PASS_API_ONLY'; $proof.ui_validation='automated API only'; $proof.ui_before_restart_confirmed=$false; $proof.ui_after_restart_confirmed=$false }
 } catch {
- $proof.error=$_.Exception.Message
+ $proof.result='NOT_VALIDATED'; $proof.error=$_.Exception.Message
  Write-Host "REFUS / NON VALIDE : $($_.Exception.Message)"
 } finally {
  Stop-Owned
