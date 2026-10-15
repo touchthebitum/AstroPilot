@@ -2183,6 +2183,20 @@ def create_app(
             ],
         }
 
+    def read_unavailable(error, *, operation, diagnostic_id=None, started=None):
+        # Never include paths, profile contents or raw exception messages.
+        diagnostic_id = diagnostic_id or uuid4().hex
+        started = perf_counter() if started is None else started
+        category = ("invalid_encoding" if isinstance(error, UnicodeError)
+                    else IntentProgressPersistenceError(error).category)
+        log_credit_persistence("durable_read_failed", diagnostic_id=diagnostic_id,
+            category=category, started=started, http_status=503, operation=operation)
+        return HTTPException(status_code=503,
+            headers={PERSISTENCE_DIAGNOSTIC_HEADER: diagnostic_id}, detail={
+                "code": "durable_read_unavailable", "category": category,
+                "message": "Saved data could not be read. Restore access and reload before retrying.",
+            })
+
     def validate_project_progress_credits(profile: dict, project_id: str):
         relevant = [entry for entry in load_credits(profile).values()
                     if entry["project_id"] == project_id]
@@ -2204,10 +2218,12 @@ def create_app(
                 validated_session_credits(profile, service, project_id, intent_id, aggregate)
                 checked_intents.add(intent_id)
         except HTTPException as exc:
-            if exc.status_code != 503:
+            if exc.status_code != 503 or exc.detail.get("code") == "durable_read_unavailable":
                 raise
             raise HTTPException(status_code=503, detail={"code": "project_credit_inconsistent"}) from exc
-        except (ExecutionOutcomeApplicationError, DecisionAcceptanceError, OSError) as exc:
+        except (OSError, UnicodeError) as exc:
+            raise read_unavailable(exc, operation="project_progress_read") from exc
+        except (ExecutionOutcomeApplicationError, DecisionAcceptanceError) as exc:
             raise HTTPException(status_code=503, detail={"code": "project_credit_inconsistent"}) from exc
 
     @application.get("/v1/projects/{project_id}/progress")
@@ -2218,6 +2234,8 @@ def create_app(
             profile = load_user_profile()
             validate_project_progress_credits(profile, project_id)
             return project_progress_projection(profile, project_id)
+        except (OSError, UnicodeError) as exc:
+            raise read_unavailable(exc, operation="project_progress_read") from exc
         except UserProfileError as exc:
             raise HTTPException(status_code=503, detail={"code": "configuration_corrupt"}) from exc
 
@@ -2228,6 +2246,8 @@ def create_app(
                 raise HTTPException(status_code=404, detail={"code": "project_not_found"})
             try:
                 profile = load_user_profile()
+            except (OSError, UnicodeError) as exc:
+                raise read_unavailable(exc, operation="project_progress_read") from exc
             except UserProfileError as exc:
                 raise HTTPException(status_code=503, detail={"code": "configuration_corrupt"}) from exc
             if project_id not in profile.get("projects", {}):
@@ -2275,6 +2295,9 @@ def create_app(
             log_credit_persistence("intent_progress_credit_result", diagnostic_id=diagnostic_id,
                 category=status, started=started, http_status=200)
             return {"status": status, "profile_revision": revision, **credit}
+        except (OSError, UnicodeError) as exc:
+            raise read_unavailable(exc, operation="intent_progress_credit",
+                diagnostic_id=diagnostic_id, started=started) from exc
         except IntentProgressPersistenceError as exc:
             log_credit_persistence("intent_progress_persistence_failed", diagnostic_id=diagnostic_id,
                 category=exc.category, started=started, http_status=503)
@@ -3722,7 +3745,9 @@ def create_app(
                 execution = aggregate.execution if aggregate is not None else None
                 mission = service.load_mission(execution.mission_id) if execution is not None else None
                 selection = service.load_selection(mission.selection_id) if mission is not None else None
-            except (ExecutionOutcomeApplicationError, DecisionAcceptanceError, OSError) as exc:
+            except (OSError, UnicodeError) as exc:
+                raise read_unavailable(exc, operation="session_read") from exc
+            except (ExecutionOutcomeApplicationError, DecisionAcceptanceError) as exc:
                 raise HTTPException(status_code=503, detail={"code": "session_credit_inconsistent"}) from exc
             if (execution is None or execution.execution_id != execution_id
                 or execution.status is not ExecutionStatus.COMPLETED
@@ -3843,16 +3868,27 @@ def create_app(
                 if mission_id is not None and service.load_mission(mission_id) is None:
                     raise HTTPException(status_code=404, detail={"code": "mission_not_found"})
                 aggregates = service.list_sessions(mission_id)
-            if not aggregates:
+            if not aggregates and not (get_user_data_dir() / "user_profile.json").exists():
                 return []
             profile = load_user_profile()
+            if execution_id is None:
+                # A missing contributing session must not look like empty/partial
+                # history when the profile still records its durable credit.
+                present = {item.execution.execution_id for item in aggregates}
+                relevant = [entry for entry in load_credits(profile).values()
+                            if mission_id is None or entry["mission_id"] == mission_id]
+                if any(entry["execution_id"] not in present for entry in relevant):
+                    raise HTTPException(status_code=503,
+                        detail={"code": "session_credit_inconsistent"})
             projections = [session_projection(item, profile, service) for item in aggregates]
             return sorted(projections, key=lambda item: (
                 datetime.fromisoformat(item["chronology_at"]).timestamp(),
                 item["execution"]["execution_id"]), reverse=True)
         except ExecutionOutcomeApplicationError as exc:
             raise HTTPException(status_code=503, detail={"code": str(exc)}) from exc
-        except (DecisionAcceptanceError, OSError) as exc:
+        except (OSError, UnicodeError) as exc:
+            raise read_unavailable(exc, operation="session_read") from exc
+        except DecisionAcceptanceError as exc:
             if not renewal_enabled:
                 raise
             raise HTTPException(status_code=503, detail={"code": "mission_provenance_invalid"}) from exc

@@ -9,13 +9,14 @@ _LOGGER = logging.getLogger("astropilot.launcher.persistence")
 _LOGGER.setLevel(logging.INFO)
 
 
-def log_credit_persistence(event, *, diagnostic_id, category, started, http_status):
+def log_credit_persistence(event, *, diagnostic_id, category, started, http_status,
+                           operation="intent_progress_credit"):
     record = {
         "schema_version": 1,
         "event": event,
         "diagnostic_id": diagnostic_id,
         "occurred_at_utc": datetime.now(timezone.utc).isoformat(),
-        "operation": "intent_progress_credit",
+        "operation": operation,
         "category": category,
         "duration_ms": round(max(0, perf_counter() - started) * 1000, 3),
         "http_status": http_status,
