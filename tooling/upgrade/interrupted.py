@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,7 @@ import qualify as u
 SHA='dad6e438b8ba0f5ce52d59457ce503e030911d80'
 OUT=u.OUT
 ROWS=[]
+BASE_SENTINELS=dict(u.SENTINELS)
 
 def record(row):
     ROWS.append(row)
@@ -71,7 +73,16 @@ def windows_interrupt(case,threshold):
     expected=u.bundle_inventory(u.payload_root());actual=u.bundle_inventory(target)
     matching=sum(actual.get(k)==v for k,v in expected.items())
     assert matching<len(expected),('Interruption did not leave incomplete payload',matching)
+    # A hard-killed Inno process can leave an unpublished uninstall temporary.
+    # Record only files newly created by this interrupted installer, never delete
+    # them or broaden the product cleanup. Repair must preserve these exact bytes.
+    orphans={}
+    for key,value in actual.items():
+        if key not in expected and key not in BASE_SENTINELS and re.fullmatch(r'is-[A-Za-z0-9]+\.tmp',key):
+            p=target/key;content=p.read_bytes();orphans[key]={'sha256':u.digest(p),'size':len(content)}
+            u.SENTINELS[key]=content
     record({'case':case.name,'stage':'interrupted','result':'PASS','method':'TerminateJobObject owned installer tree',
+        'installer_created_orphans_preserved':orphans,
         'checkpoint_successful_copy_count':observed.count('Successfully installed the file.'),
         'requested_copy_threshold':threshold,'installer_returncode':child.returncode,
         'observed_before_success':True,'payload_matching_files':matching,'payload_files':len(expected),
@@ -159,6 +170,7 @@ def main():
     OUT.mkdir(parents=True,exist_ok=False)
     scenarios=[('early_copy',0),('middle_copy',100),('late_copy',800)] if u.WINDOWS else [('staging_copy',None),('inplace_copy',None),('promotion_gap',None)]
     for label,threshold in scenarios:
+        u.SENTINELS.clear();u.SENTINELS.update(BASE_SENTINELS)
         case=OUT/label;case.mkdir();(case/'QUALIFICATION_ONLY').write_text('PUBLIC SYNTHETIC INTERRUPTED UPGRADE');(case/'data').mkdir();u.ACTIVE=case
         u.seed_modern(case);exe=u.install(u.MODERN,case)
         with u.Server(exe,case,u.MODERN_SHA,'1.0.0b8'):
