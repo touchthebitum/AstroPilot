@@ -32,7 +32,11 @@ with TestClient(app()) as c:
    intent='ou4_oiii' if name=='fixed_oiii' else 'sh2-129_ha'
    q=selection(body,intent,'public-'+name)
    accepted=c.post('/v1/decision-selections',json=q);record['confirmation']={'http':accepted.status_code,'body':accepted.json()}
-   if name=='config_changed':assert accepted.status_code==409,accepted.json()
+   if name=='config_changed':
+    # Canonical acceptance remains a historical snapshot by documented contract.
+    assert accepted.status_code==200 and accepted.json()['status']=='accepted',accepted.json()
+    record['historical_acceptance_preserved']=True
+    assert c.get('/v1/accepted-mission/current').json() is None
    else:
     assert accepted.status_code==200 and accepted.json()['status']=='accepted',accepted.json()
     mission=accepted.json()['mission'];record['mission']=mission

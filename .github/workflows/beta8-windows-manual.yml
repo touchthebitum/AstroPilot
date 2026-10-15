@@ -58,7 +58,7 @@ jobs:
           $env:NIGHT_CHAIN_PROOF=Join-Path $env:RUNNER_TEMP 'night-chain-proof'
           uv run --locked --no-sync python ../operations/tooling/nightchain/run.py
           if ($LASTEXITCODE -ne 0) { throw 'API qualification failed' }
-          foreach ($intent in @('sh2-129_ha','ou4_oiii')) {
+          foreach ($intent in @('sh2-129_ha','ou4_oiii','site_changed')) {
             $env:CASE_ROOT=Join-Path $env:NIGHT_CHAIN_PROOF ('ui-'+$intent)
             New-Item -ItemType Directory -Force $env:CASE_ROOT | Out-Null
             Set-Content (Join-Path $env:CASE_ROOT 'QUALIFICATION_ONLY') 'PUBLIC FIXTURE ONLY'

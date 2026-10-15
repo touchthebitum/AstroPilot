@@ -15,10 +15,12 @@ try:
  r=subprocess.run([os.environ.get('NODE_BINARY','node'),str(Path(__file__).with_name('browser.cjs'))],env=os.environ.copy(),timeout=180);assert r.returncode==0,'Browser scenario failed'
 finally:
  child.terminate();child.wait(timeout=30);log.close()
-assert profile_hash()==before
+if os.environ['UI_INTENT']!='site_changed':assert profile_hash()==before
 with TestClient(app()) as c:
- result=json.loads((CASE/'browser-result.json').read_text());current=c.get('/v1/accepted-mission/current');assert current.status_code==200 and current.json()['mission_id']==result['accepted']['body']['mission_id'],current.json()
+ result=json.loads((CASE/'browser-result.json').read_text());current=c.get('/v1/accepted-mission/current');assert current.status_code==200,current.json()
+ if os.environ['UI_INTENT']=='site_changed':assert current.json() is None
+ else:assert current.json()['mission_id']==result['accepted']['body']['mission_id'],current.json()
  sessions=c.get('/v1/execution-sessions').json();assert sessions==[],sessions
- result.update(restart_mission_preserved=True,profile_unchanged=True,no_execution_or_credit=True)
+ result.update(restart_mission_preserved=True,profile_unchanged=os.environ['UI_INTENT']!='site_changed',no_execution_or_credit=True)
  (CASE/'browser-result.json').write_text(json.dumps(result,indent=2)+'\n')
 print('Browser',os.environ['UI_INTENT'],'PASS')
