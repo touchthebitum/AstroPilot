@@ -130,6 +130,7 @@ jobs:
           uv run --locked --no-sync python ../operations/tooling/packaged/qualify_binary.py
           if ($LASTEXITCODE -ne 0) { throw 'Packaged session qualification failed' }
       - name: Store candidate artifacts only (no release publication)
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: AstroPilot-beta8-windows-x86_64-${{ inputs.approved_sha }}

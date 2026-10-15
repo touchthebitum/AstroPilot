@@ -12,7 +12,14 @@ for name in ('user_profile.json','decision_lineage'):
  p=data/name
  if p.is_dir():shutil.copytree(p,seed/name)
  else:shutil.copyfile(p,seed/name)
-exe=source/'dist/AstroPilot/AstroPilot.exe';opener=urllib.request.build_opener(urllib.request.ProxyHandler({}));rows=[];child=None
+artifacts=source/'dist/beta8-artifacts'
+installed=root/'installed'
+setup=artifacts/'AstroPilot-1.0.0b8-windows-x86_64-setup.exe'
+r=subprocess.run([str(setup),'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NOICONS','/TASKS=',f'/DIR={installed}',f'/LOG={root / "install.log"}'],env=env,timeout=180)
+assert r.returncode==0
+for file in (source/'dist/AstroPilot').rglob('*'):
+ if file.is_file():assert hashlib.sha256(file.read_bytes()).digest()==hashlib.sha256((installed/file.relative_to(source/'dist/AstroPilot')).read_bytes()).digest()
+exe=installed/'AstroPilot.exe';opener=urllib.request.build_opener(urllib.request.ProxyHandler({}));rows=[];child=None
 
 def req(method,path,body=None):
  q=urllib.request.Request('http://127.0.0.1:8000'+path,data=json.dumps(body).encode() if body is not None else None,headers={'Content-Type':'application/json'},method=method)
@@ -39,10 +46,10 @@ def start():
 try:
  identity=start()
  for asset in ('index.html','app.js','styles.css','help.js','alert-status.js'):
-  url='/' if asset=='index.html' else '/static/'+asset
-  # Routes are verified below through HTML resource references separately.
-  if asset=='index.html':
-   with opener.open('http://127.0.0.1:8000/') as r:assert r.read()==(source/'astropilot/web/index.html').read_bytes()
+  url='/' if asset=='index.html' else '/ui/'+asset
+  expected=(source/'astropilot/web'/asset).read_bytes()
+  if asset=='index.html':expected=(source/'astropilot/web/index.html').read_text(encoding='utf-8').replace('__ASTROPILOT_ASSET_TOKEN__','1.0.0b8-'+sha[:7]).replace('__ASTROPILOT_SESSION_TIMING__','').encode('utf-8')
+  with opener.open('http://127.0.0.1:8000'+url) as r:assert r.read()==expected,asset
  for label,seconds in [('ha',1800),('oiii',900)]:
   eid='packaged-api-'+label;mid='qualification-mission-'+label;starttime=datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(hours=1);end=starttime+datetime.timedelta(seconds=3600)
   req('POST','/v1/executions',{'execution_id':eid,'mission_id':mid})
@@ -57,7 +64,7 @@ try:
   rows.append({'intent':label,'credit_seconds':seconds,'replay':'already_applied','replay_count':3})
  assert (data/'user_profile.json').read_bytes()==before
  p=req('GET','/v1/projects/Sh2-129/progress');totals={i['acquisition_intent_id']:i['effective_total_seconds'] for i in p['intent_progress_breakdown']};assert totals=={'sh2-129_ha':5400,'ou4_oiii':900}
- stop();report={'result':'PASS','product_sha':sha,'runtime':identity,'synthetic':True,'real_frozen_binary':True,'restart':True,'profile_unchanged_after_replay':True,'profile_sha256':hashlib.sha256(before).hexdigest(),'totals':totals,'sessions':rows,'desktop_ui_observed':False,'physical_user_pc':False,'port_released':True}
+ stop();report={'result':'PASS','product_sha':sha,'runtime':identity,'synthetic':True,'real_frozen_binary':True,'installer_exit':0,'installed_payload_matches_portable_build':True,'installed_binary_tested':True,'bundled_assets_match_source':True,'restart':True,'profile_unchanged_after_replay':True,'profile_sha256':hashlib.sha256(before).hexdigest(),'totals':totals,'sessions':rows,'desktop_ui_observed':False,'physical_user_pc':False,'port_released':True}
  (source/'dist/beta8-artifacts/packaged-session-qualification.json').write_text(json.dumps(report,indent=2))
  print(json.dumps(report))
 finally:stop()
