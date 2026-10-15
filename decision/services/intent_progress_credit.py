@@ -1,5 +1,7 @@
 """Validated, append-only execution credits, separate from manual progress."""
 
+import errno
+
 from datetime import datetime, timedelta, timezone
 from collections.abc import Mapping
 
@@ -14,6 +16,17 @@ from decision.services.project_acquisition_intent_progress import (
 
 class IntentProgressCreditError(ValueError):
     pass
+
+
+class IntentProgressPersistenceError(RuntimeError):
+    """A saver raised an OS error; commit state must be reread, never inferred."""
+    def __init__(self, error: OSError):
+        self.category = {
+            errno.EACCES: "permission_denied", errno.EPERM: "permission_denied",
+            errno.ENOSPC: "storage_full", errno.EROFS: "read_only_storage",
+            getattr(errno, "EDQUOT", -1): "quota_exceeded",
+        }.get(error.errno, "io_error")
+        super().__init__("intent_progress_persistence_unavailable")
 
 
 FIELDS = frozenset({
@@ -213,5 +226,8 @@ def apply_execution_credit(*, profile, execution_id, evidence_ids, expected_revi
         applied_at = latest + timedelta(microseconds=1)
     entry = {**content, "applied_at": applied_at.isoformat()}
     profile.setdefault("intent_progress_credits", {})[execution_id] = entry
-    saved = save_profile(profile, expected_revision=expected_revision)
+    try:
+        saved = save_profile(profile, expected_revision=expected_revision)
+    except OSError as error:
+        raise IntentProgressPersistenceError(error) from error
     return "applied", entry, saved["profile_revision"]

@@ -194,6 +194,8 @@ async function fetch(url, options) {
 '''
     checks = r'''
 (async () => {
+  assert.match(sessionRefusalMessage({status:503,code:'intent_progress_persistence_unavailable'}), /Enregistrement de la progression non confirmé/);
+  assert.doesNotMatch(sessionRefusalMessage({status:503,code:'intent_progress_persistence_unavailable'}), /incohérentes/);
   const actions = [
     {name: 'start', command: startSession, sessionStatus: 'not_started'},
     {name: 'complete', command: (id) => closeSession(id, 'completed'), sessionStatus: 'in_progress'},
