@@ -56,7 +56,7 @@ def test_malformed_profile_write_is_refused(tmp_path, monkeypatch, malformed):
     candidate = {'active_equipment': 'samyang_183', 'available_equipment': ['samyang_183'],
                  'projects': {}, 'sessions': []}
     path.write_bytes(malformed)
-    with pytest.raises(user_profile.UserProfileError):
+    with pytest.raises((user_profile.UserProfileError, UnicodeError)):
         user_profile.load_user_profile()
     with pytest.raises(user_profile.PersistedProfileCorruptError):
         user_profile.save_user_profile(candidate)

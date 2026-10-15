@@ -2345,7 +2345,7 @@ def create_app(
                     "message": "The saved site timezone could not be resolved.",
                 },
             ) from exc
-        except UserProfileError as exc:
+        except (UserProfileError, UnicodeError) as exc:
             raise HTTPException(
                 status_code=503,
                 detail={
