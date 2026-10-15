@@ -339,13 +339,14 @@ def metadata_cleanup_rule():
     entries = source.split("[InstallDelete]", 1)[1].split("[", 1)[0]
     entries = [line.strip() for line in entries.splitlines()
                if line.strip() and not line.lstrip().startswith(";")]
+    entries = [line for line in entries if line.startswith("Type: filesandordirs;")]
     assert len(entries) == 1
     match = re.fullmatch(r'Type: filesandordirs; Name: "([^\"]+)"', entries[0])
     assert match is not None
     return match.group(1)
 
 
-def test_upgrade_cleanup_is_only_astropilot_metadata_in_program_internal():
+def test_upgrade_metadata_cleanup_remains_only_astropilot_in_program_internal():
     assert metadata_cleanup_rule() == r"{app}\_internal\astropilot-*.dist-info"
     source = ISS.read_text(encoding="utf-8").lower()
     assert "[uninstalldelete]" not in source
@@ -415,8 +416,65 @@ def test_upgrade_removes_beta2_metadata_and_runtime_reports_beta4(
             else:
                 path.unlink()
         shutil.copytree(payload, internal, dirs_exist_ok=True)
+        # The frozen application starts in a fresh process after installation.
+        # Invalidate this simulation's discovery cache after replacing metadata;
+        # Windows directory timestamps may not distinguish these rapid writes.
+        importlib.invalidate_caches()
         monkeypatch.setattr(sys, "path", [str(internal), str(internal / "metadata.zip")])
         assert not old.exists()
         assert app_module.canonical_version() == "1.0.0b4"
         assert app_module.runtime_identity_payload()["version"] == "1.0.0b4"
         assert all(path.read_bytes() == b"preserved" for path in keep)
+
+
+def legacy_openssl_cleanup_rules():
+    import re
+    source = ISS.read_text(encoding="utf-8")
+    entries = source.split("[InstallDelete]", 1)[1].split("[", 1)[0]
+    return re.findall(r'^Type: files; Name: "([^"]+)"$', entries, re.MULTILINE)
+
+
+def test_upgrade_delete_allowlist_contains_only_metadata_and_published_legacy_dlls():
+    source = ISS.read_text(encoding="utf-8")
+    entries = source.split("[InstallDelete]", 1)[1].split("[", 1)[0]
+    entries = [line.strip() for line in entries.splitlines()
+               if line.strip() and not line.lstrip().startswith(";")]
+    assert set(entries) == {
+        'Type: filesandordirs; Name: "{app}\\_internal\\astropilot-*.dist-info"',
+        'Type: files; Name: "{app}\\_internal\\libcrypto-3.dll"',
+        'Type: files; Name: "{app}\\_internal\\libssl-3.dll"',
+    }
+    assert source.index("[InstallDelete]") < source.index("[Files]")
+
+
+@pytest.mark.parametrize("current_payload_uses_old_names", [False, True])
+def test_legacy_openssl_retirement_and_reinstall_preserve_current_payload_and_user_files(tmp_path, current_payload_uses_old_names):
+    import shutil
+    app = tmp_path / "Programs" / "AstroPilot"
+    old_names = ["libcrypto-3.dll", "libssl-3.dll"]
+    for name in old_names:
+        p = app / "_internal" / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"published beta7 library")
+    keep = [app / "_internal" / "libcrypto-3-x64.dll",
+            app / "_internal" / "libssl-3-x64.dll", app / "_internal" / "other.dll",
+            app / "user-note.txt", tmp_path / "data" / "user_profile.json",
+            tmp_path / "data" / "execution_lineage" / "execution.json",
+            tmp_path / "data" / "libcrypto-3.dll"]
+    for p in keep:
+        p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(b"preserved")
+    payload = tmp_path / "payload" / "_internal"; payload.mkdir(parents=True)
+    if current_payload_uses_old_names:
+        for name in old_names: (payload / name).write_bytes(b"current payload")
+    patterns = [rule.removeprefix("{app}\\").replace("\\", "/")
+                for rule in legacy_openssl_cleanup_rules()]
+    assert len(patterns) == 2
+    for _ in range(2):
+        for pattern in patterns:
+            for p in app.glob(pattern): p.unlink()
+        shutil.copytree(payload, app / "_internal", dirs_exist_ok=True)
+        for name in old_names:
+            p = app / "_internal" / name
+            if current_payload_uses_old_names: assert p.read_bytes() == b"current payload"
+            else: assert not p.exists()
+        assert all(p.read_bytes() == b"preserved" for p in keep)
