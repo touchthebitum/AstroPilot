@@ -2183,12 +2183,41 @@ def create_app(
             ],
         }
 
+    def validate_project_progress_credits(profile: dict, project_id: str):
+        relevant = [entry for entry in load_credits(profile).values()
+                    if entry["project_id"] == project_id]
+        if not relevant:
+            return
+        try:
+            service = application_service()
+            if hasattr(service, "session_read_snapshot"):
+                service = service.session_read_snapshot()
+            checked_intents = set()
+            for entry in relevant:
+                intent_id = entry["acquisition_intent_id"]
+                if intent_id in checked_intents:
+                    continue
+                aggregate = service.load_session(entry["execution_id"])
+                if aggregate is None:
+                    raise ExecutionOutcomeApplicationError("execution_not_found")
+                # Reuse the session's full provenance/evidence/duration checks.
+                validated_session_credits(profile, service, project_id, intent_id, aggregate)
+                checked_intents.add(intent_id)
+        except HTTPException as exc:
+            if exc.status_code != 503:
+                raise
+            raise HTTPException(status_code=503, detail={"code": "project_credit_inconsistent"}) from exc
+        except (ExecutionOutcomeApplicationError, DecisionAcceptanceError, OSError) as exc:
+            raise HTTPException(status_code=503, detail={"code": "project_credit_inconsistent"}) from exc
+
     @application.get("/v1/projects/{project_id}/progress")
     def get_project_progress(project_id: str):
         try:
             if not (get_user_data_dir() / "user_profile.json").exists():
                 raise HTTPException(status_code=404, detail={"code": "project_not_found"})
-            return project_progress_projection(load_user_profile(), project_id)
+            profile = load_user_profile()
+            validate_project_progress_credits(profile, project_id)
+            return project_progress_projection(profile, project_id)
         except UserProfileError as exc:
             raise HTTPException(status_code=503, detail={"code": "configuration_corrupt"}) from exc
 
@@ -2205,6 +2234,7 @@ def create_app(
                 raise HTTPException(status_code=404, detail={"code": "project_not_found"})
             if request.expected_revision != profile.get("profile_revision", 0):
                 raise ProfileRevisionConflictError("profile_revision_conflict")
+            validate_project_progress_credits(profile, project_id)
             project = profile["projects"][project_id]
             if ("imaging_field_id" in request.model_fields_set
                 and request.imaging_field_id != project.get("imaging_field_id")

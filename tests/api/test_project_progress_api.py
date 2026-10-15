@@ -12,6 +12,7 @@ import astro_score
 from astropilot.app import create_app
 from astropilot.user_profile import UserProfileError, get_user_data_dir, load_user_profile, save_user_profile
 from decision.models.execution import Execution, ExecutionStatus
+from decision.execution_lineage_persistence import ExecutionLineageAggregate
 from decision.models.outcome_evidence import AcquisitionOutcomeEvidence, OutcomeEvidenceCategory, OutcomeEvidenceSource
 from decision.services.intent_progress_credit import apply_execution_credit
 
@@ -76,7 +77,12 @@ def test_execution_credit_endpoint_projection_baseline_and_editor_guard(client, 
             load_selection=lambda _: selection, load_evidence=evidence.get,
             save_profile=save_user_profile, **kwargs)
 
-    api = TestClient(create_app(service_factory=lambda: SimpleNamespace(apply_intent_progress_credit=apply)))
+    api = TestClient(create_app(service_factory=lambda: SimpleNamespace(
+        apply_intent_progress_credit=apply,
+        load_session=lambda key: ExecutionLineageAggregate(executions[key], tuple(
+            item for item in evidence.values() if item.execution_id == key)),
+        load_mission=lambda _: mission, load_selection=lambda _: selection)))
+    client = api
     url = "/v1/executions/execution-1/intent-progress-credit"
     revision = load_user_profile()["profile_revision"]
     body = {"expected_revision": revision, "evidence_ids": ["evidence-1"]}
