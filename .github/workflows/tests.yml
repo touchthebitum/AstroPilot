@@ -117,3 +117,32 @@ jobs:
       - run: uv sync --locked --extra test
       - name: Validate native child lifetime and supervision without installing startup jobs or live HTTP
         run: uv run --locked --no-sync python -m pytest -q tests/guardian
+
+  session-progress-portability:
+    name: Session replay and progress ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          python-version: "3.12"
+          version: "0.12.5"
+      - run: uv sync --locked --extra test
+      - name: Require Node for real session UI helpers
+        run: node --version
+      - name: Validate session persistence, replay, credit and Guardian in isolated directories
+        shell: pwsh
+        run: |
+          $iso = Join-Path $env:RUNNER_TEMP 'session-progress-tests'
+          foreach ($entry in @{HOME='home';USERPROFILE='home';APPDATA='appdata';LOCALAPPDATA='localappdata';ASTROPILOT_DATA_DIR='data';TMP='tmp';TEMP='tmp';TMPDIR='tmp';XDG_CACHE_HOME='cache'}.GetEnumerator()) {
+            $dir = Join-Path $iso $entry.Value
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            [Environment]::SetEnvironmentVariable($entry.Key, $dir)
+          }
+          uv run --locked --no-sync python -m pytest -q tests/api/test_execution_session_api.py tests/api/test_execution_session_ui.py tests/api/test_project_progress_api.py tests/services/test_intent_progress_credit.py tests/services/test_execution_outcome_application.py tests/services/test_execution_transition.py tests/architecture/test_execution_lineage_persistence.py tests/guardian/test_guardian_session_lifecycle.py
+          if ($LASTEXITCODE -ne 0) { throw 'Session replay and progress tests failed' }
