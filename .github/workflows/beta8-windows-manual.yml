@@ -1,26 +1,26 @@
-name: Isolated interrupted upgrade Windows Mac
+name: Isolated night availability confirmation qualification
 on:
   workflow_dispatch:
     inputs:
       approved_sha:
         required: true
         type: string
-      candidate_run:
-        required: true
-        type: string
 permissions:
   contents: read
-  actions: read
 jobs:
-  windows:
-    name: Interrupted upgrade Windows
-    runs-on: windows-2022
-    timeout-minutes: 30
+  night-chain:
+    name: Night selection UI and API ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: operations
-          sparse-checkout: tooling/upgrade
+          sparse-checkout: tooling/nightchain
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -38,126 +38,43 @@ jobs:
           version: '0.12.6'
           python-version: '3.13.5'
           enable-cache: false
-      - name: Retrieve exact candidates and verify checksums
-        working-directory: source
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if ('${{ inputs.approved_sha }}' -cne 'dad6e438b8ba0f5ce52d59457ce503e030911d80') { throw 'Unexpected SHA' }
-          if ((git rev-parse HEAD).Trim() -cne '${{ inputs.approved_sha }}') { throw 'Wrong source' }
-          $env:APPROVED_SHA='${{ inputs.approved_sha }}'
-          $env:UV_CACHE_DIR=Join-Path $env:RUNNER_TEMP 'upgrade-uv-cache'
-          uv sync --locked --extra test
-          if ($LASTEXITCODE -ne 0) { throw 'Dependencies failed' }
-          $inputRoot=Join-Path $env:RUNNER_TEMP 'upgrade-inputs'
-          gh run download ${{ inputs.candidate_run }} -R touchthebitum/AstroPilot --name AstroPilot-beta8-windows-x86_64-dad6e438b8ba0f5ce52d59457ce503e030911d80 --dir (Join-Path $inputRoot 'current')
-          if ($LASTEXITCODE -ne 0) { throw 'Current download failed' }
-          gh run download 38732731103 -R touchthebitum/AstroPilot --name AstroPilot-beta8-windows-x86_64-0dcde494c8450176f445cc29b28d004eddb60734 --dir (Join-Path $inputRoot 'modern')
-          if ($LASTEXITCODE -ne 0) { throw 'Previous download failed' }
-          gh release download v1.0.0-beta.7 -R touchthebitum/AstroPilot --pattern '*windows-x86_64-setup.exe*' --dir (Join-Path $inputRoot 'legacy')
-          if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
-          uv run --locked --no-sync python ../operations/tooling/upgrade/prepare.py
-          if ($LASTEXITCODE -ne 0) { throw 'Artifact verification failed' }
-      - name: Install predecessors and upgrade in disposable runner only
+      - name: Qualify requested night availability and confirmations in isolated profiles
         working-directory: source
         shell: pwsh
         run: |
-          $env:APPROVED_SHA='${{ inputs.approved_sha }}'
-          $env:PRODUCT_SOURCE=(Get-Location).Path
-          $env:UPGRADE_PROOF=Join-Path $env:RUNNER_TEMP 'installed-upgrade-proof'
-          $inputRoot=Join-Path $env:RUNNER_TEMP 'upgrade-inputs'
-          $env:CURRENT_CANDIDATE=Join-Path $inputRoot 'current/AstroPilot-1.0.0b8-windows-x86_64-setup.exe'
-          $env:CURRENT_PAYLOAD=Join-Path $inputRoot 'current/unpacked/AstroPilot'
-          $env:LEGACY_CANDIDATE=Join-Path $inputRoot 'legacy/AstroPilot-1.0.0b7-windows-x86_64-setup.exe'
-          $env:MODERN_CANDIDATE=Join-Path $inputRoot 'modern/AstroPilot-1.0.0b8-windows-x86_64-setup.exe'
-          $env:MODERN_SHA='0dcde494c8450176f445cc29b28d004eddb60734'
-          uv run --locked --no-sync python ../operations/tooling/upgrade/interrupted.py
-          if ($LASTEXITCODE -ne 0) { throw 'Installed upgrade qualification failed' }
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: interrupted-upgrade-windows
-          path: |
-            ${{ runner.temp }}/installed-upgrade-proof/interrupted-qualification.json
-            ${{ runner.temp }}/installed-upgrade-proof/*/*.log
-  macos:
-    name: Interrupted upgrade Mac
-    runs-on: macos-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          path: operations
-          sparse-checkout: tooling/upgrade
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ inputs.approved_sha }}
-          path: source
-          persist-credentials: false
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /*
-            !/user_profile.json
-            !/user_filters.json
-            !/data/user_profile.json
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: e5789c767d76ca335e96b3be34b50fe6328429c1
-          path: previous-source
-          persist-credentials: false
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /*
-            !/user_profile.json
-            !/user_filters.json
-            !/data/user_profile.json
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
-        with:
-          version: '0.12.6'
-          python-version: '3.13.5'
-          enable-cache: false
-      - name: Build exact current and previous bundles without test dependencies
-        shell: pwsh
-        run: |
-          if ('${{ inputs.approved_sha }}' -cne 'dad6e438b8ba0f5ce52d59457ce503e030911d80') { throw 'Unexpected SHA' }
-          $iso=Join-Path $env:RUNNER_TEMP 'upgrade-build-environment'
-          foreach ($entry in @{HOME='home';ASTROPILOT_DATA_DIR='data';TMP='tmp';TEMP='tmp';TMPDIR='tmp';XDG_CACHE_HOME='cache';PYINSTALLER_CONFIG_DIR='pyinstaller'}.GetEnumerator()) {
+          if ('${{ inputs.approved_sha }}' -cne 'dad6e438b8ba0f5ce52d59457ce503e030911d80') { throw 'Unexpected source SHA' }
+          if ((git rev-parse HEAD).Trim() -cne '${{ inputs.approved_sha }}') { throw 'Wrong checkout' }
+          $iso=Join-Path $env:RUNNER_TEMP 'night-chain-environment'
+          foreach ($entry in @{HOME='home';USERPROFILE='home';APPDATA='appdata';LOCALAPPDATA='localappdata';ASTROPILOT_DATA_DIR='data';TMP='tmp';TEMP='tmp';TMPDIR='tmp';XDG_CACHE_HOME='cache';UV_CACHE_DIR='uv-cache'}.GetEnumerator()) {
             $dir=Join-Path $iso $entry.Value
             New-Item -ItemType Directory -Force $dir | Out-Null
             [Environment]::SetEnvironmentVariable($entry.Key,$dir)
           }
-          foreach ($folder in @('source','previous-source')) {
-            Push-Location $folder
-            $env:UV_PROJECT_ENVIRONMENT='.venv-packaging'
-            uv sync --locked --extra packaging
-            if ($LASTEXITCODE -ne 0) { throw 'Packaging dependencies failed' }
-            uv run --locked --no-sync python scripts/build_macos.py
-            if ($LASTEXITCODE -ne 0) { throw 'Bundle build failed' }
-            Pop-Location
-          }
-      - name: Qualify interrupted bundle replacement and recovery
-        working-directory: source
-        shell: pwsh
-        run: |
-          $env:APPROVED_SHA='${{ inputs.approved_sha }}'
-          $env:UV_PROJECT_ENVIRONMENT='.venv-qualification'
           uv sync --locked --extra test
-          if ($LASTEXITCODE -ne 0) { throw 'Qualification dependencies failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+          node --version
+          if ($LASTEXITCODE -ne 0) { throw 'Native Node required' }
           $env:PRODUCT_SOURCE=(Get-Location).Path
-          $env:UPGRADE_PROOF=Join-Path $env:RUNNER_TEMP 'installed-upgrade-proof'
-          $env:CURRENT_CANDIDATE=Join-Path $env:PRODUCT_SOURCE 'dist/AstroPilot.app'
-          $env:CURRENT_PAYLOAD=$env:CURRENT_CANDIDATE
-          $env:LEGACY_CANDIDATE=$env:CURRENT_CANDIDATE
-          $env:MODERN_CANDIDATE=Join-Path (Split-Path $env:PRODUCT_SOURCE) 'previous-source/dist/AstroPilot.app'
-          $env:MODERN_SHA='e5789c767d76ca335e96b3be34b50fe6328429c1'
-          uv run --locked --no-sync python ../operations/tooling/upgrade/interrupted.py
-          if ($LASTEXITCODE -ne 0) { throw 'Installed upgrade qualification failed' }
+          $env:NIGHT_CHAIN_PROOF=Join-Path $env:RUNNER_TEMP 'night-chain-proof'
+          uv run --locked --no-sync python ../operations/tooling/nightchain/run.py
+          if ($LASTEXITCODE -ne 0) { throw 'API qualification failed' }
+          foreach ($intent in @('sh2-129_ha','ou4_oiii')) {
+            $env:CASE_ROOT=Join-Path $env:NIGHT_CHAIN_PROOF ('ui-'+$intent)
+            New-Item -ItemType Directory -Force $env:CASE_ROOT | Out-Null
+            Set-Content (Join-Path $env:CASE_ROOT 'QUALIFICATION_ONLY') 'PUBLIC FIXTURE ONLY'
+            $env:UI_INTENT=$intent
+            uv run --locked --no-sync python ../operations/tooling/nightchain/browser_run.py
+            if ($LASTEXITCODE -ne 0) { throw 'Browser confirmation failed' }
+          }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: interrupted-upgrade-macos
+          name: night-chain-${{ matrix.os }}
           path: |
-            ${{ runner.temp }}/installed-upgrade-proof/interrupted-qualification.json
-            ${{ runner.temp }}/installed-upgrade-proof/*/*.log
+            ${{ runner.temp }}/night-chain-proof/qualification.json
+            ${{ runner.temp }}/night-chain-proof/*/result.json
+            ${{ runner.temp }}/night-chain-proof/*/browser-result.json
+            ${{ runner.temp }}/night-chain-proof/*/ui.png
+            ${{ runner.temp }}/night-chain-proof/*/ui.txt
+            ${{ runner.temp }}/night-chain-proof/*/*.log
+            ${{ runner.temp }}/night-chain-proof/*/weather-fixture.json
