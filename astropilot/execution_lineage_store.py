@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from astropilot.field_lab_paths import require_user_directory
+from astropilot.durable_read import json_document_paths
 
 import os
 import sys
@@ -69,7 +70,7 @@ class FileExecutionLineageStore:
         require_user_directory(self._directory)
         return [
             self._load_path(path)
-            for path in sorted(self._directory.glob("*.json"))
+            for path in json_document_paths(self._directory)
         ]
 
     def _write(self, aggregate: ExecutionLineageAggregate) -> None:

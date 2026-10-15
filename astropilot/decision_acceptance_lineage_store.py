@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from astropilot.field_lab_paths import require_user_directory
+from astropilot.durable_read import json_document_paths
 
 import os
 import sys
@@ -48,7 +49,7 @@ class FileDecisionAcceptanceLineageStore:
         with self._locked():
             def signature():
                 result = []
-                for path in sorted(self._directory.glob("*.json")):
+                for path in json_document_paths(self._directory):
                     info = path.stat()
                     result.append((path.name, info.st_dev, info.st_ino, info.st_size,
                                    info.st_mtime_ns, info.st_ctime_ns))
@@ -122,7 +123,7 @@ class FileDecisionAcceptanceLineageStore:
             return {
                 path: (info.st_dev, info.st_ino, info.st_size,
                        info.st_mtime_ns, info.st_ctime_ns)
-                for path in sorted(self._directory.glob("*.json"))
+                for path in json_document_paths(self._directory)
                 for info in (path.stat(),)
             }
         before = signature()

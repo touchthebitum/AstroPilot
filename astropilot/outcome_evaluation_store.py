@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from astropilot.field_lab_paths import require_user_directory
+from astropilot.durable_read import json_document_paths
 
 import os
 import re
@@ -108,7 +109,7 @@ class FileOutcomeEvaluationStore:
         require_user_directory(self._directory)
         if not self._directory.exists():
             return []
-        return [self._load_path(path) for path in sorted(self._directory.glob("*.json"))]
+        return [self._load_path(path) for path in json_document_paths(self._directory)]
 
     @staticmethod
     def _sorted(values: list[OutcomeEvaluation]) -> list[OutcomeEvaluation]:

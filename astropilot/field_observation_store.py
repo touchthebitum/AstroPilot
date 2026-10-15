@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from astropilot.field_lab_paths import require_user_directory
+from astropilot.durable_read import json_document_paths
 
 import os
 import sys
@@ -75,7 +76,7 @@ class FileFieldObservationStore:
             return []
         return [
             self._load_path(path)
-            for path in sorted(self._directory.glob("*.json"))
+            for path in json_document_paths(self._directory)
         ]
 
     @staticmethod
