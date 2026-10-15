@@ -8,4 +8,4 @@ def json_document_paths(directory: Path) -> list[Path]:
     # Do not turn an unreadable directory into an authoritative empty history.
     with os.scandir(directory) as entries:
         return sorted(Path(directory) / entry.name for entry in entries
-                      if os.path.normcase(Path(entry.name).suffix) == os.path.normcase('.json'))
+                      if os.path.normcase(entry.name).endswith(os.path.normcase('.json')))
