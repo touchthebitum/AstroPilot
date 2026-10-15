@@ -160,7 +160,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: tooling/packaged
       - name: Validate manual kit syntax and listener ownership
-        shell: pwsh
+        shell: powershell
         run: |
           $tokens=$null; $errors=$null
           $ast=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'tooling/packaged/manual_kit.ps1'),[ref]$tokens,[ref]$errors)

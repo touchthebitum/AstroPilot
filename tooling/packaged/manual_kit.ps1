@@ -22,7 +22,7 @@ $exe = Join-Path $run 'runtime/AstroPilot/AstroPilot.exe'
 $p = $null
 $proof = [ordered]@{product_sha='e5789c767d76ca335e96b3be34b50fe6328429c1';synthetic=$true;ui_validation='manual';result='NOT_VALIDATED'}
 function Assert-Owned {
- if (-not $script:p -or $script:p.HasExited) { throw 'Le processus de test n’est plus actif' }
+ if (-not $script:p -or $script:p.HasExited) { throw 'Le processus de test n''est plus actif' }
  $owners=@(Get-NetTCPConnection -State Listen -LocalPort 8000 -ErrorAction Stop | Where-Object { $_.LocalAddress -eq '127.0.0.1' -and $_.OwningProcess -eq $script:p.Id })
  if ($owners.Count -ne 1) { throw 'Le serveur ne peut pas être rattaché au processus de test' }
 }
@@ -36,7 +36,7 @@ function Invoke-Owned {
 function Start-Owned {
  $script:p = Start-Process -FilePath $exe -WorkingDirectory $run -PassThru -RedirectStandardOutput (Join-Path $run ('stdout-'+[guid]::NewGuid()+'.log')) -RedirectStandardError (Join-Path $run ('stderr-'+[guid]::NewGuid()+'.log'))
  for ($i=0;$i -lt 120;$i++) {
-  if ($script:p.HasExited) { throw 'Le candidat s’est arrêté.' }
+  if ($script:p.HasExited) { throw 'Le candidat s''est arrêté.' }
   try { $id = Invoke-Owned -Uri 'http://127.0.0.1:8000/v1/runtime-identity'; if ($id.build -cne 'e5789c7') { throw 'Build incorrect' }; $proof.runtime=$id; return } catch { Start-Sleep -Milliseconds 500 }
  }
  throw 'Démarrage non confirmé'
