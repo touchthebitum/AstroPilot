@@ -2,6 +2,11 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $env:NIGHTMERIT_KIT_CI='1'
 $script:promptCount=0
+$canary=Join-Path $env:RUNNER_TEMP 'guardian-external-canary.json'
+'{"test_canary":"must remain untouched"}' | Set-Content -Encoding utf8 $canary
+$canaryHash=(Get-FileHash -Algorithm SHA256 $canary).Hash
+$env:ASTROPILOT_GUARDIAN_EXPLICIT_RENEWAL='1'
+$env:ASTROPILOT_GUARDIAN_ATTESTATION_PATH=$canary
 # The CI qualifies the launcher and real APIs, never claims browser interaction.
 function Start-Process {
  param([string]$FilePath,[string]$WorkingDirectory,[switch]$PassThru,[string]$RedirectStandardOutput,[string]$RedirectStandardError)
@@ -34,6 +39,8 @@ function Read-Host {
  return ''
 }
 . (Join-Path $env:KIT_TEST_ROOT 'Lancer-qualification.ps1')
+if ($env:ASTROPILOT_GUARDIAN_EXPLICIT_RENEWAL -or $env:ASTROPILOT_GUARDIAN_ATTESTATION_PATH) { throw 'Inherited Guardian environment leaked' }
+if ((Get-FileHash -Algorithm SHA256 $canary).Hash -cne $canaryHash) { throw 'External canary changed' }
 $resultFiles=@(Get-ChildItem -LiteralPath $env:KIT_TEST_ROOT -Filter 'resultats-candidat-*.zip')
 if ($resultFiles.Count -ne 1) { throw 'Native result archive missing' }
 $proofDir=Join-Path $env:RUNNER_TEMP 'kit-proof-export'

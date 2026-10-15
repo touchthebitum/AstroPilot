@@ -1,6 +1,11 @@
 ﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = $PSScriptRoot
+$ciMode=($env:NIGHTMERIT_KIT_CI -eq '1')
+# Never inherit Guardian paths, renewal flags or other product overrides.
+Get-ChildItem Env: | Where-Object { $_.Name -match '^(ASTROPILOT_|NIGHTMERIT_)' } | ForEach-Object {
+ [Environment]::SetEnvironmentVariable($_.Name,$null,'Process')
+}
 $run = Join-Path ([System.IO.Path]::GetTempPath()) ('essai-isole-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,6))
 New-Item -ItemType Directory -Path $run | Out-Null
 $manifest = Get-Content -Raw (Join-Path $root 'Manifest-kit.json') | ConvertFrom-Json
@@ -103,7 +108,7 @@ try {
  Write-Host 'Recharger la page pour vérifier les deux crédits après redémarrage.'
  if ((Read-Host 'Les deux crédits sont-ils conservés après rechargement ? Taper OUI pour exporter') -cne 'OUI') { throw 'Validation visuelle après redémarrage non confirmée' }
  $proof.ui_after_restart_confirmed=$true; $proof.result='PASS'
- if ($env:NIGHTMERIT_KIT_CI -eq '1') { $proof.result='PASS_API_ONLY'; $proof.ui_validation='automated API only'; $proof.ui_before_restart_confirmed=$false; $proof.ui_after_restart_confirmed=$false }
+ if ($ciMode) { $proof.result='PASS_API_ONLY'; $proof.ui_validation='automated API only'; $proof.ui_before_restart_confirmed=$false; $proof.ui_after_restart_confirmed=$false }
 } catch {
  $proof.result='NOT_VALIDATED'; $proof.error=$_.Exception.Message
  Write-Host "REFUS / NON VALIDE : $($_.Exception.Message)"
