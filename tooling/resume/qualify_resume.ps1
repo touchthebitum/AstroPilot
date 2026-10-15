@@ -8,9 +8,9 @@ Copy-Item (Join-Path $tool 'Reprendre-test.ps1') $staging
 Copy-Item (Join-Path $tool 'Inventaire-binaire.json') $staging
 $rows=@(Get-ChildItem $staging -File | ForEach-Object { @{path=$_.Name;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
 @{files=$rows} | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $staging 'Manifest-reprise.json')
-function Read-Host { param([string]$Prompt);$script:answers++;if ($script:answers -eq 1) { return 'je ne sais pas' };return '  oUi  ' }
+function Read-Host { param([string]$Prompt);$global:ResumeTestAnswers++;if ($global:ResumeTestAnswers -eq 1) { return 'je ne sais pas' };return '  oUi  ' }
 function Run-Resume([string]$name,[string]$expected) {
- $script:answers=0
+ $global:ResumeTestAnswers=0
  $env:TEMP=Join-Path $env:RUNNER_TEMP 'source-fixture';$env:TMP=$env:TEMP;$env:NIGHTMERIT_RESUME_CI='1'
  $canary=Join-Path $env:RUNNER_TEMP 'resume-guardian-canary.json';'unchanged' | Set-Content $canary
  $canaryHash=(Get-FileHash $canary -Algorithm SHA256).Hash
@@ -22,7 +22,7 @@ function Run-Resume([string]$name,[string]$expected) {
  $proof=Get-Content -Raw -Encoding UTF8 (Join-Path $extract 'reprise.json') | ConvertFrom-Json
  if ($proof.result -cne $expected -or $proof.source_unchanged -ne $true) { throw ($proof | ConvertTo-Json -Depth 10) }
  if ($expected -eq 'PASS_API_ONLY') {
-  if ($script:answers -ne 2 -or $proof.ui_confirmed -or -not $proof.authority_unchanged) { throw 'Confirmation tolerance or replay proof failed' }
+  if ($global:ResumeTestAnswers -ne 2 -or $proof.ui_confirmed -or -not $proof.authority_unchanged) { throw 'Confirmation tolerance or replay proof failed' }
   $text=(Get-ChildItem $extract -Filter '*.log' | Get-Content) -join "`n"
   if ($text -match '"POST /v1/(executions |execution-transitions|outcome-evidence)') { throw 'Resume created execution or evidence' }
   if ($text -match '"category": "applied"') { throw 'Resume applied a new credit' }
