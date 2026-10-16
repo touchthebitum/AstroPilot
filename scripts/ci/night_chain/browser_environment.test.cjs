@@ -1,0 +1,12 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {browserEnvironment}=require('./browser_environment.cjs');
+const base=Object.freeze({HOME:'/isolated/application/home',ASTROPILOT_DATA_DIR:'/isolated/data',USERPROFILE:'/isolated/home',APPDATA:'/isolated/appdata',LOCALAPPDATA:'/isolated/localappdata',TMPDIR:'/isolated/tmp',BROWSER_NATIVE_HOME:'/Users/runner',GITHUB_ACTIONS:'true'});
+const mac=browserEnvironment(base,{platform:'darwin'});
+assert.equal(mac.HOME,'/Users/runner');assert.equal(base.HOME,'/isolated/application/home');
+assert.deepEqual(Object.keys(mac).filter(k=>mac[k]!==base[k]),['HOME']);
+assert.deepEqual(browserEnvironment(base,{platform:'win32'}),base);
+assert.deepEqual(browserEnvironment({...base,GITHUB_ACTIONS:undefined},{platform:'darwin'}),{...base,GITHUB_ACTIONS:undefined});
+assert.throws(()=>browserEnvironment({...base,BROWSER_NATIVE_HOME:undefined},{platform:'darwin'}));
+assert.throws(()=>browserEnvironment({...base,BROWSER_NATIVE_HOME:'relative/home'},{platform:'darwin'}));
+console.log('Browser HOME regression: native Mac runner child only; app/data/temp and local user unchanged');
