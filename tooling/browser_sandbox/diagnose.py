@@ -31,10 +31,16 @@ hashes = {str(p.relative_to(browser)): hashlib.sha256(p.read_bytes()).hexdigest(
 server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root)))
 threading.Thread(target=server.serve_forever, daemon=True).start()
 url = 'http://127.0.0.1:' + str(server.server_port)
-def launch(name):
-    args = [str(exe), '--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--user-data-dir=' + str(root / ('profile-' + name)), '--dump-dom', url]
+def launch(name, extra=(), fake_env=False):
+    args = [str(exe), '--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--user-data-dir=' + str(root / ('profile-' + name)), '--dump-dom', *extra, url]
+    env = os.environ.copy()
+    if fake_env:
+        for key in ('HOME','USERPROFILE','APPDATA','LOCALAPPDATA','TMP','TEMP','TMPDIR','XDG_CACHE_HOME','XDG_CONFIG_HOME','XDG_DATA_HOME'):
+            folder = root / 'fake-env' / key
+            folder.mkdir(parents=True, exist_ok=True)
+            env[key] = str(folder)
     with (root / (name + '.stderr.log')).open('wb') as log:
-        child = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=log)
+        child = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=log, env=env)
         try:
             stdout, _ = child.communicate(timeout=45)
         except subprocess.TimeoutExpired:
@@ -46,6 +52,7 @@ def launch(name):
 result = {'provenance': provenance, 'before_acl': before, 'baseline': launch('before')}
 setup = subprocess.run([str(browser / 'setup.exe'), '--configure-browser-in-directory=' + str(browser)], capture_output=True, text=True, timeout=90)
 result.update(setup_exit=setup.returncode, setup_stdout=setup.stdout, setup_stderr=setup.stderr, after_acl=acl(browser), corrected=launch('after'))
+result['matrix'] = {name: launch(name, flags, fake) for name,flags,fake in [('flags', ('--disable-gpu','--remote-debugging-port=0'),False),('environment', (),True),('flags-and-environment', ('--disable-gpu','--remote-debugging-port=0'),True)]}
 result['parent_acl_unchanged'] = before_parent == acl(browser.parent)
 result['browser_bytes_unchanged'] = hashes == {str(p.relative_to(browser)): hashlib.sha256(p.read_bytes()).hexdigest() for p in browser.rglob('*') if p.is_file()}
 (root / 'result.json').write_text(json.dumps(result, indent=2))
