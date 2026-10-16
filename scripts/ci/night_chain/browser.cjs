@@ -190,6 +190,7 @@ async function journey() {
         list.scrollWidth <= list.clientWidth + 1;
     })()`);
     assert(planFits, 'Mission plan must remain readable without horizontal overflow at 390px');
+    await evaluate(`document.querySelector('#mission-tasks').scrollIntoView({block:'center'}); true;`);
     const mobileShot = await send('Page.captureScreenshot', {format:'png',captureBeyondViewport:true});
     fs.writeFileSync(path.join(proof,'mission-mobile.png'),Buffer.from(mobileShot.data,'base64'));
     record = {prepared, accepted, task_rows: taskRows, local_mission_times: true,
