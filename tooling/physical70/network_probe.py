@@ -11,7 +11,8 @@ import threading
 import time
 import urllib.request
 
-from controller import spawn, run_external
+from controller import spawn, run_external, browser as launch_actual_browser
+from types import SimpleNamespace
 from browser_permissions import configure_browser
 from forecast import Forecast
 
@@ -45,8 +46,15 @@ def main():
     logpath = case / 'browser.log'
     child = None
     try:
-        with logpath.open('wb') as log:
-            child = spawn(args, env=os.environ.copy(), stdout=log, stderr=log)
+        with logpath.open('ab') as log:
+            if '--actual-helper' in sys.argv:
+                owner = SimpleNamespace(kit=kit, case=case, lab=True)
+                launch_actual_browser(owner, url)
+                child = owner.browser
+                result['launcher'] = 'controller.browser'
+            else:
+                child = spawn(args, env=os.environ.copy(), stdout=log, stderr=log)
+                result['launcher'] = 'direct spawn'
             endpoint = profile / 'DevToolsActivePort'
             end = time.monotonic() + 35
             while not endpoint.exists() and time.monotonic() < end:
