@@ -55,6 +55,11 @@ def main():
    if name=='zurich':
     for start,end,code in [('2026-03-29T02:30','2026-03-29T03:30','session_availability_local_time_nonexistent'),('2026-10-25T02:30','2026-10-25T03:30','session_availability_local_time_ambiguous')]:
      r=runtime.request('POST','/v1/tonight',{'availability':{'mode':'fixed_window','start_local':start,'end_local':end}},expected=422);assert r['detail']['code']==code,r;dst.append(r)
+   if name=='winnipeg':
+    # The zero duration is intentionally invalid AFTER unique local time normalization.
+    # Old rules refuse 01:30 as ambiguous before reaching duration validation.
+    r=runtime.request('POST','/v1/tonight',{'availability':{'mode':'start_and_duration','start_local':'2026-11-01T01:30','duration':0}},expected=422)
+    assert r['detail']['code']=='session_availability_duration_must_be_positive',r;dst.append({'unique_0130_confirmed_by_later_duration_validation':r})
    for label,seconds in [('ha',5400),('oiii',900)]:
     missions[label]=browser(case,label,'accept',chrome)
    totals=check(case,missions);identity=server.identity

@@ -65,4 +65,5 @@ jobs:
             ${{ runner.temp }}/packaged70/*provenance.json
             ${{ runner.temp }}/packaged70/mac-signature.txt
             ${{ runner.temp }}/packaged70/proof/
+            !${{ runner.temp }}/packaged70/proof/**/browser-profile/**
           retention-days: 14

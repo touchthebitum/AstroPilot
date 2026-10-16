@@ -104,7 +104,7 @@ async function journey() {
       const response = await realFetch(...args);
       if (String(args[0]).startsWith('/v1/')) {
         const body = await response.clone().json().catch(() => null);
-        window.__ciTraffic.push({url: String(args[0]), request: JSON.parse(args[1].body || 'null'), http: response.status, body});
+        window.__ciTraffic.push({url: String(args[0]), request: JSON.parse(args[1]?.body || 'null'), http: response.status, body});
       }
       return response;
     };
@@ -120,10 +120,10 @@ async function journey() {
     return {id:NightMeritTime.id,winnipeg,zurich,winnipegHour:fmt('America/Winnipeg').formatToParts(instant).find(p=>p.type==='hour').value,
       zurichHour:fmt('Europe/Zurich').formatToParts(new Date('2026-10-15T22:30:00Z')).find(p=>p.type==='hour').value,
       nativeWinnipeg:new Intl.DateTimeFormat('fr-CH',{timeZone:'America/Winnipeg',hour:'2-digit',minute:'2-digit',hour12:false}).format(instant),
-      winnipegOffset:NightMeritTime.offsetAt('America/Winnipeg',instant.getTime())};
+      winnipegOffset:NightMeritTime.offsetAt('America/Winnipeg',instant.getTime()),winnipegBefore:NightMeritTime.offsetAt('America/Winnipeg',Date.parse('2026-11-01T06:30:00Z')),winnipegAfter:NightMeritTime.offsetAt('America/Winnipeg',Date.parse('2026-11-01T07:00:00Z'))};
   })()`);
   assert.equal(timezone.winnipegHour,'07');assert.equal(timezone.zurichHour,'00');
-  assert.equal(timezone.winnipegOffset,-18000);
+  assert.equal(timezone.winnipegOffset,-18000);assert.equal(timezone.winnipegBefore,-18000);assert.equal(timezone.winnipegAfter,-18000);
   const fixture=JSON.parse(fs.readFileSync(path.join(root,'fixture.json'),'utf8'));
   let record;
   if (process.env.BROWSER_MODE==='accept') {
