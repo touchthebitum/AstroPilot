@@ -162,3 +162,22 @@ jobs:
           name: profile-recovery-${{ matrix.os }}
           path: ${{ runner.temp }}/profile-recovery.xml
           retention-days: 14
+      - name: Validate native night and filter confirmation in a real browser
+        shell: pwsh
+        env:
+          NIGHT_CHAIN_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $env:BROWSER_NATIVE_HOME=$env:HOME
+          $env:NODE_BINARY=(Get-Command node -ErrorAction Stop).Source
+          $env:NIGHT_CHAIN_PROOF=Join-Path $env:RUNNER_TEMP 'night-chain-proof'
+          node scripts/ci/night_chain/browser_environment.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Browser environment isolation regression failed' }
+          uv run --locked --no-sync python scripts/ci/night_chain/run.py
+          if ($LASTEXITCODE -ne 0) { throw 'Native night confirmation browser journeys failed' }
+      - name: Export native night confirmation browser proofs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: night-confirmation-${{ matrix.os }}
+          path: ${{ runner.temp }}/night-chain-proof/
+          retention-days: 14
