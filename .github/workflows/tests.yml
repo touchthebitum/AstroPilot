@@ -135,7 +135,7 @@ jobs:
       - run: uv sync --locked --extra test
       - name: Require Node for real session UI helpers
         run: node --version
-      - name: Validate session persistence, replay, credit and Guardian in isolated directories
+      - name: Validate sessions, credits, Guardian and profile recovery in isolated directories
         shell: pwsh
         run: |
           $iso = Join-Path $env:RUNNER_TEMP 'session-progress-tests'
@@ -146,3 +146,19 @@ jobs:
           }
           uv run --locked --no-sync python -m pytest -q tests/api/test_durable_read_recovery.py tests/architecture/test_durable_directory_read.py tests/api/test_project_progress_restore_consistency.py tests/api/test_intent_progress_persistence_diagnostics.py tests/api/test_execution_session_api.py tests/api/test_execution_session_ui.py tests/api/test_project_progress_api.py tests/services/test_intent_progress_credit.py tests/services/test_execution_outcome_application.py tests/services/test_execution_transition.py tests/architecture/test_execution_lineage_persistence.py tests/guardian/test_guardian_session_lifecycle.py
           if ($LASTEXITCODE -ne 0) { throw 'Session replay and progress tests failed' }
+          $report = Join-Path $env:RUNNER_TEMP 'profile-recovery.xml'
+          uv run --locked --no-sync python -m pytest -q tests/api/test_profile_decoding_recovery.py --junitxml="$report"
+          if ($LASTEXITCODE -ne 0) { throw 'Profile recovery regressions failed' }
+          [xml]$results = Get-Content -LiteralPath $report -Raw
+          $cases = $results.SelectNodes('//testcase')
+          $unsuccessful = $results.SelectNodes('//testcase/skipped | //testcase/failure | //testcase/error')
+          if ($cases.Count -ne 11 -or $unsuccessful.Count -ne 0) {
+            throw 'Expected all 11 profile recovery regressions to execute and pass without skips.'
+          }
+      - name: Export native profile recovery results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: profile-recovery-${{ matrix.os }}
+          path: ${{ runner.temp }}/profile-recovery.xml
+          retention-days: 14
