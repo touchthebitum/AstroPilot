@@ -127,9 +127,11 @@ async function journey() {
   const fixture=JSON.parse(fs.readFileSync(path.join(root,'fixture.json'),'utf8'));
   let record;
   if (process.env.BROWSER_MODE==='accept') {
-    // Supply the production-API-generated deterministic view model directly to the real UI.
-    // No HTTP response or packaged service is replaced. Actual clicks POST to frozen backend.
-    await evaluate(`clearAcceptedMission();setCurrentFieldObservationDecision(${JSON.stringify(fixture.response)});renderDecision(${JSON.stringify(fixture.response)});true`);
+    await waitFor(()=>evaluate(`!document.querySelector('#availability-step').hidden`),'availability form');
+    await evaluate(`document.querySelector('input[name="availability-mode"][value="fixed_window"]').click();document.querySelector('#availability-start').value=${JSON.stringify(fixture.availability.start_local)};document.querySelector('#availability-end').value=${JSON.stringify(fixture.availability.end_local)};document.querySelector('#request-recommendation').click();true`);
+    const prepared=await waitFor(()=>evaluate(`window.__ciTraffic.find(x=>x.url==='/v1/tonight')`),'frozen Tonight calculation');
+    assert.equal(prepared.http,200,JSON.stringify(prepared));assert.equal(prepared.body.night_date,fixture.night_date);
+    assert.deepEqual([...prepared.body.viable_acquisition_intent_ids].sort(),['ou4_oiii','sh2-129_ha']);
     await waitFor(()=>evaluate(`Boolean(document.querySelector('#primary-intent-choice select'))`),'intent choice');
     await evaluate(`const choice=document.querySelector('#primary-intent-choice select');choice.value=${JSON.stringify(intent)};choice.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('#open-mission').click();true`);
     const accepted=await waitFor(()=>evaluate(`window.__ciTraffic.find(x=>x.url==='/v1/decision-selections')`),'frozen confirmation');
@@ -159,8 +161,8 @@ async function journey() {
     assert.equal(session.acquired_after_seconds,intent==='ou4_oiii'?900:5400);
     assert(Date.parse(session.execution.actual_end)-Date.parse(session.execution.actual_start)>=7200000);
     const uiSession=await evaluate(`({status:document.querySelector('#session-status').textContent,after:document.querySelector('#session-after').textContent})`);
-    record={accepted,session,uiSession,session_actions_via_real_dom:true,client_start_clock_fixture:"two hours before real current time; restored before closure; server clock unchanged",taskRows,expected,idempotent_confirmation:true,prepared_night:fixture.response.night_date,
-      decision_generation:'source production API with synthetic weather; fixture view model supplied directly to UI',confirmation:'real DOM click to unmodified frozen backend'};
+    record={prepared,accepted,session,uiSession,session_actions_via_real_dom:true,client_start_clock_fixture:"two hours before real current time; restored before closure; server clock unchanged",taskRows,expected,idempotent_confirmation:true,prepared_night:prepared.body.night_date,
+      decision_generation:'real DOM request to unmodified frozen Tonight API; coherent forecast supplied by loopback TLS fixture',confirmation:'real DOM click to unmodified frozen backend'};
   } else {
     const missionId=process.env.MISSION_ID;
     await waitFor(()=>evaluate(`state.savedMissions.some(m=>m.mission_id===${JSON.stringify(missionId)})`),'persisted mission discovery');

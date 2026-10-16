@@ -28,6 +28,7 @@ def environment(case):
     env['ASTROPILOT_DATA_DIR']=str(case/'data')
     noop=case/'no_browser.py';noop.write_text('pass\n',encoding='utf-8')
     env['BROWSER']=f'"{sys.executable}" "{noop}" %s'
+    if (case/'weather-proxy.json').exists():env.update(json.loads((case/'weather-proxy.json').read_text(encoding='utf-8')))
     return env
 
 def request(method,path,body=None,expected=200):

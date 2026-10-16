@@ -5,6 +5,10 @@ SOURCE=Path(os.environ['PRODUCT_SOURCE']).resolve();OUT=Path(os.environ['RECOVER
 for key in ('CURRENT_CANDIDATE','LEGACY_CANDIDATE','MODERN_CANDIDATE'):os.environ[key]=str(EXE)
 os.environ['MODERN_SHA']=SHA;os.environ['UPGRADE_PROOF']=str(OUT)
 import runtime
+from weather_fixture import Forecast
+from datetime import datetime,timedelta,timezone
+from zoneinfo import ZoneInfo,reset_tzpath
+reset_tzpath(())
 sys.path.insert(0,str(SOURCE/'scripts/ci/night_chain'))
 from setup_browser import install
 
@@ -46,34 +50,38 @@ def main():
  payload=EXE.parent if os.name=='nt' else EXE.parents[2];inventory=runtime.bundle_inventory(payload);rows=[]
  for name,zone,lat,lon in [('zurich','Europe/Zurich','46.888','6.55'),('winnipeg','America/Winnipeg','49.895','-97.138')]:
   case=OUT/name;case.mkdir();(case/'QUALIFICATION_ONLY').write_text('PUBLIC SYNTHETIC ONLY',encoding='utf-8')
-  env=runtime.environment(case);env.update(CASE_ROOT=str(case),PRODUCT_SOURCE=str(SOURCE),SITE_ZONE=zone,SITE_LAT=lat,SITE_LON=lon,PYTHONUTF8='1')
-  with (case/'seed.log').open('w',encoding='utf-8') as log:subprocess.run([sys.executable,str(Path(__file__).with_name('seed.py'))],env=env,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=180,cwd=SOURCE)
+  now=datetime.now(timezone.utc).astimezone(ZoneInfo(zone));day=(now.date()+timedelta(days=1)).isoformat()
+  write(case/'fixture.json',{'zone':zone,'night_date':now.date().isoformat(),'availability':{'mode':'fixed_window','start_local':day+'T00:30','end_local':day+'T03:30'}})
   missions={}
-  with runtime.Server(EXE,case,SHA,'1.0.0b8') as server:
-   assets=time_assets();config=runtime.request('GET','/v1/configuration');assert config['site']['timezone']==zone,config
-   dst=[]
-   if name=='zurich':
-    for start,end,code in [('2026-03-29T02:30','2026-03-29T03:30','session_availability_local_time_nonexistent'),('2026-10-25T02:30','2026-10-25T03:30','session_availability_local_time_ambiguous')]:
-     r=runtime.request('POST','/v1/tonight',{'availability':{'mode':'fixed_window','start_local':start,'end_local':end}},expected=422);assert r['detail']['code']==code,r;dst.append(r)
-   if name=='winnipeg':
-    # The zero duration is intentionally invalid AFTER unique local time normalization.
-    # Old rules refuse 01:30 as ambiguous before reaching duration validation.
-    r=runtime.request('POST','/v1/tonight',{'availability':{'mode':'start_and_duration','start_local':'2026-11-01T01:30','duration':0}},expected=422)
-    assert r['detail']['code']=='session_availability_duration_must_be_positive',r;dst.append({'unique_0130_confirmed_by_later_duration_validation':r})
-   for label,seconds in [('ha',5400),('oiii',900)]:
-    missions[label]=browser(case,label,'accept',chrome)
-   totals=check(case,missions);identity=server.identity
-  baseline=runtime.authority(case/'data');write(case/'authority-before-restart.json',baseline)
-  for boot in range(2):
-   with runtime.Server(EXE,case,SHA,'1.0.0b8'):
-    assert time_assets()==assets;check(case,missions)
-    if boot==0:
-     for label in ('ha','oiii'):browser(case,label,'reopen',chrome,missions[label])
-   assert runtime.authority(case/'data')==baseline,('Restart/replay changed canonical bytes',name,boot)
+  with Forecast(case,zone,lat,lon) as forecast:
+   with runtime.Server(EXE,case,SHA,'1.0.0b8') as server:
+    r=runtime.request('PUT','/v1/configuration',{'expected_revision':0,'site':{'name':'PUBLIC PACKAGED FIXTURE '+name,'latitude':float(lat),'longitude':float(lon),'bortle':4},'equipment':{'preset_id':'samyang_183'},'projects':{'Sh2-129':{'hours':0,'target_hours':20,'importance':9}}})
+    runtime.request('PUT','/v1/projects/Sh2-129/progress',{'expected_revision':r['profile_revision'],'imaging_field_id':'sh2-129_ou4','acquisition_intent_progress':[{'acquisition_intent_id':i,'acquired_duration_manual':0} for i in ('sh2-129_ha','ou4_oiii')],'acquisition_intent_targets':[{'acquisition_intent_id':i,'target_hours':6} for i in ('sh2-129_ha','ou4_oiii')]})
+    assets=time_assets();config=runtime.request('GET','/v1/configuration');assert config['site']['timezone']==zone,config
+    dst=[]
+    if name=='zurich':
+     for start,end,code in [('2026-03-29T02:30','2026-03-29T03:30','session_availability_local_time_nonexistent'),('2026-10-25T02:30','2026-10-25T03:30','session_availability_local_time_ambiguous')]:
+      r=runtime.request('POST','/v1/tonight',{'availability':{'mode':'fixed_window','start_local':start,'end_local':end}},expected=422);assert r['detail']['code']==code,r;dst.append(r)
+    if name=='winnipeg':
+     # The zero duration is intentionally invalid AFTER unique local time normalization.
+     # Old rules refuse 01:30 as ambiguous before reaching duration validation.
+     r=runtime.request('POST','/v1/tonight',{'availability':{'mode':'start_and_duration','start_local':'2026-11-01T01:30','duration':0}},expected=422)
+     assert r['detail']['code']=='session_availability_duration_must_be_positive',r;dst.append({'unique_0130_confirmed_by_later_duration_validation':r})
+    for label,seconds in [('ha',5400),('oiii',900)]:
+     missions[label]=browser(case,label,'accept',chrome)
+    totals=check(case,missions);identity=server.identity
+   baseline=runtime.authority(case/'data');write(case/'authority-before-restart.json',baseline)
+   for boot in range(2):
+    with runtime.Server(EXE,case,SHA,'1.0.0b8'):
+     assert time_assets()==assets;check(case,missions)
+     if boot==0:
+      for label in ('ha','oiii'):browser(case,label,'reopen',chrome,missions[label])
+    assert runtime.authority(case/'data')==baseline,('Restart/replay changed canonical bytes',name,boot)
+   assert len(forecast.rows)==2 and all('error' not in r for r in forecast.rows),forecast.rows
   assert not (case/'data/user_filters.json').exists()
   rows.append({'site':name,'timezone':zone,'result':'PASS','identity':identity,'authority':assets,'dst_refusals':dst,'totals':totals,'restarts':2,'credit_replays':18,'canonical_bytes_unchanged':True,'no_legacy_inventory':True})
   write(OUT/'partial-result.json',rows)
  assert runtime.bundle_inventory(payload)==inventory,'Packaged payload mutated'
- write(OUT/'result.json',{'result':'PASS','sha':SHA,'platform':platform.platform(),'native_frozen_runtime':True,'user_data_used':False,'weather':'synthetic coherent forecast used for source production decision generation only','ui':'real DOM confirmation, session start, closure, evidence, credit and persisted credit reopening; generated decision view model injected explicitly, no HTTP response replacement','closure_and_credit':'real DOM actions POST to unmodified frozen HTTP API; browser start clock set two hours back and restored before closure, server clock unchanged','rows':rows,'payload_unchanged':True})
+ write(OUT/'result.json',{'result':'PASS','sha':SHA,'platform':platform.platform(),'native_frozen_runtime':True,'user_data_used':False,'weather':'loopback TLS fixture returns coherent synthetic Open-Meteo payload; actual frozen requests/ingress/scoring/decision endpoints run unchanged, TLS verification enabled via process-only temporary CA','ui':'real DOM confirmation, session start, closure, evidence, credit and persisted credit reopening; real Tonight decision generation; no UI/API response replacement or view model injection','closure_and_credit':'real DOM actions POST to unmodified frozen HTTP API; browser start clock set two hours back and restored before closure, server clock unchanged','rows':rows,'payload_unchanged':True})
  print('PASS frozen Windows/Mac timezone authority, DOM Ha/OIII confirmation, closure, credit, two restarts and replay')
 if __name__=='__main__':main()

@@ -4,6 +4,7 @@ import os,sys,subprocess,json,hashlib,zipfile
 source=Path('candidate').resolve();tools=Path('operations/tooling/packaged70').resolve()
 sha=os.environ['APPROVED_SHA'];assert sha=='70ac6e0719cdc8c6ce76cbb7a2bfec1a24c82c9b'
 assert subprocess.check_output(['git','rev-parse','HEAD'],cwd=source,text=True).strip()==sha
+subprocess.run(['git','diff','--exit-code','HEAD'],cwd=source,check=True)
 root=Path(os.environ['RUNNER_TEMP'])/'packaged70';root.mkdir(exist_ok=False)
 env={k:v for k,v in os.environ.items() if not k.startswith(('ASTROPILOT_','NIGHTMERIT_','FIELD_LAB_'))}
 if sys.platform=='darwin':env['BROWSER_NATIVE_HOME']=os.environ['HOME']
