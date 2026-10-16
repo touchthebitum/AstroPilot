@@ -110,6 +110,7 @@ async function journey() {
   await waitFor(()=>evaluate(`!document.querySelector('#journey').hidden && document.querySelector('#start').textContent.includes('T00:30')`),'guide starts public isolated site');
   fs.writeFileSync(path.join(proof,'guide-ready.json'),JSON.stringify(await evaluate('latest')));
   await waitFor(()=>fs.existsSync(path.join(proof,'request-restart')),'test sessions completed',180000);
+  await waitFor(()=>evaluate(`latest.ready && !busy`),'guide observes both canonical credits');
   await evaluate(`document.querySelector('#before').checked=true;document.querySelector('#before').dispatchEvent(new Event('change'));document.querySelector('#restart').click();true`);
   await waitFor(()=>evaluate(`!document.querySelector('#replay').hidden && !busy`),'guide restart and replay',90000);
   fs.writeFileSync(path.join(proof,'guide-restarted.json'),JSON.stringify(await evaluate('latest')));
