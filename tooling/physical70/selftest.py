@@ -54,6 +54,12 @@ try:
  archive=Path(state['exported'])
  with zipfile.ZipFile(archive) as z:
   result=json.loads(z.read('qualification.json'));assert result['verdict']=='PASS_LAB';assert len(result['replays'])==6
+  permissions=json.loads(z.read('browser-permissions.json'))
+  assert permissions['status']==('configured' if os.name=='nt' else 'not_required')
+  if os.name=='nt':
+   assert permissions['exit_code']==78 and permissions['sandbox_disabled'] is False
+   assert 'Sandbox cannot access executable' not in z.read('browser.log').decode(errors='replace')
+   assert 'Network service crashed or was terminated' not in z.read('browser.log').decode(errors='replace')
   assert not any(n.endswith('.key') or 'user_profile' in n or 'browser-profile' in n for n in z.namelist())
  assert hashes(case)==baseline
  (OUT/'request-close').touch();guide.wait(timeout=30);assert guide.returncode==0;child.wait(timeout=30);assert child.returncode==0;log.close();glog.close()

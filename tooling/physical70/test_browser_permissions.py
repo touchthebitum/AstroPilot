@@ -46,6 +46,24 @@ class BrowserPermissions(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'code 5'):
             configure_browser(self.kit, windows=True, run=Mock(return_value=Mock(returncode=5)))
 
+    def test_generic_installer_success_is_not_sandbox_confirmation(self):
+        with self.assertRaisesRegex(RuntimeError, 'code 0'):
+            configure_browser(self.kit, windows=True, run=Mock(return_value=Mock(returncode=0)))
+
+    def test_controller_does_not_spawn_chrome_when_configuration_fails(self):
+        import controller
+        from unittest.mock import patch
+        case = self.kit / 'case'
+        case.mkdir()
+        (self.kit / 'kit.json').write_text('{"browser":"browser/chrome.exe"}')
+        owner = Mock(kit=self.kit, case=case)
+        with patch.object(controller, 'configure_browser', side_effect=RuntimeError('permissions refusées')), patch.object(controller, 'spawn') as spawn:
+            with self.assertRaisesRegex(RuntimeError, 'permissions refusées'):
+                controller.browser(owner, 'http://127.0.0.1:1')
+            spawn.assert_not_called()
+        import json
+        self.assertEqual(json.loads((case / 'browser-permissions.json').read_text())['status'], 'failed')
+
     def test_setup_timeout_propagates_instead_of_bypassing_sandbox(self):
         with self.assertRaises(subprocess.TimeoutExpired):
             configure_browser(self.kit, windows=True, run=Mock(side_effect=subprocess.TimeoutExpired('setup', 60)))

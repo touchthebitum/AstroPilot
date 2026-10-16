@@ -1,5 +1,6 @@
 """Physical-machine test kit. No imports from NightMerit or access to real profiles."""
 from pathlib import Path
+from contextlib import contextmanager
 from datetime import datetime,timedelta,timezone
 from zoneinfo import ZoneInfo,reset_tzpath
 import argparse,hashlib,json,os,secrets,shutil,socket,subprocess,sys,threading,time,traceback,urllib.request,urllib.error,zipfile
@@ -34,16 +35,24 @@ def verify(root):
   elif not path.is_file() or digest(path)!=record['sha256']:raise RuntimeError('Fichier du kit manquant ou modifié : '+rel)
  return manifest
 
-def spawn(args,**kwargs):
- # Frozen Windows programs must not give their DLL search path to Chrome or another bundle.
+@contextmanager
+def external_dll_search():
+ # Frozen Windows programs must not give their DLL search path to Chrome,
+ # its directory-only setup helper, or another independent bundle.
  if os.name=='nt' and getattr(sys,'frozen',False):
   import ctypes
   kernel=ctypes.windll.kernel32;buffer=ctypes.create_unicode_buffer(32768)
   kernel.GetDllDirectoryW(len(buffer),buffer);previous=buffer.value
   kernel.SetDllDirectoryW(None)
-  try:return subprocess.Popen(args,**kwargs)
+  try:yield
   finally:kernel.SetDllDirectoryW(previous or None)
- return subprocess.Popen(args,**kwargs)
+ else:yield
+
+def spawn(args,**kwargs):
+ with external_dll_search():return subprocess.Popen(args,**kwargs)
+
+def run_external(args,**kwargs):
+ with external_dll_search():return subprocess.run(args,**kwargs)
 
 class App:
  def __init__(self,kit,case,forecast):self.kit=kit;self.case=case;self.forecast=forecast;self.child=None;self.logs=[]
@@ -208,7 +217,11 @@ def browser(controller,url):
  config=json.loads((controller.kit/'kit.json').read_text(encoding='utf-8'));exe=controller.kit/config['browser']
  env={k:v for k,v in os.environ.items() if not k.startswith(('ASTROPILOT_','NIGHTMERIT_','FIELD_LAB_')) and k.upper() not in ('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','NO_PROXY','REQUESTS_CA_BUNDLE')}
  if sys.platform=='darwin' and os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('BROWSER_NATIVE_HOME'):env['HOME']=os.environ['BROWSER_NATIVE_HOME']
- permissions=configure_browser(controller.kit)
+ try:permissions=configure_browser(controller.kit,run=run_external)
+ except Exception as exc:
+  controller.error=str(exc)
+  write(controller.case/'browser-permissions.json',{'status':'failed','error':str(exc),'sandbox_disabled':False})
+  raise
  write(controller.case/'browser-permissions.json',permissions)
  profile=controller.case/'browser-profile';profile.mkdir(exist_ok=True)
  log=(controller.case/'browser.log').open('ab')
