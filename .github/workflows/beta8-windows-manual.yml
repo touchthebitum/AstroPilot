@@ -1,4 +1,4 @@
-name: Profile decoding recovery qualification
+name: Packaged profile recovery qualification
 on:
   workflow_dispatch:
     inputs:
@@ -7,6 +7,7 @@ on:
         type: string
 permissions:
   contents: read
+  actions: read
 jobs:
   qualify:
     strategy:
@@ -14,49 +15,58 @@ jobs:
       matrix:
         os: [windows-2022, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: operations
-          sparse-checkout: tooling/profile_recovery
+          sparse-checkout: tooling
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: candidate
           ref: ${{ inputs.approved_sha }}
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          path: baseline
-          ref: dad6e438b8ba0f5ce52d59457ce503e030911d80
+          sparse-checkout: |
+            /*
+            !/user_profile.json
+            !/user_filters.json
+            !/data/user_profile.json
+          sparse-checkout-cone-mode: false
           persist-credentials: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
         with:
           version: '0.12.6'
           python-version: '3.13.5'
           enable-cache: false
-      - name: Compare exact main and candidate on isolated public fixtures
-        working-directory: candidate
+      - name: Download exact official Windows candidate
+        if: runner.os == 'Windows'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          github-token: ${{ github.token }}
+          run-id: '38859544478'
+          name: AstroPilot-beta8-windows-x86_64-a5c77a79087e3e50285ec4413b8b643f1f024747
+          path: ${{ runner.temp }}/official-windows
+      - name: Qualify actual packaged runtime with isolated public authority
         shell: pwsh
         env:
-          CANDIDATE_SHA: ${{ inputs.approved_sha }}
+          APPROVED_SHA: ${{ inputs.approved_sha }}
         run: |
-          $iso=Join-Path $env:RUNNER_TEMP 'profile-tool-environment'
-          foreach ($entry in @{HOME='home';USERPROFILE='home';APPDATA='appdata';LOCALAPPDATA='localappdata';ASTROPILOT_DATA_DIR='data';UV_CACHE_DIR='cache'}.GetEnumerator()) {
-            $dir=Join-Path $iso $entry.Value
-            New-Item -ItemType Directory -Force $dir | Out-Null
-            [Environment]::SetEnvironmentVariable($entry.Key,$dir)
-          }
-          uv sync --locked --extra test
-          if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
-          uv run --locked --no-sync python ../operations/tooling/profile_recovery/qualify.py
+          node --version
+          if ($LASTEXITCODE -ne 0) { throw 'Node unavailable' }
+          python operations/tooling/packaged_recovery/bootstrap.py
           if ($LASTEXITCODE -ne 0) { throw 'Qualification failed' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: profile-recovery-${{ matrix.os }}
+          name: packaged-recovery-${{ matrix.os }}
           path: |
-            ${{ runner.temp }}/profile-recovery-proof/result.json
-            ${{ runner.temp }}/profile-recovery-proof/*/tests.xml
-            ${{ runner.temp }}/profile-recovery-proof/*/pytest.log
+            ${{ runner.temp }}/packaged-recovery/bootstrap.log
+            ${{ runner.temp }}/packaged-recovery/*candidate.json
+            ${{ runner.temp }}/packaged-recovery/*provenance.json
+            ${{ runner.temp }}/packaged-recovery/proof/result.json
+            ${{ runner.temp }}/packaged-recovery/proof/browser-provenance.json
+            ${{ runner.temp }}/packaged-recovery/proof/*/browser-result.json
+            ${{ runner.temp }}/packaged-recovery/proof/*/browser-environment.json
+            ${{ runner.temp }}/packaged-recovery/proof/*/*.log
+            ${{ runner.temp }}/packaged-recovery/proof/*/ui.*
+          retention-days: 14
