@@ -12,18 +12,18 @@ def write(p,v):p.write_text(json.dumps(v,indent=2)+'\n',encoding='utf-8')
 def browser(case,label,mode,chrome,mission=None):
  proof=case/('ui-'+mode+'-'+label);proof.mkdir()
  env=runtime.environment(case);env.update(CASE_ROOT=str(case),CASE_PROOF=str(proof),PRODUCT_SOURCE=str(SOURCE),NIGHT_CHAIN_URL='http://127.0.0.1:8000',CHROME_BINARY=str(chrome),UI_INTENT='sh2-129_ha' if label=='ha' else 'ou4_oiii',BROWSER_MODE=mode,EXECUTION_ID='public-execution-'+label)
- if mission:env['MISSION_ID']=mission
+ if mission:env['MISSION_ID']=mission['accepted']['body']['mission_id'];env['EXECUTION_ID']=mission['session']['execution']['execution_id']
  with (proof/'driver.log').open('w',encoding='utf-8') as log:subprocess.run(['node',str(Path(__file__).with_name('browser.cjs'))],env=env,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=180)
  result=json.loads((proof/'browser-result.json').read_text(encoding='utf-8'));assert result['result']=='PASS';return result
 
-def credit(case,label):
+def credit(case,label,missions):
  rev=runtime.request('GET','/v1/configuration')['profile_revision']
- return runtime.request('POST','/v1/executions/public-execution-'+label+'/intent-progress-credit',{'expected_revision':rev,'evidence_ids':['public-evidence-'+label],'confirm_historical_baseline':False})
+ return runtime.request('POST','/v1/executions/'+missions[label]['session']['execution']['execution_id']+'/intent-progress-credit',{'expected_revision':rev,'evidence_ids':[missions[label]['session']['evidence'][0]['evidence_id']],'confirm_historical_baseline':False})
 def check(case,missions):
  p=runtime.request('GET','/v1/projects/Sh2-129/progress');totals={r['acquisition_intent_id']:r['effective_total_seconds'] for r in p['intent_progress_breakdown']};assert totals=={'sh2-129_ha':5400,'ou4_oiii':900},totals
  for label,total in [('ha',5400),('oiii',900)]:
-  session=runtime.request('GET','/v1/executions/public-execution-'+label+'/session');assert session['execution']['status']=='completed' and session['acquired_after_seconds']==total,session
-  for _ in range(3):assert credit(case,label)['status']=='already_applied'
+  session=runtime.request('GET','/v1/executions/'+missions[label]['session']['execution']['execution_id']+'/session');assert session['execution']['status']=='completed' and session['acquired_after_seconds']==total,session
+  for _ in range(3):assert credit(case,label,missions)['status']=='already_applied'
   a=missions[label]['accepted'];r=runtime.request('POST','/v1/decision-selections',a['request']);assert r['mission_id']==a['body']['mission_id']
  return totals
 
@@ -56,24 +56,19 @@ def main():
     for start,end,code in [('2026-03-29T02:30','2026-03-29T03:30','session_availability_local_time_nonexistent'),('2026-10-25T02:30','2026-10-25T03:30','session_availability_local_time_ambiguous')]:
      r=runtime.request('POST','/v1/tonight',{'availability':{'mode':'fixed_window','start_local':start,'end_local':end}},expected=422);assert r['detail']['code']==code,r;dst.append(r)
    for label,seconds in [('ha',5400),('oiii',900)]:
-    missions[label]=browser(case,label,'accept',chrome);mid=missions[label]['accepted']['body']['mission_id'];eid='public-execution-'+label
-    runtime.request('POST','/v1/executions',{'execution_id':eid,'mission_id':mid})
-    b={'execution_id':eid,'mission_id':mid,'status':'in_progress','actual_start':'2026-10-15T22:30:00+00:00','actual_end':None,'actual_duration':None};runtime.request('POST','/v1/execution-transitions',b)
-    b.update(status='completed',actual_end='2026-10-16T00:30:00+00:00',actual_duration=7200);runtime.request('POST','/v1/execution-transitions',b)
-    runtime.request('POST','/v1/outcome-evidence',{'evidence_id':'public-evidence-'+label,'execution_id':eid,'category':'acquisition','observed_at':'2026-10-16T00:30:00+00:00','source':'user','usable_integration_duration':seconds})
-    assert credit(case,label)['status']=='applied'
+    missions[label]=browser(case,label,'accept',chrome)
    totals=check(case,missions);identity=server.identity
   baseline=runtime.authority(case/'data');write(case/'authority-before-restart.json',baseline)
   for boot in range(2):
    with runtime.Server(EXE,case,SHA,'1.0.0b8'):
     assert time_assets()==assets;check(case,missions)
     if boot==0:
-     for label in ('ha','oiii'):browser(case,label,'reopen',chrome,missions[label]['accepted']['body']['mission_id'])
+     for label in ('ha','oiii'):browser(case,label,'reopen',chrome,missions[label])
    assert runtime.authority(case/'data')==baseline,('Restart/replay changed canonical bytes',name,boot)
   assert not (case/'data/user_filters.json').exists()
   rows.append({'site':name,'timezone':zone,'result':'PASS','identity':identity,'authority':assets,'dst_refusals':dst,'totals':totals,'restarts':2,'credit_replays':18,'canonical_bytes_unchanged':True,'no_legacy_inventory':True})
   write(OUT/'partial-result.json',rows)
  assert runtime.bundle_inventory(payload)==inventory,'Packaged payload mutated'
- write(OUT/'result.json',{'result':'PASS','sha':SHA,'platform':platform.platform(),'native_frozen_runtime':True,'user_data_used':False,'weather':'synthetic coherent forecast used for source production decision generation only','ui':'real DOM confirmation and persisted credit reopening; generated decision view model injected explicitly, no HTTP response replacement','closure_and_credit':'real frozen HTTP API','rows':rows,'payload_unchanged':True})
+ write(OUT/'result.json',{'result':'PASS','sha':SHA,'platform':platform.platform(),'native_frozen_runtime':True,'user_data_used':False,'weather':'synthetic coherent forecast used for source production decision generation only','ui':'real DOM confirmation, session start, closure, evidence, credit and persisted credit reopening; generated decision view model injected explicitly, no HTTP response replacement','closure_and_credit':'real DOM actions POST to unmodified frozen HTTP API; browser start clock set two hours back and restored before closure, server clock unchanged','rows':rows,'payload_unchanged':True})
  print('PASS frozen Windows/Mac timezone authority, DOM Ha/OIII confirmation, closure, credit, two restarts and replay')
 if __name__=='__main__':main()

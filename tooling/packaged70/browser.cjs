@@ -145,7 +145,21 @@ async function journey() {
     assert(taskRows[0].includes(expected[0]));assert(taskRows[1].includes(expected[1]));assert(taskRows[3].includes(expected[2]));
     const replay=await evaluate(`(async()=>{const r=await fetch('/v1/decision-selections',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(${JSON.stringify(accepted.request)})});return {http:r.status,body:await r.json()};})()`);
     assert.equal(replay.http,200);assert.equal(replay.body.mission_id,accepted.body.mission_id);
-    record={accepted,taskRows,expected,idempotent_confirmation:true,prepared_night:fixture.response.night_date,
+    await waitFor(()=>evaluate(`state.acceptedMission?.mission_id===${JSON.stringify(accepted.body.mission_id)} && !state.sessionBusy && !document.querySelector('#session-start').hidden`),'session ready');
+    await evaluate(`(() => {window.__qualificationNativeDate=Date;const Native=Date;window.Date=class extends Native {constructor(...args){super(...(args.length?args:[Native.now()-7200000]));}static now(){return Native.now()-7200000;}};document.querySelector('#session-start').click();return true;})()`);
+    await waitFor(()=>evaluate(`currentSession()?.execution.status==='in_progress' && !state.sessionBusy`),'session started through UI');
+    await evaluate(`window.Date=window.__qualificationNativeDate;delete window.__qualificationNativeDate;document.querySelector('#session-complete').click();true`);
+    await waitFor(()=>evaluate(`currentSession()?.execution.status==='completed' && !state.sessionBusy`),'session completed through UI');
+    const minutes=intent==='ou4_oiii'?15:90;
+    await evaluate(`document.querySelector('#session-hours').value=${JSON.stringify(String(Math.floor(minutes/60)))};document.querySelector('#session-minutes').value=${JSON.stringify(String(minutes%60))};document.querySelector('#session-record-evidence').click();true`);
+    await waitFor(()=>evaluate(`Boolean(usableEvidence(currentSession())) && !state.sessionBusy`),'usable integration saved');
+    await evaluate(`document.querySelector('#session-apply-credit').click();true`);
+    await waitFor(()=>evaluate(`Boolean(currentSession()?.credit) && !state.sessionBusy && document.querySelector('#session-status').textContent.includes('Crédit enregistré')`),'credit recorded through UI');
+    const session=await evaluate('currentSession()');
+    assert.equal(session.acquired_after_seconds,intent==='ou4_oiii'?900:5400);
+    assert(session.execution.actual_duration>=7200);
+    const uiSession=await evaluate(`({status:document.querySelector('#session-status').textContent,after:document.querySelector('#session-after').textContent})`);
+    record={accepted,session,uiSession,session_actions_via_real_dom:true,client_start_clock_fixture:"two hours before real current time; restored before closure; server clock unchanged",taskRows,expected,idempotent_confirmation:true,prepared_night:fixture.response.night_date,
       decision_generation:'source production API with synthetic weather; fixture view model supplied directly to UI',confirmation:'real DOM click to unmodified frozen backend'};
   } else {
     const missionId=process.env.MISSION_ID;
