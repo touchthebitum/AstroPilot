@@ -1,31 +1,98 @@
-name: Public profile authority cross-OS qualification
+name: Upload artifact 371 isolated success and failure qualification
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  qualify:
+  probe:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - stage: mac_seed
-            os: macos-latest
-    uses: ./.github/workflows/profile-authority-stage.yml
-    with:
-      stage: ${{ matrix.stage }}
-      os: ${{ matrix.os }}
-  windows:
-    needs: qualify
-    uses: ./.github/workflows/profile-authority-stage.yml
-    with:
-      stage: windows
-      os: windows-2022
-      incoming: mac_seed
-  mac_return:
-    needs: windows
-    uses: ./.github/workflows/profile-authority-stage.yml
-    with:
-      stage: mac_return
-      os: macos-latest
-      incoming: windows
+        os: [windows-2022, macos-latest]
+        mode: [success, failure]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: operations
+          sparse-checkout: tooling/artifact_export
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: candidate
+          ref: 965cc007aef0196586c2f1e8d1a748e808b20c58
+          sparse-checkout: .github/workflows
+          persist-credentials: false
+      - name: Run public test
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PROBE_MODE: ${{ matrix.mode }}
+          PROBE_OS: ${{ matrix.os }}
+          CANDIDATE_SHA: 965cc007aef0196586c2f1e8d1a748e808b20c58
+        run: |
+          python operations/tooling/artifact_export/probe.py
+          if ($LASTEXITCODE -ne 0) { throw 'Intentional public test failure; job must stay failed' }
+      - name: Export JUnit even after failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: profile-recovery-${{ matrix.os }}-${{ matrix.mode }}
+          path: ${{ runner.temp }}/export-probe/profile-recovery.xml
+          retention-days: 14
+      - name: Export browser directory even after failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: night-confirmation-${{ matrix.os }}-${{ matrix.mode }}
+          path: ${{ runner.temp }}/export-probe/night-chain-proof/
+          retention-days: 14
+      - name: Export candidate-shaped fixture only after success
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: candidate-fixture-${{ matrix.os }}-${{ matrix.mode }}
+          path: ${{ runner.temp }}/export-probe/dist/beta8-artifacts/*
+          retention-days: 30
+          if-no-files-found: error
+      - name: Export public manifest even after failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: metadata-${{ matrix.os }}-${{ matrix.mode }}
+          path: ${{ runner.temp }}/export-probe/metadata/manifest.json
+          retention-days: 14
+  verify:
+    needs: probe
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          sparse-checkout: tooling/artifact_export
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: downloaded
+      - name: Read actual outcomes and artifact expiration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" > jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" > artifacts.json
+      - name: Require preserved failure and exact exported evidence
+        env:
+          CANDIDATE_SHA: 965cc007aef0196586c2f1e8d1a748e808b20c58
+        run: python tooling/artifact_export/verify.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: export-verification
+          path: |
+            verification.json
+            jobs.json
+            artifacts.json
+          retention-days: 14
