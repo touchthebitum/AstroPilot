@@ -225,7 +225,7 @@ def browser(controller,url):
  write(controller.case/'browser-permissions.json',permissions)
  profile=controller.case/'browser-profile';profile.mkdir(exist_ok=True)
  log=(controller.case/'browser.log').open('ab')
- flags=['--headless=new','--disable-gpu','--remote-debugging-port=0'] if controller.lab else []
+ flags=['--headless=new','--disable-gpu','--remote-debugging-port=0','--enable-logging=stderr','--v=1'] if controller.lab else []
  controller.browser=spawn([str(exe),'--no-first-run','--no-default-browser-check','--disable-background-networking','--user-data-dir='+str(profile),*flags,url],env=env,stdout=log,stderr=log)
 
 def main():
