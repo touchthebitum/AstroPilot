@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: candidate
-          ref: 92f3c36c00e1550061ec5aaa9350ce30f19b167b
+          ref: 4ac9964d1ca3aa0e679019f8a7c0e14ca80579c6
           sparse-checkout: |
             /*
             !/user_profile.json

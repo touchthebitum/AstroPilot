@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 
-SHA='92f3c36c00e1550061ec5aaa9350ce30f19b167b'
+SHA='4ac9964d1ca3aa0e679019f8a7c0e14ca80579c6'
 SOURCE=Path('candidate').resolve()
 OPS=Path('operations/tooling/timezone_authority').resolve()
 OUT=Path(os.environ['RUNNER_TEMP'])/'timezone-authority-proof';OUT.mkdir()
@@ -37,7 +37,7 @@ modules=['tests/architecture/'+name+'.py' for name in (
  'test_mission_site_timezone','test_timezone_authority')]
 modules += ['tests/api/test_timezone_authority_transport.py','tests/api/test_configuration_site_guard_ui.py',
  'tests/api/test_execution_session_ui.py','tests/api/test_field_observation_ui.py','tests/api/test_intent_choice_ui.py',
- 'tests/api/test_mission_task_times_ui.py','tests/api/test_outcome_evaluation_ui.py','tests/api/test_tonight_ui.py',
+ 'tests/api/test_simple_pro_ui.py','tests/api/test_mission_task_times_ui.py','tests/api/test_outcome_evaluation_ui.py','tests/api/test_tonight_ui.py',
  'tests/api/test_tonight_api.py','tests/api/test_tonight_api_e2e.py']
 for mode,version in (('locked-main','2026.3'),('integration260','2026.5')):
     env=base.copy();env.update(EXPECTED_TZDATA=version,SAMPLE_OUT=str(OUT/(mode+'-sources.json')),PYTHONPATH=str(SOURCE))
