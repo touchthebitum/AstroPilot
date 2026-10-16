@@ -423,10 +423,10 @@ button { color: inherit; }
 
 .mission-timeline { position: relative; display: grid; gap: 0; margin: 20px 0 0; padding: 0; list-style: none; }
 .mission-timeline::before { position: absolute; top: 10px; bottom: 10px; left: 5px; width: 1px; content: ""; background: var(--line-bright); }
-.mission-timeline li { position: relative; display: grid; grid-template-columns: minmax(118px, auto) minmax(0, 1fr); gap: 10px; padding: 0 0 18px 22px; }
+.mission-timeline li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 0 0 18px 22px; }
 .mission-timeline li:last-child { padding-bottom: 0; }
 .mission-timeline li::before { position: absolute; top: 6px; left: 2px; width: 7px; height: 7px; content: ""; background: var(--cyan); border: 2px solid var(--panel-strong); border-radius: 50%; box-shadow: 0 0 9px rgba(103,228,209,.35); }
-.task-time { color: var(--subtle); font-size: 10px; line-height: 1.8; text-transform: uppercase; white-space: nowrap; }
+.task-time { color: var(--ink); font-size: 13px; line-height: 1.6; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .task-copy strong { display: block; font-size: 13px; font-weight: 580; }
 .task-copy small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
 

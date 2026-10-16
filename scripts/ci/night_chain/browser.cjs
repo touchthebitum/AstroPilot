@@ -164,13 +164,37 @@ async function journey() {
     const start = Date.parse(accepted.body.mission.window_start), end = Date.parse(accepted.body.mission.window_end);
     assert(start >= Date.parse('2026-10-16T00:30:00+02:00') && start < end && end <= Date.parse('2026-10-16T03:30:00+02:00'));
     await waitFor(() => evaluate(`Boolean(document.querySelector('#mission-filter')?.textContent.includes(${JSON.stringify(filter.filter_type)}))`), 'rendered optical filter');
+    const taskRows = await evaluate(`Array.from(document.querySelectorAll('#mission-tasks li'), row => row.textContent)`);
+    assert.equal(taskRows.length, 4);
+    assert(taskRows.every(row => !/T-\d|Fin \+/.test(row)));
+    const formatTaskInstant = instant => new Intl.DateTimeFormat('fr-CH', {
+      timeZone: accepted.body.mission.site_timezone, year:'numeric',month:'2-digit',day:'2-digit',
+      hour:'2-digit',minute:'2-digit',hour12:false,timeZoneName:'shortOffset',
+    }).format(new Date(instant));
+    assert(taskRows[0].includes(formatTaskInstant(start - 30 * 60000)));
+    assert(taskRows[1].includes(formatTaskInstant(start - 20 * 60000)));
+    assert(taskRows[2].includes('Régler la mise au point automatique'));
+    assert(taskRows[3].includes(formatTaskInstant(end + 10 * 60000)));
+    assert(taskRows[3].includes('Prendre les images de calibration (flats)'));
     const replay = await evaluate(`(async () => {
       const response = await fetch('/v1/decision-selections', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(${JSON.stringify(accepted.request)})});
       return {http: response.status, body: await response.json()};
     })()`);
     assert.equal(replay.http, 200);
     assert.equal(replay.body.mission_id, accepted.body.mission_id);
-    record = {prepared, accepted, idempotent_confirmation: true};
+    await send('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:false});
+    const planFits = await evaluate(`(() => {
+      const list = document.querySelector('#mission-tasks');
+      const box = list.getBoundingClientRect();
+      return box.width > 0 && box.left >= 0 && box.right <= window.innerWidth &&
+        list.scrollWidth <= list.clientWidth + 1;
+    })()`);
+    assert(planFits, 'Mission plan must remain readable without horizontal overflow at 390px');
+    await evaluate(`document.querySelector('#mission-tasks').scrollIntoView({block:'center'}); true;`);
+    const mobileShot = await send('Page.captureScreenshot', {format:'png',captureBeyondViewport:true});
+    fs.writeFileSync(path.join(proof,'mission-mobile.png'),Buffer.from(mobileShot.data,'base64'));
+    record = {prepared, accepted, task_rows: taskRows, local_mission_times: true,
+      mission_plan_fits_390px: planFits, idempotent_confirmation: true};
   }
   const screenshot = await send('Page.captureScreenshot', {format: 'png', captureBeyondViewport: true});
   fs.writeFileSync(path.join(proof, 'ui.png'), Buffer.from(screenshot.data, 'base64'));
