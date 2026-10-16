@@ -384,6 +384,8 @@ def test_release_pipeline_requires_verified_notarized_stapled_zip_and_sha256(
 
     def runner(command, **kwargs):
         calls.append((command, kwargs))
+        if command[:2] == ["git", "rev-parse"]:
+            return type("Result", (), {"stdout": "a" * 40 + "\n"})()
         if command[:4] == ["ditto", "-c", "-k", "--keepParent"]:
             Path(command[-1]).touch()
         if command[:5] == [
@@ -411,7 +413,7 @@ def test_release_pipeline_requires_verified_notarized_stapled_zip_and_sha256(
         runner=runner,
     )
 
-    commands = [call[0] for call in calls[1:]]
+    commands = [call[0] for call in calls if call[0] != "build"]
     notarize_index = next(
         index for index, command in enumerate(commands)
         if command[:3] == ["xcrun", "notarytool", "submit"]
@@ -445,7 +447,8 @@ def test_release_pipeline_requires_verified_notarized_stapled_zip_and_sha256(
         if command[:3] == ["shasum", "-a", "256"]
     )
 
-    assert calls[0][1]["codesign_identity"].startswith("Developer ID Application:")
+    build_call = next(call for call in calls if call[0] == "build")
+    assert build_call[1]["codesign_identity"].startswith("Developer ID Application:")
     assert ["codesign", "--verify", "--deep", "--strict", "--verbose=4", str(application)] in commands
     assert notarize_index < staple_index < final_zip_index
     assert (
@@ -516,6 +519,8 @@ def test_post_extraction_failure_prevents_checksum_and_sidecar(tmp_path):
 
     def runner(command, **kwargs):
         calls.append(command)
+        if command[:2] == ["git", "rev-parse"]:
+            return type("Result", (), {"stdout": "a" * 40 + "\n"})()
         if command[:4] == ["ditto", "-c", "-k", "--keepParent"]:
             Path(command[-1]).touch()
         if command[:5] == [
