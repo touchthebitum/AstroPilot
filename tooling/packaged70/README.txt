@@ -1,0 +1,8 @@
+Qualification protocol only. No product change, no release, no personal signing.
+Approved product SHA: 70ac6e0719cdc8c6ce76cbb7a2bfec1a24c82c9b.
+Windows binary: official workflow 38919145126; provenance hashes checked before use.
+Mac binary: exact main source, locked packaging environment, ARM64 .app, local ad hoc signature only (explicit user approval). No certificate, notarization, or publication.
+Only generated public profiles on ephemeral GitHub runners; no real profile or stash is read.
+Pending decisions generated via source production APIs with synthetic coherent forecasts and actual UTC reference; normal thresholds retained. Their view models are supplied directly to the packaged UI (this does not qualify the frozen /tonight weather/calculation path). Actual DOM confirmations POST to unmodified frozen services, which check canonical context, evidence freshness and availability. Session closure/evidence/credit uses actual frozen APIs, then credits are checked in the real DOM after restart. Two restarts, repeated canonical acceptance and credit replay must preserve byte hashes. No legacy filter inventory is generated.
+Timezone assets must match exact main sources, 2026.5/2026e data identity; native browser clock is not used as timezone authority. Winnipeg 07:00 UTC-5 vs old Intl 06:00; Zurich local midnight and invalid/ambiguous local time refusal. No browser/server response replacement. Profile and program bytes checked after replay. Chrome official pinned archive hash verified.
+No untrusted documents or archive instructions are executed.
