@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 
-SHA='5b1e813e65b8e300d99f06153728aea305abc6a9'
+SHA='92f3c36c00e1550061ec5aaa9350ce30f19b167b'
 SOURCE=Path('candidate').resolve()
 OPS=Path('operations/tooling/timezone_authority').resolve()
 OUT=Path(os.environ['RUNNER_TEMP'])/'timezone-authority-proof';OUT.mkdir()
