@@ -40,4 +40,4 @@ else:
 env['UV_PROJECT_ENVIRONMENT']=str(root/'venv-test')
 call(['uv','sync','--locked','--extra','test','--python','3.13.5'])
 python=root/('venv-test/Scripts/python.exe' if os.name=='nt' else 'venv-test/bin/python')
-call([str(python),str(tools/'qualify.py')])
+call([str(python),str(tools/('reshoot.py' if os.environ.get('RESHOOT_ONLY')=='1' else 'qualify.py'))])

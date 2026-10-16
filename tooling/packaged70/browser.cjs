@@ -174,7 +174,10 @@ async function journey() {
     assert(session.intent.includes(intent));assert(session.after.includes(intent==='sh2-129_ha'?'1 h 30':'0 h 15'),JSON.stringify(session));assert(session.applyHidden);
     record={session,restored_from_frozen_backend:true};
   }
-  const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});
+  const paint=await evaluate(`(async()=>{await document.fonts.ready;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const dialog=document.querySelector('#mission');const m=document.querySelector('.mission-dialog');const box=m.getBoundingClientRect();return {open:m.open,display:getComputedStyle(m).display,visibility:getComputedStyle(m).visibility,opacity:getComputedStyle(m).opacity,box:{x:box.x,y:box.y,width:box.width,height:box.height}};})()`);
+  assert(paint.open && paint.display!=='none' && paint.visibility==='visible' && Number(paint.opacity)>0 && paint.box.width>0 && paint.box.height>0,JSON.stringify(paint));
+  fs.writeFileSync(path.join(proof,'paint-state.json'),JSON.stringify(paint,null,2));
+  const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false,fromSurface:true});
   fs.writeFileSync(path.join(proof,'ui.png'),Buffer.from(shot.data,'base64'));
   fs.writeFileSync(path.join(proof,'ui.txt'),await evaluate('document.body.innerText'));
   const traffic=await evaluate('window.__ciTraffic');
