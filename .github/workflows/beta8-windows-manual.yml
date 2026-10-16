@@ -1,69 +1,303 @@
-name: Upload artifact 371 isolated success and failure qualification
+name: Setup uv 370 isolated versions cache and failure qualification
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  probe:
+  cold:
     strategy:
       fail-fast: false
       matrix:
         os: [windows-2022, macos-latest]
-        mode: [success, failure]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: operations
-          sparse-checkout: tooling/artifact_export
+          sparse-checkout: tooling/setup_uv
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: candidate
-          ref: 965cc007aef0196586c2f1e8d1a748e808b20c58
-          sparse-checkout: .github/workflows
+          ref: 680090bfa3ceb56ba9394cb97f63942642139322
+          sparse-checkout: |
+            /*
+            !/user_profile.json
+            !/user_filters.json
+            !/data/user_profile.json
+          sparse-checkout-cone-mode: false
           persist-credentials: false
-      - name: Run public test
+      - name: Setup exact tools
+        id: setup
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: "0.12.5"
+          python-version: "3.12"
+          enable-cache: true
+          working-directory: candidate
+          cache-dependency-glob: uv.lock
+          cache-local-path: ${{ runner.temp }}/setup370-cache
+          cache-suffix: setup370-${{ github.run_id }}-${{ matrix.os }}
+      - name: Qualify versions lock and isolation
+        if: always()
         shell: pwsh
         env:
           PYTHONUTF8: '1'
-          PROBE_MODE: ${{ matrix.mode }}
-          PROBE_OS: ${{ matrix.os }}
-          CANDIDATE_SHA: 965cc007aef0196586c2f1e8d1a748e808b20c58
+          PROBE_MODE: cold
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
+          CACHE_KEY: ${{ steps.setup.outputs.cache-key }}
+          ACTION_UV_VERSION: ${{ steps.setup.outputs.uv-version }}
+          ACTION_UV_PATH: ${{ steps.setup.outputs.uv-path }}
+          ACTION_PYTHON_VERSION: ${{ steps.setup.outputs.python-version }}
         run: |
-          python operations/tooling/artifact_export/probe.py
-          if ($LASTEXITCODE -ne 0) { throw 'Intentional public test failure; job must stay failed' }
-      - name: Export JUnit even after failure
+          python operations/tooling/setup_uv/probe.py
+          if ($LASTEXITCODE -ne 0) { throw 'Qualification failure or expected stale lock refusal; preserve job failure' }
+      - name: Export public proof even on failure
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: profile-recovery-${{ matrix.os }}-${{ matrix.mode }}
-          path: ${{ runner.temp }}/export-probe/profile-recovery.xml
+          name: cold-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/setup370-proof/result.json
+            ${{ runner.temp }}/setup370-proof/*.log
           retention-days: 14
-      - name: Export browser directory even after failure
+  warm:
+    needs: cold
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: operations
+          sparse-checkout: tooling/setup_uv
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: candidate
+          ref: 680090bfa3ceb56ba9394cb97f63942642139322
+          sparse-checkout: |
+            /*
+            !/user_profile.json
+            !/user_filters.json
+            !/data/user_profile.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Setup exact tools
+        id: setup
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: "0.12.5"
+          python-version: "3.12"
+          enable-cache: true
+          working-directory: candidate
+          cache-dependency-glob: uv.lock
+          cache-local-path: ${{ runner.temp }}/setup370-cache
+          cache-suffix: setup370-${{ github.run_id }}-${{ matrix.os }}
+      - name: Qualify versions lock and isolation
+        if: always()
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PROBE_MODE: warm
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
+          CACHE_KEY: ${{ steps.setup.outputs.cache-key }}
+          ACTION_UV_VERSION: ${{ steps.setup.outputs.uv-version }}
+          ACTION_UV_PATH: ${{ steps.setup.outputs.uv-path }}
+          ACTION_PYTHON_VERSION: ${{ steps.setup.outputs.python-version }}
+        run: |
+          python operations/tooling/setup_uv/probe.py
+          if ($LASTEXITCODE -ne 0) { throw 'Qualification failure or expected stale lock refusal; preserve job failure' }
+      - name: Export public proof even on failure
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: night-confirmation-${{ matrix.os }}-${{ matrix.mode }}
-          path: ${{ runner.temp }}/export-probe/night-chain-proof/
+          name: warm-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/setup370-proof/result.json
+            ${{ runner.temp }}/setup370-proof/*.log
           retention-days: 14
-      - name: Export candidate-shaped fixture only after success
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+  disabled:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          name: candidate-fixture-${{ matrix.os }}-${{ matrix.mode }}
-          path: ${{ runner.temp }}/export-probe/dist/beta8-artifacts/*
-          retention-days: 30
-          if-no-files-found: error
-      - name: Export public manifest even after failure
+          path: operations
+          sparse-checkout: tooling/setup_uv
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: candidate
+          ref: 680090bfa3ceb56ba9394cb97f63942642139322
+          sparse-checkout: |
+            /*
+            !/user_profile.json
+            !/user_filters.json
+            !/data/user_profile.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Setup exact tools
+        id: setup
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: "0.12.6"
+          python-version: "3.13.5"
+          enable-cache: false
+          working-directory: candidate
+          cache-dependency-glob: uv.lock
+          cache-local-path: ${{ runner.temp }}/setup370-cache
+          cache-suffix: setup370-${{ github.run_id }}-${{ matrix.os }}
+      - name: Qualify versions lock and isolation
+        if: always()
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PROBE_MODE: disabled
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
+          CACHE_KEY: ${{ steps.setup.outputs.cache-key }}
+          ACTION_UV_VERSION: ${{ steps.setup.outputs.uv-version }}
+          ACTION_UV_PATH: ${{ steps.setup.outputs.uv-path }}
+          ACTION_PYTHON_VERSION: ${{ steps.setup.outputs.python-version }}
+        run: |
+          python operations/tooling/setup_uv/probe.py
+          if ($LASTEXITCODE -ne 0) { throw 'Qualification failure or expected stale lock refusal; preserve job failure' }
+      - name: Export public proof even on failure
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: metadata-${{ matrix.os }}-${{ matrix.mode }}
-          path: ${{ runner.temp }}/export-probe/metadata/manifest.json
+          name: disabled-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/setup370-proof/result.json
+            ${{ runner.temp }}/setup370-proof/*.log
+          retention-days: 14
+  lock_failure:
+    needs: cold
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: operations
+          sparse-checkout: tooling/setup_uv
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: candidate
+          ref: 680090bfa3ceb56ba9394cb97f63942642139322
+          sparse-checkout: |
+            /*
+            !/user_profile.json
+            !/user_filters.json
+            !/data/user_profile.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Setup exact tools
+        id: setup
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: "0.12.5"
+          python-version: "3.12"
+          enable-cache: true
+          working-directory: candidate
+          cache-dependency-glob: uv.lock
+          cache-local-path: ${{ runner.temp }}/setup370-cache
+          cache-suffix: setup370-${{ github.run_id }}-${{ matrix.os }}
+      - name: Qualify versions lock and isolation
+        if: always()
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PROBE_MODE: lock_failure
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
+          CACHE_KEY: ${{ steps.setup.outputs.cache-key }}
+          ACTION_UV_VERSION: ${{ steps.setup.outputs.uv-version }}
+          ACTION_UV_PATH: ${{ steps.setup.outputs.uv-path }}
+          ACTION_PYTHON_VERSION: ${{ steps.setup.outputs.python-version }}
+        run: |
+          python operations/tooling/setup_uv/probe.py
+          if ($LASTEXITCODE -ne 0) { throw 'Qualification failure or expected stale lock refusal; preserve job failure' }
+      - name: Export public proof even on failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: lock_failure-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/setup370-proof/result.json
+            ${{ runner.temp }}/setup370-proof/*.log
+          retention-days: 14
+  invalid_setup:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: operations
+          sparse-checkout: tooling/setup_uv
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: candidate
+          ref: 680090bfa3ceb56ba9394cb97f63942642139322
+          sparse-checkout: |
+            /*
+            !/user_profile.json
+            !/user_filters.json
+            !/data/user_profile.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Setup exact tools
+        id: setup
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version-file: ${{ runner.temp }}/INTENTIONALLY-MISSING-setup370-version.toml
+          enable-cache: false
+      - name: Qualify versions lock and isolation
+        if: always()
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PROBE_MODE: invalid_setup
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
+          CACHE_KEY: ${{ steps.setup.outputs.cache-key }}
+          ACTION_UV_VERSION: ${{ steps.setup.outputs.uv-version }}
+          ACTION_UV_PATH: ${{ steps.setup.outputs.uv-path }}
+          ACTION_PYTHON_VERSION: ${{ steps.setup.outputs.python-version }}
+        run: |
+          python operations/tooling/setup_uv/probe.py
+          if ($LASTEXITCODE -ne 0) { throw 'Qualification failure or expected stale lock refusal; preserve job failure' }
+      - name: Export public proof even on failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: invalid_setup-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/setup370-proof/result.json
+            ${{ runner.temp }}/setup370-proof/*.log
           retention-days: 14
   verify:
-    needs: probe
+    needs: [cold, warm, disabled, lock_failure, invalid_setup]
     if: always()
     runs-on: ubuntu-latest
     permissions:
@@ -72,27 +306,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          sparse-checkout: tooling/artifact_export
+          sparse-checkout: tooling/setup_uv
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: downloaded
-      - name: Read actual outcomes and artifact expiration
+      - name: Read job outcomes
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" > jobs.json
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" > artifacts.json
-      - name: Require preserved failure and exact exported evidence
-        env:
-          CANDIDATE_SHA: 965cc007aef0196586c2f1e8d1a748e808b20c58
-        run: python tooling/artifact_export/verify.py
+        run: gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" > jobs.json
+      - name: Verify expected failures remain failed
+        run: python tooling/setup_uv/verify.py
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
-          name: export-verification
+          name: setup370-verification
           path: |
-            verification.json
             jobs.json
-            artifacts.json
+            verification.json
           retention-days: 14
