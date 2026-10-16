@@ -3823,6 +3823,39 @@ function setList(selector, items, fallback) {
   }
 }
 
+// Presentation only: T is the accepted acquisition window start, Fin its end.
+// Resolve elapsed minutes before formatting in the historical site timezone.
+function missionTaskTime(value, mission, zone) {
+  const label = String(value ?? "");
+  const relative = /^(T|Fin)(?:\s*([+−-])\s*(\d+)\s*min)?$/.exec(label);
+  if (!relative) return label || "Horaire non précisé";
+  const [, reference, sign, minutes] = relative;
+  const amount = Number(minutes || 0);
+  const delta = (sign === "-" || sign === "−" ? -1 : 1) * amount;
+  const boundary = reference === "T" ? mission.window_start : mission.window_end;
+  // Never interpret a naive timestamp using the browser's timezone.
+  const explicit = typeof boundary === "string" && /(?:Z|[+-]\d{2}:\d{2})$/i.test(boundary);
+  const instant = explicit ? new Date(boundary) : new Date(NaN);
+  if (!Number.isNaN(instant.getTime())) {
+    instant.setTime(instant.getTime() + delta * 60000);
+    return new Intl.DateTimeFormat("fr-CH", {
+      timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false, timeZoneName: "shortOffset",
+    }).format(instant);
+  }
+  const event = reference === "T" ? "le début des acquisitions" : "la fin des acquisitions";
+  if (!amount) return `${reference === "T" ? "Début" : "Fin"} des acquisitions · heure à confirmer`;
+  return `${amount} min ${delta < 0 ? "avant" : "après"} ${event} · heure à confirmer`;
+}
+
+function missionTaskTitle(title) {
+  return new Map([
+    ["Mise en station", "Effectuer la mise en station"],
+    ["Autofocus", "Régler la mise au point automatique"],
+    ["Flats", "Prendre les images de calibration (flats)"],
+  ]).get(title) || title;
+}
+
 function renderMission(mission) {
   state.sessions = [];
   state.activeSessionId = null;
@@ -3861,8 +3894,8 @@ function renderMission(mission) {
     const title = document.createElement("strong");
     time.className = "task-time";
     copy.className = "task-copy";
-    time.textContent = `${task.start} → ${task.end}`;
-    title.textContent = task.title;
+    time.textContent = `${missionTaskTime(task.start, mission, zone)} → ${missionTaskTime(task.end, mission, zone)}`;
+    title.textContent = missionTaskTitle(task.title);
     copy.append(title);
     if (task.description) {
       const description = document.createElement("small");
