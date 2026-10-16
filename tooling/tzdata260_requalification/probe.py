@@ -7,6 +7,7 @@ import platform
 import shutil
 import subprocess
 import sys
+from instrument_browser import instrument_browser
 
 SHA='8daf2c7c40b70f2b3a5780b1666ff327bfb4e762'
 SOURCE=Path('candidate').resolve()
@@ -53,42 +54,8 @@ for mode,version in (('test','2026.5'),('test-packaging','2026.5')):
     cases=ET.parse(OUT/(mode+'-tests.xml')).getroot().findall('.//testcase')
     assert len(cases)==434 and not any(c.find(tag) is not None for c in cases for tag in ('failure','error','skipped'))
     # Add read-only observations to the disposable harness, not mocked API responses.
-    script=SOURCE/'scripts/ci/night_chain/browser.cjs';original=script.read_bytes();text=original.decode('utf-8')
-    anchor="  fs.writeFileSync(path.join(proof, 'browser-result.json'), JSON.stringify({"
-    assert text.count(anchor)==1
-    observation='''  const timeAuthorityAudit = await evaluate(`({
-      id:NightMeritTime.id, version:NightMeritTime.version,
-      winnipegClock:clock('2026-11-02T12:00:00Z','America/Winnipeg'),
-      winnipegTask:missionTaskTime('T',{window_start:'2026-11-02T12:00:00Z'},'America/Winnipeg'),
-      winnipegLocal:formatDateTimeLocalInZone(new Date('2026-11-02T12:00:00Z'),'America/Winnipeg'),
-      winnipegUtc:localDateTimeToUtc('2026-11-02TEXPECTED_CLOCK','America/Winnipeg'),
-      winnipegUniqueUtc:localDateTimeToUtc('2026-11-01T01:30','America/Winnipeg'),
-      winnipegBoundaryClock:clock('2026-11-01T07:00:00Z','America/Winnipeg'),
-      zurichClock:clock('2026-10-15T22:30:00Z','Europe/Zurich'),
-      nativeWinnipeg:new Intl.DateTimeFormat('fr-CH',{timeZone:'America/Winnipeg',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date('2026-11-02T12:00:00Z')),
-      userAgent:navigator.userAgent
-    })`);
-'''.replace('EXPECTED_CLOCK','07:00' if version=='2026.5' else '06:00')
-    text=text.replace(anchor,observation+anchor).replace('    ...record, result:','    time_authority_audit:timeAuthorityAudit, ...record, result:')
-    navigation="  await send('Page.navigate', {url});"
-    assert text.count(navigation)==1
-    text=text.replace(navigation,"  const navigation = await send('Page.navigate', {url});\n  fs.writeFileSync(path.join(proof,'navigation.json'),JSON.stringify(navigation));")
-    failure="  try { await journey(); }\n  finally {"
-    diagnostic="""  try { await journey(); }
-  catch (error) {
-    try {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        const state = await evaluate(`({location:location.href,ready:document.readyState,text:document.body?.innerText?.slice(0,16000),traffic:window.__ciTraffic})`);
-        fs.writeFileSync(path.join(proof,'failure-state.json'),JSON.stringify(state,null,2));
-        const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});
-        fs.writeFileSync(path.join(proof,'failure.png'),Buffer.from(shot.data,'base64'));
-      }
-    } catch (diagnosticError) {console.error('Failure capture',diagnosticError);}
-    throw error;
-  }
-  finally {"""
-    assert text.count(failure)==1
-    text=text.replace(failure,diagnostic)
+    script=SOURCE/'scripts/ci/night_chain/browser.cjs';original=script.read_bytes()
+    text=instrument_browser(original,version)
     browser=env.copy();browser.update(NIGHT_CHAIN_PROOF=str(OUT/(mode+'-browser')),NIGHT_CHAIN_PR_HEAD=SHA,
       BROWSER_NATIVE_HOME=os.environ.get('HOME',''),NODE_BINARY=shutil.which('node'))
     try:
