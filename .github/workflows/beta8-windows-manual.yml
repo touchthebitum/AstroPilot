@@ -1,75 +1,54 @@
-name: Packaged profile recovery qualification
+name: Distribution prequalification contracts
 on:
   workflow_dispatch:
     inputs:
-      approved_sha:
-        required: true
+      candidate_sha:
         type: string
+        required: true
 permissions:
   contents: read
-  actions: read
 jobs:
-  qualify:
+  contracts:
     strategy:
       fail-fast: false
       matrix:
         os: [windows-2022, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: operations
-          sparse-checkout: tooling
+          sparse-checkout: tooling/distribution
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: candidate
-          ref: ${{ inputs.approved_sha }}
-          sparse-checkout: |
-            /*
-            !/user_profile.json
-            !/user_filters.json
-            !/data/user_profile.json
-          sparse-checkout-cone-mode: false
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: baseline
+          ref: a5c77a79087e3e50285ec4413b8b643f1f024747
           persist-credentials: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
         with:
           version: '0.12.6'
           python-version: '3.13.5'
           enable-cache: false
-      - name: Download exact official Windows candidate
-        if: runner.os == 'Windows'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          github-token: ${{ github.token }}
-          run-id: '38859544478'
-          name: AstroPilot-beta8-windows-x86_64-a5c77a79087e3e50285ec4413b8b643f1f024747
-          path: ${{ runner.temp }}/official-windows
-      - name: Qualify actual packaged runtime with isolated public authority
+      - name: Native isolated contracts; all signing/submission mocked
         shell: pwsh
         env:
-          APPROVED_SHA: ${{ inputs.approved_sha }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: |
-          node --version
-          if ($LASTEXITCODE -ne 0) { throw 'Node unavailable' }
-          python operations/tooling/packaged_recovery/bootstrap.py
+          python operations/tooling/distribution/run.py
           if ($LASTEXITCODE -ne 0) { throw 'Qualification failed' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: packaged-recovery-${{ matrix.os }}
+          name: distribution-contracts-${{ matrix.os }}
           path: |
-            ${{ runner.temp }}/packaged-recovery/bootstrap.log
-            ${{ runner.temp }}/packaged-recovery/*candidate.json
-            ${{ runner.temp }}/packaged-recovery/*provenance.json
-            ${{ runner.temp }}/packaged-recovery/proof/authority-snapshots.zip
-            ${{ runner.temp }}/packaged-recovery/proof/*/environment/HOME/Library/Logs/AstroPilot/*.log
-            ${{ runner.temp }}/packaged-recovery/proof/*/data/Logs/*.log
-            ${{ runner.temp }}/packaged-recovery/proof/result.json
-            ${{ runner.temp }}/packaged-recovery/proof/browser-provenance.json
-            ${{ runner.temp }}/packaged-recovery/proof/*/browser-result.json
-            ${{ runner.temp }}/packaged-recovery/proof/*/browser-environment.json
-            ${{ runner.temp }}/packaged-recovery/proof/*/*.log
-            ${{ runner.temp }}/packaged-recovery/proof/*/ui.*
+            ${{ runner.temp }}/distribution-proof/*.json
+            ${{ runner.temp }}/distribution-proof/*.log
+            ${{ runner.temp }}/distribution-proof/*.xml
           retention-days: 14
