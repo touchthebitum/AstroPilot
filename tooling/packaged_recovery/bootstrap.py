@@ -6,7 +6,7 @@ sha=os.environ['APPROVED_SHA'];assert sha=='a5c77a79087e3e50285ec4413b8b643f1f02
 assert subprocess.check_output(['git','rev-parse','HEAD'],cwd=source,text=True).strip()==sha
 root=Path(os.environ['RUNNER_TEMP'])/'packaged-recovery';root.mkdir(exist_ok=False)
 env={k:v for k,v in os.environ.items() if not k.startswith(('ASTROPILOT_','NIGHTMERIT_','FIELD_LAB_'))}
-env['BROWSER_NATIVE_HOME']=os.environ['HOME']
+if sys.platform=='darwin':env['BROWSER_NATIVE_HOME']=os.environ['HOME']
 for key in ('HOME','USERPROFILE','APPDATA','LOCALAPPDATA','TMP','TEMP','TMPDIR','XDG_CONFIG_HOME','XDG_CACHE_HOME','XDG_DATA_HOME','ASTROPILOT_DATA_DIR','UV_CACHE_DIR'):
  p=root/'environment'/key;p.mkdir(parents=True);env[key]=str(p)
 env.update(PYTHONUTF8='1',UV_NO_ENV_FILE='1',PRODUCT_SOURCE=str(source),APPROVED_SHA=sha,RECOVERY_PROOF=str(root/'proof'))

@@ -63,6 +63,9 @@ jobs:
             ${{ runner.temp }}/packaged-recovery/bootstrap.log
             ${{ runner.temp }}/packaged-recovery/*candidate.json
             ${{ runner.temp }}/packaged-recovery/*provenance.json
+            ${{ runner.temp }}/packaged-recovery/proof/authority-snapshots.zip
+            ${{ runner.temp }}/packaged-recovery/proof/*/environment/HOME/Library/Logs/AstroPilot/*.log
+            ${{ runner.temp }}/packaged-recovery/proof/*/data/Logs/*.log
             ${{ runner.temp }}/packaged-recovery/proof/result.json
             ${{ runner.temp }}/packaged-recovery/proof/browser-provenance.json
             ${{ runner.temp }}/packaged-recovery/proof/*/browser-result.json

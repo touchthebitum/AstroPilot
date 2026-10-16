@@ -1,6 +1,6 @@
 """Qualify actual frozen candidates, exclusively on disposable public data."""
 from pathlib import Path
-import os,sys,json,subprocess,shutil,hashlib,platform
+import os,sys,json,subprocess,shutil,hashlib,platform,zipfile
 SOURCE=Path(os.environ['PRODUCT_SOURCE']).resolve()
 OUT=Path(os.environ['RECOVERY_PROOF']).resolve()
 SHA=os.environ['APPROVED_SHA']
@@ -79,6 +79,10 @@ def main():
    assert quarantine[0].read_bytes()==bad
   rows.append({'case':name,'result':'PASS','identity':identity,'ui_recovery':browser,'quarantine_sha256':hashlib.sha256(bad).hexdigest(),'restored_profile_sha256':hashlib.sha256(profile).hexdigest(),'totals':totals,'restarts':2,'credit_replays':12,'healthy_recovery_refused':True,'canonical_authority_unchanged':True})
  assert runtime.authority(frozen)==baseline
+ with zipfile.ZipFile(OUT/'authority-snapshots.zip','w',compression=zipfile.ZIP_DEFLATED) as z:
+  for directory in [frozen,healthy/'data']+[OUT/name/'data' for name in ('invalid_utf8','deep_json','huge_integer')]:
+   for p in directory.rglob('*'):
+    if p.is_file():z.write(p,p.relative_to(OUT).as_posix())
  write(OUT/'result.json',{'result':'PASS','sha':SHA,'platform':platform.platform(),'real_packaged_runtime':True,'real_browser_recovery':True,'fixture_decisions_via_production_api':True,'credits_created_by_packaged_runtime':True,'restoration':'controlled healthy snapshot; not automatic UI backup restore','user_data_used':False,'authority_sha256':baseline,'rows':rows})
  print('PASS actual packaged profile recovery, restoration, two restarts and idempotent replay')
 if __name__=='__main__':main()
