@@ -81,3 +81,11 @@ globalThis.window={location:new URL('http://localhost/'),fetch:async(input,init)
  await window.fetch('/ui/app.js');assert.equal(calls[2].init.headers,undefined);
 })().catch(e=>{console.error(e);process.exitCode=1});
 ''')
+
+
+def test_guardian_protocol_errors_keep_the_current_authority():
+    c = client()
+    response = c.post('/v1/executions/example/guardian-renewal',content='invalid',
+                      headers={'content-type':'text/plain','X-NightMerit-Time-Authority':identity()})
+    assert response.status_code == 422
+    assert response.headers['X-NightMerit-Time-Authority'] == identity()

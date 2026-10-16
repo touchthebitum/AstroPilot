@@ -2100,21 +2100,7 @@ def create_app(
             origin = request.headers.get("origin")
             if request.method == "POST" and origin and origin != str(request.base_url).rstrip("/"):
                 return guardian_unavailable("invalid_guardian_renewal_request", None, clock, 422)
-        if request.url.path.startswith('/v1/'):
-            try:
-                authority = time_authority_id()
-            except (ValueError, OSError, RuntimeError):
-                return JSONResponse(status_code=503, content={'detail': {'code': 'time_authority_unavailable'}})
-            provided = request.headers.get('X-NightMerit-Time-Authority')
-            browser_write = (request.method not in {'GET', 'HEAD', 'OPTIONS'}
-                             and bool(request.headers.get('origin')) and not guardian_route)
-            if (provided is not None and provided != authority) or (browser_write and provided is None):
-                return JSONResponse(status_code=409, content={'detail': {'code': 'time_authority_changed'}},
-                                    headers={'X-NightMerit-Time-Authority': authority, 'Cache-Control': 'no-store'})
         response = await call_next(request)
-        if request.url.path.startswith('/v1/'):
-            response.headers['X-NightMerit-Time-Authority'] = authority
-
         if started is not None and (guardian_route or request.url.path in {"/v1/executions", "/v1/execution-transitions", "/v1/execution-sessions"}
                                    or request.url.path.endswith(("/executions", "/session"))):
             response.headers["Server-Timing"] = f"session;dur={(perf_counter() - started) * 1000:.3f}"
@@ -2124,6 +2110,26 @@ def create_app(
             response.headers["Cache-Control"] = "no-store"
         elif request.url.path in {"/ui/app.js", "/ui/alert-status.js", "/ui/styles.css", "/ui/timezone-authority.js"}:
             response.headers["Cache-Control"] = "no-cache"
+        return response
+
+    @application.middleware("http")
+    async def timezone_authority_policy(request: Request, call_next):
+        if not request.url.path.startswith('/v1/'):
+            return await call_next(request)
+        try:
+            authority = time_authority_id()
+        except (ValueError, OSError, RuntimeError):
+            return JSONResponse(status_code=503, content={'detail': {'code': 'time_authority_unavailable'}})
+        provided = request.headers.get('X-NightMerit-Time-Authority')
+        guardian_route = request.url.path.endswith("/guardian-renewal") or (renewal_enabled and request.url.path == "/v1/execution-transitions")
+        browser_write = (request.method not in {'GET', 'HEAD', 'OPTIONS'}
+                         and bool(request.headers.get('origin')) and not guardian_route)
+        if (provided is not None and provided != authority) or (browser_write and provided is None):
+            return JSONResponse(status_code=409, content={'detail': {'code': 'time_authority_changed'}},
+                                headers={'X-NightMerit-Time-Authority': authority, 'Cache-Control': 'no-store'})
+        response = await call_next(request)
+        # Include early protocol errors too: they are not a rules-version mismatch.
+        response.headers['X-NightMerit-Time-Authority'] = authority
         return response
 
     @application.get('/ui/timezone-data.js', include_in_schema=False)

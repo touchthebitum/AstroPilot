@@ -22,6 +22,8 @@ def configure() -> None:
 
 
 def _seconds(value: str) -> int:
+    if not re.fullmatch(r'[+\-]?\d{1,3}(?::\d{1,2}(?::\d{1,2})?)?', value):
+        raise ValueError('time_authority_invalid_offset')
     sign = -1 if value.startswith('-') else 1
     parts = [int(v) for v in value.lstrip('+-').split(':')]
     if len(parts) > 3 or parts[0] > 167 or any(v > 59 for v in parts[1:]):

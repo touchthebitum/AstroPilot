@@ -72,11 +72,12 @@
   }
   globalThis.NightMeritTime = Object.freeze({id:data.id, version:data.package_version,
     ianaVersion:data.iana_version, DateTimeFormat, offsetAt});
-  if (typeof window !== 'undefined' && window.fetch && window.location) {
-    const original = window.fetch.bind(window);
-    window.fetch = async (input, init = {}) => {
-      const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, window.location.href);
-      const api = url.origin === window.location.origin && url.pathname.startsWith('/v1/');
+  const browser = globalThis.window;
+  if (browser?.fetch && browser.location) {
+    const original = browser.fetch.bind(window);
+    browser.fetch = async (input, init = {}) => {
+      const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, browser.location.href);
+      const api = url.origin === browser.location.origin && url.pathname.startsWith('/v1/');
       if (!api) return original(input, init);
       const headers = new Headers(init.headers || (typeof input === 'object' ? input.headers : undefined));
       headers.set('X-NightMerit-Time-Authority', data.id);

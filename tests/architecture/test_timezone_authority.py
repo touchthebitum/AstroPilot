@@ -1,5 +1,5 @@
 """Locked TZif -> Python/browser parity, including future POSIX rules."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -40,7 +40,7 @@ print(tzdata.__version__)
 
 def test_every_bundled_zone_at_transitions_and_future():
     data = json.loads(bundle_json())
-    # One representative per identical TZif, aliases checked separately below.
+    # One representative per identical TZif; all links share that decoded record.
     representatives = {digest: zone for zone, digest in data['zones'].items()}
     samples = []
     dates = [datetime(y,m,15,12,tzinfo=timezone.utc) for y in (1900,2026,2040,2100,2500,9998) for m in (1,4,7,11)]
@@ -50,7 +50,7 @@ def test_every_bundled_zone_at_transitions_and_future():
             instants.update((instant-1,instant,instant+1))
         tz = ZoneInfo(zone)
         for instant in sorted(instants):
-            expected = int(datetime.fromtimestamp(instant, timezone.utc).astimezone(tz).utcoffset().total_seconds())
+            expected = int((datetime(1970,1,1,tzinfo=timezone.utc) + timedelta(seconds=instant)).astimezone(tz).utcoffset().total_seconds())
             samples.append([zone, instant, expected])
     result = json.loads(node('const samples='+json.dumps(samples)+';\n'+'''
 const failures=samples.filter(([zone,t,expected])=>NightMeritTime.offsetAt(zone,t*1000)!==expected);
@@ -70,9 +70,10 @@ def test_winnipeg_zurich_wall_clock_and_mission(browser_zone, monkeypatch):
     helpers = source[source.index('function localDateTimeParts('):end]
     mission = source[source.index('function missionTimezone('):source.index('function clock(')]
     import tzdata
-    expected = '07:00' if tzdata.__version__ >= '2026.5' else '06:00'
     at = datetime(2026,11,2,12,tzinfo=timezone.utc)
-    expected_iso = at.astimezone(ZoneInfo('America/Winnipeg')).isoformat()
+    local = at.astimezone(ZoneInfo('America/Winnipeg'))
+    expected = {'2026.3':'06:00','2026.5':'07:00'}.get(tzdata.__version__, local.strftime('%H:%M'))
+    expected_iso = local.isoformat()
     node(helpers+mission+'''
 const assert=require('node:assert/strict');
 const instant='2026-11-02T12:00:00Z';
