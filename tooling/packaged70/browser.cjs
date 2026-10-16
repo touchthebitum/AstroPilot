@@ -157,7 +157,7 @@ async function journey() {
     await waitFor(()=>evaluate(`Boolean(currentSession()?.credit) && !state.sessionBusy && document.querySelector('#session-status').textContent.includes('Crédit enregistré')`),'credit recorded through UI');
     const session=await evaluate('currentSession()');
     assert.equal(session.acquired_after_seconds,intent==='ou4_oiii'?900:5400);
-    assert(session.execution.actual_duration>=7200);
+    assert(Date.parse(session.execution.actual_end)-Date.parse(session.execution.actual_start)>=7200000);
     const uiSession=await evaluate(`({status:document.querySelector('#session-status').textContent,after:document.querySelector('#session-after').textContent})`);
     record={accepted,session,uiSession,session_actions_via_real_dom:true,client_start_clock_fixture:"two hours before real current time; restored before closure; server clock unchanged",taskRows,expected,idempotent_confirmation:true,prepared_night:fixture.response.night_date,
       decision_generation:'source production API with synthetic weather; fixture view model supplied directly to UI',confirmation:'real DOM click to unmodified frozen backend'};
