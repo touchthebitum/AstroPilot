@@ -1,4 +1,4 @@
-name: Read-only Windows OIII screenshot diagnostic
+name: Build and qualify isolated physical test kits 70ac6e0
 on:
   workflow_dispatch:
     inputs:
@@ -9,13 +9,13 @@ permissions:
   contents: read
   actions: read
 jobs:
-  qualify:
+  kits:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2022]
+        os: [windows-2022, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -38,7 +38,7 @@ jobs:
           version: '0.12.6'
           python-version: '3.13.5'
           enable-cache: false
-      - name: Download exact official Windows candidate
+      - name: Download exact official Windows portable
         if: runner.os == 'Windows'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -46,32 +46,26 @@ jobs:
           run-id: '38919145126'
           name: AstroPilot-beta8-windows-x86_64-70ac6e0719cdc8c6ce76cbb7a2bfec1a24c82c9b
           path: ${{ runner.temp }}/official-windows
-      - name: Download previously qualified public profile only
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          github-token: ${{ github.token }}
-          run-id: '38921019839'
-          name: packaged70-windows-2022
-          path: ${{ runner.temp }}/prior-proof
-      - name: Qualify actual packaged runtime with isolated public authority
+      - name: Build autonomous launchers and qualify real guide, candidate, resume and export
         shell: pwsh
-        env:
-          APPROVED_SHA: ${{ inputs.approved_sha }}
-          RESHOOT_ONLY: 1
         run: |
-          node --version
-          if ($LASTEXITCODE -ne 0) { throw 'Node unavailable' }
-          python operations/tooling/packaged70/bootstrap.py
-          if ($LASTEXITCODE -ne 0) { throw 'Qualification failed' }
+          python operations/tooling/physical70/build.py
+          if ($LASTEXITCODE -ne 0) { throw 'Kit qualification failed' }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
-          name: packaged70-${{ matrix.os }}
+          name: physical-kit-proof-${{ matrix.os }}
           path: |
-            ${{ runner.temp }}/packaged70/bootstrap.log
-            ${{ runner.temp }}/packaged70/*candidate.json
-            ${{ runner.temp }}/packaged70/*provenance.json
-            ${{ runner.temp }}/packaged70/mac-signature.txt
-            ${{ runner.temp }}/packaged70/proof/
-            !${{ runner.temp }}/packaged70/proof/**/browser-profile/**
-          retention-days: 14
+            ${{ runner.temp }}/physical70/build.log
+            ${{ runner.temp }}/physical70/proof/
+            ${{ runner.temp }}/physical70/kit-validation.json
+            !${{ runner.temp }}/physical70/proof/**/browser-profile/**
+          retention-days: 30
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: NightMerit-physical-kit-${{ matrix.os }}-70ac6e0
+          path: |
+            ${{ runner.temp }}/physical70/NightMerit-Test-70ac6e0-*.zip
+            ${{ runner.temp }}/physical70/NightMerit-Test-70ac6e0-*.zip.sha256
+            ${{ runner.temp }}/physical70/kit-validation.json
+          retention-days: 30

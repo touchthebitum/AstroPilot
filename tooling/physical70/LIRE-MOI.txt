@@ -1,0 +1,53 @@
+NIGHTMERIT — TEST PHYSIQUE WINDOWS / MAC — MAIN 70ac6e0
+
+1. Copier et décompresser TOUT le kit dans un dossier neuf sur le disque local
+   de la machine à tester. Ne pas lancer depuis l’aperçu du ZIP.
+   Windows : kit x64. Mac : kit Apple Silicon (ARM64).
+2. Double-cliquer DEMARRER-TEST.cmd (Windows) ou DEMARRER-TEST.command (Mac).
+   Ne pas ouvrir AstroPilot directement : ce lanceur garantit la copie isolée.
+3. Le navigateur de test fourni ouvre le guide. Garder sa fenêtre de lancement
+   ouverte. Choisir Zurich, puis suivre les étapes dans le guide ; l’application
+   s’ouvre dans un autre onglet. Aucun Python ni installation du produit requis.
+4. Vérifier Hα : Crédit enregistré et 1 h 30 acquise. Puis OIII : Crédit enregistré
+   et 0 h 15 acquise. Toutes ces durées et observations sont FICTIVES.
+5. Dans le guide, cocher la confirmation des deux crédits et cliquer Redémarrer.
+   Attendre le contrôle, puis utiliser Rouvrir après redémarrage. Retrouver les
+   deux missions et leurs sessions terminées, sans créer de nouveau crédit.
+6. Cocher la vérification après reprise et cliquer Valider et exporter.
+   Envoyer le ZIP resultats-kit-70ac6e0-*.zip créé dans RESULTATS, à côté des lanceurs.
+   Il peut être copié sur FLASH pour le joindre à la discussion depuis le Mac.
+   Pour finir, cliquer Fermer le test dans le guide.
+
+Pour contrôler Winnipeg aussi : fermer le premier test normalement, lancer de
+nouveau DEMARRER et choisir Winnipeg. Cela crée une autre copie synthétique.
+
+REPRENDRE-TEST retrouve la dernière copie du kit, sans la réinitialiser.
+Si les deux crédits existent déjà, passer aux contrôles de reprise ; ne pas
+refaire les sessions. Les copies restent sous COPIES-ISOLEES dans le kit.
+Ne pas déplacer le kit ou la copie pendant un test. Pour préserver une reprise,
+conserver le kit entier et son fichier derniere-copie.json sur la même machine.
+
+Si le guide/app affiche une erreur : utiliser Exporter un diagnostic incomplet.
+Un résultat incomplet n’est pas transformé en réussite. Si le lancement lui-même
+est refusé par Windows ou macOS, conserver le message pour nous le transmettre ;
+ne pas désactiver les protections du système. Le port 8000 déjà utilisé provoque
+un refus sûr : aucune instance existante n’est arrêtée par le kit.
+
+PÉRIMÈTRE
+Profils neufs purement synthétiques, sites publics Zurich/Winnipeg, matériel de
+test Samyang 135 mm / ASI183MM et intents Ha/OIII 6,5 nm. Aucun profil réel, stash,
+NAS ou inventaire legacy n’est lu. Météo simulée cohérente, seuils main inchangés.
+La vraie application empaquetée réalise Tonight, confirmation, sessions et crédits.
+Le navigateur a son propre dossier de données sous la copie du kit.
+Le lanceur crée un certificat TLS de test éphémère, accepté seulement par le
+processus de test pour sa météo locale : aucun trousseau ni magasin système modifié.
+NightMerit et le lanceur Mac portent uniquement une signature ad hoc locale ;
+le Chrome officiel fourni conserve sa signature de fournisseur existante.
+Aucune identité personnelle, signature de distribution, soumission Apple,
+installation système, fusion, tag ou release.
+
+Le ZIP résultat exporte vérifications, confirmations déclarées et journaux.
+Il exclut profil, clés TLS et dossier du navigateur. Les journaux peuvent contenir
+le chemin local de cette copie. Les verdicts de laboratoire restent distincts
+(PASS_LAB) des confirmations du testeur physique (PASS_PC_DECLARE).
+Les sources du lanceur et les empreintes sont dans Audit et manifest.json.
