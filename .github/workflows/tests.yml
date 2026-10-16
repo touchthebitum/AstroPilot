@@ -165,7 +165,7 @@ jobs:
             [Environment]::SetEnvironmentVariable($entry.Key, $dir)
           }
           $report = Join-Path $env:RUNNER_TEMP 'mission-times.xml'
-          uv run --locked --no-sync python -m pytest -q tests/api/test_mission_task_times_ui.py --junitxml="$report"
+          uv run --locked --no-sync python -m pytest -q tests/api/test_mission_task_times_ui.py tests/architecture/test_timezone_authority.py tests/api/test_timezone_authority_transport.py --junitxml="$report"
           if ($LASTEXITCODE -ne 0) { throw 'Mission local time regressions failed' }
       - name: Export native mission time regressions
         if: always()

@@ -1998,6 +1998,8 @@ def create_app(
     guardian_attestation_path: Path | None = None,
     guardian_command_capacity: int = 4096,
 ) -> FastAPI:
+    from decision.timezone_authority import bundle_json, identity as time_authority_id
+
     application_version = canonical_version()
     resolved_service = None
     guardian_adapter = None
@@ -2106,9 +2108,38 @@ def create_app(
             response.headers["Cache-Control"] = "no-store"
         if request.url.path == "/":
             response.headers["Cache-Control"] = "no-store"
-        elif request.url.path in {"/ui/app.js", "/ui/alert-status.js", "/ui/styles.css"}:
+        elif request.url.path in {"/ui/app.js", "/ui/alert-status.js", "/ui/styles.css", "/ui/timezone-authority.js"}:
             response.headers["Cache-Control"] = "no-cache"
         return response
+
+    @application.middleware("http")
+    async def timezone_authority_policy(request: Request, call_next):
+        if not request.url.path.startswith('/v1/'):
+            return await call_next(request)
+        try:
+            authority = time_authority_id()
+        except (ValueError, OSError, RuntimeError):
+            return JSONResponse(status_code=503, content={'detail': {'code': 'time_authority_unavailable'}})
+        provided = request.headers.get('X-NightMerit-Time-Authority')
+        guardian_route = request.url.path.endswith("/guardian-renewal") or (renewal_enabled and request.url.path == "/v1/execution-transitions")
+        browser_write = (request.method not in {'GET', 'HEAD', 'OPTIONS'}
+                         and bool(request.headers.get('origin')) and not guardian_route)
+        if (provided is not None and provided != authority) or (browser_write and provided is None):
+            return JSONResponse(status_code=409, content={'detail': {'code': 'time_authority_changed'}},
+                                headers={'X-NightMerit-Time-Authority': authority, 'Cache-Control': 'no-store'})
+        response = await call_next(request)
+        # Include early protocol errors too: they are not a rules-version mismatch.
+        response.headers['X-NightMerit-Time-Authority'] = authority
+        return response
+
+    @application.get('/ui/timezone-data.js', include_in_schema=False)
+    def timezone_data():
+        try:
+            body = 'globalThis.NightMeritTimeData=' + bundle_json() + ';'
+            return Response(content=body, media_type='application/javascript', headers={'Cache-Control': 'no-store'})
+        except (ValueError, OSError, RuntimeError):
+            return Response(status_code=503, content='/* time_authority_unavailable */',
+                            media_type='application/javascript', headers={'Cache-Control': 'no-store'})
 
     application.mount(
         "/ui",

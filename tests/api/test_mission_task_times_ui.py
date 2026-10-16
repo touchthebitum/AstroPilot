@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 import shutil
-import subprocess
+from tests.timezone_ui_helpers import run_with_time_authority
 
 import pytest
 
@@ -47,7 +47,7 @@ function label(value,m=mission) {return missionTaskTime(value,m,missionTimezone(
     script = tmp_path / "mission-ui.cjs"
     script.write_text(harness + helpers + render + checks, encoding="utf-8")
     env = dict(os.environ, TZ=browser_zone)
-    result = subprocess.run([node, str(script)], env=env, capture_output=True,
+    result = run_with_time_authority([node, str(script)], env=env, capture_output=True,
                             text=True, encoding="utf-8", timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
 

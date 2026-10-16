@@ -2,7 +2,7 @@
 
 from pathlib import Path
 import shutil
-import subprocess
+from tests.timezone_ui_helpers import run_with_time_authority
 
 import pytest
 
@@ -65,7 +65,7 @@ assert.equal(document.querySelector('#session-hours').value, '0');
 assert.equal(document.querySelector('#session-minutes').value, '30');
 assert.equal(observationLinkageRenderCount, 3);
 '''
-    result = subprocess.run([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True, encoding="utf-8")
+    result = run_with_time_authority([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
 
 
@@ -147,7 +147,7 @@ async function fetch(url, options) {
   assert.equal(posts, 1, 'reopen must not submit a second credit');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    result = subprocess.run([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True, encoding="utf-8")
+    result = run_with_time_authority([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
 
 
@@ -256,7 +256,7 @@ async function fetch(url, options) {
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    result = subprocess.run([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True, encoding="utf-8")
+    result = run_with_time_authority([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
 
 
@@ -300,7 +300,7 @@ async function fetch(_url, options) {
   assert.doesNotMatch(message, /réponse incertaine/);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    result = subprocess.run([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True, encoding="utf-8")
+    result = run_with_time_authority([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
 
 
@@ -350,7 +350,7 @@ async function fetch(url) {
   assert.equal(opened, true);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    result = subprocess.run([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + restore + open_handler + checks, capture_output=True, text=True, encoding="utf-8")
+    result = run_with_time_authority([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + restore + open_handler + checks, capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
 
 
@@ -416,7 +416,7 @@ assert.equal(sessionStatus('completed'), 'Terminée');
 assert.equal(sessionStatus('interrupted'), 'Interrompue');
 assert.doesNotMatch(document.querySelector('#session-credit-preview').textContent, /intent|sh2|ha/i);
 '''
-    result = subprocess.run([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True, encoding="utf-8")
+    result = run_with_time_authority([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
 
 
@@ -454,7 +454,7 @@ assert.equal(message.hidden, true); assert.equal(loads, 1); assert.equal(opens, 
 assert.equal(state.fieldObservationContextInvalid, true);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    result = subprocess.run([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helper + checks, capture_output=True, text=True, encoding="utf-8")
+    result = run_with_time_authority([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helper + checks, capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
 
 
@@ -482,7 +482,7 @@ const label = missionDateTimeLabel('2026-10-04T18:00:00Z', zone);
 assert.ok(label.includes({json.dumps(expected)}), label);
 assert.ok(label.endsWith(' · ' + zone));
 """
-    result = subprocess.run([node, "-e", helpers + checks], env={**os.environ, "TZ": browser_zone}, capture_output=True, text=True, encoding="utf-8")
+    result = run_with_time_authority([node, "-e", helpers + checks], env={**os.environ, "TZ": browser_zone}, capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
 
 
@@ -514,7 +514,7 @@ async function fetch() {calls++;if(fail)throw new Error('network');return respon
   assert.equal(calls,3);assert.equal(logs.length,2,'disabled timing emits no diagnostics');
 })().catch(()=>{process.exitCode=1;});
 '''
-    subprocess.run([node, '-e', harness + helper + checks], check=True, capture_output=True, text=True, encoding="utf-8")
+    run_with_time_authority([node, '-e', harness + helper + checks], check=True, capture_output=True, text=True, encoding="utf-8")
 
 
 def test_reopened_mission_prefers_persisted_site_timezone():
@@ -530,5 +530,5 @@ assert.equal(zone, 'Europe/Madrid');
 assert.ok(missionDateTimeLabel('2026-10-11T22:00:00+02:00', zone).includes('22:00'));
 assert.equal(missionTimezone({}, null), 'UTC');
 """
-    result = subprocess.run([node, "-e", helpers + checks], capture_output=True, text=True, encoding="utf-8")
+    result = run_with_time_authority([node, "-e", helpers + checks], capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr

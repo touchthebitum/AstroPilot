@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 import shutil
-import subprocess
+from tests.timezone_ui_helpers import run_with_time_authority
 
 WEB = Path(__file__).parents[2] / 'astropilot/web'
 
@@ -52,9 +52,9 @@ const output = {defaults,pro,reload,simple,synchronized,invalid,ignored,
     engine = shutil.which('node') or shutil.which('osascript')
     assert engine
     script = tmp_path / 'mode.js'
-    script.write_text(harness + source + checks + ('\nconsole.log(JSON.stringify(output));' if Path(engine).name == 'node' else '\nJSON.stringify(output);'))
-    args = [engine] if Path(engine).name == 'node' else [engine, '-l', 'JavaScript']
-    result = json.loads(subprocess.check_output([*args, str(script)], text=True))
+    script.write_text(harness + source + checks + ('\nconsole.log(JSON.stringify(output));' if Path(engine).stem.lower() == 'node' else '\nJSON.stringify(output);'))
+    args = [engine] if Path(engine).stem.lower() == 'node' else [engine, '-l', 'JavaScript']
+    result = json.loads(run_with_time_authority([*args, str(script)], text=True, capture_output=True, check=True).stdout)
     assert result['defaults'] == result['invalid'] == result['ignored'] == 'simple'
     assert result['reload'] == result['synchronized'] == 'pro'
     assert result['pro'] == ['pro', True, 'Historique des validations']

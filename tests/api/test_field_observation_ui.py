@@ -4,6 +4,7 @@ from pathlib import Path
 import json
 import shutil
 import subprocess
+from tests.timezone_ui_helpers import bootstrap, run_with_time_authority
 
 import pytest
 
@@ -218,8 +219,8 @@ async function fetch() { return {ok: true, json: async () => clone(serverSession
 '''
     time_helpers = source[source.index("function missionTimezone("):source.index("function clock(")]
     program = harness + time_helpers + source[source.index("function decisionSiteFingerprint("):source.index("function currentDecisionMatchesSite(")] + session_helpers + context_helpers + same_context + sync_context + choice_listener + checks
-    command = [engine, "-e", program] if Path(engine).name == "node" else [engine, "-l", "JavaScript", "-e", program]
-    result = subprocess.run(
+    command = [engine, "-e", program] if Path(engine).stem.lower() == "node" else [engine, "-l", "JavaScript", "-e", program]
+    result = run_with_time_authority(
         command,
         capture_output=True,
         text=True,
@@ -1331,7 +1332,7 @@ async function check() {
   assert.equal(fieldObservationDraft().conditions.temperature_c, 7.5);
 }
 '''
-    if Path(engine).name == "node":
+    if Path(engine).stem.lower() == "node":
         program = harness + helpers + checks + "\ncheck().catch(error => { console.error(error); process.exitCode = 1; });\n"
         command = [engine, "-"]
     else:
@@ -1371,7 +1372,7 @@ async function check() {
         file = tmp_path / "field_observation_ui.js"
         file.write_text(program, encoding="utf-8")
         command = [engine, "-l", "JavaScript", str(file)]
-    result = subprocess.run(command, input=program if Path(engine).name == "node" else None,
+    result = run_with_time_authority(command, input=program if Path(engine).stem.lower() == "node" else None,
         capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
 
@@ -1379,7 +1380,7 @@ async function check() {
 def _field_observation_multicontext_program():
     """Controlled simulator, not a browser: separate globals, locks, and event tasks."""
     engine = javascript_engine()
-    if engine is None or Path(engine).name != "node":
+    if engine is None or Path(engine).stem.lower() != "node":
         pytest.skip("Node.js is required for the isolated multi-context harness")
     source = SCRIPT.read_text(encoding="utf-8")
     helpers = source[
@@ -1465,7 +1466,7 @@ function makeContext(name, locks = controlledLocks) {
     return radio ? element(`#surface-${radio[1]}`) : element(selector);
   }, createElement() { const item = new Element(); item.owner = element; return item; }};
   let uuid = 0;
-      const sandbox = {console, structuredClone, URL, TextEncoder, Intl, Date, JSON, Map, Set, Object, Array, AbortController,
+      const sandbox = {NightMeritTime, console, structuredClone, URL, TextEncoder, Intl, Date, JSON, Map, Set, Object, Array, AbortController,
     String, Number, Boolean, RegExp, Error, TypeError, Promise, encodeURIComponent, setTimeout, clearTimeout,
     TextEncoder, document, indexedDB: recoveryIndexedDB(recoveryRecords), window: {confirm: () => true}, navigator: locks ? {locks} : {},
     crypto: {subtle: require("crypto").webcrypto.subtle, randomUUID: () => `${name}-uuid-${++uuid}`}, posts: [], uuidCount: () => uuid};
@@ -2542,7 +2543,7 @@ const projection = payload => ({...structuredClone(payload),
 
 def test_field_observation_two_context_web_locks_inventory_and_clear():
     program = _field_observation_multicontext_program()
-    result = subprocess.run([javascript_engine(), "-"], input=program, capture_output=True, text=True, check=False, timeout=90)
+    result = run_with_time_authority([javascript_engine(), "-"], input=program, capture_output=True, text=True, check=False, timeout=90)
     assert result.returncode == 0, result.stderr
 
 
@@ -2624,7 +2625,7 @@ function replyFromPython(url, options) {
 '''.replace("DECISION_ID", json.dumps(decision_id))
     # Keep stdin available for the Python/Node request-response transport.
     script = tmp_path / "decision_context_refresh.cjs"
-    script.write_text(prefix + checks, encoding="utf-8")
+    script.write_text(bootstrap() + prefix + checks, encoding="utf-8")
     process = subprocess.Popen([javascript_engine(), str(script)],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     requests = []
@@ -2653,7 +2654,7 @@ function replyFromPython(url, options) {
 
 def test_site_change_invalidates_immediate_decision_preserves_recovery_and_catalogue(tmp_path):
     engine = javascript_engine()
-    if engine is None or Path(engine).name != "node":
+    if engine is None or Path(engine).stem.lower() != "node":
         pytest.skip("Node is required for the configuration/observation integration harness")
     source = SCRIPT.read_text(encoding="utf-8")
     prefix = _field_observation_multicontext_program().split("(async () => {\n  // Two distinct states")[0]
@@ -2818,14 +2819,14 @@ function show() {}
     additions += configuration + setter + tonight
     script = tmp_path / "site_invalidation.cjs"
     script.write_text(prefix + "\nconst additions = " + json.dumps(additions) + ";\n" + checks)
-    result = subprocess.run([engine, str(script)], capture_output=True, text=True, timeout=45)
+    result = run_with_time_authority([engine, str(script)], capture_output=True, text=True, timeout=45)
     assert result.returncode == 0, result.stderr
 
 
 
 def test_recovery_journal_v2_requires_text_digest():
     engine = javascript_engine()
-    if engine is None or Path(engine).name != "node":
+    if engine is None or Path(engine).stem.lower() != "node":
         pytest.skip("Node.js is required for the production journal parser harness")
     source = SCRIPT.read_text(encoding="utf-8")
     helpers = source[source.index("const OBSERVATION_CHOICES ="):
@@ -2846,7 +2847,7 @@ assert.equal(valid.resolved[0].digest, digest);
 assert.equal(validFieldObservationRecoveryJournal({version: 1, entries: [], resolved: ['legacy']}), true);
 console.log('strict-journal-parser-completed');
 """
-    result = subprocess.run([engine, "-"], input=helpers + checks,
+    result = run_with_time_authority([engine, "-"], input=helpers + checks,
         capture_output=True, text=True, check=False, timeout=30)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == 'strict-journal-parser-completed'

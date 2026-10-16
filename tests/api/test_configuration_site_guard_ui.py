@@ -1,7 +1,7 @@
 """Execute production async configuration/site guards with controlled responses."""
 from pathlib import Path
 import shutil
-import subprocess
+from tests.timezone_ui_helpers import run_with_time_authority
 
 import pytest
 
@@ -424,6 +424,6 @@ function showMessage() {}
   console.log('all-generation-scenarios-completed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    result = subprocess.run([node, '-e', harness + helpers + checks], capture_output=True, text=True, timeout=30)
+    result = run_with_time_authority([node, '-e', harness + helpers + checks], capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == 'all-generation-scenarios-completed', 'Harness did not finish all awaited scenarios'

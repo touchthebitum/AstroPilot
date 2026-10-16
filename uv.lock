@@ -69,6 +69,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "requests" },
     { name = "timezonefinder" },
+    { name = "tzdata" },
     { name = "uvicorn" },
 ]
 
@@ -76,7 +77,6 @@ dependencies = [
 packaging = [
     { name = "pyinstaller" },
     { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
-    { name = "tzdata" },
 ]
 test = [
     { name = "httpx2" },
@@ -95,7 +95,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0,<9.0" },
     { name = "requests", specifier = ">=2.32,<3.0" },
     { name = "timezonefinder", specifier = ">=8,<9" },
-    { name = "tzdata", marker = "extra == 'packaging'", specifier = ">=2025.2" },
+    { name = "tzdata", specifier = ">=2025.2" },
     { name = "uvicorn", specifier = ">=0.52,<1.0" },
 ]
 provides-extras = ["packaging", "test"]

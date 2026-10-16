@@ -2,7 +2,7 @@
 
 from pathlib import Path
 import shutil
-import subprocess
+from tests.timezone_ui_helpers import run_with_time_authority
 
 import pytest
 
@@ -25,7 +25,7 @@ def _run_javascript(source: str) -> None:
               + _javascript_between("function siteTimezone()", "function decisionSiteFingerprint(")
               .split("function siteConfigurationIdentity", 1)[0]
               + _javascript_between("function windowTimezone(", "function clock(") + source)
-    result = subprocess.run(
+    result = run_with_time_authority(
         [node, "-e", source], capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr

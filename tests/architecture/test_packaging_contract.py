@@ -55,6 +55,7 @@ def test_packaging_dependencies_are_isolated_from_runtime_dependencies():
         "requests>=2.32,<3.0",
         "timezonefinder>=8,<9",
         "uvicorn>=0.52,<1.0",
+        "tzdata>=2025.2",
     ]
     packaging_dependencies = project["optional-dependencies"]["packaging"]
     assert any(
@@ -68,10 +69,8 @@ def test_packaging_dependencies_are_isolated_from_runtime_dependencies():
         and "sys_platform == 'darwin'" in dependency
         for dependency in packaging_dependencies
     )
-    assert any(
-        dependency.lower().startswith("tzdata")
-        for dependency in packaging_dependencies
-    )
+    # Rules are required by every runtime, rather than only packaged executables.
+    assert not any(dependency.lower().startswith("tzdata") for dependency in packaging_dependencies)
 
 
 def test_wheel_excludes_internal_decision_tests():

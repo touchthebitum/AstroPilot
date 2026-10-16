@@ -15,6 +15,7 @@ dependencies = [
     "requests>=2.32,<3.0",
     "timezonefinder>=8,<9",
     "uvicorn>=0.52,<1.0",
+    "tzdata>=2025.2",
 ]
 
 [project.scripts]
@@ -26,7 +27,6 @@ astropilot-field-lab = "astropilot.reference_station_cli:main"
 packaging = [
     "pyinstaller>=6.22,<7.0",
     "pyobjc-framework-Cocoa>=11,<13; sys_platform == 'darwin'",
-    "tzdata>=2025.2",
 ]
 test = [
     "httpx2>=2.0,<3.0",
