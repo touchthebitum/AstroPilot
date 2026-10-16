@@ -1,4 +1,12 @@
 "use strict";
+if (!globalThis.NightMeritTime) {
+  const notice = document.createElement('p');
+  notice.setAttribute('role', 'alert');
+  notice.textContent = 'Les règles d’heure sont indisponibles. Rechargez avant de préparer une mission.';
+  document.body.prepend(notice);
+  document.querySelectorAll('button,input,select,textarea').forEach(el => {el.disabled = true;});
+  throw new Error('time_authority_unavailable');
+}
 
 // UI preference only: never read by scientific or persistence handlers.
 const UI_MODE_KEY = "nightmerit.ui-mode.v1";
@@ -631,7 +639,7 @@ function renderRecentDecisions() {
     const button = document.createElement("button");
     button.type = "button";
     let date = "inconnue";
-    try { if (candidate.retrieved_at_utc != null) date = new Intl.DateTimeFormat("fr-CH", {timeZone: context.timezone, dateStyle: "short", timeStyle: "short"}).format(new Date(candidate.retrieved_at_utc)); } catch (_) {}
+    try { if (candidate.retrieved_at_utc != null) date = new NightMeritTime.DateTimeFormat("fr-CH", {timeZone: context.timezone, dateStyle: "short", timeStyle: "short"}).format(new Date(candidate.retrieved_at_utc)); } catch (_) {}
     button.textContent = `Prévision récupérée le ${date} · Site configuré`
       + (candidate.decision_status != null ? ` · ${candidate.decision_status}` : "")
       + (candidate.target != null ? ` · ${candidate.target}` : "") + ` · …${candidate.decision_id.slice(-6)}`;
@@ -1150,7 +1158,7 @@ function zonedDateTimeParts(date, timezone) {
   }
   let formatter;
   try {
-    formatter = new Intl.DateTimeFormat("en-CA", {
+    formatter = new NightMeritTime.DateTimeFormat("en-CA", {
       timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
       hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
     });
@@ -2760,7 +2768,7 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
     if (!value || !Number.isFinite(Date.parse(value))) return unavailable;
     const utc = new Date(value).toISOString();
     try {
-      return timezone ? `${new Intl.DateTimeFormat("fr-CH", {timeZone: timezone,
+      return timezone ? `${new NightMeritTime.DateTimeFormat("fr-CH", {timeZone: timezone,
         dateStyle: "short", timeStyle: "short"}).format(new Date(value))} (${timezone}) · ${utc}` : utc;
     } catch (_) { return utc; }
   };
@@ -3696,7 +3704,7 @@ function duration(hours) {
 function windowTimezone(decision) {
   const candidate = decision?.weather_trust?.timezone ?? siteTimezone() ?? "UTC";
   try {
-    return new Intl.DateTimeFormat("fr-CH", {timeZone: candidate}).resolvedOptions().timeZone;
+    return new NightMeritTime.DateTimeFormat("fr-CH", {timeZone: candidate}).resolvedOptions().timeZone;
   } catch (_) { return "UTC"; }
 }
 
@@ -3705,14 +3713,14 @@ function windowTimezone(decision) {
 function missionTimezone(mission, context) {
   const candidate = mission?.site_timezone ?? context?.windowTimezone ?? mission?.windowTimezone ?? "UTC";
   try {
-    return new Intl.DateTimeFormat("fr-CH", {timeZone: candidate}).resolvedOptions().timeZone;
+    return new NightMeritTime.DateTimeFormat("fr-CH", {timeZone: candidate}).resolvedOptions().timeZone;
   } catch (_) { return "UTC"; }
 }
 
 function missionDateTimeLabel(value, zone) {
   const parsed = new Date(value);
   const label = value && !Number.isNaN(parsed.getTime())
-    ? new Intl.DateTimeFormat("fr-CH", {year:"numeric", month:"2-digit", day:"2-digit",
+    ? new NightMeritTime.DateTimeFormat("fr-CH", {year:"numeric", month:"2-digit", day:"2-digit",
       hour:"2-digit", minute:"2-digit", hour12:false, timeZone:zone}).format(parsed)
     : "Non précisée";
   return `${label} · ${zone}`;
@@ -3723,7 +3731,7 @@ function clock(value, timeZone) {
   if (/^\d{2}:\d{2}$/.test(value)) return value;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return String(value);
-  return new Intl.DateTimeFormat("fr-CH", {
+  return new NightMeritTime.DateTimeFormat("fr-CH", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -3735,7 +3743,7 @@ function dateLabel(value) {
   if (!value) return "Prochaine nuit disponible";
   const parsed = new Date(`${value}T12:00:00`);
   if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat("fr-CH", {
+  return new NightMeritTime.DateTimeFormat("fr-CH", {
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -3747,7 +3755,7 @@ function siteDateTime(value, timeZone) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return String(value);
   try {
-    return new Intl.DateTimeFormat("fr-CH", {
+    return new NightMeritTime.DateTimeFormat("fr-CH", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -3838,7 +3846,7 @@ function missionTaskTime(value, mission, zone) {
   const instant = explicit ? new Date(boundary) : new Date(NaN);
   if (!Number.isNaN(instant.getTime())) {
     instant.setTime(instant.getTime() + delta * 60000);
-    return new Intl.DateTimeFormat("fr-CH", {
+    return new NightMeritTime.DateTimeFormat("fr-CH", {
       timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
       hour: "2-digit", minute: "2-digit", hour12: false, timeZoneName: "shortOffset",
     }).format(instant);

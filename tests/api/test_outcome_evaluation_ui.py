@@ -1,6 +1,6 @@
 from pathlib import Path
 import runpy
-import subprocess
+from tests.timezone_ui_helpers import run_with_time_authority
 
 import pytest
 
@@ -263,7 +263,7 @@ const missing = () => response(404,{detail:{code:'outcome_evaluation_not_found'}
   assert.equal(element('#outcome-compare').disabled,true);
 })().catch(error=>{console.error(error);process.exitCode=1;});
 '''.replace('HELPERS',helpers)
-    run = subprocess.run([engine,'-'],input=program,text=True,capture_output=True,timeout=30)
+    run = run_with_time_authority([engine,'-'],input=program,text=True,capture_output=True,timeout=30)
     assert run.returncode == 0, run.stderr
 
 
@@ -319,7 +319,7 @@ HELPERS
     ])
     program = program.replace('(async()=>{', context_helpers + '\n' + CONTEXT_FIXTURE + '(async()=>{', 1)
     program = 'const fixtures=' + json.dumps(fixtures) + ';\n' + program
-    result = subprocess.run([engine, '-'], input=program, text=True, capture_output=True, timeout=30)
+    result = run_with_time_authority([engine, '-'], input=program, text=True, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
 
 

@@ -1998,6 +1998,8 @@ def create_app(
     guardian_attestation_path: Path | None = None,
     guardian_command_capacity: int = 4096,
 ) -> FastAPI:
+    from decision.timezone_authority import bundle_json, identity as time_authority_id
+
     application_version = canonical_version()
     resolved_service = None
     guardian_adapter = None
@@ -2098,7 +2100,21 @@ def create_app(
             origin = request.headers.get("origin")
             if request.method == "POST" and origin and origin != str(request.base_url).rstrip("/"):
                 return guardian_unavailable("invalid_guardian_renewal_request", None, clock, 422)
+        if request.url.path.startswith('/v1/'):
+            try:
+                authority = time_authority_id()
+            except (ValueError, OSError, RuntimeError):
+                return JSONResponse(status_code=503, content={'detail': {'code': 'time_authority_unavailable'}})
+            provided = request.headers.get('X-NightMerit-Time-Authority')
+            browser_write = (request.method not in {'GET', 'HEAD', 'OPTIONS'}
+                             and bool(request.headers.get('origin')) and not guardian_route)
+            if (provided is not None and provided != authority) or (browser_write and provided is None):
+                return JSONResponse(status_code=409, content={'detail': {'code': 'time_authority_changed'}},
+                                    headers={'X-NightMerit-Time-Authority': authority, 'Cache-Control': 'no-store'})
         response = await call_next(request)
+        if request.url.path.startswith('/v1/'):
+            response.headers['X-NightMerit-Time-Authority'] = authority
+
         if started is not None and (guardian_route or request.url.path in {"/v1/executions", "/v1/execution-transitions", "/v1/execution-sessions"}
                                    or request.url.path.endswith(("/executions", "/session"))):
             response.headers["Server-Timing"] = f"session;dur={(perf_counter() - started) * 1000:.3f}"
@@ -2106,9 +2122,18 @@ def create_app(
             response.headers["Cache-Control"] = "no-store"
         if request.url.path == "/":
             response.headers["Cache-Control"] = "no-store"
-        elif request.url.path in {"/ui/app.js", "/ui/alert-status.js", "/ui/styles.css"}:
+        elif request.url.path in {"/ui/app.js", "/ui/alert-status.js", "/ui/styles.css", "/ui/timezone-authority.js"}:
             response.headers["Cache-Control"] = "no-cache"
         return response
+
+    @application.get('/ui/timezone-data.js', include_in_schema=False)
+    def timezone_data():
+        try:
+            body = 'globalThis.NightMeritTimeData=' + bundle_json() + ';'
+            return Response(content=body, media_type='application/javascript', headers={'Cache-Control': 'no-store'})
+        except (ValueError, OSError, RuntimeError):
+            return Response(status_code=503, content='/* time_authority_unavailable */',
+                            media_type='application/javascript', headers={'Cache-Control': 'no-store'})
 
     application.mount(
         "/ui",

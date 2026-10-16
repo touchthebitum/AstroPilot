@@ -1,3 +1,4 @@
+const {timeHeaders,timeData}=require('./timezone_fixture.cjs');
 // Run with the bundled Node runtime and NODE_PATH pointing to bundled packages.
 const {chromium} = require('playwright');
 const fs = require('fs');
@@ -10,11 +11,12 @@ const assert = require('node:assert/strict');
  let requests = 0;
  await context.route('http://nightmerit.test/**', route => {
   const url = new URL(route.request().url());
-  if (url.pathname === '/') return route.fulfill({contentType:'text/html',body:fs.readFileSync(path.join(web,'index.html'),'utf8')});
-  const file = {'/ui/app.js':'app.js','/ui/styles.css':'styles.css'}[url.pathname];
-  if (file) return route.fulfill({contentType:file.endsWith('.js')?'text/javascript':'text/css',body:fs.readFileSync(path.join(web,file),'utf8')});
+  if (url.pathname === '/ui/timezone-data.js') return route.fulfill({headers:timeHeaders,contentType:'text/javascript',body:timeData});
+  if (url.pathname === '/') return route.fulfill({headers:timeHeaders,contentType:'text/html',body:fs.readFileSync(path.join(web,'index.html'),'utf8')});
+  const file = {'/ui/timezone-authority.js':'timezone-authority.js','/ui/app.js':'app.js','/ui/styles.css':'styles.css'}[url.pathname];
+  if (file) return route.fulfill({headers:timeHeaders,contentType:file.endsWith('.js')?'text/javascript':'text/css',body:fs.readFileSync(path.join(web,file),'utf8')});
   requests++;
-  return route.fulfill({status:503,contentType:'application/json',body:'{}'});
+  return route.fulfill({headers:timeHeaders,status:503,contentType:'application/json',body:'{}'});
  });
  const page = await context.newPage();
  const errors = []; page.on('pageerror', e => errors.push(e.message));

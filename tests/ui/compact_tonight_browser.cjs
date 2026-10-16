@@ -1,3 +1,4 @@
+const {timeHeaders,timeData}=require('./timezone_fixture.cjs');
 // Chrome smoke: presentation only, real DOM/listeners, deterministic API fixtures.
 // Run with Node and NODE_PATH pointing to Playwright; optional TONIGHT_ARTIFACT_DIR.
 const {chromium}=require('playwright');
@@ -21,9 +22,10 @@ const decision={status:'available',decision_id:'d',catalog_key:'M31',target:'Gal
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route('https://nightmerit.test/**',route=>{
   const pathname=new URL(route.request().url()).pathname;
-  const file=pathname==='/'?'index.html':{'/ui/app.js':'app.js','/ui/styles.css':'styles.css','/ui/help.js':'help.js'}[pathname];
-  return file?route.fulfill({body:fs.readFileSync(path.join(web,file)),contentType:file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'})
-   :route.fulfill({status:503,contentType:'application/json',body:'{}'});
+  if (pathname === '/ui/timezone-data.js') return route.fulfill({headers:timeHeaders,contentType:'text/javascript',body:timeData});
+  const file=pathname==='/'?'index.html':{'/ui/timezone-authority.js':'timezone-authority.js','/ui/app.js':'app.js','/ui/styles.css':'styles.css','/ui/help.js':'help.js'}[pathname];
+  return file?route.fulfill({headers:timeHeaders,body:fs.readFileSync(path.join(web,file)),contentType:file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'})
+   :route.fulfill({headers:timeHeaders,status:503,contentType:'application/json',body:'{}'});
  });
  await page.goto('https://nightmerit.test/');
  await page.waitForFunction(()=>appliedUiMode!==null);
@@ -175,7 +177,7 @@ const decision={status:'available',decision_id:'d',catalog_key:'M31',target:'Gal
  // Form submit -> request -> loadTonight state uses the exact ISO payload.
  const refusal={status:'no_productive_window',actionability_refusal:{status:'constraints_refusal',refusal_stage:'continuous_window_too_short',required_continuous_minutes:60}};
  const sent=[];
- await page.route('https://nightmerit.test/v1/tonight',r=>{sent.push(r.request().postDataJSON().availability);return r.fulfill({json:refusal});});
+ await page.route('https://nightmerit.test/v1/tonight',r=>{sent.push(r.request().postDataJSON().availability);return r.fulfill({headers:timeHeaders,json:refusal});});
  for(const [hours,iso,visible] of [['0.5','PT30M',true],['1','PT1H',false],['1.5','PT1H30M',false]]) {
   await page.evaluate(hours=>{state.acceptedMission=null;state.configuration.site.timezone='Europe/Zurich';setView('availability');
    document.querySelector('input[name="availability-mode"][value="duration"]').checked=true;
@@ -188,8 +190,8 @@ const decision={status:'available',decision_id:'d',catalog_key:'M31',target:'Gal
  // Restore real API DTOs while the browser remains in New York.
  const mission={mission_id:'saved',selection_id:'sel',decision_id:'old',target:'M31',window_start:decision.window_start,window_end:decision.window_end};
  const session={mission_id:'saved',mission,execution:{execution_id:'exec',actual_start:decision.window_start,status:'completed'},evidence:[]};
- await page.route('https://nightmerit.test/v1/accepted-mission/current',r=>r.fulfill({json:{status:'accepted',mission_id:'saved',selection_id:'sel',decision_id:'old',mission}}));
- await page.route('https://nightmerit.test/v1/execution-sessions',r=>r.fulfill({json:[session]}));
+ await page.route('https://nightmerit.test/v1/accepted-mission/current',r=>r.fulfill({headers:timeHeaders,json:{status:'accepted',mission_id:'saved',selection_id:'sel',decision_id:'old',mission}}));
+ await page.route('https://nightmerit.test/v1/execution-sessions',r=>r.fulfill({headers:timeHeaders,json:[session]}));
  for(const zone of ['Europe/Zurich',undefined,'Invalid/Zone']) {
   await page.evaluate(async ({mission,session,zone})=>{
    state.acceptedMission={mission_id:'saved',mission,windowTimezone:zone};state.savedMissions=[];
@@ -238,7 +240,7 @@ const decision={status:'available',decision_id:'d',catalog_key:'M31',target:'Gal
   savedMissionBounds.push({mode,width,targetLength:target.length,...bounds});
  }
  // Exercise the real acceptance listener and retention of the evaluated zone.
- await page.route('https://nightmerit.test/v1/decision-selections',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({
+ await page.route('https://nightmerit.test/v1/decision-selections',route=>route.fulfill({headers:timeHeaders,contentType:'application/json',body:JSON.stringify({
   status:'accepted',decision_id:'d',catalog_key:'M31',selection_id:'s',mission_id:'m',selected_acquisition_intent_id:null,
   mission:{decision_id:'d',selection_id:'s',mission_id:'m',target:decision.target,window_start:decision.window_start,window_end:decision.window_end}
  })}));

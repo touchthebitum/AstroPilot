@@ -25,7 +25,7 @@ def make_client():
 def _execute_reliability_renderers(tmp_path, checks):
     import json
     import shutil
-    import subprocess
+    from tests.timezone_ui_helpers import run_with_time_authority
 
     import pytest
 
@@ -52,7 +52,7 @@ function siteDateTime(value) { return value || "Non précisée"; }
     output = "\nconsole.log(JSON.stringify(output));\n" if Path(engine).stem.lower() == "node" else "\nJSON.stringify(output);\n"
     path.write_text(harness + weather_renderer + confidence_renderers + checks + output)
     command = [engine] if Path(engine).stem.lower() == "node" else [engine, "-l", "JavaScript"]
-    completed = subprocess.run(
+    completed = run_with_time_authority(
         [*command, str(path)], text=True, capture_output=True, check=True,
     )
     return json.loads(completed.stdout)
@@ -666,7 +666,7 @@ def test_availability_uses_read_only_site_timezone_and_local_wall_clock_transpor
 def test_fixed_window_overnight_hint_and_payload_follow_the_civil_contract(tmp_path):
     import json
     import shutil
-    import subprocess
+    from tests.timezone_ui_helpers import run_with_time_authority
 
     import pytest
 
@@ -717,7 +717,7 @@ const output = {
     path = tmp_path / "availability-overnight.js"
     path.write_text(harness + functions + output)
     command = [engine] if Path(engine).stem.lower() == "node" else [engine, "-l", "JavaScript"]
-    completed = subprocess.run(
+    completed = run_with_time_authority(
         [*command, str(path)], text=True, capture_output=True, check=True,
     )
     result = json.loads(completed.stdout)
@@ -1132,7 +1132,7 @@ def test_actionability_refusal_renderer_floors_found_and_ceils_required_minutes(
 ):
     import json
     import shutil
-    import subprocess
+    from tests.timezone_ui_helpers import run_with_time_authority
     import pytest
 
     engine = shutil.which('node') or shutil.which('osascript')
@@ -1161,7 +1161,7 @@ const rendered = actionabilityRefusalMessage({
     path = tmp_path / 'actionability-render.js'
     path.write_text(harness)
 
-    completed = subprocess.run(
+    completed = run_with_time_authority(
         [*command, str(path)],
         text=True,
         capture_output=True,
@@ -1177,7 +1177,7 @@ const rendered = actionabilityRefusalMessage({
 def _execute_actionability_renderer(tmp_path, refusal):
     import json
     import shutil
-    import subprocess
+    from tests.timezone_ui_helpers import run_with_time_authority
     import pytest
 
     engine = shutil.which('node') or shutil.which('osascript')
@@ -1201,7 +1201,7 @@ def _execute_actionability_renderer(tmp_path, refusal):
         command = [engine, '-l', 'JavaScript']
     path = tmp_path / 'productivity-breakdown-render.js'
     path.write_text(harness)
-    completed = subprocess.run(
+    completed = run_with_time_authority(
         [*command, str(path)], text=True, capture_output=True, check=True,
     )
     return json.loads(completed.stdout)
@@ -1265,7 +1265,7 @@ def test_continuous_window_renderer_never_presents_losses_as_causal(tmp_path):
 def test_primary_status_render_executes_without_fabricating_missing_values(tmp_path):
     import json
     import shutil
-    import subprocess
+    from tests.timezone_ui_helpers import run_with_time_authority
     import pytest
 
     engine = shutil.which('node') or shutil.which('osascript')
@@ -1347,7 +1347,7 @@ function run() {
         command = [engine, '-l', 'JavaScript']
     path = tmp_path / 'render.js'
     path.write_text(harness)
-    completed = subprocess.run([*command, str(path)], text=True, capture_output=True, check=True)
+    completed = run_with_time_authority([*command, str(path)], text=True, capture_output=True, check=True)
     results = json.loads(completed.stdout)
     assert results['quality'][0] == {'score': '—', 'title': 'Preuves AQI insuffisantes'}
     assert results['quality'][1] == {'score': '—', 'title': 'Preuves AQI insuffisantes'}
@@ -1377,7 +1377,7 @@ function run() {
 
 def test_field_observation_entry_points_require_a_persisted_decision(tmp_path):
     import shutil
-    import subprocess
+    from tests.timezone_ui_helpers import run_with_time_authority
 
     response = make_client().get('/')
     script = make_client().get('/ui/app.js').text
@@ -1432,7 +1432,7 @@ if (!ui.addObservationMessage.hidden) throw new Error("error button visible");
     command = [engine, str(path)] if Path(engine).stem.lower() == 'node' else [
         engine, '-l', 'JavaScript', str(path)
     ]
-    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    completed = run_with_time_authority(command, capture_output=True, text=True, check=False)
     assert completed.returncode == 0, completed.stderr
 
 
@@ -1494,7 +1494,7 @@ def test_compact_tonight_keeps_essential_fields_and_critical_warnings_outside_de
 
 def test_unavailable_tonight_guidance_preserves_technical_evidence_and_availability():
     import shutil
-    import subprocess
+    from tests.timezone_ui_helpers import run_with_time_authority
     import pytest
 
     node = shutil.which("node")
@@ -1565,7 +1565,7 @@ for (const mode of ['simple','pro']) {
 showTonightUnavailable({status:'no_recommendation'});
 assert.equal(document.querySelector('#message-edit-availability').hidden,true);
 '''
-    result = subprocess.run([node, "-e", harness], text=True, capture_output=True)
+    result = run_with_time_authority([node, "-e", harness], text=True, capture_output=True)
     assert result.returncode == 0, result.stderr
 
 
@@ -1573,7 +1573,7 @@ assert.equal(document.querySelector('#message-edit-availability').hidden,true);
 def test_ui_duration_iso_roundtrip(hours, iso, minutes):
     import json
     import shutil
-    import subprocess
+    from tests.timezone_ui_helpers import run_with_time_authority
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js is required")
@@ -1581,5 +1581,5 @@ def test_ui_duration_iso_roundtrip(hours, iso, minutes):
     helpers = source[source.index("function hoursToIsoDuration("):source.index("function normalizeLocalDateTime(")]
     helpers += source[source.index("function isoAvailabilityMinutes("):source.index("function canEditRefusedAvailability(")]
     checks = f"const assert=require('node:assert/strict');const iso=hoursToIsoDuration({json.dumps(hours)});assert.equal(iso,{json.dumps(iso)});assert.equal(isoAvailabilityMinutes(iso),{minutes});"
-    result = subprocess.run([node, "-e", helpers + checks], capture_output=True, text=True)
+    result = run_with_time_authority([node, "-e", helpers + checks], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
