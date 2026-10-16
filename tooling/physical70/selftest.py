@@ -27,7 +27,7 @@ def start(resume=False):
  location=wait(lambda:(lambda x:x if x['token']!=old_token else None)(read(case/'guide-location.json')) if (case/'guide-location.json').exists() else None,'guide location')
  return child,case,location,log
 forbidden=OUT/'forbidden';forbidden.mkdir();(forbidden/'user_profile.json').write_bytes(b'EXTERNAL SENTINEL - DO NOT TOUCH');before=(forbidden/'user_profile.json').read_bytes()
-child=None;guide=None
+child=None;guide=None;case=None
 try:
  child,case,location,log=start();url=location['url'];token=location['token']
  # Browser-side helpers use isolated HOME and preserve native HOME only for macOS framework services.
@@ -75,6 +75,15 @@ try:
     if (src/name).exists():(dest/name).write_bytes((src/name).read_bytes())
  write(OUT/'result.json',{'result':'PASS_LAB','source_sha':read(KIT/'kit.json')['source_sha'],'real_frozen_controller':True,'real_guide_dom':True,'real_candidate_dom':True,'restarts':2,'credit_replays':12,'resume_same_copy':True,'canonical_bytes_unchanged':True,'external_sentinel_unchanged':True,'physical_user_test_pending':True})
 finally:
+ if case and case.exists():
+  for src in case.glob('ui-*'):
+   dest=OUT/('debug-'+src.name);dest.mkdir(exist_ok=True)
+   for name in ('driver.log','browser.log','browser-result.json','failure-state.json','failure.png','paint-state.json','ui.png','ui.txt','navigation.json'):
+    p=src/name
+    if p.is_file():(dest/name).write_bytes(p.read_bytes())
+  for name in ('controller.log','browser.log','application-stdout.log','application-stderr.log'):
+   p=case/name
+   if p.is_file():(OUT/('runtime-'+name)).write_bytes(p.read_bytes())
  if guide and guide.poll() is None:guide.terminate();guide.wait(timeout=20)
  if child and child.poll() is None:
   try:query(location['url'],'/api/close',{},location['token']);child.wait(timeout=30)
