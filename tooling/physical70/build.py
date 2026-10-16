@@ -33,7 +33,7 @@ else:
  (kit/'product-provenance.json').write_text(json.dumps({'source_sha':SHA,'version':'1.0.0b8','architecture':'arm64','signature':'ad_hoc_only','executable_sha256':sha(app/'Contents/MacOS/AstroPilot'),'uv_lock_sha256':sha(source/'uv.lock')}),encoding='utf-8')
 # Separate locked toolchain: no changes to product dependencies.
 venv=root/'venv-controller';call(['uv','venv','--python','3.13.5',str(venv)]);python=venv/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
-call(['uv','pip','sync','--require-hashes','--python',str(python),str(tools/'requirements.txt')]);call([str(python),str(tools/'test_protocol.py')],cwd=tools)
+call(['uv','pip','sync','--require-hashes','--python',str(python),str(tools/'requirements.txt')]);call([str(python),'-m','unittest','test_protocol','test_browser_permissions'],cwd=tools)
 call([str(python),'-m','PyInstaller','--noconfirm','--clean','--onedir','--console','--name','TestController','--collect-data','tzdata','--distpath',str(root/'controller-dist'),'--workpath',str(root/'controller-build'),'--specpath',str(root/'controller-spec'),str(tools/'controller.py')],cwd=tools)
 shutil.copytree(root/'controller-dist/TestController',kit/'TestController',symlinks=True)
 if sys.platform=='darwin':

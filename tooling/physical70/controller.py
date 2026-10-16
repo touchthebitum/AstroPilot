@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo,reset_tzpath
 import argparse,hashlib,json,os,secrets,shutil,socket,subprocess,sys,threading,time,traceback,urllib.request,urllib.error,zipfile
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 from forecast import Forecast
+from browser_permissions import configure_browser
 import tzdata
 reset_tzpath(())
 SHA='70ac6e0719cdc8c6ce76cbb7a2bfec1a24c82c9b'
@@ -148,7 +149,7 @@ class Controller:
   out=self.kit/'RESULTATS';out.mkdir(exist_ok=True);archive=out/('resultats-kit-70ac6e0-'+('windows' if os.name=='nt' else 'mac')+'-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+secrets.token_hex(2)+'.zip')
   with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_DEFLATED) as z:
    z.writestr('qualification.json',json.dumps(report,indent=2,ensure_ascii=False))
-   for rel in ('application-stdout.log','application-stderr.log','weather-log.json','controller.log','browser.log'):
+   for rel in ('application-stdout.log','application-stderr.log','weather-log.json','controller.log','browser.log','browser-permissions.json'):
     p=self.case/rel
     if p.is_file():z.write(p,rel)
    for folder in (self.case/'data/Logs',self.case/'environment/HOME/Library/Logs/AstroPilot'):
@@ -207,6 +208,8 @@ def browser(controller,url):
  config=json.loads((controller.kit/'kit.json').read_text(encoding='utf-8'));exe=controller.kit/config['browser']
  env={k:v for k,v in os.environ.items() if not k.startswith(('ASTROPILOT_','NIGHTMERIT_','FIELD_LAB_')) and k.upper() not in ('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','NO_PROXY','REQUESTS_CA_BUNDLE')}
  if sys.platform=='darwin' and os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('BROWSER_NATIVE_HOME'):env['HOME']=os.environ['BROWSER_NATIVE_HOME']
+ permissions=configure_browser(controller.kit)
+ write(controller.case/'browser-permissions.json',permissions)
  profile=controller.case/'browser-profile';profile.mkdir(exist_ok=True)
  log=(controller.case/'browser.log').open('ab')
  flags=['--headless=new','--disable-gpu','--remote-debugging-port=0'] if controller.lab else []
