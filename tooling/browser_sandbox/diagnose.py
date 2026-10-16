@@ -20,7 +20,7 @@ who = subprocess.check_output(['whoami', '/user', '/fo', 'csv', '/nh'], text=Tru
 def run(args):
     return subprocess.run(args, check=True, capture_output=True, text=True, timeout=90)
 def acl(path):
-    return subprocess.check_output(['powershell', '-NoProfile', '-Command', '(Get-Acl -LiteralPath $env:NIGHTMERIT_ACL_PROBE).Sddl'], env={**os.environ, 'NIGHTMERIT_ACL_PROBE': str(path)}, text=True).strip()
+    return subprocess.check_output(['pwsh', '-NoProfile', '-Command', '(Get-Acl -LiteralPath $env:NIGHTMERIT_ACL_PROBE).Sddl'], env={**os.environ, 'NIGHTMERIT_ACL_PROBE': str(path)}, text=True).strip()
 # Replace inherited access on this newly downloaded, disposable browser only.
 run(['icacls', str(browser), '/inheritance:r'])
 run(['icacls', str(browser), '/grant:r', '*' + who + ':(OI)(CI)(F)', '*S-1-5-18:(OI)(CI)(F)'])
