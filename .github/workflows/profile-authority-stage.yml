@@ -1,0 +1,71 @@
+name: Profile authority isolated stage
+on:
+  workflow_call:
+    inputs:
+      stage:
+        type: string
+        required: true
+      os:
+        type: string
+        required: true
+      incoming:
+        type: string
+        default: ''
+permissions:
+  contents: read
+jobs:
+  run:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: operations
+          sparse-checkout: tooling/authority
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: candidate
+          ref: 9afb40bd1e36d67f7a9e11e55f8fa28e6880f64d
+          sparse-checkout: |
+            /*
+            !/user_profile.json
+            !/user_filters.json
+            !/data/user_profile.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: '0.12.6'
+          python-version: '3.13.5'
+          enable-cache: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: inputs.incoming != ''
+        with:
+          name: authority-transfer-${{ inputs.incoming }}
+          path: ${{ runner.temp }}/authority-input
+      - name: Qualify public stopped copies; real production API, no merge or signing
+        shell: pwsh
+        env:
+          AUTHORITY_STAGE: ${{ inputs.stage }}
+          AUTHORITY_INPUT: ${{ runner.temp }}/authority-input/transfer.zip
+        run: |
+          python operations/tooling/authority/bootstrap.py
+          if ($LASTEXITCODE -ne 0) { throw 'Qualification failed' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: authority-transfer-${{ inputs.stage }}
+          path: ${{ runner.temp }}/authority-proof/transfer.zip
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: authority-proof-${{ inputs.stage }}
+          path: |
+            ${{ runner.temp }}/authority-proof/result.json
+            ${{ runner.temp }}/authority-proof/cases/*/result.json
+            ${{ runner.temp }}/authority-proof/cases/*/*.log
+            ${{ runner.temp }}/authority-proof/snapshots/*/manifest.json
+            ${{ runner.temp }}/authority-tools/dependencies.log
+          retention-days: 14

@@ -1,54 +1,31 @@
-name: Distribution prequalification contracts
+name: Public profile authority cross-OS qualification
 on:
   workflow_dispatch:
-    inputs:
-      candidate_sha:
-        type: string
-        required: true
 permissions:
   contents: read
 jobs:
-  contracts:
+  qualify:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2022, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          path: operations
-          sparse-checkout: tooling/distribution
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          path: candidate
-          ref: ${{ inputs.candidate_sha }}
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          path: baseline
-          ref: a5c77a79087e3e50285ec4413b8b643f1f024747
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
-        with:
-          version: '0.12.6'
-          python-version: '3.13.5'
-          enable-cache: false
-      - name: Native isolated contracts; all signing/submission mocked
-        shell: pwsh
-        env:
-          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
-        run: |
-          python operations/tooling/distribution/run.py
-          if ($LASTEXITCODE -ne 0) { throw 'Qualification failed' }
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: distribution-contracts-${{ matrix.os }}
-          path: |
-            ${{ runner.temp }}/distribution-proof/*.json
-            ${{ runner.temp }}/distribution-proof/*.log
-            ${{ runner.temp }}/distribution-proof/*.xml
-          retention-days: 14
+        include:
+          - stage: mac_seed
+            os: macos-latest
+    uses: ./.github/workflows/profile-authority-stage.yml
+    with:
+      stage: ${{ matrix.stage }}
+      os: ${{ matrix.os }}
+  windows:
+    needs: qualify
+    uses: ./.github/workflows/profile-authority-stage.yml
+    with:
+      stage: windows
+      os: windows-2022
+      incoming: mac_seed
+  mac_return:
+    needs: windows
+    uses: ./.github/workflows/profile-authority-stage.yml
+    with:
+      stage: mac_return
+      os: macos-latest
+      incoming: windows
