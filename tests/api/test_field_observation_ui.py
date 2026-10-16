@@ -219,7 +219,7 @@ async function fetch() { return {ok: true, json: async () => clone(serverSession
 '''
     time_helpers = source[source.index("function missionTimezone("):source.index("function clock(")]
     program = harness + time_helpers + source[source.index("function decisionSiteFingerprint("):source.index("function currentDecisionMatchesSite(")] + session_helpers + context_helpers + same_context + sync_context + choice_listener + checks
-    command = [engine, "-e", program] if Path(engine).name == "node" else [engine, "-l", "JavaScript", "-e", program]
+    command = [engine, "-e", program] if Path(engine).stem.lower() == "node" else [engine, "-l", "JavaScript", "-e", program]
     result = run_with_time_authority(
         command,
         capture_output=True,
@@ -1332,7 +1332,7 @@ async function check() {
   assert.equal(fieldObservationDraft().conditions.temperature_c, 7.5);
 }
 '''
-    if Path(engine).name == "node":
+    if Path(engine).stem.lower() == "node":
         program = harness + helpers + checks + "\ncheck().catch(error => { console.error(error); process.exitCode = 1; });\n"
         command = [engine, "-"]
     else:
@@ -1372,7 +1372,7 @@ async function check() {
         file = tmp_path / "field_observation_ui.js"
         file.write_text(program, encoding="utf-8")
         command = [engine, "-l", "JavaScript", str(file)]
-    result = run_with_time_authority(command, input=program if Path(engine).name == "node" else None,
+    result = run_with_time_authority(command, input=program if Path(engine).stem.lower() == "node" else None,
         capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
 
@@ -1380,7 +1380,7 @@ async function check() {
 def _field_observation_multicontext_program():
     """Controlled simulator, not a browser: separate globals, locks, and event tasks."""
     engine = javascript_engine()
-    if engine is None or Path(engine).name != "node":
+    if engine is None or Path(engine).stem.lower() != "node":
         pytest.skip("Node.js is required for the isolated multi-context harness")
     source = SCRIPT.read_text(encoding="utf-8")
     helpers = source[
@@ -2654,7 +2654,7 @@ function replyFromPython(url, options) {
 
 def test_site_change_invalidates_immediate_decision_preserves_recovery_and_catalogue(tmp_path):
     engine = javascript_engine()
-    if engine is None or Path(engine).name != "node":
+    if engine is None or Path(engine).stem.lower() != "node":
         pytest.skip("Node is required for the configuration/observation integration harness")
     source = SCRIPT.read_text(encoding="utf-8")
     prefix = _field_observation_multicontext_program().split("(async () => {\n  // Two distinct states")[0]
@@ -2826,7 +2826,7 @@ function show() {}
 
 def test_recovery_journal_v2_requires_text_digest():
     engine = javascript_engine()
-    if engine is None or Path(engine).name != "node":
+    if engine is None or Path(engine).stem.lower() != "node":
         pytest.skip("Node.js is required for the production journal parser harness")
     source = SCRIPT.read_text(encoding="utf-8")
     helpers = source[source.index("const OBSERVATION_CHOICES ="):
