@@ -53,7 +53,7 @@ def main():
    assets=time_assets();config=runtime.request('GET','/v1/configuration');assert config['site']['timezone']==zone,config
    dst=[]
    if name=='zurich':
-    for start,end,code in [('2026-03-29T02:30','2026-03-29T03:30','nonexistent_local_time'),('2026-10-25T02:30','2026-10-25T03:30','ambiguous_local_time')]:
+    for start,end,code in [('2026-03-29T02:30','2026-03-29T03:30','session_availability_local_time_nonexistent'),('2026-10-25T02:30','2026-10-25T03:30','session_availability_local_time_ambiguous')]:
      r=runtime.request('POST','/v1/tonight',{'availability':{'mode':'fixed_window','start_local':start,'end_local':end}},expected=422);assert r['detail']['code']==code,r;dst.append(r)
    for label,seconds in [('ha',5400),('oiii',900)]:
     missions[label]=browser(case,label,'accept',chrome);mid=missions[label]['accepted']['body']['mission_id'];eid='public-execution-'+label
