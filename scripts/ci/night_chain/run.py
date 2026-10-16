@@ -18,7 +18,7 @@ def main():
     assert len(source_sha) == 40
     browser, provenance = install()
     provenance.update(source_sha=source_sha, pr_head=os.environ.get('NIGHT_CHAIN_PR_HEAD'))
-    (out / 'provenance.json').write_text(json.dumps(provenance, indent=2))
+    (out / 'provenance.json').write_text(json.dumps(provenance, indent=2), encoding='utf-8')
     rows = []
     for intent in ('sh2-129_ha', 'ou4_oiii', 'site_changed'):
         # The exported proof directory contains reports, never browser/data profiles.
@@ -28,7 +28,7 @@ def main():
         report.mkdir()
         env = {key: value for key, value in os.environ.items()
                if not key.startswith(('ASTROPILOT_', 'NIGHTMERIT_', 'FIELD_LAB_'))}
-        env.update(CASE_ROOT=str(case), CASE_PROOF=str(report), UI_INTENT=intent,
+        env.update(PYTHONUTF8='1', CASE_ROOT=str(case), CASE_PROOF=str(report), UI_INTENT=intent,
                    CHROME_BINARY=str(browser), NIGHT_CHAIN_SOURCE_SHA=source_sha)
         with (report / 'case.log').open('wb') as log:
             child = subprocess.Popen(
@@ -51,11 +51,11 @@ def main():
                         os.killpg(child.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
-        assert code == 0, (intent, (report / 'case.log').read_text()[-5000:])
-        record = json.loads((report / 'browser-result.json').read_text())
+        assert code == 0, (intent, (report / 'case.log').read_text(encoding='utf-8')[-5000:])
+        record = json.loads((report / 'browser-result.json').read_text(encoding='utf-8'))
         assert record['result'] == 'PASS' and record['no_execution_or_credit']
         rows.append({'intent': intent, 'result': 'PASS'})
-        (out / 'result.json').write_text(json.dumps({'result': 'PASS' if len(rows) == 3 else 'RUNNING', 'source_sha': source_sha, 'rows': rows}, indent=2))
+        (out / 'result.json').write_text(json.dumps({'result': 'PASS' if len(rows) == 3 else 'RUNNING', 'source_sha': source_sha, 'rows': rows}, indent=2), encoding='utf-8')
     assert len(rows) == 3
     print('All three native browser journeys PASS')
 

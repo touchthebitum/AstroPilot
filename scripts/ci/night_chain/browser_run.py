@@ -56,10 +56,12 @@ with (PROOF / 'server.log').open('wb') as log:
             child.wait(timeout=10)
         assert child.poll() is not None
 # The browser has stopped; seed is never called again during the reread.
-record = json.loads((PROOF / 'browser-result.json').read_text())
+record = json.loads((PROOF / 'browser-result.json').read_text(encoding='utf-8'))
 with TestClient(app()) as client:
     current = client.get('/v1/accepted-mission/current')
     assert current.status_code == 200, current.text
+    record['current_after_restart'] = current.json()
+    (PROOF / 'browser-result.json').write_text(json.dumps(record, indent=2), encoding='utf-8')
     if os.environ['UI_INTENT'] == 'site_changed':
         assert current.json() is None
         assert profile_hash() != before
@@ -74,11 +76,11 @@ with TestClient(app()) as client:
         assert end <= datetime.fromisoformat('2026-10-16T03:30:00+02:00')
     sessions = client.get('/v1/execution-sessions')
     assert sessions.status_code == 200 and sessions.json() == [], sessions.text
-    profile = json.loads((CASE / 'data/user_profile.json').read_text())
+    profile = json.loads((CASE / 'data/user_profile.json').read_text(encoding='utf-8'))
     assert not profile.get('intent_progress_credits')
     assert not (CASE / 'data/user_filters.json').exists()
 record.update(restart_mission_preserved=True, no_execution_or_credit=True,
               profile_unchanged=os.environ['UI_INTENT'] != 'site_changed',
               server_stopped=True, source_sha=os.environ['NIGHT_CHAIN_SOURCE_SHA'])
-(PROOF / 'browser-result.json').write_text(json.dumps(record, indent=2))
+(PROOF / 'browser-result.json').write_text(json.dumps(record, indent=2), encoding='utf-8')
 print('Browser journey PASS:', os.environ['UI_INTENT'])
