@@ -33,7 +33,7 @@ if MODE=='lock_failure':
  fixture=OUT/'stale-lock-fixture';fixture.mkdir();shutil.copy2(SOURCE/'pyproject.toml',fixture/'pyproject.toml');shutil.copy2(SOURCE/'uv.lock',fixture/'uv.lock')
  p=fixture/'pyproject.toml';text=p.read_text(encoding='utf-8');assert 'version = "1.0.0b8"' in text;p.write_text(text.replace('version = "1.0.0b8"','version = "1.0.0b999"',1),encoding='utf-8');old=digest(fixture/'uv.lock')
  bad=env.copy();bad['UV_PROJECT_ENVIRONMENT']=str(OUT/'must-not-sync')
- a=call([str(uv),'lock','--check','--offline'],'stale-lock-check',expected=None,cwd=fixture,e=bad);b=call([str(uv),'sync','--locked','--offline','--extra','test'],'stale-lock-sync',expected=None,cwd=fixture,e=bad)
+ a=call([str(uv),'lock','--check'],'stale-lock-check',expected=None,cwd=fixture,e=bad);b=call([str(uv),'sync','--locked','--extra','test'],'stale-lock-sync',expected=None,cwd=fixture,e=bad)
  assert a.returncode!=0 and b.returncode!=0 and digest(fixture/'uv.lock')==old
  assert all('lockfile' in r.stderr.lower() and ('needs to be updated' in r.stderr.lower() or 'not up-to-date' in r.stderr.lower()) for r in (a,b)),(a.stderr,b.stderr)
  result.update(result='PASS expected lock failure recorded',expected_job_conclusion='failure',lock_check_exit=a.returncode,locked_sync_exit=b.returncode,fixture_lock_unchanged=True)
