@@ -17,6 +17,16 @@ ARCHIVES = {
     ('darwin', 'arm64'): ('mac-arm64', 'e141a7cbf948780bb7d381860bd5a7944c6736f79b9918b9826fccb199d28ea4'),
 }
 
+def configure_windows_sandbox(binary, *, run=subprocess.run):
+    setup = binary.parent / 'setup.exe'
+    if not setup.is_file():
+        raise RuntimeError('Pinned Chrome sandbox setup is missing')
+    result = run([str(setup), '--configure-browser-in-directory=' + str(binary.parent)],
+                 cwd=binary.parent, capture_output=True, timeout=60, check=False)
+    if result.returncode != 78:  # CONFIGURE_APP_CONTAINER_SANDBOX_SUCCESS
+        raise RuntimeError(f'Chrome sandbox permissions were not configured: {result.returncode}')
+    return result.returncode
+
 def install():
     target, expected = ARCHIVES[(sys.platform, platform.machine())]
     root = Path(tempfile.mkdtemp(prefix='night-chain-browser-', dir=os.environ.get('RUNNER_TEMP')))
@@ -41,7 +51,9 @@ def install():
     binary = root / f'chrome-{target}' / ('chrome.exe' if os.name == 'nt' else
                 'Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing')
     assert binary.is_file()
+    setup_status = configure_windows_sandbox(binary) if os.name == 'nt' else None
     return binary, {
         'version': VERSION, 'platform': target, 'url': url, 'archive_sha256': digest,
         'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
+        'windows_sandbox_setup_exit_code': setup_status,
     }
