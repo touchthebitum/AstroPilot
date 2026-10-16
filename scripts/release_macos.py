@@ -46,6 +46,29 @@ def _run(
     return runner(command, **options)
 
 
+def verify_release_checkout(
+    root: Path,
+    runner: Callable[..., object],
+    *,
+    expected_commit: str | None = None,
+) -> str:
+    revision = _run(
+        runner, ["git", "rev-parse", "HEAD"], root=root, capture_output=True,
+    )
+    commit = str(getattr(revision, "stdout", "")).strip()
+    if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        raise RuntimeError("Cannot verify the release checkout commit.")
+    status = _run(
+        runner, ["git", "status", "--porcelain", "--untracked-files=all"],
+        root=root, capture_output=True,
+    )
+    if str(getattr(status, "stdout", "")).strip():
+        raise RuntimeError("Release requires a clean committed checkout.")
+    if expected_commit is not None and commit != expected_commit:
+        raise RuntimeError("Release checkout commit changed during the build.")
+    return commit
+
+
 def validate_release_zip(artifact: Path) -> None:
     try:
         with zipfile.ZipFile(artifact) as archive:
@@ -78,10 +101,12 @@ def release(
     if target_architecture != MACOS_RELEASE_TARGET_ARCHITECTURE:
         raise RuntimeError("The macOS release target must be arm64.")
 
+    source_commit = verify_release_checkout(root, runner)
     application = build_function(
         root=root,
         codesign_identity=codesign_identity,
     )
+    verify_release_checkout(root, runner, expected_commit=source_commit)
     _run(
         runner,
         [
