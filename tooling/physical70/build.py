@@ -81,6 +81,13 @@ else:
   for p in kit.rglob('*'):
    if p.is_file():z.write(p,p.relative_to(kit.parent))
 with zipfile.ZipFile(archive) as z:assert z.testzip() is None
+roundtrip=root/'roundtrip';roundtrip.mkdir()
+if sys.platform=='darwin':call(['/usr/bin/ditto','-x','-k',str(archive),str(roundtrip)],cwd=root)
+else:
+ with zipfile.ZipFile(archive) as z:z.extractall(roundtrip)
+restored=roundtrip/kit.name
+call([str(restored/'TestController'/('TestController.exe' if os.name=='nt' else 'TestController')),'--verify-only'],cwd=restored)
+if sys.platform=='darwin':call(['/usr/bin/codesign','--verify','--deep','--strict',str(restored/'candidate/AstroPilot.app')])
 (root/(archive.name+'.sha256')).write_text(sha(archive)+'  '+archive.name+'\n')
-write={'result':'PASS','kit':archive.name,'sha256':sha(archive),'source_sha':SHA,'platform':platform,'pristine':True,'files':len(inventory()),'operations_sha':json.loads((kit/'kit.json').read_text())['operations_sha']};(root/'kit-validation.json').write_text(json.dumps(write,indent=2))
+write={'result':'PASS','kit':archive.name,'sha256':sha(archive),'source_sha':SHA,'platform':platform,'pristine':True,'zip_roundtrip_verified':True,'files':len(inventory()),'operations_sha':json.loads((kit/'kit.json').read_text())['operations_sha']};(root/'kit-validation.json').write_text(json.dumps(write,indent=2))
 print(json.dumps(write),flush=True)

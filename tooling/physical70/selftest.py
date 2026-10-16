@@ -22,7 +22,7 @@ def start(resume=False):
  old_token=None
  if resume and (KIT/'derniere-copie.json').exists():
   old_case=Path(read(KIT/'derniere-copie.json')['path']);old_token=read(old_case/'guide-location.json')['token']
- child=subprocess.Popen([str(EXE),'--laboratory','--no-browser']+(['--resume'] if resume else []),cwd=KIT,env=env,stdout=log,stderr=log)
+ child=subprocess.Popen([str(EXE),'--laboratory']+(['--resume'] if resume else []),cwd=KIT,env=env,stdout=log,stderr=log)
  case=Path(wait(lambda:read(KIT/'derniere-copie.json')['path'] if (KIT/'derniere-copie.json').exists() else None,'copy'))
  location=wait(lambda:(lambda x:x if x['token']!=old_token else None)(read(case/'guide-location.json')) if (case/'guide-location.json').exists() else None,'guide location')
  return child,case,location,log

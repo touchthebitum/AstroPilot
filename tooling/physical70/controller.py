@@ -33,6 +33,17 @@ def verify(root):
   elif not path.is_file() or digest(path)!=record['sha256']:raise RuntimeError('Fichier du kit manquant ou modifié : '+rel)
  return manifest
 
+def spawn(args,**kwargs):
+ # Frozen Windows programs must not give their DLL search path to Chrome or another bundle.
+ if os.name=='nt' and getattr(sys,'frozen',False):
+  import ctypes
+  kernel=ctypes.windll.kernel32;buffer=ctypes.create_unicode_buffer(32768)
+  kernel.GetDllDirectoryW(len(buffer),buffer);previous=buffer.value
+  kernel.SetDllDirectoryW(None)
+  try:return subprocess.Popen(args,**kwargs)
+  finally:kernel.SetDllDirectoryW(previous or None)
+ return subprocess.Popen(args,**kwargs)
+
 class App:
  def __init__(self,kit,case,forecast):self.kit=kit;self.case=case;self.forecast=forecast;self.child=None;self.logs=[]
  def env(self):
@@ -53,7 +64,7 @@ class App:
    if s.connect_ex(('127.0.0.1',8000))==0:raise RuntimeError('Le port de test est déjà utilisé.')
   exe=self.kit/'candidate'/('AstroPilot.exe' if os.name=='nt' else 'AstroPilot.app/Contents/MacOS/AstroPilot')
   logs=[(self.case/'application-stdout.log').open('ab'),(self.case/'application-stderr.log').open('ab')];self.logs=logs
-  self.child=subprocess.Popen([str(exe)],cwd=self.case,env=self.env(),stdout=logs[0],stderr=logs[1])
+  self.child=spawn([str(exe)],cwd=self.case,env=self.env(),stdout=logs[0],stderr=logs[1])
   try:
    for _ in range(240):
     self.owned()
@@ -81,7 +92,7 @@ class App:
 
 class Controller:
  def __init__(self,kit,case,lab=False):
-  self.kit=kit;self.case=case;self.lab=lab;self.lock=threading.Lock();self.error=None;self.closed=threading.Event();self.browser=None;self.exported=None
+  self.kit=kit;self.case=case;self.lab=lab;self.lock=threading.Lock();self.error=None;self.closed=threading.Event();self.closing=False;self.browser=None;self.exported=None
   self.state=json.loads((case/'run.json').read_text(encoding='utf-8')) if (case/'run.json').exists() else {'phase':'new','source_sha':SHA,'user_confirmations':{},'public_test_only':True,'laboratory':lab}
   if self.state['source_sha']!=SHA or not self.state['public_test_only']:raise RuntimeError('La reprise ne désigne pas une copie de test de ce kit.')
   self.lab=self.state['laboratory'];self.forecast=Forecast(case);self.forecast.__enter__();self.app=App(kit,case,self.forecast)
@@ -145,6 +156,8 @@ class Controller:
      if p.is_file():z.write(p,'application-logs/'+('data-' if folder==self.case/'data/Logs' else 'home-')+p.name)
   self.exported=str(archive);return str(archive)
  def shutdown(self):
+  if self.closing:return
+  self.closing=True
   try:
    if not self.exported:self.export(incomplete=True)
   finally:
@@ -193,15 +206,19 @@ def serve(controller):
 def browser(controller,url):
  config=json.loads((controller.kit/'kit.json').read_text(encoding='utf-8'));exe=controller.kit/config['browser']
  env={k:v for k,v in os.environ.items() if not k.startswith(('ASTROPILOT_','NIGHTMERIT_','FIELD_LAB_')) and k.upper() not in ('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','NO_PROXY','REQUESTS_CA_BUNDLE')}
+ if sys.platform=='darwin' and os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('BROWSER_NATIVE_HOME'):env['HOME']=os.environ['BROWSER_NATIVE_HOME']
  profile=controller.case/'browser-profile';profile.mkdir(exist_ok=True)
  log=(controller.case/'browser.log').open('ab')
- controller.browser=subprocess.Popen([str(exe),'--no-first-run','--no-default-browser-check','--disable-background-networking','--user-data-dir='+str(profile),url],env=env,stdout=log,stderr=log)
+ flags=['--headless=new','--disable-gpu','--remote-debugging-port=0'] if controller.lab else []
+ controller.browser=spawn([str(exe),'--no-first-run','--no-default-browser-check','--disable-background-networking','--user-data-dir='+str(profile),*flags,url],env=env,stdout=log,stderr=log)
 
 def main():
  if '--ignore-browser' in sys.argv:return
- p=argparse.ArgumentParser();p.add_argument('--resume',action='store_true');p.add_argument('--laboratory',action='store_true');p.add_argument('--no-browser',action='store_true');p.add_argument('--kit-root');args=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--resume',action='store_true');p.add_argument('--laboratory',action='store_true');p.add_argument('--no-browser',action='store_true');p.add_argument('--kit-root');p.add_argument('--verify-only',action='store_true');args=p.parse_args()
  kit=Path(args.kit_root).resolve() if args.kit_root else Path(sys.executable).resolve().parent.parent
  print('NightMerit — test isolé de main 70ac6e0\nVérification du kit…',flush=True);verify(kit)
+ if args.verify_only:
+  print('Kit intègre.',flush=True);return
  copies=kit/'COPIES-ISOLEES';copies.mkdir(exist_ok=True)
  if args.resume:
   case=Path(json.loads((kit/'derniere-copie.json').read_text(encoding='utf-8'))['path']).resolve()
@@ -212,7 +229,10 @@ def main():
  print('Guide du test : '+url+'\nCopie isolée : '+str(case)+'\nGardez cette fenêtre ouverte. Les étapes et l’export se font dans le guide.',flush=True)
  try:
   if not args.no_browser:browser(controller,url)
-  while not controller.closed.wait(.25):pass
+  while not controller.closed.wait(.25):
+   if controller.browser and controller.browser.poll() is not None and not controller.closing:
+    controller.error='Le navigateur de test a été fermé ou n’a pas pu démarrer. Un diagnostic incomplet est exporté.';controller.shutdown()
+  if controller.exported:print('Résultats : '+controller.exported,flush=True)
  except KeyboardInterrupt:controller.shutdown()
  finally:
   server.shutdown()

@@ -12,15 +12,10 @@ const intent = process.env.UI_INTENT, url = process.env.NIGHT_CHAIN_URL;
 assert(new URL(url).hostname === '127.0.0.1');
 const chrome = process.env.CHROME_BINARY;
 assert(chrome && fs.existsSync(chrome), 'Pinned testing browser is required');
-const profile = path.join(proof, 'browser-profile');
-fs.mkdirSync(profile);
+const profile = path.join(root, 'browser-profile');
 const log = fs.openSync(path.join(proof, 'browser.log'), 'w');
 const env = browserEnvironment(process.env);
-const child = cp.spawn(chrome, [
-  '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
-  '--disable-background-networking', '--remote-debugging-port=0',
-  `--user-data-dir=${profile}`, 'about:blank',
-], {stdio: ['ignore', log, log], env});
+const child = {exitCode:0,signalCode:null,on(){}};
 let spawnError;
 child.on('error', error => { spawnError = error; });
 fs.writeFileSync(path.join(proof, 'browser-environment.json'), JSON.stringify({
@@ -124,7 +119,7 @@ async function journey() {
   const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});fs.writeFileSync(path.join(proof,'guide.png'),Buffer.from(shot.data,'base64'));
   fs.writeFileSync(path.join(proof,'guide-finished.json'),JSON.stringify(await evaluate('latest')));
   await waitFor(()=>fs.existsSync(path.join(proof,'request-close')),'export verification',30000);
-  await evaluate(`document.querySelector('#result button').click();true`);
+  await evaluate(`setTimeout(()=>document.querySelector('#result button').click(),100);true`);
 }
 (async () => {
   try { await journey(); }
