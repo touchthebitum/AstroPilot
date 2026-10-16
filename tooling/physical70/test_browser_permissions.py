@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock
 
-from browser_permissions import configure_browser
+from browser_permissions import configure_browser, browser_environment
 
 
 class BrowserPermissions(unittest.TestCase):
@@ -21,6 +21,38 @@ class BrowserPermissions(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def test_windows_ci_restores_only_browser_os_identity_not_test_storage(self):
+        parent = {'GITHUB_ACTIONS': 'true', 'USERPROFILE': r'D:\isolated\USERPROFILE',
+                  'BROWSER_NATIVE_USERPROFILE': r'C:\Users\runneradmin',
+                  'APPDATA': r'D:\isolated\APPDATA', 'LOCALAPPDATA': r'D:\isolated\LOCALAPPDATA',
+                  'HOME': r'D:\isolated\HOME', 'TEMP': r'D:\isolated\TEMP',
+                  'ASTROPILOT_DATA_DIR': 'forbidden', 'HTTPS_PROXY': 'forbidden'}
+        before = parent.copy()
+        child = browser_environment(parent, platform='win32')
+        self.assertEqual(parent, before)
+        self.assertEqual(child['USERPROFILE'], parent['BROWSER_NATIVE_USERPROFILE'])
+        for key in ('APPDATA', 'LOCALAPPDATA', 'HOME', 'TEMP'):
+            self.assertEqual(child[key], parent[key])
+        self.assertNotIn('ASTROPILOT_DATA_DIR', child)
+        self.assertNotIn('HTTPS_PROXY', child)
+
+    def test_windows_ci_requires_explicit_absolute_native_identity(self):
+        for value in (None, '', 'relative'):
+            parent = {'GITHUB_ACTIONS': 'true', 'USERPROFILE': 'synthetic'}
+            if value is not None:
+                parent['BROWSER_NATIVE_USERPROFILE'] = value
+            with self.assertRaisesRegex(RuntimeError, 'natif'):
+                browser_environment(parent, platform='win32')
+
+    def test_physical_windows_keeps_its_existing_os_identity(self):
+        parent = {'USERPROFILE': r'C:\Users\physical', 'BROWSER_NATIVE_USERPROFILE': 'unused'}
+        self.assertEqual(browser_environment(parent, platform='win32'), parent)
+
+    def test_macos_keeps_existing_native_home_rule(self):
+        parent = {'GITHUB_ACTIONS': 'true', 'HOME': '/isolated', 'BROWSER_NATIVE_HOME': '/Users/runner'}
+        self.assertEqual(browser_environment(parent, platform='darwin')['HOME'], '/Users/runner')
+        self.assertEqual(parent['HOME'], '/isolated')
 
     def test_macos_does_not_run_or_inspect_windows_setup(self):
         run = Mock()

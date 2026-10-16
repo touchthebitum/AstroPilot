@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo,reset_tzpath
 import argparse,hashlib,json,os,secrets,shutil,socket,subprocess,sys,threading,time,traceback,urllib.request,urllib.error,zipfile
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 from forecast import Forecast
-from browser_permissions import configure_browser
+from browser_permissions import configure_browser, browser_environment
 import tzdata
 reset_tzpath(())
 SHA='70ac6e0719cdc8c6ce76cbb7a2bfec1a24c82c9b'
@@ -215,8 +215,7 @@ def serve(controller):
 
 def browser(controller,url):
  config=json.loads((controller.kit/'kit.json').read_text(encoding='utf-8'));exe=controller.kit/config['browser']
- env={k:v for k,v in os.environ.items() if not k.startswith(('ASTROPILOT_','NIGHTMERIT_','FIELD_LAB_')) and k.upper() not in ('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','NO_PROXY','REQUESTS_CA_BUNDLE')}
- if sys.platform=='darwin' and os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('BROWSER_NATIVE_HOME'):env['HOME']=os.environ['BROWSER_NATIVE_HOME']
+ env=browser_environment(os.environ)
  try:permissions=configure_browser(controller.kit,run=run_external)
  except Exception as exc:
   controller.error=str(exc)

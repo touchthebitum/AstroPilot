@@ -34,6 +34,7 @@ try:
  env={k:v for k,v in os.environ.items() if not k.startswith(('ASTROPILOT_','NIGHTMERIT_','FIELD_LAB_'))}
  for key in ('HOME','USERPROFILE','APPDATA','LOCALAPPDATA','TMP','TEMP','TMPDIR','XDG_CONFIG_HOME','XDG_CACHE_HOME','XDG_DATA_HOME'):
   p=OUT/'browser-environment'/key;p.mkdir(parents=True);env[key]=str(p)
+ if os.name=='nt':env['USERPROFILE']=os.environ['BROWSER_NATIVE_USERPROFILE']
  env['PRODUCT_SOURCE']=str(SOURCE);env['CHROME_BINARY']=str(KIT/read(KIT/'kit.json')['browser']);env['CASE_ROOT']=str(case);env['CASE_PROOF']=str(OUT);env['NIGHT_CHAIN_URL']=url;env['UI_INTENT']='sh2-129_ha'
  glog=(OUT/'guide-driver.log').open('w',encoding='utf-8');guide=subprocess.Popen(['node',str(TOOLS/'guide_test.cjs')],env=env,stdout=glog,stderr=subprocess.STDOUT)
  state=wait(lambda:read(OUT/'guide-ready.json') if (OUT/'guide-ready.json').exists() else None,'guide real start');write(case/'fixture.json',{'zone':'Europe/Zurich','night_date':state['night_date'],'availability':state['availability']})

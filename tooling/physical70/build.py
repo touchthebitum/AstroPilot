@@ -8,6 +8,7 @@ subprocess.run(['git','diff','--exit-code','HEAD'],cwd=source,check=True)
 root=Path(os.environ['RUNNER_TEMP'])/'physical70';root.mkdir();platform='Windows-x64' if os.name=='nt' else 'Mac-ARM64';kit=root/('NightMerit-Test-70ac6e0-'+platform);kit.mkdir()
 env={k:v for k,v in os.environ.items() if not k.startswith(('ASTROPILOT_','NIGHTMERIT_','FIELD_LAB_'))}
 if sys.platform=='darwin':env['BROWSER_NATIVE_HOME']=os.environ['HOME']
+if os.name=='nt':env['BROWSER_NATIVE_USERPROFILE']=os.environ['USERPROFILE']
 for key in ('HOME','USERPROFILE','APPDATA','LOCALAPPDATA','TMP','TEMP','TMPDIR','XDG_CACHE_HOME','XDG_CONFIG_HOME','XDG_DATA_HOME','ASTROPILOT_DATA_DIR','UV_CACHE_DIR'):
  p=root/'environment'/key;p.mkdir(parents=True);env[key]=str(p)
 env.update(UV_NO_ENV_FILE='1',PYTHONUTF8='1')
