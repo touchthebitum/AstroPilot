@@ -11,12 +11,19 @@ import zoneinfo
 from zoneinfo import ZoneInfo
 
 mode = os.environ['TZ_PROBE_MODE']
-assert importlib.metadata.version('tzdata') == '2026.5'
-import tzdata
+try:
+    package_version = importlib.metadata.version('tzdata')
+except importlib.metadata.PackageNotFoundError:
+    package_version = None
+if mode == 'package':
+    assert package_version == '2026.5'
+if package_version:
+    import tzdata
 rows = []
 for key in ('Europe/Zurich', 'America/Winnipeg'):
     found = next((Path(root) / key for root in zoneinfo.TZPATH if (Path(root) / key).is_file()), None)
-    resource = importlib.resources.files('tzdata.zoneinfo').joinpath(*key.split('/'))
+    resource = importlib.resources.files('tzdata.zoneinfo').joinpath(*key.split('/')) if package_version else None
+    assert found or resource is not None
     content = found.read_bytes() if found else resource.read_bytes()
     loaded = ZoneInfo.no_cache(key)
     proof = ZoneInfo.from_file(io.BytesIO(content), key=key)
@@ -49,6 +56,6 @@ assert a.isoformat() == '2026-10-15T23:30:00+02:00' and b.isoformat() == '2026-1
 assert elapsed_hours(a, b) == 2
 first = datetime(2026, 10, 25, 2, 10, tzinfo=z, fold=1)
 assert add_elapsed_time(first, timedelta(minutes=-20)).isoformat() == '2026-10-25T02:50:00+02:00'
-result = {'mode': mode, 'package_version': importlib.metadata.version('tzdata'), 'iana_version': tzdata.IANA_VERSION,
+result = {'mode': mode, 'package_version': package_version, 'iana_version': tzdata.IANA_VERSION if package_version else None,
           'tzpath': list(zoneinfo.TZPATH), 'rows': rows, 'product_zurich_wall_time_checks': 'PASS'}
 Path(os.environ['TZ_PROBE_FILE']).write_text(json.dumps(result, indent=2), encoding='utf-8')

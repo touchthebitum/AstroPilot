@@ -45,12 +45,16 @@ modules += ['tests/api/test_mission_task_times_ui.py','tests/api/test_configurat
             'tests/api/test_tonight_api.py','tests/api/test_tonight_api_e2e.py']
 for mode in ('default','package'):
     env = base.copy()
+    if mode == 'package':
+        env['UV_PROJECT_ENVIRONMENT'] = str(LAB/'venv-package')
+        call(['uv','sync','--locked','--extra','test','--extra','packaging'],'sync-test-packaging',env)
+        python = LAB/'venv-package'/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
     if mode == 'package': env['PYTHONTZPATH'] = ''
-    env.update(TZ_PROBE_MODE=mode,TZ_PROBE_FILE=str(OUT/(mode+'-sources.json')),PYTHONPATH=str(SOURCE))
+    env.update(TZ_PROBE_MODE=mode,TZ_PROBE_FILE=str(OUT/(mode+'-sources.json')),PYTHONPATH=str(OPS)+os.pathsep+str(SOURCE),NODE_STDIN_PROOF=str(OUT/(mode+'-node-stdin.jsonl')))
     call([str(python),str(OPS/'sample.py')],mode+'-sources',env)
     data = json.loads((OUT/(mode+'-sources.json')).read_text(encoding='utf-8'))
     result['rows'].append(data);save()
-    call([str(python),'-m','pytest','-q',*modules,'--junitxml='+str(OUT/(mode+'-tests.xml'))],mode+'-tests',env)
+    call([str(python),'-m','pytest','-q','-p','windows_stdin_node',*modules,'--junitxml='+str(OUT/(mode+'-tests.xml'))],mode+'-tests',env)
 # Compare the changed zone to the old wheel whose URL/hash are pinned in main's 2026.3 lock.
 url='https://files.pythonhosted.org/packages/e5/6d/b53b99a9f2766d095985947a5782f1702cabb129a34f7a802d7197af832f/tzdata-2026.3-py2.py3-none-any.whl'
 with urllib.request.urlopen(url,timeout=30) as remote: old=remote.read(1024*1024)
