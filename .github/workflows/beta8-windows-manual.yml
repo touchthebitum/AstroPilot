@@ -1,10 +1,16 @@
 name: Node timeout bounded isolated Windows Mac diagnosis
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [campaign, cold-controls]
+        default: campaign
 permissions:
   contents: read
 jobs:
   qualify:
+    if: ${{ inputs.mode == 'campaign' }}
     strategy:
       fail-fast: false
       matrix:
@@ -45,5 +51,51 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: node-timeout-${{ matrix.os }}
+          path: ${{ runner.temp }}/node-timeout-proof/
+          retention-days: 14
+
+  cold-controls:
+    if: ${{ inputs.mode == 'cold-controls' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: operations
+          sparse-checkout: tooling/node_timeout
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: candidate
+          ref: 2fb3cb4d7fb7f391439a86cd09b6019148126643
+          sparse-checkout: |
+            /*
+            !/user_profile.json
+            !/user_filters.json
+            !/data/user_profile.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.12.5'
+          python-version: '3.12'
+          enable-cache: false
+      - name: Run bounded isolated diagnosis at exact main
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          NODE_COLD_CONTROL: '1'
+        run: |
+          python operations/tooling/node_timeout/probe.py
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnosis observed a failure; keep the job failed and export evidence' }
+      - name: Export bounded public diagnosis including failures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: node-timeout-cold-${{ matrix.os }}
           path: ${{ runner.temp }}/node-timeout-proof/
           retention-days: 14

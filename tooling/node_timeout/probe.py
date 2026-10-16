@@ -19,6 +19,7 @@ LAB.mkdir()
 assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=SOURCE, text=True).strip() == SHA
 node = shutil.which('node')
 assert node
+cold_control = os.environ.get('NODE_COLD_CONTROL') == '1'
 base = {k: v for k, v in os.environ.items() if not k.startswith(('ASTROPILOT_', 'NIGHTMERIT_', 'FIELD_LAB_'))}
 for key in ('HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ASTROPILOT_DATA_DIR', 'TMP', 'TEMP', 'TMPDIR', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME'):
     path = LAB / 'setup' / key
@@ -27,9 +28,10 @@ for key in ('HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ASTROPILOT_DATA_D
 base.update(PYTHONUTF8='1', UV_NO_ENV_FILE='1', UV_PROJECT_ENVIRONMENT=str(LAB / 'venv'),
             UV_CACHE_DIR=str(LAB / 'uv-cache'))
 result = {'source_sha': SHA, 'platform': platform.platform(), 'node_path': node,
-          'node_version': subprocess.check_output([node, '--version'], text=True).strip(),
+          'node_version': None if cold_control else subprocess.check_output([node, '--version'], text=True).strip(),
           'protocol': '8 disabled + 3 module + 2 ordered + 1 instrumented seven-state module selection per OS',
-          'public_fixtures_only': True, 'rows': [], 'status': 'RUNNING'}
+          'public_fixtures_only': True, 'rows': [], 'status': 'RUNNING',
+          'node_version_invoked_before_tests': not cold_control}
 
 def save():
     (OUT / 'result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
@@ -64,6 +66,9 @@ phases = [(f'disabled-{i+1:02}', [module + '::test_real_host_snapshot_api_ui[dis
 phases += [(f'module-{i+1:02}', [module]) for i in range(3)]
 phases += [(f'ordered-{i+1:02}', ordered) for i in range(2)]
 phases += [('instrumented-seven-states', [module + '::test_real_host_snapshot_api_ui'])]
+if cold_control:
+    phases = [('cold-disabled', [module + '::test_real_host_snapshot_api_ui[disabled]'])]
+    result['protocol'] = 'one disabled before invoking node version; exit 23 and blocked-child cleanup controls'
 for label, tests in phases:
     case = LAB / label
     case.mkdir()
@@ -102,6 +107,40 @@ for label, tests in phases:
     result['rows'].append(row)
     save()
     print(json.dumps(row), flush=True)
+if cold_control:
+    result['node_version'] = subprocess.check_output([node, '--version'], env=base, text=True).strip()
+    failure = subprocess.run([node, '-e', 'process.exit(23)'], env=base, capture_output=True, timeout=20)
+    assert failure.returncode == 23
+    case = LAB / 'blocked-control'
+    case.mkdir()
+    ready = case / 'ready.json'
+    script = case / 'host-status-ui.cjs'
+    script.write_text("require('node:fs').writeFileSync(" + json.dumps(str(ready)) +
+                      ", JSON.stringify({pid:process.pid}));setInterval(()=>{},1000);", encoding='utf-8')
+    with (OUT / 'blocked-control.log').open('wb') as log:
+        child = subprocess.Popen([node, str(script)], env=base, stdout=log, stderr=subprocess.STDOUT)
+        ready_deadline = time.monotonic() + 20
+        observed_timeout = False
+        try:
+            while not ready.exists() and child.poll() is None and time.monotonic() < ready_deadline:
+                time.sleep(0.02)
+            assert ready.exists() and child.poll() is None, 'Control did not reach its intentional block'
+            assert json.loads(ready.read_text())['pid'] == child.pid
+            try:
+                child.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                observed_timeout = True
+            assert observed_timeout, 'Blocked control must time out, not return success'
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=10)
+    leftovers = census(case)
+    assert child.returncode != 0 and not leftovers
+    result['controls'] = {'exit_23_preserved': failure.returncode, 'child_reached_intentional_block': True,
+                          'timeout_observed': observed_timeout, 'timeout_seconds': 1,
+                          'child_exit_after_kill': child.returncode, 'remaining_matching_node_processes': leftovers,
+                          'product_timeout_unchanged_seconds': 20}
 result['source_hashes_after'] = {p: hashlib.sha256((SOURCE / p).read_bytes()).hexdigest() for p in watched}
 assert result['source_hashes_after'] == before
 result['status'] = 'PASS' if all(x['exit'] == 0 and not x['outer_timeout'] and not x['remaining_matching_node_processes'] for x in result['rows']) else 'OBSERVATION_FAILURE'
