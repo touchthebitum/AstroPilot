@@ -1,4 +1,4 @@
-name: Build and qualify isolated physical test kits 108e531
+name: Build and qualify isolated physical test kits 7e98e45
 on:
   workflow_dispatch:
     inputs:
@@ -46,8 +46,8 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           github-token: ${{ github.token }}
-          run-id: '39027667278'
-          name: AstroPilot-beta8-windows-x86_64-108e53120bc66840201a9d0eb05e293e90e73d3e
+          run-id: '39030387705'
+          name: AstroPilot-beta8-windows-x86_64-7e98e45b2f46f57dcf959f3bf8d2b1373375cf48
           path: ${{ runner.temp }}/official-windows
       - name: Build autonomous launchers and qualify real guide, candidate, resume and export
         shell: pwsh
@@ -64,6 +64,7 @@ jobs:
             ${{ runner.temp }}/physical70/runtime-proof/*.json
             ${{ runner.temp }}/physical70/runtime-proof/*.log
             ${{ runner.temp }}/physical70/kit-validation.json
+            ${{ runner.temp }}/physical70/distribution-tests.xml
             ${{ runner.temp }}/sandbox-proof/result.json
             ${{ runner.temp }}/sandbox-proof/*.log
             ${{ runner.temp }}/sandbox-proof/*.html
@@ -71,9 +72,9 @@ jobs:
           retention-days: 30
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: NightMerit-physical-kit-${{ matrix.os }}-108e531
+          name: NightMerit-physical-kit-${{ matrix.os }}-7e98e45
           path: |
-            ${{ runner.temp }}/physical70/NightMerit-Test-108e531-*.zip
-            ${{ runner.temp }}/physical70/NightMerit-Test-108e531-*.zip.sha256
+            ${{ runner.temp }}/physical70/NightMerit-Test-7e98e45-*.zip
+            ${{ runner.temp }}/physical70/NightMerit-Test-7e98e45-*.zip.sha256
             ${{ runner.temp }}/physical70/kit-validation.json
           retention-days: 30

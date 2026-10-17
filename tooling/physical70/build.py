@@ -1,11 +1,11 @@
 """Build and qualify two autonomous internal test kits; exact main product sources."""
 from pathlib import Path,PurePosixPath
 import os,sys,subprocess,json,hashlib,shutil,zipfile
-SHA='108e53120bc66840201a9d0eb05e293e90e73d3e'
+SHA='7e98e45b2f46f57dcf959f3bf8d2b1373375cf48'
 source=Path('candidate').resolve();tools=Path('operations/tooling/physical70').resolve();ops=Path('operations').resolve()
 assert subprocess.check_output(['git','rev-parse','HEAD'],cwd=source,text=True).strip()==SHA
 subprocess.run(['git','diff','--exit-code','HEAD'],cwd=source,check=True)
-root=Path(os.environ['RUNNER_TEMP'])/'physical70';root.mkdir();platform='Windows-x64' if os.name=='nt' else 'Mac-ARM64';kit=root/('NightMerit-Test-108e531-'+platform);kit.mkdir()
+root=Path(os.environ['RUNNER_TEMP'])/'physical70';root.mkdir();platform='Windows-x64' if os.name=='nt' else 'Mac-ARM64';kit=root/('NightMerit-Test-7e98e45-'+platform);kit.mkdir()
 env={k:v for k,v in os.environ.items() if not k.startswith(('ASTROPILOT_','NIGHTMERIT_','FIELD_LAB_'))}
 if sys.platform=='darwin':env['BROWSER_NATIVE_HOME']=os.environ['HOME']
 if os.name=='nt':env['BROWSER_NATIVE_USERPROFILE']=os.environ['USERPROFILE']
@@ -37,6 +37,17 @@ else:
 runtime=root/'venv-runtime';env['UV_PROJECT_ENVIRONMENT']=str(runtime)
 call(['uv','sync','--locked','--extra','test','--python','3.13.5'])
 runtime_python=runtime/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
+distribution=root/'distribution-tests.xml'
+call([str(runtime_python),'-m','pytest','-q',
+ 'tests/architecture/test_packaging_contract.py',
+ 'tests/architecture/test_windows_packaging_contract.py',
+ 'tests/architecture/test_windows_installer_contract.py',
+ 'tests/architecture/test_windows_candidate_artifacts.py',
+ 'tests/architecture/test_macos_release_source_identity.py',
+ '--junitxml='+str(distribution)])
+import xml.etree.ElementTree as ET
+checks=ET.parse(distribution)
+assert not any(checks.findall('.//'+kind) for kind in ('failure','error','skipped'))
 env.update(PRODUCT_SOURCE=str(source),LIFECYCLE_PROOF=str(root/'runtime-proof'))
 call([str(runtime_python),str(tools/'runtime_lifecycle.py')],cwd=source)
 # Separate locked toolchain: no changes to product dependencies.
