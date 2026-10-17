@@ -1,4 +1,4 @@
-name: Build and qualify isolated physical test kits 108e531
+name: Qualify httpx2 PR 259 in isolated Windows and Mac copies
 on:
   workflow_dispatch:
     inputs:
@@ -7,20 +7,19 @@ on:
         type: string
 permissions:
   contents: read
-  actions: read
 jobs:
-  kits:
+  httpx:
     strategy:
       fail-fast: false
       matrix:
         os: [windows-2022, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: operations
-          sparse-checkout: tooling
+          sparse-checkout: tooling/httpx259
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -38,42 +37,28 @@ jobs:
           version: '0.12.6'
           python-version: '3.13.5'
           enable-cache: false
-      - name: Reproduce and repair browser sandbox permissions in a disposable directory
-        if: runner.os == 'Windows'
-        run: python operations/tooling/physical70/diagnose_browser.py
-      - name: Download exact official Windows portable
-        if: runner.os == 'Windows'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          github-token: ${{ github.token }}
-          run-id: '39027667278'
-          name: AstroPilot-beta8-windows-x86_64-108e53120bc66840201a9d0eb05e293e90e73d3e
-          path: ${{ runner.temp }}/official-windows
-      - name: Build autonomous launchers and qualify real guide, candidate, resume and export
+      - name: Qualify the exact lock and real local HTTP failures with isolated data
         shell: pwsh
+        env:
+          APPROVED_SHA: ${{ inputs.approved_sha }}
         run: |
-          python operations/tooling/physical70/build.py
-          if ($LASTEXITCODE -ne 0) { throw 'Kit qualification failed' }
+          if ($env:APPROVED_SHA -cne '40a2d333378486319eb279bc456884d5f5f17e4d') { throw 'Unexpected candidate SHA' }
+          $env:PRODUCT_SOURCE=(Resolve-Path candidate).Path
+          $env:HTTPX_PROOF=Join-Path $env:RUNNER_TEMP 'httpx259-proof'
+          $env:UV_PROJECT_ENVIRONMENT=Join-Path $env:RUNNER_TEMP 'httpx259-venv'
+          $env:UV_CACHE_DIR=Join-Path $env:RUNNER_TEMP 'httpx259-cache'
+          $env:UV_NO_ENV_FILE='1'
+          $env:NODE_BINARY=(Get-Command node -ErrorAction Stop).Source
+          uv sync --project candidate --locked --extra test --python 3.13.5
+          if ($LASTEXITCODE -ne 0) { throw 'Locked dependency installation failed' }
+          uv run --project candidate --locked --no-sync python operations/tooling/httpx259/qualify.py
+          if ($LASTEXITCODE -ne 0) { throw 'HTTP and replay qualification failed' }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
-          name: physical-kit-proof-${{ matrix.os }}
+          name: httpx259-proof-${{ matrix.os }}
           path: |
-            ${{ runner.temp }}/physical70/build.log
-            ${{ runner.temp }}/physical70/proof/
-            ${{ runner.temp }}/physical70/runtime-proof/*.json
-            ${{ runner.temp }}/physical70/runtime-proof/*.log
-            ${{ runner.temp }}/physical70/kit-validation.json
-            ${{ runner.temp }}/sandbox-proof/result.json
-            ${{ runner.temp }}/sandbox-proof/*.log
-            ${{ runner.temp }}/sandbox-proof/*.html
-            !${{ runner.temp }}/physical70/proof/**/browser-profile/**
-          retention-days: 30
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: NightMerit-physical-kit-${{ matrix.os }}-108e531
-          path: |
-            ${{ runner.temp }}/physical70/NightMerit-Test-108e531-*.zip
-            ${{ runner.temp }}/physical70/NightMerit-Test-108e531-*.zip.sha256
-            ${{ runner.temp }}/physical70/kit-validation.json
+            ${{ runner.temp }}/httpx259-proof/*.json
+            ${{ runner.temp }}/httpx259-proof/*.xml
+            ${{ runner.temp }}/httpx259-proof/*.log
           retention-days: 30
