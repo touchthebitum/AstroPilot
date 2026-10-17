@@ -34,6 +34,7 @@ try:
  env={k:v for k,v in os.environ.items() if not k.startswith(('ASTROPILOT_','NIGHTMERIT_','FIELD_LAB_'))}
  for key in ('HOME','USERPROFILE','APPDATA','LOCALAPPDATA','TMP','TEMP','TMPDIR','XDG_CONFIG_HOME','XDG_CACHE_HOME','XDG_DATA_HOME'):
   p=OUT/'browser-environment'/key;p.mkdir(parents=True);env[key]=str(p)
+ if os.name=='nt':env['USERPROFILE']=os.environ['BROWSER_NATIVE_USERPROFILE']
  env['PRODUCT_SOURCE']=str(SOURCE);env['CHROME_BINARY']=str(KIT/read(KIT/'kit.json')['browser']);env['CASE_ROOT']=str(case);env['CASE_PROOF']=str(OUT);env['NIGHT_CHAIN_URL']=url;env['UI_INTENT']='sh2-129_ha'
  glog=(OUT/'guide-driver.log').open('w',encoding='utf-8');guide=subprocess.Popen(['node',str(TOOLS/'guide_test.cjs')],env=env,stdout=glog,stderr=subprocess.STDOUT)
  state=wait(lambda:read(OUT/'guide-ready.json') if (OUT/'guide-ready.json').exists() else None,'guide real start');write(case/'fixture.json',{'zone':'Europe/Zurich','night_date':state['night_date'],'availability':state['availability']})
@@ -54,6 +55,12 @@ try:
  archive=Path(state['exported'])
  with zipfile.ZipFile(archive) as z:
   result=json.loads(z.read('qualification.json'));assert result['verdict']=='PASS_LAB';assert len(result['replays'])==6
+  permissions=json.loads(z.read('browser-permissions.json'))
+  assert permissions['status']==('configured' if os.name=='nt' else 'not_required')
+  if os.name=='nt':
+   assert permissions['exit_code']==78 and permissions['sandbox_disabled'] is False
+   assert 'Sandbox cannot access executable' not in z.read('browser.log').decode(errors='replace')
+   assert 'Network service crashed or was terminated' not in z.read('browser.log').decode(errors='replace')
   assert not any(n.endswith('.key') or 'user_profile' in n or 'browser-profile' in n for n in z.namelist())
  assert hashes(case)==baseline
  (OUT/'request-close').touch();guide.wait(timeout=30);assert guide.returncode==0;child.wait(timeout=30);assert child.returncode==0;log.close();glog.close()

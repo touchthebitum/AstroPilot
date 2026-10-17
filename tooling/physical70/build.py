@@ -8,6 +8,7 @@ subprocess.run(['git','diff','--exit-code','HEAD'],cwd=source,check=True)
 root=Path(os.environ['RUNNER_TEMP'])/'physical70';root.mkdir();platform='Windows-x64' if os.name=='nt' else 'Mac-ARM64';kit=root/('NightMerit-Test-70ac6e0-'+platform);kit.mkdir()
 env={k:v for k,v in os.environ.items() if not k.startswith(('ASTROPILOT_','NIGHTMERIT_','FIELD_LAB_'))}
 if sys.platform=='darwin':env['BROWSER_NATIVE_HOME']=os.environ['HOME']
+if os.name=='nt':env['BROWSER_NATIVE_USERPROFILE']=os.environ['USERPROFILE']
 for key in ('HOME','USERPROFILE','APPDATA','LOCALAPPDATA','TMP','TEMP','TMPDIR','XDG_CACHE_HOME','XDG_CONFIG_HOME','XDG_DATA_HOME','ASTROPILOT_DATA_DIR','UV_CACHE_DIR'):
  p=root/'environment'/key;p.mkdir(parents=True);env[key]=str(p)
 env.update(UV_NO_ENV_FILE='1',PYTHONUTF8='1')
@@ -33,7 +34,7 @@ else:
  (kit/'product-provenance.json').write_text(json.dumps({'source_sha':SHA,'version':'1.0.0b8','architecture':'arm64','signature':'ad_hoc_only','executable_sha256':sha(app/'Contents/MacOS/AstroPilot'),'uv_lock_sha256':sha(source/'uv.lock')}),encoding='utf-8')
 # Separate locked toolchain: no changes to product dependencies.
 venv=root/'venv-controller';call(['uv','venv','--python','3.13.5',str(venv)]);python=venv/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
-call(['uv','pip','sync','--require-hashes','--python',str(python),str(tools/'requirements.txt')]);call([str(python),str(tools/'test_protocol.py')],cwd=tools)
+call(['uv','pip','sync','--require-hashes','--python',str(python),str(tools/'requirements.txt')]);call([str(python),'-m','unittest','test_protocol','test_browser_permissions'],cwd=tools)
 call([str(python),'-m','PyInstaller','--noconfirm','--clean','--onedir','--console','--name','TestController','--collect-data','tzdata','--distpath',str(root/'controller-dist'),'--workpath',str(root/'controller-build'),'--specpath',str(root/'controller-spec'),str(tools/'controller.py')],cwd=tools)
 shutil.copytree(root/'controller-dist/TestController',kit/'TestController',symlinks=True)
 if sys.platform=='darwin':

@@ -9,6 +9,10 @@ function browserEnvironment(parent,{platform=process.platform}={}){
   assert(parent.BROWSER_NATIVE_HOME && path.posix.isAbsolute(parent.BROWSER_NATIVE_HOME),'Capture native runner HOME before application isolation');
   child.HOME=parent.BROWSER_NATIVE_HOME;
  }
+ if(platform==='win32' && parent.GITHUB_ACTIONS==='true'){
+  assert(parent.BROWSER_NATIVE_USERPROFILE && path.win32.isAbsolute(parent.BROWSER_NATIVE_USERPROFILE),'Capture native runner USERPROFILE before application isolation');
+  child.USERPROFILE=parent.BROWSER_NATIVE_USERPROFILE;
+ }
  return child;
 }
 module.exports={browserEnvironment};

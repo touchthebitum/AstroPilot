@@ -38,6 +38,9 @@ jobs:
           version: '0.12.6'
           python-version: '3.13.5'
           enable-cache: false
+      - name: Reproduce and repair browser sandbox permissions in a disposable directory
+        if: runner.os == 'Windows'
+        run: python operations/tooling/physical70/diagnose_browser.py
       - name: Download exact official Windows portable
         if: runner.os == 'Windows'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
@@ -59,6 +62,9 @@ jobs:
             ${{ runner.temp }}/physical70/build.log
             ${{ runner.temp }}/physical70/proof/
             ${{ runner.temp }}/physical70/kit-validation.json
+            ${{ runner.temp }}/sandbox-proof/result.json
+            ${{ runner.temp }}/sandbox-proof/*.log
+            ${{ runner.temp }}/sandbox-proof/*.html
             !${{ runner.temp }}/physical70/proof/**/browser-profile/**
           retention-days: 30
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
