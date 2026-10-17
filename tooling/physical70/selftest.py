@@ -78,9 +78,9 @@ try:
  for label in ('ha','oiii'):
   for mode in ('accept','reopen'):
    src=case/('ui-'+mode+'-'+label);dest=OUT/src.name;dest.mkdir()
-   for name in ('browser-result.json','ui.png','ui.txt','paint-state.json','driver.log'):
+   for name in ('browser-result.json','ui.png','ui.txt','paint-state.json','saved-mission-mobile.png','driver.log'):
     if (src/name).exists():(dest/name).write_bytes((src/name).read_bytes())
- write(OUT/'result.json',{'result':'PASS_LAB','source_sha':read(KIT/'kit.json')['source_sha'],'real_frozen_controller':True,'real_guide_dom':True,'real_candidate_dom':True,'restarts':2,'credit_replays':12,'resume_same_copy':True,'canonical_bytes_unchanged':True,'external_sentinel_unchanged':True,'physical_user_test_pending':True})
+ write(OUT/'result.json',{'result':'PASS_LAB','source_sha':read(KIT/'kit.json')['source_sha'],'real_frozen_controller':True,'real_guide_dom':True,'real_candidate_dom':True,'restarts':2,'credit_replays':12,'resume_same_copy':True,'canonical_bytes_unchanged':True,'external_sentinel_unchanged':True,'physical_user_test_pending':True,'distinct_saved_filter_labels':True,'saved_summary_fits_390px':True,'reopen_read_only':True})
 finally:
  if case and case.exists():
   for src in case.glob('ui-*'):

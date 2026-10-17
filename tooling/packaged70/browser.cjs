@@ -104,7 +104,7 @@ async function journey() {
       const response = await realFetch(...args);
       if (String(args[0]).startsWith('/v1/')) {
         const body = await response.clone().json().catch(() => null);
-        window.__ciTraffic.push({url: String(args[0]), request: JSON.parse(args[1]?.body || 'null'), http: response.status, body});
+        window.__ciTraffic.push({method: args[1]?.method || 'GET', url: String(args[0]), request: JSON.parse(args[1]?.body || 'null'), http: response.status, body});
       }
       return response;
     };
@@ -166,13 +166,38 @@ async function journey() {
   } else {
     const missionId=process.env.MISSION_ID;
     await waitFor(()=>evaluate(`state.savedMissions.some(m=>m.mission_id===${JSON.stringify(missionId)})`),'persisted mission discovery');
-    await evaluate(`document.querySelector('#saved-mission-choice').value=${JSON.stringify(missionId)};document.querySelector('#saved-mission-choice').dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('#open-saved-mission').click();true`);
+    const savedLabels = await evaluate(`(() => {
+      const options = Array.from(document.querySelector('#saved-mission-choice').options);
+      return options.map(o => ({id:o.value,label:o.textContent}));
+    })()`);
+    assert.equal(savedLabels.length, 2);
+    assert.notEqual(savedLabels[0].label, savedLabels[1].label, 'Ha/OIII missions must be distinguishable');
+    const selectedLabel = savedLabels.find(o => o.id === missionId);
+    assert(selectedLabel);
+    assert(selectedLabel.label.includes(intent === 'sh2-129_ha' ? ' · Ha 6.5 nm · ' : ' · OIII 6.5 nm · '));
+    assert(selectedLabel.label.includes('Sh2-129 · ') && selectedLabel.label.includes(' → '));
+    assert(selectedLabel.label.endsWith(fixture.zone));
+    await evaluate(`document.querySelector('#saved-mission-choice').value=${JSON.stringify(missionId)};document.querySelector('#saved-mission-choice').dispatchEvent(new Event('change',{bubbles:true}));true`);
+    assert.equal(await evaluate("document.querySelector('#saved-mission-target').textContent"), selectedLabel.label);
+    await send('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:false});
+    const summaryFits = await evaluate(`(() => {
+      const entry=document.querySelector('#saved-mission-entry'), summary=document.querySelector('#saved-mission-target');
+      const box=entry.getBoundingClientRect();
+      return box.width>0 && box.left>=0 && box.right<=window.innerWidth && summary.scrollWidth<=summary.clientWidth+1;
+    })()`);
+    assert(summaryFits, 'Full persisted mission label must fit at 390px');
+    await evaluate("document.querySelector('#saved-mission-entry').scrollIntoView({block:'center'});true");
+    const savedShot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});
+    fs.writeFileSync(path.join(proof,'saved-mission-mobile.png'),Buffer.from(savedShot.data,'base64'));
+    await send('Emulation.setDeviceMetricsOverride', {width:1280,height:1200,deviceScaleFactor:1,mobile:false});
+    await evaluate("document.querySelector('#open-saved-mission').click();true");
     await waitFor(()=>evaluate(`state.sessions.some(s=>s.execution.execution_id===${JSON.stringify(process.env.EXECUTION_ID)})`),'persisted session');
     await evaluate(`document.querySelector('#session-choice').value=${JSON.stringify(process.env.EXECUTION_ID)};document.querySelector('#session-choice').dispatchEvent(new Event('change',{bubbles:true}));true`);
     await waitFor(()=>evaluate(`document.querySelector('#session-status').textContent.includes('Crédit enregistré')`),'persisted credit UI');
     const session=await evaluate(`({status:document.querySelector('#session-status').textContent,after:document.querySelector('#session-after').textContent,intent:document.querySelector('#session-intent').textContent,filter:document.querySelector('#mission-filter').textContent,applyHidden:document.querySelector('#session-credit').hidden})`);
     assert(session.intent.includes(intent));assert(session.after.includes(intent==='sh2-129_ha'?'1 h 30':'0 h 15'),JSON.stringify(session));assert(session.applyHidden);
-    record={session,restored_from_frozen_backend:true};
+    assert((await evaluate('window.__ciTraffic')).every(r=>r.method==='GET'), 'Reopening must not write');
+    record={session,restored_from_frozen_backend:true,saved_labels:savedLabels,selected_label:selectedLabel,saved_summary_fits_390px:summaryFits,reopen_read_only:true};
   }
   const paint=await evaluate(`(async()=>{await document.fonts.ready;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const dialog=document.querySelector('#mission');const m=document.querySelector('.mission-dialog');const box=m.getBoundingClientRect();return {open:m.open,display:getComputedStyle(m).display,visibility:getComputedStyle(m).visibility,opacity:getComputedStyle(m).opacity,box:{x:box.x,y:box.y,width:box.width,height:box.height}};})()`);
   assert(paint.open && paint.display!=='none' && paint.visibility==='visible' && Number(paint.opacity)>0 && paint.box.width>0 && paint.box.height>0,JSON.stringify(paint));

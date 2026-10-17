@@ -1,4 +1,4 @@
-name: Build and qualify isolated physical test kits 70ac6e0
+name: Build and qualify isolated physical test kits 3cd1356
 on:
   workflow_dispatch:
     inputs:
@@ -46,8 +46,8 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           github-token: ${{ github.token }}
-          run-id: '38919145126'
-          name: AstroPilot-beta8-windows-x86_64-70ac6e0719cdc8c6ce76cbb7a2bfec1a24c82c9b
+          run-id: '39018194757'
+          name: AstroPilot-beta8-windows-x86_64-3cd135644ba8f306c15291073b52c469059247b0
           path: ${{ runner.temp }}/official-windows
       - name: Build autonomous launchers and qualify real guide, candidate, resume and export
         shell: pwsh
@@ -69,9 +69,9 @@ jobs:
           retention-days: 30
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: NightMerit-physical-kit-${{ matrix.os }}-70ac6e0
+          name: NightMerit-physical-kit-${{ matrix.os }}-3cd1356
           path: |
-            ${{ runner.temp }}/physical70/NightMerit-Test-70ac6e0-*.zip
-            ${{ runner.temp }}/physical70/NightMerit-Test-70ac6e0-*.zip.sha256
+            ${{ runner.temp }}/physical70/NightMerit-Test-3cd1356-*.zip
+            ${{ runner.temp }}/physical70/NightMerit-Test-3cd1356-*.zip.sha256
             ${{ runner.temp }}/physical70/kit-validation.json
           retention-days: 30

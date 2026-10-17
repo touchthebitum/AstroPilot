@@ -1,11 +1,11 @@
 """Build and qualify two autonomous internal test kits; exact main product sources."""
 from pathlib import Path,PurePosixPath
 import os,sys,subprocess,json,hashlib,shutil,zipfile
-SHA='70ac6e0719cdc8c6ce76cbb7a2bfec1a24c82c9b'
+SHA='3cd135644ba8f306c15291073b52c469059247b0'
 source=Path('candidate').resolve();tools=Path('operations/tooling/physical70').resolve();ops=Path('operations').resolve()
 assert subprocess.check_output(['git','rev-parse','HEAD'],cwd=source,text=True).strip()==SHA
 subprocess.run(['git','diff','--exit-code','HEAD'],cwd=source,check=True)
-root=Path(os.environ['RUNNER_TEMP'])/'physical70';root.mkdir();platform='Windows-x64' if os.name=='nt' else 'Mac-ARM64';kit=root/('NightMerit-Test-70ac6e0-'+platform);kit.mkdir()
+root=Path(os.environ['RUNNER_TEMP'])/'physical70';root.mkdir();platform='Windows-x64' if os.name=='nt' else 'Mac-ARM64';kit=root/('NightMerit-Test-3cd1356-'+platform);kit.mkdir()
 env={k:v for k,v in os.environ.items() if not k.startswith(('ASTROPILOT_','NIGHTMERIT_','FIELD_LAB_'))}
 if sys.platform=='darwin':env['BROWSER_NATIVE_HOME']=os.environ['HOME']
 if os.name=='nt':env['BROWSER_NATIVE_USERPROFILE']=os.environ['USERPROFILE']

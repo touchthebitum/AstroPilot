@@ -9,7 +9,7 @@ from forecast import Forecast
 from browser_permissions import configure_browser, browser_environment
 import tzdata
 reset_tzpath(())
-SHA='70ac6e0719cdc8c6ce76cbb7a2bfec1a24c82c9b'
+SHA='3cd135644ba8f306c15291073b52c469059247b0'
 AUTH='c5bc501f192e0894008277cc4b76957a10d37cac092de4f318a7eed0a2c382d5'
 URL='http://127.0.0.1:8000';OPENER=urllib.request.build_opener(urllib.request.ProxyHandler({}))
 SITES={'zurich':{'name':'TEST ISOLE Zurich','latitude':46.888,'longitude':6.55,'bortle':4,'timezone':'Europe/Zurich'},'winnipeg':{'name':'TEST ISOLE Winnipeg','latitude':49.895,'longitude':-97.138,'bortle':4,'timezone':'America/Winnipeg'}}
@@ -26,7 +26,7 @@ def request(method,path,body=None):
 
 def verify(root):
  manifest=json.loads((root/'manifest.json').read_text(encoding='utf-8'))
- if manifest['source_sha']!=SHA:raise RuntimeError('Le kit ne correspond pas à main 70ac6e0.')
+ if manifest['source_sha']!=SHA:raise RuntimeError('Le kit ne correspond pas à main 3cd1356.')
  for rel,record in manifest['files'].items():
   path=root/rel
   if not path.resolve().is_relative_to(root.resolve()):raise RuntimeError('Chemin hors du kit refusé.')
@@ -155,7 +155,7 @@ class Controller:
   verdict='PASS_LAB' if valid and self.lab else 'PASS_PC_DECLARE' if valid else 'NOT_VALIDATED'
   report={**self.state,'verdict':verdict,'physical_ui_confirmation':'declared by operator' if not self.lab else 'laboratory automation, not physical user proof','error':self.error,'runtime_identity':getattr(self.app,'identity',None),'copie_isolee':str(self.case),'kit_source_sha':SHA,'real_profile_accessed':False}
   if hasattr(self,'last_sessions'):report.update(sessions=self.last_sessions,progress=self.last_progress)
-  out=self.kit/'RESULTATS';out.mkdir(exist_ok=True);archive=out/('resultats-kit-70ac6e0-'+('windows' if os.name=='nt' else 'mac')+'-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+secrets.token_hex(2)+'.zip')
+  out=self.kit/'RESULTATS';out.mkdir(exist_ok=True);archive=out/('resultats-kit-3cd1356-'+('windows' if os.name=='nt' else 'mac')+'-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+secrets.token_hex(2)+'.zip')
   with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_DEFLATED) as z:
    z.writestr('qualification.json',json.dumps(report,indent=2,ensure_ascii=False))
    for rel in ('application-stdout.log','application-stderr.log','weather-log.json','controller.log','browser.log','browser-permissions.json'):
@@ -231,7 +231,7 @@ def main():
  if '--ignore-browser' in sys.argv:return
  p=argparse.ArgumentParser();p.add_argument('--resume',action='store_true');p.add_argument('--laboratory',action='store_true');p.add_argument('--no-browser',action='store_true');p.add_argument('--kit-root');p.add_argument('--verify-only',action='store_true');args=p.parse_args()
  kit=Path(args.kit_root).resolve() if args.kit_root else Path(sys.executable).resolve().parent.parent
- print('NightMerit — test isolé de main 70ac6e0\nVérification du kit…',flush=True);verify(kit)
+ print('NightMerit — test isolé de main 3cd1356\nVérification du kit…',flush=True);verify(kit)
  if args.verify_only:
   print('Kit intègre.',flush=True);return
  copies=kit/'COPIES-ISOLEES';copies.mkdir(exist_ok=True)
