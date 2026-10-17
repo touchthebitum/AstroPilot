@@ -8,6 +8,7 @@ $inputXml = [System.Security.SecurityElement]::Escape($kit)
 $outputXml = [System.Security.SecurityElement]::Escape($results)
 $config = @"
 <Configuration>
+ <vGPU>Disable</vGPU>
  <Networking>Disable</Networking>
  <ClipboardRedirection>Disable</ClipboardRedirection>
  <MappedFolders>

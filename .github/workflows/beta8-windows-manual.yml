@@ -1,11 +1,7 @@
-name: Diagnose Sandbox and qualify durable Windows installation kit 7e98e45
+name: Verify Windows software-rendering diagnostic kit 7e98e45
 on:
   workflow_dispatch:
     inputs:
-      collect_only:
-        type: boolean
-        default: false
-        required: false
       approved_sha:
         required: true
         type: string
@@ -13,109 +9,45 @@ permissions:
   contents: read
   actions: read
 jobs:
-  host-diagnostic:
+  software-variant:
     runs-on: windows-2022
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          sparse-checkout: tooling/sandbox_diagnostic
-          persist-credentials: false
-      - name: Test read-only event collector and filters
-        shell: pwsh
-        run: ./tooling/sandbox_diagnostic/test_collect.ps1
-      - name: Build and exercise actual user launcher
-        shell: pwsh
-        run: |
-          python tooling/sandbox_diagnostic/build.py
-          if ($LASTEXITCODE -ne 0) { throw 'Host collector launcher failed' }
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: always()
-        with:
-          name: sandbox-host-diagnostic-kit-and-proof
-          path: |
-            diagnostic-output/NightMerit-Diagnostic-Sandbox-Windows-v2.zip
-            diagnostic-output/NightMerit-Diagnostic-Sandbox-Windows-v2.zip.sha256
-            diagnostic-output/launcher-smoke.json
-            ${{ runner.temp }}/host-diagnostic-test-*/test-result.json
-          retention-days: 30
-  kits:
-    if: ${{ !inputs.collect_only }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-2022]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          path: operations
           sparse-checkout: tooling
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          path: candidate
-          ref: ${{ inputs.approved_sha }}
-          sparse-checkout: |
-            /*
-            !/user_profile.json
-            !/user_filters.json
-            !/data/user_profile.json
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
-        with:
-          version: '0.12.6'
-          python-version: '3.13.5'
-          enable-cache: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          github-token: ${{ github.token }}
-          run-id: '39030606199'
-          name: NightMerit-physical-kit-${{ matrix.os }}-7e98e45
-          path: ${{ runner.temp }}/input-current
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          github-token: ${{ github.token }}
-          run-id: '39018435620'
-          name: NightMerit-physical-kit-${{ matrix.os }}-3cd1356
-          path: ${{ runner.temp }}/input-previous
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        if: runner.os == 'Windows'
-        with:
-          github-token: ${{ github.token }}
-          run-id: '39030387705'
-          name: AstroPilot-beta8-windows-x86_64-7e98e45b2f46f57dcf959f3bf8d2b1373375cf48
-          path: ${{ runner.temp }}/official-current
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        if: runner.os == 'Windows'
-        with:
-          github-token: ${{ github.token }}
-          run-id: '39018194757'
-          name: AstroPilot-beta8-windows-x86_64-3cd135644ba8f306c15291073b52c469059247b0
-          path: ${{ runner.temp }}/official-previous
-      - name: Build installation kit and qualify official upgrade, restart and replay
+      - name: Verify requested source
         shell: pwsh
         run: |
-          python operations/tooling/installation7e/build.py
-          if ($LASTEXITCODE -ne 0) { throw 'Installation kit qualification failed' }
+          if ('${{ inputs.approved_sha }}' -ne '7e98e45b2f46f57dcf959f3bf8d2b1373375cf48') { throw 'Unapproved product source' }
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          github-token: ${{ github.token }}
+          run-id: '39035081606'
+          name: NightMerit-installation-kit-windows-2022-7e98e45
+          path: ${{ runner.temp }}/input-kit
+      - name: Verify isolated WSB configuration without starting Sandbox
+        shell: powershell
+        run: ./tooling/software_sandbox/test_launch.ps1
+      - name: Derive kit and verify complete manifest and frozen controller
+        shell: powershell
+        run: |
+          python tooling/software_sandbox/build.py
+          if ($LASTEXITCODE -ne 0) { throw 'Variant integrity verification failed' }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
-          name: installation-proof-${{ matrix.os }}
+          name: software-rendering-proof
           path: |
-            ${{ runner.temp }}/installation7e/build.log
-            ${{ runner.temp }}/installation7e/proof/
-            ${{ runner.temp }}/installation7e/seed-proof/result.json
-            ${{ runner.temp }}/installation7e/seed-proof/*log
-            ${{ runner.temp }}/installation7e/kit-validation.json
+            ${{ runner.temp }}/software-launch-proof.json
+            ${{ runner.temp }}/software-kit/variant-validation.json
           retention-days: 30
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: NightMerit-installation-kit-${{ matrix.os }}-7e98e45
+          name: NightMerit-Windows-Logiciel-7e98e45
           path: |
-            ${{ runner.temp }}/installation7e/NightMerit-Installation-7e98e45-*.zip
-            ${{ runner.temp }}/installation7e/NightMerit-Installation-7e98e45-*.zip.sha256
-            ${{ runner.temp }}/installation7e/kit-validation.json
+            ${{ runner.temp }}/software-kit/*.zip
+            ${{ runner.temp }}/software-kit/*.sha256
+            ${{ runner.temp }}/software-kit/variant-validation.json
           retention-days: 30
