@@ -636,6 +636,8 @@ async function fetch(url, options) {
       for (const date of expected) assert(option.textContent.includes(date), option.textContent);
       assert(option.textContent.endsWith(zone));
       ui.savedMissionChoice.value = option.value;
+      renderSavedMissionAvailability();
+      assert.equal(ui.savedMissionTarget.textContent, option.textContent);
       ui.openSavedMission.handler();
       assert.equal(state.acceptedMission.mission_id, `mission-${kind}`);
       assert.equal(state.acceptedMission.mission.selected_filter.name, display);

@@ -208,6 +208,18 @@ async function journey() {
     assert(savedOption.label.includes(formatSavedInstant(start)));
     assert(savedOption.label.includes(formatSavedInstant(end)));
     assert(savedOption.label.endsWith(accepted.body.mission.site_timezone));
+    assert.equal(await evaluate("document.querySelector('#saved-mission-target').textContent"), savedOption.label);
+    const summaryFits = await evaluate(`(() => {
+      const entry = document.querySelector('#saved-mission-entry');
+      const summary = document.querySelector('#saved-mission-target');
+      const box = entry.getBoundingClientRect();
+      return box.width > 0 && box.left >= 0 && box.right <= window.innerWidth &&
+        summary.scrollWidth <= summary.clientWidth + 1;
+    })()`);
+    assert(summaryFits, 'Full saved mission description must fit at 390px');
+    await evaluate("document.querySelector('#saved-mission-entry').scrollIntoView({block:'center'}); true;");
+    const savedShot = await send('Page.captureScreenshot', {format:'png', captureBeyondViewport:true});
+    fs.writeFileSync(path.join(proof,'saved-mission-mobile.png'), Buffer.from(savedShot.data,'base64'));
     await evaluate(`
       document.querySelector('#saved-mission-choice').value = ${JSON.stringify(accepted.body.mission_id)};
       document.querySelector('#saved-mission-choice').dispatchEvent(new Event('change', {bubbles:true}));
@@ -219,7 +231,8 @@ async function journey() {
     assert.equal(await evaluate('window.__ciTraffic.length'), 0, 'Reopening must not write');
     record = {prepared, accepted, task_rows: taskRows, local_mission_times: true,
       mission_plan_fits_390px: planFits, idempotent_confirmation: true,
-      saved_mission_option: savedOption, saved_mission_reopened_without_write: true};
+      saved_mission_option: savedOption, saved_mission_summary_fits_390px: summaryFits,
+      saved_mission_reopened_without_write: true};
   }
   const screenshot = await send('Page.captureScreenshot', {format: 'png', captureBeyondViewport: true});
   fs.writeFileSync(path.join(proof, 'ui.png'), Buffer.from(screenshot.data, 'base64'));

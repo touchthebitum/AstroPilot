@@ -5163,7 +5163,6 @@ async function restoreSavedMission() {
   }
   if (state.acceptedMission) {
     ui.savedMissionChoice.value = state.acceptedMission.mission_id;
-    ui.savedMissionTarget.textContent = state.acceptedMission.mission.target;
     ui.savedMissionEntry.hidden = false;
   }
   renderSavedMissionAvailability();
@@ -5173,6 +5172,10 @@ function renderSavedMissionAvailability() {
   if (!ui.openSavedMission) return;
   const selected = state.savedMissions.find(item => item.mission_id === ui.savedMissionChoice.value);
   ui.openSavedMission.disabled = !selected?.mission || selected.source !== "persisted";
+  if (ui.savedMissionTarget) {
+    ui.savedMissionTarget.textContent = selected?.mission && selected.source === "persisted"
+      ? savedMissionLabel(selected) : "";
+  }
 }
 
 function invalidateAvailabilityForSiteChange(previousSite, nextSite) {
