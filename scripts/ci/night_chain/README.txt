@@ -45,3 +45,11 @@ installer, physical shutdown or concurrent NAS qualification is claimed.
 
 The on-disk files in common.py are synthetic and disposable. No real Mac/Windows
 profile is copied or uploaded. No change to business logic is made by this fixture.
+
+Saved mission labels: after each Hα/OIII confirmation, reload the actual page,
+assert its persisted option contains the target, recorded filter, both local
+window endpoints and historical site zone, then reopen the same mission ID. No
+new acceptance or write is allowed. The native session UI regression additionally
+uses real API-persisted pairs with the same target/window, verifies each credit
+(90/15 min), repeated discovery, midnight/DST/Winnipeg and unchanged canonical files.
+Its DOM harness is distinct from these real-browser confirmation journeys.

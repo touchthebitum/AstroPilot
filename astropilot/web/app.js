@@ -3726,6 +3726,20 @@ function missionDateTimeLabel(value, zone) {
   return `${label} · ${zone}`;
 }
 
+// Describe persisted missions without consulting today's site or filter inventory.
+function savedMissionLabel(item) {
+  const mission = item.mission;
+  const zone = missionTimezone(mission, item);
+  const filter = mission.selected_filter?.name || mission.selected_filter?.filter_type || "Filtre non précisé";
+  const formatter = new NightMeritTime.DateTimeFormat("fr-CH", {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false, timeZone: zone,
+  });
+  const dateTime = value => value && Number.isFinite(Date.parse(value))
+    ? formatter.format(new Date(value)) : "Non précisée";
+  return `${mission.target} · ${filter} · ${dateTime(mission.window_start)} → ${dateTime(mission.window_end)} · ${zone}`;
+}
+
 function clock(value, timeZone) {
   if (!value) return null;
   if (/^\d{2}:\d{2}$/.test(value)) return value;
@@ -5144,12 +5158,11 @@ async function restoreSavedMission() {
   for (const item of state.savedMissions) {
     const option = document.createElement("option");
     option.value = item.mission_id;
-    option.textContent = `${item.mission.target} · ${missionDateTimeLabel(item.mission.window_start, missionTimezone(item.mission, item))}`;
+    option.textContent = savedMissionLabel(item);
     ui.savedMissionChoice.append(option);
   }
   if (state.acceptedMission) {
     ui.savedMissionChoice.value = state.acceptedMission.mission_id;
-    ui.savedMissionTarget.textContent = state.acceptedMission.mission.target;
     ui.savedMissionEntry.hidden = false;
   }
   renderSavedMissionAvailability();
@@ -5159,6 +5172,10 @@ function renderSavedMissionAvailability() {
   if (!ui.openSavedMission) return;
   const selected = state.savedMissions.find(item => item.mission_id === ui.savedMissionChoice.value);
   ui.openSavedMission.disabled = !selected?.mission || selected.source !== "persisted";
+  if (ui.savedMissionTarget) {
+    ui.savedMissionTarget.textContent = selected?.mission && selected.source === "persisted"
+      ? savedMissionLabel(selected) : "";
+  }
 }
 
 function invalidateAvailabilityForSiteChange(previousSite, nextSite) {

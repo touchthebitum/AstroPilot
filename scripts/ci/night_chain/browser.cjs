@@ -193,8 +193,46 @@ async function journey() {
     await evaluate(`document.querySelector('#mission-tasks').scrollIntoView({block:'center'}); true;`);
     const mobileShot = await send('Page.captureScreenshot', {format:'png',captureBeyondViewport:true});
     fs.writeFileSync(path.join(proof,'mission-mobile.png'),Buffer.from(mobileShot.data,'base64'));
+    // Reload the real app and reopen by persisted ID, without a new acceptance.
+    await send('Page.reload');
+    const savedOption = await waitFor(() => evaluate(`(() => {
+      const option = Array.from(document.querySelector('#saved-mission-choice')?.options || [])
+        .find(o => o.value === ${JSON.stringify(accepted.body.mission_id)});
+      return option ? {value: option.value, label: option.textContent} : null;
+    })()`), 'persisted mission label after reload');
+    const formatSavedInstant = instant => new Intl.DateTimeFormat('fr-CH', {
+      timeZone: accepted.body.mission.site_timezone, year:'numeric', month:'2-digit', day:'2-digit',
+      hour:'2-digit', minute:'2-digit', hour12:false,
+    }).format(new Date(instant));
+    assert(savedOption.label.includes(`${accepted.body.mission.target} · ${filter.name} · `));
+    assert(savedOption.label.includes(formatSavedInstant(start)));
+    assert(savedOption.label.includes(formatSavedInstant(end)));
+    assert(savedOption.label.endsWith(accepted.body.mission.site_timezone));
+    assert.equal(await evaluate("document.querySelector('#saved-mission-target').textContent"), savedOption.label);
+    const summaryFits = await evaluate(`(() => {
+      const entry = document.querySelector('#saved-mission-entry');
+      const summary = document.querySelector('#saved-mission-target');
+      const box = entry.getBoundingClientRect();
+      return box.width > 0 && box.left >= 0 && box.right <= window.innerWidth &&
+        summary.scrollWidth <= summary.clientWidth + 1;
+    })()`);
+    assert(summaryFits, 'Full saved mission description must fit at 390px');
+    await evaluate("document.querySelector('#saved-mission-entry').scrollIntoView({block:'center'}); true;");
+    const savedShot = await send('Page.captureScreenshot', {format:'png', captureBeyondViewport:true});
+    fs.writeFileSync(path.join(proof,'saved-mission-mobile.png'), Buffer.from(savedShot.data,'base64'));
+    await evaluate(`
+      document.querySelector('#saved-mission-choice').value = ${JSON.stringify(accepted.body.mission_id)};
+      document.querySelector('#saved-mission-choice').dispatchEvent(new Event('change', {bubbles:true}));
+      document.querySelector('#open-saved-mission').click(); true;
+    `);
+    await waitFor(() => evaluate(`document.querySelector('#mission-dialog').open &&
+      document.querySelector('#mission-filter').textContent === ${JSON.stringify(filter.name)}`), 'reopened persisted filter');
+    assert.equal(await evaluate('state.acceptedMission.mission_id'), accepted.body.mission_id);
+    assert.equal(await evaluate('window.__ciTraffic.length'), 0, 'Reopening must not write');
     record = {prepared, accepted, task_rows: taskRows, local_mission_times: true,
-      mission_plan_fits_390px: planFits, idempotent_confirmation: true};
+      mission_plan_fits_390px: planFits, idempotent_confirmation: true,
+      saved_mission_option: savedOption, saved_mission_summary_fits_390px: summaryFits,
+      saved_mission_reopened_without_write: true};
   }
   const screenshot = await send('Page.captureScreenshot', {format: 'png', captureBeyondViewport: true});
   fs.writeFileSync(path.join(proof, 'ui.png'), Buffer.from(screenshot.data, 'base64'));
