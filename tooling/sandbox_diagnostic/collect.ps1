@@ -6,6 +6,7 @@ function Save-DiagnosticJson($Path,$Value) {
 function Test-RelevantEvent($Event) {
     $provider = [string]$Event.ProviderName
     $message = [string]$Event.Message
+    if ($provider -eq 'CodexSandboxService.OpenAI.Codex') { return $false }
     if ($Event.LogName -notin @('System','Application')) { return $true }
     $platformProvider = $provider -match 'Hyper-V|Host.Compute|HostCompute|Containers|Sandbox|Hypervisor'
     $appProvider = $provider -match 'Application Error|Windows Error Reporting|Application Hang|Service Control Manager'
@@ -24,7 +25,8 @@ function Invoke-NightMeritDiagnostic($Root) {
     $errors = [Collections.Generic.List[object]]::new()
     $from = (Get-Date).AddHours(-24)
     $to = Get-Date
-    $summary = [ordered]@{schema_version=1;kind='host_sandbox_diagnostic_only';verdict='NOT_A_QUALIFICATION';created_utc=$to.ToUniversalTime().ToString('o');window_start_utc=$from.ToUniversalTime().ToString('o');window_end_utc=$to.ToUniversalTime().ToString('o');product_source_sha='7e98e45b2f46f57dcf959f3bf8d2b1373375cf48';real_profiles_read=$false;settings_changed=$false;sandbox_launched=$false;security_log_read=$false}
+    $summary = [ordered]@{schema_version=2;kind='host_sandbox_diagnostic_only';verdict='NOT_A_QUALIFICATION';created_utc=$to.ToUniversalTime().ToString('o');window_start_utc=$from.ToUniversalTime().ToString('o');window_end_utc=$to.ToUniversalTime().ToString('o');product_source_sha='7e98e45b2f46f57dcf959f3bf8d2b1373375cf48';real_profiles_read=$false;settings_changed=$false;sandbox_launched=$false;security_log_read=$false}
+    $summary['administrator'] = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     try {
         $osInfo = Get-CimInstance Win32_OperatingSystem
         $computer = Get-CimInstance Win32_ComputerSystem
@@ -36,11 +38,18 @@ function Invoke-NightMeritDiagnostic($Root) {
     try {
         $summary['features'] = @(Get-WindowsOptionalFeature -Online -ErrorAction Stop | Where-Object FeatureName -Match 'Containers-DisposableClientVM|VirtualMachinePlatform|Microsoft-Hyper-V-Hypervisor' | Select-Object FeatureName,@{Name='state';Expression={$_.State.ToString()}})
     } catch { $errors.Add(@{stage='feature_status';message='Etat non accessible sans droits supplementaires ; aucune elevation demandee.'}) }
-    $logs = @('System','Application')
-    try {
-        $available = @(Get-WinEvent -ListLog * -ErrorAction SilentlyContinue | Where-Object { $_.IsEnabled -and $_.LogName -match '^Microsoft-Windows-(Hyper-V-(Compute|Worker|VMMS|Hypervisor)|Host-Compute|HostCompute|Containers|Sandbox)' } | Select-Object -ExpandProperty LogName)
-        $logs += $available
-    } catch { $errors.Add(@{stage='log_inventory';message=$_.Exception.Message}) }
+    $logs = @('System','Application','Microsoft-Windows-Hyper-V-Compute-Admin','Microsoft-Windows-Hyper-V-Worker-Admin','Microsoft-Windows-Hyper-V-VMMS-Admin','Microsoft-Windows-Hyper-V-Hypervisor-Admin')
+    $inventory = @()
+    foreach ($pattern in @('*Hyper-V*','*Host*Compute*','*Containers*','*Sandbox*','*Host*Network*')) {
+        $inventoryErrors = @()
+        $found = @(Get-WinEvent -ListLog $pattern -ErrorAction SilentlyContinue -ErrorVariable inventoryErrors)
+        foreach ($item in $found) {
+            $inventory += [ordered]@{name=$item.LogName;enabled=$item.IsEnabled;records=$item.RecordCount;type=[string]$item.LogType}
+            if ($item.IsEnabled -and [string]$item.LogType -notmatch 'Analytic|Debug') { $logs += $item.LogName }
+        }
+        foreach ($issue in $inventoryErrors) { $errors.Add(@{stage='log_inventory';pattern=$pattern;message=$issue.Exception.Message}) }
+    }
+    Save-DiagnosticJson (Join-Path $folder 'log-inventory.json') @($inventory | Sort-Object { $_.name } -Unique)
     $counts = @()
     foreach ($log in ($logs | Select-Object -Unique)) {
         $rows = @()
@@ -49,7 +58,7 @@ function Invoke-NightMeritDiagnostic($Root) {
             if ($log -in @('System','Application')) { $filter['Level'] = @(1,2,3) }
             $raw = @(Get-WinEvent -FilterHashtable $filter -MaxEvents 600 -ErrorAction Stop)
             $rows = @($raw | Where-Object { Test-RelevantEvent $_ } | Select-Object -First 150 | ForEach-Object {
-                [ordered]@{time_utc=$_.TimeCreated.ToUniversalTime().ToString('o');provider=$_.ProviderName;log=$_.LogName;id=$_.Id;level=$_.Level;record_id=$_.RecordId;message=([string]$_.Message).Substring(0,[Math]::Min(([string]$_.Message).Length,32768))}
+                [ordered]@{time_utc=$_.TimeCreated.ToUniversalTime().ToString('o');provider=$_.ProviderName;log=$_.LogName;id=$_.Id;level=$_.Level;record_id=$_.RecordId;message=([string]$_.Message).Substring(0,[Math]::Min(([string]$_.Message).Length,32768));event_xml=($_.ToXml()).Substring(0,[Math]::Min(($_.ToXml()).Length,32768))}
             })
         } catch {
             if ($_.FullyQualifiedErrorId -notmatch 'NoMatchingEventsFound') { $errors.Add(@{stage='event_log';log=$log;message=$_.Exception.Message}) }

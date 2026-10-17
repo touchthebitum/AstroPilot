@@ -34,8 +34,8 @@ jobs:
         with:
           name: sandbox-host-diagnostic-kit-and-proof
           path: |
-            diagnostic-output/NightMerit-Diagnostic-Sandbox-Windows.zip
-            diagnostic-output/NightMerit-Diagnostic-Sandbox-Windows.zip.sha256
+            diagnostic-output/NightMerit-Diagnostic-Sandbox-Windows-v2.zip
+            diagnostic-output/NightMerit-Diagnostic-Sandbox-Windows-v2.zip.sha256
             diagnostic-output/launcher-smoke.json
             ${{ runner.temp }}/host-diagnostic-test-*/test-result.json
           retention-days: 30
