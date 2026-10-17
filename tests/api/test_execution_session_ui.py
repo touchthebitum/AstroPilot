@@ -532,3 +532,126 @@ assert.equal(missionTimezone({}, null), 'UTC');
 """
     result = run_with_time_authority([node, "-e", helpers + checks], capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("zone,start,end,expected", [
+    ("Europe/Zurich", "2026-10-16T22:30:00Z", "2026-10-17T00:00:00Z", ("17.10.2026 00:30", "17.10.2026 02:00")),
+    ("America/Winnipeg", "2026-10-17T04:30:00Z", "2026-10-17T06:00:00Z", ("16.10.2026 23:30", "17.10.2026 01:00")),
+    ("Europe/Zurich", "2026-03-29T00:30:00Z", "2026-03-29T01:30:00Z", ("29.03.2026 01:30", "29.03.2026 03:30")),
+])
+def test_saved_mission_labels_reopen_persisted_filters_and_credits(tmp_path, monkeypatch, zone, start, end, expected):
+    """Real API persistence -> actual list/open/session JS; only DOM is simulated."""
+    import json
+    from dataclasses import replace
+    from datetime import datetime
+    from fastapi.testclient import TestClient
+    from astropilot.app import create_app
+    from astropilot.execution_lineage_store import FileExecutionLineageStore
+    from astropilot.user_profile import load_user_profile, save_user_profile
+    from decision.filtering.selected_filter import SelectedFilter
+    from decision.services.durable_tonight_application_service import DurableTonightApplicationService
+    from test_execution_session_api import Acceptance, setup, create_completed, credit
+
+    node = shutil.which("node")
+    assert node, "Node is required: this regression must not silently skip in native CI"
+    setup(tmp_path, monkeypatch, baseline=0)
+    acceptance = Acceptance()
+    for key, kind in (("mission-ha", "Ha"), ("mission-oiii", "OIII")):
+        acceptance.missions[key] = replace(acceptance.missions[key],
+            selected_filter=SelectedFilter(name=f"{kind} 6.5 nm", filter_type=kind, bandwidth_nm=6.5),
+            site_timezone=zone, window_start=datetime.fromisoformat(start.replace("Z", "+00:00")),
+            window_end=datetime.fromisoformat(end.replace("Z", "+00:00")))
+
+    def fresh():
+        def service():
+            return DurableTonightApplicationService(application_service=object(), evidence_store=object(),
+                decision_id_factory=lambda: "unused", acceptance_service=acceptance,
+                execution_lineage_store=FileExecutionLineageStore(tmp_path / "execution_lineage"),
+                profile_loader=load_user_profile, profile_saver=save_user_profile)
+        return TestClient(create_app(service_factory=service))
+
+    for kind, minutes in (("ha", 90), ("oiii", 15)):
+        create_completed(fresh(), f"execution-{kind}", mission_id=f"mission-{kind}",
+                         evidence_id=f"evidence-{kind}", minutes=minutes)
+        response = credit(fresh(), f"execution-{kind}", f"evidence-{kind}", confirm=True)
+        assert response.status_code == 200, response.text
+    # Record every canonical file after the two explicit setup credits.
+    before = {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    response = fresh().get("/v1/execution-sessions")
+    assert response.status_code == 200, response.text
+    sessions = response.json()
+    assert len(sessions) == 2
+    source = SCRIPT.read_text(encoding="utf-8")
+    helpers = source[source.index("function missionTimezone("):source.index("function clock(")]
+    restore = (source[source.index("function configurationOperationIsCurrent("):source.index("function installCurrentConfiguration(")]
+               + source[source.index("async function restoreSavedMission()"):source.index("function invalidateAvailabilityForSiteChange")])
+    session_helpers = source[source.index("const SESSION_PENDING_KEY ="):source.index("async function reloadSessions")]
+    open_handler = source[source.index("ui.openSavedMission.addEventListener"):source.index('document.querySelector("#session-choice").addEventListener')]
+    harness = r'''
+const assert = require('node:assert/strict');
+class Element {
+  constructor() { this.value = ''; this.textContent = ''; this.children = []; this.hidden = false; }
+  replaceChildren() { this.children = []; }
+  append(item) { this.children.push(item); }
+  addEventListener(_name, handler) { this.handler = handler; }
+}
+const elements = new Map();
+const document = {createElement: () => new Element(), querySelector(selector) {
+  if (!elements.has(selector)) elements.set(selector, new Element()); return elements.get(selector);
+}};
+const ui = {savedMissionEntry: new Element(), savedMissionChoice: new Element(),
+  savedMissionTarget: new Element(), openSavedMission: new Element(),
+  mission: {showModal() { opened++; }}};
+const state = {configuration: {site: {timezone: 'Pacific/Auckland'}}, acceptedMission: null,
+  savedMissions: [], sessions: [], activeSessionId: null};
+const localStorage = {getItem: () => null, setItem() { throw Error('Unexpected write'); }};
+function text(selector, value) { document.querySelector(selector).textContent = value; }
+function renderObservationLinkage() {}
+let opened = 0;
+function renderMission(mission) {
+  state.sessions = persisted.filter(s => s.mission_id === mission.mission_id);
+  assert.equal(state.sessions.length, 1);
+  state.activeSessionId = state.sessions[0].execution.execution_id;
+  renderSession();
+}
+async function fetch(url, options) {
+  assert.equal(options, undefined, 'Restoration must perform only GET requests');
+  if (url === '/v1/accepted-mission/current') return {ok: true, json: async () => null};
+  assert.equal(url, '/v1/execution-sessions');
+  return {ok: true, json: async () => persisted};
+}
+'''
+    checks = r'''
+(async () => {
+  const original = JSON.stringify(persisted);
+  // Repeat discovery and selection to represent reopening after a new app read.
+  for (let pass = 0; pass < 2; pass++) {
+    await restoreSavedMission();
+    assert.equal(ui.savedMissionChoice.children.length, 2);
+    const labels = ui.savedMissionChoice.children.map(o => o.textContent);
+    assert.notEqual(labels[0], labels[1]);
+    for (const [kind, display, amount] of [['ha', 'Ha 6.5 nm', '1 h 30'], ['oiii', 'OIII 6.5 nm', '0 h 15']]) {
+      const option = ui.savedMissionChoice.children.find(o => o.value === `mission-${kind}`);
+      assert(option.textContent.includes(`Sh2-129 · ${display} · `));
+      for (const date of expected) assert(option.textContent.includes(date), option.textContent);
+      assert(option.textContent.endsWith(zone));
+      ui.savedMissionChoice.value = option.value;
+      ui.openSavedMission.handler();
+      assert.equal(state.acceptedMission.mission_id, `mission-${kind}`);
+      assert.equal(state.acceptedMission.mission.selected_filter.name, display);
+      assert.equal(document.querySelector('#session-current').textContent, amount);
+      assert.equal(document.querySelector('#session-status').textContent, 'Crédit enregistré.');
+    }
+  }
+  assert.equal(opened, 4);
+  assert.equal(JSON.stringify(persisted), original);
+  const legacy = savedMissionLabel({mission: {target: 'Legacy', window_start: null, window_end: 'invalid'}});
+  assert.equal(legacy, 'Legacy · Filtre non précisé · Non précisée → Non précisée · UTC');
+  assert(savedMissionLabel({mission: {target: 'M31', selected_filter: {filter_type:'L'}}}).includes(' · L · '));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''
+    data = f"const persisted = {json.dumps(sessions)}; const expected = {json.dumps(expected)}; const zone = {json.dumps(zone)};\n"
+    result = run_with_time_authority([node, "-"], input=helpers + data + harness + session_helpers + restore + open_handler + checks,
+                                    capture_output=True, text=True, encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    assert {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
