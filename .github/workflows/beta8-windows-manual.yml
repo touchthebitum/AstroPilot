@@ -2,6 +2,10 @@ name: Diagnose Sandbox and qualify durable Windows installation kit 7e98e45
 on:
   workflow_dispatch:
     inputs:
+      collect_only:
+        type: boolean
+        default: false
+        required: false
       approved_sha:
         required: true
         type: string
@@ -36,6 +40,7 @@ jobs:
             ${{ runner.temp }}/host-diagnostic-test-*/test-result.json
           retention-days: 30
   kits:
+    if: ${{ !inputs.collect_only }}
     strategy:
       fail-fast: false
       matrix:

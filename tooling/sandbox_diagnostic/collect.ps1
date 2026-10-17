@@ -7,9 +7,10 @@ function Test-RelevantEvent($Event) {
     $provider = [string]$Event.ProviderName
     $message = [string]$Event.Message
     if ($Event.LogName -notin @('System','Application')) { return $true }
-    return ($provider -match 'Hyper-V|Host.Compute|HostCompute|Containers|Sandbox|Hypervisor' -or
-        (($provider -match 'Application Error|Windows Error Reporting|Application Hang|Service Control Manager') -and
-         $message -match 'WindowsSandbox|Windows Sandbox|Bac . sable|vmcompute|vmwp|CmService|Containers|AstroPilot|TestController')))
+    $platformProvider = $provider -match 'Hyper-V|Host.Compute|HostCompute|Containers|Sandbox|Hypervisor'
+    $appProvider = $provider -match 'Application Error|Windows Error Reporting|Application Hang|Service Control Manager'
+    $appMessage = $message -match 'WindowsSandbox|Windows Sandbox|Bac . sable|vmcompute|vmwp|CmService|Containers|AstroPilot|TestController'
+    return ($platformProvider -or ($appProvider -and $appMessage))
 }
 function Invoke-NightMeritDiagnostic($Root) {
     if (-not (Test-Path -LiteralPath $Root -PathType Container)) { throw 'Dossier du collecteur introuvable.' }
