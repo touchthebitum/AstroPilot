@@ -43,3 +43,10 @@ Windows Sandbox et la copie d'application Mac ne constituent pas une signature
 personnelle ni une notarisation. Aucune publication, fusion, tag ou release.
 Le bac à sable Chrome reste actif. Aucun logiciel supplémentaire à installer
 pour exécuter les lanceurs ; Windows Sandbox doit cependant être disponible.
+
+DIAGNOSTIC EN CAS D ARRET DE SANDBOX
+Le dossier RESULTATS reçoit un journal de démarrage et un sous-dossier
+diagnostic-en-cours contenant diagnostic-partiel.zip, actualisé environ toutes
+les trois secondes et aux étapes importantes. Ces fichiers sont des diagnostics
+partiels, jamais une preuve de réussite. Ils peuvent conserver la dernière étape
+connue après un arrêt de Sandbox ; leur écriture reste dépendante du dossier partagé.

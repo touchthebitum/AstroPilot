@@ -1,4 +1,4 @@
-name: Build and qualify isolated installation test kits 7e98e45
+name: Diagnose Sandbox and qualify durable Windows installation kit 7e98e45
 on:
   workflow_dispatch:
     inputs:
@@ -9,11 +9,37 @@ permissions:
   contents: read
   actions: read
 jobs:
+  host-diagnostic:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          sparse-checkout: tooling/sandbox_diagnostic
+          persist-credentials: false
+      - name: Test read-only event collector and filters
+        shell: pwsh
+        run: ./tooling/sandbox_diagnostic/test_collect.ps1
+      - name: Build and exercise actual user launcher
+        shell: pwsh
+        run: |
+          python tooling/sandbox_diagnostic/build.py
+          if ($LASTEXITCODE -ne 0) { throw 'Host collector launcher failed' }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: sandbox-host-diagnostic-kit-and-proof
+          path: |
+            diagnostic-output/NightMerit-Diagnostic-Sandbox-Windows.zip
+            diagnostic-output/NightMerit-Diagnostic-Sandbox-Windows.zip.sha256
+            diagnostic-output/launcher-smoke.json
+            ${{ runner.temp }}/host-diagnostic-test-*/test-result.json
+          retention-days: 30
   kits:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2022, macos-latest]
+        os: [windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     steps:

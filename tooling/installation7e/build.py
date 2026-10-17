@@ -44,7 +44,7 @@ else:
 for p in kit.glob('DEMARRER*'):p.unlink()
 for p in kit.glob('REPRENDRE*'):p.unlink()
 for p in kit.glob('*signature.txt'):p.unlink()
-call([str(python),'-m','unittest','test_safety'],cwd=tools)
+call([str(python),'-m','unittest','test_safety','test_durable_diagnostic'],cwd=tools)
 call([str(python),'-m','PyInstaller','--noconfirm','--clean','--onedir','--console','--name','TestController','--collect-data','tzdata','--distpath',str(root/'controller-dist'),'--workpath',str(root/'controller-build'),'--specpath',str(root/'controller-spec'),str(tools/'controller.py')],cwd=tools)
 shutil.copytree(root/'controller-dist/TestController',kit/'TestController',symlinks=True)
 if sys.platform=='darwin':
@@ -71,8 +71,17 @@ def inventory():
    elif p.is_file() and rel!='manifest.json':rows[rel]={'sha256':sha(p)}
  return rows
 (kit/'manifest.json').write_text(json.dumps({'source_sha':SHA,'files':inventory()},indent=2))
+if os.name=='nt':
+ assert os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('RUNNER_ENVIRONMENT')=='github-hosted'
+ Path('C:/NightMeritResults').mkdir(exist_ok=False)
 validation=root/'validation-kit';shutil.copytree(kit,validation,symlinks=True);env.update(INSTALL_KIT=str(validation),INSTALL_PROOF=str(root/'proof'))
 call([str(python),str(tools/'selftest.py')],cwd=tools)
+if os.name=='nt':
+ snapshots=list(Path('C:/NightMeritResults').glob('diagnostic-en-cours-*/diagnostic-partiel.zip'));assert snapshots
+ for index,p in enumerate(snapshots):
+  with zipfile.ZipFile(p) as z:
+   assert z.testzip() is None;report=json.loads(z.read('checkpoint.json'));assert report['verdict']=='DIAGNOSTIC_ONLY' and report['stage']=='controller_stopping'
+  shutil.copy2(p,root/'proof'/('diagnostic-partiel-'+str(index)+'.zip'))
 assert inventory()==json.loads((kit/'manifest.json').read_text())['files'];assert not (kit/'COPIES-ISOLEES').exists() and not (kit/'RESULTATS').exists()
 archive=root/(kit.name+'.zip')
 if sys.platform=='darwin':call(['/usr/bin/ditto','-c','-k','--sequesterRsrc','--keepParent',str(kit),str(archive)])
