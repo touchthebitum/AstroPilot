@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const cp = require('node:child_process');
 const assert = require('node:assert/strict');
+const {readDebuggerPort} = require('./debugger_port.cjs');
 const {browserEnvironment} = require(process.env.PRODUCT_SOURCE + '/scripts/ci/night_chain/browser_environment.cjs');
 assert(typeof WebSocket === 'function', 'Node with built-in WebSocket is required');
 const root = process.env.CASE_ROOT, proof = process.env.CASE_PROOF;
@@ -73,8 +74,7 @@ async function evaluate(expression) {
   return result.result.value;
 }
 async function journey() {
-  await waitFor(() => fs.existsSync(path.join(profile, 'DevToolsActivePort')), 'browser debugger');
-  const port = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0];
+  const port = await waitFor(() => readDebuggerPort(path.join(profile, 'DevToolsActivePort')), 'browser debugger');
   const target = await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, {
     method: 'PUT', signal: AbortSignal.timeout(10000),
   })).json();

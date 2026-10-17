@@ -60,6 +60,7 @@ shutil.copytree(root/'controller-dist/TestController',kit/'TestController',symli
 if sys.platform=='darwin':
  controller=kit/'TestController/TestController';call(['/usr/bin/codesign','--verify','--deep','--strict',str(controller)])
  signature=subprocess.check_output(['/usr/bin/codesign','-d','--verbose=4',str(controller)],stderr=subprocess.STDOUT,text=True);assert 'Signature=adhoc' in signature and 'TeamIdentifier=not set' in signature;(kit/'controller-signature.txt').write_text(signature)
+call(['node',str(ops/'tooling/packaged70/debugger_port.test.cjs')])
 # Official pinned Chrome; only its per-kit browser profile is used.
 sys.path.insert(0,str(source/'scripts/ci/night_chain'));from setup_browser import install
 chrome,provenance=install();chrome_root=chrome.parents[3] if sys.platform=='darwin' else chrome.parent
