@@ -52,6 +52,10 @@ def candidate(tmp_path, monkeypatch):
     monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(data))
     (tmp_path / 'pyproject.toml').write_text('[project]\nversion="1.0.0b8"\n', encoding='utf-8')
     (tmp_path / 'uv.lock').write_text('test lock', encoding='utf-8')
+    monkeypatch.setenv('ISCC_PATH', str(tmp_path / 'ISCC.exe'))
+    monkeypatch.setattr(module, 'inno_setup_provenance', lambda _: {
+        'version': '6.5.4', 'source': 'engine_banner_no_output_compile',
+        'compiler_sha256': 'c' * 64, 'engine_sha256': 'e' * 64})
     payload = tmp_path / 'dist/AstroPilot'; payload.mkdir(parents=True)
     pe = bytearray(144); pe[:2] = b'MZ'; struct.pack_into('<I', pe, 0x3c, 128)
     pe[128:132] = b'PE\0\0'; struct.pack_into('<H', pe, 132, 0x8664)
@@ -78,6 +82,8 @@ def test_export_preserves_payload_and_records_exact_zip_hashes_and_source(candid
     output = module.prepare(SHA)
     proof = json.loads((output / 'provenance.json').read_text(encoding='utf-8'))
     assert proof['source_sha'] == SHA and proof['runtime_identity'] == identity
+    assert proof['inno_setup_version'] == proof['inno_setup']['version'] == '6.5.4'
+    assert proof['inno_setup']['compiler_sha256'] == 'c' * 64
     assert proof['uv_lock_sha256'] == module.digest(module.ROOT / 'uv.lock')
     for name, row in proof['artifacts'].items():
         assert row['sha256'] == module.digest(output / name)
@@ -161,3 +167,83 @@ def test_payload_change_during_export_cannot_receive_success_provenance(candidat
     with pytest.raises(RuntimeError, match='content mismatch'):
         module.prepare(SHA)
     assert not (module.ROOT / 'dist/beta8-artifacts/provenance.json').exists()
+
+
+@pytest.mark.parametrize('failure', ['missing-path', 'invalid-engine'])
+def test_invalid_compiler_provenance_refuses_export_before_creating_output(candidate, monkeypatch, failure):
+    module, _, _ = candidate
+    installer = module.ROOT / 'dist/installer/AstroPilot-1.0.0b8-windows-x86_64-setup.exe'
+    installer.parent.mkdir(); installer.write_bytes(b'test installer')
+    if failure == 'missing-path':
+        monkeypatch.delenv('ISCC_PATH')
+    else:
+        def refuse(_):
+            raise RuntimeError('Invalid Inno Setup engine version')
+        monkeypatch.setattr(module, 'inno_setup_provenance', refuse)
+    with pytest.raises(RuntimeError, match='ISCC_PATH|Inno Setup'):
+        module.prepare(SHA)
+    assert not (module.ROOT / 'dist/beta8-artifacts').exists()
+
+
+@pytest.mark.parametrize('banner', ['6.5.4', '7.0.1', '6.5.4.1'])
+def test_engine_banner_overrides_zero_environment_version(tmp_path, monkeypatch, banner):
+    module = exporter()
+    compiler = tmp_path / 'ISCC.exe'; compiler.write_bytes(b'compiler')
+    engine = tmp_path / 'ISCmplr.dll'; engine.write_bytes(b'engine')
+    monkeypatch.setenv('INNO_SETUP_VERSION', '0.0.0.0')
+    calls = []
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(stdout=f'Inno Setup Command-Line Compiler\nCompiler engine version: Inno Setup {banner}\n')
+    monkeypatch.setattr(module.subprocess, 'run', run)
+    result = module.inno_setup_provenance(compiler)
+    assert result['version'] == banner
+    assert result['compiler_sha256'] == hashlib.sha256(b'compiler').hexdigest()
+    assert result['engine_sha256'] == hashlib.sha256(b'engine').hexdigest()
+    assert calls[0][0] == [str(compiler.resolve()), '/O-', '-']
+    assert calls[0][1]['check'] and calls[0][1]['timeout'] == 30
+    assert 'Uninstallable=no' in calls[0][1]['input']
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['ISCC.exe', 'ISCmplr.dll']
+
+
+@pytest.mark.parametrize('output', ['', 'Compiler engine version: Inno Setup 0.0.0.0\n',
+    'Compiler engine version: Inno Setup 6\n', '6.5.4\n',
+    'Compiler engine version: Inno Setup 6.5.4\nCompiler engine version: Inno Setup 7.0.1\n'])
+def test_unknown_zero_or_conflicting_engine_banner_is_refused(tmp_path, monkeypatch, output):
+    module = exporter()
+    compiler = tmp_path / 'ISCC.exe'; compiler.write_bytes(b'compiler')
+    (tmp_path / 'ISCmplr.dll').write_bytes(b'engine')
+    monkeypatch.setattr(module.subprocess, 'run', lambda *a, **k: SimpleNamespace(stdout=output))
+    with pytest.raises(RuntimeError, match='engine version'):
+        module.inno_setup_provenance(compiler)
+
+
+@pytest.mark.parametrize('failure', ['missing-engine', 'changed-engine', 'exit-error', 'timeout'])
+def test_unusable_engine_cannot_be_attested(tmp_path, monkeypatch, failure):
+    module = exporter()
+    compiler = tmp_path / 'ISCC.exe'; compiler.write_bytes(b'compiler')
+    engine = tmp_path / 'ISCmplr.dll'
+    if failure != 'missing-engine': engine.write_bytes(b'engine')
+    def run(*args, **kwargs):
+        if failure == 'exit-error': raise subprocess.CalledProcessError(2, args[0])
+        if failure == 'timeout': raise subprocess.TimeoutExpired(args[0], 30)
+        engine.write_bytes(b'changed')
+        return SimpleNamespace(stdout='Compiler engine version: Inno Setup 6.5.4\n')
+    monkeypatch.setattr(module.subprocess, 'run', run)
+    with pytest.raises((RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired)):
+        module.inno_setup_provenance(compiler)
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Real Inno Setup is Windows-only')
+def test_native_inno_engine_no_output_compile():
+    module = exporter()
+    import os
+    compiler = Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)')) / 'Inno Setup 6/ISCC.exe'
+    # This runs on disposable Windows CI. Missing tools must fail, not silently skip.
+    result = module.inno_setup_provenance(compiler)
+    assert result['version'].startswith('6.')
+    assert result['compiler_sha256'] == module.digest(compiler)
+    assert result['engine_sha256'] == module.digest(compiler.with_name('ISCmplr.dll'))
+    report = os.environ.get('INNO_PROVENANCE_TEST_REPORT')
+    if report:
+        Path(report).write_text(json.dumps(result, indent=2), encoding='utf-8')

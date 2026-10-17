@@ -37,6 +37,35 @@ def command(args: list[str]) -> str:
     return subprocess.check_output(args, cwd=ROOT, text=True).strip()
 
 
+def inno_setup_provenance(compiler: Path) -> dict:
+    """Ask the engine, not ISCC's often-zero Windows file version resource.
+
+    Inno 6 has no --version option. A no-output compile works with 6 and 7,
+    loads the real engine, and reports its version without producing an installer.
+    """
+    compiler = compiler.resolve()
+    require(compiler.name.lower() == 'iscc.exe' and compiler.is_file(),
+            'A regular Inno Setup compiler is required.')
+    require(not is_link(compiler), 'Linked Inno Setup compiler is not accepted.')
+    engine = compiler.with_name('ISCmplr.dll')
+    require(engine.is_file() and not is_link(engine), 'Inno Setup engine is missing.')
+    before = {'compiler_sha256': digest(compiler), 'engine_sha256': digest(engine)}
+    probe = ('[Setup]\nAppName=NightMerit provenance probe\nAppVersion=1\n'
+             'DefaultDirName={tmp}\\NightMeritProvenanceProbe\n'
+             'CreateAppDir=no\nUninstallable=no\n')
+    result = subprocess.run([str(compiler), '/O-', '-'], input=probe,
+                            cwd=compiler.parent, capture_output=True, text=True,
+                            encoding='utf-8', errors='replace', timeout=30, check=True)
+    versions = re.findall(r'^Compiler engine version: Inno Setup ([0-9]+(?:\.[0-9]+){2,3})\s*$',
+                          result.stdout, flags=re.MULTILINE)
+    require(len(versions) == 1 and int(versions[0].split('.')[0]) >= 6,
+            'Missing or invalid Inno Setup engine version.')
+    require(before == {'compiler_sha256': digest(compiler), 'engine_sha256': digest(engine)},
+            'Inno Setup tool changed during version detection.')
+    return {'version': versions[0], 'source': 'engine_banner_no_output_compile',
+            'compiler': str(compiler), **before}
+
+
 USER_DATA_DIRECTORIES = frozenset({
     'field_observations', 'outcome_evaluations', 'execution_records',
     'execution_lineage', 'decision_lineage', 'decision_acceptance_lineage', 'decision_forecast_evidence',
@@ -128,6 +157,9 @@ def prepare(approved_sha: str, *, check_payload_only: bool = False) -> Path:
         return payload
     require(installer.is_file() and not is_link(installer),
             'A regular built installer is required.')
+    compiler_path = os.environ.get('ISCC_PATH')
+    require(bool(compiler_path), 'ISCC_PATH is required for compiler provenance.')
+    inno = inno_setup_provenance(Path(compiler_path))
     output = ROOT / 'dist/beta8-artifacts'
     require(not output.exists(), 'Artifact output already exists; use a fresh build.')
     output.mkdir()
@@ -158,7 +190,8 @@ def prepare(approved_sha: str, *, check_payload_only: bool = False) -> Path:
         'uv_lock_sha256': digest(ROOT / 'uv.lock'),
         'python': sys.version, 'uv': command(['uv', '--version']),
         'pyinstaller': metadata.version('pyinstaller'),
-        'inno_setup_version': os.environ.get('INNO_SETUP_VERSION'),
+        'inno_setup_version': inno['version'],
+        'inno_setup': inno,
         'installed_distributions': sorted(
             [{'name': d.metadata['Name'], 'version': d.version} for d in metadata.distributions()],
             key=lambda row: (row['name'].lower(), row['version'])),

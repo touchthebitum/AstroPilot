@@ -200,3 +200,53 @@ jobs:
           name: night-confirmation-${{ matrix.os }}
           path: ${{ runner.temp }}/night-chain-proof/
           retention-days: 14
+
+  windows-packaging-provenance:
+    name: Packaging provenance ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/user_profile.json
+            !/user_filters.json
+            !/data/user_profile.json
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: '3.13.5'
+          version: '0.12.6'
+          enable-cache: false
+      - run: uv sync --locked --extra test
+      - name: Qualify compiler provenance and installer contracts in isolation
+        shell: pwsh
+        run: |
+          $iso = Join-Path $env:RUNNER_TEMP 'packaging-provenance'
+          foreach ($key in @('HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ASTROPILOT_DATA_DIR', 'TMP', 'TEMP', 'TMPDIR', 'XDG_CACHE_HOME')) {
+            $path = Join-Path $iso $key
+            New-Item -ItemType Directory -Force $path | Out-Null
+            [Environment]::SetEnvironmentVariable($key, $path)
+          }
+          if ($IsWindows) {
+            $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+            (Get-Item -LiteralPath $compiler).VersionInfo.FileVersion | Set-Content -LiteralPath (Join-Path $iso 'iscc-file-version.txt')
+          }
+          $env:INNO_PROVENANCE_TEST_REPORT = Join-Path $iso 'native-inno.json'
+          uv run --locked --no-sync python -m pytest -q tests/architecture/test_windows_candidate_artifacts.py tests/architecture/test_windows_installer_contract.py --junitxml="$iso/tests.xml"
+          if ($LASTEXITCODE -ne 0) { throw 'Packaging provenance regressions failed' }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: packaging-provenance-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/packaging-provenance/tests.xml
+            ${{ runner.temp }}/packaging-provenance/native-inno.json
+            ${{ runner.temp }}/packaging-provenance/iscc-file-version.txt
+          retention-days: 30
