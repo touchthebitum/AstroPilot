@@ -1,11 +1,11 @@
 """Build and qualify two autonomous internal test kits; exact main product sources."""
 from pathlib import Path,PurePosixPath
 import os,sys,subprocess,json,hashlib,shutil,zipfile
-SHA='7e98e45b2f46f57dcf959f3bf8d2b1373375cf48'
+SHA='7bc3170919589fdbb0e59e38d29cf13738e0e0e8'
 source=Path('candidate').resolve();tools=Path('operations/tooling/physical70').resolve();ops=Path('operations').resolve()
 assert subprocess.check_output(['git','rev-parse','HEAD'],cwd=source,text=True).strip()==SHA
 subprocess.run(['git','diff','--exit-code','HEAD'],cwd=source,check=True)
-root=Path(os.environ['RUNNER_TEMP'])/'physical70';root.mkdir();platform='Windows-x64' if os.name=='nt' else 'Mac-ARM64';kit=root/('NightMerit-Test-7e98e45-'+platform);kit.mkdir()
+root=Path(os.environ['RUNNER_TEMP'])/'physical70';root.mkdir();platform='Windows-x64' if os.name=='nt' else 'Mac-ARM64';kit=root/('NightMerit-Test-7bc3170-'+platform);kit.mkdir()
 env={k:v for k,v in os.environ.items() if not k.startswith(('ASTROPILOT_','NIGHTMERIT_','FIELD_LAB_'))}
 if sys.platform=='darwin':env['BROWSER_NATIVE_HOME']=os.environ['HOME']
 if os.name=='nt':env['BROWSER_NATIVE_USERPROFILE']=os.environ['USERPROFILE']
@@ -47,7 +47,9 @@ call([str(runtime_python),'-m','pytest','-q',
  '--junitxml='+str(distribution)])
 import xml.etree.ElementTree as ET
 checks=ET.parse(distribution)
-assert not any(checks.findall('.//'+kind) for kind in ('failure','error','skipped'))
+assert not any(checks.findall('.//'+kind) for kind in ('failure','error'))
+skipped=[case for case in checks.findall('.//testcase') if case.find('skipped') is not None]
+assert ([case.attrib['name'] for case in skipped]==['test_native_inno_engine_no_output_compile'] if sys.platform=='darwin' else not skipped)
 env.update(PRODUCT_SOURCE=str(source),LIFECYCLE_PROOF=str(root/'runtime-proof'))
 call([str(runtime_python),str(tools/'runtime_lifecycle.py')],cwd=source)
 # Separate locked toolchain: no changes to product dependencies.
@@ -90,6 +92,36 @@ def inventory():
 validation=root/'validation-kit';shutil.copytree(kit,validation,symlinks=True)
 env.update(PRODUCT_SOURCE=str(source),KIT_ROOT=str(validation),KIT_PROOF=str(root/'proof'))
 call([str(python),str(tools/'selftest.py')],cwd=tools,timeout=600)
+# Qualify the exact frozen product in Zurich and Winnipeg, not only the guide.
+exe=kit/'candidate'/('AstroPilot.exe' if os.name=='nt' else 'AstroPilot.app/Contents/MacOS/AstroPilot')
+env.update(PRODUCT_SOURCE=str(source),APPROVED_SHA=SHA,CANDIDATE_EXE=str(exe),RECOVERY_PROOF=str(root/'packaged-proof'))
+call([str(python),str(ops/'tooling/packaged70/qualify.py')],cwd=source,timeout=600)
+# Produce a standalone Mac app archive, distinct from the internal guide kit.
+if sys.platform=='darwin':
+ release=root/'mac-candidate';release.mkdir()
+ app=kit/'candidate/AstroPilot.app';identity=json.loads(subprocess.check_output([str(exe),'--runtime-identity'],cwd=root,env=env,text=True))
+ assert identity=={'application':'astropilot','architecture':'arm64','build':SHA[:7],'version':'1.0.0b8'},identity
+ candidate_archive=release/'AstroPilot-1.0.0-beta.8-macos-arm64.zip'
+ call(['/usr/bin/ditto','-c','-k','--sequesterRsrc','--keepParent',str(app),str(candidate_archive)],cwd=root)
+ with zipfile.ZipFile(candidate_archive) as z:assert z.testzip() is None
+ original=inventory();restored_app=root/'mac-roundtrip';restored_app.mkdir()
+ call(['/usr/bin/ditto','-x','-k',str(candidate_archive),str(restored_app)])
+ call(['/usr/bin/codesign','--verify','--deep','--strict',str(restored_app/'AstroPilot.app')])
+ def app_inventory(bundle):
+  rows={}
+  for base,dirs,files in os.walk(bundle,followlinks=False):
+   for name in dirs+files:
+    p=Path(base)/name;rel=p.relative_to(bundle).as_posix()
+    if p.is_symlink():rows[rel]={'link':os.readlink(p)}
+    elif p.is_file():rows[rel]={'sha256':sha(p),'size':p.stat().st_size}
+  return rows
+ assert app_inventory(app)==app_inventory(restored_app/'AstroPilot.app')
+ meta=json.loads((kit/'product-provenance.json').read_text());meta.update(runtime_identity=identity,operations_sha=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ops,text=True).strip(),archive={'name':candidate_archive.name,'sha256':sha(candidate_archive),'size':candidate_archive.stat().st_size},bundle_inventory=app_inventory(app),zip_roundtrip_verified=True,public_release=False,notarized=False)
+ (release/'provenance.json').write_text(json.dumps(meta,indent=2))
+ (release/(candidate_archive.name+'.sha256')).write_text(sha(candidate_archive)+'  '+candidate_archive.name+'\n')
+ shutil.copy2(kit/'mac-signature.txt',release/'signature.txt')
+ assert inventory()==original
+
 # Validate pristine inventory after all qualification (before distribution ZIP).
 assert inventory()==json.loads((kit/'manifest.json').read_text())['files']
 for folder in ('COPIES-ISOLEES','RESULTATS'):assert not (kit/folder).exists()

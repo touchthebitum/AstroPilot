@@ -1,4 +1,4 @@
-NIGHTMERIT — TEST PHYSIQUE WINDOWS / MAC — MAIN 7e98e45
+NIGHTMERIT — TEST PHYSIQUE WINDOWS / MAC — MAIN 7bc3170
 
 1. Copier et décompresser TOUT le kit dans un dossier neuf sur le disque local
    de la machine à tester. Ne pas lancer depuis l’aperçu du ZIP.
@@ -14,7 +14,7 @@ NIGHTMERIT — TEST PHYSIQUE WINDOWS / MAC — MAIN 7e98e45
    Attendre le contrôle, puis utiliser Rouvrir après redémarrage. Retrouver les
    deux missions et leurs sessions terminées, sans créer de nouveau crédit.
 6. Cocher la vérification après reprise et cliquer Valider et exporter.
-   Envoyer le ZIP resultats-kit-7e98e45-*.zip créé dans RESULTATS, à côté des lanceurs.
+   Envoyer le ZIP resultats-kit-7bc3170-*.zip créé dans RESULTATS, à côté des lanceurs.
    Il peut être copié sur FLASH pour le joindre à la discussion depuis le Mac.
    Pour finir, cliquer Fermer le test dans le guide.
 

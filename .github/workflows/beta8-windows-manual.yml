@@ -1,4 +1,4 @@
-name: Qualify published beta7 migration to 7e98e45
+name: Build and qualify isolated physical test kits 7bc3170
 on:
   workflow_dispatch:
     inputs:
@@ -9,23 +9,19 @@ permissions:
   contents: read
   actions: read
 jobs:
-  migration:
+  kits:
     strategy:
       fail-fast: false
       matrix:
         os: [windows-2022, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: operations
           sparse-checkout: tooling
           persist-credentials: false
-      - name: Verify exact approved source
-        shell: pwsh
-        run: |
-          if ('${{ inputs.approved_sha }}' -ne '7e98e45b2f46f57dcf959f3bf8d2b1373375cf48') { throw 'Unapproved source' }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: candidate
@@ -42,51 +38,57 @@ jobs:
           version: '0.12.6'
           python-version: '3.13.5'
           enable-cache: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        if: runner.os == 'macOS'
-        with:
-          github-token: ${{ github.token }}
-          run-id: '39030606199'
-          name: NightMerit-physical-kit-${{ matrix.os }}-7e98e45
-          path: ${{ runner.temp }}/input-current
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - name: Reproduce and repair browser sandbox permissions in a disposable directory
         if: runner.os == 'Windows'
+        run: python operations/tooling/physical70/diagnose_browser.py
+      - name: Download exact official Windows portable
+        if: runner.os == 'Windows'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           github-token: ${{ github.token }}
-          run-id: '39030387705'
-          name: AstroPilot-beta8-windows-x86_64-7e98e45b2f46f57dcf959f3bf8d2b1373375cf48
-          path: ${{ runner.temp }}/official-current
-      - name: Fetch published beta7 assets (read only)
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $asset = if ($IsWindows) { 'AstroPilot-1.0.0b7-windows-x86_64-setup.exe' } else { 'AstroPilot-1.0.0-beta.7-macos-arm64.zip' }
-          gh release download v1.0.0-beta.7 --repo touchthebitum/AstroPilot --pattern $asset --dir "$env:RUNNER_TEMP/legacy"
-          if ($LASTEXITCODE -ne 0) { throw 'Published asset download failed' }
-      - name: Create locked qualification environment
+          run-id: '39043197214'
+          name: AstroPilot-beta8-windows-x86_64-7bc3170919589fdbb0e59e38d29cf13738e0e0e8
+          path: ${{ runner.temp }}/official-windows
+      - name: Build autonomous launchers and qualify real guide, candidate, resume and export
         shell: pwsh
         run: |
-          uv venv --python 3.13.5 .qualification
-          if ($LASTEXITCODE -ne 0) { throw 'Environment failed' }
-          $python = if ($IsWindows) { '.qualification/Scripts/python.exe' } else { '.qualification/bin/python' }
-          uv pip sync --require-hashes --python $python operations/tooling/physical70/requirements.txt
-          if ($LASTEXITCODE -ne 0) { throw 'Locked dependencies failed' }
-          & $python operations/tooling/beta7migration/run.py
-          if ($LASTEXITCODE -ne 0) { throw 'Beta7 migration qualification failed' }
+          python operations/tooling/physical70/build.py
+          if ($LASTEXITCODE -ne 0) { throw 'Kit qualification failed' }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
-          name: beta7-migration-proof-${{ matrix.os }}
+          name: physical-kit-proof-${{ matrix.os }}
           path: |
-            ${{ runner.temp }}/beta7migration/result.json
-            ${{ runner.temp }}/beta7migration/partial-result.json
-            ${{ runner.temp }}/beta7migration/*log
-            ${{ runner.temp }}/beta7migration/*/stdout.log
-            ${{ runner.temp }}/beta7migration/*/stderr.log
-            ${{ runner.temp }}/beta7migration/*/beta7-origin.json
-            ${{ runner.temp }}/beta7migration/*/ui-*/browser-result.json
-            ${{ runner.temp }}/beta7migration/*/ui-*/driver.log
-            ${{ runner.temp }}/beta7migration/*/ui-*/failure-state.json
-            ${{ runner.temp }}/beta7migration/*/ui-*/*.png
+            ${{ runner.temp }}/physical70/build.log
+            ${{ runner.temp }}/physical70/proof/
+            ${{ runner.temp }}/physical70/packaged-proof/result.json
+            ${{ runner.temp }}/physical70/packaged-proof/partial-result.json
+            ${{ runner.temp }}/physical70/packaged-proof/*/*log
+            ${{ runner.temp }}/physical70/packaged-proof/*/weather-requests.json
+            ${{ runner.temp }}/physical70/packaged-proof/*/ui-*/browser-result.json
+            ${{ runner.temp }}/physical70/packaged-proof/*/ui-*/driver.log
+            ${{ runner.temp }}/physical70/packaged-proof/*/ui-*/failure-state.json
+            ${{ runner.temp }}/physical70/packaged-proof/*/ui-*/*.png
+            ${{ runner.temp }}/physical70/runtime-proof/*.json
+            ${{ runner.temp }}/physical70/runtime-proof/*.log
+            ${{ runner.temp }}/physical70/kit-validation.json
+            ${{ runner.temp }}/physical70/distribution-tests.xml
+            ${{ runner.temp }}/sandbox-proof/result.json
+            ${{ runner.temp }}/sandbox-proof/*.log
+            ${{ runner.temp }}/sandbox-proof/*.html
+            !${{ runner.temp }}/physical70/proof/**/browser-profile/**
+          retention-days: 30
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: NightMerit-physical-kit-${{ matrix.os }}-7bc3170
+          path: |
+            ${{ runner.temp }}/physical70/NightMerit-Test-7bc3170-*.zip
+            ${{ runner.temp }}/physical70/NightMerit-Test-7bc3170-*.zip.sha256
+            ${{ runner.temp }}/physical70/kit-validation.json
+          retention-days: 30
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: runner.os == 'macOS'
+        with:
+          name: NightMerit-mac-candidate-7bc3170
+          path: ${{ runner.temp }}/physical70/mac-candidate/*
           retention-days: 30
