@@ -25,7 +25,7 @@ class Safety(unittest.TestCase):
   c.write(self.root/'manifest.json',{'source_sha':c.SHA,'files':{'../outside':{'sha256':'no'}}})
   with self.assertRaisesRegex(RuntimeError,'hors'):c.verify(self.root)
  def fake(self):
-  x=c.Controller.__new__(c.Controller);x.kit=self.root;x.case=self.case;x.lab=True;x.state={'phase':'running','user_confirmations':{}};x.error=None;x.exported=None;x.app=Mock();x.app.child.pid=123;x.app.owners.return_value={123};x.app.identity={'build':'3cd1356'}
+  x=c.Controller.__new__(c.Controller);x.kit=self.root;x.case=self.case;x.lab=True;x.state={'phase':'running','user_confirmations':{}};x.error=None;x.exported=None;x.app=Mock();x.app.child.pid=123;x.app.owners.return_value={123};x.app.identity={'build':'108e531'}
   (self.case/'data').mkdir();(self.case/'data/profile.json').write_text('{"public":true}')
   x.last_progress={};x.last_sessions=[{'execution':{'execution_id':'existing'},'credit':{'evidence_ids':['existing-evidence']}}];x.inspect=lambda:{'ready':True};return x
  def test_replay_cannot_declare_success_for_new_credit(self):

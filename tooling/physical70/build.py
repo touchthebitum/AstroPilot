@@ -1,11 +1,11 @@
 """Build and qualify two autonomous internal test kits; exact main product sources."""
 from pathlib import Path,PurePosixPath
 import os,sys,subprocess,json,hashlib,shutil,zipfile
-SHA='3cd135644ba8f306c15291073b52c469059247b0'
+SHA='108e53120bc66840201a9d0eb05e293e90e73d3e'
 source=Path('candidate').resolve();tools=Path('operations/tooling/physical70').resolve();ops=Path('operations').resolve()
 assert subprocess.check_output(['git','rev-parse','HEAD'],cwd=source,text=True).strip()==SHA
 subprocess.run(['git','diff','--exit-code','HEAD'],cwd=source,check=True)
-root=Path(os.environ['RUNNER_TEMP'])/'physical70';root.mkdir();platform='Windows-x64' if os.name=='nt' else 'Mac-ARM64';kit=root/('NightMerit-Test-3cd1356-'+platform);kit.mkdir()
+root=Path(os.environ['RUNNER_TEMP'])/'physical70';root.mkdir();platform='Windows-x64' if os.name=='nt' else 'Mac-ARM64';kit=root/('NightMerit-Test-108e531-'+platform);kit.mkdir()
 env={k:v for k,v in os.environ.items() if not k.startswith(('ASTROPILOT_','NIGHTMERIT_','FIELD_LAB_'))}
 if sys.platform=='darwin':env['BROWSER_NATIVE_HOME']=os.environ['HOME']
 if os.name=='nt':env['BROWSER_NATIVE_USERPROFILE']=os.environ['USERPROFILE']
@@ -19,7 +19,7 @@ def call(args,cwd=source,timeout=600):
   f.write(repr(args)+'\n');f.flush();subprocess.run(args,cwd=cwd,env=env,stdout=f,stderr=subprocess.STDOUT,check=True,timeout=timeout)
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 if os.name=='nt':
- d=Path(os.environ['RUNNER_TEMP'])/'official-windows';meta=json.loads((d/'provenance.json').read_text(encoding='utf-8-sig'));assert meta['source_sha']==SHA
+ d=Path(os.environ['RUNNER_TEMP'])/'official-windows';meta=json.loads((d/'provenance.json').read_text(encoding='utf-8-sig'));assert meta['source_sha']==SHA;assert next(x['version'] for x in meta['installed_distributions'] if x['name'].lower()=='uvicorn')=='0.54.0'
  archive=next(d.glob('*portable.zip'));assert sha(archive)==meta['artifacts'][archive.name]['sha256']
  with zipfile.ZipFile(archive) as z:
   assert z.testzip() is None and all(not PurePosixPath(n).is_absolute() and '..' not in PurePosixPath(n).parts for n in z.namelist());z.extractall(root/'portable')
@@ -27,11 +27,18 @@ if os.name=='nt':
  shutil.move(str(payload),str(kit/'candidate'));shutil.copy2(d/'provenance.json',kit/'product-provenance.json')
 else:
  env['UV_PROJECT_ENVIRONMENT']=str(root/'venv-product');call(['uv','sync','--locked','--extra','packaging','--python','3.13.5']);python=root/'venv-product/bin/python'
+ call([str(python),'-c',"import uvicorn;assert uvicorn.__version__=='0.54.0';print(uvicorn.__version__)"])
  call([str(python),'scripts/build_macos.py']);app=source/'dist/AstroPilot.app'
  call(['/usr/bin/codesign','--verify','--deep','--strict',str(app)])
  signature=subprocess.check_output(['/usr/bin/codesign','-d','--verbose=4',str(app)],stderr=subprocess.STDOUT,text=True);assert 'Signature=adhoc' in signature and 'TeamIdentifier=not set' in signature
  (kit/'candidate').mkdir();call(['/usr/bin/ditto',str(app),str(kit/'candidate/AstroPilot.app')]);(kit/'mac-signature.txt').write_text(signature)
- (kit/'product-provenance.json').write_text(json.dumps({'source_sha':SHA,'version':'1.0.0b8','architecture':'arm64','signature':'ad_hoc_only','executable_sha256':sha(app/'Contents/MacOS/AstroPilot'),'uv_lock_sha256':sha(source/'uv.lock')}),encoding='utf-8')
+ (kit/'product-provenance.json').write_text(json.dumps({'source_sha':SHA,'version':'1.0.0b8','architecture':'arm64','signature':'ad_hoc_only','uvicorn':'0.54.0','executable_sha256':sha(app/'Contents/MacOS/AstroPilot'),'uv_lock_sha256':sha(source/'uv.lock')}),encoding='utf-8')
+# Qualify actual Uvicorn startup/graceful shutdown independently of the frozen UI.
+runtime=root/'venv-runtime';env['UV_PROJECT_ENVIRONMENT']=str(runtime)
+call(['uv','sync','--locked','--extra','test','--python','3.13.5'])
+runtime_python=runtime/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
+env.update(PRODUCT_SOURCE=str(source),LIFECYCLE_PROOF=str(root/'runtime-proof'))
+call([str(runtime_python),str(tools/'runtime_lifecycle.py')],cwd=source)
 # Separate locked toolchain: no changes to product dependencies.
 venv=root/'venv-controller';call(['uv','venv','--python','3.13.5',str(venv)]);python=venv/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
 call(['uv','pip','sync','--require-hashes','--python',str(python),str(tools/'requirements.txt')]);call([str(python),'-m','unittest','test_protocol','test_browser_permissions'],cwd=tools)
