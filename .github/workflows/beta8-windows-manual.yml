@@ -69,9 +69,7 @@ jobs:
             throw 'Expected Inno Setup compiler is missing; do not install dynamically.'
           }
           $env:ISCC_PATH = $compiler
-          $env:INNO_SETUP_VERSION = (Get-Item -LiteralPath $compiler).VersionInfo.FileVersion
           "ISCC_PATH=$compiler" >> $env:GITHUB_ENV
-          "INNO_SETUP_VERSION=$env:INNO_SETUP_VERSION" >> $env:GITHUB_ENV
           New-Item -ItemType Directory -Path $env:ASTROPILOT_DATA_DIR -ErrorAction Stop
 
       - name: Set up locked packaging tools
