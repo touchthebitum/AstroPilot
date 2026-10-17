@@ -1,0 +1,45 @@
+NightMerit — test isolé d'installation / mise à niveau 3cd1356 → 7e98e45
+
+Décompressez entièrement le ZIP adapté à votre machine.
+
+WINDOWS
+Double-cliquez LANCER-TEST-WINDOWS.cmd.
+Le test exige Windows Sandbox déjà disponible. Si elle est absente ou bloquée,
+aucun installeur ne sera exécuté sur votre PC : transmettez le message.
+N'exécutez pas directement candidate-setup.exe ni previous-setup.exe.
+Le dossier du kit est exposé en lecture seule à Sandbox ; seul RESULTATS
+est accessible en écriture. Réseau et presse-papiers sont désactivés.
+Le test installe et désinstalle les véritables installeurs officiels dans
+la machine jetable, jamais dans votre Windows habituel.
+Gardez Sandbox ouverte jusqu'à l'export et au retour du ZIP dans RESULTATS.
+Fermer Sandbox détruit sa copie de test : les crédits y sont synthétiques.
+Aucune modification automatique des fonctionnalités Windows ni de la politique
+d'exécution PowerShell. Une difficulté produit un test non validé.
+
+MAC APPLE SILICON
+Double-cliquez LANCER-TEST-MAC.command.
+Les applications sont copiées/remplacées dans COPIES-ISOLEES, sans écrire dans
+/Applications ni dans votre profil habituel. Signature ad hoc locale uniquement.
+Si macOS bloque le lancement, transmettez le message ; ne désactivez pas ses
+protections. REPRENDRE-TEST-MAC reprend une copie ayant terminé les contrôles
+sans recréer de sessions ou de crédits. Un test interrompu est conservé pour
+diagnostic et n'est pas réinitialisé par ce lanceur.
+
+DANS LE GUIDE
+1. Cliquez Installer et vérifier. Attendez quelques minutes.
+2. Ouvrez l'application. Dans Missions enregistrées, vérifiez les deux missions :
+   Ha 6.5 nm : Crédit enregistré, durée acquise 1 h 30.
+   OIII 6.5 nm : Crédit enregistré, durée acquise 0 h 15.
+   Ne démarrez aucune nouvelle session et ne créez aucun crédit.
+3. Revenez au guide, cochez la confirmation, validez et exportez.
+4. Retournez le ZIP du dossier RESULTATS. Il contient rapports et journaux,
+   aucun profil réel, certificat de test ou cache du navigateur.
+
+Les deux crédits ont été créés automatiquement par l'ancien candidat empaqueté
+avec des données publiques synthétiques. Leur copie est propre à ce test.
+La référence et le candidat sont tous deux des versions internes beta.8 ;
+ce parcours ne remplace pas une qualification depuis toutes les anciennes versions.
+Windows Sandbox et la copie d'application Mac ne constituent pas une signature
+personnelle ni une notarisation. Aucune publication, fusion, tag ou release.
+Le bac à sable Chrome reste actif. Aucun logiciel supplémentaire à installer
+pour exécuter les lanceurs ; Windows Sandbox doit cependant être disponible.

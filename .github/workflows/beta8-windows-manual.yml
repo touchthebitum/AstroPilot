@@ -1,4 +1,4 @@
-name: Build and qualify isolated physical test kits 7e98e45
+name: Build and qualify isolated installation test kits 7e98e45
 on:
   workflow_dispatch:
     inputs:
@@ -38,43 +38,53 @@ jobs:
           version: '0.12.6'
           python-version: '3.13.5'
           enable-cache: false
-      - name: Reproduce and repair browser sandbox permissions in a disposable directory
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          github-token: ${{ github.token }}
+          run-id: '39030606199'
+          name: NightMerit-physical-kit-${{ matrix.os }}-7e98e45
+          path: ${{ runner.temp }}/input-current
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          github-token: ${{ github.token }}
+          run-id: '39018435620'
+          name: NightMerit-physical-kit-${{ matrix.os }}-3cd1356
+          path: ${{ runner.temp }}/input-previous
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         if: runner.os == 'Windows'
-        run: python operations/tooling/physical70/diagnose_browser.py
-      - name: Download exact official Windows portable
-        if: runner.os == 'Windows'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           github-token: ${{ github.token }}
           run-id: '39030387705'
           name: AstroPilot-beta8-windows-x86_64-7e98e45b2f46f57dcf959f3bf8d2b1373375cf48
-          path: ${{ runner.temp }}/official-windows
-      - name: Build autonomous launchers and qualify real guide, candidate, resume and export
+          path: ${{ runner.temp }}/official-current
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: runner.os == 'Windows'
+        with:
+          github-token: ${{ github.token }}
+          run-id: '39018194757'
+          name: AstroPilot-beta8-windows-x86_64-3cd135644ba8f306c15291073b52c469059247b0
+          path: ${{ runner.temp }}/official-previous
+      - name: Build installation kit and qualify official upgrade, restart and replay
         shell: pwsh
         run: |
-          python operations/tooling/physical70/build.py
-          if ($LASTEXITCODE -ne 0) { throw 'Kit qualification failed' }
+          python operations/tooling/installation7e/build.py
+          if ($LASTEXITCODE -ne 0) { throw 'Installation kit qualification failed' }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
-          name: physical-kit-proof-${{ matrix.os }}
+          name: installation-proof-${{ matrix.os }}
           path: |
-            ${{ runner.temp }}/physical70/build.log
-            ${{ runner.temp }}/physical70/proof/
-            ${{ runner.temp }}/physical70/runtime-proof/*.json
-            ${{ runner.temp }}/physical70/runtime-proof/*.log
-            ${{ runner.temp }}/physical70/kit-validation.json
-            ${{ runner.temp }}/physical70/distribution-tests.xml
-            ${{ runner.temp }}/sandbox-proof/result.json
-            ${{ runner.temp }}/sandbox-proof/*.log
-            ${{ runner.temp }}/sandbox-proof/*.html
-            !${{ runner.temp }}/physical70/proof/**/browser-profile/**
+            ${{ runner.temp }}/installation7e/build.log
+            ${{ runner.temp }}/installation7e/proof/
+            ${{ runner.temp }}/installation7e/seed-proof/result.json
+            ${{ runner.temp }}/installation7e/seed-proof/*log
+            ${{ runner.temp }}/installation7e/kit-validation.json
           retention-days: 30
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: NightMerit-physical-kit-${{ matrix.os }}-7e98e45
+          name: NightMerit-installation-kit-${{ matrix.os }}-7e98e45
           path: |
-            ${{ runner.temp }}/physical70/NightMerit-Test-7e98e45-*.zip
-            ${{ runner.temp }}/physical70/NightMerit-Test-7e98e45-*.zip.sha256
-            ${{ runner.temp }}/physical70/kit-validation.json
+            ${{ runner.temp }}/installation7e/NightMerit-Installation-7e98e45-*.zip
+            ${{ runner.temp }}/installation7e/NightMerit-Installation-7e98e45-*.zip.sha256
+            ${{ runner.temp }}/installation7e/kit-validation.json
           retention-days: 30
