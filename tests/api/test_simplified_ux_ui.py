@@ -46,8 +46,8 @@ def test_quick_observation_and_correction_markup():
     assert 'required' in markup.nodes['site-bortle']['attrs']
     assert 'hidden' in markup.nodes['custom-equipment']['attrs']
     assert [p['attrs'].get('id') for p in markup.nodes['review-step']['parents']][-1] == 'availability-step'
-    assert source.count('data-progress=') == 3
-    assert 'data-progress="projects"' not in source
+    assert source.count('data-progress=') == 4
+    assert 'data-progress="projects"' in source
 
 
 def test_real_onboarding_handlers_preserve_projects_draft_and_custom_validation():
@@ -79,7 +79,7 @@ const screens = [];
 function setView(view) {state.view = view; screens.push(view);}
 function text(selector, value) {element(selector).textContent = value;}
 function renderPresetChoices() {}
-function renderProjects() {}
+function renderProjects() {return true;}
 function renderReview() {}
 function showFormError(message) {state.error = message;}
 function confirmDiscardProjectProgress() {return true;}
@@ -104,7 +104,7 @@ element('#site-bortle').value = '4';
 element('input[name="equipment-kind"]:checked').value = 'preset';
 element('input[name="preset-equipment"]:checked').value = 'preset-1';
 setView('site'); element('#site-next').click(); element('#equipment-next').click();
-assert.deepEqual(screens, ['site', 'equipment', 'review']);
+assert.deepEqual(screens, ['site', 'equipment', 'projects']);
 assert.equal(state.configurationDraft.projects, projects);
 back.click();
 assert.equal(state.configurationDraft.site.name, 'Jardin');

@@ -4659,18 +4659,21 @@ function renderProjects() {
   zeroProjectsControl.hidden = Boolean(entries.length);
   if (entries.length) {
     const heading = document.createElement("p");
-    heading.textContent = "Projets actuellement conservés";
+    heading.textContent = entries.some(([key]) => Object.hasOwn(state.configuration?.projects || {}, key))
+      ? "Projets actuellement conservés" : "Projets à enregistrer";
     const explanation = document.createElement("p");
     explanation.textContent = "Vos projets existants sont conservés. Ouvrez un projet pour renseigner son avancement par intention d’acquisition. Changer votre site ou votre matériel ne les supprimera pas.";
     const list = document.createElement("ul");
     for (const [catalogKey, project] of entries) {
       const item = document.createElement("li");
       const label = document.createElement("span");
-      label.textContent = `${catalogKey} · ${project.hours} h sur ${project.target_hours} h (historique) `;
+      const saved = Object.hasOwn(state.configuration?.projects || {}, catalogKey);
+      label.textContent = `${catalogKey} · ${project.hours} h sur ${project.target_hours} h${saved ? " (historique)" : " (brouillon à enregistrer)"} `;
       const button = document.createElement("button");
       button.type = "button";
       button.className = "secondary-button";
-      button.textContent = "Ouvrir";
+      button.textContent = saved ? "Ouvrir" : "Enregistrer d’abord";
+      button.disabled = !saved;
       button.addEventListener("click", () => openProjectProgress(catalogKey));
       item.append(label, button);
       list.append(item);
@@ -4683,6 +4686,112 @@ function renderProjects() {
     zeroProjects.disabled = true;
   }
   return true;
+}
+
+async function loadProjectTemplates() {
+  const button = document.querySelector("#project-templates-load");
+  const feedback = document.querySelector("#project-create-feedback");
+  button.disabled = true;
+  feedback.textContent = "Chargement des cibles prises en charge…";
+  try {
+    const response = await fetch("/v1/project-templates");
+    if (!response.ok) throw new Error("templates unavailable");
+    const templates = await response.json();
+    if (!Array.isArray(templates)) throw new Error("invalid templates");
+    state.projectTemplates = templates;
+    const select = document.querySelector("#project-template");
+    select.replaceChildren(new Option("Choisir une cible", ""));
+    for (const template of templates) {
+      select.append(new Option(template.display_name, template.catalog_key));
+    }
+    document.querySelector("#project-create-fields").hidden = !templates.length;
+    button.hidden = Boolean(templates.length);
+    feedback.textContent = templates.length
+      ? "Seules les cibles disposant de données de mission complètes sont proposées dans cette bêta."
+      : "Aucune cible ne dispose encore des données nécessaires dans cette version.";
+  } catch (_error) {
+    feedback.textContent = "Les cibles ne peuvent pas être chargées. Vos réglages sont conservés ; réessayez.";
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderNewProjectIntents() {
+  const key = document.querySelector("#project-template").value;
+  const template = state.projectTemplates?.find(item => item.catalog_key === key);
+  const container = document.querySelector("#project-new-intents");
+  container.replaceChildren();
+  document.querySelector("#project-new-empty").checked = false;
+  const equipmentId = state.configurationDraft.equipment?.preset_id;
+  for (const intent of template?.acquisition_intents || []) {
+    const filters = intent.supported_filters.filter(item => item.equipment_id === equipmentId);
+    const row = document.createElement("fieldset");
+    row.dataset.newIntentId = intent.acquisition_intent_id;
+    const legend = document.createElement("legend");
+    legend.textContent = intent.label;
+    const confirmation = document.createElement("label");
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.disabled = filters.length !== 1;
+    const copy = document.createElement("span");
+    copy.textContent = filters.length === 1
+      ? `Je veux photographier avec ce filtre et je confirme le posséder : ${filters[0].label} (${filters[0].fwhm_nm} nm).`
+      : "Cette bêta ne dispose pas d’un filtre précisément compatible avec le matériel choisi. Ne changez pas votre matériel pour contourner cette limite.";
+    confirmation.append(check, copy);
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "number"; input.min = "1"; input.step = "any";
+    input.dataset.targetHours = "true";
+    label.append(document.createTextNode("Objectif de pose utile en heures (au moins 1 h, sur une ou plusieurs nuits)"), input);
+    row.append(legend, confirmation, label);
+    container.append(row);
+  }
+}
+
+function newProjectFromInputs(template, entries, emptyConfirmed, existingProjects) {
+  if (!template) throw new Error("Choisissez une cible à photographier.");
+  if (Object.hasOwn(existingProjects, template.catalog_key)) {
+    throw new Error("Ce projet existe déjà. Ouvrez-le pour modifier son avancement ; il ne sera pas remplacé.");
+  }
+  if (!emptyConfirmed) throw new Error("Confirmez que ce nouveau projet ne contient pas déjà des images acquises.");
+  const targets = [];
+  for (const entry of entries.filter(item => item.selected)) {
+    const hours = Number(entry.hours);
+    const intent = template.acquisition_intents.find(item => item.acquisition_intent_id === entry.id);
+    const equipmentId = state.configurationDraft.equipment?.preset_id;
+    if (!intent || intent.supported_filters.filter(item => item.equipment_id === equipmentId).length !== 1) {
+      throw new Error("Le filtre précis n’est pas pris en charge pour votre matériel.");
+    }
+    if (!Number.isFinite(hours) || hours < 1) throw new Error("Indiquez un objectif de pose d’au moins 1 heure pour chaque filtre choisi.");
+    targets.push({ acquisition_intent_id: entry.id, target_hours: hours });
+  }
+  if (!targets.length) throw new Error("Choisissez au moins une prise de vue avec un filtre que vous possédez.");
+  const total = targets.reduce((sum, item) => sum + item.target_hours, 0);
+  if (!Number.isFinite(total)) throw new Error("L’objectif total de pose est trop grand.");
+  return { hours: 0, target_hours: total, imaging_field_id: template.imaging_field_id,
+    acquisition_intent_targets: targets, acquisition_intent_progress: targets.map(item => ({
+      acquisition_intent_id: item.acquisition_intent_id, acquired_duration_manual: 0 })) };
+}
+
+function addNewProject() {
+  const feedback = document.querySelector("#project-create-feedback");
+  try {
+    if (!confirmDiscardProjectProgress()) return;
+    const key = document.querySelector("#project-template").value;
+    const template = state.projectTemplates?.find(item => item.catalog_key === key);
+    const entries = [...document.querySelectorAll("fieldset[data-new-intent-id]")].map(row => ({
+      id: row.dataset.newIntentId, selected: row.querySelector('input[type="checkbox"]').checked,
+      hours: row.querySelector('input[data-target-hours]').value,
+    }));
+    const projects = state.configurationDraft.projects || {};
+    const project = newProjectFromInputs(template, entries,
+      document.querySelector("#project-new-empty").checked, projects);
+    state.configurationDraft.projects = { ...projects, [key]: project };
+    renderProjects();
+    feedback.textContent = "Projet ajouté à votre brouillon. Cliquez sur Continuer, puis Enregistrer ma configuration. Aucun crédit d’imagerie n’a été créé.";
+  } catch (error) {
+    feedback.textContent = error.message;
+  }
 }
 
 function progressDuration(seconds) {
@@ -5072,6 +5181,8 @@ function initializeConfiguration(payload) {
   )) clearAcceptedMission();
   invalidateAvailabilityForSiteChange(state.configuration?.site, payload.site);
   state.configuration = payload;
+  const projectFeedback = document.querySelector("#project-create-feedback");
+  if (projectFeedback) projectFeedback.textContent = "";
   try { localStorage.setItem(DECISION_SITE_STORAGE_KEY, decisionSiteFingerprint()); } catch (_) {}
   syncFieldObservationContext();
   state.configurationDraft = draftFromConfiguration(payload);
@@ -5567,7 +5678,7 @@ const creationRefusalMessages = Object.freeze({
 
 function creationRefusalMessage(payload) {
   if (payload.creation_refusal === "modern_mission_authorization_required" && payload.provenance === "discovery") {
-    return ["Projet d’acquisition requis", "Cette cible a été trouvée en découverte. Aucun projet d’acquisition configuré ne permet encore de créer une mission. Configurez un projet avec une acquisition et un filtre compatibles."];
+    return ["Préparons votre premier projet", "Une cible a été repérée, mais aucune mission n’est encore prête. Un projet indique ce que vous souhaitez photographier, avec quel filtre et pendant combien de temps au total. Créez un projet pour une cible prise en charge par cette bêta, puis relancez l’analyse avec vos horaires conservés."];
   }
   return creationRefusalMessages[payload.creation_refusal]
     || ["Création de mission refusée", "La cause précise du refus n’est pas reconnue par cette version de l’interface."];
@@ -5697,12 +5808,18 @@ function showTonightUnavailable(payload) {
   const details = document.querySelector("#message-details");
   details.hidden = false;
   details.open = appliedUiMode === "pro";
+  const needsProject = creationRefused && payload.provenance === "discovery"
+    && payload.creation_refusal === "modern_mission_authorization_required";
+  document.querySelector("#message-create-project").hidden = !needsProject;
+  ui.retry.hidden = needsProject;
   ui.retry.textContent = "Réessayer plus tard";
   document.querySelector("#message-edit-availability").hidden = !editAvailability;
 }
 
 function showMessage(title, body, { kicker = "Décision indisponible", retry = true } = {}) {
   const details = document.querySelector("#message-details");
+  const createProject = document.querySelector("#message-create-project");
+  if (createProject) createProject.hidden = true;
   if (details) details.hidden = true;
   const editAvailability = document.querySelector("#message-edit-availability");
   if (editAvailability) editAvailability.hidden = true;
@@ -6148,8 +6265,7 @@ document.querySelector("#equipment-next").addEventListener("click", () => {
   }
   state.configurationDraft.equipment = equipment;
   showFormError("");
-  renderReview();
-  setView("review");
+  if (renderProjects()) setView("projects");
 });
 
 document.querySelector("#projects-next").addEventListener("click", () => {
@@ -6182,6 +6298,18 @@ function editConfiguration() {
 }
 
 document.querySelector("#save-configuration").addEventListener("click", saveConfiguration);
+document.querySelector("#project-templates-load").addEventListener("click", loadProjectTemplates);
+document.querySelector("#project-template").addEventListener("change", renderNewProjectIntents);
+document.querySelector("#project-add").addEventListener("click", addNewProject);
+document.querySelector("#message-create-project").addEventListener("click", () => {
+  if (guardUnresolvedAcceptance()) return;
+  if (!renderProjects()) return;
+  setView("projects");
+  document.querySelector("#project-create").open = true;
+  document.querySelector(document.querySelector("#project-create-fields").hidden
+    ? "#project-templates-load" : "#project-template").focus();
+});
+
 document.querySelector("#configuration-projects").addEventListener("click", () => {
   if (guardUnresolvedAcceptance()) return;
   if (renderProjects()) setView("projects");

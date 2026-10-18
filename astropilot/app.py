@@ -2162,6 +2162,11 @@ def create_app(
     def opportunity_alert_status():
         return JSONResponse(read_status(get_user_data_dir()), headers={"Cache-Control": "no-store"})
 
+    @application.get("/v1/project-templates")
+    def get_project_templates():
+        from astropilot.project_templates import project_templates
+        return JSONResponse(project_templates(), headers={"Cache-Control": "no-store"})
+
     @application.get("/v1/runtime-identity", include_in_schema=False)
     def runtime_identity():
         return runtime_identity_payload()

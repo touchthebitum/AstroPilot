@@ -1557,8 +1557,10 @@ state.availability=null;
 for (const mode of ['simple','pro']) {
  appliedUiMode=mode;
  showTonightUnavailable({status:'no_mission',provenance:'discovery',creation_refusal:'modern_mission_authorization_required'});
- assert.equal(shown.title,'Projet d’acquisition requis');
- assert.match(shown.body,/Aucun projet d’acquisition configuré/);
+ assert.equal(shown.title,'Préparons votre premier projet');
+ assert.match(shown.body,/Un projet indique/);
+ assert.equal(document.querySelector('#message-create-project').hidden,false);
+ assert.equal(ui.retry.hidden,true);
  assert.doesNotMatch(shown.body,/Mission incomplète|Réessayez plus tard|modern_mission/);
  assert.equal(document.querySelector('#message-edit-availability').hidden,true);
 }

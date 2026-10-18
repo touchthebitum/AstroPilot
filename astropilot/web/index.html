@@ -113,6 +113,7 @@
           <ol class="wizard-progress" aria-label="Progression">
             <li data-progress="site">Site</li>
             <li data-progress="equipment">Matériel</li>
+            <li data-progress="projects">Projets</li>
             <li data-progress="review">Disponibilité</li>
           </ol>
         </div>
@@ -189,13 +190,27 @@
         <section id="projects-step" class="wizard-step" data-step="projects" aria-labelledby="projects-title" hidden>
           <p class="eyebrow">Étape 3</p>
           <h2 id="projects-title" tabindex="-1">Vos projets</h2>
-          <p class="step-intro">Vous pourrez organiser vos projets plus tard.</p>
+          <p class="step-intro">Un projet décrit ce que vous voulez photographier et le temps de pose utile que vous souhaitez accumuler, éventuellement sur plusieurs nuits. Il est nécessaire pour préparer une mission.</p>
           <div id="existing-projects" class="project-summary" hidden></div>
           <div id="project-progress-editor" class="project-progress-editor" hidden></div>
           <label id="zero-projects-wrap" class="project-none" for="zero-projects">
             <input id="zero-projects" type="checkbox" checked>
-            <span><strong>Aucun projet pour l’instant</strong><small>NightMerit peut déjà découvrir une cible adaptée sans projet.</small></span>
+            <span><strong>Aucun projet pour l’instant</strong><small>Sans projet, NightMerit peut rechercher une cible, mais ne pourra pas préparer de mission.</small></span>
           </label>
+          <details id="project-create">
+            <summary>Créer mon premier projet ou ajouter un projet</summary>
+            <p>Choisissez une cible prise en charge par cette bêta, puis le filtre et votre objectif de pose. Ce choix ne garantit pas que la cible sera adaptée à ce soir.</p>
+            <p>Les filtres proposés sont des références précises. Ne confirmez pas un filtre dont vous ne connaissez pas le modèle.</p>
+            <button class="secondary-button" id="project-templates-load" type="button">Afficher les cibles prises en charge</button>
+            <div id="project-create-fields" hidden>
+              <label for="project-template">Cible à photographier</label>
+              <select id="project-template"><option value="">Choisir une cible</option></select>
+              <div id="project-new-intents"></div>
+              <label class="check-field"><input id="project-new-empty" type="checkbox"><span>Je commence ce projet sans images déjà acquises.</span></label>
+              <button class="primary-button" id="project-add" type="button">Ajouter ce projet à ma configuration</button>
+            </div>
+            <p id="project-create-feedback" role="status" aria-live="polite"></p>
+          </details>
           <div class="wizard-actions">
             <button class="secondary-button" data-back="equipment" type="button">Retour</button>
             <button class="primary-button" id="projects-next" type="button">Continuer</button>
@@ -295,6 +310,7 @@
         </div>
         <div class="message-actions">
           <button class="secondary-button" id="message-retry" type="button">Réessayer</button>
+          <button class="primary-button" id="message-create-project" type="button" hidden>Créer mon premier projet</button>
           <button class="secondary-button" id="message-edit-availability" type="button" hidden>Modifier ma disponibilité</button>
         </div>
       </section>
