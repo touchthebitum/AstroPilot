@@ -271,6 +271,33 @@ const assert = require('node:assert/strict');
    if (state.recentDecisions.items.length!==(key==='unrelated.preference'?1:0)) throw Error('stale response accepted');
   }
  });
+ // A first project must remain reachable when Pro left its disclosure closed.
+ const firstProject = await context.newPage();
+ await firstProject.goto('http://nightmerit.test/');
+ await firstProject.waitForFunction(() => state.view === 'configuration_error');
+ await firstProject.evaluate(() => {
+  applyUiMode('pro');
+  state.configuration = {configured:false, projects:{}};
+  state.configurationDraft = {site:null, equipment:{preset_id:'samyang_183'}, projects:{}};
+  renderProjects(); setView('projects');
+  document.querySelector('#project-create').open = false;
+ });
+ const firstProjectRequests = requests;
+ await firstProject.locator('#ui-mode').selectOption('simple');
+ assert.equal(await firstProject.locator('#project-create').evaluate(e=>e.open),false);
+ assert.equal(await firstProject.locator('#project-create > summary').isVisible(),true,
+  'Pro → Simple must leave a visible way to open first-project creation');
+ assert.equal(requests,firstProjectRequests,'presentation switch must not load templates or write configuration');
+ await firstProject.locator('#project-create > summary').click();
+ assert.equal(await firstProject.locator('#project-templates-load').isVisible(),true);
+ await firstProject.locator('#ui-mode').selectOption('pro');
+ await firstProject.locator('#project-create > summary').click();
+ await firstProject.locator('#ui-mode').selectOption('simple');
+ assert.equal(await firstProject.locator('#project-create > summary').isVisible(),true,
+  'closing creation in Pro and returning to Simple must remain recoverable');
+ assert.equal(await firstProject.evaluate(()=>Object.keys(state.configurationDraft.projects).length),0);
+ assert.equal(requests,firstProjectRequests);
+ await firstProject.close();
  await other.close();
  assert.deepEqual(errors,[]);
  console.log('Browser checks passed: persistence, multi-tab, draft/guards/filter retention, disclosures, 390/1280px.');

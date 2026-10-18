@@ -705,7 +705,7 @@ html[data-ui-mode="simple"][data-progress-open="true"] #project-create,
 html[data-ui-mode="simple"][data-progress-open="true"] #projects-step > .wizard-actions { display: none; }
 
 #current-decision-site-warning:empty { display: none; }
-html[data-ui-mode="simple"] #project-create[data-first-project="true"] > summary { display: none; }
+html[data-ui-mode="simple"] #project-create[data-first-project="true"][open] > summary { display: none; }
 html[data-ui-mode="simple"] #project-new-intents fieldset[data-intent-selected="false"] .new-intent-goal { display: none; }
 
 html[data-ui-mode="pro"][data-guided-view="availability"]:not([data-guided-initial="true"]) #terrain,
