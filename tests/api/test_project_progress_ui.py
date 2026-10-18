@@ -40,8 +40,10 @@ class Element {
     return [];
   }
 }
+const appliedUiMode = "pro";
 const editor = new Element("div");
 const document = {
+  documentElement: {dataset:{}},
   createElement: (tag) => new Element(tag),
   querySelector: (selector) => selector === "#project-progress-editor" ? editor : null,
 };

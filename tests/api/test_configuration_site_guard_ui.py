@@ -41,7 +41,7 @@ const element = () => ({hidden: true, disabled: false, querySelector: element,
 const crypto = require("node:crypto");
 const PENDING_ACCEPTANCE_STORAGE_KEY = "astropilot.pendingAcceptance";
 const PENDING_ACCEPTANCE_STORAGE_VERSION = 2;
-const document = {querySelector: element, querySelectorAll: () => [], createElement: element};
+const document = {documentElement:{dataset:{}},querySelector: element, querySelectorAll: () => [], createElement: element};
 const wizardStates = ["site", "equipment", "projects", "review"];
 function requestAnimationFrame(callback) {callback();}
 function invalidateOutcomeHistory() {}

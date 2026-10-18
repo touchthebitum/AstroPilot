@@ -653,3 +653,60 @@ html[data-ui-mode="simple"] .help-navigation [data-help-guide="complete"] { font
 #open-saved-mission:not(:disabled):hover { border-color: var(--cyan); background: rgba(103,228,209,.2); }
 #open-saved-mission:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
 #open-saved-mission:disabled { color: #95a3b5; background: rgba(255,255,255,.025); border-color: var(--line); opacity: .55; cursor: not-allowed; }
+
+/* Guided Simple presentation: the same forms, values, guards and API contracts. */
+html[data-ui-mode="pro"] [data-simple-only] { display: none !important; }
+.main-navigation { display: flex; gap: 8px; flex-wrap: wrap; }
+.main-navigation button[aria-current="page"] { background: var(--cyan-soft); color: var(--cyan); }
+.header-options { position: relative; }
+.header-options > summary { cursor: pointer; padding: 11px 13px; color: var(--muted); }
+.header-options-content { position: absolute; z-index: 20; top: 100%; right: 0; padding: 16px; display: flex; flex-wrap: wrap; gap: 10px; width: min(440px, 85vw); border: 1px solid var(--line); background: #102031; border-radius: 12px; box-shadow: var(--shadow); }
+html[data-ui-mode="pro"] .header-options-content { position: static; width: auto; background: transparent; border: 0; box-shadow: none; padding: 0; }
+html[data-ui-mode="pro"] .header-options > summary { display: none; }
+html[data-ui-mode="simple"] .topbar { grid-template-columns: auto 1fr auto; gap: 16px; }
+html[data-ui-mode="simple"] .wizard-heading { display: none; }
+html[data-ui-mode="simple"] .onboarding,
+html[data-ui-mode="simple"] .availability-panel { max-width: 740px; margin: 32px auto; }
+html[data-ui-mode="simple"] .intro { display: none; }
+html[data-ui-mode="simple"] .step-intro { max-width: 62ch; }
+html[data-ui-mode="simple"] .availability-modes [data-advanced-availability]:not(:has(input:checked)) { display: none; }
+html[data-ui-mode="simple"] #availability-edit-configuration,
+html[data-ui-mode="simple"] #configuration-projects,
+html[data-ui-mode="simple"] #open-observation-catalogue { display: none; }
+html[data-ui-mode="simple"] #simple-projects:not([hidden]) ~ #project-progress-editor:not([hidden]) { margin-top: 22px; }
+.simple-projects { display: grid; gap: 20px; }
+.simple-project-card { background: rgba(255,255,255,.025); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+.simple-project-card h3 { margin: 0 0 18px; font-family: Georgia,serif; font-size: 26px; font-weight: 400; }
+.simple-project-card p { margin: 12px 0; }
+.simple-project-card small { display: block; color: var(--muted); margin-top: 7px; }
+.simple-project-actions { display: flex; justify-content: flex-end; margin: 24px 0; }
+.simple-project-card details { border-top: 1px solid var(--line); padding-top: 14px; }
+.simple-project-card summary { cursor: pointer; color: var(--muted); }
+.project-progress-editor label { display: block; margin: 12px 0; }
+#project-new-intents > fieldset { margin: 18px 0; padding: 18px; border: 1px solid var(--line); border-radius: 10px; }
+#project-new-intents label { display: block; margin: 12px 0; }
+#project-new-intents input[type="checkbox"] { margin-right: 10px; }
+html[data-ui-mode="simple"] #project-create { margin-top: 24px; }
+html[data-ui-mode="simple"] #projects-step > .wizard-actions[data-projects-configured="true"] > [data-back] { display: none; }
+html[data-ui-mode="simple"] #projects-step:has(#simple-projects[data-has-drafts="false"]:not([hidden])) > .wizard-actions { display: none; }
+html:not([data-guided-view="recommendation"]) #tonight-section-title,
+html:not([data-guided-view="recommendation"]) #terrain,
+html:not([data-guided-view="recommendation"]) #history-section { display: none; }
+@media(max-width:640px) {
+  html[data-ui-mode="simple"] .topbar { display: flex; flex-wrap: wrap; align-items: center; }
+  .main-navigation { order: 3; flex-basis: 100%; }
+  .header-actions { margin-left: auto; }
+  .header-options-content { position: absolute; width: min(320px, 85vw); }
+  .simple-project-card { padding: 18px; }
+  .simple-project-actions .primary-button { width: 100%; }
+}
+
+html[data-ui-mode="simple"][data-progress-open="true"] #project-create,
+html[data-ui-mode="simple"][data-progress-open="true"] #projects-step > .wizard-actions { display: none; }
+
+#current-decision-site-warning:empty { display: none; }
+html[data-ui-mode="simple"] #project-create[data-first-project="true"] > summary { display: none; }
+html[data-ui-mode="simple"] #project-new-intents fieldset[data-intent-selected="false"] .new-intent-goal { display: none; }
+
+html[data-ui-mode="pro"][data-guided-view="availability"]:not([data-guided-initial="true"]) #terrain,
+html[data-ui-mode="pro"][data-guided-view="availability"]:not([data-guided-initial="true"]) #history-section { display: block; }

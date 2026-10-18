@@ -110,10 +110,10 @@ def test_root_serves_tonight_classic_ui():
     assert 'id="configuration-recovery-confirm"' in response.text
     assert 'id="edit-configuration"' in response.text
     assert "Modifier ma configuration" in response.text
-    assert "Site d’observation" in response.text
-    assert "Votre matériel" in response.text
+    assert "Où allez-vous observer ?" in response.text
+    assert "Avec quel matériel ?" in response.text
     assert "Aucun projet pour l’instant" in response.text
-    assert "Site, matériel et disponibilité" in response.text
+    assert "Vérifier ma configuration" in response.text
     for field_id in (
         "custom-optics-manufacturer",
         "custom-optics-model",

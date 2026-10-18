@@ -20,6 +20,7 @@ const UI_MODE_LABELS = {
 };
 function normalizeUiMode(value) { return value === "pro" ? "pro" : "simple"; }
 let appliedUiMode = null;
+let uiPresentationListener = null;
 function applyUiMode(value) {
   const mode = normalizeUiMode(value);
   if (appliedUiMode === mode) {
@@ -38,6 +39,7 @@ function applyUiMode(value) {
   document.querySelectorAll("[data-simple-text]").forEach(element => {
     element.textContent = mode === "pro" ? element.dataset.proText : element.dataset.simpleText;
   });
+  if (uiPresentationListener) uiPresentationListener(mode);
   // Disclosure changes do not reset inputs, selections, filters, or requests.
   document.querySelectorAll("[data-mode-disclosure]").forEach(element => { element.open = mode === "pro"; });
 }
@@ -857,6 +859,7 @@ function currentDecisionMatchesSite() {
     && (!trust.timezone || trust.timezone === siteTimezone());
 }
 function invalidateCurrentDecisionForSiteChange() {
+  const hadSiteContext = Boolean(state.configuration?.configured || state.currentDecision || state.acceptedMission || state.fieldObservationLock);
   beginConfigurationOperation();
   state.configurationInFlightGeneration = null;
   state.decisionSiteGeneration = (state.decisionSiteGeneration || 0) + 1;
@@ -867,7 +870,7 @@ function invalidateCurrentDecisionForSiteChange() {
   if (state.recentDecisions) state.recentDecisions = {open: false, items: [], cursor: null, extension: 1};
   ui.addObservationMessage.hidden = true;
   ui.addObservationDecision.hidden = true;
-  text("#current-decision-site-warning", "Le site ou son fuseau a changé. Préparez à nouveau votre nuit avant une observation immédiate, ou choisissez explicitement une décision récente.");
+  text("#current-decision-site-warning", hadSiteContext ? "Le site ou son fuseau a changé. Préparez à nouveau votre nuit avant une observation immédiate, ou choisissez explicitement une décision récente." : "");
   syncFieldObservationContext(); // Preserve draft, pending payload and UUID; block the old editor.
 }
 async function handleDecisionSiteStorageEvent(event) {
@@ -3607,7 +3610,9 @@ function setView(view) {
   invalidateOutcomeHistory();
   state.viewRevision = (state.viewRevision || 0) + 1;
   state.view = view;
+  if (view === "recommendation") state.guidedInitialConfiguration = false;
   const wizardVisible = wizardStates.includes(view);
+  document.documentElement.dataset.guidedView = view;
   ui.configurationLoading.hidden = view !== "loading_configuration";
   ui.configurationError.hidden = view !== "configuration_error";
   ui.onboarding.hidden = !wizardVisible;
@@ -3635,6 +3640,8 @@ function setView(view) {
   for (const marker of document.querySelectorAll("[data-progress]")) {
     marker.classList.toggle("active", marker.dataset.progress === view);
   }
+  if (typeof updateGuidedPresentation === "function") updateGuidedPresentation();
+  if (view === "projects" && typeof prepareGuidedProjectCreation === "function") prepareGuidedProjectCreation();
   if (view === "review") {
     requestAnimationFrame(() => document.querySelector("#availability-title")?.focus());
   } else if (wizardVisible) {
@@ -4640,6 +4647,7 @@ function progressEditorSnapshot(fieldOverride = null) {
 }
 
 function confirmDiscardProjectProgress() {
+  if (state.savingProjectProgress) return false;
   return progressEditorSnapshot() === state.progressEditorBaseline
     || window.confirm("Des modifications de l’avancement ne sont pas enregistrées. Les abandonner ?");
 }
@@ -4647,6 +4655,7 @@ function confirmDiscardProjectProgress() {
 function renderProjects() {
   if (!confirmDiscardProjectProgress()) return false;
   document.querySelector("#project-progress-editor").hidden = true;
+  document.documentElement.dataset.progressOpen = "false";
   state.progressEditor = null;
   state.progressEditorBaseline = null;
   const projects = state.configurationDraft.projects || {};
@@ -4685,10 +4694,13 @@ function renderProjects() {
     zeroProjects.checked = true;
     zeroProjects.disabled = true;
   }
+  if (typeof renderSimpleProjects === "function") renderSimpleProjects(entries);
   return true;
 }
 
 async function loadProjectTemplates() {
+  if (state.projectTemplatesLoading) return;
+  state.projectTemplatesLoading = true;
   const button = document.querySelector("#project-templates-load");
   const feedback = document.querySelector("#project-create-feedback");
   button.disabled = true;
@@ -4705,6 +4717,10 @@ async function loadProjectTemplates() {
       select.append(new Option(template.display_name, template.catalog_key));
     }
     document.querySelector("#project-create-fields").hidden = !templates.length;
+    if (templates.length === 1) {
+      select.value = templates[0].catalog_key;
+      renderNewProjectIntents();
+    }
     button.hidden = Boolean(templates.length);
     feedback.textContent = templates.length
       ? "Seules les cibles disposant de données de mission complètes sont proposées dans cette bêta."
@@ -4712,6 +4728,7 @@ async function loadProjectTemplates() {
   } catch (_error) {
     feedback.textContent = "Les cibles ne peuvent pas être chargées. Vos réglages sont conservés ; réessayez.";
   } finally {
+    state.projectTemplatesLoading = false;
     button.disabled = false;
   }
 }
@@ -4723,6 +4740,7 @@ function renderNewProjectIntents() {
   container.replaceChildren();
   document.querySelector("#project-new-empty").checked = false;
   const equipmentId = state.configurationDraft.equipment?.preset_id;
+  state.projectCreationEquipmentId = equipmentId;
   for (const intent of template?.acquisition_intents || []) {
     const filters = intent.supported_filters.filter(item => item.equipment_id === equipmentId);
     const row = document.createElement("fieldset");
@@ -4742,7 +4760,14 @@ function renderNewProjectIntents() {
     const input = document.createElement("input");
     input.type = "number"; input.min = "1"; input.step = "any";
     input.dataset.targetHours = "true";
-    label.append(document.createTextNode("Objectif de pose utile en heures (au moins 1 h, sur une ou plusieurs nuits)"), input);
+    label.className = "field";
+    label.append(document.createTextNode("Temps de pose total souhaité avec ce filtre (heures, au moins 1 h)"), input);
+    const note = document.createElement("small");
+    note.textContent = "Sur toutes vos nuits réunies. Ce n’est pas votre disponibilité de ce soir.";
+    label.append(note);
+    row.dataset.intentSelected = "false";
+    check.addEventListener("change", () => {row.dataset.intentSelected = String(check.checked);});
+    label.classList.add("new-intent-goal");
     row.append(legend, confirmation, label);
     container.append(row);
   }
@@ -4774,6 +4799,7 @@ function newProjectFromInputs(template, entries, emptyConfirmed, existingProject
 }
 
 function addNewProject() {
+  if (state.savingConfiguration) return;
   const feedback = document.querySelector("#project-create-feedback");
   try {
     if (!confirmDiscardProjectProgress()) return;
@@ -4788,7 +4814,9 @@ function addNewProject() {
       document.querySelector("#project-new-empty").checked, projects);
     state.configurationDraft.projects = { ...projects, [key]: project };
     renderProjects();
-    feedback.textContent = "Projet ajouté à votre brouillon. Cliquez sur Continuer, puis Enregistrer ma configuration. Aucun crédit d’imagerie n’a été créé.";
+    document.querySelector("#project-create").open = false;
+    feedback.textContent = "Projet ajouté au brouillon. Enregistrez pour conserver ce choix. Aucun temps de pose n’a été crédité.";
+    if (appliedUiMode === "simple") saveConfiguration();
   } catch (error) {
     feedback.textContent = error.message;
   }
@@ -4818,16 +4846,23 @@ async function openProjectProgress(projectId, { discardConfirmed = false } = {})
   if (!discardConfirmed && !confirmDiscardProjectProgress()) return;
   const editor = document.querySelector("#project-progress-editor");
   editor.hidden = false;
+  document.documentElement.dataset.progressOpen = "true";
+  const simpleList = document.querySelector("#simple-projects");
+  if (simpleList) simpleList.hidden = true;
   editor.textContent = "Chargement du projet…";
+  const generation = (state.progressEditorGeneration || 0) + 1;
+  state.progressEditorGeneration = generation;
   state.progressEditor = null;
   state.progressEditorBaseline = null;
   try {
     const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/progress`);
     if (!response.ok) throw new Error("load failed");
-    state.progressEditor = await response.json();
+    const data = await response.json();
+    if (generation !== state.progressEditorGeneration || state.view !== "projects") return;
+    state.progressEditor = data;
     renderProjectProgressEditor();
   } catch (_error) {
-    editor.textContent = "Le projet ne peut pas être ouvert. Réessayez.";
+    if (generation === state.progressEditorGeneration && state.view === "projects") editor.textContent = "Le projet ne peut pas être ouvert. Réessayez.";
   }
 }
 
@@ -4880,7 +4915,11 @@ function renderProjectProgressEditor(message = "") {
       const section = document.createElement("fieldset");
       section.dataset.intentId = id;
       const legend = document.createElement("legend");
-      legend.textContent = `${id} · ${intent.filter_type}`;
+      legend.textContent = `Filtre ${intent.filter_type === "Ha" ? "Hα" : intent.filter_type}`;
+      legend.dataset.simpleText = legend.textContent;
+      legend.dataset.proText = `${id} · ${intent.filter_type}`;
+      if (appliedUiMode === "pro") legend.textContent = legend.dataset.proText;
+      if (!target && !progress && data.acquisition_intent_targets?.length) section.dataset.proOnly = "true";
       const mode = document.createElement("select");
       mode.dataset.field = "mode";
       for (const [value, label] of [["unknown", "non renseigné"], ["detailed", "Poses × secondes"], ["manual", "Durée manuelle (secondes)"]]) {
@@ -4894,7 +4933,13 @@ function renderProjectProgressEditor(message = "") {
       const frames = progressInput("Poses acquises ", progress?.acquired_frames, "acquired_frames");
       const exposure = progressInput("Secondes par pose ", progress?.exposure_seconds, "exposure_seconds");
       const manual = progressInput("Durée acquise (secondes) ", progress?.acquired_duration_manual, "acquired_duration_manual");
-      const hours = progressInput("Objectif (heures, facultatif) ", target?.target_hours, "target_hours");
+      const hours = progressInput("Objectif total sur plusieurs nuits (heures) ", target?.target_hours, "target_hours");
+      if (target) hours.dataset.proOnly = "true";
+      const goalSummary = document.createElement("p");
+      goalSummary.dataset.simpleOnly = "true";
+      const updateGoalSummary = () => {goalSummary.textContent = hours.querySelector("input").value !== "" ? `Votre objectif total : ${hours.querySelector("input").value} h, sur une ou plusieurs nuits.` : "Indiquez votre objectif total pour ce filtre.";};
+      hours.querySelector("input").addEventListener("input", updateGoalSummary);
+      updateGoalSummary();
       const computed = document.createElement("output");
       const update = () => {
         frames.hidden = exposure.hidden = mode.value !== "detailed";
@@ -4909,7 +4954,8 @@ function renderProjectProgressEditor(message = "") {
       };
       mode.addEventListener("change", update);
       for (const input of [frames, exposure, manual]) input.querySelector("input").addEventListener("input", update);
-      section.append(legend, mode, frames, exposure, manual, hours, computed);
+      section.append(legend, goalSummary, mode, frames, exposure, manual, hours, computed);
+      if (typeof addSimpleDurationFields === "function") addSimpleDurationFields(section, mode, manual, update, credited.has(id));
       if (credited.has(id)) {
         mode.disabled = true;
         for (const input of [frames, exposure, manual]) input.querySelector("input").disabled = true;
@@ -4945,15 +4991,27 @@ function renderProjectProgressEditor(message = "") {
   save.className = "primary-button";
   save.textContent = "Enregistrer l’avancement";
   save.addEventListener("click", saveProjectProgress);
-  editor.append(heading, feedback, fieldLabel, intents, save);
+  if (data.imaging_field_id) fieldLabel.dataset.proOnly = "true";
+  const baselineHelp = document.createElement("p");
+  baselineHelp.textContent = "Renseignez ici le temps total déjà acquis avant les sessions créditées dans NightMerit. Les sessions déjà enregistrées ne doivent pas être comptées une deuxième fois.";
+  const back = document.createElement("button");
+  back.type = "button"; back.className = "secondary-button"; back.textContent = "Retour à mes projets";
+  back.addEventListener("click", () => { if (typeof navigateGuidedProjects === "function") navigateGuidedProjects(); });
+  editor.append(heading, feedback, baselineHelp, fieldLabel, intents, save, back);
   renderIntents();
   state.progressEditorBaseline = progressEditorSnapshot();
 }
 
 async function saveProjectProgress() {
+  if (state.savingProjectProgress) return;
   const data = state.progressEditor;
   const editor = document.querySelector("#project-progress-editor");
   const feedback = editor.querySelector(".project-progress-feedback");
+  const configuration = state.configuration;
+  if (!data || data.profile_revision !== configuration?.profile_revision) {
+    feedback.textContent = "La configuration a changé. Rechargez la page avant d’enregistrer ; votre saisie n’a pas été envoyée.";
+    return;
+  }
   const field = editor.querySelector("#project-imaging-field").value;
   if (!field) {
     feedback.textContent = "Choisissez un champ d’imagerie.";
@@ -4993,6 +5051,9 @@ async function saveProjectProgress() {
   }
   const body = { expected_revision: data.profile_revision, imaging_field_id: field,
     acquisition_intent_progress: progress, acquisition_intent_targets: targets };
+  state.savingProjectProgress = true;
+  const controlsBeforeSave = [...editor.querySelectorAll("input, select, button")].map(control => [control, control.disabled]);
+  controlsBeforeSave.forEach(([control]) => {control.disabled = true;});
   try {
     const response = await fetch(`/v1/projects/${encodeURIComponent(data.project_id)}/progress`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -5013,7 +5074,9 @@ async function saveProjectProgress() {
       return;
     }
     if (!response.ok) throw new Error("save failed");
-    state.progressEditor = await response.json();
+    const saved = await response.json();
+    if (state.configuration !== configuration || state.progressEditor !== data) return;
+    state.progressEditor = saved;
     state.configuration.profile_revision = state.progressEditor.profile_revision;
     const project = state.configuration.projects[data.project_id];
     project.imaging_field_id = field;
@@ -5021,9 +5084,196 @@ async function saveProjectProgress() {
     project.acquisition_intent_targets = targets;
     state.configurationDraft.projects[data.project_id] = structuredClone(project);
     renderProjectProgressEditor("Avancement enregistré.");
+
   } catch (_error) {
     feedback.textContent = "L’avancement n’a pas pu être enregistré. Vérifiez les valeurs et réessayez.";
+  } finally {
+    state.savingProjectProgress = false;
+    controlsBeforeSave.forEach(([control, disabled]) => {if (control.isConnected) control.disabled = disabled;});
   }
+}
+
+// Guided presentation uses the same live controls and canonical progress reads.
+function updateGuidedPresentation() {
+  const simple = appliedUiMode === "simple";
+  const view = state.view;
+  const configured = Boolean(state.configuration?.configured);
+  const nav = document.querySelector("#main-navigation");
+  if (nav) nav.hidden = !configured || (state.guidedInitialConfiguration && view === "availability") || ["site", "equipment", "review", "loading_configuration", "configuration_error", "unresolved_acceptance"].includes(view);
+  document.querySelector("#nav-tonight")?.setAttribute("aria-current", view === "availability" || view === "recommendation" ? "page" : "false");
+  document.querySelector("#nav-projects")?.setAttribute("aria-current", view === "projects" ? "page" : "false");
+  document.documentElement.dataset.guidedView = view;
+  document.documentElement.dataset.guidedInitial = String(Boolean(state.guidedInitialConfiguration));
+  const availabilityKicker = document.querySelector(".availability-heading .state-kicker");
+  if (availabilityKicker) availabilityKicker.textContent = state.guidedInitialConfiguration ? "Étape 4 sur 4 · Disponibilité" : "Préparer une séance";
+  const title = document.querySelector("#projects-title");
+  if (title) title.textContent = configured ? "Mes projets" : "Que souhaitez-vous photographier ?";
+  const number = document.querySelector("#projects-step-number");
+  if (number) number.hidden = configured;
+  const intro = document.querySelector("#projects-intro");
+  if (intro) intro.textContent = configured
+    ? "Retrouvez votre avancement et préparez une prochaine séance. Vos projets sont conservés d’une nuit à l’autre."
+    : "Un projet décrit votre cible, votre filtre et le temps total à accumuler sur une ou plusieurs nuits.";
+  const hasProjects = Object.keys(state.configurationDraft.projects || {}).length > 0;
+  const creation = document.querySelector("#project-create");
+  if (creation) creation.dataset.firstProject = String(!hasProjects);
+  const next = document.querySelector("#projects-next");
+  if (next) {
+    next.hidden = simple && !hasProjects;
+    next.textContent = simple ? (configured ? "Préparer une séance" : "Enregistrer et choisir mes horaires") : "Continuer vers la vérification";
+  }
+  const actions = document.querySelector("#projects-step > .wizard-actions");
+  if (actions) actions.dataset.projectsConfigured = String(configured);
+  const form = document.querySelector("#availability-form");
+  if (form) form.hidden = view === "review";
+  const review = document.querySelector("#review-step");
+  if (review) {
+    if (view === "availability") review.dataset.proOnly = "true";
+    else delete review.dataset.proOnly;
+  }
+}
+
+function prepareGuidedProjectCreation() {
+  const hasProjects = Object.keys(state.configurationDraft.projects || {}).length > 0;
+  const creation = document.querySelector("#project-create");
+  if (appliedUiMode === "simple" && !hasProjects && creation) {
+    creation.open = true;
+    if (!state.projectTemplates) loadProjectTemplates();
+    else if (state.projectCreationEquipmentId !== state.configurationDraft.equipment?.preset_id) renderNewProjectIntents();
+  }
+}
+
+function navigateGuidedProjects() {
+  if (guardUnresolvedAcceptance() || state.savingProjectProgress) return;
+  if (renderProjects()) setView("projects");
+}
+
+function prepareGuidedSession() {
+  if (guardUnresolvedAcceptance() || state.savingProjectProgress || !confirmDiscardProjectProgress()) return;
+  const unchanged = JSON.stringify(state.configurationDraft) === JSON.stringify(draftFromConfiguration(state.configuration));
+  if (!unchanged) {
+    showFormError("Votre configuration contient des modifications. Enregistrez-les avant de préparer une séance.");
+    setView("projects");
+    return;
+  }
+  showFormError("");
+  setView("availability");
+}
+
+function renderSimpleProjects(entries) {
+  const region = document.querySelector("#simple-projects");
+  if (!region) return;
+  const generation = (state.simpleProjectsGeneration || 0) + 1;
+  state.simpleProjectsGeneration = generation;
+  state.progressEditorGeneration = (state.progressEditorGeneration || 0) + 1;
+  region.replaceChildren();
+  region.hidden = !entries.length;
+  region.dataset.hasDrafts = String(entries.some(([key]) => !Object.hasOwn(state.configuration?.projects || {}, key)));
+  const configuration = state.configuration;
+  for (const [key, project] of entries) {
+    const card = document.createElement("article");
+    card.className = "simple-project-card";
+    const heading = document.createElement("h3");
+    heading.textContent = key;
+    const status = document.createElement("div");
+    const saved = Object.hasOwn(configuration?.projects || {}, key);
+    status.textContent = saved ? "Lecture de l’avancement enregistré…" : "Projet ajouté au brouillon ; l’enregistrement reste à confirmer.";
+    const controls = document.createElement("div");
+    controls.className = "simple-project-actions";
+    const prepare = document.createElement("button");
+    prepare.type = "button"; prepare.className = "primary-button";
+    prepare.textContent = "Préparer une séance";
+    prepare.disabled = true;
+    prepare.addEventListener("click", prepareGuidedSession);
+    const more = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "J’ai déjà photographié ce projet";
+    const note = document.createElement("p");
+    note.textContent = "Pour une session réalisée dans NightMerit, ouvrez sa mission enregistrée pour créditer sa durée une seule fois. Pour des images antérieures, renseignez votre temps total de départ.";
+    const edit = document.createElement("button");
+    edit.type = "button"; edit.className = "secondary-button";
+    edit.textContent = "Renseigner mon temps de départ"; edit.disabled = !saved;
+    edit.addEventListener("click", () => openProjectProgress(key));
+    more.append(summary, note, edit);
+    controls.append(prepare);
+    card.append(heading, status, controls, more);
+    region.append(card);
+    if (!saved) continue;
+    fetch(`/v1/projects/${encodeURIComponent(key)}/progress`).then(async response => {
+      if (!response.ok) throw new Error("progress unavailable");
+      const data = await response.json();
+      if (state.simpleProjectsGeneration !== generation || state.configuration !== configuration) return;
+      status.replaceChildren();
+      const targets = data.acquisition_intent_targets || [];
+      if (!targets.length) {
+        status.textContent = "L’objectif par filtre reste à renseigner. Votre projet historique est conservé.";
+        return;
+      }
+      prepare.disabled = false;
+      for (const target of targets) {
+        const intent = data.acquisition_intents.find(item => item.acquisition_intent_id === target.acquisition_intent_id);
+        const progress = data.intent_progress_breakdown.find(item => item.acquisition_intent_id === target.acquisition_intent_id);
+        const row = document.createElement("p");
+        const filter = intent?.filter_type === "Ha" ? "Hα" : intent?.filter_type || "à confirmer";
+        const known = progress?.effective_total_seconds != null;
+        row.textContent = `Filtre ${filter} · ${known ? progressDuration(progress.effective_total_seconds) : "Avancement non renseigné"} sur ${target.target_hours} h au total.`;
+        const remainder = document.createElement("small");
+        remainder.textContent = progress?.remaining_hours == null ? "Confirmez votre avancement pour calculer ce qu’il reste."
+          : progress.remaining_hours <= 0 ? "Objectif atteint pour ce filtre."
+          : `Il reste ${progressDuration(progress.remaining_hours * 3600)} à accumuler, sur une ou plusieurs nuits.`;
+        row.append(remainder); status.append(row);
+      }
+    }).catch(() => {
+      if (state.simpleProjectsGeneration === generation && state.configuration === configuration) {
+        status.textContent = "L’avancement ne peut pas être relu. Vos données sont conservées ; rouvrez Mes projets pour réessayer.";
+        prepare.disabled = true;
+      }
+    });
+  }
+}
+
+function addSimpleDurationFields(section, mode, manual, update, locked) {
+  const wrapper = document.createElement("div");
+  wrapper.dataset.simpleOnly = "true";
+  const info = document.createElement("p");
+  const fields = document.createElement("div");
+  fields.className = "form-grid two-columns";
+  const hours = progressInput("Heures ", "", "simple_hours");
+  const minutes = progressInput("Minutes ", "", "simple_minutes");
+  const h = hours.querySelector("input"), m = minutes.querySelector("input");
+  h.step = "1"; m.max = "59.999999999";
+  h.disabled = m.disabled = locked;
+  fields.append(hours, minutes);
+  const enter = document.createElement("button");
+  enter.type = "button"; enter.className = "secondary-button";
+  enter.textContent = "Renseigner une durée totale connue";
+  enter.disabled = locked;
+  const reflect = () => {
+    fields.hidden = mode.value !== "manual";
+    enter.hidden = mode.value !== "unknown";
+    const seconds = Number(manual.querySelector("input").value);
+    const known = manual.querySelector("input").value !== "" && Number.isFinite(seconds) && seconds >= 0;
+    h.value = known ? Math.floor(seconds / 3600) : "";
+    m.value = known ? (seconds % 3600) / 60 : "";
+    info.textContent = locked ? "Le temps de départ est verrouillé car des sessions ont déjà été créditées. Ouvrez la mission enregistrée pour ajouter une nouvelle session."
+      : mode.value === "detailed" ? "Le temps de départ est calculé à partir de vos poses. Les mesures restent consultables et modifiables en Pro."
+      : mode.value === "unknown" ? "Votre temps déjà acquis est inconnu. Ne le remplacez pas par zéro sans le confirmer."
+      : "Indiquez le total de départ, pas une durée à ajouter. Les sessions déjà créditées seront comptées séparément.";
+  };
+  const original = manual.querySelector("input");
+  const change = () => {
+    const wholeHours = Number(h.value), extraMinutes = Number(m.value);
+    original.value = h.value !== "" && m.value !== "" && Number.isInteger(wholeHours) && wholeHours >= 0
+      && Number.isFinite(extraMinutes) && extraMinutes >= 0 && extraMinutes < 60
+      ? wholeHours * 3600 + extraMinutes * 60 : "";
+    update();
+  };
+  h.addEventListener("input", change); m.addEventListener("input", change);
+  original.addEventListener("input", reflect); mode.addEventListener("change", reflect);
+  enter.addEventListener("click", () => {mode.value = "manual"; update(); reflect();});
+  for (const child of [mode, manual]) child.dataset.proOnly = "true";
+  wrapper.append(info, fields, enter);
+  section.append(wrapper); reflect();
 }
 
 function prefillConfiguration() {
@@ -5171,6 +5421,7 @@ function showConfigurationError(message, { code = null } = {}) {
 }
 
 function initializeConfiguration(payload) {
+  if (!state.configuration && !payload.configured) state.guidedInitialConfiguration = true;
   if (state.configuration && decisionSiteFingerprint() !== decisionSiteFingerprint(payload.site)) {
     invalidateCurrentDecisionForSiteChange();
   }
@@ -5433,6 +5684,8 @@ async function saveConfiguration() {
     installCurrentConfiguration(payload, generation);
     if (!ownsNavigation) return;
     setView("availability");
+    const savedNotice = document.querySelector("#availability-save-confirmation");
+    if (savedNotice) savedNotice.hidden = false;
   } catch (_error) {
     if (!configurationOperationIsCurrent(generation)) return;
     if (!configurationOwnsNavigation(generation)) return;
@@ -6345,6 +6598,12 @@ document.querySelector("#equipment-next").addEventListener("click", () => {
 document.querySelector("#projects-next").addEventListener("click", () => {
   if (!confirmDiscardProjectProgress()) return;
   showFormError("");
+  if (appliedUiMode === "simple") {
+    const unchanged = JSON.stringify(state.configurationDraft) === JSON.stringify(draftFromConfiguration(state.configuration));
+    if (state.configuration?.configured && unchanged) setView("availability");
+    else saveConfiguration();
+    return;
+  }
   renderReview();
   setView("review");
 });
@@ -6554,6 +6813,11 @@ document.querySelector("#outcome-observation").addEventListener("change", event 
   clearOutcomePresentation();
   document.querySelector("#outcome-result").textContent = "Observation enregistrée sélectionnée. Consultez ou comparez explicitement.";
 });
+uiPresentationListener = updateGuidedPresentation;
+document.querySelector("#nav-projects").addEventListener("click", navigateGuidedProjects);
+document.querySelector("#nav-tonight").addEventListener("click", prepareGuidedSession);
+updateGuidedPresentation();
+
 // Outcome History: independent read-only view and request generation.
 function invalidateOutcomeHistory() {
   historyState.generation += 1;

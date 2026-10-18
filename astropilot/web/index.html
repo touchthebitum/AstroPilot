@@ -26,18 +26,16 @@
         </span>
         <span>NightMerit</span>
       </a>
-      <div class="night-context">
+      <nav id="main-navigation" class="main-navigation" aria-label="Navigation principale" hidden><button class="secondary-button" id="nav-tonight" type="button">Ce soir</button><button class="secondary-button" id="nav-projects" type="button">Mes projets</button></nav>
+      <div class="night-context" data-pro-only>
         <span class="context-label">Ce soir</span>
         <time id="night-date">—</time>
       </div>
       <div class="header-actions">
+        <details id="header-options" class="header-options" data-mode-disclosure><summary>Options et aide</summary><div class="header-options-content">
         <button class="secondary-button" id="alerts-status-open" type="button" aria-haspopup="dialog">État des alertes</button>
         <button class="secondary-button" id="help-open" type="button" aria-haspopup="dialog">Aide</button>
-        <label class="ui-mode-control" for="ui-mode">Présentation
-          <select id="ui-mode" aria-label="Mode de présentation">
-            <option value="simple">Simple</option><option value="pro">Pro</option>
-          </select>
-        </label>
+
         <button class="secondary-button" id="edit-availability" type="button" hidden>
           Modifier ma disponibilité
         </button>
@@ -50,6 +48,12 @@
           </svg>
           <span>Actualiser</span>
         </button>
+        </div></details>
+        <label class="ui-mode-control" for="ui-mode">Présentation
+          <select id="ui-mode" aria-label="Mode de présentation">
+            <option value="simple">Simple</option><option value="pro">Pro</option>
+          </select>
+        </label>
       </div>
     </header>
 
@@ -121,8 +125,8 @@
         <p id="configuration-form-error" class="form-error" role="alert" hidden></p>
 
         <section id="site-step" class="wizard-step" data-step="site" aria-labelledby="site-title">
-          <p class="eyebrow">Étape 1</p>
-          <h2 id="site-title" tabindex="-1">Site d’observation</h2>
+          <p class="eyebrow">Étape 1 sur 4 · Site</p>
+          <h2 id="site-title" tabindex="-1">Où allez-vous observer ?</h2>
           <p class="step-intro">Indiquez l’endroit depuis lequel vous observez habituellement.</p>
           <div class="geolocation-row">
             <button class="secondary-button" id="use-geolocation" type="button">Utiliser ma position</button>
@@ -146,19 +150,19 @@
             <label class="field full-width" for="site-bortle">
               <span>Pollution lumineuse / qualité du ciel (Bortle)</span>
               <input id="site-bortle" name="site-bortle" type="number" min="1" max="9" step="1" inputmode="numeric" required>
-              <small>1 correspond à un ciel très sombre, 9 à un ciel urbain très lumineux.</small>
+              <small>Cette échelle décrit la pollution lumineuse : 1 = ciel très sombre ; 9 = centre-ville très lumineux.</small><details class="bortle-help"><summary>Comment choisir si je débute ?</summary><p>Il s’agit de la luminosité habituelle du ciel causée par les éclairages, pas des nuages de ce soir. N’indiquez pas une valeur au hasard : faites confirmer la classe de votre lieu par un club d’astronomie ou une carte de pollution lumineuse avant de continuer.</p></details>
               <small id="legacy-bortle-note" hidden>Pour ce profil historique, confirmez cette valeur avant toute recommandation.</small>
             </label>
           </div>
           <p id="site-summary" class="field-note" aria-live="polite"></p>
           <div class="wizard-actions end">
-            <button class="primary-button" id="site-next" type="button">Continuer</button>
+            <button class="primary-button" id="site-next" type="button">Continuer vers le matériel</button>
           </div>
         </section>
 
         <section id="equipment-step" class="wizard-step" data-step="equipment" aria-labelledby="equipment-title" hidden>
-          <p class="eyebrow">Étape 2</p>
-          <h2 id="equipment-title" tabindex="-1">Votre matériel</h2>
+          <p class="eyebrow">Étape 2 sur 4 · Matériel</p>
+          <h2 id="equipment-title" tabindex="-1">Avec quel matériel ?</h2>
           <p class="step-intro">Choisissez une configuration connue ou décrivez votre optique et votre caméra.</p>
           <div class="choice-tabs" role="radiogroup" aria-label="Type de matériel">
             <label><input type="radio" name="equipment-kind" value="preset" checked> Configuration proposée</label>
@@ -183,17 +187,17 @@
           </fieldset>
           <div class="wizard-actions">
             <button class="secondary-button" data-back="site" type="button">Retour</button>
-            <button class="primary-button" id="equipment-next" type="button">Continuer</button>
+            <button class="primary-button" id="equipment-next" type="button">Continuer vers mon projet</button>
           </div>
         </section>
 
         <section id="projects-step" class="wizard-step" data-step="projects" aria-labelledby="projects-title" hidden>
-          <p class="eyebrow">Étape 3</p>
+          <p class="eyebrow" id="projects-step-number">Étape 3 sur 4 · Projet</p>
           <h2 id="projects-title" tabindex="-1">Vos projets</h2>
-          <p class="step-intro">Un projet décrit ce que vous voulez photographier et le temps de pose utile que vous souhaitez accumuler, éventuellement sur plusieurs nuits. Il est nécessaire pour préparer une mission.</p>
-          <div id="existing-projects" class="project-summary" hidden></div>
+          <p class="step-intro" id="projects-intro">Un projet décrit ce que vous voulez photographier et le temps de pose utile que vous souhaitez accumuler, éventuellement sur plusieurs nuits. Il est nécessaire pour préparer une mission.</p>
+          <div id="existing-projects" class="project-summary" data-pro-only hidden></div><div id="simple-projects" class="simple-projects" data-simple-only hidden aria-live="polite"></div>
           <div id="project-progress-editor" class="project-progress-editor" hidden></div>
-          <label id="zero-projects-wrap" class="project-none" for="zero-projects">
+          <label id="zero-projects-wrap" class="project-none" data-pro-only for="zero-projects">
             <input id="zero-projects" type="checkbox" checked>
             <span><strong>Aucun projet pour l’instant</strong><small>Sans projet, NightMerit peut rechercher une cible, mais ne pourra pas préparer de mission.</small></span>
           </label>
@@ -207,13 +211,13 @@
               <select id="project-template"><option value="">Choisir une cible</option></select>
               <div id="project-new-intents"></div>
               <label class="check-field"><input id="project-new-empty" type="checkbox"><span>Je commence ce projet sans images déjà acquises.</span></label>
-              <button class="primary-button" id="project-add" type="button">Ajouter ce projet à ma configuration</button>
+              <button class="primary-button" id="project-add" type="button" data-simple-text="Enregistrer mon projet et continuer" data-pro-text="Ajouter ce projet à ma configuration">Enregistrer mon projet et continuer</button>
             </div>
             <p id="project-create-feedback" role="status" aria-live="polite"></p>
           </details>
           <div class="wizard-actions">
             <button class="secondary-button" data-back="equipment" type="button">Retour</button>
-            <button class="primary-button" id="projects-next" type="button">Continuer</button>
+            <button class="primary-button" id="projects-next" type="button">Enregistrer et choisir mes horaires</button>
           </div>
         </section>
 
@@ -224,14 +228,15 @@
           <p class="state-kicker">Préparer ma nuit</p>
           <h2 id="availability-title" tabindex="-1">Quand êtes-vous disponible ce soir&nbsp;?</h2>
           <p>NightMerit utilisera uniquement la plage que vous indiquez pour cette recommandation.</p>
+          <p id="availability-save-confirmation" class="field-note" role="status" hidden>Votre projet et votre configuration sont enregistrés. Choisissez maintenant votre disponibilité.</p>
           <p id="availability-site-timezone" class="field-note" hidden></p>
           <p id="availability-timezone-warning" class="form-error" role="alert" hidden>Le fuseau horaire du site ne peut pas être déterminé. Vérifiez les coordonnées du site avant de choisir une heure précise.</p>
         </div>
         <p id="current-decision-site-warning" class="field-note" role="status"></p>
         <button class="secondary-button" id="open-observation-catalogue" type="button">Observer avec une décision récente du site</button>
         <section id="review-step" class="wizard-step" aria-labelledby="review-title">
-          <p class="eyebrow">Étape 3</p>
-          <h2 id="review-title" tabindex="-1">Site, matériel et disponibilité</h2>
+          <p class="eyebrow">Vérification avant enregistrement</p>
+          <h2 id="review-title" tabindex="-1">Vérifier ma configuration</h2>
           <dl class="review-grid">
             <div><dt>Site</dt><dd id="review-site">—</dd></div>
             <div><dt>Ciel</dt><dd id="review-bortle">—</dd></div>
@@ -258,10 +263,10 @@
           <fieldset class="availability-modes">
             <legend>Ma disponibilité</legend>
             <label><input type="radio" name="availability-mode" value="all_night"><span><strong>Toute la nuit</strong><small>Je peux observer pendant toute la nuit astronomique.</small></span></label>
-            <label><input type="radio" name="availability-mode" value="duration"><span><strong>Pendant environ X heures</strong><small>NightMerit place cette durée dans la meilleure fenêtre.</small></span></label>
-            <label><input type="radio" name="availability-mode" value="start_and_duration"><span><strong>À partir de HH:MM pendant X heures</strong><small>Je connais mon heure de début.</small></span></label>
-            <label><input type="radio" name="availability-mode" value="until"><span><strong>Jusqu’à HH:MM</strong><small>Je dois avoir terminé avant cette heure.</small></span></label>
-            <label><input type="radio" name="availability-mode" value="fixed_window"><span><strong>Entre HH:MM et HH:MM</strong><small>Je dispose d’une plage précise.</small></span></label>
+            <label data-advanced-availability><input type="radio" name="availability-mode" value="duration"><span><strong>Pendant environ X heures</strong><small>NightMerit place cette durée dans la meilleure fenêtre.</small></span></label>
+            <label data-advanced-availability><input type="radio" name="availability-mode" value="start_and_duration"><span><strong>À partir de HH:MM pendant X heures</strong><small>Je connais mon heure de début.</small></span></label>
+            <label data-advanced-availability><input type="radio" name="availability-mode" value="until"><span><strong>Jusqu’à HH:MM</strong><small>Je dois avoir terminé avant cette heure.</small></span></label>
+            <label><input type="radio" name="availability-mode" value="fixed_window"><span><strong>Entre deux horaires</strong><small>Je dispose d’une plage précise.</small></span></label>
           </fieldset>
 
           <div class="availability-fields">
@@ -271,11 +276,11 @@
               <small>Exemple&nbsp;: 1,5 pour 1 h 30.</small>
             </label>
             <label class="field" data-availability-field="start" for="availability-start" hidden>
-              <span>Début</span>
+              <span>Début · date et heure</span>
               <input id="availability-start" type="datetime-local">
             </label>
             <label class="field" data-availability-field="end" for="availability-end" hidden>
-              <span>Fin</span>
+              <span>Fin · date et heure</span>
               <input id="availability-end" type="datetime-local">
             </label>
           </div>
