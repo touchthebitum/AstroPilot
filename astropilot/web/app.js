@@ -4871,7 +4871,7 @@ function renderProjectProgressEditor(message = "") {
   const editor = document.querySelector("#project-progress-editor");
   editor.replaceChildren();
   const heading = document.createElement("h3");
-  heading.textContent = data.project_id;
+  heading.textContent = `Modifier mon projet : ${data.project_id}`;
   const feedback = document.createElement("p");
   feedback.className = "project-progress-feedback";
   feedback.textContent = message;
@@ -4934,9 +4934,8 @@ function renderProjectProgressEditor(message = "") {
       const exposure = progressInput("Secondes par pose ", progress?.exposure_seconds, "exposure_seconds");
       const manual = progressInput("Durée acquise (secondes) ", progress?.acquired_duration_manual, "acquired_duration_manual");
       const hours = progressInput("Objectif total sur plusieurs nuits (heures) ", target?.target_hours, "target_hours");
-      if (target) hours.dataset.proOnly = "true";
       const goalSummary = document.createElement("p");
-      goalSummary.dataset.simpleOnly = "true";
+      goalSummary.dataset.proOnly = "true";
       const updateGoalSummary = () => {goalSummary.textContent = hours.querySelector("input").value !== "" ? `Votre objectif total : ${hours.querySelector("input").value} h, sur une ou plusieurs nuits.` : "Indiquez votre objectif total pour ce filtre.";};
       hours.querySelector("input").addEventListener("input", updateGoalSummary);
       updateGoalSummary();
@@ -4989,11 +4988,11 @@ function renderProjectProgressEditor(message = "") {
   const save = document.createElement("button");
   save.type = "button";
   save.className = "primary-button";
-  save.textContent = "Enregistrer l’avancement";
+  save.textContent = "Enregistrer les modifications";
   save.addEventListener("click", saveProjectProgress);
   if (data.imaging_field_id) fieldLabel.dataset.proOnly = "true";
   const baselineHelp = document.createElement("p");
-  baselineHelp.textContent = "Renseignez ici le temps total déjà acquis avant les sessions créditées dans NightMerit. Les sessions déjà enregistrées ne doivent pas être comptées une deuxième fois.";
+  baselineHelp.textContent = "Modifiez votre objectif total pour ce filtre, sur une ou plusieurs nuits. Le temps de départ correspond uniquement aux images acquises avant les sessions créditées dans NightMerit ; laissez-le inchangé si vous ajustez seulement votre objectif.";
   const back = document.createElement("button");
   back.type = "button"; back.className = "secondary-button"; back.textContent = "Retour à mes projets";
   back.addEventListener("click", () => { if (typeof navigateGuidedProjects === "function") navigateGuidedProjects(); });
@@ -5083,7 +5082,7 @@ async function saveProjectProgress() {
     project.acquisition_intent_progress = progress;
     project.acquisition_intent_targets = targets;
     state.configurationDraft.projects[data.project_id] = structuredClone(project);
-    renderProjectProgressEditor("Avancement enregistré.");
+    renderProjectProgressEditor("Modifications du projet enregistrées.");
 
   } catch (_error) {
     feedback.textContent = "L’avancement n’a pas pu être enregistré. Vérifiez les valeurs et réessayez.";
@@ -5206,7 +5205,11 @@ function renderSimpleProjects(entries) {
     edit.textContent = "Renseigner mon temps de départ"; edit.disabled = !saved;
     edit.addEventListener("click", () => openProjectProgress(key));
     more.append(summary, note, edit);
-    controls.append(prepare);
+    const modify = document.createElement("button");
+    modify.type = "button"; modify.className = "secondary-button";
+    modify.textContent = "Modifier mon projet"; modify.disabled = !saved;
+    modify.addEventListener("click", () => openProjectProgress(key));
+    controls.append(modify, prepare);
     card.append(heading, status, controls, more);
     region.append(card);
     if (!saved) continue;

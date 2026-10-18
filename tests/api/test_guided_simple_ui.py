@@ -67,7 +67,7 @@ const configuration={projects:{'Sh2-129':{hours:99}}};
 const state={configuration};
 let requests=[];
 function fetch(url){return new Promise((resolve,reject)=>requests.push({url,resolve,reject}));}
-function prepareGuidedSession(){} function configurationDraftMatchesSaved(){return true;} function openProjectProgress(){}
+function prepareGuidedSession(){} function configurationDraftMatchesSaved(){return true;} let openedProject=null; function openProjectProgress(id){openedProject=id;}
 const flush=async()=>{for(let i=0;i<12;i++)await Promise.resolve();};
 const payload={acquisition_intent_targets:[{acquisition_intent_id:'ha',target_hours:3}],
  acquisition_intents:[{acquisition_intent_id:'ha',filter_type:'Ha'}],
@@ -75,6 +75,9 @@ const payload={acquisition_intent_targets:[{acquisition_intent_id:'ha',target_ho
 '''+functions+r'''
 (async()=>{
  renderSimpleProjects([['Sh2-129',configuration.projects['Sh2-129']]]);
+ const modify=region.children[0].children[2].children.find(x=>x.textContent==='Modifier mon projet');
+ assert.ok(modify && !modify.disabled,'saved projects must offer a direct edit action in Simple');
+ modify.listeners.click();assert.equal(openedProject,'Sh2-129');
  const old=region.children[0].children[1];
  renderSimpleProjects([['Sh2-129',configuration.projects['Sh2-129']]]);
  const current=region.children[0],status=current.children[1];
@@ -87,7 +90,7 @@ const payload={acquisition_intent_targets:[{acquisition_intent_id:'ha',target_ho
  renderSimpleProjects([['Sh2-129',configuration.projects['Sh2-129']]]);
  const failed=region.children[0];requests.shift().reject(new Error('offline'));await flush();
  assert.match(failed.children[1].textContent,/ne peut pas être relu/);
- assert.equal(failed.children[2].children[0].disabled,true);
+ assert.equal(failed.children[2].children.find(x=>x.textContent==='Préparer une séance').disabled,true);
 })().catch(e=>{console.error(e);process.exitCode=1;});
 ''')
 

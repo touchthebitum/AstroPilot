@@ -679,7 +679,7 @@ html[data-ui-mode="simple"] #simple-projects:not([hidden]) ~ #project-progress-e
 .simple-project-card h3 { margin: 0 0 18px; font-family: Georgia,serif; font-size: 26px; font-weight: 400; }
 .simple-project-card p { margin: 12px 0; }
 .simple-project-card small { display: block; color: var(--muted); margin-top: 7px; }
-.simple-project-actions { display: flex; justify-content: flex-end; margin: 24px 0; }
+.simple-project-actions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: flex-end; margin: 24px 0; }
 .simple-project-card details { border-top: 1px solid var(--line); padding-top: 14px; }
 .simple-project-card summary { cursor: pointer; color: var(--muted); }
 .project-progress-editor label { display: block; margin: 12px 0; }

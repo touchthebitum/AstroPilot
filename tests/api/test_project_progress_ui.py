@@ -10,7 +10,8 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[2] / "astropilot/web/app.js"
 
 
-def test_field_transition_and_unsaved_editor_guards(tmp_path):
+@pytest.mark.parametrize("ui_mode", ["simple", "pro"])
+def test_field_transition_and_unsaved_editor_guards(tmp_path, ui_mode):
     engine = shutil.which("osascript") or shutil.which("node")
     if not engine:
         pytest.skip("JavaScript runtime unavailable")
@@ -66,6 +67,8 @@ const state = {
 };
 function check() {
   renderProjectProgressEditor();
+  const goal = editor.all().find(x => x.tag === "label" && x.children.some(c => c.dataset.field === "target_hours"));
+  assert(goal && goal.dataset.proOnly !== "true", "the total goal must be editable in Simple as well as Pro");
   const select = editor.querySelector("#project-imaging-field");
   assert(confirmDiscardProjectProgress(), "pristine editor should not need confirmation");
   const firstInput = editor.querySelector("input");
@@ -92,7 +95,7 @@ function check() {
 }
 '''
     # The tiny DOM harness checks the real event listener, including cancellation.
-    program = harness + functions + "\ncheck();\n"
+    program = harness.replace('const appliedUiMode = "pro";', f'const appliedUiMode = "{ui_mode}";') + functions + "\ncheck();\n"
     file = tmp_path / "progress_ui.js"
     file.write_text(program, encoding="utf-8")
     command = [engine, "-l", "JavaScript", str(file)] if Path(engine).name == "osascript" else [engine, str(file)]
