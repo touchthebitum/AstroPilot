@@ -67,7 +67,7 @@ const configuration={projects:{'Sh2-129':{hours:99}}};
 const state={configuration};
 let requests=[];
 function fetch(url){return new Promise((resolve,reject)=>requests.push({url,resolve,reject}));}
-function prepareGuidedSession(){} function openProjectProgress(){}
+function prepareGuidedSession(){} function configurationDraftMatchesSaved(){return true;} function openProjectProgress(){}
 const flush=async()=>{for(let i=0;i<12;i++)await Promise.resolve();};
 const payload={acquisition_intent_targets:[{acquisition_intent_id:'ha',target_hours:3}],
  acquisition_intents:[{acquisition_intent_id:'ha',filter_type:'Ha'}],
@@ -108,4 +108,21 @@ let writes=0;async function fetch(){writes++;throw new Error('must not write');}
  assert.equal(state.configuration.profile_revision,7);
  assert.match(feedback.textContent,/n’a pas été envoyée/);
 })().catch(e=>{console.error(e);process.exitCode=1;});
+""")
+
+
+def test_saved_site_derived_metadata_does_not_create_a_false_unsaved_draft():
+    source=SOURCE.read_text()
+    function=source[source.index('function configurationDraftMatchesSaved('):source.index('function prepareGuidedSession(')]
+    run_js(r"""
+const assert=require('node:assert/strict');
+const state={configuration:{site:{name:'Fixture',latitude:46.8,longitude:6.5,bortle:4,timezone:'Europe/Zurich',timezone_source:'coordinates_local'},equipment:{preset_id:'samyang_183'},projects:{fixture:{target_hours:10,hours:0}}}};
+function draftFromConfiguration(c){return structuredClone(c);}
+state.configurationDraft=structuredClone(state.configuration);
+delete state.configurationDraft.site.timezone;delete state.configurationDraft.site.timezone_source;
+"""+function+r"""
+assert.equal(configurationDraftMatchesSaved(),true,'readSite need not copy derived server metadata');
+state.configurationDraft.site.latitude=47;assert.equal(configurationDraftMatchesSaved(),false);
+state.configurationDraft.site.latitude=46.8;state.configurationDraft.projects.fixture.target_hours=12;
+assert.equal(configurationDraftMatchesSaved(),false,'real project changes must still require saving');
 """)

@@ -5148,10 +5148,21 @@ function navigateGuidedProjects() {
   if (renderProjects()) setView("projects");
 }
 
-function prepareGuidedSession() {
+function configurationDraftMatchesSaved() {
+  const comparable = draft => ({
+    site: draft.site ? {name:draft.site.name, latitude:draft.site.latitude,
+      longitude:draft.site.longitude, bortle:draft.site.bortle} : null,
+    equipment: draft.equipment, projects: draft.projects,
+  });
+  return JSON.stringify(comparable(state.configurationDraft))
+    === JSON.stringify(comparable(draftFromConfiguration(state.configuration)));
+}
+
+function prepareGuidedSession({saveDraft = false} = {}) {
   if (guardUnresolvedAcceptance() || state.savingProjectProgress || !confirmDiscardProjectProgress()) return;
-  const unchanged = JSON.stringify(state.configurationDraft) === JSON.stringify(draftFromConfiguration(state.configuration));
+  const unchanged = configurationDraftMatchesSaved();
   if (!unchanged) {
+    if (saveDraft) {saveConfiguration(); return;}
     showFormError("Votre configuration contient des modifications. Enregistrez-les avant de préparer une séance.");
     setView("projects");
     return;
@@ -5182,9 +5193,9 @@ function renderSimpleProjects(entries) {
     controls.className = "simple-project-actions";
     const prepare = document.createElement("button");
     prepare.type = "button"; prepare.className = "primary-button";
-    prepare.textContent = "Préparer une séance";
+    prepare.textContent = configurationDraftMatchesSaved() ? "Préparer une séance" : "Enregistrer et préparer une séance";
     prepare.disabled = true;
-    prepare.addEventListener("click", prepareGuidedSession);
+    prepare.addEventListener("click", () => prepareGuidedSession({saveDraft:true}));
     const more = document.createElement("details");
     const summary = document.createElement("summary");
     summary.textContent = "J’ai déjà photographié ce projet";
@@ -6599,7 +6610,7 @@ document.querySelector("#projects-next").addEventListener("click", () => {
   if (!confirmDiscardProjectProgress()) return;
   showFormError("");
   if (appliedUiMode === "simple") {
-    const unchanged = JSON.stringify(state.configurationDraft) === JSON.stringify(draftFromConfiguration(state.configuration));
+    const unchanged = configurationDraftMatchesSaved();
     if (state.configuration?.configured && unchanged) setView("availability");
     else saveConfiguration();
     return;
