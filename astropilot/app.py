@@ -1090,6 +1090,15 @@ class TonightAdviceModel(BaseModel):
     message: str
 
 
+class RefusalWeatherSummaryModel(BaseModel):
+    window_start: AwareDatetime
+    window_end: AwareDatetime
+    cloud_cover_min: float = Field(ge=0, le=100)
+    cloud_cover_max: float = Field(ge=0, le=100)
+    retrieved_at_utc: AwareDatetime
+    provider: str
+
+
 class TonightWeatherTrustModel(BaseModel):
     provider: str
     retrieved_at_utc: str
@@ -1588,6 +1597,7 @@ class TonightResponseModel(BaseModel):
     target_decision_status: TargetDecisionStatus | None = None
     actionability_refusal: ActionabilityRefusalModel | None = None
     creation_refusal: str | None = None
+    refusal_weather: RefusalWeatherSummaryModel | None = None
     shortlist_entries: list[TonightShortlistEntryModel] = Field(
         default_factory=list
     )

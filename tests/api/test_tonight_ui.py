@@ -1577,8 +1577,23 @@ for (const mode of ['simple','pro']) {
  assert.doesNotMatch(shown.body,/configurer|OIII|autoriser|modern_mission/);
  assert.equal(document.querySelector('#message-edit-availability').hidden,false);
  assert.equal(document.querySelector('#message-create-project').hidden,true);
- assert.equal(ui.retry.textContent,'Actualiser l’analyse');
+ assert.equal(ui.retry.textContent,'Actualiser les prévisions');
 }
+const overcast = {...noIntent,refusal_weather:{window_start:'2026-10-18T21:00:00+02:00',window_end:'2026-10-18T23:00:00+02:00',cloud_cover_min:100,cloud_cover_max:100,retrieved_at_utc:'2026-10-18T11:25:00+00:00',provider:'fixture'}};
+for (const mode of ['simple','pro']) {
+ appliedUiMode=mode;showTonightUnavailable(overcast);
+ assert.equal(shown.title,'Ciel couvert prévu sur le créneau évalué');
+ assert.match(shown.body,/100 %/);
+ assert.match(shown.body,/de 21:00 à 23:00 \(UTC\+02:00\)/);
+ assert.match(shown.body,/18.10.2026/);
+ assert.match(shown.body,/11:25 UTC\+00:00/);
+ assert.doesNotMatch(document.querySelector('#message-technical').textContent,/Votre projet est bien enregistré/);
+ assert.equal(document.querySelector('#message-edit-availability').hidden,true);
+}
+showTonightUnavailable({...overcast,refusal_weather:{...overcast.refusal_weather,cloud_cover_min:65,cloud_cover_max:80}});
+assert.match(shown.body,/65 à 80 %/);assert.doesNotMatch(shown.title,/Ciel couvert/);
+showTonightUnavailable({...overcast,refusal_weather:{...overcast.refusal_weather,retrieved_at_utc:null}});
+assert.doesNotMatch(shown.title,/Ciel couvert/);
 showTonightUnavailable({...noIntent,acquisition_intent_assessments:[
  {label:'Hα',status:'insufficient_evidence',reason_codes:['filter_profile_evidence_insufficient']}]});
 assert.match(shown.body,/caractéristiques précises du filtre/);

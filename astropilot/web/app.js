@@ -5689,8 +5689,38 @@ function intentsRefusedForProductiveWindow(payload) {
       && item.reason_codes[0] === "insufficient_actionable_productive_window");
 }
 
+function refusalForecastMessage(payload) {
+  if (!intentsRefusedForProductiveWindow(payload)) return null;
+  const forecast = payload.refusal_weather;
+  if (!forecast || !Number.isFinite(forecast.cloud_cover_min)
+      || !Number.isFinite(forecast.cloud_cover_max)
+      || forecast.cloud_cover_min < 0 || forecast.cloud_cover_max > 100
+      || forecast.cloud_cover_min > forecast.cloud_cover_max) return null;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2}):\d{2}(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+  const start = iso.exec(forecast.window_start || "");
+  const end = iso.exec(forecast.window_end || "");
+  const retrieved = iso.exec(forecast.retrieved_at_utc || "");
+  if (!start || !end || !retrieved || !forecast.provider) return null;
+  const stamp = match => `${match[3]}.${match[2]}.${match[1]} à ${match[4]} UTC${match[5] === "Z" ? "" : match[5]}`;
+  const sameDay = start[1] === end[1] && start[2] === end[2] && start[3] === end[3] && start[5] === end[5];
+  const range = sameDay
+    ? `le ${start[3]}.${start[2]}.${start[1]}, de ${start[4]} à ${end[4]} (UTC${start[5] === "Z" ? "" : start[5]})`
+    : `du ${stamp(start)} au ${stamp(end)}`;
+  const low = Math.round(forecast.cloud_cover_min), high = Math.round(forecast.cloud_cover_max);
+  const clouds = low === high ? `${low} %` : `${low} à ${high} %`;
+  const overcast = forecast.cloud_cover_min === 100 && forecast.cloud_cover_max === 100;
+  return {
+    title: overcast ? "Ciel couvert prévu sur le créneau évalué" : "Créneau insuffisant pour ce projet",
+    body: `Votre projet est bien enregistré. Couverture nuageuse prévue : ${clouds} sur le créneau évalué ${range}. ${overcast ? "NightMerit ne recommande pas de séance photo pour ce projet dans ces conditions. " : "Aucun créneau suffisamment productif n’a été retenu pour ce projet. "}Votre projet est conservé. Prévisions récupérées le ${stamp(retrieved)}. Actualisez les prévisions avant de décider de sortir.`,
+    details: `Source : ${forecast.provider}. Il s’agit de prévisions, pas d’une mesure du ciel sur place. Le créneau évalué peut être plus court que votre disponibilité.`,
+    overcast,
+  };
+}
+
 function intentEligibilityRefusalMessage(payload) {
   const assessments = targetedIntentAssessments(payload);
+  const forecast = refusalForecastMessage(payload);
+  if (forecast) return [forecast.title, forecast.body];
   if (intentsRefusedForProductiveWindow(payload)) {
     const names = assessments.map(item => item.label || item.filter_type).filter(Boolean).join(", ");
     return ["Créneau insuffisant pour ce projet",
@@ -5836,8 +5866,9 @@ function showTonightUnavailable(payload) {
     : creationRefused
     ? creationRefusalMessage(payload)
     : partialMessages[payload.status] || ["Décision indisponible", "Aucune recommandation exploitable."];
+  const forecast = refusalForecastMessage(payload);
   const shortWindow = payload.actionability_refusal?.refusal_stage === "continuous_window_too_short";
-  const editAvailability = canEditRefusedAvailability(payload) || intentsRefusedForProductiveWindow(payload);
+  const editAvailability = canEditRefusedAvailability(payload) || (intentsRefusedForProductiveWindow(payload) && !forecast?.overcast);
   const body = creationRefused
     ? technical
     : productiveRefusal
@@ -5846,7 +5877,7 @@ function showTonightUnavailable(payload) {
       : "Aucun créneau ne permet de lancer une mission dans les conditions évaluées. Réessayez plus tard lorsque les prévisions évoluent."
     : `${technical} Réessayez plus tard lorsque les données ou les conditions évoluent.`;
   showMessage(title, body, { kicker: "Analyse terminée" });
-  text("#message-technical", technical);
+  text("#message-technical", forecast?.details || technical);
   const details = document.querySelector("#message-details");
   details.hidden = false;
   details.open = appliedUiMode === "pro";
@@ -5855,7 +5886,7 @@ function showTonightUnavailable(payload) {
   document.querySelector("#message-create-project").hidden = !needsProject;
   ui.retry.hidden = needsProject;
   ui.retry.textContent = payload.creation_refusal === "no_eligible_acquisition_intent"
-    ? "Actualiser l’analyse" : "Réessayer plus tard";
+    ? "Actualiser les prévisions" : "Réessayer plus tard";
   document.querySelector("#message-edit-availability").hidden = !editAvailability;
 }
 

@@ -9,7 +9,7 @@ from astropilot.app import create_app
 from decision.weather.weather_ingress import REQUIRED_HOURLY_UNITS, validate_weather_payload
 
 
-@pytest.mark.parametrize('cloud_cover,available', [(10, True), (65, False)])
+@pytest.mark.parametrize('cloud_cover,available', [(10, True), (65, False), (100, False)])
 def test_saved_ha_project_distinguishes_unusable_window_from_missing_configuration(
     tmp_path, monkeypatch, cloud_cover, available,
 ):
@@ -77,4 +77,11 @@ def test_saved_ha_project_distinguishes_unusable_window_from_missing_configurati
         assert assessments['sh2-129_ha']['reason_codes'] == ['insufficient_actionable_productive_window']
         assert assessments['ou4_oiii']['reason_codes'] == ['intent_not_targeted_by_project']
         assert assembly_calls == []
+        summary = payload['refusal_weather']
+        assert summary['cloud_cover_min'] == cloud_cover
+        assert summary['cloud_cover_max'] == cloud_cover
+        assert summary['window_start'] == '2026-10-18T21:00:00+02:00'
+        assert summary['window_end'] == '2026-10-18T23:00:00+02:00'
+        assert summary['retrieved_at_utc'] == '2026-10-18T10:55:00Z'
+
     assert path.read_bytes() == before
