@@ -5676,7 +5676,49 @@ const creationRefusalMessages = Object.freeze({
   legacy_filter_cannot_authorize_modern_mission: ["Filtre compatible à configurer", "Le filtre historique ne fournit pas le profil optique précis requis pour cette acquisition."],
 });
 
+function targetedIntentAssessments(payload) {
+  return (payload.acquisition_intent_assessments || []).filter(item =>
+    !(item.reason_codes || []).includes("intent_not_targeted_by_project"));
+}
+
+function intentsRefusedForProductiveWindow(payload) {
+  const assessments = targetedIntentAssessments(payload);
+  return payload.creation_refusal === "no_eligible_acquisition_intent"
+    && assessments.length > 0 && assessments.every(item =>
+      item.status === "not_eligible" && item.reason_codes?.length === 1
+      && item.reason_codes[0] === "insufficient_actionable_productive_window");
+}
+
+function intentEligibilityRefusalMessage(payload) {
+  const assessments = targetedIntentAssessments(payload);
+  if (intentsRefusedForProductiveWindow(payload)) {
+    const names = assessments.map(item => item.label || item.filter_type).filter(Boolean).join(", ");
+    return ["Créneau insuffisant pour ce projet",
+      `Votre projet est bien enregistré. Sur la plage choisie, NightMerit ne trouve pas de créneau suffisamment productif${names ? ` pour ${names}` : ""}. Vous pouvez revoir vos horaires ou refaire l’analyse lorsque les conditions évoluent, sans garantie de trouver un créneau adapté. Votre projet est conservé.`];
+  }
+  const reasons = {
+    intent_target_completed: "l’objectif de pose est déjà atteint",
+    required_filter_unavailable: "le filtre requis n’est pas disponible pour le matériel choisi",
+    insufficient_actionable_productive_window: "aucun créneau suffisamment productif sur la plage choisie",
+    ambiguous_best_duration_window: "plusieurs créneaux restent à départager ; précisez vos horaires",
+    intent_progress_evidence_insufficient: "l’avancement de cette prise de vue doit être renseigné",
+    setup_capabilities_missing: "les capacités du matériel ne sont pas renseignées",
+    productive_window_evidence_missing: "les données de créneau exploitable sont insuffisantes",
+    weather_evidence_insufficient: "les données météo sont insuffisantes",
+    filter_profile_evidence_insufficient: "les caractéristiques précises du filtre ne permettent pas de vérifier sa compatibilité",
+    lunar_evidence_insufficient: "les données sur l’effet de la Lune sont insuffisantes",
+  };
+  const descriptions = assessments.map(item => {
+    const details = (item.reason_codes || []).map(code => reasons[code]
+      || "les données disponibles ne permettent pas de confirmer cette prise de vue");
+    return `${item.label || item.filter_type || "Prise de vue"} : ${details.join(" ; ") || "raison non précisée"}.`;
+  });
+  return ["Aucune prise de vue réalisable pour ce projet",
+    `Votre projet est conservé. ${descriptions.join(" ") || "Aucune prise de vue ne peut être confirmée avec les données actuelles."}`];
+}
+
 function creationRefusalMessage(payload) {
+  if (payload.creation_refusal === "no_eligible_acquisition_intent") return intentEligibilityRefusalMessage(payload);
   if (payload.creation_refusal === "modern_mission_authorization_required" && payload.provenance === "discovery") {
     return ["Préparons votre premier projet", "Une cible a été repérée, mais aucune mission n’est encore prête. Un projet indique ce que vous souhaitez photographier, avec quel filtre et pendant combien de temps au total. Créez un projet pour une cible prise en charge par cette bêta, puis relancez l’analyse avec vos horaires conservés."];
   }
@@ -5795,7 +5837,7 @@ function showTonightUnavailable(payload) {
     ? creationRefusalMessage(payload)
     : partialMessages[payload.status] || ["Décision indisponible", "Aucune recommandation exploitable."];
   const shortWindow = payload.actionability_refusal?.refusal_stage === "continuous_window_too_short";
-  const editAvailability = canEditRefusedAvailability(payload);
+  const editAvailability = canEditRefusedAvailability(payload) || intentsRefusedForProductiveWindow(payload);
   const body = creationRefused
     ? technical
     : productiveRefusal
@@ -5812,7 +5854,8 @@ function showTonightUnavailable(payload) {
     && payload.creation_refusal === "modern_mission_authorization_required";
   document.querySelector("#message-create-project").hidden = !needsProject;
   ui.retry.hidden = needsProject;
-  ui.retry.textContent = "Réessayer plus tard";
+  ui.retry.textContent = payload.creation_refusal === "no_eligible_acquisition_intent"
+    ? "Actualiser l’analyse" : "Réessayer plus tard";
   document.querySelector("#message-edit-availability").hidden = !editAvailability;
 }
 

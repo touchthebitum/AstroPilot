@@ -19,6 +19,7 @@ from decision.models.candidate_rejection import (
     CandidateBuildResult,
     CandidateRejection,
 )
+from decision.models.acquisition_intent_selection import AcquisitionIntentSelectionStatus
 from decision.models.session_availability import SessionAvailability, requested_evening
 from decision.recommendation.recommendation import Recommendation
 from decision.services.session_availability_windowing import ActionabilityRefusal
@@ -330,6 +331,20 @@ class TonightApplicationService:
             "catalog_key",
             candidate.get("name"),
         )
+
+        # Preserve the eligibility diagnostic before reaching the creation gate.
+        # A valid saved project can have no actionable intent for this night;
+        # missing creation authority in that case is a consequence, not a
+        # configuration error. Never select an intent or bypass the refusal.
+        if (getattr(candidate, "acquisition_intent_selection_status", None)
+                is AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT):
+            return TonightResult(
+                night, recommendation, None,
+                status=TonightStatus.NO_MISSION,
+                forecast_evidence=forecast_evidence,
+                candidate_rejections=candidate_rejections,
+                creation_refusal="no_eligible_acquisition_intent",
+            )
 
         # Comparative lunar evidence belongs to the candidate until an intent
         # is selected. It cannot be attached to an unidentified mission input.

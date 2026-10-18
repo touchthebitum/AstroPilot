@@ -1564,6 +1564,26 @@ for (const mode of ['simple','pro']) {
  assert.doesNotMatch(shown.body,/Mission incomplète|Réessayez plus tard|modern_mission/);
  assert.equal(document.querySelector('#message-edit-availability').hidden,true);
 }
+const noIntent = {status:'no_mission',provenance:'project',creation_refusal:'no_eligible_acquisition_intent',
+ acquisition_intent_assessments:[
+  {label:'Hα · Sh2-129',status:'not_eligible',reason_codes:['insufficient_actionable_productive_window']},
+  {label:'OIII · Ou4',status:'not_eligible',reason_codes:['intent_not_targeted_by_project']}]};
+for (const mode of ['simple','pro']) {
+ appliedUiMode=mode;
+ showTonightUnavailable(noIntent);
+ assert.equal(shown.title,'Créneau insuffisant pour ce projet');
+ assert.match(shown.body,/bien enregistré/);
+ assert.match(shown.body,/Hα · Sh2-129/);
+ assert.doesNotMatch(shown.body,/configurer|OIII|autoriser|modern_mission/);
+ assert.equal(document.querySelector('#message-edit-availability').hidden,false);
+ assert.equal(document.querySelector('#message-create-project').hidden,true);
+ assert.equal(ui.retry.textContent,'Actualiser l’analyse');
+}
+showTonightUnavailable({...noIntent,acquisition_intent_assessments:[
+ {label:'Hα',status:'insufficient_evidence',reason_codes:['filter_profile_evidence_insufficient']}]});
+assert.match(shown.body,/caractéristiques précises du filtre/);
+assert.doesNotMatch(shown.title,/Créneau insuffisant/);
+assert.equal(document.querySelector('#message-edit-availability').hidden,true);
 showTonightUnavailable({status:'no_recommendation'});
 assert.equal(document.querySelector('#message-edit-availability').hidden,true);
 '''
