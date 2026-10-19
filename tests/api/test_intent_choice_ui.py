@@ -252,6 +252,7 @@ def test_failed_recommendation_retains_restored_mission_until_success():
     _run_javascript("""
 const assert = require('node:assert/strict');
 const entry = {hidden: false};
+const document = {querySelector: () => null};
 const ui = {savedMissionEntry: entry, recommendationSubmit: {disabled: false}, refresh: {disabled: false}};
 const saved = {mission_id: 'saved', source: 'persisted', mission: {target: 'M31'}};
 const state = {acceptedMission: saved, requestingRecommendation: false, currentDecision: null,

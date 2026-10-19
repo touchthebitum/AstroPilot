@@ -6524,13 +6524,37 @@ async function loadTonight(availability) {
   ui.refresh.disabled = true;
   setCurrentFieldObservationDecision(null);
 
+  const waitMessage = document.querySelector("#analysis-wait");
+  if (waitMessage) { waitMessage.hidden = true; waitMessage.textContent = ""; }
+  const controller = new AbortController();
+  let deadlineExceeded = false;
+  const slowTimer = setTimeout(() => {
+    if (!isCurrent() || !waitMessage) return;
+    waitMessage.textContent = "L’analyse prend plus de temps que prévu. La récupération météo ou le calcul peuvent être en cause. Vos horaires sont conservés.";
+    waitMessage.hidden = false;
+  }, 10000);
+  let deadlineTimer;
+  const deadline = new Promise((_resolve, reject) => {
+    deadlineTimer = setTimeout(() => {
+      deadlineExceeded = true;
+      reject(new Error("analysis_response_timeout"));
+      controller.abort();
+    }, 90000);
+  });
+
   try {
-    const response = await fetch("/v1/tonight", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ availability }),
-    });
-    const payload = await response.json().catch(() => ({}));
+    // The bound includes decoding the body. A late reply cannot reach rendering
+    // even if a transport ignores abort; this does not claim to stop server work.
+    const {response, payload} = await Promise.race([deadline, (async () => {
+      const response = await fetch("/v1/tonight", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ availability }),
+        signal: controller.signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      return {response, payload};
+    })()]);
     if (!isCurrent()) return;
 
     if (!response.ok) {
@@ -6579,9 +6603,13 @@ async function loadTonight(availability) {
     renderDecision(payload);
   } catch (_error) {
     if (!isCurrent()) return;
-    showAvailabilityError("Connexion impossible. Vos horaires sont conservés; réessayez dans un instant.");
+    showAvailabilityError(deadlineExceeded
+      ? "L’analyse n’a pas répondu après 90 secondes. Vos horaires sont conservés ; réessayez dans un instant."
+      : "Connexion impossible. Vos horaires sont conservés ; réessayez dans un instant.");
     setView("availability");
   } finally {
+    clearTimeout(slowTimer);
+    clearTimeout(deadlineTimer);
     state.requestingRecommendation = false;
     ui.recommendationSubmit.disabled = false;
     ui.refresh.disabled = false;

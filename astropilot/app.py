@@ -34,6 +34,7 @@ from astropilot.guardian_renewal_api import (GuardianRenewalAdapter, RenewalRequ
 from astropilot.persistence_diagnostics import HEADER as PERSISTENCE_DIAGNOSTIC_HEADER, log_credit_persistence
 from decision.services.intent_progress_credit import IntentProgressPersistenceError
 from astropilot.weather_diagnostics import HEADER as WEATHER_DIAGNOSTIC_HEADER, log_weather, weather_diagnostic_context
+from astropilot.analysis_diagnostics import AnalysisTimings, HEADER as ANALYSIS_DIAGNOSTIC_HEADER
 from astropilot.guardian_api import GuardianEvaluateRequest, GuardianEvaluateResponse, evaluate as evaluate_guardian
 from decision.runners.guardian_runner import GuardianRunner
 
@@ -2093,6 +2094,21 @@ def create_app(
         if os.environ.get("ASTROPILOT_SESSION_TIMING") == "1" else "")
 
     @application.middleware("http")
+    async def tonight_timings(request: Request, call_next):
+        if request.method != "POST" or request.url.path != "/v1/tonight":
+            return await call_next(request)
+        timings = AnalysisTimings()
+        request.state.analysis_timings = timings
+        try:
+            response = await call_next(request)
+        except BaseException:
+            timings.finish(500)
+            raise
+        response.headers["Server-Timing"] = timings.finish(response.status_code)
+        response.headers[ANALYSIS_DIAGNOSTIC_HEADER] = timings.identifier
+        return response
+
+    @application.middleware("http")
     async def ui_cache_policy(request: Request, call_next):
         started = perf_counter() if os.environ.get("ASTROPILOT_SESSION_TIMING") == "1" else None
         guardian_route = request.url.path.endswith("/guardian-renewal") or (renewal_enabled and request.url.path == "/v1/execution-transitions")
@@ -2652,7 +2668,8 @@ def create_app(
             },
         },
     )
-    def tonight(request: TonightRequest, response: Response):
+    def tonight(request: TonightRequest, response: Response, http_request: Request):
+        timings = http_request.state.analysis_timings
         reference_time_utc = clock()
         try:
             profile = dict(profile_provider())
@@ -2738,12 +2755,12 @@ def create_app(
         effective_bortle = inputs.bortle
 
         weather_freshness: WeatherFreshness | None = None
-        weather_diagnostic_id = uuid4().hex
+        weather_diagnostic_id = timings.identifier
         weather_started = perf_counter()
         response.headers[WEATHER_DIAGNOSTIC_HEADER] = weather_diagnostic_id
         diagnostic_headers = {WEATHER_DIAGNOSTIC_HEADER: weather_diagnostic_id}
         try:
-            with weather_diagnostic_context(weather_diagnostic_id):
+            with timings.measure("weather"), weather_diagnostic_context(weather_diagnostic_id):
                 weather = weather_provider(
                     location["latitude"],
                     location["longitude"],
@@ -2797,16 +2814,17 @@ def create_app(
                     diagnostic_id=weather_diagnostic_id)
 
         try:
-            result = application_service().evaluate(
-                profile=profile,
-                weather=weather,
-                reference_time_utc=reference_time_utc,
-                equipment=inputs.equipment,
-                goal=request.goal,
-                target=request.target,
-                bortle=effective_bortle,
-                availability=inputs.availability,
-            )
+            with timings.measure("calculation"):
+                result = application_service().evaluate(
+                    profile=profile,
+                    weather=weather,
+                    reference_time_utc=reference_time_utc,
+                    equipment=inputs.equipment,
+                    goal=request.goal,
+                    target=request.target,
+                    bortle=effective_bortle,
+                    availability=inputs.availability,
+                )
         except DecisionConsistencyError as exc:
             raise HTTPException(
                 status_code=503,

@@ -43,3 +43,33 @@ def test_geometry_keys_keep_target_site_and_dst_fold_distinct():
         expected=SkyEngine().hour_geometry({'time':time},site,obj,site.latitude,site.longitude)
         assert actual == pytest.approx(expected)
         assert actual['target_altitude'] != engine.hour_geometry({'time':wall},observer,target,46.88,6.54)['target_altitude']
+
+
+def test_moon_reuse_matches_direct_astropy_across_targets_sites_and_dst(monkeypatch):
+    import astropy.units as u
+    from astropy.coordinates import SkyCoord, EarthLocation
+    from astropy.time import Time
+    import astropilot.engines.sky_engine as module
+    direct_get_body = module.get_body
+    calls = []
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return direct_get_body(*args, **kwargs)
+    monkeypatch.setattr(module, 'get_body', counted)
+    engine = SkyEngine()
+    fold = datetime(2026, 10, 25, 2, 15, tzinfo=ZoneInfo('Europe/Zurich'))
+    samples = [
+        (10.6847, 41.269, fold, 46.88, 6.54),
+        (83.82, -5.39, fold, 46.88, 6.54),
+        (10.6847, 41.269, fold.replace(fold=1), 46.88, 6.54),
+        (10.6847, 41.269, fold, 40.4, -3.7),
+        (10.6847, 41.269, Time(fold), 46.88, 6.54),
+    ]
+    for ra, dec, instant, lat, lon in samples:
+        expected = SkyCoord(ra=ra*u.deg, dec=dec*u.deg).separation(
+            direct_get_body('moon', Time(instant), location=EarthLocation(lat=lat*u.deg, lon=lon*u.deg))
+        ).deg
+        assert engine.moon_target_separation(ra, dec, instant, lat, lon) == expected
+    assert len(calls) == 3, 'same place and instant must share the exact Moon position across targets'
+    SkyEngine().moon_target_separation(*samples[0])
+    assert len(calls) == 4, 'independent engines must not share cached request data'
