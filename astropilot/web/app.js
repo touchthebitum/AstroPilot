@@ -11,12 +11,13 @@ if (!globalThis.NightMeritTime) {
 // UI preference only: never read by scientific or persistence handlers.
 const UI_MODE_KEY = "nightmerit.ui-mode.v1";
 const UI_MODE_LABELS = {
+  "nav-tonight": ["Préparer ma séance", "Ce soir"],
   "outcome-reopen": ["Mes observations", "Retrouver les observations enregistrées récentes"],
   "history-open": ["Mon historique", "Historique des validations"],
   "history-title": ["Mon historique", "Historique des validations"],
-  "add-field-observation-message": ["Ajouter une observation", "Ajouter une observation terrain"],
-  "add-field-observation-decision": ["Ajouter une observation", "Ajouter une observation terrain"],
-  "add-field-observation-mission": ["Ajouter une observation", "Ajouter une observation terrain"],
+  "add-field-observation-message": ["Noter les conditions sur place", "Ajouter une observation terrain"],
+  "add-field-observation-decision": ["Noter les conditions sur place", "Ajouter une observation terrain"],
+  "add-field-observation-mission": ["Noter les conditions sur place", "Ajouter une observation terrain"],
 };
 function normalizeUiMode(value) { return value === "pro" ? "pro" : "simple"; }
 let appliedUiMode = null;

@@ -62,7 +62,7 @@ const assert = require('node:assert/strict');
   assert.equal(await page.locator('#decision [id^="add-field-observation"]').count(),0);
   assert.equal(await page.locator('#message-state [id^="add-field-observation"]').count(),0);
   assert.equal(await page.locator('#terrain #outcome-reopen').count(),1);
-  assert.equal(await page.locator('#add-field-observation-decision').textContent(),mode==='simple'?'Ajouter une observation':'Ajouter une observation terrain');
+  assert.equal(await page.locator('#add-field-observation-decision').textContent(),mode==='simple'?'Noter les conditions sur place':'Ajouter une observation terrain');
   assert.equal(await page.locator('#outcome-reopen').textContent(),mode==='simple'?'Mes observations':'Retrouver les observations enregistrées récentes');
   assert.equal(await page.locator('#terrain #history-open').count(),0);
   assert.equal(await page.locator('#history-section #history-open').count(),1);
