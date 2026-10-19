@@ -55,7 +55,11 @@ const assert = require('node:assert/strict');
  }
 
  // Terrain uses the original controls and respects their former ancestor visibility.
- await page.evaluate(() => document.querySelector('#field-observation-dialog').close());
+ await page.evaluate(() => {
+  document.querySelector('#field-observation-dialog').close();
+  // Terrain belongs to the recommendation screen in the guided journey.
+  setView('recommendation');
+ });
  for (const mode of ['simple','pro']) for (const width of [390,1280]) {
   await page.setViewportSize({width,height:900});
   await page.evaluate(mode => applyUiMode(mode), mode);
