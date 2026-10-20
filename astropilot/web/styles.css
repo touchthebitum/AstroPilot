@@ -686,6 +686,12 @@ html[data-ui-mode="simple"] #simple-projects:not([hidden]) ~ #project-progress-e
 #project-new-intents > fieldset { margin: 18px 0; padding: 18px; border: 1px solid var(--line); border-radius: 10px; }
 #project-new-intents label { display: block; margin: 12px 0; }
 #project-new-intents input[type="checkbox"] { margin-right: 10px; }
+#project-new-intents .target-difficulty { color: var(--ink); font-weight: 600; }
+.target-choice-help { margin: 12px 0; }
+.target-choice-help summary { cursor: pointer; }
+.target-choice-help p, #project-target-guidance { max-width: 70ch; }
+#project-target-guidance { font-size: 1rem; color: var(--ink); border-left: 2px solid var(--cyan); padding-left: 12px; }
+.target-choice-help a { overflow-wrap: anywhere; }
 html[data-ui-mode="simple"] #project-create { margin-top: 24px; }
 html[data-ui-mode="simple"] #projects-step > .wizard-actions[data-projects-configured="true"] > [data-back] { display: none; }
 html[data-ui-mode="simple"] #projects-step:has(#simple-projects[data-has-drafts="false"]:not([hidden])) > .wizard-actions { display: none; }

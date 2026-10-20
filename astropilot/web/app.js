@@ -4739,6 +4739,9 @@ function renderNewProjectIntents() {
   const template = state.projectTemplates?.find(item => item.catalog_key === key);
   const container = document.querySelector("#project-new-intents");
   container.replaceChildren();
+  const guidance = document.querySelector("#project-target-guidance");
+  guidance.textContent = template?.guidance?.summary || "";
+  guidance.hidden = !guidance.textContent;
   document.querySelector("#project-new-empty").checked = false;
   const equipmentId = state.configurationDraft.equipment?.preset_id;
   state.projectCreationEquipmentId = equipmentId;
@@ -4748,6 +4751,33 @@ function renderNewProjectIntents() {
     row.dataset.newIntentId = intent.acquisition_intent_id;
     const legend = document.createElement("legend");
     legend.textContent = intent.label;
+    row.append(legend);
+    if (intent.guidance) {
+      const difficulty = document.createElement("p");
+      difficulty.className = "target-difficulty";
+      difficulty.textContent = intent.guidance.difficulty;
+      const purpose = document.createElement("p");
+      purpose.textContent = intent.guidance.purpose;
+      const details = document.createElement("details");
+      details.className = "target-choice-help";
+      const summary = document.createElement("summary");
+      summary.textContent = "Conseils pour cette cible";
+      const advice = document.createElement("p");
+      advice.textContent = intent.guidance.advice;
+      const duration = document.createElement("p");
+      duration.textContent = "Combien d’heures prévoir ? Cette bêta ne dispose pas encore d’une estimation fiable pour votre matériel et votre ciel. Choisissez un objectif total que vous pourrez ajuster après vos premières images. Le minimum de 1 h du formulaire ne garantit pas un résultat visible.";
+      details.append(summary, advice, duration);
+      // Only curated help is linked; never turn arbitrary template data into a URL.
+      if (template.guidance?.source_url?.startsWith("https://science.nasa.gov/")) {
+        const source = document.createElement("a");
+        source.href = template.guidance.source_url;
+        source.textContent = template.guidance.source_label;
+        source.target = "_blank";
+        source.rel = "noopener noreferrer";
+        details.append(source);
+      }
+      row.append(difficulty, purpose, details);
+    }
     const confirmation = document.createElement("label");
     const check = document.createElement("input");
     check.type = "checkbox";
@@ -4769,7 +4799,7 @@ function renderNewProjectIntents() {
     row.dataset.intentSelected = "false";
     check.addEventListener("change", () => {row.dataset.intentSelected = String(check.checked);});
     label.classList.add("new-intent-goal");
-    row.append(legend, confirmation, label);
+    row.append(confirmation, label);
     container.append(row);
   }
 }
