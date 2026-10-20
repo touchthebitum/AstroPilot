@@ -197,6 +197,7 @@ button { color: inherit; }
 .project-progress-editor fieldset label { display: grid; gap: 4px; }
 .project-progress-editor input, .project-progress-editor select { max-width: 360px; padding: 8px; color: var(--ink); background: var(--panel-strong); border: 1px solid var(--line-bright); border-radius: 6px; }
 .project-progress-editor output { color: var(--cyan); }
+.project-progress-editor details > summary { min-height: 44px; padding: 10px 0; color: var(--muted); cursor: pointer; }
 .project-progress-feedback { color: var(--gold); }
 .session-panel { margin: 20px 0; padding: 18px; border: 1px solid var(--line-bright); border-radius: 12px; display: grid; gap: 10px; }
 .session-panel[hidden], .session-panel [hidden] { display: none; }

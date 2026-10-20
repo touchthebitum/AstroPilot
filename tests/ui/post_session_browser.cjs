@@ -38,8 +38,17 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
   await page.getByRole('button',{name:'Modifier mon projet',exact:true}).click();
   const section=page.locator('#project-intents [data-intent-id="sh2-129_ha"]');
   await section.waitFor();
+  const baseline=section.locator('details');
+  assert.equal(await baseline.getAttribute('open'),null);
+  assert.equal(await section.locator('[data-field="acquired_frames"]').isVisible(),false);
+  await section.locator('[data-field="target_hours"]').fill('3');
+  assert.equal(await section.locator('[data-field="acquired_frames"]').inputValue(),'0');
+  assert.equal(await section.locator('[data-field="exposure_seconds"]').inputValue(),'300');
+  await section.locator('[data-field="target_hours"]').fill('2');
+  assert.equal(writes.length,0,'editing the goal with collapsed baseline must preserve acquired duration');
   for(const mode of ['simple','pro'])for(const width of [390,1280]){
    await page.evaluate(mode=>applyUiMode(mode),mode);await page.setViewportSize({width,height:950});
+   if(mode==='simple' && !(await baseline.evaluate(el=>el.open)))await baseline.locator('summary').click();
    await section.locator('[data-field="acquired_frames"]').fill('');
    await page.getByRole('button',{name:'Enregistrer les modifications',exact:true}).click();
    assert.equal(await page.locator('.project-progress-feedback').innerText(),'Indiquez le nombre de poses déjà réalisées. Si vous n’avez pas encore commencé, saisissez 0.');

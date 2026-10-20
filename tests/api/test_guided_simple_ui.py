@@ -41,6 +41,14 @@ function make(seconds,locked=false,method='manual') {
  return {section,mode,manual:manual.querySelector('input'),h:input('simple_hours'),m:input('simple_minutes'),updates:()=>updates};
 }
 const a=make(5400.5);
+const disclosure=a.section.all().find(x=>x.tag==='details');
+assert.ok(disclosure && !disclosure.open,'historical duration entry starts collapsed');
+assert.equal(disclosure.children[0].tag,'summary');
+assert.equal(disclosure.children[0].textContent,'J’avais déjà des images avant de commencer ce suivi');
+assert.ok(disclosure.all().some(x=>x.textContent?.includes('30 images conservées de 3 minutes = 1 heure et 30 minutes')));
+disclosure.open=true;disclosure.open=false;
+assert.equal(Number(a.manual.value),5400.5,'opening or closing help must preserve the historical duration');
+assert.equal(a.updates(),0,'disclosure alone must not change progress');
 assert.equal(Number(a.h.value),1);
 assert.equal(Number(a.m.value),(1800.5/60));
 a.mode.listeners.change();

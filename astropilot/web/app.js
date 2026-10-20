@@ -5015,12 +5015,13 @@ function renderProjectProgressEditor(message = "") {
       mode.addEventListener("change", update);
       for (const input of [frames, exposure, manual]) input.querySelector("input").addEventListener("input", update);
       section.append(legend, goalSummary, mode, frames, exposure, manual, hours, computed);
-      if (typeof addSimpleDurationFields === "function") addSimpleDurationFields(section, mode, manual, update, credited.has(id));
+      if (typeof addSimpleDurationFields === "function") addSimpleDurationFields(section, mode, manual, update, credited.has(id), [mode, frames, exposure, manual, computed]);
       if (credited.has(id)) {
         mode.disabled = true;
         for (const input of [frames, exposure, manual]) input.querySelector("input").disabled = true;
         const note = document.createElement("p");
         note.textContent = "Base verrouillée après crédit d’exécution ; l’objectif reste modifiable.";
+        note.dataset.proOnly = "true";
         section.append(note);
       }
       intents.append(section);
@@ -5053,7 +5054,9 @@ function renderProjectProgressEditor(message = "") {
   save.addEventListener("click", saveProjectProgress);
   if (data.imaging_field_id) fieldLabel.dataset.proOnly = "true";
   const baselineHelp = document.createElement("p");
-  baselineHelp.textContent = "L’objectif est le temps total souhaité sur toutes vos nuits. Le temps de départ exclut les sessions déjà ajoutées par NightMerit. Pour ajouter une session, ouvrez sa mission depuis Mes projets.";
+  baselineHelp.dataset.simpleText = "Modifiez ici le temps de pose total que vous souhaitez accumuler, sur une ou plusieurs nuits.";
+  baselineHelp.dataset.proText = "L’objectif est le temps total souhaité sur toutes vos nuits. Le temps de départ exclut les sessions déjà ajoutées par NightMerit. Pour ajouter une session, ouvrez sa mission depuis Mes projets.";
+  baselineHelp.textContent = baselineHelp.dataset[appliedUiMode === "pro" ? "proText" : "simpleText"];
   const back = document.createElement("button");
   back.type = "button"; back.className = "secondary-button"; back.textContent = "Retour à mes projets";
   back.addEventListener("click", () => { if (typeof navigateGuidedProjects === "function") navigateGuidedProjects(); });
@@ -5336,10 +5339,19 @@ function renderSimpleProjects(entries) {
   }
 }
 
-function addSimpleDurationFields(section, mode, manual, update, locked) {
-  const wrapper = document.createElement("div");
-  wrapper.dataset.simpleOnly = "true";
+function addSimpleDurationFields(section, mode, manual, update, locked, advanced = []) {
+  const wrapper = document.createElement("details");
+  wrapper.dataset.modeDisclosure = "true";
+  wrapper.open = typeof appliedUiMode !== "undefined" && appliedUiMode === "pro";
+  const summary = document.createElement("summary");
+  summary.dataset.simpleText = "J’avais déjà des images avant de commencer ce suivi";
+  summary.dataset.proText = "Avancement acquis avant les séances suivies dans NightMerit";
+  summary.textContent = summary.dataset[wrapper.open ? "proText" : "simpleText"];
+  const heading = document.createElement("p");
+  heading.textContent = "Temps de pose utilisable de ces images";
   const info = document.createElement("p");
+  const example = document.createElement("p");
+  example.textContent = "Exemple : 30 images conservées de 3 minutes = 1 heure et 30 minutes. N’incluez pas les séances déjà ajoutées au projet ni les images rejetées, flats, darks et bias.";
   const fields = document.createElement("div");
   fields.className = "form-grid two-columns";
   const hours = progressInput("Heures ", "", "simple_hours");
@@ -5359,10 +5371,10 @@ function addSimpleDurationFields(section, mode, manual, update, locked) {
     const known = manual.querySelector("input").value !== "" && Number.isFinite(seconds) && seconds >= 0;
     h.value = known ? Math.floor(seconds / 3600) : "";
     m.value = known ? (seconds % 3600) / 60 : "";
-    info.textContent = locked ? "Le temps de départ est verrouillé car des sessions ont déjà été créditées. Ouvrez la mission enregistrée pour ajouter une nouvelle session."
-      : mode.value === "detailed" ? "Le temps de départ est calculé à partir du nombre de poses et de leur durée. N’incluez pas les sessions déjà ajoutées au projet."
-      : mode.value === "unknown" ? "Votre temps déjà acquis est inconnu. Ne le remplacez pas par zéro sans le confirmer."
-      : "Indiquez le total de départ, pas une durée à ajouter. Les sessions déjà créditées seront comptées séparément.";
+    info.textContent = locked ? "Ce temps est conservé et verrouillé car des séances ont déjà été ajoutées au projet. Pour ajouter une nouvelle séance, retrouvez sa session NightMerit depuis Mes projets."
+      : mode.value === "detailed" ? "Ce temps est calculé à partir du nombre de poses conservées et de leur durée."
+      : mode.value === "unknown" ? "Ce temps n’est pas encore renseigné. Si vous commencez sans images, cliquez sur « Renseigner une durée totale connue », puis saisissez 0 heure et 0 minute."
+      : "Indiquez uniquement le temps de pose des images conservées avant ce suivi. Si vous commencez sans images, laissez 0 heure et 0 minute. Si vous modifiez seulement l’objectif, ne changez pas ces valeurs.";
   };
   const original = manual.querySelector("input");
   const change = () => {
@@ -5376,7 +5388,8 @@ function addSimpleDurationFields(section, mode, manual, update, locked) {
   original.addEventListener("input", reflect); mode.addEventListener("change", reflect);
   enter.addEventListener("click", () => {mode.value = "manual"; update(); reflect();});
   for (const child of [mode, manual]) child.dataset.proOnly = "true";
-  wrapper.append(info, fields, enter);
+  for (const child of [heading, info, example, fields, enter]) child.dataset.simpleOnly = "true";
+  wrapper.append(summary, heading, info, example, ...advanced, fields, enter);
   section.append(wrapper); reflect();
 }
 
