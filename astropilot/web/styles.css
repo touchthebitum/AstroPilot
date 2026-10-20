@@ -685,7 +685,25 @@ html[data-ui-mode="simple"] #simple-projects:not([hidden]) ~ #project-progress-e
 .project-progress-editor label { display: block; margin: 12px 0; }
 #project-new-intents > fieldset { margin: 18px 0; padding: 18px; border: 1px solid var(--line); border-radius: 10px; }
 #project-new-intents label { display: block; margin: 12px 0; }
-#project-new-intents input[type="checkbox"] { margin-right: 10px; }
+#project-create label:has(> input[type="checkbox"]) {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 8px 0;
+  margin: 12px 0;
+  font-size: 1rem;
+  cursor: pointer;
+}
+#project-create input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  margin: 0;
+  accent-color: var(--cyan);
+  cursor: inherit;
+}
+#project-create input[type="checkbox"]:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
 #project-new-intents .target-difficulty { color: var(--ink); font-weight: 600; }
 .target-choice-help { margin: 12px 0; }
 .target-choice-help summary { cursor: pointer; }
