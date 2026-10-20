@@ -710,6 +710,8 @@ html[data-ui-mode="simple"] #simple-projects:not([hidden]) ~ #project-progress-e
 .target-choice-help p, #project-target-guidance { max-width: 70ch; }
 #project-target-guidance { font-size: 1rem; color: var(--ink); border-left: 2px solid var(--cyan); padding-left: 12px; }
 .target-choice-help a { overflow-wrap: anywhere; }
+.session-next-step { padding: 12px 16px; border-left: 2px solid var(--cyan); background: var(--cyan-soft); }
+.simple-project-card details button { margin: 8px 12px 0 0; }
 html[data-ui-mode="simple"] #project-create { margin-top: 24px; }
 html[data-ui-mode="simple"] #projects-step > .wizard-actions[data-projects-configured="true"] > [data-back] { display: none; }
 html[data-ui-mode="simple"] #projects-step:has(#simple-projects[data-has-drafts="false"]:not([hidden])) > .wizard-actions { display: none; }

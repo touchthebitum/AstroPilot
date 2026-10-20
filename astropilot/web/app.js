@@ -378,6 +378,22 @@ function renderSession() {
   document.querySelector("#session-close-actions").hidden = status !== "in_progress";
   document.querySelector("#session-evidence").hidden = status !== "completed" || Boolean(usableEvidence(session));
   const evidence = usableEvidence(session);
+  const nextStep = !session
+    ? "Démarrez une session uniquement lorsque vous commencez réellement vos prises de vue."
+    : !knownStatus || status === "unconfirmed"
+      ? "L’état de cette session doit être vérifié avant de poursuivre. Aucune durée ne sera ajoutée ici."
+      : status === "interrupted"
+        ? "Cette session interrompue n’ajoute aucun temps au projet."
+        : status === "not_started"
+          ? "Démarrez cette session lorsque vous commencez réellement vos prises de vue."
+          : status === "in_progress"
+            ? "Après vos prises de vue, terminez la session. Vous pourrez ensuite renseigner le temps de pose des images utilisables."
+            : session.credit
+              ? "Cette durée a déjà été ajoutée au projet. Ne la recopiez pas dans votre temps de départ. Le total acquis et le temps restant sont affichés ci-dessous."
+              : evidence
+                ? "La durée utilisable est enregistrée, mais pas encore ajoutée au projet. Vérifiez les valeurs, puis cliquez sur « Ajouter cette durée à mon avancement »."
+                : "Session terminée : renseignez ci-dessous le temps de pose des images utilisables de cette session. Si aucune image n’est utilisable, n’ajoutez aucune durée au projet.";
+  text("#session-next-step", nextStep);
   document.querySelector("#session-credit").hidden = status !== "completed" || !evidence || Boolean(session.credit);
   document.querySelector("#session-apply-credit").disabled = state.sessionBusy || status !== "completed";
   if (status === "completed" && evidence && !session.credit) {
@@ -5023,7 +5039,7 @@ function renderProjectProgressEditor(message = "") {
   save.addEventListener("click", saveProjectProgress);
   if (data.imaging_field_id) fieldLabel.dataset.proOnly = "true";
   const baselineHelp = document.createElement("p");
-  baselineHelp.textContent = "Modifiez votre objectif total pour ce filtre, sur une ou plusieurs nuits. Le temps de départ correspond uniquement aux images acquises avant les sessions créditées dans NightMerit ; laissez-le inchangé si vous ajustez seulement votre objectif.";
+  baselineHelp.textContent = "L’objectif est le temps total souhaité sur toutes vos nuits. Le temps de départ exclut les sessions déjà ajoutées par NightMerit. Pour ajouter une session, ouvrez sa mission depuis Mes projets.";
   const back = document.createElement("button");
   back.type = "button"; back.className = "secondary-button"; back.textContent = "Retour à mes projets";
   back.addEventListener("click", () => { if (typeof navigateGuidedProjects === "function") navigateGuidedProjects(); });
@@ -5056,9 +5072,16 @@ async function saveProjectProgress() {
     if (mode === "detailed") {
       const frames = Number(value("acquired_frames"));
       const seconds = Number(value("exposure_seconds"));
-      if (value("acquired_frames") === "" || !Number.isInteger(frames) || frames < 0
-          || value("exposure_seconds") === "" || !Number.isFinite(seconds) || seconds <= 0) {
-        feedback.textContent = `Corrigez les poses et la durée de ${id}.`;
+      if (value("acquired_frames") === "") {
+        feedback.textContent = "Indiquez le nombre de poses déjà réalisées. Si vous n’avez pas encore commencé, saisissez 0.";
+        return;
+      }
+      if (!Number.isInteger(frames) || frames < 0) {
+        feedback.textContent = "Indiquez un nombre entier de poses, égal ou supérieur à 0.";
+        return;
+      }
+      if (value("exposure_seconds") === "" || !Number.isFinite(seconds) || seconds <= 0) {
+        feedback.textContent = "Indiquez la durée d’une pose en secondes, strictement supérieure à 0.";
         return;
       }
       progress.push({ acquisition_intent_id: id, acquired_frames: frames, exposure_seconds: seconds });
@@ -5228,14 +5251,32 @@ function renderSimpleProjects(entries) {
     prepare.addEventListener("click", () => prepareGuidedSession({saveDraft:true}));
     const more = document.createElement("details");
     const summary = document.createElement("summary");
-    summary.textContent = "J’ai déjà photographié ce projet";
+    summary.textContent = "Après mes prises de vue : mettre à jour mon projet";
     const note = document.createElement("p");
-    note.textContent = "Pour une session réalisée dans NightMerit, ouvrez sa mission enregistrée pour créditer sa durée une seule fois. Pour des images antérieures, renseignez votre temps total de départ.";
+    note.textContent = "Pour une séance suivie dans NightMerit, retrouvez sa mission, choisissez la session terminée, puis renseignez sa durée utilisable et ajoutez-la au projet. Pour des images antérieures, renseignez seulement le temps de départ : il ne doit pas inclure les sessions déjà ajoutées par NightMerit.";
+    const sessions = document.createElement("button");
+    sessions.type = "button"; sessions.className = "secondary-button";
+    sessions.textContent = "Retrouver mes sessions NightMerit";
+    sessions.disabled = !saved;
+    sessions.addEventListener("click", () => {
+      prepareGuidedSession();
+      if (state.view !== "availability") return;
+      if (ui.savedMissionEntry.hidden) {
+        showAvailabilityError("Les missions enregistrées ne sont pas disponibles ici. Rechargez la page pour tenter de les relire. Ne créez pas une nouvelle session pour remplacer une session déjà réalisée.");
+        return;
+      }
+      const revision = state.viewRevision;
+      requestAnimationFrame(() => {
+        if (state.view !== "availability" || state.viewRevision !== revision || ui.savedMissionEntry.hidden) return;
+        ui.savedMissionChoice.focus();
+        ui.savedMissionEntry.scrollIntoView({block: "center"});
+      });
+    });
     const edit = document.createElement("button");
     edit.type = "button"; edit.className = "secondary-button";
     edit.textContent = "Renseigner mon temps de départ"; edit.disabled = !saved;
     edit.addEventListener("click", () => openProjectProgress(key));
-    more.append(summary, note, edit);
+    more.append(summary, note, sessions, edit);
     const modify = document.createElement("button");
     modify.type = "button"; modify.className = "secondary-button";
     modify.textContent = "Modifier mon projet"; modify.disabled = !saved;
@@ -5301,7 +5342,7 @@ function addSimpleDurationFields(section, mode, manual, update, locked) {
     h.value = known ? Math.floor(seconds / 3600) : "";
     m.value = known ? (seconds % 3600) / 60 : "";
     info.textContent = locked ? "Le temps de départ est verrouillé car des sessions ont déjà été créditées. Ouvrez la mission enregistrée pour ajouter une nouvelle session."
-      : mode.value === "detailed" ? "Le temps de départ est calculé à partir de vos poses. Les mesures restent consultables et modifiables en Pro."
+      : mode.value === "detailed" ? "Le temps de départ est calculé à partir du nombre de poses et de leur durée. N’incluez pas les sessions déjà ajoutées au projet."
       : mode.value === "unknown" ? "Votre temps déjà acquis est inconnu. Ne le remplacez pas par zéro sans le confirmer."
       : "Indiquez le total de départ, pas une durée à ajouter. Les sessions déjà créditées seront comptées séparément.";
   };

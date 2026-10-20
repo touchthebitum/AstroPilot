@@ -540,6 +540,7 @@
             <label for="session-choice">Sessions de cette mission</label>
             <select id="session-choice"></select>
             <p id="session-status" role="status"></p>
+            <p id="session-next-step" class="session-next-step" data-simple-only></p>
             <section id="guardian-renewal" hidden aria-label="Confirmation Guardian">
               <p>Cette confirmation vient de vous. NightMerit ne vérifie pas techniquement que l’acquisition continue.</p>
               <p>Les actions Guardian restent des recommandations, sans contrôle matériel.</p>
@@ -555,10 +556,11 @@
               <button class="secondary-button" id="session-interrupt" type="button">Interrompre la session</button>
             </div>
             <div id="session-evidence" hidden>
-              <p>Indiquez uniquement la durée d’intégration réellement utilisable.</p>
+              <p>Indiquez le temps de pose des images utilisables de cette session uniquement, sans inclure l’installation, les pauses ni les images rejetées. N’indiquez pas le total de votre projet.</p>
               <label>Heures <input id="session-hours" type="number" min="0" step="1" value="0"></label>
               <label>Minutes <input id="session-minutes" type="number" min="0" max="59" step="1" value="0"></label>
               <button class="primary-button" id="session-record-evidence" type="button">Enregistrer la durée utilisable</button>
+              <small>Cette étape conserve la durée. Le bouton suivant permettra de l’ajouter à votre projet.</small>
             </div>
             <div id="session-credit" hidden>
               <p id="session-credit-preview"></p>
