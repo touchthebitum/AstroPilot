@@ -5252,6 +5252,8 @@ function renderSimpleProjects(entries) {
     const more = document.createElement("details");
     const summary = document.createElement("summary");
     summary.textContent = "J’ai pris des photos : renseigner mon temps de pose";
+    const purpose = document.createElement("p");
+    purpose.textContent = "Après chaque séance, vous pouvez ajouter son temps de pose utilisable au projet. NightMerit conserve le total, nuit après nuit, séparément pour chaque filtre. Chaque ajout doit être confirmé par vous.";
     const note = document.createElement("p");
     note.textContent = "Vous avez suivi cette séance dans NightMerit ? Retrouvez-la pour enregistrer le temps de pose des images que vous gardez, sans les pauses ni les images rejetées.";
     const sessions = document.createElement("button");
@@ -5278,7 +5280,7 @@ function renderSimpleProjects(entries) {
     edit.addEventListener("click", () => openProjectProgress(key));
     const earlierImages = document.createElement("p");
     earlierImages.textContent = "Vous aviez déjà des images avant ce suivi ? Renseignez leur temps de pose total comme temps de départ, sans inclure les séances déjà ajoutées par NightMerit.";
-    more.append(summary, note, sessions, earlierImages, edit);
+    more.append(summary, purpose, note, sessions, earlierImages, edit);
     const modify = document.createElement("button");
     modify.type = "button"; modify.className = "secondary-button";
     modify.textContent = "Modifier mon projet"; modify.disabled = !saved;
