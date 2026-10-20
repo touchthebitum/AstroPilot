@@ -5251,9 +5251,9 @@ function renderSimpleProjects(entries) {
     prepare.addEventListener("click", () => prepareGuidedSession({saveDraft:true}));
     const more = document.createElement("details");
     const summary = document.createElement("summary");
-    summary.textContent = "Après mes prises de vue : mettre à jour mon projet";
+    summary.textContent = "J’ai pris des photos : renseigner mon temps de pose";
     const note = document.createElement("p");
-    note.textContent = "Pour une séance suivie dans NightMerit, retrouvez sa mission, choisissez la session terminée, puis renseignez sa durée utilisable et ajoutez-la au projet. Pour des images antérieures, renseignez seulement le temps de départ : il ne doit pas inclure les sessions déjà ajoutées par NightMerit.";
+    note.textContent = "Vous avez suivi cette séance dans NightMerit ? Retrouvez-la pour enregistrer le temps de pose des images que vous gardez, sans les pauses ni les images rejetées.";
     const sessions = document.createElement("button");
     sessions.type = "button"; sessions.className = "secondary-button";
     sessions.textContent = "Retrouver mes sessions NightMerit";
@@ -5276,7 +5276,9 @@ function renderSimpleProjects(entries) {
     edit.type = "button"; edit.className = "secondary-button";
     edit.textContent = "Renseigner mon temps de départ"; edit.disabled = !saved;
     edit.addEventListener("click", () => openProjectProgress(key));
-    more.append(summary, note, sessions, edit);
+    const earlierImages = document.createElement("p");
+    earlierImages.textContent = "Vous aviez déjà des images avant ce suivi ? Renseignez leur temps de pose total comme temps de départ, sans inclure les séances déjà ajoutées par NightMerit.";
+    more.append(summary, note, sessions, earlierImages, edit);
     const modify = document.createElement("button");
     modify.type = "button"; modify.className = "secondary-button";
     modify.textContent = "Modifier mon projet"; modify.disabled = !saved;
