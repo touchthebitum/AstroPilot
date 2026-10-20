@@ -3958,6 +3958,20 @@ function renderMission(mission) {
     tasks.append(item);
   }
 
+  const review = document.createElement("li");
+  const reviewWhen = document.createElement("span");
+  reviewWhen.className = "task-time";
+  reviewWhen.textContent = "Après les flats · le lendemain si besoin";
+  const reviewCopy = document.createElement("div");
+  reviewCopy.className = "task-copy";
+  const reviewTitle = document.createElement("strong");
+  reviewTitle.textContent = "Trier les images, puis enregistrer les poses utilisables dans mon projet";
+  const reviewHelp = document.createElement("small");
+  reviewHelp.textContent = "Vérifiez vos clichés et comptez uniquement ceux que vous conservez. Dans la session d’imagerie, renseignez leur temps de pose total pour cette séance, sans les images rejetées ni les flats, darks et bias. Vous confirmerez ensuite son ajout à votre projet.";
+  reviewCopy.append(reviewTitle, reviewHelp);
+  review.append(reviewWhen, reviewCopy);
+  tasks.append(review);
+
   renderSession();
   reloadSessions().catch(() => sessionMessage("Sessions momentanément indisponibles. Rechargez avant une action."));
 
