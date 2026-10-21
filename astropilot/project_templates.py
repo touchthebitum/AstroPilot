@@ -52,6 +52,18 @@ for identity, name, purpose, advice, source in (
         "purpose": purpose + " Le filtre Hα isole l’émission de l’hydrogène.", "advice": advice}
 
 
+from decision.definitions.production_extended_targets import EXTENDED_HA_TARGETS
+
+for target in EXTENDED_HA_TARGETS:
+    identity = target["identity"]
+    PROJECT_GUIDANCE[identity] = {"summary": target["advice"],
+        "source_url": target["source_url"], "source_label": "Source de la photographie de référence"}
+    INTENT_GUIDANCE[(identity, identity + "_ha")] = {
+        "difficulty": target["difficulty"],
+        "purpose": "Photographier l’émission de l’hydrogène de " + target["name"] + " avec le filtre Hα.",
+        "advice": target["advice"] + " En Hα, le résultat est monochrome. Le ciel, le suivi et le traitement restent déterminants."}
+
+
 def project_templates() -> list[dict]:
     objects = {item.celestial_object_id: item for item in CELESTIAL_OBJECT_DEFINITIONS}
     profiles = {item.filter_profile_id: item for item in FILTER_OPTICAL_PROFILES}
@@ -66,7 +78,7 @@ def project_templates() -> list[dict]:
         result.append({
             "catalog_key": keys[0], "imaging_field_id": field.imaging_field_id,
             "display_name": field.display_name,
-            "discovery_supported": field.imaging_field_id in {"ngc7000", "rosette", "m42", "sh2-190", "sh2-199"},
+            "discovery_supported": field.imaging_field_id in ({"ngc7000", "rosette", "m42", "sh2-190", "sh2-199"} | {t["identity"] for t in EXTENDED_HA_TARGETS}),
             **({"guidance": dict(PROJECT_GUIDANCE[field.imaging_field_id])}
                if field.imaging_field_id in PROJECT_GUIDANCE else {}),
             "acquisition_intents": [

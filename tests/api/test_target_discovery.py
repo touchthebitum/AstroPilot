@@ -46,7 +46,7 @@ def test_real_preselection_preserves_profile_and_requires_explicit_project(tmp_p
     assert proposal["window_start"] < proposal["window_end"]
     assert proposal["equipment_match"]["framing"]["status"] == "nominal_fit"
     assert proposal["equipment_match"]["filter"]["status"] == "documented_match"
-    assert len(result["catalogue"]["targets"]) == 20
+    assert len(result["catalogue"]["targets"]) == 26
     assert not {"mission", "decision_id", "target_hours", "hours", "expected_gain"} & proposal.keys()
     assert saved == before
     assert not list(tmp_path.rglob("user_profile.json"))
@@ -72,7 +72,7 @@ def test_oiii_only_does_not_suggest_ha_targets(tmp_path, monkeypatch):
     assert response.json()["suggestions"] == []
 
 
-@pytest.mark.parametrize("change", [{"f_ratio": 5.6}, {"focal_length_mm": 400}])
+@pytest.mark.parametrize("change", [{"f_ratio": 5.6}, {"focal_length_mm": 1000}])
 def test_discovery_rejects_nominally_wrong_filter_range_or_incomplete_framing(tmp_path, monkeypatch, change):
     from astropilot.equipment_catalog import EQUIPMENT_PROFILES
     monkeypatch.setitem(EQUIPMENT_PROFILES, "samyang_183", {**EQUIPMENT_PROFILES["samyang_183"], **change})
@@ -119,7 +119,7 @@ def test_new_catalog_fields_accept_explicit_targets_and_keep_zero_progress(tmp_p
         "equipment": {"preset_id": "samyang_183"}, "projects": projects})
     assert response.status_code == 200, response.text
     loaded = client.get("/v1/configuration").json()
-    assert set(loaded["projects"]) == {"NorthAmerica", "Rosette", "M42", "IC1805", "IC1848"}
+    assert set(loaded["projects"]) == set(projects)
     assert all(item["hours"] == 0 for item in loaded["projects"].values())
 
     from astro_score import build_durable_tonight_application_service

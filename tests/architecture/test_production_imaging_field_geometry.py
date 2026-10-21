@@ -14,7 +14,7 @@ def test_production_definitions_are_an_immutable_field_tuple():
     assert tuple(
         definition.imaging_field_id
         for definition in IMAGING_FIELD_GEOMETRY_DEFINITIONS
-    ) == ("sh2-129_ou4", "ngc7000", "rosette", "m42", "sh2-190", "sh2-199")
+    ) == ("sh2-129_ou4", "ngc7000", "rosette", "m42", "sh2-190", "sh2-199", "m16", "m17", "ngc1499", "ic5070", "ic434", "sh2-296", "ngc3372", "ic4628")
     assert not {
         "sh2-129",
         "ou4",

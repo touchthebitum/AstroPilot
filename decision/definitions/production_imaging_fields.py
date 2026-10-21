@@ -74,6 +74,22 @@ IMAGING_FIELD_DEFINITIONS += tuple(
 )
 
 
+from decision.definitions.production_extended_targets import EXTENDED_HA_TARGETS
+
+CELESTIAL_OBJECT_DEFINITIONS += tuple(
+    CelestialObjectDefinition(celestial_object_id=t["identity"], canonical_name=t["key"],
+        object_type="emission nebula", object_subtype="H II region")
+    for t in EXTENDED_HA_TARGETS
+)
+IMAGING_FIELD_DEFINITIONS += tuple(
+    ImagingFieldDefinition(imaging_field_id=t["identity"], display_name=t["name"],
+        components=(ImagingFieldComponent(celestial_object_id=t["identity"]),),
+        acquisition_intents=(AcquisitionIntent(acquisition_intent_id=t["identity"] + "_ha",
+            filter_type="Ha", primary_component_ids=(t["identity"],), label="Hα · " + t["name"]),))
+    for t in EXTENDED_HA_TARGETS
+)
+
+
 def build_production_imaging_field_resolver() -> ImagingFieldResolver:
     return ImagingFieldResolver(
         IMAGING_FIELD_DEFINITIONS,

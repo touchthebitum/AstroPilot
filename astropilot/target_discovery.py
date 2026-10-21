@@ -50,6 +50,20 @@ TARGET_IMAGES = {
 }
 
 
+from decision.definitions.production_extended_targets import EXTENDED_HA_TARGETS
+for target in EXTENDED_HA_TARGETS:
+    nico = "nebulaphotos.com" in target["source_url"]
+    TARGET_IMAGES[target["key"]] = {
+        "src": "/ui/target-" + target["image"] + ".jpg",
+        "source_url": target["source_url"], "credit": target["credit"],
+        "license_url": "https://creativecommons.org/licenses/by-sa/4.0/" if nico else "https://creativecommons.org/licenses/by/4.0/",
+        "license_label": "CC BY-SA 4.0" if nico else "CC BY 4.0",
+        "note": ({"M16": "La vignette montre l’Aigle et Oméga ensemble ; ce projet concerne l’Aigle. ",
+                  "M17": "La vignette montre l’Aigle et Oméga ensemble ; ce projet concerne Oméga. ",
+                  "NGC3372": "Vue rapprochée d’une partie centrale de la Carène, pas de toute la région. "}.get(target["key"], "")) + target["advice"] + " Photographie de référence obtenue avec un autre matériel, parfois avec plusieurs filtres ; elle ne prédit ni votre cadrage ni votre résultat en Hα.",
+    }
+
+
 def discover_targets(*, inputs, profile, weather, weather_freshness,
                      reference_time_utc, confirmed_filter_profile_ids, forecast=None):
     if inputs.availability is None:
@@ -141,6 +155,6 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
         del item["_score"]
     return {"status": "suggestions" if suggestions else "no_suggestion", "suggestions": suggestions[:3],
             "catalogue": catalogue,
-            "scope": f"Catalogue étendu : {catalogue['extended_catalogue']['records']} fiches, dont {len(catalogue['targets'])} cibles étudiées. La présélection automatique de cette bêta reste limitée à North America, la Rosette, Orion (M42), le Cœur et l’Âme en Hα, avec cadrage et filtre vérifiés. Une fiche de référence ne constitue pas à elle seule une mission.",
+            "scope": f"Catalogue étendu : {catalogue['extended_catalogue']['records']} fiches, dont {len(catalogue['targets'])} cibles étudiées. La présélection automatique de cette bêta couvre {sum(bool(t['discovery_supported']) for t in templates)} régions en Hα, avec cadrage et filtre vérifiés. Une fiche de référence ne constitue pas à elle seule une mission.",
             "notice": "Le créneau est une estimation selon les prévisions. Confirmez votre projet, puis relancez l’analyse avant de sortir. Aucun temps de pose n’est enregistré.",
             "weather_retrieved_at": weather.retrieved_at_utc.isoformat()}

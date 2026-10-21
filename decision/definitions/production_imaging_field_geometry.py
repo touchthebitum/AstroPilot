@@ -36,6 +36,15 @@ IMAGING_FIELD_GEOMETRY_DEFINITIONS += (
 )
 
 
+from decision.definitions.production_extended_targets import EXTENDED_HA_TARGETS
+
+IMAGING_FIELD_GEOMETRY_DEFINITIONS += tuple(
+    ImagingFieldGeometryDefinition(imaging_field_id=t["identity"],
+        reference_ra_deg=t["ra"], reference_dec_deg=t["dec"])
+    for t in EXTENDED_HA_TARGETS
+)
+
+
 def build_production_imaging_field_geometry_resolver(
 ) -> ImagingFieldGeometryResolver:
     return ImagingFieldGeometryResolver(IMAGING_FIELD_GEOMETRY_DEFINITIONS)

@@ -10,7 +10,7 @@ from math import atan, degrees, isfinite
 
 from astropilot.user_profile import resolve_equipment_definition
 
-CATALOGUE_VERSION = "2026-10-21.2"
+CATALOGUE_VERSION = "2026-10-21.3"
 SOURCES = {
     "ngc2000": {"title": "NGC 2000.0 · Sinnott 1988 · CDS VII/118",
         "url": "https://cdsarc.cds.unistra.fr/viz-bin/ReadMe/VII/118?format=html&tex=true",
@@ -19,7 +19,7 @@ SOURCES = {
     "sharpless": {"title": "Catalogue of H II Regions · Sharpless 1959 · CDS VII/20",
         "url": "https://cdsarc.cds.unistra.fr/viz-bin/ReadMe/VII/20?format=html&tex=true",
         "data_url": "https://cdsarc.cds.unistra.fr/ftp/VII/20/catalog.dat.gz",
-        "quantity": "Maximum H II region diameter (arcmin), bytes 49–52; no B1900/B1950 coordinate is imported."},
+        "quantity": "Maximum H II region diameter (arcmin), bytes 49–52; old-epoch coordinates are not used directly as ICRS."},
     "veil": {"title": "NASA · Cygnus Loop, about three degrees across",
         "url": "https://science.nasa.gov/solar-system/skywatching/night-sky-network/summer-triangle-corner-deneb/"},
     "ou4": {"title": "Corradi et al. 2014 · Gas physical conditions and kinematics of the giant outflow Ou4",
@@ -138,6 +138,14 @@ TARGETS = (
         "Limite photographique des poussières non documentée ici ; aucune taille inventée.", ("L", "R", "G", "B"), "Pour progresser",
         "Les poussières diffusent la lumière des étoiles : SHO n’est pas le premier choix pour cette image."),
 )
+
+from decision.definitions.production_extended_targets import EXTENDED_HA_TARGETS
+SOURCES["openngc"] = {"title": "OpenNGC · pinned NGC.csv, ICRS centres and major axes",
+    "url": "https://github.com/mattiaverga/OpenNGC/blob/be3cd6c5498806a2fbb2f7e0452ef802dbb02be0/database_files/NGC.csv", "quantity": "MajAx in arcminutes; not a photograph field or B-band magnitude."}
+TARGETS += tuple(ImagingTarget(t["key"], t["name"], (), "hii_region", t["extent"],
+    t["extent_source"], t["source_row"], t["advice"], ("Ha",), t["difficulty"], t["advice"])
+    for t in EXTENDED_HA_TARGETS if t["key"] not in {item.key for item in TARGETS})
+
 
 def canonical_target(key: str) -> ImagingTarget | None:
     return next((target for target in TARGETS if key == target.key or key in target.aliases), None)

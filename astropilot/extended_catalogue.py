@@ -35,7 +35,9 @@ KINDS = {
 }
 # Only these associations refer to the same principal object. Whole HII regions
 # (IC1396, Heart, Soul, M16, M17, Rosette, Veil) deliberately remain separate.
-CURATED_ASSOCIATIONS = {"M31": "NGC0224", "M33": "NGC0598", "M51": "NGC5194",
+CURATED_ASSOCIATIONS = {"NGC1499": "NGC1499", "IC5070": "IC5070", "IC434": "IC0434",
+                        "NGC3372": "NGC3372", "IC4628": "IC4628",
+                        "M31": "NGC0224", "M33": "NGC0598", "M51": "NGC5194",
     "M81": "NGC3031", "M101": "NGC5457", "M42": "NGC1976", "NorthAmerica": "NGC7000",
     "M13": "NGC6205", "M27": "NGC6853", "M57": "NGC6720", "M45": "Mel022"}
 

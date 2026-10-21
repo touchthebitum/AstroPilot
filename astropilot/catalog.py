@@ -215,3 +215,19 @@ CATALOG = {
 
     
     }
+
+# Newly curated fields use verified ICRS centres, never thumbnail coordinates.
+from decision.definitions.production_extended_targets import EXTENDED_HA_TARGETS
+for _target in EXTENDED_HA_TARGETS:
+    if _target["key"] not in CATALOG:  # preserve historical entries and portfolio keys
+        CATALOG[_target["key"]] = {
+            "ra": _target["ra"], "dec": _target["dec"], "name": _target["name"],
+            "size_arcmin": _target["extent"], "type": "nebula", "difficulty": 3,
+        }
+
+# Operational M16/M17 fields describe Sh2-49/Sh2-45, not just their compact
+# cluster entries. Keep keys/centres; use the documented whole-region diameter
+# consistently for equipment scoring as well as reference framing.
+for _target in EXTENDED_HA_TARGETS:
+    if _target["key"] in {"M16", "M17"}:
+        CATALOG[_target["key"]]["size_arcmin"] = _target["extent"]

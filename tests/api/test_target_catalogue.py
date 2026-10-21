@@ -91,7 +91,7 @@ def test_documented_lrgb_product_is_not_an_invented_transmission_profile_or_conf
 
 
 def test_all_legacy_keys_are_covered_without_duplicate_targets_or_migrating_projects():
-    assert len(TARGETS) == 20
+    assert len(TARGETS) == 26
     assert len({item.key for item in TARGETS}) == len(TARGETS)
     aliases = [alias for item in TARGETS for alias in (item.key, *item.aliases)]
     assert len(aliases) == len(set(aliases))
@@ -138,7 +138,7 @@ def test_catalogue_api_requires_resolved_equipment_and_does_not_need_weather_or_
     response = client.get("/v1/target-catalogue?equipment=samyang_183")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
-    assert len(response.json()["targets"]) == 20
+    assert len(response.json()["targets"]) == 26
     assert not list(tmp_path.rglob("*.json"))
 
 

@@ -18,7 +18,7 @@ def search(query="", **kwargs):
 
 def test_pinned_complete_sources_and_exclusions_reconcile():
     records, stats, manifest = catalog._load()
-    assert stats["records"] == 13381
+    assert stats["records"] == 13382
     assert stats["openngc_records"] + stats["additional_imaging_regions"] == len(records)
     assert stats["openngc_records"] + stats["excluded_duplicates"] + stats["excluded_nonexistent"] == stats["openngc_source_rows"] == 14034
     assert stats["messier_designations"] == 110
@@ -193,7 +193,7 @@ def test_production_first_run_catalogue_does_not_require_or_create_a_profile(tmp
     assert payload['results'][0]['catalogue_id'] == 'NGC0224'
     assert payload['geometry']['status'] == 'unknown'
     assert payload['equipment_id'] is None
-    assert payload['catalogue']['records'] == 13381
+    assert payload['catalogue']['records'] == 13382
     response = client.get('/v1/target-catalogue/search?q=IC1396&equipment=samyang_183')
     assert response.status_code == 200, response.text
     assert {r['major_arcmin'] for r in response.json()['results']} == {14, 170}
