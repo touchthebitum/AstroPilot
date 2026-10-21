@@ -75,7 +75,7 @@ const configuration={projects:{'Sh2-129':{hours:99}}};
 const state={configuration};
 let requests=[];
 function fetch(url){return new Promise((resolve,reject)=>requests.push({url,resolve,reject}));}
-function prepareGuidedSession(){} function configurationDraftMatchesSaved(){return true;} let openedProject=null; function openProjectProgress(id){openedProject=id;}
+let preparation;function prepareGuidedSession(options){preparation=options;} function configurationDraftMatchesSaved(){return true;} let openedProject=null; function openProjectProgress(id){openedProject=id;}
 const flush=async()=>{for(let i=0;i<12;i++)await Promise.resolve();};
 const payload={acquisition_intent_targets:[{acquisition_intent_id:'ha',target_hours:3}],
  acquisition_intents:[{acquisition_intent_id:'ha',filter_type:'Ha'}],
@@ -95,6 +95,8 @@ const payload={acquisition_intent_targets:[{acquisition_intent_id:'ha',target_ho
  const text=status.children[0].textContent;
  assert.match(text,/1 h 45 sur 3 h/);assert.doesNotMatch(text,/99/,'legacy scalar must not override canonical credits');
  assert.match(status.children[0].children[0].textContent,/1 h 15/);
+ current.children[2].children.find(x=>x.textContent==='Préparer une séance').listeners.click();
+ assert.equal(preparation.projectId,'Sh2-129');
  renderSimpleProjects([['Sh2-129',configuration.projects['Sh2-129']]]);
  const failed=region.children[0];requests.shift().reject(new Error('offline'));await flush();
  assert.match(failed.children[1].textContent,/ne peut pas être relu/);

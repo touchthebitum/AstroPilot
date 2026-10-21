@@ -121,6 +121,7 @@ const state = {
   },
   availability: null,
   currentDecision: null,
+  selectedProjectId: null,
   currentDecisionSiteFingerprint: null,
   configurationGeneration: 0,
   configurationInFlightGeneration: null,
@@ -3624,6 +3625,12 @@ const PENDING_ACCEPTANCE_STORAGE_VERSION = 2;
 const wizardStates = Object.freeze(["site", "equipment", "projects", "review"]);
 
 function setView(view) {
+  const selectedNotice = document.querySelector("#availability-selected-project");
+  if (selectedNotice) {
+    selectedNotice.hidden = !state.selectedProjectId || state.discoveryMode;
+    selectedNotice.textContent = state.selectedProjectId
+      ? `Cible choisie : ${state.selectedProjectId}. L’analyse vérifiera ce projet avec vos horaires et la météo, sans le remplacer par une autre cible.` : "";
+  }
   invalidateOutcomeHistory();
   state.viewRevision = (state.viewRevision || 0) + 1;
   state.view = view;
@@ -4882,6 +4889,7 @@ function addNewProject() {
     const project = newProjectFromInputs(template, entries,
       document.querySelector("#project-new-empty").checked, projects);
     state.configurationDraft.projects = { ...projects, [key]: project };
+    state.selectedProjectId = key;
     renderProjects();
     document.querySelector("#project-create").open = false;
     feedback.textContent = "Projet ajouté au brouillon. Enregistrez pour conserver ce choix. Aucun temps de pose n’a été crédité.";
@@ -5236,8 +5244,9 @@ function configurationDraftMatchesSaved() {
     === JSON.stringify(comparable(draftFromConfiguration(state.configuration)));
 }
 
-function prepareGuidedSession({saveDraft = false} = {}) {
+function prepareGuidedSession({saveDraft = false, projectId} = {}) {
   if (guardUnresolvedAcceptance() || state.savingProjectProgress || !confirmDiscardProjectProgress()) return;
+  if (projectId !== undefined) state.selectedProjectId = projectId;
   const unchanged = configurationDraftMatchesSaved();
   if (!unchanged) {
     if (saveDraft) {saveConfiguration(); return;}
@@ -5273,7 +5282,7 @@ function renderSimpleProjects(entries) {
     prepare.type = "button"; prepare.className = "primary-button";
     prepare.textContent = configurationDraftMatchesSaved() ? "Préparer une séance" : "Enregistrer et préparer une séance";
     prepare.disabled = true;
-    prepare.addEventListener("click", () => prepareGuidedSession({saveDraft:true}));
+    prepare.addEventListener("click", () => prepareGuidedSession({saveDraft:true, projectId:key}));
     const more = document.createElement("details");
     const summary = document.createElement("summary");
     summary.textContent = "J’ai pris des photos : renseigner mon temps de pose";
@@ -6254,7 +6263,10 @@ function showTonightUnavailable(payload) {
       ? `Le créneau utilisable est trop court pour lancer une mission. Réessayez plus tard si les conditions évoluent.${editAvailability ? " Vous pouvez revoir votre disponibilité, sans garantie de trouver un créneau suffisant." : ""}`
       : "Aucun créneau ne permet de lancer une mission dans les conditions évaluées. Réessayez plus tard lorsque les prévisions évoluent."
     : `${technical} Réessayez plus tard lorsque les données ou les conditions évoluent.`;
-  showMessage(title, body, { kicker: "Analyse terminée" });
+  const chosen = state.selectedProjectId;
+  showMessage(title, chosen
+    ? `Cible choisie : ${chosen}. ${body} Votre choix est conservé ; aucune autre cible ne le remplace. Pour chercher une alternative, cochez « Me proposer une cible avec mon matériel » dans la préparation de séance.`
+    : body, { kicker: "Analyse terminée" });
   text("#message-technical", forecast?.details || technical);
   const details = document.querySelector("#message-details");
   details.hidden = false;
@@ -6621,6 +6633,7 @@ async function loadTonight(availability) {
   const siteGeneration = state.decisionSiteGeneration;
   const siteFingerprint = decisionSiteFingerprint();
   const discovery = Boolean(state.discoveryMode);
+  const selectedProjectId = discovery ? null : state.selectedProjectId;
   const confirmedFilters = discovery ? discoveryConfirmedFilters() : [];
   state.requestingRecommendation = true;
   state.availability = { ...availability };
@@ -6629,6 +6642,8 @@ async function loadTonight(availability) {
   show("loading");
   const navigationOwner = {view: state.view, revision: state.viewRevision || 0};
   const isCurrent = () => configurationGeneration === state.configurationGeneration
+    && selectedProjectId === (state.discoveryMode ? null : state.selectedProjectId)
+    && discovery === Boolean(state.discoveryMode)
     && siteGeneration === state.decisionSiteGeneration
     && siteFingerprint === decisionSiteFingerprint() && !state.decisionSiteReloadRequired
     && navigationOwner.view === state.view
@@ -6661,7 +6676,7 @@ async function loadTonight(availability) {
       const options = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: discovery ? JSON.stringify({availability, confirmed_filter_profile_ids: confirmedFilters}) : JSON.stringify({ availability }),
+        body: discovery ? JSON.stringify({availability, confirmed_filter_profile_ids: confirmedFilters}) : JSON.stringify({ availability, ...(selectedProjectId ? {selected_project_id: selectedProjectId} : {}) }),
         signal: controller.signal,
       };
       const response = await (discovery
@@ -6693,6 +6708,11 @@ async function loadTonight(availability) {
         return;
       }
       if (response.status === 422) {
+        if (payload?.detail?.code === "selected_project_unavailable") {
+          showAvailabilityError(payload.detail.message);
+          setView("availability");
+          return;
+        }
         showAvailabilityError(payload?.detail?.code?.startsWith("discovery_")
           ? "Vérifiez les filtres possédés et vos horaires avant de relancer la recherche."
           : backendAvailabilityMessage(payload?.detail));
@@ -7187,6 +7207,9 @@ async function setDiscoveryMode(enabled) {
   const generation = (state.discoveryGeneration || 0) + 1;
   state.discoveryGeneration = generation;
   state.discoveryMode = enabled;
+  if (enabled) state.selectedProjectId = null;
+  const chosenNotice = document.querySelector("#availability-selected-project");
+  if (enabled && chosenNotice) chosenNotice.hidden = true;
   document.querySelector("#discover-targets").checked = enabled;
   document.querySelector("#discovery-filters").hidden = !enabled;
   ui.recommendationSubmit.textContent = enabled ? "Chercher une cible pour mes horaires" : "Préparer ma nuit";
@@ -7261,6 +7284,7 @@ function renderTargetSuggestions(payload) {
     choose.addEventListener("click", async () => {
       if (guardUnresolvedAcceptance() || !confirmDiscardProjectProgress()) return;
       await setDiscoveryMode(false);
+      state.selectedProjectId = suggestion.existing_project_key || suggestion.catalog_key;
       setView("projects");
       const existingKey = suggestion.existing_project_key || suggestion.catalog_key;
       if (Object.hasOwn(state.configuration?.projects || {}, existingKey)) { openProjectProgress(existingKey); return; }

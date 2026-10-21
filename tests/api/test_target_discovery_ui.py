@@ -76,6 +76,7 @@ for(const [index,alias] of ['Heart','Soul'].entries()) {
  assert(elements.some(n=>n.tag==='img' && n.alt===payload.suggestions[index].image.alt));
  const choose=elements.find(n=>n.tag==='button');assert.equal(choose.textContent,'Retrouver ce projet');
  await choose.handlers.click();assert.equal(opened.at(-1),alias);
+ assert.equal(state.selectedProjectId,alias);
  locked=true;await choose.handlers.click();assert.equal(opened.length,index+1);locked=false;
 }
 assert.deepEqual(opened,['Heart','Soul']);assert.equal(JSON.stringify(state.configuration),before);

@@ -41,6 +41,7 @@ def test_real_javascript_builder_and_persisted_capacity(tmp_path, monkeypatch):
         pytest.skip('Node is required for the actual project builder')
     source = (WEB / 'app.js').read_text()
     builder = source[source.index('function newProjectFromInputs('):source.index('function addNewProject(')]
+    builder += source[source.index('function addNewProject('):source.index('function progressDuration(')]
     template = project_templates()[0]
     harness = '''
 const assert = require('node:assert/strict');
@@ -62,6 +63,16 @@ state.configurationDraft.equipment={preset_id:'samyang_183'};
 const project=build();
 assert.deepEqual(project.acquisition_intent_targets,[{acquisition_intent_id:'sh2-129_ha',target_hours:2}]);
 assert.deepEqual(project.acquisition_intent_progress,[{acquisition_intent_id:'sh2-129_ha',acquired_duration_manual:0}]);
+state.projectTemplates=[template];state.configurationDraft.projects={M31:{hours:1}};
+let saves=0;const appliedUiMode='simple';
+function confirmDiscardProjectProgress(){return true;}function renderProjects(){}
+function saveConfiguration(){saves++;}
+const nodes={'#project-template':{value:template.catalog_key},'#project-new-empty':{checked:true},'#project-create':{},'#project-create-feedback':{}};
+const document={querySelector:key=>nodes[key],querySelectorAll:()=>selected.map(item=>({
+ dataset:{newIntentId:item.id},querySelector:selector=>selector.includes('checkbox')?{checked:item.selected}:{value:item.hours}}))};
+addNewProject();
+assert.equal(saves,1);assert.equal(state.selectedProjectId,template.catalog_key);
+assert.equal(state.configurationDraft.projects.M31.hours,1);
 console.log(JSON.stringify(project));
 '''
     result = subprocess.run([node, '-e', harness], capture_output=True, text=True, check=True)

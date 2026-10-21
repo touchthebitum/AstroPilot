@@ -201,7 +201,11 @@ class TonightApplicationService:
         target="deep_sky",
         bortle,
         availability: SessionAvailability | None = None,
+        selected_project_id: str | None = None,
     ) -> TonightResult:
+        if (selected_project_id is not None
+                and selected_project_id not in profile.get("projects", {})):
+            raise ValueError("selected_project_unavailable")
         inputs = resolve_tonight_inputs(
             profile,
             equipment=equipment,
@@ -258,6 +262,19 @@ class TonightApplicationService:
                 forecast_evidence=forecast_evidence,
             )
         top_objects = night.get("top_objects") or []
+        if selected_project_id is not None:
+            # Scope candidates and durable acceptance evidence, never the saved
+            # portfolio or its credits. An unsuitable choice cannot fall back
+            # to another project or to a discovery candidate.
+            top_objects = [obj for obj in top_objects
+                           if obj.get("catalog_key", obj.get("name")) == selected_project_id]
+            night = {
+                **night, "top_objects": top_objects,
+                "object_evaluations": {
+                    key: value for key, value in night.get("object_evaluations", {}).items()
+                    if key == selected_project_id
+                },
+            }
         weather_snapshot = (
             weather if isinstance(weather, WeatherSnapshot) else None
         )

@@ -22,7 +22,7 @@ const message={hidden:true,textContent:''};
 const document={querySelector:()=>message};
 const ui={recommendationSubmit:{disabled:false},refresh:{disabled:false}};
 const state={configurationGeneration:1,decisionSiteGeneration:1,view:'availability',viewRevision:0};
-let requests=0,rendered=[],clears=0,lastSignal,transport;
+let requests=0,rendered=[],clears=0,lastSignal,transport,lastBody;
 function guardUnresolvedAcceptance(){return false;}
 function decisionSiteFingerprint(){return 'retained';}
 function showAvailabilityError(value){state.error=value;}
@@ -33,7 +33,7 @@ function clearAcceptedMission(){clears++;}
 function renderDecision(){setView('recommendation');}
 function showTonightUnavailable(){throw Error('unexpected');}
 function pendingIntentChoice(){return false;}
-function fetch(_url,options){requests++;lastSignal=options.signal;return transport();}
+function fetch(_url,options){requests++;lastSignal=options.signal;lastBody=JSON.parse(options.body);return transport();}
 const flush=async()=>{for(let i=0;i<12;i++)await Promise.resolve();};
 const availability={mode:'fixed_window',start:'2026-10-19T21:00:00+02:00',end:'2026-10-19T23:00:00+02:00'};
 const response=id=>({ok:true,json:async()=>({status:'available',decision_id:id})});
@@ -52,7 +52,9 @@ const response=id=>({ok:true,json:async()=>({status:'available',decision_id:id})
  assert.equal(ui.recommendationSubmit.disabled,false);assert.equal(ui.refresh.disabled,false);
  assert.equal(timers.size,0);
  // A new response succeeds; the abandoned old response must not replace it.
+ state.selectedProjectId='M42';
  transport=async()=>response('new');await loadTonight(availability);
+ assert.equal(lastBody.selected_project_id,'M42');
  assert.deepEqual(rendered,['new']);assert.equal(timers.size,0);
  release(response('late'));await flush();assert.deepEqual(rendered,['new']);assert.equal(clears,1);
  // The same deadline includes a body that never finishes decoding.

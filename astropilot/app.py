@@ -571,6 +571,7 @@ class SessionAvailabilityRequest(BaseModel):
 
 
 class TonightRequest(BaseModel):
+    selected_project_id: str | None = Field(default=None, strict=True, min_length=1, max_length=200)
     claim_opportunity_alert: bool = Field(default=False, strict=True, description="Explicitly evaluate and durably claim an alert from this live Tonight result.")
     model_config = ConfigDict(
         extra="forbid",
@@ -2740,6 +2741,13 @@ def create_app(
         reference_time_utc = clock()
         try:
             profile = dict(profile_provider())
+            selected_project_id = getattr(request, "selected_project_id", None)
+            if (selected_project_id is not None
+                    and selected_project_id not in profile.get("projects", {})):
+                raise HTTPException(status_code=422, detail={
+                    "code": "selected_project_unavailable",
+                    "message": "Le projet choisi n’est plus enregistré. Retrouvez-le dans Mes projets ou choisissez une autre cible.",
+                })
             requested_location = (
                 request.location.model_dump()
                 if request.location is not None
@@ -2905,6 +2913,8 @@ def create_app(
                     target=request.target,
                     bortle=effective_bortle,
                     availability=inputs.availability,
+                    **({"selected_project_id": selected_project_id}
+                       if selected_project_id is not None else {}),
                 )
         except DecisionConsistencyError as exc:
             raise HTTPException(
