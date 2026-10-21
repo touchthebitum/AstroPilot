@@ -31,6 +31,7 @@ datas = [
 ]
 datas += [(str(p), "astropilot/web") for p in (ROOT / "astropilot/web").glob("*") if p.is_file()]
 datas += [(str(ROOT / "astropilot/reference_stations_v1.json"), "astropilot")]
+datas += [(str(p), "astropilot/catalogue_data") for p in (ROOT / "astropilot/catalogue_data").glob("*") if p.is_file()]
 datas += collect_data_files("timezonefinder_data")
 datas += collect_data_files("astropy_iers_data")
 datas += collect_data_files("tzdata")
