@@ -2,7 +2,7 @@
 from math import isfinite
 
 from astropilot.project_templates import project_templates
-from astropilot.target_catalogue import equipment_catalogue
+from astropilot.target_catalogue import canonical_target, equipment_catalogue
 from decision.services.candidate_assessment import CandidateAssessment, CandidateViabilityEvaluator
 from decision.services.session_availability_windowing import select_physical_productive_window
 from decision.services.tonight_application_service import _select_forecast_night
@@ -22,6 +22,24 @@ TARGET_IMAGES = {
         "credit": "ESO/G. Beccari",
         "license_url": "https://creativecommons.org/licenses/by/4.0/",
         "note": "Vue professionnelle de la région centrale d’Orion, plus serrée que votre champ au 135 mm. Cette image combine plusieurs filtres ; elle ne prédit ni votre cadrage ni votre résultat en Hα.",
+    },
+    "IC1805": {
+        "src": "/ui/target-heart-soul-ha.jpg",
+        "alt": "Cœur en haut à droite et Âme en bas à gauche · photographie Hα de Nico Carver",
+        "source_url": "https://www.nebulaphotos.com/ngc-ic/ic1805/",
+        "credit": "IC1805 and IC1848 by Nico Carver",
+        "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "license_label": "CC BY-SA 4.0",
+        "note": "Photo Hα en noir et blanc montrant le Cœur et l’Âme ensemble. Le Cœur est en haut à droite ; ce choix concerne seulement cette région (Sh2-190). L’image a été obtenue avec un autre matériel ; elle ne prédit ni votre cadrage ni votre résultat.",
+    },
+    "IC1848": {
+        "src": "/ui/target-heart-soul-ha.jpg",
+        "alt": "Cœur en haut à droite et Âme en bas à gauche · photographie Hα de Nico Carver",
+        "source_url": "https://www.nebulaphotos.com/ngc-ic/ic1805/",
+        "credit": "IC1805 and IC1848 by Nico Carver",
+        "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "license_label": "CC BY-SA 4.0",
+        "note": "Photo Hα en noir et blanc montrant le Cœur et l’Âme ensemble. L’Âme est en bas à gauche ; ce choix concerne seulement cette région (Sh2-199). L’image a été obtenue avec un autre matériel ; elle ne prédit ni votre cadrage ni votre résultat.",
     },
     "Rosette": {
         "src": "/ui/target-rosette.jpg",
@@ -87,6 +105,15 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
             window = select_physical_productive_window(assessment.productive_window, inputs.availability)
             if window is None:
                 continue
+            # Catalogue aliases identify an already saved project without migrating
+            # its key or overwriting progress. Ambiguous legacy duplicates are not
+            # resolved by guessing which project the operator meant.
+            existing_keys = [saved_key for saved_key in profile.get("projects", {})
+                             if (target := canonical_target(saved_key)) is not None
+                             and target.key == key]
+            if len(existing_keys) > 1:
+                continue
+            existing_key = existing_keys[0] if existing_keys else None
             for intent in template["acquisition_intents"]:
                 matches = [item for item in intent["supported_filters"]
                            if item["equipment_id"] == inputs.equipment and item["filter_profile_id"] in confirmed]
@@ -106,13 +133,14 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
                         "framing": material["framing"], "filter": optical_match,
                         "extent_arcmin": material["extent_arcmin"], "extent_scope": material["scope"]},
                     "window_start": window.window_start.isoformat(), "window_end": window.window_end.isoformat(),
-                    "already_saved": key in profile.get("projects", {}), "_score": score,
+                    "already_saved": existing_key is not None,
+                    "existing_project_key": existing_key, "_score": score,
                 })
     suggestions.sort(key=lambda item: (-item["_score"], item["catalog_key"]))
     for item in suggestions:
         del item["_score"]
     return {"status": "suggestions" if suggestions else "no_suggestion", "suggestions": suggestions[:3],
             "catalogue": catalogue,
-            "scope": f"Catalogue étendu : {catalogue['extended_catalogue']['records']} fiches, dont {len(catalogue['targets'])} cibles étudiées. La présélection automatique de cette bêta reste limitée à North America, la Rosette et Orion (M42) en Hα, avec cadrage et filtre vérifiés. Une fiche de référence ne constitue pas à elle seule une mission.",
+            "scope": f"Catalogue étendu : {catalogue['extended_catalogue']['records']} fiches, dont {len(catalogue['targets'])} cibles étudiées. La présélection automatique de cette bêta reste limitée à North America, la Rosette, Orion (M42), le Cœur et l’Âme en Hα, avec cadrage et filtre vérifiés. Une fiche de référence ne constitue pas à elle seule une mission.",
             "notice": "Le créneau est une estimation selon les prévisions. Confirmez votre projet, puis relancez l’analyse avant de sortir. Aucun temps de pose n’est enregistré.",
             "weather_retrieved_at": weather.retrieved_at_utc.isoformat()}

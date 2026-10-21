@@ -113,7 +113,7 @@ def test_catalogue_is_read_only_and_does_not_claim_all_references_have_mission_r
     assert all(not item["confirmed_filters"] for item in result["targets"])
     by_key = {item["key"]: item for item in result["targets"]}
     assert by_key["Ou4"]["project_routes"] == [{"imaging_field_id": "sh2-129_ou4", "acquisition_intent_id": "ou4_oiii"}]
-    assert not by_key["IC1805"]["project_supported"]
+    assert by_key["IC1805"]["project_supported"]
     assert not {"mission", "decision_id", "target_hours"} & result.keys()
 
 

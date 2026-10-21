@@ -107,7 +107,9 @@ def test_all_discovery_templates_have_licensed_images_and_exact_intent_help():
     for template in templates:
         image = TARGET_IMAGES[template['catalog_key']]
         assert image['credit'] and image['source_url'].startswith('https://')
-        assert image['license_url'] == 'https://creativecommons.org/licenses/by/4.0/'
+        assert (image.get('license_label', 'CC BY 4.0'), image['license_url']) in {
+            ('CC BY 4.0', 'https://creativecommons.org/licenses/by/4.0/'),
+            ('CC BY-SA 4.0', 'https://creativecommons.org/licenses/by-sa/4.0/')}
         assert template['guidance']['source_url'].startswith('https://')
         for intent in template['acquisition_intents']:
             assert all(intent['guidance'][key] for key in ('difficulty', 'purpose', 'advice'))

@@ -35,6 +35,12 @@ for identity, name, purpose, advice, source in (
     ("m42", "la nébuleuse d’Orion", "Photographier le gaz lumineux autour des jeunes étoiles d’Orion.",
      "Une nébuleuse lumineuse pour progresser. Son cœur est beaucoup plus brillant que ses extensions : vérifiez qu’il n’est pas saturé et adaptez vos poses. Avec le Hα, le résultat est monochrome. Le ciel, le suivi et le traitement restent déterminants.",
      "https://eso.org/public/images/eso1723a/"),
+    ("sh2-190", "la nébuleuse du Cœur", "Photographier les contours de la grande région de gaz Sh2-190, autour de l’amas IC 1805.",
+     "Laissez de la place autour de la nébuleuse et vérifiez le cadrage avec votre appareil. Ses extensions sont plus discrètes que son centre. En Hα, l’image reste monochrome ; la couleur demande d’autres acquisitions. L’Âme est un projet distinct, même si la vignette montre les deux régions.",
+     "https://www.nebulaphotos.com/ngc-ic/ic1805/"),
+    ("sh2-199", "la nébuleuse de l’Âme", "Photographier la région de gaz Sh2-199 associée à IC 1848, avec ses contours et ses zones sombres.",
+     "Cherchez la forme de la grande nébuleuse plutôt que les petits détails de ses piliers. En Hα, l’image reste monochrome ; le contraste dépend du ciel et de l’empilement. Le Cœur est un projet distinct, même si la vignette montre les deux régions.",
+     "https://www.nebulaphotos.com/ngc-ic/ic1805/"),
     ("rosette", "la Rosette", "Photographier la couronne de gaz autour de l’amas central.",
      "Travaillez la mise au point sur les étoiles et le contraste de la nébuleuse. Le filtre Hα produit une image monochrome ; la couleur demande d’autres acquisitions.",
      "https://www.eso.org/public/images/b12/"),
@@ -60,7 +66,7 @@ def project_templates() -> list[dict]:
         result.append({
             "catalog_key": keys[0], "imaging_field_id": field.imaging_field_id,
             "display_name": field.display_name,
-            "discovery_supported": field.imaging_field_id in {"ngc7000", "rosette", "m42"},
+            "discovery_supported": field.imaging_field_id in {"ngc7000", "rosette", "m42", "sh2-190", "sh2-199"},
             **({"guidance": dict(PROJECT_GUIDANCE[field.imaging_field_id])}
                if field.imaging_field_id in PROJECT_GUIDANCE else {}),
             "acquisition_intents": [

@@ -27,6 +27,12 @@ IMAGING_FIELD_GEOMETRY_DEFINITIONS += (
         reference_ra_deg=97.5, reference_dec_deg=4.95),
     ImagingFieldGeometryDefinition(imaging_field_id="m42",
         reference_ra_deg=83.8221, reference_dec_deg=-5.3911),
+    # Planning centres retained from the IC1805/IC1848 portfolio entries.
+    # Not the image centre, cluster extent, or a remeasurement of Sh2 boundaries.
+    ImagingFieldGeometryDefinition(imaging_field_id="sh2-190",
+        reference_ra_deg=38.5, reference_dec_deg=61.4),
+    ImagingFieldGeometryDefinition(imaging_field_id="sh2-199",
+        reference_ra_deg=42.825, reference_dec_deg=60.408333),
 )
 
 

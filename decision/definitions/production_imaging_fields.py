@@ -22,11 +22,15 @@ CELESTIAL_OBJECT_DEFINITIONS: tuple[CelestialObjectDefinition, ...] = (
 )
 
 # Additional single-component fields use the existing, explicitly identified catalog
-# entries. Discovery does not give these fields project progress or target hours.
+# entries. sh2-190/sh2-199 explicitly mean the whole H II regions; the
+# IC1805/IC1848 canonical names retain the existing portfolio keys, not a claim
+# that the embedded open cluster has the same extent as its surrounding nebula.
+# Discovery does not give these fields project progress or target hours.
 CELESTIAL_OBJECT_DEFINITIONS += tuple(
     CelestialObjectDefinition(celestial_object_id=identity, canonical_name=key,
                               object_type="emission nebula", object_subtype="H II region")
-    for identity, key in (("ngc7000", "NorthAmerica"), ("rosette", "Rosette"), ("m42", "M42"))
+    for identity, key in (("ngc7000", "NorthAmerica"), ("rosette", "Rosette"), ("m42", "M42"),
+                          ("sh2-190", "IC1805"), ("sh2-199", "IC1848"))
 )
 
 IMAGING_FIELD_DEFINITIONS: tuple[ImagingFieldDefinition, ...] = (
@@ -64,7 +68,9 @@ IMAGING_FIELD_DEFINITIONS += tuple(
     )
     for identity, name in (("ngc7000", "North America · NGC 7000"),
                            ("rosette", "Nébuleuse de la Rosette"),
-                           ("m42", "Nébuleuse d’Orion · M42"))
+                           ("m42", "Nébuleuse d’Orion · M42"),
+                           ("sh2-190", "Nébuleuse du Cœur · Sh2-190"),
+                           ("sh2-199", "Nébuleuse de l’Âme · Sh2-199"))
 )
 
 

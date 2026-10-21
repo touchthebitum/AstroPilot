@@ -7213,7 +7213,7 @@ async function setDiscoveryMode(enabled) {
     const text = document.createElement("span"); text.textContent = `${filter.label} (${filter.fwhm_nm} nm)`;
     label.append(input, text); choices.append(label);
   }
-  feedback.textContent = filters.size ? "Cette première recherche propose North America, la Rosette et Orion (M42) en Hα, si les conditions le permettent."
+  feedback.textContent = filters.size ? "La recherche retient jusqu’à trois cibles parmi les nébuleuses prises en charge en Hα, si les conditions le permettent."
     : "Aucun filtre précisément compatible n’est disponible pour ce matériel dans cette bêta. Vos réglages sont conservés.";
 }
 
@@ -7240,13 +7240,13 @@ function renderTargetSuggestions(payload) {
     const card = document.createElement("article"); card.className = "target-suggestion-card";
     const title = document.createElement("h3"); title.textContent = suggestion.display_name;
     const figure = document.createElement("figure");
-    const image = document.createElement("img"); image.src = suggestion.image.src; image.alt = `Image de référence de ${suggestion.display_name}`;
+    const image = document.createElement("img"); image.src = suggestion.image.src; image.alt = suggestion.image.alt || `Image de référence de ${suggestion.display_name}`;
     image.width = 160; image.height = 140;
     image.addEventListener("error", () => { image.hidden = true; });
     const caption = document.createElement("figcaption");
     const source = document.createElement("a"); source.href = suggestion.image.source_url; source.textContent = suggestion.image.credit;
     source.target = "_blank"; source.rel = "noopener noreferrer";
-    const license = document.createElement("a"); license.href = suggestion.image.license_url; license.textContent = "CC BY 4.0"; license.target = "_blank"; license.rel = "noopener noreferrer";
+    const license = document.createElement("a"); license.href = suggestion.image.license_url; license.textContent = suggestion.image.license_label || "CC BY 4.0"; license.target = "_blank"; license.rel = "noopener noreferrer";
     caption.append(source, document.createTextNode(" · "), license);
     figure.append(image, caption);
     const reference = document.createElement("p"); reference.className = "field-note";
@@ -7262,7 +7262,8 @@ function renderTargetSuggestions(payload) {
       if (guardUnresolvedAcceptance() || !confirmDiscardProjectProgress()) return;
       await setDiscoveryMode(false);
       setView("projects");
-      if (Object.hasOwn(state.configuration?.projects || {}, suggestion.catalog_key)) { openProjectProgress(suggestion.catalog_key); return; }
+      const existingKey = suggestion.existing_project_key || suggestion.catalog_key;
+      if (Object.hasOwn(state.configuration?.projects || {}, existingKey)) { openProjectProgress(existingKey); return; }
       if (!state.projectTemplates?.length) await loadProjectTemplates();
       document.querySelector("#project-create").open = true;
       document.querySelector("#project-template").value = suggestion.catalog_key;
