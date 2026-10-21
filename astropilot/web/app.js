@@ -7233,8 +7233,9 @@ function renderTargetSuggestions(payload) {
   setView("discovery");
   const cards = document.querySelector("#target-suggestion-cards"); cards.replaceChildren();
   document.querySelector("#target-suggestions-status").textContent = payload.suggestions?.length
-    ? payload.notice : "Aucune cible de cette sélection n’a de créneau suffisamment favorable avec vos horaires et les filtres confirmés. Vos projets sont conservés. Vous pouvez revoir vos horaires ou réessayer lorsque les prévisions évoluent.";
+    ? payload.notice : "Aucune cible de cette sélection ne réunit un cadrage adapté, un filtre confirmé et un créneau suffisamment favorable. Vos projets sont conservés. Consultez les correspondances avec votre matériel ci-dessous, revoyez vos horaires ou réessayez lorsque les prévisions évoluent.";
   document.querySelector("#target-suggestions-scope").textContent = payload.scope || "";
+  renderEquipmentCatalogue(payload.catalogue);
   for (const suggestion of payload.suggestions || []) {
     const card = document.createElement("article"); card.className = "target-suggestion-card";
     const title = document.createElement("h3"); title.textContent = suggestion.display_name;
@@ -7276,9 +7277,53 @@ function renderTargetSuggestions(payload) {
     const details = document.createElement("details");
     const summary = document.createElement("summary"); summary.textContent = "Pourquoi cette cible et ce filtre ?";
     details.append(summary, why, advice);
+    if (suggestion.equipment_match) {
+      const material = suggestion.equipment_match;
+      const match = document.createElement("p");
+      match.textContent = `${material.framing.label} ${material.extent_scope}`;
+      details.append(match);
+    }
     card.append(title, figure, reference, timing, filter, difficulty, choose, details); cards.append(card);
   }
   document.querySelector("#target-suggestions-title").focus();
+}
+
+function renderEquipmentCatalogue(catalogue) {
+  const container = document.querySelector("#equipment-catalogue");
+  container.replaceChildren();
+  if (!catalogue) return;
+  const details = document.createElement("details");
+  const summary = document.createElement("summary"); summary.textContent = "Comprendre les correspondances avec mon matériel";
+  const notice = document.createElement("p"); notice.textContent = catalogue.notice;
+  details.append(summary, notice);
+  const geometry = catalogue.geometry;
+  const field = document.createElement("p");
+  field.textContent = geometry.status === "nominal"
+    ? `Champ approximatif : ${geometry.field_width_deg.toFixed(2)}° × ${geometry.field_height_deg.toFixed(2)}°. ${geometry.assumptions}`
+    : geometry.reason;
+  details.append(field);
+  for (const target of catalogue.targets) {
+    const item = document.createElement("details");
+    const heading = document.createElement("summary"); heading.textContent = target.name;
+    const size = document.createElement("p");
+    size.textContent = target.extent_arcmin == null ? "Étendue photographique non documentée."
+      : `Étendue ${target.extent_bound === "lower_limit" ? "supérieure à" : "cataloguée approximative :"} ${target.extent_arcmin} minutes d’arc. ${target.difficulty}.`;
+    const content = document.createElement("p");
+    content.textContent = `${target.scope} ${target.framing.label} ${target.advice}`;
+    const filters = document.createElement("p");
+    filters.textContent = `Approche retenue : ${target.filter_types.join(" / ")}. ` +
+      (target.confirmed_filters.length ? target.confirmed_filters.map(filter => filter.label).join(" ") : "Références exactes et possession des filtres à confirmer.");
+    const support = document.createElement("p");
+    support.textContent = target.project_supported ? "Projet présent dans cette bêta pour certaines configurations ; vérifier les filtres pris en charge puis relancer l’analyse."
+      : "Fiche de référence uniquement : cette bêta ne propose pas encore de mission pour cette cible.";
+    const source = document.createElement("a");
+    source.href = catalogue.sources[target.extent_source].url;
+    source.textContent = "Source des dimensions ou de la nature de la cible";
+    source.target = "_blank"; source.rel = "noopener noreferrer";
+    item.append(heading, size, content, filters, support, source); details.append(item);
+  }
+  const limits = document.createElement("p"); limits.textContent = catalogue.limits.join(" ");
+  details.append(limits); container.append(details);
 }
 
 

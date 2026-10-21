@@ -2,6 +2,7 @@
 from math import isfinite
 
 from astropilot.project_templates import project_templates
+from astropilot.target_catalogue import equipment_catalogue
 from decision.services.candidate_assessment import CandidateAssessment, CandidateViabilityEvaluator
 from decision.services.session_availability_windowing import select_physical_productive_window
 from decision.services.tonight_application_service import _select_forecast_night
@@ -36,6 +37,9 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
     confirmed = set(confirmed_filter_profile_ids)
     if not confirmed or not confirmed <= supported:
         raise ValueError("discovery_filter_confirmation_required")
+    catalogue = equipment_catalogue(profile=profile, equipment_id=inputs.equipment,
+                                   confirmed_filter_profile_ids=confirmed)
+    material_matches = {item["key"]: item for item in catalogue["targets"]}
     # An empty portfolio is intentional for ranking: discovery must be independent
     # of saved goals and accumulated exposure. The original profile stays untouched.
     effective = {**profile, "projects": {}, "sessions": [],
@@ -60,6 +64,9 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
             evaluation = evaluations.get(key)
             if key not in TARGET_IMAGES or not evaluation:
                 continue
+            material = material_matches.get(key)
+            if not material or material["framing"]["status"] != "nominal_fit":
+                continue
             score = evaluation.get("global_score", evaluation.get("score"))
             if isinstance(score, bool) or not isinstance(score, (int, float)) or not isfinite(score) or score <= 0:
                 continue
@@ -78,12 +85,19 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
                            if item["equipment_id"] == inputs.equipment and item["filter_profile_id"] in confirmed]
                 if len(matches) != 1:
                     continue
+                optical_match = next((item for item in material["confirmed_filters"]
+                    if item["filter_profile_id"] == matches[0]["filter_profile_id"]), None)
+                if not optical_match or optical_match["status"] != "documented_match":
+                    continue
                 suggestions.append({
                     "catalog_key": key, "display_name": template["display_name"],
                     "imaging_field_id": template["imaging_field_id"],
                     "acquisition_intent_id": intent["acquisition_intent_id"],
                     "filter": matches[0], "filter_type": intent["filter_type"],
                     "guidance": intent["guidance"], "image": TARGET_IMAGES[key],
+                    "equipment_match": {"geometry": catalogue["geometry"],
+                        "framing": material["framing"], "filter": optical_match,
+                        "extent_arcmin": material["extent_arcmin"], "extent_scope": material["scope"]},
                     "window_start": window.window_start.isoformat(), "window_end": window.window_end.isoformat(),
                     "already_saved": key in profile.get("projects", {}), "_score": score,
                 })
@@ -91,6 +105,7 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
     for item in suggestions:
         del item["_score"]
     return {"status": "suggestions" if suggestions else "no_suggestion", "suggestions": suggestions[:3],
-            "scope": "Préselection parmi North America et la Rosette, en Hα, pour les filtres précisément pris en charge. Ce n’est pas une recherche de toutes les cibles du ciel.",
+            "catalogue": catalogue,
+            "scope": f"Catalogue de référence : {len(catalogue['targets'])} cibles distinctes. La présélection automatique de cette bêta reste limitée à North America et la Rosette en Hα, avec cadrage et filtre vérifiés. Une fiche de référence ne constitue pas à elle seule une mission.",
             "notice": "Le créneau est une estimation selon les prévisions. Confirmez votre projet, puis relancez l’analyse avant de sortir. Aucun temps de pose n’est enregistré.",
             "weather_retrieved_at": weather.retrieved_at_utc.isoformat()}

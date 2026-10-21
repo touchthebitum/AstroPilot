@@ -2201,6 +2201,21 @@ def create_app(
         from astropilot.project_templates import project_templates
         return JSONResponse(project_templates(), headers={"Cache-Control": "no-store"})
 
+    @application.get("/v1/target-catalogue")
+    def get_target_catalogue(equipment: str | None = None):
+        from astropilot.target_catalogue import equipment_catalogue
+        try:
+            profile = profile_provider()
+            if not isinstance(profile, dict):
+                raise HTTPException(status_code=503, detail={"code": "catalogue_unavailable"})
+            identity = equipment if equipment is not None else profile.get("active_equipment")
+            if not isinstance(identity, str) or resolve_equipment_definition(profile, identity) is None:
+                raise HTTPException(status_code=422, detail={"code": "catalogue_equipment_unresolved"})
+            result = equipment_catalogue(profile=profile, equipment_id=identity)
+        except (OSError, ValueError, UserProfileError):
+            raise HTTPException(status_code=503, detail={"code": "catalogue_unavailable"}) from None
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
     @application.get("/v1/runtime-identity", include_in_schema=False)
     def runtime_identity():
         return runtime_identity_payload()

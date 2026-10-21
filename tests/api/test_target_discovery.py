@@ -44,6 +44,9 @@ def test_real_preselection_preserves_profile_and_requires_explicit_project(tmp_p
     assert proposal["filter"]["filter_profile_id"] == HA
     assert proposal["acquisition_intent_id"] == "ngc7000_ha"
     assert proposal["window_start"] < proposal["window_end"]
+    assert proposal["equipment_match"]["framing"]["status"] == "nominal_fit"
+    assert proposal["equipment_match"]["filter"]["status"] == "documented_match"
+    assert len(result["catalogue"]["targets"]) == 20
     assert not {"mission", "decision_id", "target_hours", "hours", "expected_gain"} & proposal.keys()
     assert saved == before
     assert not list(tmp_path.rglob("user_profile.json"))
@@ -67,6 +70,16 @@ def test_oiii_only_does_not_suggest_ha_targets(tmp_path, monkeypatch):
         confirmed_filter_profile_ids=["baader_oiii_highspeed_6_5nm"]))
     assert response.status_code == 200
     assert response.json()["suggestions"] == []
+
+
+@pytest.mark.parametrize("change", [{"f_ratio": 5.6}, {"focal_length_mm": 400}])
+def test_discovery_rejects_nominally_wrong_filter_range_or_incomplete_framing(tmp_path, monkeypatch, change):
+    from astropilot.equipment_catalog import EQUIPMENT_PROFILES
+    monkeypatch.setitem(EQUIPMENT_PROFILES, "samyang_183", {**EQUIPMENT_PROFILES["samyang_183"], **change})
+    response = client_for(tmp_path, monkeypatch).post("/v1/target-suggestions", json=request())
+    assert response.status_code == 200, response.text
+    assert response.json()["suggestions"] == []
+    assert response.json()["catalogue"]["targets"]
 
 
 def test_solid_cloud_and_too_short_availability_produce_no_suggestion(tmp_path, monkeypatch):
