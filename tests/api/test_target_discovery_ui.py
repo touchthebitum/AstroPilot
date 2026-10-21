@@ -80,7 +80,44 @@ for(const [index,alias] of ['Heart','Soul'].entries()) {
  locked=true;await choose.handlers.click();assert.equal(opened.length,index+1);locked=false;
 }
 assert.deepEqual(opened,['Heart','Soul']);assert.equal(JSON.stringify(state.configuration),before);
+renderTargetSuggestions({suggestions:[],catalogue:{},notice:'unused',scope:'Scope verified'});
+assert.equal(nodes['#target-suggestions-title'].textContent,'Aucune cible proposée pour vos horaires');
+assert.equal(nodes['#discovery-refresh'].hidden,false);
+assert.equal(nodes['#target-suggestion-cards'].children.length,0);
+assert.match(nodes['#target-suggestions-status'].textContent,/sans refaire la configuration/);
+assert.doesNotMatch(nodes['#target-suggestions-status'].textContent,/ciel couvert|100 %|mauvaise météo/i);
+assert.equal(JSON.stringify(state.configuration),before);
+renderTargetSuggestions(payload);
+assert.equal(nodes['#discovery-refresh'].hidden,true);
+assert.equal(nodes['#target-suggestions-title'].textContent,'Que pourriez-vous photographier ?');
 })().catch(error=>{console.error(error);process.exitCode=1;});
+'''
+    result = subprocess.run([node, '-e', program], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_empty_search_retry_keeps_availability_filters_and_configuration():
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node required for actual UI handler')
+    source = (Path(__file__).parents[2] / 'astropilot/web/app.js').read_text()
+    handler = source[source.index('document.querySelector("#discovery-refresh").addEventListener'):source.index('function renderTargetSuggestions(')]
+    program = r'''
+const assert=require('node:assert/strict');let retry,locked=false,calls=[],navigated=[];
+const state={discoveryMode:true,availability:{mode:'all_night'},configuration:{projects:{M42:{hours:0,target_hours:3}}},confirmedFilters:['baader_ha_highspeed_6_5nm']};
+const document={querySelector:()=>({addEventListener:(_event,fn)=>retry=fn})};
+function guardUnresolvedAcceptance(){return locked;}
+function loadTonight(value){calls.push(value);state.requestingRecommendation=true;}
+function setView(value){navigated.push(value);}
+''' + handler + r'''
+const before=JSON.stringify(state);
+retry();assert.equal(calls.length,1);assert.equal(calls[0],state.availability);
+retry();assert.equal(calls.length,1,'no duplicate while busy');
+delete state.requestingRecommendation;
+assert.equal(JSON.stringify(state),before,'retry must not rewrite the profile, filters or hours');
+locked=true;retry();assert.equal(calls.length,1);locked=false;
+state.availability=null;retry();assert.deepEqual(navigated,['availability']);assert.equal(calls.length,1);
+state.availability={mode:'all_night'};state.discoveryMode=false;retry();assert.equal(calls.length,1);
 '''
     result = subprocess.run([node, '-e', program], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

@@ -757,6 +757,6 @@ html[data-ui-mode="pro"][data-guided-view="availability"]:not([data-guided-initi
   .target-suggestion-card { padding: 1rem; }
 }
 #equipment-catalogue { margin: 20px 0; font-size: 15px; line-height: 1.6; }
-#equipment-catalogue details > summary { min-height: 44px; padding: 10px 0; cursor: pointer; color: var(--ink); }
+#equipment-catalogue details > summary, #target-suggestions > details > summary { min-height: 44px; padding: 10px 0; cursor: pointer; color: var(--ink); }
 #equipment-catalogue details details { padding: 0 16px; margin: 8px 0; border: 1px solid var(--line-bright); border-radius: 10px; }
 #equipment-catalogue p { color: var(--muted); }

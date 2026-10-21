@@ -6264,8 +6264,11 @@ function showTonightUnavailable(payload) {
       : "Aucun créneau ne permet de lancer une mission dans les conditions évaluées. Réessayez plus tard lorsque les prévisions évoluent."
     : `${technical} Réessayez plus tard lorsque les données ou les conditions évoluent.`;
   const chosen = state.selectedProjectId;
-  showMessage(title, chosen
-    ? `Cible choisie : ${chosen}. ${body} Votre choix est conservé ; aucune autre cible ne le remplace. Pour chercher une alternative, cochez « Me proposer une cible avec mon matériel » dans la préparation de séance.`
+  const simpleTitle = appliedUiMode === "simple" && productiveRefusal
+    ? (shortWindow ? "Le créneau disponible est trop court" : "Aucun créneau adapté à vos horaires")
+    : title;
+  showMessage(simpleTitle, chosen
+    ? `Cible choisie : ${chosen}. ${body} Votre choix est conservé ; aucune autre cible ne le remplace.${forecast?.overcast ? " Vous pourrez reprendre ce projet lorsque les prévisions évolueront." : " Pour chercher une alternative, cochez « Me proposer une cible avec mon matériel » dans la préparation de séance."}`
     : body, { kicker: "Analyse terminée" });
   text("#message-technical", forecast?.details || technical);
   const details = document.querySelector("#message-details");
@@ -7251,12 +7254,24 @@ document.querySelector("#discover-from-projects").addEventListener("click", asyn
   else await saveConfiguration();
 });
 document.querySelector("#discovery-back").addEventListener("click", () => { if (!guardUnresolvedAcceptance()) setView("availability"); });
+document.querySelector("#discovery-refresh").addEventListener("click", () => {
+  if (guardUnresolvedAcceptance() || state.requestingRecommendation) return;
+  if (!state.discoveryMode || !state.availability) {
+    setView("availability");
+    return;
+  }
+  loadTonight(state.availability);
+});
 
 function renderTargetSuggestions(payload) {
   setView("discovery");
+  const hasSuggestions = Boolean(payload.suggestions?.length);
+  document.querySelector("#target-suggestions-title").textContent = hasSuggestions
+    ? "Que pourriez-vous photographier ?" : "Aucune cible proposée pour vos horaires";
+  document.querySelector("#discovery-refresh").hidden = hasSuggestions;
   const cards = document.querySelector("#target-suggestion-cards"); cards.replaceChildren();
-  document.querySelector("#target-suggestions-status").textContent = payload.suggestions?.length
-    ? payload.notice : "Aucune cible de cette sélection ne réunit un cadrage adapté, un filtre confirmé et un créneau suffisamment favorable. Vos projets sont conservés. Consultez les correspondances avec votre matériel ci-dessous, revoyez vos horaires ou réessayez lorsque les prévisions évoluent.";
+  document.querySelector("#target-suggestions-status").textContent = hasSuggestions
+    ? payload.notice : "La recherche n’a retenu aucune cible parmi celles prises en charge avec vos horaires, votre matériel, vos filtres confirmés et les conditions prévues. Vos réglages et vos projets sont conservés. Vous pouvez réessayer lorsque les prévisions évoluent, sans refaire la configuration.";
   document.querySelector("#target-suggestions-scope").textContent = payload.scope || "";
   renderEquipmentCatalogue(payload.catalogue);
   for (const suggestion of payload.suggestions || []) {

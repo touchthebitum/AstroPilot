@@ -1521,6 +1521,9 @@ for (const stage of ['no_productive_slice','continuous_window_too_short']) {
    best_slice_tie_count:1,evaluated_slice_count:8,losses:{cloud:.4}}}};
  for (const mode of ['simple','pro']) {
   appliedUiMode=mode;showTonightUnavailable(payload);
+  assert.equal(shown.title,mode==='simple'
+    ? (stage==='continuous_window_too_short'?'Le créneau disponible est trop court':'Aucun créneau adapté à vos horaires')
+    : (stage==='continuous_window_too_short'?'Fenêtre productive trop courte':'Aucune tranche productive'));
   assert.match(shown.body,/Réessayez plus tard/);
   assert.doesNotMatch(shown.body,/seuil|points/i);
 
@@ -1592,6 +1595,11 @@ for (const mode of ['simple','pro']) {
 }
 showTonightUnavailable({...overcast,refusal_weather:{...overcast.refusal_weather,cloud_cover_min:65,cloud_cover_max:80}});
 assert.match(shown.body,/65 à 80 %/);assert.doesNotMatch(shown.title,/Ciel couvert/);
+state.selectedProjectId='Sh2-129';showTonightUnavailable(overcast);
+assert.match(shown.body,/Cible choisie : Sh2-129/);
+assert.doesNotMatch(shown.body,/chercher une alternative|Me proposer une cible/);
+assert.equal(state.selectedProjectId,'Sh2-129');
+delete state.selectedProjectId;
 showTonightUnavailable({...overcast,refusal_weather:{...overcast.refusal_weather,retrieved_at_utc:null}});
 assert.doesNotMatch(shown.title,/Ciel couvert/);
 showTonightUnavailable({...noIntent,acquisition_intent_assessments:[
