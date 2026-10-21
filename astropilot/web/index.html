@@ -201,6 +201,10 @@
             <input id="zero-projects" type="checkbox" checked>
             <span><strong>Aucun projet pour l’instant</strong><small>Sans projet, NightMerit peut rechercher une cible, mais ne pourra pas préparer de mission.</small></span>
           </label>
+          <div class="discovery-entry">
+            <button class="secondary-button" id="discover-from-projects" type="button">Je ne sais pas quoi photographier</button>
+            <p class="field-note">NightMerit peut rechercher une cible parmi celles prises en charge, selon votre matériel et vos horaires.</p>
+          </div>
           <details id="project-create">
             <summary>Créer mon premier projet ou ajouter un projet</summary>
             <p>Choisissez une cible prise en charge par cette bêta, puis le filtre et votre objectif de pose. Ce choix ne garantit pas que la cible sera adaptée à ce soir.</p>
@@ -224,6 +228,13 @@
 
       </section>
 
+      <section id="target-suggestions" class="availability-panel" aria-labelledby="target-suggestions-title" hidden>
+        <h2 id="target-suggestions-title" tabindex="-1">Que pourriez-vous photographier ?</h2>
+        <p id="target-suggestions-status" role="status"></p>
+        <div id="target-suggestion-cards"></div>
+        <p id="target-suggestions-scope" class="field-note"></p>
+        <button class="secondary-button" id="discovery-back" type="button">Modifier mes horaires ou mes filtres</button>
+      </section>
       <section id="availability-step" class="availability-panel" hidden aria-labelledby="availability-title">
         <div class="availability-heading">
           <p class="state-kicker">Préparer ma nuit</p>
@@ -255,6 +266,13 @@
           </div>
         </section>
         <form id="availability-form" novalidate>
+          <label class="check-field"><input id="discover-targets" type="checkbox"><span>Me proposer une cible avec mon matériel</span></label>
+          <fieldset id="discovery-filters" hidden>
+            <legend>Quels filtres possédez-vous ?</legend>
+            <p>Cochez uniquement les modèles que vous possédez. La recherche ne modifie pas vos projets.</p>
+            <div id="discovery-filter-choices"></div>
+            <p id="discovery-filter-feedback" role="status"></p>
+          </fieldset>
           <div id="saved-mission-entry" class="saved-mission-entry" hidden>
             <div><strong>Missions enregistrées</strong><p id="saved-mission-target"></p>
               <label for="saved-mission-choice">Choisir une mission</label>

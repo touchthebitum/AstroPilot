@@ -9,12 +9,12 @@ from decision.definitions.production_imaging_field_geometry import (
 )
 
 
-def test_production_definitions_are_an_immutable_single_field_tuple():
+def test_production_definitions_are_an_immutable_field_tuple():
     assert isinstance(IMAGING_FIELD_GEOMETRY_DEFINITIONS, tuple)
     assert tuple(
         definition.imaging_field_id
         for definition in IMAGING_FIELD_GEOMETRY_DEFINITIONS
-    ) == ("sh2-129_ou4",)
+    ) == ("sh2-129_ou4", "ngc7000", "rosette")
     assert not {
         "sh2-129",
         "ou4",

@@ -3630,6 +3630,7 @@ function setView(view) {
   if (view === "recommendation") state.guidedInitialConfiguration = false;
   const wizardVisible = wizardStates.includes(view);
   document.documentElement.dataset.guidedView = view;
+  document.querySelector("#target-suggestions").hidden = view !== "discovery";
   ui.configurationLoading.hidden = view !== "loading_configuration";
   ui.configurationError.hidden = view !== "configuration_error";
   ui.onboarding.hidden = !wizardVisible;
@@ -4729,8 +4730,15 @@ function renderProjects() {
   return true;
 }
 
-async function loadProjectTemplates() {
-  if (state.projectTemplatesLoading) return;
+function loadProjectTemplates() {
+  if (state.projectTemplatesRequest) return state.projectTemplatesRequest;
+  const operation = loadProjectTemplatesOnce();
+  state.projectTemplatesRequest = operation;
+  operation.finally(() => { if (state.projectTemplatesRequest === operation) state.projectTemplatesRequest = null; });
+  return operation;
+}
+
+async function loadProjectTemplatesOnce() {
   state.projectTemplatesLoading = true;
   const button = document.querySelector("#project-templates-load");
   const feedback = document.querySelector("#project-create-feedback");
@@ -4798,7 +4806,7 @@ function renderNewProjectIntents() {
       duration.textContent = "Combien d’heures prévoir ? Cette bêta ne dispose pas encore d’une estimation fiable pour votre matériel et votre ciel. Choisissez un objectif total que vous pourrez ajuster après vos premières images. Le minimum de 1 h du formulaire ne garantit pas un résultat visible.";
       details.append(summary, advice, duration);
       // Only curated help is linked; never turn arbitrary template data into a URL.
-      if (template.guidance?.source_url?.startsWith("https://science.nasa.gov/")) {
+      if (["https://science.nasa.gov/", "https://esahubble.org/", "https://www.eso.org/"].some(prefix => template.guidance?.source_url?.startsWith(prefix))) {
         const source = document.createElement("a");
         source.href = template.guidance.source_url;
         source.textContent = template.guidance.source_label;
@@ -5207,7 +5215,7 @@ function prepareGuidedProjectCreation() {
   const hasProjects = Object.keys(state.configurationDraft.projects || {}).length > 0;
   const creation = document.querySelector("#project-create");
   if (appliedUiMode === "simple" && !hasProjects && creation) {
-    creation.open = true;
+    creation.open = !state.discoveryMode;
     if (!state.projectTemplates) loadProjectTemplates();
     else if (state.projectCreationEquipmentId !== state.configurationDraft.equipment?.preset_id) renderNewProjectIntents();
   }
@@ -6612,6 +6620,8 @@ async function loadTonight(availability) {
   const configurationGeneration = state.configurationGeneration;
   const siteGeneration = state.decisionSiteGeneration;
   const siteFingerprint = decisionSiteFingerprint();
+  const discovery = Boolean(state.discoveryMode);
+  const confirmedFilters = discovery ? discoveryConfirmedFilters() : [];
   state.requestingRecommendation = true;
   state.availability = { ...availability };
   ui.recommendationSubmit.disabled = true;
@@ -6648,12 +6658,15 @@ async function loadTonight(availability) {
     // The bound includes decoding the body. A late reply cannot reach rendering
     // even if a transport ignores abort; this does not claim to stop server work.
     const {response, payload} = await Promise.race([deadline, (async () => {
-      const response = await fetch("/v1/tonight", {
+      const options = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ availability }),
+        body: discovery ? JSON.stringify({availability, confirmed_filter_profile_ids: confirmedFilters}) : JSON.stringify({ availability }),
         signal: controller.signal,
-      });
+      };
+      const response = await (discovery
+        ? fetch("/v1/target-suggestions", options)
+        : fetch("/v1/tonight", options));
       const payload = await response.json().catch(() => ({}));
       return {response, payload};
     })()]);
@@ -6680,7 +6693,9 @@ async function loadTonight(availability) {
         return;
       }
       if (response.status === 422) {
-        showAvailabilityError(backendAvailabilityMessage(payload?.detail));
+        showAvailabilityError(payload?.detail?.code?.startsWith("discovery_")
+          ? "Vérifiez les filtres possédés et vos horaires avant de relancer la recherche."
+          : backendAvailabilityMessage(payload?.detail));
         setView("availability");
         return;
       }
@@ -6690,6 +6705,10 @@ async function loadTonight(availability) {
       return;
     }
 
+    if (discovery) {
+      renderTargetSuggestions(payload);
+      return;
+    }
     clearAcceptedMission();
     setCurrentFieldObservationDecision(payload);
     if (payload.status === "weather_refused") {
@@ -6836,6 +6855,10 @@ ui.availabilityForm.addEventListener("submit", (event) => {
   try {
     const availability = collectAvailabilityPayload();
     showAvailabilityError("");
+    if (state.discoveryMode && !discoveryConfirmedFilters().length) {
+      showAvailabilityError("Cochez un filtre que vous possédez avant de chercher une cible.");
+      return;
+    }
     loadTonight(availability);
   } catch (error) {
     const message = availabilityValidationMessages[error.availabilityCode]
@@ -7154,6 +7177,110 @@ document.querySelector("#history-current-site").addEventListener("click", () => 
   document.querySelector("#history-table").replaceChildren();
   document.querySelector("#history-message").textContent = "Site sélectionné. Rechargez l’historique.";
 });
+
+
+function discoveryConfirmedFilters() {
+  return [...document.querySelectorAll("#discovery-filter-choices input:checked")].map(input => input.value);
+}
+
+async function setDiscoveryMode(enabled) {
+  const generation = (state.discoveryGeneration || 0) + 1;
+  state.discoveryGeneration = generation;
+  state.discoveryMode = enabled;
+  document.querySelector("#discover-targets").checked = enabled;
+  document.querySelector("#discovery-filters").hidden = !enabled;
+  ui.recommendationSubmit.textContent = enabled ? "Chercher une cible pour mes horaires" : "Préparer ma nuit";
+  if (!enabled) return;
+  const feedback = document.querySelector("#discovery-filter-feedback");
+  feedback.textContent = "Chargement des filtres pris en charge…";
+  const equipment = state.configurationDraft.equipment?.preset_id;
+  await loadProjectTemplates();
+  if (!state.discoveryMode || generation !== state.discoveryGeneration || equipment !== state.configurationDraft.equipment?.preset_id) return;
+  const choices = document.querySelector("#discovery-filter-choices");
+  const previouslyConfirmed = equipment === state.discoveryEquipment ? new Set(discoveryConfirmedFilters()) : new Set();
+  choices.replaceChildren();
+  state.discoveryEquipment = equipment;
+  const filters = new Map();
+  for (const template of (state.projectTemplates || []).filter(item => item.discovery_supported)) {
+    for (const intent of template.acquisition_intents) {
+      for (const filter of intent.supported_filters.filter(item => item.equipment_id === equipment)) filters.set(filter.filter_profile_id, filter);
+    }
+  }
+  for (const filter of filters.values()) {
+    const label = document.createElement("label"); label.className = "check-field";
+    const input = document.createElement("input"); input.type = "checkbox"; input.value = filter.filter_profile_id;
+    input.checked = previouslyConfirmed.has(input.value);
+    const text = document.createElement("span"); text.textContent = `${filter.label} (${filter.fwhm_nm} nm)`;
+    label.append(input, text); choices.append(label);
+  }
+  feedback.textContent = filters.size ? "Cette première recherche propose North America et la Rosette en Hα, si les conditions le permettent."
+    : "Aucun filtre précisément compatible n’est disponible pour ce matériel dans cette bêta. Vos réglages sont conservés.";
+}
+
+document.querySelector("#discover-targets").addEventListener("change", event => setDiscoveryMode(event.target.checked));
+document.querySelector("#discover-from-projects").addEventListener("click", async () => {
+  if (guardUnresolvedAcceptance() || !confirmDiscardProjectProgress()) return;
+  const revision = state.viewRevision;
+  const configurationGeneration = state.configurationGeneration;
+  await setDiscoveryMode(true);
+  if (revision !== state.viewRevision || configurationGeneration !== state.configurationGeneration || !state.discoveryMode) return;
+  if (state.configuration?.configured && configurationDraftMatchesSaved()) setView("availability");
+  else await saveConfiguration();
+});
+document.querySelector("#discovery-back").addEventListener("click", () => { if (!guardUnresolvedAcceptance()) setView("availability"); });
+
+function renderTargetSuggestions(payload) {
+  setView("discovery");
+  const cards = document.querySelector("#target-suggestion-cards"); cards.replaceChildren();
+  document.querySelector("#target-suggestions-status").textContent = payload.suggestions?.length
+    ? payload.notice : "Aucune cible de cette sélection n’a de créneau suffisamment favorable avec vos horaires et les filtres confirmés. Vos projets sont conservés. Vous pouvez revoir vos horaires ou réessayer lorsque les prévisions évoluent.";
+  document.querySelector("#target-suggestions-scope").textContent = payload.scope || "";
+  for (const suggestion of payload.suggestions || []) {
+    const card = document.createElement("article"); card.className = "target-suggestion-card";
+    const title = document.createElement("h3"); title.textContent = suggestion.display_name;
+    const figure = document.createElement("figure");
+    const image = document.createElement("img"); image.src = suggestion.image.src; image.alt = `Image de référence de ${suggestion.display_name}`;
+    image.width = 160; image.height = 140;
+    image.addEventListener("error", () => { image.hidden = true; });
+    const caption = document.createElement("figcaption");
+    const source = document.createElement("a"); source.href = suggestion.image.source_url; source.textContent = suggestion.image.credit;
+    source.target = "_blank"; source.rel = "noopener noreferrer";
+    const license = document.createElement("a"); license.href = suggestion.image.license_url; license.textContent = "CC BY 4.0"; license.target = "_blank"; license.rel = "noopener noreferrer";
+    caption.append(source, document.createTextNode(" · "), license);
+    figure.append(image, caption);
+    const reference = document.createElement("p"); reference.className = "field-note";
+    reference.textContent = "Image de référence en couleur. En Hα, votre image sera monochrome ; son cadrage et ses détails dépendront de votre matériel et de vos poses.";
+    const timing = document.createElement("p"); timing.textContent = `Créneau estimé : ${missionDateTimeLabel(suggestion.window_start, currentSiteTimezone())} → ${missionDateTimeLabel(suggestion.window_end, currentSiteTimezone())}.`;
+    const filter = document.createElement("p"); filter.textContent = `Filtre confirmé : ${suggestion.filter.label} (${suggestion.filter.fwhm_nm} nm).`;
+    const why = document.createElement("p"); why.textContent = suggestion.guidance.purpose;
+    const difficulty = document.createElement("p"); difficulty.textContent = suggestion.guidance.difficulty;
+    const advice = document.createElement("p"); advice.textContent = suggestion.guidance.advice;
+    const choose = document.createElement("button"); choose.type = "button"; choose.className = "primary-button";
+    choose.textContent = suggestion.already_saved ? "Retrouver ce projet" : "Choisir cette cible";
+    choose.addEventListener("click", async () => {
+      if (guardUnresolvedAcceptance() || !confirmDiscardProjectProgress()) return;
+      await setDiscoveryMode(false);
+      setView("projects");
+      if (Object.hasOwn(state.configuration?.projects || {}, suggestion.catalog_key)) { openProjectProgress(suggestion.catalog_key); return; }
+      if (!state.projectTemplates?.length) await loadProjectTemplates();
+      document.querySelector("#project-create").open = true;
+      document.querySelector("#project-template").value = suggestion.catalog_key;
+      renderNewProjectIntents();
+      const row = [...document.querySelectorAll("fieldset[data-new-intent-id]")].find(item => item.dataset.newIntentId === suggestion.acquisition_intent_id);
+      if (row) {
+        const check = row.querySelector('input[type="checkbox"]'); check.checked = true; row.dataset.intentSelected = "true";
+        requestAnimationFrame(() => row.querySelector('input[data-target-hours]')?.focus());
+      }
+      document.querySelector("#project-create-feedback").textContent = "Cible choisie. Indiquez votre objectif total sur une ou plusieurs nuits, puis confirmez le départ sans images si c’est votre cas. Enregistrez le projet et relancez l’analyse pour préparer une mission.";
+    });
+    const details = document.createElement("details");
+    const summary = document.createElement("summary"); summary.textContent = "Pourquoi cette cible et ce filtre ?";
+    details.append(summary, why, advice);
+    card.append(title, figure, reference, timing, filter, difficulty, choose, details); cards.append(card);
+  }
+  document.querySelector("#target-suggestions-title").focus();
+}
+
 
 updateHistoryFilterSummary();
 // End Outcome History.

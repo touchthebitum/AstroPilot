@@ -612,6 +612,14 @@ class TonightRequest(BaseModel):
     ] = "deep_sky"
     bortle: int | None = Field(default=None, ge=1, le=9)
 
+class TargetSuggestionsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    availability: SessionAvailabilityRequest
+    confirmed_filter_profile_ids: list[str] = Field(min_length=1, max_length=20)
+    location: LocationRequest | None = None
+    equipment: str | None = None
+    bortle: int | None = Field(default=None, ge=1, le=9)
+
 
 class UserSelectionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -2095,7 +2103,7 @@ def create_app(
 
     @application.middleware("http")
     async def tonight_timings(request: Request, call_next):
-        if request.method != "POST" or request.url.path != "/v1/tonight":
+        if request.method != "POST" or request.url.path not in {"/v1/tonight", "/v1/target-suggestions"}:
             return await call_next(request)
         timings = AnalysisTimings()
         request.state.analysis_timings = timings
@@ -2539,6 +2547,10 @@ def create_app(
                 },
             ) from exc
 
+    @application.post("/v1/target-suggestions")
+    def target_suggestions(request: TargetSuggestionsRequest, response: Response, http_request: Request):
+        return tonight(request, response, http_request)
+
     @application.post(
         "/v1/tonight",
         response_model=TonightResponseModel,
@@ -2812,6 +2824,20 @@ def create_app(
 
         log_weather("tonight_weather_available", category="available", started=weather_started,
                     diagnostic_id=weather_diagnostic_id)
+
+        if isinstance(request, TargetSuggestionsRequest):
+            from astropilot.target_discovery import discover_targets
+            try:
+                with timings.measure("calculation"):
+                    return JSONResponse(discover_targets(
+                        inputs=inputs, profile=profile, weather=weather,
+                        weather_freshness=weather_freshness, reference_time_utc=reference_time_utc,
+                        confirmed_filter_profile_ids=request.confirmed_filter_profile_ids),
+                        headers={"Cache-Control": "no-store", **diagnostic_headers})
+            except ValueError as exc:
+                if str(exc).startswith("discovery_"):
+                    raise HTTPException(status_code=422, detail={"code": str(exc)}) from exc
+                raise HTTPException(status_code=503, detail={"code": "discovery_evidence_unavailable"}) from exc
 
         try:
             with timings.measure("calculation"):

@@ -737,3 +737,22 @@ html[data-ui-mode="simple"] #project-new-intents fieldset[data-intent-selected="
 
 html[data-ui-mode="pro"][data-guided-view="availability"]:not([data-guided-initial="true"]) #terrain,
 html[data-ui-mode="pro"][data-guided-view="availability"]:not([data-guided-initial="true"]) #history-section { display: block; }
+
+/* Discovery remains a short, readable preselection in either presentation. */
+.discovery-entry { margin: 1.25rem 0; }
+#discovery-filters { margin: 1rem 0; border: 1px solid var(--border, #33485e); border-radius: 12px; padding: 1rem; }
+.target-suggestion-card { margin: 1.5rem 0; padding: 1.25rem; border: 1px solid var(--border, #33485e); border-radius: 16px; }
+.target-suggestion-card figure { margin: 0 0 1rem; }
+.target-suggestion-card img { object-fit: contain; max-width: 100%; border-radius: 8px; background: #060e18; }
+.target-suggestion-card figcaption { font-size: .8rem; margin-top: .5rem; overflow-wrap: anywhere; }
+#target-suggestions [hidden] { display: none; }
+
+#target-suggestions { padding: clamp(1rem, 3vw, 2rem); }
+.target-suggestion-card h3 { margin-top: 0; }
+.target-suggestion-card figure { display: flex; align-items: center; gap: 1rem; }
+.target-suggestion-card img { flex: 0 0 140px; width: 140px; height: 120px; }
+.target-suggestion-card details { margin-top: 1rem; }
+@media (max-width: 520px) {
+  .target-suggestion-card figure { display: block; }
+  .target-suggestion-card { padding: 1rem; }
+}

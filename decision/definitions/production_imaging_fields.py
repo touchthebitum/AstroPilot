@@ -21,6 +21,14 @@ CELESTIAL_OBJECT_DEFINITIONS: tuple[CelestialObjectDefinition, ...] = (
     ),
 )
 
+# Additional single-component fields use the existing, explicitly identified catalog
+# entries. Discovery does not give these fields project progress or target hours.
+CELESTIAL_OBJECT_DEFINITIONS += tuple(
+    CelestialObjectDefinition(celestial_object_id=identity, canonical_name=key,
+                              object_type="emission nebula", object_subtype="H II region")
+    for identity, key in (("ngc7000", "NorthAmerica"), ("rosette", "Rosette"))
+)
+
 IMAGING_FIELD_DEFINITIONS: tuple[ImagingFieldDefinition, ...] = (
     ImagingFieldDefinition(
         imaging_field_id="sh2-129_ou4",
@@ -44,6 +52,18 @@ IMAGING_FIELD_DEFINITIONS: tuple[ImagingFieldDefinition, ...] = (
             ),
         ),
     ),
+)
+
+IMAGING_FIELD_DEFINITIONS += tuple(
+    ImagingFieldDefinition(
+        imaging_field_id=identity, display_name=name,
+        components=(ImagingFieldComponent(celestial_object_id=identity),),
+        acquisition_intents=(AcquisitionIntent(
+            acquisition_intent_id=identity + "_ha", filter_type="Ha",
+            primary_component_ids=(identity,), label="Hα · " + name),),
+    )
+    for identity, name in (("ngc7000", "North America · NGC 7000"),
+                           ("rosette", "Nébuleuse de la Rosette"))
 )
 
 

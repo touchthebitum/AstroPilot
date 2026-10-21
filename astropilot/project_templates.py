@@ -28,6 +28,20 @@ INTENT_GUIDANCE = {
     },
 }
 
+for identity, name, purpose, advice, source in (
+    ("ngc7000", "North America", "Faire ressortir les nuages d’hydrogène et leurs zones sombres.",
+     "Une grande nébuleuse pour apprendre le cadrage, le suivi et l’empilement. Le filtre Hα produit une image monochrome ; la couleur demande d’autres acquisitions.",
+     "https://esahubble.org/images/heic0510a/"),
+    ("rosette", "la Rosette", "Photographier la couronne de gaz autour de l’amas central.",
+     "Travaillez la mise au point sur les étoiles et le contraste de la nébuleuse. Le filtre Hα produit une image monochrome ; la couleur demande d’autres acquisitions.",
+     "https://www.eso.org/public/images/b12/"),
+):
+    PROJECT_GUIDANCE[identity] = {"summary": "Un projet Hα pour découvrir " + name + ". Le ciel, le suivi et le traitement restent déterminants.",
+        "source_url": source, "source_label": "Découvrir cette nébuleuse et la source de son image"}
+    INTENT_GUIDANCE[(identity, identity + "_ha")] = {
+        "difficulty": "Pour progresser · nébuleuse étendue",
+        "purpose": purpose + " Le filtre Hα isole l’émission de l’hydrogène.", "advice": advice}
+
 
 def project_templates() -> list[dict]:
     objects = {item.celestial_object_id: item for item in CELESTIAL_OBJECT_DEFINITIONS}
@@ -43,6 +57,7 @@ def project_templates() -> list[dict]:
         result.append({
             "catalog_key": keys[0], "imaging_field_id": field.imaging_field_id,
             "display_name": field.display_name,
+            "discovery_supported": field.imaging_field_id in {"ngc7000", "rosette"},
             **({"guidance": dict(PROJECT_GUIDANCE[field.imaging_field_id])}
                if field.imaging_field_id in PROJECT_GUIDANCE else {}),
             "acquisition_intents": [
