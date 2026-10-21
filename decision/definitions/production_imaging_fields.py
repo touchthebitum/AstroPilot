@@ -26,7 +26,7 @@ CELESTIAL_OBJECT_DEFINITIONS: tuple[CelestialObjectDefinition, ...] = (
 CELESTIAL_OBJECT_DEFINITIONS += tuple(
     CelestialObjectDefinition(celestial_object_id=identity, canonical_name=key,
                               object_type="emission nebula", object_subtype="H II region")
-    for identity, key in (("ngc7000", "NorthAmerica"), ("rosette", "Rosette"))
+    for identity, key in (("ngc7000", "NorthAmerica"), ("rosette", "Rosette"), ("m42", "M42"))
 )
 
 IMAGING_FIELD_DEFINITIONS: tuple[ImagingFieldDefinition, ...] = (
@@ -63,7 +63,8 @@ IMAGING_FIELD_DEFINITIONS += tuple(
             primary_component_ids=(identity,), label="Hα · " + name),),
     )
     for identity, name in (("ngc7000", "North America · NGC 7000"),
-                           ("rosette", "Nébuleuse de la Rosette"))
+                           ("rosette", "Nébuleuse de la Rosette"),
+                           ("m42", "Nébuleuse d’Orion · M42"))
 )
 
 

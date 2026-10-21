@@ -7213,7 +7213,7 @@ async function setDiscoveryMode(enabled) {
     const text = document.createElement("span"); text.textContent = `${filter.label} (${filter.fwhm_nm} nm)`;
     label.append(input, text); choices.append(label);
   }
-  feedback.textContent = filters.size ? "Cette première recherche propose North America et la Rosette en Hα, si les conditions le permettent."
+  feedback.textContent = filters.size ? "Cette première recherche propose North America, la Rosette et Orion (M42) en Hα, si les conditions le permettent."
     : "Aucun filtre précisément compatible n’est disponible pour ce matériel dans cette bêta. Vos réglages sont conservés.";
 }
 
@@ -7250,7 +7250,7 @@ function renderTargetSuggestions(payload) {
     caption.append(source, document.createTextNode(" · "), license);
     figure.append(image, caption);
     const reference = document.createElement("p"); reference.className = "field-note";
-    reference.textContent = "Image de référence en couleur. En Hα, votre image sera monochrome ; son cadrage et ses détails dépendront de votre matériel et de vos poses.";
+    reference.textContent = suggestion.image.note || "Image de référence en couleur. En Hα, votre image sera monochrome ; son cadrage et ses détails dépendront de votre matériel et de vos poses.";
     const timing = document.createElement("p"); timing.textContent = `Créneau estimé : ${missionDateTimeLabel(suggestion.window_start, currentSiteTimezone())} → ${missionDateTimeLabel(suggestion.window_end, currentSiteTimezone())}.`;
     const filter = document.createElement("p"); filter.textContent = `Filtre confirmé : ${suggestion.filter.label} (${suggestion.filter.fwhm_nm} nm).`;
     const why = document.createElement("p"); why.textContent = suggestion.guidance.purpose;

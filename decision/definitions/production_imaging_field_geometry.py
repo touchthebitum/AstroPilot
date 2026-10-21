@@ -25,6 +25,8 @@ IMAGING_FIELD_GEOMETRY_DEFINITIONS += (
         reference_ra_deg=314.75, reference_dec_deg=44.33),
     ImagingFieldGeometryDefinition(imaging_field_id="rosette",
         reference_ra_deg=97.5, reference_dec_deg=4.95),
+    ImagingFieldGeometryDefinition(imaging_field_id="m42",
+        reference_ra_deg=83.8221, reference_dec_deg=-5.3911),
 )
 
 

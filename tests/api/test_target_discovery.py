@@ -119,7 +119,7 @@ def test_new_catalog_fields_accept_explicit_targets_and_keep_zero_progress(tmp_p
         "equipment": {"preset_id": "samyang_183"}, "projects": projects})
     assert response.status_code == 200, response.text
     loaded = client.get("/v1/configuration").json()
-    assert set(loaded["projects"]) == {"NorthAmerica", "Rosette"}
+    assert set(loaded["projects"]) == {"NorthAmerica", "Rosette", "M42"}
     assert all(item["hours"] == 0 for item in loaded["projects"].values())
 
     from astro_score import build_durable_tonight_application_service

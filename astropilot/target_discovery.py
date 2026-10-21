@@ -16,6 +16,13 @@ TARGET_IMAGES = {
         "credit": "Davide De Martin (ESA/Hubble), the ESA/ESO/NASA Photoshop FITS Liberator & Digitized Sky Survey 2",
         "license_url": "https://creativecommons.org/licenses/by/4.0/",
     },
+    "M42": {
+        "src": "/ui/target-orion.jpg",
+        "source_url": "https://eso.org/public/images/eso1723a/",
+        "credit": "ESO/G. Beccari",
+        "license_url": "https://creativecommons.org/licenses/by/4.0/",
+        "note": "Vue professionnelle de la région centrale d’Orion, plus serrée que votre champ au 135 mm. Cette image combine plusieurs filtres ; elle ne prédit ni votre cadrage ni votre résultat en Hα.",
+    },
     "Rosette": {
         "src": "/ui/target-rosette.jpg",
         "source_url": "https://www.eso.org/public/images/b12/",
@@ -106,6 +113,6 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
         del item["_score"]
     return {"status": "suggestions" if suggestions else "no_suggestion", "suggestions": suggestions[:3],
             "catalogue": catalogue,
-            "scope": f"Catalogue étendu : {catalogue['extended_catalogue']['records']} fiches, dont {len(catalogue['targets'])} cibles étudiées. La présélection automatique de cette bêta reste limitée à North America et la Rosette en Hα, avec cadrage et filtre vérifiés. Une fiche de référence ne constitue pas à elle seule une mission.",
+            "scope": f"Catalogue étendu : {catalogue['extended_catalogue']['records']} fiches, dont {len(catalogue['targets'])} cibles étudiées. La présélection automatique de cette bêta reste limitée à North America, la Rosette et Orion (M42) en Hα, avec cadrage et filtre vérifiés. Une fiche de référence ne constitue pas à elle seule une mission.",
             "notice": "Le créneau est une estimation selon les prévisions. Confirmez votre projet, puis relancez l’analyse avant de sortir. Aucun temps de pose n’est enregistré.",
             "weather_retrieved_at": weather.retrieved_at_utc.isoformat()}

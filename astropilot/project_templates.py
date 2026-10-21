@@ -32,6 +32,9 @@ for identity, name, purpose, advice, source in (
     ("ngc7000", "North America", "Faire ressortir les nuages d’hydrogène et leurs zones sombres.",
      "Une grande nébuleuse pour apprendre le cadrage, le suivi et l’empilement. Le filtre Hα produit une image monochrome ; la couleur demande d’autres acquisitions.",
      "https://esahubble.org/images/heic0510a/"),
+    ("m42", "la nébuleuse d’Orion", "Photographier le gaz lumineux autour des jeunes étoiles d’Orion.",
+     "Une nébuleuse lumineuse pour progresser. Son cœur est beaucoup plus brillant que ses extensions : vérifiez qu’il n’est pas saturé et adaptez vos poses. Avec le Hα, le résultat est monochrome. Le ciel, le suivi et le traitement restent déterminants.",
+     "https://eso.org/public/images/eso1723a/"),
     ("rosette", "la Rosette", "Photographier la couronne de gaz autour de l’amas central.",
      "Travaillez la mise au point sur les étoiles et le contraste de la nébuleuse. Le filtre Hα produit une image monochrome ; la couleur demande d’autres acquisitions.",
      "https://www.eso.org/public/images/b12/"),
@@ -57,7 +60,7 @@ def project_templates() -> list[dict]:
         result.append({
             "catalog_key": keys[0], "imaging_field_id": field.imaging_field_id,
             "display_name": field.display_name,
-            "discovery_supported": field.imaging_field_id in {"ngc7000", "rosette"},
+            "discovery_supported": field.imaging_field_id in {"ngc7000", "rosette", "m42"},
             **({"guidance": dict(PROJECT_GUIDANCE[field.imaging_field_id])}
                if field.imaging_field_id in PROJECT_GUIDANCE else {}),
             "acquisition_intents": [
