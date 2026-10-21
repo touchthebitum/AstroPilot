@@ -80,6 +80,16 @@ def test_no_generic_narrowband_or_unidentified_lrgb_ownership_is_inferred():
     assert filter_match(canonical_target("NorthAmerica"), color, HA)["status"] == "unknown"
 
 
+def test_documented_lrgb_product_is_not_an_invented_transmission_profile_or_confirmed_ownership():
+    result = equipment_catalogue(profile={}, equipment_id="samyang_183")
+    family = result["reference_filter_families"][0]
+    assert family["manufacturer_product_id"] == "10220125"
+    assert family["ownership"] == "not_confirmed_by_this_catalogue"
+    assert family["transmission_model"] is None
+    assert not family["mission_profile_available"]
+    assert filter_match(canonical_target("M31"), EQUIPMENT_PROFILES["samyang_183"], family["id"])["status"] == "unknown"
+
+
 def test_all_legacy_keys_are_covered_without_duplicate_targets_or_migrating_projects():
     assert len(TARGETS) == 20
     assert len({item.key for item in TARGETS}) == len(TARGETS)

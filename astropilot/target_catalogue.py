@@ -39,7 +39,21 @@ SOURCES = {
         "url": "https://samyangus.com/collections/samyang-lenses/products/135mm-f2-0-full-frame-telephoto"},
     "baader": {"title": "Baader · f/2 Highspeed 6.5 nm, working range f/1.8–f/3.4",
         "url": "https://www.baader-planetarium.co.uk/2022/05/13/preshift-and-further-information-concerning-baader-cmos-filters-new-f-3-filter-category/"},
+    "astronomik_type2c": {"title": "Astronomik · L-RGB Type 2c",
+        "url": "https://www.astronomik.com/en/RGB-Filters/L-RGB-Typ-2c/",
+        "product_url": "https://www.astronomik.com/en/Astronomik-L-RGB-Type-2c-Filterset-1-25-M28-5/10220125"},
 }
+
+# A documented product family is NOT an optical transmission model or an owned
+# filter. No guessed Gaussian passbands are added to the production profiles.
+REFERENCE_FILTER_FAMILIES = ({
+    "id": "astronomik_lrgb_type2c_125", "manufacturer": "Astronomik",
+    "name": 'L-RGB Type 2c 1,25″ (M28,5)', "manufacturer_product_id": "10220125",
+    "filter_types": ["L", "R", "G", "B"], "glass_thickness_mm": 1,
+    "uv_ir_blocking": True, "manufacturer_focal_ratio_claim": "all_focal_ratios",
+    "source_id": "astronomik_type2c", "ownership": "not_confirmed_by_this_catalogue",
+    "transmission_model": None, "mission_profile_available": False,
+},)
 
 
 @dataclass(frozen=True)
@@ -225,6 +239,7 @@ def equipment_catalogue(*, profile: dict, equipment_id: str, confirmed_filter_pr
         targets.append(entry)
     return {"version": CATALOGUE_VERSION, "verified_on": "2026-10-21", "equipment_id": equipment_id, "geometry": geometry,
         "targets": targets, "sources": deepcopy(SOURCES),
+        "reference_filter_families": deepcopy(REFERENCE_FILTER_FAMILIES),
         "notice": "Correspondances documentées, pas une recommandation de sortie. La météo, la hauteur de la cible et vos horaires restent à analyser. Les entrées de référence ne créent pas de mission.",
         "limits": ["Les limites diffuses dépendent de la longueur d’onde et de la profondeur des images.",
             "Aucune durée de pose unitaire, durée totale idéale, qualité de suivi ou capacité de batterie n’est déduite de cette table.",

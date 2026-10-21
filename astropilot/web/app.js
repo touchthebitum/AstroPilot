@@ -7302,6 +7302,13 @@ function renderEquipmentCatalogue(catalogue) {
     ? `Champ approximatif : ${geometry.field_width_deg.toFixed(2)}° × ${geometry.field_height_deg.toFixed(2)}°. ${geometry.assumptions}`
     : geometry.reason;
   details.append(field);
+  for (const family of catalogue.reference_filter_families || []) {
+    const reference = document.createElement("p");
+    reference.textContent = `Référence LRGB documentée : ${family.manufacturer} ${family.name}. Sa présence dans le catalogue ne confirme pas que vous possédez ce modèle et ne l’active pas pour une mission. `;
+    const source = document.createElement("a"); source.href = catalogue.sources[family.source_id].url;
+    source.textContent = "Fiche du fabricant"; source.target = "_blank"; source.rel = "noopener noreferrer";
+    reference.append(source); details.append(reference);
+  }
   for (const target of catalogue.targets) {
     const item = document.createElement("details");
     const heading = document.createElement("summary"); heading.textContent = target.name;
