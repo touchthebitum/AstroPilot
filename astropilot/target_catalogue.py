@@ -10,7 +10,7 @@ from math import atan, degrees, isfinite
 
 from astropilot.user_profile import resolve_equipment_definition
 
-CATALOGUE_VERSION = "2026-10-21.1"
+CATALOGUE_VERSION = "2026-10-21.2"
 SOURCES = {
     "ngc2000": {"title": "NGC 2000.0 · Sinnott 1988 · CDS VII/118",
         "url": "https://cdsarc.cds.unistra.fr/viz-bin/ReadMe/VII/118?format=html&tex=true",
@@ -221,6 +221,7 @@ def filter_match(target: ImagingTarget, equipment: dict | None, filter_profile_i
 def equipment_catalogue(*, profile: dict, equipment_id: str, confirmed_filter_profile_ids=()) -> dict:
     """Read-only reference inventory, deliberately independent of weather/progress."""
     equipment = resolve_equipment_definition(profile, equipment_id)
+    from astropilot.extended_catalogue import catalogue_summary
     geometry = sensor_geometry(equipment)
     from decision.definitions.production_imaging_fields import CELESTIAL_OBJECT_DEFINITIONS, IMAGING_FIELD_DEFINITIONS
     objects = {item.celestial_object_id: item.canonical_name for item in CELESTIAL_OBJECT_DEFINITIONS}
@@ -240,6 +241,7 @@ def equipment_catalogue(*, profile: dict, equipment_id: str, confirmed_filter_pr
     return {"version": CATALOGUE_VERSION, "verified_on": "2026-10-21", "equipment_id": equipment_id, "geometry": geometry,
         "targets": targets, "sources": deepcopy(SOURCES),
         "reference_filter_families": deepcopy(REFERENCE_FILTER_FAMILIES),
+        "extended_catalogue": catalogue_summary(),
         "notice": "Correspondances documentées, pas une recommandation de sortie. La météo, la hauteur de la cible et vos horaires restent à analyser. Les entrées de référence ne créent pas de mission.",
         "limits": ["Les limites diffuses dépendent de la longueur d’onde et de la profondeur des images.",
             "Aucune durée de pose unitaire, durée totale idéale, qualité de suivi ou capacité de batterie n’est déduite de cette table.",

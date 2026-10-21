@@ -83,11 +83,14 @@ def test_wheel_includes_only_immutable_product_assets():
     package_data = _pyproject()["tool"]["setuptools"]["package-data"]
 
     assert package_data == {
-        "astropilot": ["knowledge/objects/*.json", "web/*", "reference_stations_v1.json"],
+        "astropilot": ["knowledge/objects/*.json", "web/*", "reference_stations_v1.json", "catalogue_data/*"],
     }
     declared_patterns = package_data["astropilot"]
     assert "data/user_profile.json" not in declared_patterns
     assert "user_filters.json" not in declared_patterns
+    assert {item.name for item in (ROOT / "astropilot/catalogue_data").iterdir() if item.is_file()} == {
+        "NGC.csv", "addendum.csv", "NGC_guide.txt", "AUTHORS", "CC-BY-SA-4.0.txt", "README.md", "manifest.json", "UPSTREAM-COPYRIGHT.txt",
+    }
 
 
 def test_obsolete_image_quality_demo_is_not_shipped_as_a_module():

@@ -106,6 +106,6 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
         del item["_score"]
     return {"status": "suggestions" if suggestions else "no_suggestion", "suggestions": suggestions[:3],
             "catalogue": catalogue,
-            "scope": f"Catalogue de référence : {len(catalogue['targets'])} cibles distinctes. La présélection automatique de cette bêta reste limitée à North America et la Rosette en Hα, avec cadrage et filtre vérifiés. Une fiche de référence ne constitue pas à elle seule une mission.",
+            "scope": f"Catalogue étendu : {catalogue['extended_catalogue']['records']} fiches, dont {len(catalogue['targets'])} cibles étudiées. La présélection automatique de cette bêta reste limitée à North America et la Rosette en Hα, avec cadrage et filtre vérifiés. Une fiche de référence ne constitue pas à elle seule une mission.",
             "notice": "Le créneau est une estimation selon les prévisions. Confirmez votre projet, puis relancez l’analyse avant de sortir. Aucun temps de pose n’est enregistré.",
             "weather_retrieved_at": weather.retrieved_at_utc.isoformat()}

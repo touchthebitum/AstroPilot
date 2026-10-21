@@ -14,7 +14,7 @@ from time import perf_counter
 from typing import Annotated, Any, Callable, Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -2212,6 +2212,32 @@ def create_app(
             if not isinstance(identity, str) or resolve_equipment_definition(profile, identity) is None:
                 raise HTTPException(status_code=422, detail={"code": "catalogue_equipment_unresolved"})
             result = equipment_catalogue(profile=profile, equipment_id=identity)
+        except (OSError, ValueError, UserProfileError):
+            raise HTTPException(status_code=503, detail={"code": "catalogue_unavailable"}) from None
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+    @application.get("/catalogue", include_in_schema=False)
+    def extended_catalogue_page():
+        return HTMLResponse((web_root / "catalogue.html").read_text())
+
+    @application.get("/v1/target-catalogue/search")
+    def get_extended_catalogue(q: str = Query(default="", max_length=120),
+        equipment: str | None = None, kind: str | None = Query(default=None, max_length=40),
+        framing: Literal["nominal_fit", "small_in_field", "requires_framing_check", "unknown"] | None = None,
+        offset: int = Query(default=0, ge=0, le=100000), limit: int = Query(default=25, ge=1, le=100)):
+        from astropilot.extended_catalogue import search_catalogue, KINDS
+        from astropilot.target_catalogue import TARGETS
+        try:
+            profile = profile_provider()
+            if not isinstance(profile, dict):
+                raise HTTPException(status_code=503, detail={"code": "catalogue_unavailable"})
+            identity = equipment if equipment is not None else profile.get("active_equipment")
+            if identity is not None and (not isinstance(identity, str) or resolve_equipment_definition(profile, identity) is None):
+                raise HTTPException(status_code=422, detail={"code": "catalogue_equipment_unresolved"})
+            if kind and kind not in {item[0] for item in KINDS.values()} | {item.kind for item in TARGETS}:
+                raise HTTPException(status_code=422, detail={"code": "catalogue_kind_invalid"})
+            result = search_catalogue(profile=profile, equipment_id=identity, query=q,
+                kind=kind, framing=framing, offset=offset, limit=limit)
         except (OSError, ValueError, UserProfileError):
             raise HTTPException(status_code=503, detail={"code": "catalogue_unavailable"}) from None
         return JSONResponse(result, headers={"Cache-Control": "no-store"})

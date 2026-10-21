@@ -1,0 +1,3 @@
+# Preserve the pinned upstream bytes, including on Windows autocrlf checkouts.
+# Runtime SHA-256 checks deliberately fail if a bundled catalogue is modified.
+astropilot/catalogue_data/* -text

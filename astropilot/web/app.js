@@ -7296,6 +7296,12 @@ function renderEquipmentCatalogue(catalogue) {
   const summary = document.createElement("summary"); summary.textContent = "Comprendre les correspondances avec mon matériel";
   const notice = document.createElement("p"); notice.textContent = catalogue.notice;
   details.append(summary, notice);
+  if (catalogue.extended_catalogue) {
+    const browse = document.createElement("a");
+    browse.href = `/catalogue?equipment=${encodeURIComponent(catalogue.equipment_id)}`;
+    browse.textContent = `Rechercher parmi les ${catalogue.extended_catalogue.records.toLocaleString("fr-CH")} fiches du catalogue étendu`;
+    browse.target = "_blank"; browse.rel = "noopener noreferrer"; details.append(browse);
+  }
   const geometry = catalogue.geometry;
   const field = document.createElement("p");
   field.textContent = geometry.status === "nominal"
