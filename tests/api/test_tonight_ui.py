@@ -179,7 +179,7 @@ def test_tonight_ui_assets_are_served():
     assert "availability.duration =" in script.text
     assert "availability.start_local =" in script.text
     assert "availability.end_local =" in script.text
-    assert "JSON.stringify({ availability })" in script.text
+    assert "JSON.stringify({ availability, ...(selectedProjectId ? {selected_project_id: selectedProjectId} : {}) })" in script.text
     assert "state.availability" in script.text
     assert "requestingRecommendation" in script.text
     assert "invalid_session_availability_fields" in script.text
