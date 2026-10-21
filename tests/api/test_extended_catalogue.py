@@ -178,3 +178,55 @@ showCatalogue=payload=>shown.push(payload);
 '''
     result = subprocess.run([node, "-e", harness], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_production_first_run_catalogue_does_not_require_or_create_a_profile(tmp_path, monkeypatch):
+    """Use the real default provider, as the packaged app does on a clean Mac."""
+    monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(tmp_path))
+    def no_weather(*args):
+        pytest.fail('First-run reference lookup must not call weather')
+    client = TestClient(create_app(weather_provider=no_weather))
+    assert not client.get('/v1/configuration').json()['configured']
+    response = client.get('/v1/target-catalogue/search?q=M31&limit=1')
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload['results'][0]['catalogue_id'] == 'NGC0224'
+    assert payload['geometry']['status'] == 'unknown'
+    assert payload['equipment_id'] is None
+    assert payload['catalogue']['records'] == 13381
+    response = client.get('/v1/target-catalogue/search?q=IC1396&equipment=samyang_183')
+    assert response.status_code == 200, response.text
+    assert {r['major_arcmin'] for r in response.json()['results']} == {14, 170}
+    assert client.get('/v1/target-catalogue?equipment=samyang_183').status_code == 200
+    assert client.get('/v1/target-catalogue').status_code == 422  # no setup guessed
+    assert not client.get('/v1/configuration').json()['configured']
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize('contents', [b'{broken json', b'{"projects":{}}', b'\xff\xfe'])
+def test_production_invalid_profile_is_not_silently_treated_as_first_run(tmp_path, monkeypatch, contents):
+    monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(tmp_path))
+    path = tmp_path / 'user_profile.json'
+    path.write_bytes(contents)
+    client = TestClient(create_app())
+    for route in ['/v1/target-catalogue/search?q=M31', '/v1/target-catalogue?equipment=samyang_183']:
+        response = client.get(route)
+        assert response.status_code == 503, response.text
+        assert response.json()['detail']['code'] == 'catalogue_unavailable'
+        assert str(tmp_path) not in response.text
+    assert path.read_bytes() == contents
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_injected_missing_provider_failure_is_not_masked(tmp_path, monkeypatch):
+    from astropilot.user_profile import UserProfileError
+    monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(tmp_path))
+    def failing_provider():
+        try:
+            (tmp_path / 'user_profile.json').read_text()
+        except FileNotFoundError as cause:
+            raise UserProfileError('injected failure') from cause
+    client = TestClient(create_app(profile_provider=failing_provider))
+    response = client.get('/v1/target-catalogue/search?q=M31')
+    assert response.status_code == 503
+    assert not list(tmp_path.iterdir())

@@ -2201,11 +2201,25 @@ def create_app(
         from astropilot.project_templates import project_templates
         return JSONResponse(project_templates(), headers={"Cache-Control": "no-store"})
 
+    def reference_catalogue_profile():
+        # A catalogue lookup needs no saved observing setup. Only a genuinely
+        # absent production profile is treated as first run; corrupt/unreadable
+        # profiles and injected provider failures still fail closed.
+        try:
+            return profile_provider()
+        except UserProfileError as exc:
+            cause = exc.__cause__
+            if (profile_provider is _production_profile_provider
+                    and isinstance(cause, FileNotFoundError)
+                    and cause.filename == str(get_user_data_dir() / "user_profile.json")):
+                return {}
+            raise
+
     @application.get("/v1/target-catalogue")
     def get_target_catalogue(equipment: str | None = None):
         from astropilot.target_catalogue import equipment_catalogue
         try:
-            profile = profile_provider()
+            profile = reference_catalogue_profile()
             if not isinstance(profile, dict):
                 raise HTTPException(status_code=503, detail={"code": "catalogue_unavailable"})
             identity = equipment if equipment is not None else profile.get("active_equipment")
@@ -2228,7 +2242,7 @@ def create_app(
         from astropilot.extended_catalogue import search_catalogue, KINDS
         from astropilot.target_catalogue import TARGETS
         try:
-            profile = profile_provider()
+            profile = reference_catalogue_profile()
             if not isinstance(profile, dict):
                 raise HTTPException(status_code=503, detail={"code": "catalogue_unavailable"})
             identity = equipment if equipment is not None else profile.get("active_equipment")
