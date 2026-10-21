@@ -85,8 +85,8 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
                  "location": inputs.location, "active_equipment": inputs.equipment,
                  "available_equipment": [inputs.equipment]}
     if forecast is None:
-        from astro_score import forecast_astro
-        forecast = forecast_astro
+        from astro_score import forecast_session_astro
+        forecast = forecast_session_astro
     run = forecast(inputs.location["latitude"], inputs.location["longitude"],
                    inputs.location["name"], inputs.bortle, target="deep_sky", goal="nebulae",
                    weather=weather, profile=effective, reference_time_utc=reference_time_utc,

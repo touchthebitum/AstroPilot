@@ -2210,7 +2210,10 @@ def forecast_astro(
     *,
     reference_time_utc: datetime,
     availability=None,
+    first_available_night_only: bool = False,
 ) -> ForecastRun:
+    if not isinstance(first_available_night_only, bool):
+        raise TypeError("first_available_night_only must be a bool")
     if not isinstance(reference_time_utc, datetime):
         raise ValueError("invalid_reference_time")
     if reference_time_utc.utcoffset() is None:
@@ -2286,7 +2289,18 @@ def forecast_astro(
             )
         )
 
+        # Session callers consume the earliest returned evening only. Stop
+        # after the identical first result, not after a favourable weather/score
+        # result. General multi-night forecasts retain their full seven nights.
+        if first_available_night_only:
+            break
+
     return ForecastRun(nights=tuple(results), evidence=forecast_evidence)
+
+
+def forecast_session_astro(*args, **kwargs) -> ForecastRun:
+    """Same session evidence and first evening without computing unused nights."""
+    return forecast_astro(*args, **kwargs, first_available_night_only=True)
 
 
 def best_equipment_for_object(object_name, profile=None):
@@ -2424,7 +2438,7 @@ portfolio_engine = PortfolioEngine()
 
 def build_tonight_application_service() -> TonightApplicationService:
     return TonightApplicationService(
-        forecast_nights=forecast_astro,
+        forecast_nights=forecast_session_astro,
         build_candidates=recommend_project_for_night,
         opportunity_recommendation_service=(
             opportunity_recommendation_service
