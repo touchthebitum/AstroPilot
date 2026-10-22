@@ -4779,6 +4779,28 @@ async function loadProjectTemplatesOnce() {
   }
 }
 
+// Keep explicit start-state consent in this draft, scoped to its target.
+// A new draft or a successfully created project must not inherit old consent.
+function restoreNewProjectEmptyConfirmation(key) {
+  const control = document.querySelector("#project-new-empty");
+  if (state.projectEmptyConfirmationDraft !== state.configurationDraft) {
+    state.projectEmptyConfirmationDraft = state.configurationDraft;
+    state.projectEmptyConfirmations = new Map();
+  } else if (state.projectEmptyConfirmationKey) {
+    state.projectEmptyConfirmations.set(state.projectEmptyConfirmationKey, control.checked === true);
+  }
+  state.projectEmptyConfirmationKey = key || null;
+  control.checked = Boolean(key && state.projectEmptyConfirmations.get(key) === true);
+}
+
+function consumeNewProjectEmptyConfirmation(key) {
+  state.projectEmptyConfirmations?.delete(key);
+  if (state.projectEmptyConfirmationKey === key) {
+    state.projectEmptyConfirmationKey = null;
+    document.querySelector("#project-new-empty").checked = false;
+  }
+}
+
 function renderNewProjectIntents() {
   const key = document.querySelector("#project-template").value;
   const template = state.projectTemplates?.find(item => item.catalog_key === key);
@@ -4787,7 +4809,7 @@ function renderNewProjectIntents() {
   const guidance = document.querySelector("#project-target-guidance");
   guidance.textContent = template?.guidance?.summary || "";
   guidance.hidden = !guidance.textContent;
-  document.querySelector("#project-new-empty").checked = false;
+  restoreNewProjectEmptyConfirmation(template?.catalog_key);
   const equipmentId = state.configurationDraft.equipment?.preset_id;
   state.projectCreationEquipmentId = equipmentId;
   for (const intent of template?.acquisition_intents || []) {
@@ -4890,6 +4912,7 @@ function addNewProject() {
       document.querySelector("#project-new-empty").checked, projects);
     state.configurationDraft.projects = { ...projects, [key]: project };
     state.selectedProjectId = key;
+    consumeNewProjectEmptyConfirmation(key);
     renderProjects();
     document.querySelector("#project-create").open = false;
     feedback.textContent = "Projet ajouté au brouillon. Enregistrez pour conserver ce choix. Aucun temps de pose n’a été crédité.";
