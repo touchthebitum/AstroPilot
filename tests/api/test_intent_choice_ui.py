@@ -195,7 +195,8 @@ async function fetch(url, options) {
 
 
 def test_configuration_changes_invalidate_restored_mission():
-    initialize = _javascript_between("function initializeConfiguration(payload) {", "async function restoreSavedMission() {")
+    initialize = _javascript_between("function setConfigurationDraft(", "function restoreNewProjectEmptyConfirmation(")
+    initialize += _javascript_between("function initializeConfiguration(payload) {", "async function restoreSavedMission() {")
     save = _javascript_between("async function saveConfiguration() {", "const availabilityFieldsByMode")
     _run_javascript("""
 const assert = require('node:assert/strict');

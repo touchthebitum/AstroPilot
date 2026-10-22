@@ -13,7 +13,7 @@ def test_start_confirmation_scoped_to_target_and_draft():
     if not node:
         pytest.skip('Node is required to exercise UI consent state')
     source = SOURCE.read_text()
-    functions = source[source.index('function restoreNewProjectEmptyConfirmation('):
+    functions = source[source.index('function setConfigurationDraft('):
                        source.index('function renderNewProjectIntents(')]
     program = r'''
 const assert=require('node:assert/strict');
@@ -40,7 +40,10 @@ consumeNewProjectEmptyConfirmation('B');
 restoreNewProjectEmptyConfirmation('B');
 assert.equal(control.checked,false,'creating a project consumes its consent');
 control.checked=true;
-state.configurationDraft={projects:{}};
+setConfigurationDraft({projects:{}});
+assert.equal(control.checked,false,'draft replacement immediately clears the reused control');
+assert.equal(state.projectEmptyConfirmations.size,0,'all previous target choices are discarded');
+assert.equal(state.projectEmptyConfirmationKey,null);
 restoreNewProjectEmptyConfirmation('B');
 assert.equal(control.checked,false,'a new draft/profile cannot inherit consent');
 control.checked=true;

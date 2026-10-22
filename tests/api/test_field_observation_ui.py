@@ -2658,7 +2658,8 @@ def test_site_change_invalidates_immediate_decision_preserves_recovery_and_catal
         pytest.skip("Node is required for the configuration/observation integration harness")
     source = SCRIPT.read_text(encoding="utf-8")
     prefix = _field_observation_multicontext_program().split("(async () => {\n  // Two distinct states")[0]
-    configuration = source[source.index("function initializeConfiguration("):source.index("async function restoreSavedMission(")]
+    configuration = source[source.index("function setConfigurationDraft("):source.index("function restoreNewProjectEmptyConfirmation(")]
+    configuration += source[source.index("function initializeConfiguration("):source.index("async function restoreSavedMission(")]
     setter = source[source.index("function setCurrentFieldObservationDecision("):source.index("function normalizeError(")]
     tonight = source[source.index("async function loadTonight("):source.index('document.querySelector("#site-next").addEventListener')]
     additions = r'''

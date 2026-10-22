@@ -4779,6 +4779,16 @@ async function loadProjectTemplatesOnce() {
   }
 }
 
+// Replace a draft and invalidate its start-state choices before any UI rendering.
+function setConfigurationDraft(draft) {
+  if (state.configurationDraft === draft) return;
+  state.configurationDraft = draft;
+  state.projectEmptyConfirmationDraft = draft;
+  state.projectEmptyConfirmations = new Map();
+  state.projectEmptyConfirmationKey = null;
+  document.querySelector("#project-new-empty").checked = false;
+}
+
 // Keep explicit start-state consent in this draft, scoped to its target.
 // A new draft or a successfully created project must not inherit old consent.
 function restoreNewProjectEmptyConfirmation(key) {
@@ -5593,7 +5603,7 @@ function initializeConfiguration(payload) {
   if (projectFeedback) projectFeedback.textContent = "";
   try { localStorage.setItem(DECISION_SITE_STORAGE_KEY, decisionSiteFingerprint()); } catch (_) {}
   syncFieldObservationContext();
-  state.configurationDraft = draftFromConfiguration(payload);
+  setConfigurationDraft(draftFromConfiguration(payload));
   document.querySelector("#legacy-bortle-note").hidden = !payload.needs_configuration_confirmation;
   text("#onboarding-title", payload.needs_configuration_confirmation
     ? "Confirmez votre profil NightMerit."
@@ -6720,14 +6730,14 @@ async function loadTonight(availability) {
       }
       if (payload?.detail?.code === "location_timezone_unresolved") {
         state.availability = null;
-        state.configurationDraft = draftFromConfiguration(state.configuration);
+        setConfigurationDraft(draftFromConfiguration(state.configuration));
         prefillConfiguration();
         showFormError("Le fuseau horaire du site ne peut pas être déterminé. Vérifiez les coordonnées du site avant de choisir une heure précise.");
         setView("site");
         return;
       }
       if (payload?.detail?.code === "invalid_tonight_equipment") {
-        state.configurationDraft = draftFromConfiguration(state.configuration);
+        setConfigurationDraft(draftFromConfiguration(state.configuration));
         prefillConfiguration();
         showFormError("Vérifiez le matériel actif avant de préparer la nuit.");
         setView("equipment");
@@ -6833,7 +6843,7 @@ for (const input of document.querySelectorAll('input[name="equipment-kind"]')) {
 function editConfiguration() {
   if (guardUnresolvedAcceptance()) return;
   if (state.view !== "review") {
-    state.configurationDraft = draftFromConfiguration(state.configuration);
+    setConfigurationDraft(draftFromConfiguration(state.configuration));
     prefillConfiguration();
   }
   showFormError("");

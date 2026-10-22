@@ -70,7 +70,12 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
   await page.evaluate(()=>renderNewProjectIntents());
   assert.equal(await page.locator('#project-new-empty').isChecked(),false,'withdrawal is preserved');
   await page.locator('#project-new-empty').check();
-  await page.evaluate(()=>{state.configurationDraft=structuredClone(state.configurationDraft);renderNewProjectIntents();});
+  const existingIntent=await ha.elementHandle();
+  await page.evaluate(()=>{
+   setConfigurationDraft(structuredClone(state.configurationDraft));
+   renderProjects();setView('projects');
+  });
+  assert.equal(await existingIntent.evaluate(el=>el===document.querySelector('[data-new-intent-id="sh2-129_ha"]')),true,'the form was reused, not rebuilt');
   assert.equal(await page.locator('#project-new-empty').isChecked(),false,'no consent carried to a new draft');
   assert.equal(writes,0,'restoring consent must not write or credit a project');
   // Unsupported equipment must not become compatible merely because advice exists.
