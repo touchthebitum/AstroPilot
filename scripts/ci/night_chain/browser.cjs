@@ -165,7 +165,7 @@ async function journey() {
     assert(start >= Date.parse('2026-10-16T00:30:00+02:00') && start < end && end <= Date.parse('2026-10-16T03:30:00+02:00'));
     await waitFor(() => evaluate(`Boolean(document.querySelector('#mission-filter')?.textContent.includes(${JSON.stringify(filter.filter_type)}))`), 'rendered optical filter');
     const taskRows = await evaluate(`Array.from(document.querySelectorAll('#mission-tasks li'), row => row.textContent)`);
-    assert.equal(taskRows.length, 4);
+    assert.equal(taskRows.length, 5);
     assert(taskRows.every(row => !/T-\d|Fin \+/.test(row)));
     const formatTaskInstant = instant => new Intl.DateTimeFormat('fr-CH', {
       timeZone: accepted.body.mission.site_timezone, year:'numeric',month:'2-digit',day:'2-digit',
@@ -176,6 +176,12 @@ async function journey() {
     assert(taskRows[2].includes('Régler la mise au point automatique'));
     assert(taskRows[3].includes(formatTaskInstant(end + 10 * 60000)));
     assert(taskRows[3].includes('Prendre les images de calibration (flats)'));
+    assert(taskRows[4].includes('Après les flats · le lendemain si besoin'));
+    assert(taskRows[4].includes('Trier les images, puis enregistrer les poses utilisables dans mon projet'));
+    assert(taskRows[4].includes('uniquement ceux que vous conservez'));
+    assert(taskRows[4].includes('sans les images rejetées ni les flats, darks et bias'));
+    assert(taskRows[4].includes('Vous confirmerez ensuite son ajout à votre projet'));
+    assert(!taskRows[4].includes('→'), 'Post-session triage has no fabricated appointment');
     const replay = await evaluate(`(async () => {
       const response = await fetch('/v1/decision-selections', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(${JSON.stringify(accepted.request)})});
       return {http: response.status, body: await response.json()};

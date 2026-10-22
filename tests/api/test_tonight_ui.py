@@ -849,7 +849,7 @@ def test_existing_projects_are_preserved_by_the_configuration_wizard():
         "function initializeConfiguration(payload)",
         1,
     )[1].split("async function loadConfiguration", 1)[0]
-    assert "state.configurationDraft = draftFromConfiguration(payload)" in initialization
+    assert "setConfigurationDraft(draftFromConfiguration(payload))" in initialization
     assert "prefillConfiguration()" in initialization
 
     conflict = script.split(
@@ -1003,7 +1003,7 @@ def test_recovered_projection_reuses_first_run_initialization():
     )[1].split("async function saveConfiguration()", 1)[0]
 
     assert "state.configuration = payload" in initializer
-    assert "state.configurationDraft = draftFromConfiguration(payload)" in initializer
+    assert "setConfigurationDraft(draftFromConfiguration(payload))" in initializer
     assert "prefillConfiguration()" in initializer
     assert "renderAvailabilityTimezone()" in initializer
     assert "installCurrentConfiguration(payload, generation)" in loader

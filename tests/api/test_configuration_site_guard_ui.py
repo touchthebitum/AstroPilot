@@ -22,6 +22,7 @@ def test_configuration_and_acceptance_generation_races():
     helpers += between('function setView(', 'const labels = Object.freeze')
     helpers += between('function show(view)', 'function duration(')
     helpers += between('function setCurrentFieldObservationDecision(', 'function normalizeError(')
+    helpers += between('function setConfigurationDraft(', 'function restoreNewProjectEmptyConfirmation(')
     helpers += between('function initializeConfiguration(', 'async function restoreSavedMission(')
     helpers += between('async function loadConfiguration(', 'const availabilityFieldsByMode')
     helpers += between('async function retryPendingAcceptance(', 'document.querySelector("#site-next")')

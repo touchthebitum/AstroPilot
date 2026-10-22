@@ -52,6 +52,32 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
   assert.equal(await oxygen.locator('input[type=checkbox]').isChecked(),false);
   assert.equal(await page.evaluate(()=>Object.keys(state.configurationDraft.projects).length),0);
   assert.equal(writes,0,'reading advice must not create, save or credit a project');
+  // Explicit no-images consent survives panels and rerenders, scoped to a draft/target.
+  await page.locator('#project-new-empty').check();
+  for(const mode of ['simple','pro']){
+   await page.evaluate(mode=>{applyUiMode(mode);setView('availability');setView('projects');renderNewProjectIntents();},mode);
+   assert.equal(await page.locator('#project-new-empty').isChecked(),true);
+   assert.equal(await ha.locator('input[type=checkbox]').isChecked(),false,'start state is not filter ownership');
+  }
+  await page.evaluate(()=>{
+   const select=document.querySelector('#project-template'),second=state.projectTemplates[1];
+   select.append(new Option(second.display_name,second.catalog_key));select.value=second.catalog_key;renderNewProjectIntents();
+  });
+  assert.equal(await page.locator('#project-new-empty').isChecked(),false,'no transfer to a different target');
+  await page.evaluate(()=>{document.querySelector('#project-template').value=state.projectTemplates[0].catalog_key;renderNewProjectIntents();});
+  assert.equal(await page.locator('#project-new-empty').isChecked(),true);
+  await page.locator('#project-new-empty').uncheck();
+  await page.evaluate(()=>renderNewProjectIntents());
+  assert.equal(await page.locator('#project-new-empty').isChecked(),false,'withdrawal is preserved');
+  await page.locator('#project-new-empty').check();
+  const existingIntent=await ha.elementHandle();
+  await page.evaluate(()=>{
+   setConfigurationDraft(structuredClone(state.configurationDraft));
+   renderProjects();setView('projects');
+  });
+  assert.equal(await existingIntent.evaluate(el=>el===document.querySelector('[data-new-intent-id="sh2-129_ha"]')),true,'the form was reused, not rebuilt');
+  assert.equal(await page.locator('#project-new-empty').isChecked(),false,'no consent carried to a new draft');
+  assert.equal(writes,0,'restoring consent must not write or credit a project');
   // Unsupported equipment must not become compatible merely because advice exists.
   await page.evaluate(()=>{state.configurationDraft.equipment={custom:{camera_model:'unknown'}};renderNewProjectIntents();});
   assert.equal(await ha.locator('input[type=checkbox]').isDisabled(),true);
@@ -61,6 +87,6 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
   assert.equal(await page.locator('#project-target-guidance').isVisible(),false);
   assert.equal(await page.locator('.target-choice-help').count(),0);
   assert.deepEqual(errors,[]);
-  console.log('PASS: contextual advice, keyboard disclosures, Simple/Pro 390/1280px, no automatic goals/filter consent/writes, incompatible equipment and missing guidance.');
+  console.log('PASS: contextual advice, keyboard disclosures, Simple/Pro 390/1280px, no automatic goals/filter consent/writes, incompatible equipment, missing guidance and scoped no-images consent.');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
