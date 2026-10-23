@@ -2764,15 +2764,18 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
   // Build both wording variants from the complete message, including business warnings.
   const lines = [...warnings, knownStatus ? statuses[evaluation.status] : "Statut non reconnu"];
   const technicalLines = [`Observation enregistrée : ${evaluation.observation_id}`];
+  const comparableLines = [];
   const reasonText = reason => Object.hasOwn(OUTCOME_REASON_TEXT, reason.code) ? OUTCOME_REASON_TEXT[reason.code] : "Raison non reconnue.";
   for (const item of knownStatus ? evaluation.results : []) {
     const name = labels[item.variable] || "Variable";
     if (item.status !== "comparable") {
       lines.push(`${name} : non comparable. ${item.reasons.map(reasonText).join(" ")}`);
     } else if (item.variable === "cloud_cover_percent") {
-      lines.push(`${name} : Prévu ${cloud[item.forecast] || item.forecast}, Observé ${cloud[item.observed] || item.observed} — ${item.outcome === "match" ? "catégories identiques" : "catégories différentes"}.`);
+      const line = `${name} : Prévu ${cloud[item.forecast] || item.forecast}, Observé ${cloud[item.observed] || item.observed} — ${item.outcome === "match" ? "catégories identiques" : "catégories différentes"}.`;
+      lines.push(line); comparableLines.push(line);
     } else {
-      lines.push(`${name} : Prévu ${item.forecast} ${item.unit}, Observé ${item.observed} ${item.unit} ; erreur signée (prévision − observation) ${item.signed_error} ${item.unit} ; erreur absolue ${item.absolute_error} ${item.unit}.`);
+      const line = `${name} : Prévu ${item.forecast} ${item.unit}, Observé ${item.observed} ${item.unit} ; erreur signée (prévision − observation) ${item.signed_error} ${item.unit} ; erreur absolue ${item.absolute_error} ${item.unit}.`;
+      lines.push(line); comparableLines.push(line);
     }
   }
   lines.push(...evaluation.reasons.map(reasonText));
@@ -2785,12 +2788,16 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
   technicalLines.push("", "Traçabilité de la prévision");
   const unavailable = "Non disponible";
   const timezone = state.fieldObservationDraftContext?.timezone || null;
-  const dateText = value => {
+  const dateText = (value, compact = false) => {
     if (!value || !Number.isFinite(Date.parse(value))) return unavailable;
     const utc = new Date(value).toISOString();
     try {
-      return timezone ? `${new NightMeritTime.DateTimeFormat("fr-CH", {timeZone: timezone,
-        dateStyle: "short", timeStyle: "short"}).format(new Date(value))} (${timezone}) · ${utc}` : utc;
+      if (!timezone) return utc;
+      const format = compact
+        ? {timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZoneName: "shortOffset"}
+        : {timeZone: timezone, dateStyle: "short", timeStyle: "short"};
+      const local = new NightMeritTime.DateTimeFormat("fr-CH", format).format(new Date(value));
+      return compact ? local : `${local} (${timezone}) · ${utc}`;
     } catch (_) { return utc; }
   };
   for (const item of knownStatus ? evaluation.results : []) {
@@ -2816,7 +2823,47 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
   resultElement.textContent = lines.join("\n");
   if (resultElement.dataset) {
     resultElement.dataset.proText = resultElement.textContent;
-    resultElement.dataset.simpleText = resultElement.textContent
+    const simpleLines = [...warnings, knownStatus ? statuses[evaluation.status] : "Statut non reconnu"];
+    if (knownStatus) {
+      simpleLines.push("Votre observation est enregistrée.");
+      // Use the selected, server-confirmed observation, never the editable clock.
+      const observation = state.visibleObservationsForContext?.find(item =>
+        item.observation_id === evaluation.observation_id);
+      if (observation?.observed_at_utc) simpleLines.push(`Heure du relevé : ${dateText(observation.observed_at_utc, true)}.`);
+      const forecastTimes = new Map();
+      for (const item of evaluation.results) {
+        const time = item.forecast_point?.selected_forecast_for_utc;
+        if (item.status !== "comparable" || !time || !Number.isFinite(Date.parse(time))) continue;
+        const instant = new Date(time).toISOString();
+        if (!forecastTimes.has(instant)) forecastTimes.set(instant, []);
+        forecastTimes.get(instant).push(labels[item.variable] || "Variable");
+      }
+      for (const [time, variables] of forecastTimes) simpleLines.push(`Prévision utilisée (${variables.join(", ")}) : ${dateText(time, true)}.`);
+      simpleLines.push(...comparableLines);
+      const reasons = new Map();
+      for (const item of evaluation.results) {
+        for (const reason of item.reasons) {
+          if (!reasons.has(reason.code)) reasons.set(reason.code, new Set());
+          reasons.get(reason.code).add(labels[item.variable] || "Variable");
+        }
+      }
+      for (const reason of evaluation.reasons) {
+        if (!reasons.has(reason.code)) reasons.set(reason.code, new Set());
+      }
+      for (const [code, variables] of reasons) {
+        if (code === "forecast_outside_temporal_tolerance") {
+          simpleLines.push(evaluation.status === "partial"
+            ? "Certaines conditions ne peuvent pas être comparées : la prévision disponible est trop éloignée de l’heure de votre relevé."
+            : "La prévision disponible est trop éloignée de l’heure de votre relevé pour permettre une comparaison fiable.");
+          if (evaluation.status !== "partial") simpleLines.push("L’heure de la prévision rejetée n’est pas disponible dans cette comparaison.");
+          simpleLines.push("Conservez l’heure réelle de votre observation. Ce résultat ne dit pas si la prévision était juste ou fausse.");
+        } else {
+          simpleLines.push(`${variables.size ? [...variables].join(", ") + " : " : ""}${reasonText({code})}`);
+        }
+      }
+      if (evaluation.assessment) simpleLines.push(lines[lines.length - 1]);
+    }
+    resultElement.dataset.simpleText = simpleLines.join("\n")
       .replaceAll("erreur signée (prévision − observation)", "Écart (prévu − observé)")
       .replaceAll("erreur absolue", "écart sans tenir compte du signe")
       .replaceAll("Suffisance des éléments comparables", "Conditions pouvant être comparées");
