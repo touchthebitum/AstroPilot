@@ -768,6 +768,12 @@ assert.equal(state.outcomeObservationId,null,'missing requested record cannot si
 assert.equal(element('#outcome-compare').disabled,true);
 assert.equal(element('#saved-observation-details').textContent,'');
 assert.match(element('#outcome-result').textContent,/Aucun autre relevé n’a été sélectionné/);
+ui.observation.open=false;
+element('#saved-observation-details').textContent='Conditions from the previous report';
+fetch=async()=>{throw Error('read unavailable');};
+await openSavedObservationRecord(item);
+assert.equal(element('#saved-observation-details').textContent,'','failed reads cannot retain another report’s conditions');
+assert.match(element('#outcome-result').textContent,/Lecture canonique indisponible/);
 
 ''')
 

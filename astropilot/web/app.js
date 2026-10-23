@@ -2730,7 +2730,10 @@ async function openSavedObservationRecord(item) {
 
 function renderSavedObservationDetails() {
   const observation = state.visibleObservationsForContext?.find(o => o.observation_id === state.outcomeObservationId);
-  if (!observation) return;
+  if (!observation) {
+    document.querySelector("#saved-observation-details").textContent = "";
+    return;
+  }
   const conditions = observation.conditions || {};
   const labels = {clear: "Dégagé", few: "Quelques nuages", partly_cloudy: "Partiellement couvert", mostly_cloudy: "Très nuageux", overcast: "Couvert", dry: "Sèche", damp: "Humide", dew_present: "Rosée"};
   const lines = [];
