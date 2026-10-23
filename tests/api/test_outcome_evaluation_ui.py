@@ -30,12 +30,12 @@ def test_outcome_layout_keeps_result_below_controls_at_all_widths():
                 self.in_panel = False
 
     parser = OutcomeParser()
-    parser.feed((ROOT / 'astropilot/web/index.html').read_text())
+    parser.feed((ROOT / 'astropilot/web/index.html').read_text(encoding="utf-8"))
     assert [tag for tag, _ in parser.children] == ['h3', 'label', 'select', 'button', 'button', 'div', 'details', 'summary', 'pre']
     result = parser.children[5][1]
     assert result['id'] == 'outcome-result'
     assert result['role'] == 'status' and result['aria-live'] == 'polite'
-    css = (ROOT / 'astropilot/web/styles.css').read_text()
+    css = (ROOT / 'astropilot/web/styles.css').read_text(encoding="utf-8")
     rules = re.findall(r'([^{}]+)\{([^{}]*)\}', css)
 
     def declarations(selector):
@@ -60,7 +60,7 @@ def test_outcome_click_recovery_stale_and_readback():
     engine = UTIL['javascript_engine']()
     if not engine or engine.endswith('osascript'):
         pytest.skip('Node required')
-    source = (ROOT / 'astropilot/web/app.js').read_text()
+    source = (ROOT / 'astropilot/web/app.js').read_text(encoding="utf-8")
     helpers = source[source.index('// Outcome state is independent'):source.index('async function finishFieldObservationSubmission(')]
     program = r'''
 const assert = require('assert').strict;
@@ -268,7 +268,7 @@ const missing = () => response(404,{detail:{code:'outcome_evaluation_not_found'}
 
 
 def test_explicit_click_and_confirmation_precedes_cleanup():
-    source=(ROOT/'astropilot/web/app.js').read_text()
+    source=(ROOT/'astropilot/web/app.js').read_text(encoding="utf-8")
     assert source.count('consultOutcomeEvaluation(true)') == 1
     assert 'state.outcomeManualObservationId = state.outcomeObservationId;' in source
     assert '#outcome-compare").addEventListener("click", () => consultOutcomeEvaluation(true)' in source
@@ -282,7 +282,7 @@ def test_explicit_click_and_confirmation_precedes_cleanup():
 
 
 def test_unchanged_context_does_not_discard_outcome_response():
-    source = (ROOT/'astropilot/web/app.js').read_text()
+    source = (ROOT/'astropilot/web/app.js').read_text(encoding="utf-8")
     body = source[source.index('function syncFieldObservationContext('):source.index('function restorePendingFieldObservation(')]
     assert body.index('sameFieldObservationContext(') < body.index('state.outcomeToken =')
 
@@ -292,7 +292,7 @@ def run_outcome_ui(body, fixtures=None):
     engine = UTIL['javascript_engine']()
     if not engine or engine.endswith('osascript'):
         pytest.skip('Node required')
-    source = (ROOT / 'astropilot/web/app.js').read_text()
+    source = (ROOT / 'astropilot/web/app.js').read_text(encoding="utf-8")
     helpers = source[source.index('// Outcome state is independent'):source.index('async function finishFieldObservationSubmission(')]
     program = r'''
 const assert=require('assert').strict;
