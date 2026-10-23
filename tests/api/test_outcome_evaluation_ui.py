@@ -30,12 +30,12 @@ def test_outcome_layout_keeps_result_below_controls_at_all_widths():
                 self.in_panel = False
 
     parser = OutcomeParser()
-    parser.feed((ROOT / 'astropilot/web/index.html').read_text())
+    parser.feed((ROOT / 'astropilot/web/index.html').read_text(encoding="utf-8"))
     assert [tag for tag, _ in parser.children] == ['h3', 'label', 'select', 'button', 'button', 'div', 'details', 'summary', 'pre']
     result = parser.children[5][1]
     assert result['id'] == 'outcome-result'
     assert result['role'] == 'status' and result['aria-live'] == 'polite'
-    css = (ROOT / 'astropilot/web/styles.css').read_text()
+    css = (ROOT / 'astropilot/web/styles.css').read_text(encoding="utf-8")
     rules = re.findall(r'([^{}]+)\{([^{}]*)\}', css)
 
     def declarations(selector):
@@ -60,7 +60,7 @@ def test_outcome_click_recovery_stale_and_readback():
     engine = UTIL['javascript_engine']()
     if not engine or engine.endswith('osascript'):
         pytest.skip('Node required')
-    source = (ROOT / 'astropilot/web/app.js').read_text()
+    source = (ROOT / 'astropilot/web/app.js').read_text(encoding="utf-8")
     helpers = source[source.index('// Outcome state is independent'):source.index('async function finishFieldObservationSubmission(')]
     program = r'''
 const assert = require('assert').strict;
@@ -268,7 +268,7 @@ const missing = () => response(404,{detail:{code:'outcome_evaluation_not_found'}
 
 
 def test_explicit_click_and_confirmation_precedes_cleanup():
-    source=(ROOT/'astropilot/web/app.js').read_text()
+    source=(ROOT/'astropilot/web/app.js').read_text(encoding="utf-8")
     assert source.count('consultOutcomeEvaluation(true)') == 1
     assert 'state.outcomeManualObservationId = state.outcomeObservationId;' in source
     assert '#outcome-compare").addEventListener("click", () => consultOutcomeEvaluation(true)' in source
@@ -282,7 +282,7 @@ def test_explicit_click_and_confirmation_precedes_cleanup():
 
 
 def test_unchanged_context_does_not_discard_outcome_response():
-    source = (ROOT/'astropilot/web/app.js').read_text()
+    source = (ROOT/'astropilot/web/app.js').read_text(encoding="utf-8")
     body = source[source.index('function syncFieldObservationContext('):source.index('function restorePendingFieldObservation(')]
     assert body.index('sameFieldObservationContext(') < body.index('state.outcomeToken =')
 
@@ -292,7 +292,7 @@ def run_outcome_ui(body, fixtures=None):
     engine = UTIL['javascript_engine']()
     if not engine or engine.endswith('osascript'):
         pytest.skip('Node required')
-    source = (ROOT / 'astropilot/web/app.js').read_text()
+    source = (ROOT / 'astropilot/web/app.js').read_text(encoding="utf-8")
     helpers = source[source.index('// Outcome state is independent'):source.index('async function finishFieldObservationSubmission(')]
     program = r'''
 const assert=require('assert').strict;
@@ -724,3 +724,74 @@ text=element('#outcome-result').textContent;
 assert.doesNotMatch(text,/Heure du relevé|Prévision utilisée/);
 assert.match(text,/Température : Prévu 8/);
 """)
+
+
+def test_saved_library_survives_missing_browser_context_and_opens_read_only():
+    run_outcome_ui(r'''
+globalThis.ui={observation:element('#field-observation-dialog')};
+ui.observation.dataset={};ui.observation.open=false;
+ui.observation.showModal=function(){this.open=true;};
+globalThis.setFieldObservationEditorDisabled=()=>{};
+const node=()=>({textContent:'',children:[],dataset:{},append(...values){this.children.push(...values);},addEventListener(){}});
+document.createElement=node;
+for(const id of ['#saved-observations-dialog','#saved-observations-list']){
+ const el=element(id);el.replaceChildren=function(){this.children=[];};el.append=function(...values){this.children.push(...values);};
+ el.showModal=function(){this.open=true;};el.close=function(){this.open=false;};
+}
+element('#saved-observations-dialog').open=false;
+document.documentElement={dataset:{uiMode:'simple'}};
+const saved={...obs('o','2026-10-22T19:03:00Z'),conditions:{cloud_state:'overcast',surface_condition:'dew_present'}};
+const item={observation:saved,context:{site_name:'Buttes',latitude:46.9,longitude:6.5,timezone:'Europe/Zurich'}};
+const calls=[];
+fetch=async(url,options)=>{calls.push([options.method||'GET',url]);
+ if(url==='/v1/field-observations')return response(200,{items:[item],next_before:null});
+ if(url==='/v1/decisions/d/field-observations')return response(200,[saved,{...saved,observation_id:'other',execution_id:'exec'}]);
+ if(url.endsWith('/outcome-evaluation'))return response(200,projection());
+ throw Error('unexpected request '+url);
+};
+await openSavedObservationLibrary();
+assert.equal(element('#saved-observations-list').children.length,1);
+assert.match(element('#saved-observations-list').children[0].children[0].textContent,/22 octobre 2026.*21:03.*UTC\+2/);
+await openSavedObservationRecord(item);
+assert.equal(ui.observation.dataset.readOnly,'true');
+assert.equal(state.fieldObservationContextInvalid,true,'capture stays disabled in consultation');
+assert.equal(state.outcomeObservationId,'o');
+assert.deepEqual(state.visibleObservationsForContext.map(o=>o.observation_id),['o'],'no report from another execution');
+assert.match(element('#saved-observation-details').textContent,/Nuages : Couvert/);
+assert.match(element('#observation-time-summary').textContent,/21:03/);
+assert.ok(calls.every(([method])=>method==='GET'));
+assert.deepEqual(calls.map(([,url])=>url),['/v1/field-observations','/v1/decisions/d/field-observations','/v1/field-observations/o/outcome-evaluation']);
+ui.observation.open=false;
+fetch=async(url)=>{assert.equal(url,'/v1/decisions/d/field-observations');return response(200,[obs('different')]);};
+await openSavedObservationRecord(item);
+assert.equal(state.outcomeObservationId,null,'missing requested record cannot silently select another');
+assert.equal(element('#outcome-compare').disabled,true);
+assert.equal(element('#saved-observation-details').textContent,'');
+assert.match(element('#outcome-result').textContent,/Aucun autre relevé n’a été sélectionné/);
+ui.observation.open=false;
+element('#saved-observation-details').textContent='Conditions from the previous report';
+fetch=async()=>{throw Error('read unavailable');};
+await openSavedObservationRecord(item);
+assert.equal(element('#saved-observation-details').textContent,'','failed reads cannot retain another report’s conditions');
+assert.match(element('#outcome-result').textContent,/Lecture canonique indisponible/);
+
+''')
+
+
+def test_saved_library_error_and_stale_response_never_become_an_empty_success():
+    run_outcome_ui(r'''
+globalThis.ui={observation:{open:false}};
+const dialog=element('#saved-observations-dialog');dialog.showModal=function(){this.open=true;};
+element('#saved-observations-list').replaceChildren=function(){this.children=[];};
+fetch=async()=>response(503,{});
+await openSavedObservationLibrary();
+assert.match(element('#saved-observations-status').textContent,/n’a pas pu être chargée complètement/);
+assert.doesNotMatch(element('#saved-observations-status').textContent,/Aucune observation/);
+assert.equal(element('#saved-observations-retry').hidden,false);
+let release;fetch=()=>new Promise(resolve=>{release=resolve;});
+const pending=openSavedObservationLibrary();
+dialog.open=false;state.savedObservationLibrary.generation++;
+element('#saved-observations-status').textContent='closed';
+release(response(200,{items:[],next_before:null}));await pending;
+assert.equal(element('#saved-observations-status').textContent,'closed');
+''')

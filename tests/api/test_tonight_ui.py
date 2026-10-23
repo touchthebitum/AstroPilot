@@ -1452,7 +1452,8 @@ def test_terrain_groups_existing_controls_outside_decision():
     script = make_client().get("/ui/app.js").text
     for control in ("Message", "Decision"):
         assert f'ui.addObservation{control}.addEventListener("click", () => openFieldObservation("decision"));' in script
-    assert 'document.querySelector("#outcome-reopen").addEventListener("click", reopenRecentFieldObservations);' in script
+    assert 'document.querySelector("#outcome-reopen").addEventListener("click", openSavedObservationLibrary);' in script
+    assert 'document.querySelector("#saved-observations-open").addEventListener("click", openSavedObservationLibrary);' in script
 
 
 def test_compact_tonight_keeps_essential_fields_and_critical_warnings_outside_details():
