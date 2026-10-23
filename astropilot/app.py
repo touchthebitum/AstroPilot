@@ -3833,6 +3833,42 @@ def create_app(
         except Exception as exc:
             raise_outcome_evaluation_error(exc)
 
+    @application.get("/v1/field-observations")
+    def list_saved_field_observations(limit: int = 50, before: str | None = None):
+        """Profile-local saved reports. Reading never evaluates or changes a report."""
+        if not 1 <= limit <= 50:
+            raise HTTPException(status_code=422, detail={"code": "invalid_observation_page"})
+        if before is not None:
+            before = validated_field_observation_route_identity(before, field="observation_id")
+        try:
+            service = application_service()
+            page = service.list_saved_field_observations(limit=limit, before=before)
+            items = []
+            zones = {}
+            for observation in page["items"]:
+                context = None
+                try:
+                    resolved = service.resolve_saved_field_observation_context(observation)
+                except FieldObservationContextError:
+                    resolved = None
+                if resolved is not None:
+                    coordinates = (resolved.latitude, resolved.longitude)
+                    if coordinates not in zones:
+                        try:
+                            zones[coordinates] = LocationTimeResolver.resolve(*coordinates).timezone_name
+                        except LocationTimeError:
+                            zones[coordinates] = None
+                    context = {"site_name": resolved.site_name, "latitude": resolved.latitude,
+                        "longitude": resolved.longitude, "timezone": zones[coordinates]}
+                items.append({"observation": field_observation_projection(observation), "context": context})
+            return {"items": items, "next_before": page["next_before"]}
+        except ValueError as error:
+            if str(error) == "invalid_observation_page":
+                raise HTTPException(status_code=422, detail={"code": str(error)}) from error
+            raise_field_observation_read_error(error)
+        except Exception as error:
+            raise_field_observation_read_error(error)
+
     @application.get("/v1/field-observations/{observation_id}")
     def get_field_observation(observation_id: str):
         observation_id = validated_field_observation_route_identity(

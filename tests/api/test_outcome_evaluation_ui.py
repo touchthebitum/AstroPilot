@@ -724,3 +724,68 @@ text=element('#outcome-result').textContent;
 assert.doesNotMatch(text,/Heure du relevé|Prévision utilisée/);
 assert.match(text,/Température : Prévu 8/);
 """)
+
+
+def test_saved_library_survives_missing_browser_context_and_opens_read_only():
+    run_outcome_ui(r'''
+globalThis.ui={observation:element('#field-observation-dialog')};
+ui.observation.dataset={};ui.observation.open=false;
+ui.observation.showModal=function(){this.open=true;};
+globalThis.setFieldObservationEditorDisabled=()=>{};
+const node=()=>({textContent:'',children:[],dataset:{},append(...values){this.children.push(...values);},addEventListener(){}});
+document.createElement=node;
+for(const id of ['#saved-observations-dialog','#saved-observations-list']){
+ const el=element(id);el.replaceChildren=function(){this.children=[];};el.append=function(...values){this.children.push(...values);};
+ el.showModal=function(){this.open=true;};el.close=function(){this.open=false;};
+}
+element('#saved-observations-dialog').open=false;
+document.documentElement={dataset:{uiMode:'simple'}};
+const saved={...obs('o','2026-10-22T19:03:00Z'),conditions:{cloud_state:'overcast',surface_condition:'dew_present'}};
+const item={observation:saved,context:{site_name:'Buttes',latitude:46.9,longitude:6.5,timezone:'Europe/Zurich'}};
+const calls=[];
+fetch=async(url,options)=>{calls.push([options.method||'GET',url]);
+ if(url==='/v1/field-observations')return response(200,{items:[item],next_before:null});
+ if(url==='/v1/decisions/d/field-observations')return response(200,[saved,{...saved,observation_id:'other',execution_id:'exec'}]);
+ if(url.endsWith('/outcome-evaluation'))return response(200,projection());
+ throw Error('unexpected request '+url);
+};
+await openSavedObservationLibrary();
+assert.equal(element('#saved-observations-list').children.length,1);
+assert.match(element('#saved-observations-list').children[0].children[0].textContent,/22 octobre 2026.*21:03.*UTC\+2/);
+await openSavedObservationRecord(item);
+assert.equal(ui.observation.dataset.readOnly,'true');
+assert.equal(state.fieldObservationContextInvalid,true,'capture stays disabled in consultation');
+assert.equal(state.outcomeObservationId,'o');
+assert.deepEqual(state.visibleObservationsForContext.map(o=>o.observation_id),['o'],'no report from another execution');
+assert.match(element('#saved-observation-details').textContent,/Nuages : Couvert/);
+assert.match(element('#observation-time-summary').textContent,/21:03/);
+assert.ok(calls.every(([method])=>method==='GET'));
+assert.deepEqual(calls.map(([,url])=>url),['/v1/field-observations','/v1/decisions/d/field-observations','/v1/field-observations/o/outcome-evaluation']);
+ui.observation.open=false;
+fetch=async(url)=>{assert.equal(url,'/v1/decisions/d/field-observations');return response(200,[obs('different')]);};
+await openSavedObservationRecord(item);
+assert.equal(state.outcomeObservationId,null,'missing requested record cannot silently select another');
+assert.equal(element('#outcome-compare').disabled,true);
+assert.equal(element('#saved-observation-details').textContent,'');
+assert.match(element('#outcome-result').textContent,/Aucun autre relevé n’a été sélectionné/);
+
+''')
+
+
+def test_saved_library_error_and_stale_response_never_become_an_empty_success():
+    run_outcome_ui(r'''
+globalThis.ui={observation:{open:false}};
+const dialog=element('#saved-observations-dialog');dialog.showModal=function(){this.open=true;};
+element('#saved-observations-list').replaceChildren=function(){this.children=[];};
+fetch=async()=>response(503,{});
+await openSavedObservationLibrary();
+assert.match(element('#saved-observations-status').textContent,/n’a pas pu être chargée complètement/);
+assert.doesNotMatch(element('#saved-observations-status').textContent,/Aucune observation/);
+assert.equal(element('#saved-observations-retry').hidden,false);
+let release;fetch=()=>new Promise(resolve=>{release=resolve;});
+const pending=openSavedObservationLibrary();
+dialog.open=false;state.savedObservationLibrary.generation++;
+element('#saved-observations-status').textContent='closed';
+release(response(200,{items:[],next_before:null}));await pending;
+assert.equal(element('#saved-observations-status').textContent,'closed');
+''')

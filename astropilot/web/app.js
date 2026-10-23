@@ -1074,6 +1074,9 @@ function openFieldObservation(source) {
     setView("availability");
     return;
   }
+  if (ui.observation.dataset) delete ui.observation.dataset.readOnly;
+  const observationTitle = document.querySelector("#observation-title");
+  if (observationTitle) observationTitle.textContent = "Observation terrain";
   resetFieldObservationForm();
   state.fieldObservationAnchorContext = Object.freeze({...context});
   state.fieldObservationDraftContext = Object.freeze(context);
@@ -2624,7 +2627,124 @@ function rememberConfirmedFieldObservation(observation) {
     : "Observation récemment confirmée. Supersession inconnue : attendez la lecture canonique ou rouvrez cet éditeur pour réessayer.";
 }
 
+function savedObservationTime(value, timezone) {
+  if (!value || !Number.isFinite(Date.parse(value))) return "Heure du relevé non disponible";
+  try {
+    return new NightMeritTime.DateTimeFormat("fr-CH", {timeZone: timezone || "UTC",
+      year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
+      timeZoneName: "shortOffset"}).format(new Date(value));
+  } catch (_) { return `${new Date(value).toISOString()} (UTC)`; }
+}
+
+async function openSavedObservationLibrary() {
+  if (state.observationBusy || ui.observation.open) return;
+  const dialog = document.querySelector("#saved-observations-dialog");
+  state.savedObservationLibrary = {generation: (state.savedObservationLibrary?.generation || 0) + 1, cursor: null};
+  dialog.showModal();
+  await loadSavedObservationLibrary(false);
+}
+
+async function loadSavedObservationLibrary(more = false) {
+  const library = state.savedObservationLibrary;
+  if (!library || library.loading) return;
+  library.loading = true;
+  const generation = ++library.generation;
+  const dialog = document.querySelector("#saved-observations-dialog");
+  const status = document.querySelector("#saved-observations-status");
+  const list = document.querySelector("#saved-observations-list");
+  const next = document.querySelector("#saved-observations-more");
+  const retry = document.querySelector("#saved-observations-retry");
+  if (!more) {list.replaceChildren(); library.cursor = null;}
+  status.textContent = "Lecture des observations enregistrées…";
+  next.hidden = retry.hidden = true;
+  const current = () => state.savedObservationLibrary === library && library.generation === generation && dialog.open;
+  try {
+    const query = library.cursor ? `?before=${encodeURIComponent(library.cursor)}` : "";
+    const data = await fieldObservationNetworkRequest(`/v1/field-observations${query}`, {method: "GET"}, async response => {
+      if (!response.ok) throw await sessionHttpError(response);
+      return response.json();
+    });
+    if (!current()) return;
+    if (!Array.isArray(data.items) || !(data.next_before === null || typeof data.next_before === "string")
+      || data.items.some(item => typeof item?.observation?.observation_id !== "string")) throw new Error("invalid_observation_page");
+    for (const item of data.items) {
+      const observation = item.observation, context = item.context;
+      const card = document.createElement("article"); card.className = "saved-observation-card";
+      const heading = document.createElement("h3"); heading.textContent = savedObservationTime(observation.observed_at_utc, context?.timezone);
+      const site = document.createElement("p");
+      const configuredSite = state.configuration?.site;
+      const matchesSite = context && Number.isFinite(context.latitude) && Number.isFinite(context.longitude)
+        && context.latitude === configuredSite?.latitude && context.longitude === configuredSite?.longitude;
+      site.textContent = `Site : ${context?.site_name || (matchesSite ? configuredSite.name : null)
+        || (Number.isFinite(context?.latitude) && Number.isFinite(context?.longitude) ? `${context.latitude}, ${context.longitude}` : "non documenté")}`;
+      const open = document.createElement("button"); open.type = "button"; open.className = "primary-button";
+      open.textContent = "Ouvrir ce relevé";
+      open.disabled = typeof observation.decision_id !== "string" || !observation.decision_id;
+      open.addEventListener("click", () => openSavedObservationRecord(item));
+      card.append(heading, site, open);
+      if (open.disabled) {
+        const note = document.createElement("p"); note.textContent = "Ancien relevé sans décision associée : comparaison indisponible."; card.append(note);
+      }
+      list.append(card);
+    }
+    library.cursor = data.next_before;
+    next.hidden = !library.cursor;
+    status.textContent = list.children.length ? "Choisissez un relevé pour le consulter et voir sa comparaison." : "Aucune observation enregistrée dans ce profil. Les relevés d’une autre copie de test ne sont pas importés automatiquement.";
+  } catch (_) {
+    if (!current()) return;
+    status.textContent = "La liste des observations n’a pas pu être chargée complètement. Vos relevés sont conservés. Réessayez la lecture.";
+    retry.hidden = false;
+  } finally {library.loading = false;}
+}
+
+async function openSavedObservationRecord(item) {
+  if (state.observationBusy) return;
+  const observation = item.observation;
+  const context = {decision_id: observation.decision_id, execution_id: observation.execution_id ?? null,
+    timezone: item.context?.timezone || null};
+  document.querySelector("#saved-observations-dialog").close();
+  invalidateFieldObservationOperation();
+  state.fieldObservationDraftContext = Object.freeze(context);
+  state.fieldObservationContextInvalid = true;
+  setFieldObservationEditorDisabled(true);
+  ui.observation.dataset.readOnly = "true";
+  document.querySelector("#observation-title").textContent = "Observation enregistrée";
+  document.querySelector("#observation-time-summary").textContent = savedObservationTime(observation.observed_at_utc, context.timezone);
+  document.querySelector("#observation-context-decision").textContent = "Consultation d’un relevé enregistré";
+  document.querySelector("#observation-linkage").textContent = observation.execution_id ? "Liée à une session" : "Sans session photo";
+  ui.observation.showModal();
+  await loadSavedFieldObservations(context);
+  if (!ui.observation.open || state.fieldObservationDraftContext !== context) return;
+  if (state.outcomeLineageStatus !== "ready") return;
+  if (!(state.visibleObservationsForContext || []).some(o => o.observation_id === observation.observation_id)) {
+    state.outcomeManualObservationId = state.outcomeObservationId = null;
+    renderSavedFieldObservations();
+    document.querySelector("#saved-observation-details").textContent = "";
+    document.querySelector("#outcome-result").textContent = "Ce relevé n’a pas été retrouvé. Rechargez la liste. Aucun autre relevé n’a été sélectionné.";
+    return;
+  }
+  state.outcomeManualObservationId = state.outcomeObservationId = observation.observation_id;
+  renderSavedFieldObservations();
+  await consultOutcomeEvaluation(false);
+}
+
+function renderSavedObservationDetails() {
+  const observation = state.visibleObservationsForContext?.find(o => o.observation_id === state.outcomeObservationId);
+  if (!observation) return;
+  const conditions = observation.conditions || {};
+  const labels = {clear: "Dégagé", few: "Quelques nuages", partly_cloudy: "Partiellement couvert", mostly_cloudy: "Très nuageux", overcast: "Couvert", dry: "Sèche", damp: "Humide", dew_present: "Rosée"};
+  const lines = [];
+  if (conditions.cloud_state) lines.push(`Nuages : ${labels[conditions.cloud_state] || conditions.cloud_state}`);
+  if (conditions.surface_condition) lines.push(`Surface : ${labels[conditions.surface_condition] || conditions.surface_condition}`);
+  for (const [key, label, unit] of [["temperature_c", "Température", "°C"], ["relative_humidity_percent", "Humidité", "%"], ["wind_speed_kmh", "Vent", "km/h"]]) {
+    if (Number.isFinite(conditions[key])) lines.push(`${label} : ${conditions[key]} ${unit}`);
+  }
+  document.querySelector("#saved-observation-details").textContent = lines.length ? lines.join("\n") : "Aucune de ces conditions n’a été renseignée dans ce relevé.";
+  document.querySelector("#observation-time-summary").textContent = savedObservationTime(observation.observed_at_utc, state.fieldObservationDraftContext?.timezone);
+}
+
 function renderSavedFieldObservations() {
+  if (typeof ui !== "undefined" && ui.observation?.dataset?.readOnly === "true") renderSavedObservationDetails();
   const select = document.querySelector("#outcome-observation");
   if (!select) return;
   select.innerHTML = "";
@@ -2644,7 +2764,7 @@ function renderSavedFieldObservations() {
     if (state.outcomeLineageStatus === "ready" && !history.coherent) option.textContent += " — Chaîne de corrections incohérente";
     if (option.dataset) {
       option.dataset.proText = option.textContent;
-      let simpleText = item.observed_at_utc || "Observation";
+      let simpleText = savedObservationTime(item.observed_at_utc, state.fieldObservationDraftContext?.timezone);
       if (state.outcomeLineageStatus !== "ready") simpleText += " — Vérification en cours, comparaison bloquée";
       else if (history.replacements.has(item.observation_id)) simpleText += " — Historique / observation remplacée";
       else if (activeCount > 1) simpleText += " — Plusieurs observations actives";
@@ -2967,7 +3087,7 @@ async function consultOutcomeEvaluation(createIfMissing = false) {
       output.textContent = "Supersession inconnue : création bloquée. Rouvrez cet éditeur pour réessayer la lecture canonique.";
     } else if (!outcomeCanCreate(observationId)) {
       output.textContent = "Observation remplacée ou chaîne de corrections incohérente : aucune nouvelle évaluation autorisée. La consultation historique reste disponible.";
-    } else output.textContent = "Aucune comparaison enregistrée. Cliquez sur « Comparer avec la prévision ».";
+    } else output.textContent = "Aucune comparaison enregistrée. Cliquez sur « Créer une comparaison si elle manque ».";
   } catch (_error) {
     if (!current()) return;
     if (_error.outcomeProtocolError) {
@@ -5264,6 +5384,8 @@ function updateGuidedPresentation() {
   const simple = appliedUiMode === "simple";
   const view = state.view;
   const configured = Boolean(state.configuration?.configured);
+  const observationsNav = document.querySelector("#saved-observations-open");
+  if (observationsNav) observationsNav.hidden = !configured;
   const nav = document.querySelector("#main-navigation");
   if (nav) nav.hidden = !configured || (state.guidedInitialConfiguration && view === "availability") || ["site", "equipment", "review", "loading_configuration", "configuration_error", "unresolved_acceptance"].includes(view);
   document.querySelector("#nav-tonight")?.setAttribute("aria-current", view === "availability" || view === "recommendation" ? "page" : "false");
@@ -7073,7 +7195,18 @@ ui.observation.addEventListener("close", () => {
   invalidateFieldObservationOperation();
   state.outcomeToken = (state.outcomeToken || 0) + 1;
 });
-document.querySelector("#outcome-reopen").addEventListener("click", reopenRecentFieldObservations);
+document.querySelector("#outcome-reopen").addEventListener("click", openSavedObservationLibrary);
+document.querySelector("#saved-observations-open").addEventListener("click", openSavedObservationLibrary);
+document.querySelector("#saved-observations-close").addEventListener("click", () => document.querySelector("#saved-observations-dialog").close());
+document.querySelector("#saved-observation-back").addEventListener("click", () => {
+  ui.observation.close();
+  openSavedObservationLibrary();
+});
+document.querySelector("#saved-observations-dialog").addEventListener("close", () => {
+  if (state.savedObservationLibrary) state.savedObservationLibrary.generation++;
+});
+document.querySelector("#saved-observations-more").addEventListener("click", () => loadSavedObservationLibrary(true));
+document.querySelector("#saved-observations-retry").addEventListener("click", () => loadSavedObservationLibrary(false));
 document.querySelector("#outcome-compare").addEventListener("click", () => consultOutcomeEvaluation(true));
 document.querySelector("#outcome-read").addEventListener("click", () => consultOutcomeEvaluation(false));
 document.querySelector("#outcome-observation").addEventListener("change", event => {

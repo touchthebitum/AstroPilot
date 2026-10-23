@@ -32,6 +32,7 @@
         <time id="night-date">—</time>
       </div>
       <div class="header-actions">
+        <button class="secondary-button" id="saved-observations-open" type="button" aria-haspopup="dialog" hidden>Mes observations</button>
         <details id="header-options" class="header-options" data-mode-disclosure><summary>Options et aide</summary><div class="header-options-content">
         <button class="secondary-button" id="alerts-status-open" type="button" aria-haspopup="dialog">État des alertes</button>
         <button class="secondary-button" id="help-open" type="button" aria-haspopup="dialog">Aide</button>
@@ -613,6 +614,17 @@
         </div>
       </dialog>
 
+      <dialog class="observation-dialog" id="saved-observations-dialog" aria-labelledby="saved-observations-title">
+        <div class="observation-surface">
+          <header class="observation-heading"><h2 id="saved-observations-title">Mes observations</h2><button class="secondary-button" id="saved-observations-close" type="button">Fermer</button></header>
+          <p>Retrouvez vos relevés enregistrés dans ce profil, du plus récent au plus ancien. Leur consultation ne crée ni observation ni session photo.</p>
+          <p id="saved-observations-status" role="status" aria-live="polite"></p>
+          <div id="saved-observations-list"></div>
+          <button class="secondary-button" id="saved-observations-more" type="button" hidden>Afficher les observations plus anciennes</button>
+          <button class="secondary-button" id="saved-observations-retry" type="button" hidden>Recharger la liste</button>
+        </div>
+      </dialog>
+
       <dialog class="observation-dialog" id="field-observation-dialog" aria-labelledby="observation-title">
         <div class="observation-surface observation-panel">
           <header class="observation-heading">
@@ -629,12 +641,13 @@
             <p id="observation-time-summary"></p>
             <span id="observation-linkage">Sans session</span>
           </section>
-            <div class="observation-heading">
+            <div class="observation-heading observation-entry-heading">
               <div>
                 <p data-simple-only>Indiquez les conditions que vous constatez pour les comparer aux prévisions.</p>
                 <h3>Comment est le ciel maintenant&nbsp;?</h3>
               </div>
             </div>
+            <p id="saved-observation-details"></p>
             <form id="field-observation-form">
               <details class="observation-context-editor"><summary>Modifier l’heure ou la décision</summary>
               <label class="observation-time" for="observation-observed-at">
@@ -732,13 +745,14 @@
             </form>
             <section class="outcome-panel" aria-labelledby="outcome-title">
               <h3 id="outcome-title">Comparer une observation enregistrée</h3>
-              <label for="outcome-observation">Observations confirmées par le serveur</label>
+              <label for="outcome-observation">Choisir un relevé enregistré</label>
               <select id="outcome-observation"></select>
-              <button class="secondary-button" id="outcome-read" type="button">Consulter la comparaison enregistrée</button>
-              <button class="secondary-button" id="outcome-compare" type="button" disabled>Comparer avec la prévision</button>
+              <button class="secondary-button" id="outcome-read" type="button">Voir la comparaison enregistrée</button>
+              <button class="secondary-button" id="outcome-compare" type="button" disabled>Créer une comparaison si elle manque</button>
               <div id="outcome-result" role="status" aria-live="polite"></div>
               <details data-mode-disclosure><summary>Détails techniques</summary><pre id="outcome-trace"></pre></details>
             </section>
+            <button class="secondary-button" id="saved-observation-back" type="button">Retour à mes observations</button>
         </div>
       </dialog>
       <section id="history-section" class="compact-actions-section" aria-labelledby="history-section-title">

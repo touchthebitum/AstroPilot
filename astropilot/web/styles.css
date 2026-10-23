@@ -760,3 +760,16 @@ html[data-ui-mode="pro"][data-guided-view="availability"]:not([data-guided-initi
 #equipment-catalogue details > summary, #target-suggestions > details > summary { min-height: 44px; padding: 10px 0; cursor: pointer; color: var(--ink); }
 #equipment-catalogue details details { padding: 0 16px; margin: 8px 0; border: 1px solid var(--line-bright); border-radius: 10px; }
 #equipment-catalogue p { color: var(--muted); }
+
+/* Saved reports are a read-only consultation, separate from capture. */
+#field-observation-dialog[data-read-only="true"] #field-observation-form,
+#field-observation-dialog[data-read-only="true"] .observation-entry-heading { display: none !important; }
+#saved-observations-list { display: grid; gap: 14px; }
+.saved-observation-card { border: 1px solid var(--line); border-radius: 14px; padding: 16px; min-width: 0; overflow-wrap: anywhere; }
+.saved-observation-card h3 { margin-top: 0; }
+#saved-observations-dialog .observation-heading { flex-wrap: wrap; }
+#saved-observation-details { display: none; }
+#field-observation-dialog[data-read-only="true"] .observation-kicker { display: none; }
+#field-observation-dialog[data-read-only="true"] #saved-observation-details { display: block; white-space: pre-line; }
+#saved-observation-back { display: none; }
+#field-observation-dialog[data-read-only="true"] #saved-observation-back { display: inline-flex; margin-top: 16px; }

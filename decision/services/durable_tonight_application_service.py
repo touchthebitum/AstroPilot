@@ -322,6 +322,14 @@ class DurableTonightApplicationService:
             observation_id=observation_id
         )
 
+    def list_saved_field_observations(self, *, limit=50, before=None):
+        if self.field_observation_store is None:
+            raise RuntimeError("field_observation_persistence_unavailable")
+        return self.field_observation_store.list_page(limit=limit, before=before)
+
+    def resolve_saved_field_observation_context(self, observation):
+        return self._field_observation_recording_service().context_resolver.resolve(observation)
+
     def list_field_observations_by_decision(self, decision_id: str):
         if self.field_observation_store is None:
             raise RuntimeError("field_observation_persistence_unavailable")

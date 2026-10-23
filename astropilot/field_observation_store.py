@@ -5,6 +5,7 @@ from astropilot.durable_read import json_document_paths
 
 import os
 import sys
+import stat
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -201,6 +202,58 @@ class FileFieldObservationStore:
                     if observation.decision_id == identity
                 ]
             )
+
+    def _load_catalogue_path(self, path: Path, before) -> FieldObservation:
+        # Validate the opened file itself before reading: also protects platforms
+        # without O_NOFOLLOW and refuses a file replaced during enumeration.
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+        fd = os.open(path, flags)
+        try:
+            opened = os.fstat(fd)
+            if (not stat.S_ISREG(opened.st_mode) or getattr(before, "st_file_attributes", 0) & 0x400
+                    or not stat.S_ISREG(before.st_mode)
+                    or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                    != (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)):
+                raise FieldObservationPersistenceError("observation_catalogue_unsafe_file")
+            with os.fdopen(fd, "rb", closefd=False) as stream:
+                raw = stream.read(1024 * 1024 + 1)
+            after = path.lstat()
+            if len(raw) > 1024 * 1024 or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+                raise FieldObservationPersistenceError("observation_catalogue_changed")
+            return deserialize_field_observation(raw.decode("utf-8"), observation_id=path.stem)
+        finally:
+            os.close(fd)
+
+    def list_page(self, *, limit: int = 50, before: str | None = None):
+        """Read this profile's saved reports, newest first; never omit corrupt data."""
+        if type(limit) is not int or not 1 <= limit <= 50:
+            raise ValueError("invalid_observation_page")
+        if before is not None:
+            validate_observation_identity(before, field="observation_id")
+        with self._locked():
+            paths = json_document_paths(self._directory) if self._directory.exists() else []
+            if len(paths) > 10000:
+                raise FieldObservationPersistenceError("observation_catalogue_scan_limit")
+            total = 0
+            checked = []
+            for path in paths:
+                info = path.lstat()
+                if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                    raise FieldObservationPersistenceError("observation_catalogue_unsafe_file")
+                checked.append((path, info))
+                total += info.st_size
+                if info.st_size > 1024 * 1024 or total > 32 * 1024 * 1024:
+                    raise FieldObservationPersistenceError("observation_catalogue_scan_limit")
+            observations = sorted((self._load_catalogue_path(path, info) for path, info in checked),
+                key=lambda item: (item.observed_at_utc, item.observation_id), reverse=True)
+            if before is not None:
+                anchor = next((o for o in observations if o.observation_id == before), None)
+                if anchor is None:
+                    raise ValueError("invalid_observation_page")
+                observations = [o for o in observations if
+                    (o.observed_at_utc, o.observation_id) < (anchor.observed_at_utc, anchor.observation_id)]
+            items = observations[:limit]
+            return {"items": items, "next_before": items[-1].observation_id if len(observations) > limit else None}
 
     def list_by_execution(self, *, execution_id: str) -> list[FieldObservation]:
         try:
