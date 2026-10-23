@@ -655,3 +655,72 @@ assert.deepEqual(calls,['GET','POST']);
 assert.match(element('#outcome-result').textContent,/erreur signée/);
 assert.equal(element('#outcome-compare').disabled,false);
 ''')
+
+
+@pytest.mark.parametrize("status", ["not_comparable", "partial"])
+def test_temporal_rejection_is_clear_without_inventing_forecast_time(status):
+    run_outcome_ui(r"""
+const saved=obs('o','2026-10-22T19:03:00Z');
+rememberConfirmedFieldObservation(saved);
+state.fieldObservationDraftContext={timezone:'Europe/Zurich'};
+// An edited clock must never replace the saved observation's timestamp.
+element('#observation-observed-at').value='2030-01-01T00:00';
+element('#outcome-result').dataset={};
+document.documentElement={dataset:{uiMode:'simple'}};
+const value=projection();value.status=fixtures.status;
+const reason={code:'forecast_outside_temporal_tolerance',variable:null};
+value.reasons=[reason,reason];
+value.results=['temperature_c','relative_humidity_percent','cloud_cover_percent'].map(variable=>({
+ variable,status:'not_comparable',unit:variable==='temperature_c'?'°C':'%',reasons:[{...reason,variable}]}));
+if(fixtures.status==='partial'){
+ value.results[0]={...projection().results[0],forecast_point:{selected_forecast_for_utc:'2026-10-22T19:00:00Z'}};
+}
+const before=JSON.stringify(value),beforeSaved=JSON.stringify(saved);
+renderOutcomeEvaluation(value,['Historique / remplacée (ou chaîne incohérente).']);
+const output=element('#outcome-result');
+assert.ok(output.textContent.startsWith('Historique / remplacée'));
+assert.match(output.textContent,/Votre observation est enregistrée/);
+assert.match(output.textContent,/Heure du relevé : .*22.*10.*2026.*21:03.*UTC\+2/);
+assert.doesNotMatch(output.textContent,/2030/);
+assert.equal((output.textContent.match(/trop éloignée/g)||[]).length,1);
+assert.match(output.textContent,/Conservez l’heure réelle/);
+assert.match(output.textContent,/ne dit pas si la prévision était juste ou fausse/);
+if(fixtures.status==='not_comparable'){
+ assert.match(output.textContent,/L’heure de la prévision rejetée n’est pas disponible/);
+ assert.doesNotMatch(output.textContent,/Prévision utilisée|23:00|erreur signée/);
+}else{
+ assert.match(output.textContent,/Certaines conditions ne peuvent pas être comparées/);
+ assert.match(output.textContent,/Prévision utilisée \(Température\) : .*21:00/);
+ assert.match(output.textContent,/Température : Prévu 8 °C, Observé 7 °C/);
+}
+assert.equal(JSON.stringify(value),before);
+assert.equal(JSON.stringify(saved),beforeSaved);
+// Technical per-variable reasons remain available when the operator switches modes.
+output.textContent=output.dataset.proText;
+assert.match(output.textContent,/Prévision trop éloignée de l’heure observée/);
+assert.ok(output.textContent.startsWith('Historique / remplacée'));
+output.textContent=output.dataset.simpleText;
+assert.equal((output.textContent.match(/trop éloignée/g)||[]).length,1);
+""", {'status': status})
+
+
+def test_comparison_times_use_confirmed_selection_and_distinguish_clock_change():
+    run_outcome_ui(r"""
+state.visibleObservationsForContext=[obs('other','2026-10-25T00:03:00Z'),obs('o','2026-10-25T01:03:00Z')];
+state.fieldObservationDraftContext={timezone:'Europe/Zurich'};
+element('#outcome-result').dataset={};
+document.documentElement={dataset:{uiMode:'simple'}};
+const value=projection();
+value.results[0].forecast_point={selected_forecast_for_utc:'2026-10-25T00:00:00Z'};
+renderOutcomeEvaluation(value);
+let text=element('#outcome-result').textContent;
+assert.match(text,/Heure du relevé : .*02:03.*UTC\+1/);
+assert.match(text,/Prévision utilisée \(Température\) : .*02:00.*UTC\+2/);
+assert.doesNotMatch(text,/Conservez l’heure réelle|trop éloignée/);
+// Missing/invalid traceability is displayed honestly, without using the editable clock.
+state.visibleObservationsForContext=[];delete value.results[0].forecast_point;
+renderOutcomeEvaluation(value);
+text=element('#outcome-result').textContent;
+assert.doesNotMatch(text,/Heure du relevé|Prévision utilisée/);
+assert.match(text,/Température : Prévu 8/);
+""")
