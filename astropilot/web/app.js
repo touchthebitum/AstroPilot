@@ -2881,6 +2881,13 @@ const OUTCOME_REASON_TEXT = {
 };
 
 function renderOutcomeEvaluation(evaluation, warnings = []) {
+  // Presentation only: keep the canonical evaluation and its precision intact.
+  const numberFormat = new Intl.NumberFormat("fr-CH", {maximumFractionDigits: 2});
+  const displayNumber = value => {
+    if (!Number.isFinite(value)) return "Non disponible";
+    const rounded = Number(value.toFixed(2));
+    return numberFormat.format(Object.is(rounded, -0) ? 0 : rounded);
+  };
   const labels = {temperature_c: "Température", relative_humidity_percent: "Humidité relative",
     wind_speed_kmh: "Vent", cloud_cover_percent: "Nuages"};
   const statuses = {comparable: "Comparable", partial: "Partiellement comparable", not_comparable: "Non comparable"};
@@ -2900,7 +2907,8 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
       const line = `${name} : Prévu ${cloud[item.forecast] || item.forecast}, Observé ${cloud[item.observed] || item.observed} — ${item.outcome === "match" ? "catégories identiques" : "catégories différentes"}.`;
       lines.push(line); comparableLines.push(line);
     } else {
-      const line = `${name} : Prévu ${item.forecast} ${item.unit}, Observé ${item.observed} ${item.unit} ; erreur signée (prévision − observation) ${item.signed_error} ${item.unit} ; erreur absolue ${item.absolute_error} ${item.unit}.`;
+      const errorUnit = item.variable === "relative_humidity_percent" ? "points de pourcentage" : item.unit;
+      const line = `${name} : Prévu ${displayNumber(item.forecast)} ${item.unit}, Observé ${displayNumber(item.observed)} ${item.unit} ; erreur signée (prévision − observation) ${displayNumber(item.signed_error)} ${errorUnit} ; erreur absolue ${displayNumber(item.absolute_error)} ${errorUnit}.`;
       lines.push(line); comparableLines.push(line);
     }
   }
