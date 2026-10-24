@@ -8,6 +8,58 @@ ROOT = Path(__file__).resolve().parents[2]
 UTIL = runpy.run_path(str(Path(__file__).with_name('test_field_observation_ui.py')))
 
 
+def test_comparison_rounds_display_only_in_both_modes_and_labels_humidity_points():
+    engine = UTIL['javascript_engine']()
+    if not engine or engine.endswith('osascript'):
+        pytest.skip('Node required for comparison rendering regression')
+    source = (ROOT / 'astropilot/web/app.js').read_text(encoding='utf-8')
+    render = source[source.index('function renderOutcomeEvaluation('):source.index('function validateOutcomeProjection(')]
+    program = r'''
+const assert = require('assert').strict;
+const state = {};
+const OUTCOME_REASON_TEXT = {};
+const elements = new Map();
+const document = {documentElement:{dataset:{uiMode:'simple'}},querySelector(id) {
+  if (!elements.has(id)) elements.set(id,{textContent:'',dataset:{}});
+  return elements.get(id);
+}};
+RENDER
+const numeric = (variable,forecast,observed,unit) => ({variable,status:'comparable',
+  forecast,observed,unit,signed_error:forecast-observed,absolute_error:Math.abs(forecast-observed),reasons:[]});
+const evaluation = {observation_id:'saved',status:'comparable',reasons:[],results:[
+  numeric('temperature_c',5.5,6.4,'°C'),
+  numeric('relative_humidity_percent',76,83,'%'),
+  numeric('wind_speed_kmh',1.234,1.2,'km/h'),
+  {variable:'cloud_cover_percent',status:'comparable',forecast:'overcast',observed:'overcast',outcome:'match',reasons:[]}
+]};
+const original = JSON.stringify(evaluation);
+for (const mode of ['simple','pro']) {
+  document.documentElement.dataset.uiMode=mode;
+  renderOutcomeEvaluation(evaluation);
+  const output=document.querySelector('#outcome-result');
+  const text=output.textContent;
+  assert.match(text,/Prévu 5,5 °C, Observé 6,4 °C/);
+  assert.match(text,/-0,9 °C/);
+  assert.doesNotMatch(text,/900000000|6\.4|5\.5/);
+  assert.match(text,/Prévu 76 %, Observé 83 %/);
+  assert.match(text,/-7 points de pourcentage/);
+  assert.match(text,/7 points de pourcentage/);
+  assert.doesNotMatch(text,/-7 %/);
+  assert.match(text,/Prévu 1,23 km\/h, Observé 1,2 km\/h/);
+  assert.match(text,/0,03 km\/h/);
+  assert.match(text,/catégories identiques/);
+  assert.equal(JSON.stringify(evaluation),original,'rendering never changes persisted precision');
+  assert.equal(output.dataset[mode==='pro'?'proText':'simpleText'],text);
+  const tiny = {...evaluation,results:[numeric('temperature_c',0,0.0001,'°C')]};
+  renderOutcomeEvaluation(tiny);
+  assert.doesNotMatch(output.textContent,/-0(?:[ ,]|°C)/,'rounded zero has no negative sign');
+  assert.equal(tiny.results[0].signed_error,-0.0001);
+}
+'''.replace('RENDER', render)
+    run = run_with_time_authority([engine, '-'], input=program, text=True, capture_output=True, timeout=30)
+    assert run.returncode == 0, run.stderr
+
+
 def test_outcome_layout_keeps_result_below_controls_at_all_widths():
     from html.parser import HTMLParser
     import re
