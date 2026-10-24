@@ -27,7 +27,7 @@ $config = @"
   <MappedFolder><HostFolder>$inputXml</HostFolder><SandboxFolder>C:\NightMeritInput</SandboxFolder><ReadOnly>true</ReadOnly></MappedFolder>
   <MappedFolder><HostFolder>$outputXml</HostFolder><SandboxFolder>C:\NightMeritResults</SandboxFolder><ReadOnly>false</ReadOnly></MappedFolder>
  </MappedFolders>
- <LogonCommand><Command>cmd.exe /c start "NightMerit - test prive" cmd.exe /k C:\NightMeritInput\sandbox-start.cmd $copyContext</Command></LogonCommand>
+ <LogonCommand><Command>cmd.exe /c start "NightMerit - test prive" cmd.exe /k C:\NightMeritInput\sandbox-start.cmd "$copyContext"</Command></LogonCommand>
 </Configuration>
 "@
 $target = Join-Path $kit 'TEST-ISOLE-GENERE.wsb'
