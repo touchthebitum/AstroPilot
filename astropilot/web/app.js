@@ -7619,8 +7619,11 @@ async function loadDataContext() {
   const details = document.querySelector('#data-context-details');
   const technical = document.querySelector('#data-context-technical');
   const retry = document.querySelector('#data-context-retry');
-  details.hidden = technical.hidden = retry.hidden = true;
-  for (const id of ['#data-context-version', '#data-context-directory', '#data-context-executable']) document.querySelector(id).textContent = '';
+  const host = document.querySelector('#data-context-host');
+  const hostNote = document.querySelector('#data-context-host-note');
+  details.hidden = technical.hidden = retry.hidden = host.hidden = hostNote.hidden = true;
+  for (const id of ['#data-context-version', '#data-context-directory', '#data-context-executable', '#data-context-host-kit', '#data-context-host-data', '#data-context-host-note']) document.querySelector(id).textContent = '';
+  document.querySelector('#data-context-directory-label').textContent = 'Dossier de données utilisé';
   status.textContent = 'Lecture de la version et du dossier de données…';
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
@@ -7633,6 +7636,18 @@ async function loadDataContext() {
     document.querySelector('#data-context-version').textContent = `${data.runtime.version} · ${data.runtime.build}`;
     document.querySelector('#data-context-directory').textContent = data.data_directory;
     document.querySelector('#data-context-executable').textContent = data.application_executable;
+    const copy = data.private_copy;
+    if (copy?.status === 'provided_by_launcher') {
+      if (![copy.host?.kit_directory, copy.host?.data_directory].every(value => typeof value === 'string' && value.trim())) throw new Error('invalid_host_context');
+      document.querySelector('#data-context-host-kit').textContent = copy.host.kit_directory;
+      document.querySelector('#data-context-host-data').textContent = copy.host.data_directory;
+      document.querySelector('#data-context-directory-label').textContent = 'Chemin interne utilisé dans Windows Sandbox';
+      host.hidden = hostNote.hidden = false;
+      hostNote.textContent = 'Emplacements sur votre PC transmis par le lanceur de ce kit. Le chemin interne de Sandbox peut être identique dans plusieurs copies ; comparez les dossiers sur votre PC pour les distinguer.';
+    } else if (copy?.status === 'unavailable' || /^C:\\NightMeritResults\\profil\\?$/i.test(data.data_directory)) {
+      hostNote.hidden = false;
+      hostNote.textContent = 'Le dossier du kit sur votre PC n’a pas pu être identifié. Dans Windows Sandbox, le chemin C:\\NightMeritResults\\profil est commun à plusieurs copies : vérifiez le dossier depuis lequel vous avez lancé le kit. Aucun emplacement sur votre PC n’a été deviné.';
+    }
     details.hidden = technical.hidden = false;
     status.textContent = 'L’application actuellement ouverte utilise le dossier indiqué ci-dessous.';
   } catch (_) {

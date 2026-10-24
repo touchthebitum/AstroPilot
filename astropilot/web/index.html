@@ -819,9 +819,14 @@
       </header>
       <p>Chaque copie de test peut utiliser un dossier de données différent. Ouvrir un nouveau kit vierge ne reprend pas automatiquement vos projets et vos observations.</p>
       <p id="data-context-status" role="status" aria-live="polite"></p>
+      <dl id="data-context-host" hidden>
+        <dt>Copie utilisée sur votre PC</dt><dd id="data-context-host-kit"></dd>
+        <dt>Dossier de vos données sur votre PC</dt><dd id="data-context-host-data"></dd>
+      </dl>
+      <p id="data-context-host-note" hidden></p>
       <dl id="data-context-details" hidden>
         <dt>Version ouverte</dt><dd id="data-context-version"></dd>
-        <dt>Dossier de données utilisé</dt><dd id="data-context-directory"></dd>
+        <dt id="data-context-directory-label">Dossier de données utilisé</dt><dd id="data-context-directory"></dd>
       </dl>
       <details id="data-context-technical" hidden><summary>Identifier précisément cette application</summary><p id="data-context-executable"></p><p>Dans Windows Sandbox, le dossier C:\NightMeritResults correspond au dossier RESULTATS du kit lancé sur votre PC.</p></details>
       <h3>Pour reprendre vos essais</h3>

@@ -156,8 +156,14 @@ jobs:
             throw 'Expected all 11 profile recovery regressions to execute and pass without skips.'
           }
           $observationsReport = Join-Path $env:RUNNER_TEMP 'saved-observations.xml'
-          uv run --locked --no-sync python -m pytest -q tests/api/test_saved_observation_catalogue.py tests/api/test_outcome_evaluation_ui.py tests/api/test_data_context.py tests/api/test_runtime_identity.py --junitxml="$observationsReport"
+          uv run --locked --no-sync python -m pytest -q tests/api/test_saved_observation_catalogue.py tests/api/test_outcome_evaluation_ui.py tests/api/test_data_context.py tests/api/test_runtime_identity.py tests/api/test_private_kit_context.py --junitxml="$observationsReport"
           if ($LASTEXITCODE -ne 0) { throw 'Saved observation catalogue and comparison UI regressions failed' }
+      - name: Validate Windows host copy context with native PowerShell 5.1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -File scripts/private_beta_windows/test_context.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Private kit host context regressions failed' }
       - name: Validate readable mission times in isolated Windows and Mac environments
         shell: pwsh
         run: |

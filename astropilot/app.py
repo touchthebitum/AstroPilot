@@ -7,6 +7,7 @@ import importlib.metadata
 import math
 import os
 import sys
+from astropilot.private_kit_context import ENVIRONMENT_KEY as PRIVATE_COPY_CONTEXT_ENV, private_kit_context
 from pathlib import Path
 import platform
 import re
@@ -2272,6 +2273,10 @@ def create_app(
                 "data_directory": os.path.abspath(get_user_data_dir()),
                 "application_executable": os.path.abspath(sys.executable),
             }
+            payload["private_copy"] = private_kit_context(
+                os.environ.get(PRIVATE_COPY_CONTEXT_ENV),
+                build=payload["runtime"]["build"], data_directory=payload["data_directory"],
+            )
         except (OSError, ValueError):
             raise HTTPException(status_code=503, detail={"code": "data_context_unavailable"}) from None
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})

@@ -39,6 +39,27 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
    if(mode==='simple'&&width===1280&&process.env.NIGHTMERIT_TEST_SCREENSHOT)await page.screenshot({path:process.env.NIGHTMERIT_TEST_SCREENSHOT,fullPage:true});
    await page.locator('#data-context-close').click();assert.equal(await page.locator('#data-context-dialog').isVisible(),false);
   }
+  const hostData=[];
+  for(const mode of ['simple','pro'])for(const width of [390,1280])for(const copy of ['Copie personnelle','Copie vierge']){
+   await page.setViewportSize({width,height:900});await page.evaluate(mode=>applyUiMode(mode),mode);
+   const kit=String.raw`C:\Tests été & ' famille`+'\\'+copy+String.raw`\Kit`;
+   fixture={runtime:{version:'1.0.0b8',build:'abcdef0'},data_directory:String.raw`C:\NightMeritResults\profil`,application_executable:String.raw`C:\NightMeritWork\candidate\AstroPilot.exe`,private_copy:{status:'provided_by_launcher',host:{kit_directory:kit,data_directory:kit+String.raw`\RESULTATS\profil`}}};
+   await page.locator('#data-context-footer').click();await page.locator('#data-context-host').waitFor();
+   assert.equal(await page.locator('#data-context-host-kit').textContent(),kit);
+   hostData.push(await page.locator('#data-context-host-data').textContent());
+   assert.equal(await page.locator('#data-context-dialog').evaluate(e=>e.scrollWidth<=e.clientWidth),true);
+   if(mode==='simple'&&width===1280&&copy==='Copie personnelle'&&process.env.NIGHTMERIT_TEST_SCREENSHOT)await page.screenshot({path:process.env.NIGHTMERIT_TEST_SCREENSHOT,fullPage:true});
+   assert.match(await page.locator('#data-context-directory-label').textContent(),/interne/);
+   assert.match(await page.locator('#data-context-host-note').innerText(),/transmis par le lanceur/);
+   await page.locator('#data-context-close').click();
+  }
+  assert.notEqual(hostData[0],hostData[1],'same-build copies with the same guest paths remain distinguishable');
+  fixture.private_copy={status:'unavailable',host:null};
+  await page.locator('#data-context-footer').click();await page.locator('#data-context-details').waitFor();
+  assert.equal(await page.locator('#data-context-host').isVisible(),false);
+  assert.match(await page.locator('#data-context-host-note').innerText(),/Aucun emplacement sur votre PC n’a été deviné/);
+  await page.locator('#data-context-close').click();
+  fixture.private_copy={status:'not_provided',host:null};
   fixture.data_directory='<img src=x onerror=alert(1)>';
   await page.locator('#data-context-footer').click();await page.locator('#data-context-details').waitFor();
   assert.equal(await page.locator('#data-context-directory').textContent(),fixture.data_directory);
@@ -49,6 +70,8 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
   await page.locator('#data-context-retry').waitFor();
   assert.equal(await page.locator('#data-context-details').isVisible(),false);
   assert.equal(await page.locator('#data-context-directory').textContent(),'','no stale path on failure');
+  assert.equal(await page.locator('#data-context-host-data').textContent(),'','no stale host path on failure');
+  assert.equal(await page.locator('#data-context-host').isVisible(),false);
   assert.match(await page.locator('#data-context-status').innerText(),/ne signifie pas que vos données sont absentes/);
   status=200;await page.locator('#data-context-retry').click();await page.locator('#data-context-details').waitFor();
   await page.keyboard.press('Escape');assert.equal(await page.locator('#data-context-dialog').isVisible(),false);

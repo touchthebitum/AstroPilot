@@ -27,10 +27,17 @@ text is never interpreted as HTML. `/v1/runtime-identity` stays non-sensitive.
 | Windows Sandbox | Host kit's `RESULTATS/profil` | Close the old Sandbox normally, then run `LANCER-TEST-WINDOWS.cmd` in that same host folder. |
 
 In Sandbox, `C:\NightMeritResults\profil` maps to the host kit's
-`RESULTATS/profil`. Different host kits use that same guest path. To distinguish
-copies, also check the host folder used to launch the kit and the reported
-build. The UI cannot resolve a host path that was never passed into Sandbox;
-it does not invent one.
+`RESULTATS/profil`. Different host kits use that same guest path. The reviewed
+private launcher now passes its host kit and RESULTATS locations as display-only
+metadata, bound to the build and expected guest profile path. The panel shows
+**Copie utilisée sur votre PC**, **Dossier de vos données sur votre PC**, and the
+separately labeled internal Sandbox path. Two same-build kits in different host
+folders therefore remain distinguishable.
+
+If an older launcher supplies no context, or it fails validation, the panel
+explicitly says that the host location could not be identified. It never derives
+one from the guest path. Host metadata cannot choose the profile, trigger a file
+read, or migrate data. See [private launcher templates](../scripts/private_beta_windows/README.md).
 
 The ordinary installed application can use an OS data directory outside the
 application. Always use the actual location reported by that runtime, not an
@@ -51,8 +58,8 @@ assumption about these private-kit paths.
 
 This change implements identification and guidance only. It adds no profile
 import, merge, automatic discovery of other copies, reset, folder opener or
-background migration. No launcher, sandbox mapping or filesystem permission is
-changed. A future transfer flow needs its own conflict handling and validation.
+background migration. The private launcher adds display-only provenance; Sandbox mappings and
+filesystem permissions are unchanged. A future transfer flow needs its own conflict handling and validation.
 
 ## Validation scope
 
