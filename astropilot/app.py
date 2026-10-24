@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import importlib.metadata
 import math
 import os
+import sys
 from pathlib import Path
 import platform
 import re
@@ -2260,6 +2261,20 @@ def create_app(
     @application.get("/v1/runtime-identity", include_in_schema=False)
     def runtime_identity():
         return runtime_identity_payload()
+
+    @application.get("/v1/data-context", include_in_schema=False)
+    def data_context():
+        # Explicit local diagnostic view. Resolve paths only: do not open, create,
+        # import or count profile records, or infer that this profile is empty.
+        try:
+            payload = {
+                "runtime": runtime_identity_payload(),
+                "data_directory": os.path.abspath(get_user_data_dir()),
+                "application_executable": os.path.abspath(sys.executable),
+            }
+        except (OSError, ValueError):
+            raise HTTPException(status_code=503, detail={"code": "data_context_unavailable"}) from None
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
     def project_progress_projection(profile: dict, project_id: str) -> dict:
         project = profile.get("projects", {}).get(project_id)

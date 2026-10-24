@@ -36,6 +36,7 @@
         <details id="header-options" class="header-options" data-mode-disclosure><summary>Options et aide</summary><div class="header-options-content">
         <button class="secondary-button" id="alerts-status-open" type="button" aria-haspopup="dialog">État des alertes</button>
         <button class="secondary-button" id="help-open" type="button" aria-haspopup="dialog">Aide</button>
+        <button class="secondary-button" id="data-context-open" type="button" aria-haspopup="dialog">Version et données</button>
         <a class="secondary-button" href="/catalogue" target="_blank" rel="noopener noreferrer">Catalogue de cibles</a>
 
         <button class="secondary-button" id="edit-availability" type="button" hidden>
@@ -620,6 +621,7 @@
           <p>Retrouvez vos relevés enregistrés dans ce profil, du plus récent au plus ancien. Leur consultation ne crée ni observation ni session photo.</p>
           <p id="saved-observations-status" role="status" aria-live="polite"></p>
           <div id="saved-observations-list"></div>
+          <button class="secondary-button" id="saved-observations-data-context" type="button" hidden>Retrouver le dossier de mes données</button>
           <button class="secondary-button" id="saved-observations-more" type="button" hidden>Afficher les observations plus anciennes</button>
           <button class="secondary-button" id="saved-observations-retry" type="button" hidden>Recharger la liste</button>
         </div>
@@ -789,6 +791,7 @@
       <span>NightMerit</span>
       <span aria-hidden="true">·</span>
       <span>Une décision. Une nuit.</span>
+      <button class="secondary-button" id="data-context-footer" type="button" aria-haspopup="dialog">Version et données</button>
       <span aria-hidden="true">·</span>
       <a href="https://open-meteo.com/" rel="noreferrer">Données météo par Open-Meteo.com</a>
     </footer>
@@ -808,6 +811,25 @@
       <p id="alerts-status-action"></p>
       <p id="alerts-status-note" class="field-note">La configuration affichée est celle du dernier démarrage. Un cycle réussi ne signifie pas qu’une alerte a été trouvée. Une notification acceptée par le système ne garantit pas son affichage. Cette vue ne confirme pas que le service tourne encore.</p>
       <button class="secondary-button" id="alerts-status-refresh" type="button">Actualiser l’état</button>
+    </dialog>
+    <dialog id="data-context-dialog" aria-labelledby="data-context-title">
+      <header class="help-heading">
+        <h2 id="data-context-title">Version et données</h2>
+        <button class="secondary-button" id="data-context-close" type="button" autofocus>Fermer</button>
+      </header>
+      <p>Chaque copie de test peut utiliser un dossier de données différent. Ouvrir un nouveau kit vierge ne reprend pas automatiquement vos projets et vos observations.</p>
+      <p id="data-context-status" role="status" aria-live="polite"></p>
+      <dl id="data-context-details" hidden>
+        <dt>Version ouverte</dt><dd id="data-context-version"></dd>
+        <dt>Dossier de données utilisé</dt><dd id="data-context-directory"></dd>
+      </dl>
+      <details id="data-context-technical" hidden><summary>Identifier précisément cette application</summary><p id="data-context-executable"></p><p>Dans Windows Sandbox, le dossier C:\NightMeritResults correspond au dossier RESULTATS du kit lancé sur votre PC.</p></details>
+      <h3>Pour reprendre vos essais</h3>
+      <p>Rouvrez le dossier de la copie que vous utilisiez et son lanceur. Si une nouvelle copie paraît vide, vérifiez d’abord le dossier utilisé ; ne recréez pas vos projets pour retrouver les anciens.</p>
+      <p>Conservez les anciennes copies et leurs données jusqu’à ce que la reprise dans la nouvelle version ait été vérifiée. Le transfert doit être préparé séparément, application arrêtée, sans remplacer un dossier existant.</p>
+      <p>Ce panneau consulte seulement la version et les emplacements. Il ne transfère et ne réinitialise aucune donnée.</p>
+      <button class="secondary-button" id="data-context-retry" type="button" hidden>Réessayer la lecture</button>
+      <button class="secondary-button" id="data-context-back" type="button" hidden>Retour à mes observations</button>
     </dialog>
     <dialog id="help-dialog" aria-labelledby="help-title">
       <header class="help-heading">
