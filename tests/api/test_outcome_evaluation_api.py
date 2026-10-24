@@ -222,7 +222,9 @@ def test_humidity_weather_traceability_roundtrip_and_ui(tmp_path, real_evidence_
     text = subprocess.check_output([node, '-e', program], text=True)
     assert '00:00' in text and '2026-10-02T22:00:00.000Z' in text
     assert '-10 min' in text and 'Open-Meteo' in text and '1200 m' in text
-    assert 'Prévu 91 %, Observé 73 %' in text and '18 %' in text
+    assert 'Prévu 91 %, Observé 73 %' in text
+    assert '18 points de pourcentage' in text
+    assert '18 %' not in text  # Errors are absolute percentage-point differences.
     # Replace only geography after comparison has been persisted: all matching
     # business fields remain identical, but the historical digest must reject it.
     replaced = replace(point, grid_location=builders['WeatherLocation'](47.0, 7.0, altitude_m=999.0))

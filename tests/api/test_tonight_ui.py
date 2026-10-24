@@ -347,7 +347,12 @@ def test_tonight_ui_assets_are_served():
     assert "value < 0 || value > 1" in script.text
     assert "ui.recommendationConfidencePanel.hidden = formatted === null" in script.text
     assert 'ui.recommendationConfidence.textContent = formatted || ""' in script.text
-    assert 'return "Non disponible"' not in script.text
+    confidence_formatter = script.text.split(
+        "function formatRecommendationConfidence(confidence)", 1
+    )[1].split("function renderRecommendationConfidence(confidence)", 1)[0]
+    # Missing confidence stays hidden; unrelated comparison fallbacks may exist.
+    assert 'return "Non disponible"' not in confidence_formatter
+    assert "return null" in confidence_formatter
     assert "renderMission(mission)" in acceptance_function
     assert "decision.decision_score" not in script.text
     assert "quality.decision_score" in script.text
