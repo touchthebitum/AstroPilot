@@ -2654,6 +2654,8 @@ async function loadSavedObservationLibrary(more = false) {
   const list = document.querySelector("#saved-observations-list");
   const next = document.querySelector("#saved-observations-more");
   const retry = document.querySelector("#saved-observations-retry");
+  const dataContext = document.querySelector("#saved-observations-data-context");
+  if (dataContext) dataContext.hidden = true;
   if (!more) {list.replaceChildren(); library.cursor = null;}
   status.textContent = "Lecture des observations enregistrées…";
   next.hidden = retry.hidden = true;
@@ -2689,6 +2691,7 @@ async function loadSavedObservationLibrary(more = false) {
     }
     library.cursor = data.next_before;
     next.hidden = !library.cursor;
+    if (dataContext) dataContext.hidden = Boolean(list.children.length);
     status.textContent = list.children.length ? "Choisissez un relevé pour le consulter et voir sa comparaison." : "Aucune observation enregistrée dans ce profil. Les relevés d’une autre copie de test ne sont pas importés automatiquement.";
   } catch (_) {
     if (!current()) return;
@@ -7595,6 +7598,78 @@ function renderEquipmentCatalogue(catalogue) {
   details.append(limits); container.append(details);
 }
 
+
+// Explicit read-only copy identification. No browser pointer or guessed profile state.
+const dataContextUI = {generation: 0, controller: null};
+function openDataContext(fromObservations = false) {
+  const dialog = document.querySelector('#data-context-dialog');
+  if (dialog.open) return;
+  if (fromObservations) document.querySelector('#saved-observations-dialog').close();
+  document.querySelector('#data-context-back').hidden = !fromObservations;
+  dialog.showModal();
+  loadDataContext();
+}
+async function loadDataContext() {
+  dataContextUI.controller?.abort();
+  const controller = dataContextUI.controller = new AbortController();
+  const generation = ++dataContextUI.generation;
+  const dialog = document.querySelector('#data-context-dialog');
+  const current = () => generation === dataContextUI.generation && dialog.open;
+  const status = document.querySelector('#data-context-status');
+  const details = document.querySelector('#data-context-details');
+  const technical = document.querySelector('#data-context-technical');
+  const retry = document.querySelector('#data-context-retry');
+  const host = document.querySelector('#data-context-host');
+  const hostNote = document.querySelector('#data-context-host-note');
+  details.hidden = technical.hidden = retry.hidden = host.hidden = hostNote.hidden = true;
+  for (const id of ['#data-context-version', '#data-context-directory', '#data-context-executable', '#data-context-host-kit', '#data-context-host-data', '#data-context-host-note']) document.querySelector(id).textContent = '';
+  document.querySelector('#data-context-directory-label').textContent = 'Dossier de données utilisé';
+  status.textContent = 'Lecture de la version et du dossier de données…';
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch('/v1/data-context', {method: 'GET', cache: 'no-store', signal: controller.signal});
+    if (!response.ok) throw new Error('data_context_unavailable');
+    const data = await response.json();
+    if (!current()) return;
+    if (![data.runtime?.version, data.runtime?.build, data.data_directory, data.application_executable]
+      .every(value => typeof value === 'string' && value.trim())) throw new Error('invalid_data_context');
+    document.querySelector('#data-context-version').textContent = `${data.runtime.version} · ${data.runtime.build}`;
+    document.querySelector('#data-context-directory').textContent = data.data_directory;
+    document.querySelector('#data-context-executable').textContent = data.application_executable;
+    const copy = data.private_copy;
+    if (copy?.status === 'provided_by_launcher') {
+      if (![copy.host?.kit_directory, copy.host?.data_directory].every(value => typeof value === 'string' && value.trim())) throw new Error('invalid_host_context');
+      document.querySelector('#data-context-host-kit').textContent = copy.host.kit_directory;
+      document.querySelector('#data-context-host-data').textContent = copy.host.data_directory;
+      document.querySelector('#data-context-directory-label').textContent = 'Chemin interne utilisé dans Windows Sandbox';
+      host.hidden = hostNote.hidden = false;
+      hostNote.textContent = 'Emplacements sur votre PC transmis par le lanceur de ce kit. Le chemin interne de Sandbox peut être identique dans plusieurs copies ; comparez les dossiers sur votre PC pour les distinguer.';
+    } else if (copy?.status === 'unavailable' || /^C:\\NightMeritResults\\profil\\?$/i.test(data.data_directory)) {
+      hostNote.hidden = false;
+      hostNote.textContent = 'Le dossier du kit sur votre PC n’a pas pu être identifié. Dans Windows Sandbox, le chemin C:\\NightMeritResults\\profil est commun à plusieurs copies : vérifiez le dossier depuis lequel vous avez lancé le kit. Aucun emplacement sur votre PC n’a été deviné.';
+    }
+    details.hidden = technical.hidden = false;
+    status.textContent = 'L’application actuellement ouverte utilise le dossier indiqué ci-dessous.';
+  } catch (_) {
+    if (!current()) return;
+    status.textContent = 'Impossible d’identifier le dossier pour le moment. Cela ne signifie pas que vos données sont absentes. Réessayez la lecture.';
+    retry.hidden = false;
+  } finally { clearTimeout(timer); }
+}
+document.querySelector('#data-context-open').addEventListener('click', () => openDataContext());
+document.querySelector('#data-context-footer').addEventListener('click', () => openDataContext());
+document.querySelector('#saved-observations-data-context').addEventListener('click', () => openDataContext(true));
+document.querySelector('#data-context-close').addEventListener('click', () => document.querySelector('#data-context-dialog').close());
+document.querySelector('#data-context-retry').addEventListener('click', loadDataContext);
+document.querySelector('#data-context-dialog').addEventListener('close', () => {
+  dataContextUI.generation++;
+  dataContextUI.controller?.abort();
+});
+document.querySelector('#data-context-back').addEventListener('click', () => {
+  document.querySelector('#data-context-dialog').close();
+  openSavedObservationLibrary();
+});
+// End copy identification.
 
 updateHistoryFilterSummary();
 // End Outcome History.
