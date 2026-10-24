@@ -17,7 +17,7 @@ def test_help_content_and_integration():
     short = source.split('  start: {', 1)[1].split('  understand: {', 1)[0]
     for term in ['UUID', 'provenance', 'Outcome', 'supersession']:
         assert term.lower() not in short.lower()
-    for text in ['Site → Matériel → Disponibilité → Préparer ma nuit', 'cible', 'filtre', 'créneau', 'risques', 's’abstenir', 'observation terrain', 'même moteur']:
+    for text in ['Site → Matériel → Projet → Disponibilité → Préparer ma nuit', 'cible', 'filtre', 'créneau', 'risques', 's’abstenir', 'observation terrain', 'même moteur']:
         assert text in short
     assert len(short.split()) < 450
     for text in ['Fiabilité', 'prévision', 'recalibrage automatique', 'fenêtre productive', 'inconnues']:

@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 import importlib.metadata
 import math
 import os
+import sys
+from astropilot.private_kit_context import ENVIRONMENT_KEY as PRIVATE_COPY_CONTEXT_ENV, private_kit_context
 from pathlib import Path
 import platform
 import re
@@ -14,7 +16,7 @@ from time import perf_counter
 from typing import Annotated, Any, Callable, Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -34,6 +36,7 @@ from astropilot.guardian_renewal_api import (GuardianRenewalAdapter, RenewalRequ
 from astropilot.persistence_diagnostics import HEADER as PERSISTENCE_DIAGNOSTIC_HEADER, log_credit_persistence
 from decision.services.intent_progress_credit import IntentProgressPersistenceError
 from astropilot.weather_diagnostics import HEADER as WEATHER_DIAGNOSTIC_HEADER, log_weather, weather_diagnostic_context
+from astropilot.analysis_diagnostics import AnalysisTimings, HEADER as ANALYSIS_DIAGNOSTIC_HEADER
 from astropilot.guardian_api import GuardianEvaluateRequest, GuardianEvaluateResponse, evaluate as evaluate_guardian
 from decision.runners.guardian_runner import GuardianRunner
 
@@ -570,6 +573,7 @@ class SessionAvailabilityRequest(BaseModel):
 
 
 class TonightRequest(BaseModel):
+    selected_project_id: str | None = Field(default=None, strict=True, min_length=1, max_length=200)
     claim_opportunity_alert: bool = Field(default=False, strict=True, description="Explicitly evaluate and durably claim an alert from this live Tonight result.")
     model_config = ConfigDict(
         extra="forbid",
@@ -609,6 +613,14 @@ class TonightRequest(BaseModel):
         "moon",
         "nightscape",
     ] = "deep_sky"
+    bortle: int | None = Field(default=None, ge=1, le=9)
+
+class TargetSuggestionsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    availability: SessionAvailabilityRequest
+    confirmed_filter_profile_ids: list[str] = Field(min_length=1, max_length=20)
+    location: LocationRequest | None = None
+    equipment: str | None = None
     bortle: int | None = Field(default=None, ge=1, le=9)
 
 
@@ -1088,6 +1100,15 @@ class TonightAdviceModel(BaseModel):
     priority: str
     category: str
     message: str
+
+
+class RefusalWeatherSummaryModel(BaseModel):
+    window_start: AwareDatetime
+    window_end: AwareDatetime
+    cloud_cover_min: float = Field(ge=0, le=100)
+    cloud_cover_max: float = Field(ge=0, le=100)
+    retrieved_at_utc: AwareDatetime
+    provider: str
 
 
 class TonightWeatherTrustModel(BaseModel):
@@ -1588,6 +1609,7 @@ class TonightResponseModel(BaseModel):
     target_decision_status: TargetDecisionStatus | None = None
     actionability_refusal: ActionabilityRefusalModel | None = None
     creation_refusal: str | None = None
+    refusal_weather: RefusalWeatherSummaryModel | None = None
     shortlist_entries: list[TonightShortlistEntryModel] = Field(
         default_factory=list
     )
@@ -2083,6 +2105,21 @@ def create_app(
         if os.environ.get("ASTROPILOT_SESSION_TIMING") == "1" else "")
 
     @application.middleware("http")
+    async def tonight_timings(request: Request, call_next):
+        if request.method != "POST" or request.url.path not in {"/v1/tonight", "/v1/target-suggestions"}:
+            return await call_next(request)
+        timings = AnalysisTimings()
+        request.state.analysis_timings = timings
+        try:
+            response = await call_next(request)
+        except BaseException:
+            timings.finish(500)
+            raise
+        response.headers["Server-Timing"] = timings.finish(response.status_code)
+        response.headers[ANALYSIS_DIAGNOSTIC_HEADER] = timings.identifier
+        return response
+
+    @application.middleware("http")
     async def ui_cache_policy(request: Request, call_next):
         started = perf_counter() if os.environ.get("ASTROPILOT_SESSION_TIMING") == "1" else None
         guardian_route = request.url.path.endswith("/guardian-renewal") or (renewal_enabled and request.url.path == "/v1/execution-transitions")
@@ -2162,9 +2199,87 @@ def create_app(
     def opportunity_alert_status():
         return JSONResponse(read_status(get_user_data_dir()), headers={"Cache-Control": "no-store"})
 
+    @application.get("/v1/project-templates")
+    def get_project_templates():
+        from astropilot.project_templates import project_templates
+        return JSONResponse(project_templates(), headers={"Cache-Control": "no-store"})
+
+    def reference_catalogue_profile():
+        # A catalogue lookup needs no saved observing setup. Only a genuinely
+        # absent production profile is treated as first run; corrupt/unreadable
+        # profiles and injected provider failures still fail closed.
+        try:
+            return profile_provider()
+        except UserProfileError as exc:
+            cause = exc.__cause__
+            if (profile_provider is _production_profile_provider
+                    and isinstance(cause, FileNotFoundError)
+                    and cause.filename == str(get_user_data_dir() / "user_profile.json")):
+                return {}
+            raise
+
+    @application.get("/v1/target-catalogue")
+    def get_target_catalogue(equipment: str | None = None):
+        from astropilot.target_catalogue import equipment_catalogue
+        try:
+            profile = reference_catalogue_profile()
+            if not isinstance(profile, dict):
+                raise HTTPException(status_code=503, detail={"code": "catalogue_unavailable"})
+            identity = equipment if equipment is not None else profile.get("active_equipment")
+            if not isinstance(identity, str) or resolve_equipment_definition(profile, identity) is None:
+                raise HTTPException(status_code=422, detail={"code": "catalogue_equipment_unresolved"})
+            result = equipment_catalogue(profile=profile, equipment_id=identity)
+        except (OSError, ValueError, UserProfileError):
+            raise HTTPException(status_code=503, detail={"code": "catalogue_unavailable"}) from None
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+    @application.get("/catalogue", include_in_schema=False)
+    def extended_catalogue_page():
+        return HTMLResponse((web_root / "catalogue.html").read_text())
+
+    @application.get("/v1/target-catalogue/search")
+    def get_extended_catalogue(q: str = Query(default="", max_length=120),
+        equipment: str | None = None, kind: str | None = Query(default=None, max_length=40),
+        framing: Literal["nominal_fit", "small_in_field", "requires_framing_check", "unknown"] | None = None,
+        offset: int = Query(default=0, ge=0, le=100000), limit: int = Query(default=25, ge=1, le=100)):
+        from astropilot.extended_catalogue import search_catalogue, KINDS
+        from astropilot.target_catalogue import TARGETS
+        try:
+            profile = reference_catalogue_profile()
+            if not isinstance(profile, dict):
+                raise HTTPException(status_code=503, detail={"code": "catalogue_unavailable"})
+            identity = equipment if equipment is not None else profile.get("active_equipment")
+            if identity is not None and (not isinstance(identity, str) or resolve_equipment_definition(profile, identity) is None):
+                raise HTTPException(status_code=422, detail={"code": "catalogue_equipment_unresolved"})
+            if kind and kind not in {item[0] for item in KINDS.values()} | {item.kind for item in TARGETS}:
+                raise HTTPException(status_code=422, detail={"code": "catalogue_kind_invalid"})
+            result = search_catalogue(profile=profile, equipment_id=identity, query=q,
+                kind=kind, framing=framing, offset=offset, limit=limit)
+        except (OSError, ValueError, UserProfileError):
+            raise HTTPException(status_code=503, detail={"code": "catalogue_unavailable"}) from None
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
     @application.get("/v1/runtime-identity", include_in_schema=False)
     def runtime_identity():
         return runtime_identity_payload()
+
+    @application.get("/v1/data-context", include_in_schema=False)
+    def data_context():
+        # Explicit local diagnostic view. Resolve paths only: do not open, create,
+        # import or count profile records, or infer that this profile is empty.
+        try:
+            payload = {
+                "runtime": runtime_identity_payload(),
+                "data_directory": os.path.abspath(get_user_data_dir()),
+                "application_executable": os.path.abspath(sys.executable),
+            }
+            payload["private_copy"] = private_kit_context(
+                os.environ.get(PRIVATE_COPY_CONTEXT_ENV),
+                build=payload["runtime"]["build"], data_directory=payload["data_directory"],
+            )
+        except (OSError, ValueError):
+            raise HTTPException(status_code=503, detail={"code": "data_context_unavailable"}) from None
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
     def project_progress_projection(profile: dict, project_id: str) -> dict:
         project = profile.get("projects", {}).get(project_id)
@@ -2508,6 +2623,10 @@ def create_app(
                 },
             ) from exc
 
+    @application.post("/v1/target-suggestions")
+    def target_suggestions(request: TargetSuggestionsRequest, response: Response, http_request: Request):
+        return tonight(request, response, http_request)
+
     @application.post(
         "/v1/tonight",
         response_model=TonightResponseModel,
@@ -2637,10 +2756,18 @@ def create_app(
             },
         },
     )
-    def tonight(request: TonightRequest, response: Response):
+    def tonight(request: TonightRequest, response: Response, http_request: Request):
+        timings = http_request.state.analysis_timings
         reference_time_utc = clock()
         try:
             profile = dict(profile_provider())
+            selected_project_id = getattr(request, "selected_project_id", None)
+            if (selected_project_id is not None
+                    and selected_project_id not in profile.get("projects", {})):
+                raise HTTPException(status_code=422, detail={
+                    "code": "selected_project_unavailable",
+                    "message": "Le projet choisi n’est plus enregistré. Retrouvez-le dans Mes projets ou choisissez une autre cible.",
+                })
             requested_location = (
                 request.location.model_dump()
                 if request.location is not None
@@ -2723,12 +2850,12 @@ def create_app(
         effective_bortle = inputs.bortle
 
         weather_freshness: WeatherFreshness | None = None
-        weather_diagnostic_id = uuid4().hex
+        weather_diagnostic_id = timings.identifier
         weather_started = perf_counter()
         response.headers[WEATHER_DIAGNOSTIC_HEADER] = weather_diagnostic_id
         diagnostic_headers = {WEATHER_DIAGNOSTIC_HEADER: weather_diagnostic_id}
         try:
-            with weather_diagnostic_context(weather_diagnostic_id):
+            with timings.measure("weather"), weather_diagnostic_context(weather_diagnostic_id):
                 weather = weather_provider(
                     location["latitude"],
                     location["longitude"],
@@ -2781,17 +2908,34 @@ def create_app(
         log_weather("tonight_weather_available", category="available", started=weather_started,
                     diagnostic_id=weather_diagnostic_id)
 
+        if isinstance(request, TargetSuggestionsRequest):
+            from astropilot.target_discovery import discover_targets
+            try:
+                with timings.measure("calculation"):
+                    return JSONResponse(discover_targets(
+                        inputs=inputs, profile=profile, weather=weather,
+                        weather_freshness=weather_freshness, reference_time_utc=reference_time_utc,
+                        confirmed_filter_profile_ids=request.confirmed_filter_profile_ids),
+                        headers={"Cache-Control": "no-store", **diagnostic_headers})
+            except ValueError as exc:
+                if str(exc).startswith("discovery_"):
+                    raise HTTPException(status_code=422, detail={"code": str(exc)}) from exc
+                raise HTTPException(status_code=503, detail={"code": "discovery_evidence_unavailable"}) from exc
+
         try:
-            result = application_service().evaluate(
-                profile=profile,
-                weather=weather,
-                reference_time_utc=reference_time_utc,
-                equipment=inputs.equipment,
-                goal=request.goal,
-                target=request.target,
-                bortle=effective_bortle,
-                availability=inputs.availability,
-            )
+            with timings.measure("calculation"):
+                result = application_service().evaluate(
+                    profile=profile,
+                    weather=weather,
+                    reference_time_utc=reference_time_utc,
+                    equipment=inputs.equipment,
+                    goal=request.goal,
+                    target=request.target,
+                    bortle=effective_bortle,
+                    availability=inputs.availability,
+                    **({"selected_project_id": selected_project_id}
+                       if selected_project_id is not None else {}),
+                )
         except DecisionConsistencyError as exc:
             raise HTTPException(
                 status_code=503,
@@ -3708,6 +3852,42 @@ def create_app(
             raise
         except Exception as exc:
             raise_outcome_evaluation_error(exc)
+
+    @application.get("/v1/field-observations")
+    def list_saved_field_observations(limit: int = 50, before: str | None = None):
+        """Profile-local saved reports. Reading never evaluates or changes a report."""
+        if not 1 <= limit <= 50:
+            raise HTTPException(status_code=422, detail={"code": "invalid_observation_page"})
+        if before is not None:
+            before = validated_field_observation_route_identity(before, field="observation_id")
+        try:
+            service = application_service()
+            page = service.list_saved_field_observations(limit=limit, before=before)
+            items = []
+            zones = {}
+            for observation in page["items"]:
+                context = None
+                try:
+                    resolved = service.resolve_saved_field_observation_context(observation)
+                except FieldObservationContextError:
+                    resolved = None
+                if resolved is not None:
+                    coordinates = (resolved.latitude, resolved.longitude)
+                    if coordinates not in zones:
+                        try:
+                            zones[coordinates] = LocationTimeResolver.resolve(*coordinates).timezone_name
+                        except LocationTimeError:
+                            zones[coordinates] = None
+                    context = {"site_name": resolved.site_name, "latitude": resolved.latitude,
+                        "longitude": resolved.longitude, "timezone": zones[coordinates]}
+                items.append({"observation": field_observation_projection(observation), "context": context})
+            return {"items": items, "next_before": page["next_before"]}
+        except ValueError as error:
+            if str(error) == "invalid_observation_page":
+                raise HTTPException(status_code=422, detail={"code": str(error)}) from error
+            raise_field_observation_read_error(error)
+        except Exception as error:
+            raise_field_observation_read_error(error)
 
     @application.get("/v1/field-observations/{observation_id}")
     def get_field_observation(observation_id: str):

@@ -1,0 +1,4 @@
+# Preserve the pinned upstream bytes, including on Windows autocrlf checkouts.
+# Runtime SHA-256 checks deliberately fail if a bundled catalogue is modified.
+# Upstream formatting is retained verbatim, including whitespace in its guide.
+astropilot/catalogue_data/* -text -whitespace

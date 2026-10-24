@@ -4123,7 +4123,7 @@ def test_weather_failure_is_correlated_in_isolated_persistent_log_and_recovers(m
         assert first_id!=second_id
         contents=log_path.read_text()
         assert 'SECRET' not in contents and 'private.invalid' not in contents
-        events=[json.loads(line.split('weather_diagnostic ',1)[1]) for line in contents.splitlines()]
+        events=[json.loads(line.split('weather_diagnostic ',1)[1]) for line in contents.splitlines() if 'weather_diagnostic ' in line]
         assert [(x['event'],x['category']) for x in events if x['diagnostic_id']==first_id]==[
             ('weather_fetch_failed','tls_error'),('tonight_weather_refused','weather_unavailable')]
         assert [(x['event'],x['category']) for x in events if x['diagnostic_id']==second_id]==[

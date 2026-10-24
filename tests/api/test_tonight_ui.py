@@ -110,10 +110,10 @@ def test_root_serves_tonight_classic_ui():
     assert 'id="configuration-recovery-confirm"' in response.text
     assert 'id="edit-configuration"' in response.text
     assert "Modifier ma configuration" in response.text
-    assert "Site d’observation" in response.text
-    assert "Votre matériel" in response.text
+    assert "Où allez-vous observer ?" in response.text
+    assert "Avec quel matériel ?" in response.text
     assert "Aucun projet pour l’instant" in response.text
-    assert "Site, matériel et disponibilité" in response.text
+    assert "Vérifier ma configuration" in response.text
     for field_id in (
         "custom-optics-manufacturer",
         "custom-optics-model",
@@ -179,7 +179,7 @@ def test_tonight_ui_assets_are_served():
     assert "availability.duration =" in script.text
     assert "availability.start_local =" in script.text
     assert "availability.end_local =" in script.text
-    assert "JSON.stringify({ availability })" in script.text
+    assert "JSON.stringify({ availability, ...(selectedProjectId ? {selected_project_id: selectedProjectId} : {}) })" in script.text
     assert "state.availability" in script.text
     assert "requestingRecommendation" in script.text
     assert "invalid_session_availability_fields" in script.text
@@ -849,7 +849,7 @@ def test_existing_projects_are_preserved_by_the_configuration_wizard():
         "function initializeConfiguration(payload)",
         1,
     )[1].split("async function loadConfiguration", 1)[0]
-    assert "state.configurationDraft = draftFromConfiguration(payload)" in initialization
+    assert "setConfigurationDraft(draftFromConfiguration(payload))" in initialization
     assert "prefillConfiguration()" in initialization
 
     conflict = script.split(
@@ -1003,7 +1003,7 @@ def test_recovered_projection_reuses_first_run_initialization():
     )[1].split("async function saveConfiguration()", 1)[0]
 
     assert "state.configuration = payload" in initializer
-    assert "state.configurationDraft = draftFromConfiguration(payload)" in initializer
+    assert "setConfigurationDraft(draftFromConfiguration(payload))" in initializer
     assert "prefillConfiguration()" in initializer
     assert "renderAvailabilityTimezone()" in initializer
     assert "installCurrentConfiguration(payload, generation)" in loader
@@ -1452,7 +1452,8 @@ def test_terrain_groups_existing_controls_outside_decision():
     script = make_client().get("/ui/app.js").text
     for control in ("Message", "Decision"):
         assert f'ui.addObservation{control}.addEventListener("click", () => openFieldObservation("decision"));' in script
-    assert 'document.querySelector("#outcome-reopen").addEventListener("click", reopenRecentFieldObservations);' in script
+    assert 'document.querySelector("#outcome-reopen").addEventListener("click", openSavedObservationLibrary);' in script
+    assert 'document.querySelector("#saved-observations-open").addEventListener("click", openSavedObservationLibrary);' in script
 
 
 def test_compact_tonight_keeps_essential_fields_and_critical_warnings_outside_details():
@@ -1521,6 +1522,9 @@ for (const stage of ['no_productive_slice','continuous_window_too_short']) {
    best_slice_tie_count:1,evaluated_slice_count:8,losses:{cloud:.4}}}};
  for (const mode of ['simple','pro']) {
   appliedUiMode=mode;showTonightUnavailable(payload);
+  assert.equal(shown.title,mode==='simple'
+    ? (stage==='continuous_window_too_short'?'Le créneau disponible est trop court':'Aucun créneau adapté à vos horaires')
+    : (stage==='continuous_window_too_short'?'Fenêtre productive trop courte':'Aucune tranche productive'));
   assert.match(shown.body,/Réessayez plus tard/);
   assert.doesNotMatch(shown.body,/seuil|points/i);
 
@@ -1557,11 +1561,53 @@ state.availability=null;
 for (const mode of ['simple','pro']) {
  appliedUiMode=mode;
  showTonightUnavailable({status:'no_mission',provenance:'discovery',creation_refusal:'modern_mission_authorization_required'});
- assert.equal(shown.title,'Projet d’acquisition requis');
- assert.match(shown.body,/Aucun projet d’acquisition configuré/);
+ assert.equal(shown.title,'Préparons votre premier projet');
+ assert.match(shown.body,/Un projet indique/);
+ assert.equal(document.querySelector('#message-create-project').hidden,false);
+ assert.equal(ui.retry.hidden,true);
  assert.doesNotMatch(shown.body,/Mission incomplète|Réessayez plus tard|modern_mission/);
  assert.equal(document.querySelector('#message-edit-availability').hidden,true);
 }
+const noIntent = {status:'no_mission',provenance:'project',creation_refusal:'no_eligible_acquisition_intent',
+ acquisition_intent_assessments:[
+  {label:'Hα · Sh2-129',status:'not_eligible',reason_codes:['insufficient_actionable_productive_window']},
+  {label:'OIII · Ou4',status:'not_eligible',reason_codes:['intent_not_targeted_by_project']}]};
+for (const mode of ['simple','pro']) {
+ appliedUiMode=mode;
+ showTonightUnavailable(noIntent);
+ assert.equal(shown.title,'Créneau insuffisant pour ce projet');
+ assert.match(shown.body,/bien enregistré/);
+ assert.match(shown.body,/Hα · Sh2-129/);
+ assert.doesNotMatch(shown.body,/configurer|OIII|autoriser|modern_mission/);
+ assert.equal(document.querySelector('#message-edit-availability').hidden,false);
+ assert.equal(document.querySelector('#message-create-project').hidden,true);
+ assert.equal(ui.retry.textContent,'Actualiser les prévisions');
+}
+const overcast = {...noIntent,refusal_weather:{window_start:'2026-10-18T21:00:00+02:00',window_end:'2026-10-18T23:00:00+02:00',cloud_cover_min:100,cloud_cover_max:100,retrieved_at_utc:'2026-10-18T11:25:00+00:00',provider:'fixture'}};
+for (const mode of ['simple','pro']) {
+ appliedUiMode=mode;showTonightUnavailable(overcast);
+ assert.equal(shown.title,'Ciel couvert prévu sur le créneau évalué');
+ assert.match(shown.body,/100 %/);
+ assert.match(shown.body,/de 21:00 à 23:00 \(UTC\+02:00\)/);
+ assert.match(shown.body,/18.10.2026/);
+ assert.match(shown.body,/11:25 UTC\+00:00/);
+ assert.doesNotMatch(document.querySelector('#message-technical').textContent,/Votre projet est bien enregistré/);
+ assert.equal(document.querySelector('#message-edit-availability').hidden,true);
+}
+showTonightUnavailable({...overcast,refusal_weather:{...overcast.refusal_weather,cloud_cover_min:65,cloud_cover_max:80}});
+assert.match(shown.body,/65 à 80 %/);assert.doesNotMatch(shown.title,/Ciel couvert/);
+state.selectedProjectId='Sh2-129';showTonightUnavailable(overcast);
+assert.match(shown.body,/Cible choisie : Sh2-129/);
+assert.doesNotMatch(shown.body,/chercher une alternative|Me proposer une cible/);
+assert.equal(state.selectedProjectId,'Sh2-129');
+delete state.selectedProjectId;
+showTonightUnavailable({...overcast,refusal_weather:{...overcast.refusal_weather,retrieved_at_utc:null}});
+assert.doesNotMatch(shown.title,/Ciel couvert/);
+showTonightUnavailable({...noIntent,acquisition_intent_assessments:[
+ {label:'Hα',status:'insufficient_evidence',reason_codes:['filter_profile_evidence_insufficient']}]});
+assert.match(shown.body,/caractéristiques précises du filtre/);
+assert.doesNotMatch(shown.title,/Créneau insuffisant/);
+assert.equal(document.querySelector('#message-edit-availability').hidden,true);
 showTonightUnavailable({status:'no_recommendation'});
 assert.equal(document.querySelector('#message-edit-availability').hidden,true);
 '''

@@ -1,0 +1,22 @@
+{
+  "source": "OpenNGC",
+  "author": "Mattia Verga and contributors",
+  "upstream_url": "https://github.com/mattiaverga/OpenNGC",
+  "revision": "be3cd6c5498806a2fbb2f7e0452ef802dbb02be0",
+  "retrieved_on": "2026-10-21",
+  "license": "CC-BY-SA-4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "files": {
+    "NGC.csv": "54abea0b57b0a103831bfc7a8e3a99a23acfbf4bb581fcf3d8af539cbb826c84",
+    "addendum.csv": "c93f983dda6780b76b7b2e9271a856a892627710148a982ee98101a54c642fdd",
+    "NGC_guide.txt": "b7fca022985daa0f41a8bc8dd7028513e4db9ca96a2cfc380b68ff4c2e812810",
+    "AUTHORS": "57ad4fb09da7d94e90c66aea92af23f6493b29c9953ba0e85d3360b16531c011",
+    "CC-BY-SA-4.0.txt": "cde7883b9050a1104f4ac19a1572aafd6e5d7323b68351aaf51fbf4beba54966",
+    "README.md": "30222bfdea3df904f5de464663e81141eea4bd53c94c87d4fcce6f7b039e3f00",
+    "UPSTREAM-COPYRIGHT.txt": "5c0d58af7da9f6f1dd20e99ed55b5dbb4c09d035f9721cad80b2eecb81097672"
+  },
+  "modifications": "Original files unchanged. Runtime extracts selected columns, normalises identifier search, excludes Dup and NonEx entries, retains other classifications explicitly. Curated NightMerit imaging regions retain separate provenance and scope; source dimensions are not silently overwritten.",
+  "original_paths": {
+    "UPSTREAM-COPYRIGHT.txt": ".reuse/dep5"
+  }
+}

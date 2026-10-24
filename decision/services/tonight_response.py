@@ -22,6 +22,7 @@ from decision.models.recommendation_reason import (
     RecommendationReasonScope,
 )
 from decision.services.tonight_application_service import TonightResult
+from decision.services.refusal_weather_summary import RefusalWeatherSummary, refusal_weather_summary
 from decision.services.session_availability_windowing import (
     ActionabilityRefusal,
     ActionabilityRefusalStatus,
@@ -464,6 +465,7 @@ class TonightResponse:
     target_decision_status: TargetDecisionStatus | None = None
     actionability_refusal: ActionabilityRefusal | None = None
     creation_refusal: str | None = None
+    refusal_weather: RefusalWeatherSummary | None = None
     shortlist_entries: list[TonightShortlistEntryResponse] = field(
         default_factory=list
     )
@@ -944,6 +946,7 @@ class TonightResponse:
             target_decision_status=target_decision_status,
             actionability_refusal=actionability_refusal,
             creation_refusal=None if refused else result.creation_refusal,
+            refusal_weather=None if refused else refusal_weather_summary(result),
             shortlist_entries=shortlist_entries,
             alternatives=alternatives,
             rejected_targets=list(rejected_targets),

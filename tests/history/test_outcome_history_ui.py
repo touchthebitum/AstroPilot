@@ -98,7 +98,8 @@ function content(node){return [node.textContent,...node.children.map(content)].j
 def test_history_markup_and_navigation_invalidation():
     source = (ROOT / 'astropilot/web/app.js').read_text()
     markup = (ROOT / 'astropilot/web/index.html').read_text()
-    assert 'function setView(view) {\n  invalidateOutcomeHistory();' in source
+    navigation = source[source.index('function setView(view) {'):source.index('const labels = Object.freeze')]
+    assert navigation.index('invalidateOutcomeHistory();') < navigation.index('state.view = view;')
     assert 'id="history-dialog"' in markup
     assert 'partly_cloudy' in source[source.index('// Outcome History:'):source.index('// End Outcome History.')]
     assert 'textContent = value' in source[source.index('// Outcome History:'):source.index('// End Outcome History.')]

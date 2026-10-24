@@ -1,0 +1,68 @@
+NightMerit reference photographs — retrieved 2026-10-21.
+Original image bytes unchanged. Browser display sizing only.
+Images illustrate objects; they do not predict framing, colour or attainable detail.
+
+Nébuleuse de l’Aigle
+ESO/S. Brunier
+https://www.eso.org/public/images/b15/
+https://creativecommons.org/licenses/by/4.0/
+Région HII Sh2-49 entière. Les Piliers restent un petit détail à 135 mm ; vérifiez la hauteur sur l’horizon.
+SHA256 1edd0799fc3d42e9f99ceeb5e71ad649132befe38b6ca1458496fac3291fc307
+
+Nébuleuse Oméga
+ESO/S. Brunier
+https://www.eso.org/public/images/b15/
+https://creativecommons.org/licenses/by/4.0/
+Région HII Sh2-45. Sa faible hauteur depuis certains sites limite les bonnes conditions.
+SHA256 1edd0799fc3d42e9f99ceeb5e71ad649132befe38b6ca1458496fac3291fc307
+
+Nébuleuse de la Californie
+NGC1499 by Nico Carver
+https://www.nebulaphotos.com/ngc-ic/ngc1499/
+https://creativecommons.org/licenses/by-sa/4.0/
+NGC 1499 seule, pas l’ensemble de Sh2-220. Grande nébuleuse diffuse : cherchez ses contours après empilement, sans attendre le contraste de la vignette.
+SHA256 3fb4a915ab582766ea11177b1d40c00f8de36482a3621d7ad69f43a76c9cb45d
+
+Nébuleuse du Pélican
+NGC7000 and IC5070 by Nico Carver
+https://www.nebulaphotos.com/ngc-ic/ngc7000/
+https://creativecommons.org/licenses/by-sa/4.0/
+IC 5070 seule. North America est un autre projet ; la photographie montre les deux régions.
+SHA256 0222d7232ef2c796a23cdba620a25f9ab500ba624b50730b2f4a27f616513611
+
+IC 434 · autour de la Tête de Cheval
+ESO
+https://www.eso.org/public/images/eso0202a/
+https://creativecommons.org/licenses/by/4.0/
+Grande région lumineuse IC 434. La Tête de Cheval est une petite silhouette sombre devant ce gaz ; à 135 mm elle ne sera pas détaillée comme sur la vignette rapprochée.
+SHA256 2da28cab6ca70e3e0c1ecf4fec55d3d97b14cef348616b0c1758670dd6a3a63c
+
+Nébuleuse de la Mouette · Sh2-296
+IC2177 by Nico Carver
+https://www.nebulaphotos.com/ngc-ic/ic2177/
+https://creativecommons.org/licenses/by-sa/4.0/
+Région HII Sh2-296 entière, distincte de la petite entrée IC 2177. Proche de la limite du champ : vérifiez l’orientation et laissez une marge ; les extensions faibles ne sont pas garanties.
+SHA256 fe3830cb1dedd46083b43bd55d04e0876d89f86f8af093ce1f6326509a0849bb
+
+Nébuleuse de la Carène
+ESO
+https://www.eso.org/public/images/eso0905a/
+https://creativecommons.org/licenses/by/4.0/
+Cible australe. Elle ne se lève pas depuis Buttes ; elle ne sera proposée que depuis un site où sa hauteur permet une acquisition.
+SHA256 f066c5404b293b90634eb2d7052c96b0086e6a1be3147168b78598530ee123dd
+
+Nébuleuse de la Crevette
+ESO. Acknowledgement: Martin Pugh
+https://www.eso.org/public/images/eso1340b/
+https://creativecommons.org/licenses/by/4.0/
+Cible australe, trop basse depuis Buttes. Les petits détails de la vignette professionnelle ne représentent pas le résultat d’un 135 mm.
+SHA256 1567adfac377dbbb4b8e58a6358bd0303d663ab2a3491e0a88d7d1451a4e85cb
+
+Original download URLs:
+target-california.jpg : https://www.nebulaphotos.com/img/ngc1499Medium.jpg
+target-pelican.jpg : https://www.nebulaphotos.com/img/ngc7000Medium.jpg
+target-seagull.jpg : https://www.nebulaphotos.com/img/ic2177-HAMedium.jpg
+target-eagle-omega.jpg : https://cdn.eso.org/images/screen/b15.jpg
+target-carina.jpg : https://cdn.eso.org/images/screen/eso0905a.jpg
+target-prawn.jpg : https://cdn.eso.org/images/screen/eso1340b.jpg
+target-horsehead.jpg : https://cdn.eso.org/images/screen/eso0202a.jpg

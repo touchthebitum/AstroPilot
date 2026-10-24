@@ -11,15 +11,17 @@ if (!globalThis.NightMeritTime) {
 // UI preference only: never read by scientific or persistence handlers.
 const UI_MODE_KEY = "nightmerit.ui-mode.v1";
 const UI_MODE_LABELS = {
+  "nav-tonight": ["Préparer ma séance", "Ce soir"],
   "outcome-reopen": ["Mes observations", "Retrouver les observations enregistrées récentes"],
   "history-open": ["Mon historique", "Historique des validations"],
   "history-title": ["Mon historique", "Historique des validations"],
-  "add-field-observation-message": ["Ajouter une observation", "Ajouter une observation terrain"],
-  "add-field-observation-decision": ["Ajouter une observation", "Ajouter une observation terrain"],
-  "add-field-observation-mission": ["Ajouter une observation", "Ajouter une observation terrain"],
+  "add-field-observation-message": ["Noter les conditions sur place", "Ajouter une observation terrain"],
+  "add-field-observation-decision": ["Noter les conditions sur place", "Ajouter une observation terrain"],
+  "add-field-observation-mission": ["Noter les conditions sur place", "Ajouter une observation terrain"],
 };
 function normalizeUiMode(value) { return value === "pro" ? "pro" : "simple"; }
 let appliedUiMode = null;
+let uiPresentationListener = null;
 function applyUiMode(value) {
   const mode = normalizeUiMode(value);
   if (appliedUiMode === mode) {
@@ -38,6 +40,7 @@ function applyUiMode(value) {
   document.querySelectorAll("[data-simple-text]").forEach(element => {
     element.textContent = mode === "pro" ? element.dataset.proText : element.dataset.simpleText;
   });
+  if (uiPresentationListener) uiPresentationListener(mode);
   // Disclosure changes do not reset inputs, selections, filters, or requests.
   document.querySelectorAll("[data-mode-disclosure]").forEach(element => { element.open = mode === "pro"; });
 }
@@ -118,6 +121,7 @@ const state = {
   },
   availability: null,
   currentDecision: null,
+  selectedProjectId: null,
   currentDecisionSiteFingerprint: null,
   configurationGeneration: 0,
   configurationInFlightGeneration: null,
@@ -375,6 +379,22 @@ function renderSession() {
   document.querySelector("#session-close-actions").hidden = status !== "in_progress";
   document.querySelector("#session-evidence").hidden = status !== "completed" || Boolean(usableEvidence(session));
   const evidence = usableEvidence(session);
+  const nextStep = !session
+    ? "Démarrez une session uniquement lorsque vous commencez réellement vos prises de vue."
+    : !knownStatus || status === "unconfirmed"
+      ? "L’état de cette session doit être vérifié avant de poursuivre. Aucune durée ne sera ajoutée ici."
+      : status === "interrupted"
+        ? "Cette session interrompue n’ajoute aucun temps au projet."
+        : status === "not_started"
+          ? "Démarrez cette session lorsque vous commencez réellement vos prises de vue."
+          : status === "in_progress"
+            ? "Après vos prises de vue, terminez la session. Vous pourrez ensuite renseigner le temps de pose des images utilisables."
+            : session.credit
+              ? "Cette durée a déjà été ajoutée au projet. Ne la recopiez pas dans votre temps de départ. Le total acquis et le temps restant sont affichés ci-dessous."
+              : evidence
+                ? "La durée utilisable est enregistrée, mais pas encore ajoutée au projet. Vérifiez les valeurs, puis cliquez sur « Ajouter cette durée à mon avancement »."
+                : "Session terminée : renseignez ci-dessous le temps de pose des images utilisables de cette session. Si aucune image n’est utilisable, n’ajoutez aucune durée au projet.";
+  text("#session-next-step", nextStep);
   document.querySelector("#session-credit").hidden = status !== "completed" || !evidence || Boolean(session.credit);
   document.querySelector("#session-apply-credit").disabled = state.sessionBusy || status !== "completed";
   if (status === "completed" && evidence && !session.credit) {
@@ -857,6 +877,7 @@ function currentDecisionMatchesSite() {
     && (!trust.timezone || trust.timezone === siteTimezone());
 }
 function invalidateCurrentDecisionForSiteChange() {
+  const hadSiteContext = Boolean(state.configuration?.configured || state.currentDecision || state.acceptedMission || state.fieldObservationLock);
   beginConfigurationOperation();
   state.configurationInFlightGeneration = null;
   state.decisionSiteGeneration = (state.decisionSiteGeneration || 0) + 1;
@@ -867,7 +888,7 @@ function invalidateCurrentDecisionForSiteChange() {
   if (state.recentDecisions) state.recentDecisions = {open: false, items: [], cursor: null, extension: 1};
   ui.addObservationMessage.hidden = true;
   ui.addObservationDecision.hidden = true;
-  text("#current-decision-site-warning", "Le site ou son fuseau a changé. Préparez à nouveau votre nuit avant une observation immédiate, ou choisissez explicitement une décision récente.");
+  text("#current-decision-site-warning", hadSiteContext ? "Le site ou son fuseau a changé. Préparez à nouveau votre nuit avant une observation immédiate, ou choisissez explicitement une décision récente." : "");
   syncFieldObservationContext(); // Preserve draft, pending payload and UUID; block the old editor.
 }
 async function handleDecisionSiteStorageEvent(event) {
@@ -1053,6 +1074,9 @@ function openFieldObservation(source) {
     setView("availability");
     return;
   }
+  if (ui.observation.dataset) delete ui.observation.dataset.readOnly;
+  const observationTitle = document.querySelector("#observation-title");
+  if (observationTitle) observationTitle.textContent = "Observation terrain";
   resetFieldObservationForm();
   state.fieldObservationAnchorContext = Object.freeze({...context});
   state.fieldObservationDraftContext = Object.freeze(context);
@@ -2603,7 +2627,130 @@ function rememberConfirmedFieldObservation(observation) {
     : "Observation récemment confirmée. Supersession inconnue : attendez la lecture canonique ou rouvrez cet éditeur pour réessayer.";
 }
 
+function savedObservationTime(value, timezone) {
+  if (!value || !Number.isFinite(Date.parse(value))) return "Heure du relevé non disponible";
+  try {
+    return new NightMeritTime.DateTimeFormat("fr-CH", {timeZone: timezone || "UTC",
+      year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
+      timeZoneName: "shortOffset"}).format(new Date(value));
+  } catch (_) { return `${new Date(value).toISOString()} (UTC)`; }
+}
+
+async function openSavedObservationLibrary() {
+  if (state.observationBusy || ui.observation.open) return;
+  const dialog = document.querySelector("#saved-observations-dialog");
+  state.savedObservationLibrary = {generation: (state.savedObservationLibrary?.generation || 0) + 1, cursor: null};
+  dialog.showModal();
+  await loadSavedObservationLibrary(false);
+}
+
+async function loadSavedObservationLibrary(more = false) {
+  const library = state.savedObservationLibrary;
+  if (!library || library.loading) return;
+  library.loading = true;
+  const generation = ++library.generation;
+  const dialog = document.querySelector("#saved-observations-dialog");
+  const status = document.querySelector("#saved-observations-status");
+  const list = document.querySelector("#saved-observations-list");
+  const next = document.querySelector("#saved-observations-more");
+  const retry = document.querySelector("#saved-observations-retry");
+  const dataContext = document.querySelector("#saved-observations-data-context");
+  if (dataContext) dataContext.hidden = true;
+  if (!more) {list.replaceChildren(); library.cursor = null;}
+  status.textContent = "Lecture des observations enregistrées…";
+  next.hidden = retry.hidden = true;
+  const current = () => state.savedObservationLibrary === library && library.generation === generation && dialog.open;
+  try {
+    const query = library.cursor ? `?before=${encodeURIComponent(library.cursor)}` : "";
+    const data = await fieldObservationNetworkRequest(`/v1/field-observations${query}`, {method: "GET"}, async response => {
+      if (!response.ok) throw await sessionHttpError(response);
+      return response.json();
+    });
+    if (!current()) return;
+    if (!Array.isArray(data.items) || !(data.next_before === null || typeof data.next_before === "string")
+      || data.items.some(item => typeof item?.observation?.observation_id !== "string")) throw new Error("invalid_observation_page");
+    for (const item of data.items) {
+      const observation = item.observation, context = item.context;
+      const card = document.createElement("article"); card.className = "saved-observation-card";
+      const heading = document.createElement("h3"); heading.textContent = savedObservationTime(observation.observed_at_utc, context?.timezone);
+      const site = document.createElement("p");
+      const configuredSite = state.configuration?.site;
+      const matchesSite = context && Number.isFinite(context.latitude) && Number.isFinite(context.longitude)
+        && context.latitude === configuredSite?.latitude && context.longitude === configuredSite?.longitude;
+      site.textContent = `Site : ${context?.site_name || (matchesSite ? configuredSite.name : null)
+        || (Number.isFinite(context?.latitude) && Number.isFinite(context?.longitude) ? `${context.latitude}, ${context.longitude}` : "non documenté")}`;
+      const open = document.createElement("button"); open.type = "button"; open.className = "primary-button";
+      open.textContent = "Ouvrir ce relevé";
+      open.disabled = typeof observation.decision_id !== "string" || !observation.decision_id;
+      open.addEventListener("click", () => openSavedObservationRecord(item));
+      card.append(heading, site, open);
+      if (open.disabled) {
+        const note = document.createElement("p"); note.textContent = "Ancien relevé sans décision associée : comparaison indisponible."; card.append(note);
+      }
+      list.append(card);
+    }
+    library.cursor = data.next_before;
+    next.hidden = !library.cursor;
+    if (dataContext) dataContext.hidden = Boolean(list.children.length);
+    status.textContent = list.children.length ? "Choisissez un relevé pour le consulter et voir sa comparaison." : "Aucune observation enregistrée dans ce profil. Les relevés d’une autre copie de test ne sont pas importés automatiquement.";
+  } catch (_) {
+    if (!current()) return;
+    status.textContent = "La liste des observations n’a pas pu être chargée complètement. Vos relevés sont conservés. Réessayez la lecture.";
+    retry.hidden = false;
+  } finally {library.loading = false;}
+}
+
+async function openSavedObservationRecord(item) {
+  if (state.observationBusy) return;
+  const observation = item.observation;
+  const context = {decision_id: observation.decision_id, execution_id: observation.execution_id ?? null,
+    timezone: item.context?.timezone || null};
+  document.querySelector("#saved-observations-dialog").close();
+  invalidateFieldObservationOperation();
+  state.fieldObservationDraftContext = Object.freeze(context);
+  state.fieldObservationContextInvalid = true;
+  setFieldObservationEditorDisabled(true);
+  ui.observation.dataset.readOnly = "true";
+  document.querySelector("#observation-title").textContent = "Observation enregistrée";
+  document.querySelector("#observation-time-summary").textContent = savedObservationTime(observation.observed_at_utc, context.timezone);
+  document.querySelector("#observation-context-decision").textContent = "Consultation d’un relevé enregistré";
+  document.querySelector("#observation-linkage").textContent = observation.execution_id ? "Liée à une session" : "Sans session photo";
+  ui.observation.showModal();
+  await loadSavedFieldObservations(context);
+  if (!ui.observation.open || state.fieldObservationDraftContext !== context) return;
+  if (state.outcomeLineageStatus !== "ready") return;
+  if (!(state.visibleObservationsForContext || []).some(o => o.observation_id === observation.observation_id)) {
+    state.outcomeManualObservationId = state.outcomeObservationId = null;
+    renderSavedFieldObservations();
+    document.querySelector("#saved-observation-details").textContent = "";
+    document.querySelector("#outcome-result").textContent = "Ce relevé n’a pas été retrouvé. Rechargez la liste. Aucun autre relevé n’a été sélectionné.";
+    return;
+  }
+  state.outcomeManualObservationId = state.outcomeObservationId = observation.observation_id;
+  renderSavedFieldObservations();
+  await consultOutcomeEvaluation(false);
+}
+
+function renderSavedObservationDetails() {
+  const observation = state.visibleObservationsForContext?.find(o => o.observation_id === state.outcomeObservationId);
+  if (!observation) {
+    document.querySelector("#saved-observation-details").textContent = "";
+    return;
+  }
+  const conditions = observation.conditions || {};
+  const labels = {clear: "Dégagé", few: "Quelques nuages", partly_cloudy: "Partiellement couvert", mostly_cloudy: "Très nuageux", overcast: "Couvert", dry: "Sèche", damp: "Humide", dew_present: "Rosée"};
+  const lines = [];
+  if (conditions.cloud_state) lines.push(`Nuages : ${labels[conditions.cloud_state] || conditions.cloud_state}`);
+  if (conditions.surface_condition) lines.push(`Surface : ${labels[conditions.surface_condition] || conditions.surface_condition}`);
+  for (const [key, label, unit] of [["temperature_c", "Température", "°C"], ["relative_humidity_percent", "Humidité", "%"], ["wind_speed_kmh", "Vent", "km/h"]]) {
+    if (Number.isFinite(conditions[key])) lines.push(`${label} : ${conditions[key]} ${unit}`);
+  }
+  document.querySelector("#saved-observation-details").textContent = lines.length ? lines.join("\n") : "Aucune de ces conditions n’a été renseignée dans ce relevé.";
+  document.querySelector("#observation-time-summary").textContent = savedObservationTime(observation.observed_at_utc, state.fieldObservationDraftContext?.timezone);
+}
+
 function renderSavedFieldObservations() {
+  if (typeof ui !== "undefined" && ui.observation?.dataset?.readOnly === "true") renderSavedObservationDetails();
   const select = document.querySelector("#outcome-observation");
   if (!select) return;
   select.innerHTML = "";
@@ -2623,7 +2770,7 @@ function renderSavedFieldObservations() {
     if (state.outcomeLineageStatus === "ready" && !history.coherent) option.textContent += " — Chaîne de corrections incohérente";
     if (option.dataset) {
       option.dataset.proText = option.textContent;
-      let simpleText = item.observed_at_utc || "Observation";
+      let simpleText = savedObservationTime(item.observed_at_utc, state.fieldObservationDraftContext?.timezone);
       if (state.outcomeLineageStatus !== "ready") simpleText += " — Vérification en cours, comparaison bloquée";
       else if (history.replacements.has(item.observation_id)) simpleText += " — Historique / observation remplacée";
       else if (activeCount > 1) simpleText += " — Plusieurs observations actives";
@@ -2743,15 +2890,18 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
   // Build both wording variants from the complete message, including business warnings.
   const lines = [...warnings, knownStatus ? statuses[evaluation.status] : "Statut non reconnu"];
   const technicalLines = [`Observation enregistrée : ${evaluation.observation_id}`];
+  const comparableLines = [];
   const reasonText = reason => Object.hasOwn(OUTCOME_REASON_TEXT, reason.code) ? OUTCOME_REASON_TEXT[reason.code] : "Raison non reconnue.";
   for (const item of knownStatus ? evaluation.results : []) {
     const name = labels[item.variable] || "Variable";
     if (item.status !== "comparable") {
       lines.push(`${name} : non comparable. ${item.reasons.map(reasonText).join(" ")}`);
     } else if (item.variable === "cloud_cover_percent") {
-      lines.push(`${name} : Prévu ${cloud[item.forecast] || item.forecast}, Observé ${cloud[item.observed] || item.observed} — ${item.outcome === "match" ? "catégories identiques" : "catégories différentes"}.`);
+      const line = `${name} : Prévu ${cloud[item.forecast] || item.forecast}, Observé ${cloud[item.observed] || item.observed} — ${item.outcome === "match" ? "catégories identiques" : "catégories différentes"}.`;
+      lines.push(line); comparableLines.push(line);
     } else {
-      lines.push(`${name} : Prévu ${item.forecast} ${item.unit}, Observé ${item.observed} ${item.unit} ; erreur signée (prévision − observation) ${item.signed_error} ${item.unit} ; erreur absolue ${item.absolute_error} ${item.unit}.`);
+      const line = `${name} : Prévu ${item.forecast} ${item.unit}, Observé ${item.observed} ${item.unit} ; erreur signée (prévision − observation) ${item.signed_error} ${item.unit} ; erreur absolue ${item.absolute_error} ${item.unit}.`;
+      lines.push(line); comparableLines.push(line);
     }
   }
   lines.push(...evaluation.reasons.map(reasonText));
@@ -2764,12 +2914,16 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
   technicalLines.push("", "Traçabilité de la prévision");
   const unavailable = "Non disponible";
   const timezone = state.fieldObservationDraftContext?.timezone || null;
-  const dateText = value => {
+  const dateText = (value, compact = false) => {
     if (!value || !Number.isFinite(Date.parse(value))) return unavailable;
     const utc = new Date(value).toISOString();
     try {
-      return timezone ? `${new NightMeritTime.DateTimeFormat("fr-CH", {timeZone: timezone,
-        dateStyle: "short", timeStyle: "short"}).format(new Date(value))} (${timezone}) · ${utc}` : utc;
+      if (!timezone) return utc;
+      const format = compact
+        ? {timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZoneName: "shortOffset"}
+        : {timeZone: timezone, dateStyle: "short", timeStyle: "short"};
+      const local = new NightMeritTime.DateTimeFormat("fr-CH", format).format(new Date(value));
+      return compact ? local : `${local} (${timezone}) · ${utc}`;
     } catch (_) { return utc; }
   };
   for (const item of knownStatus ? evaluation.results : []) {
@@ -2795,7 +2949,47 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
   resultElement.textContent = lines.join("\n");
   if (resultElement.dataset) {
     resultElement.dataset.proText = resultElement.textContent;
-    resultElement.dataset.simpleText = resultElement.textContent
+    const simpleLines = [...warnings, knownStatus ? statuses[evaluation.status] : "Statut non reconnu"];
+    if (knownStatus) {
+      simpleLines.push("Votre observation est enregistrée.");
+      // Use the selected, server-confirmed observation, never the editable clock.
+      const observation = state.visibleObservationsForContext?.find(item =>
+        item.observation_id === evaluation.observation_id);
+      if (observation?.observed_at_utc) simpleLines.push(`Heure du relevé : ${dateText(observation.observed_at_utc, true)}.`);
+      const forecastTimes = new Map();
+      for (const item of evaluation.results) {
+        const time = item.forecast_point?.selected_forecast_for_utc;
+        if (item.status !== "comparable" || !time || !Number.isFinite(Date.parse(time))) continue;
+        const instant = new Date(time).toISOString();
+        if (!forecastTimes.has(instant)) forecastTimes.set(instant, []);
+        forecastTimes.get(instant).push(labels[item.variable] || "Variable");
+      }
+      for (const [time, variables] of forecastTimes) simpleLines.push(`Prévision utilisée (${variables.join(", ")}) : ${dateText(time, true)}.`);
+      simpleLines.push(...comparableLines);
+      const reasons = new Map();
+      for (const item of evaluation.results) {
+        for (const reason of item.reasons) {
+          if (!reasons.has(reason.code)) reasons.set(reason.code, new Set());
+          reasons.get(reason.code).add(labels[item.variable] || "Variable");
+        }
+      }
+      for (const reason of evaluation.reasons) {
+        if (!reasons.has(reason.code)) reasons.set(reason.code, new Set());
+      }
+      for (const [code, variables] of reasons) {
+        if (code === "forecast_outside_temporal_tolerance") {
+          simpleLines.push(evaluation.status === "partial"
+            ? "Certaines conditions ne peuvent pas être comparées : la prévision disponible est trop éloignée de l’heure de votre relevé."
+            : "La prévision disponible est trop éloignée de l’heure de votre relevé pour permettre une comparaison fiable.");
+          if (evaluation.status !== "partial") simpleLines.push("L’heure de la prévision rejetée n’est pas disponible dans cette comparaison.");
+          simpleLines.push("Conservez l’heure réelle de votre observation. Ce résultat ne dit pas si la prévision était juste ou fausse.");
+        } else {
+          simpleLines.push(`${variables.size ? [...variables].join(", ") + " : " : ""}${reasonText({code})}`);
+        }
+      }
+      if (evaluation.assessment) simpleLines.push(lines[lines.length - 1]);
+    }
+    resultElement.dataset.simpleText = simpleLines.join("\n")
       .replaceAll("erreur signée (prévision − observation)", "Écart (prévu − observé)")
       .replaceAll("erreur absolue", "écart sans tenir compte du signe")
       .replaceAll("Suffisance des éléments comparables", "Conditions pouvant être comparées");
@@ -2899,7 +3093,7 @@ async function consultOutcomeEvaluation(createIfMissing = false) {
       output.textContent = "Supersession inconnue : création bloquée. Rouvrez cet éditeur pour réessayer la lecture canonique.";
     } else if (!outcomeCanCreate(observationId)) {
       output.textContent = "Observation remplacée ou chaîne de corrections incohérente : aucune nouvelle évaluation autorisée. La consultation historique reste disponible.";
-    } else output.textContent = "Aucune comparaison enregistrée. Cliquez sur « Comparer avec la prévision ».";
+    } else output.textContent = "Aucune comparaison enregistrée. Cliquez sur « Créer une comparaison si elle manque ».";
   } catch (_error) {
     if (!current()) return;
     if (_error.outcomeProtocolError) {
@@ -3604,10 +3798,19 @@ const PENDING_ACCEPTANCE_STORAGE_VERSION = 2;
 const wizardStates = Object.freeze(["site", "equipment", "projects", "review"]);
 
 function setView(view) {
+  const selectedNotice = document.querySelector("#availability-selected-project");
+  if (selectedNotice) {
+    selectedNotice.hidden = !state.selectedProjectId || state.discoveryMode;
+    selectedNotice.textContent = state.selectedProjectId
+      ? `Cible choisie : ${state.selectedProjectId}. L’analyse vérifiera ce projet avec vos horaires et la météo, sans le remplacer par une autre cible.` : "";
+  }
   invalidateOutcomeHistory();
   state.viewRevision = (state.viewRevision || 0) + 1;
   state.view = view;
+  if (view === "recommendation") state.guidedInitialConfiguration = false;
   const wizardVisible = wizardStates.includes(view);
+  document.documentElement.dataset.guidedView = view;
+  document.querySelector("#target-suggestions").hidden = view !== "discovery";
   ui.configurationLoading.hidden = view !== "loading_configuration";
   ui.configurationError.hidden = view !== "configuration_error";
   ui.onboarding.hidden = !wizardVisible;
@@ -3635,6 +3838,8 @@ function setView(view) {
   for (const marker of document.querySelectorAll("[data-progress]")) {
     marker.classList.toggle("active", marker.dataset.progress === view);
   }
+  if (typeof updateGuidedPresentation === "function") updateGuidedPresentation();
+  if (view === "projects" && typeof prepareGuidedProjectCreation === "function") prepareGuidedProjectCreation();
   if (view === "review") {
     requestAnimationFrame(() => document.querySelector("#availability-title")?.focus());
   } else if (wizardVisible) {
@@ -3933,6 +4138,20 @@ function renderMission(mission) {
     item.textContent = "Plan opérationnel non disponible.";
     tasks.append(item);
   }
+
+  const review = document.createElement("li");
+  const reviewWhen = document.createElement("span");
+  reviewWhen.className = "task-time";
+  reviewWhen.textContent = "Après les flats · le lendemain si besoin";
+  const reviewCopy = document.createElement("div");
+  reviewCopy.className = "task-copy";
+  const reviewTitle = document.createElement("strong");
+  reviewTitle.textContent = "Trier les images, puis enregistrer les poses utilisables dans mon projet";
+  const reviewHelp = document.createElement("small");
+  reviewHelp.textContent = "Vérifiez vos clichés et comptez uniquement ceux que vous conservez. Dans la session d’imagerie, renseignez leur temps de pose total pour cette séance, sans les images rejetées ni les flats, darks et bias. Vous confirmerez ensuite son ajout à votre projet.";
+  reviewCopy.append(reviewTitle, reviewHelp);
+  review.append(reviewWhen, reviewCopy);
+  tasks.append(review);
 
   renderSession();
   reloadSessions().catch(() => sessionMessage("Sessions momentanément indisponibles. Rechargez avant une action."));
@@ -4640,6 +4859,7 @@ function progressEditorSnapshot(fieldOverride = null) {
 }
 
 function confirmDiscardProjectProgress() {
+  if (state.savingProjectProgress) return false;
   return progressEditorSnapshot() === state.progressEditorBaseline
     || window.confirm("Des modifications de l’avancement ne sont pas enregistrées. Les abandonner ?");
 }
@@ -4647,6 +4867,7 @@ function confirmDiscardProjectProgress() {
 function renderProjects() {
   if (!confirmDiscardProjectProgress()) return false;
   document.querySelector("#project-progress-editor").hidden = true;
+  document.documentElement.dataset.progressOpen = "false";
   state.progressEditor = null;
   state.progressEditorBaseline = null;
   const projects = state.configurationDraft.projects || {};
@@ -4659,18 +4880,21 @@ function renderProjects() {
   zeroProjectsControl.hidden = Boolean(entries.length);
   if (entries.length) {
     const heading = document.createElement("p");
-    heading.textContent = "Projets actuellement conservés";
+    heading.textContent = entries.some(([key]) => Object.hasOwn(state.configuration?.projects || {}, key))
+      ? "Projets actuellement conservés" : "Projets à enregistrer";
     const explanation = document.createElement("p");
     explanation.textContent = "Vos projets existants sont conservés. Ouvrez un projet pour renseigner son avancement par intention d’acquisition. Changer votre site ou votre matériel ne les supprimera pas.";
     const list = document.createElement("ul");
     for (const [catalogKey, project] of entries) {
       const item = document.createElement("li");
       const label = document.createElement("span");
-      label.textContent = `${catalogKey} · ${project.hours} h sur ${project.target_hours} h (historique) `;
+      const saved = Object.hasOwn(state.configuration?.projects || {}, catalogKey);
+      label.textContent = `${catalogKey} · ${project.hours} h sur ${project.target_hours} h${saved ? " (historique)" : " (brouillon à enregistrer)"} `;
       const button = document.createElement("button");
       button.type = "button";
       button.className = "secondary-button";
-      button.textContent = "Ouvrir";
+      button.textContent = saved ? "Ouvrir" : "Enregistrer d’abord";
+      button.disabled = !saved;
       button.addEventListener("click", () => openProjectProgress(catalogKey));
       item.append(label, button);
       list.append(item);
@@ -4682,7 +4906,203 @@ function renderProjects() {
     zeroProjects.checked = true;
     zeroProjects.disabled = true;
   }
+  if (typeof renderSimpleProjects === "function") renderSimpleProjects(entries);
   return true;
+}
+
+function loadProjectTemplates() {
+  if (state.projectTemplatesRequest) return state.projectTemplatesRequest;
+  const operation = loadProjectTemplatesOnce();
+  state.projectTemplatesRequest = operation;
+  operation.finally(() => { if (state.projectTemplatesRequest === operation) state.projectTemplatesRequest = null; });
+  return operation;
+}
+
+async function loadProjectTemplatesOnce() {
+  state.projectTemplatesLoading = true;
+  const button = document.querySelector("#project-templates-load");
+  const feedback = document.querySelector("#project-create-feedback");
+  button.disabled = true;
+  feedback.textContent = "Chargement des cibles prises en charge…";
+  try {
+    const response = await fetch("/v1/project-templates");
+    if (!response.ok) throw new Error("templates unavailable");
+    const templates = await response.json();
+    if (!Array.isArray(templates)) throw new Error("invalid templates");
+    state.projectTemplates = templates;
+    const select = document.querySelector("#project-template");
+    select.replaceChildren(new Option("Choisir une cible", ""));
+    for (const template of templates) {
+      select.append(new Option(template.display_name, template.catalog_key));
+    }
+    document.querySelector("#project-create-fields").hidden = !templates.length;
+    if (templates.length === 1) {
+      select.value = templates[0].catalog_key;
+      renderNewProjectIntents();
+    }
+    button.hidden = Boolean(templates.length);
+    feedback.textContent = templates.length
+      ? "Seules les cibles disposant de données de mission complètes sont proposées dans cette bêta."
+      : "Aucune cible ne dispose encore des données nécessaires dans cette version.";
+  } catch (_error) {
+    feedback.textContent = "Les cibles ne peuvent pas être chargées. Vos réglages sont conservés ; réessayez.";
+  } finally {
+    state.projectTemplatesLoading = false;
+    button.disabled = false;
+  }
+}
+
+// Replace a draft and invalidate its start-state choices before any UI rendering.
+function setConfigurationDraft(draft) {
+  if (state.configurationDraft === draft) return;
+  state.configurationDraft = draft;
+  state.projectEmptyConfirmationDraft = draft;
+  state.projectEmptyConfirmations = new Map();
+  state.projectEmptyConfirmationKey = null;
+  document.querySelector("#project-new-empty").checked = false;
+}
+
+// Keep explicit start-state consent in this draft, scoped to its target.
+// A new draft or a successfully created project must not inherit old consent.
+function restoreNewProjectEmptyConfirmation(key) {
+  const control = document.querySelector("#project-new-empty");
+  if (state.projectEmptyConfirmationDraft !== state.configurationDraft) {
+    state.projectEmptyConfirmationDraft = state.configurationDraft;
+    state.projectEmptyConfirmations = new Map();
+  } else if (state.projectEmptyConfirmationKey) {
+    state.projectEmptyConfirmations.set(state.projectEmptyConfirmationKey, control.checked === true);
+  }
+  state.projectEmptyConfirmationKey = key || null;
+  control.checked = Boolean(key && state.projectEmptyConfirmations.get(key) === true);
+}
+
+function consumeNewProjectEmptyConfirmation(key) {
+  state.projectEmptyConfirmations?.delete(key);
+  if (state.projectEmptyConfirmationKey === key) {
+    state.projectEmptyConfirmationKey = null;
+    document.querySelector("#project-new-empty").checked = false;
+  }
+}
+
+function renderNewProjectIntents() {
+  const key = document.querySelector("#project-template").value;
+  const template = state.projectTemplates?.find(item => item.catalog_key === key);
+  const container = document.querySelector("#project-new-intents");
+  container.replaceChildren();
+  const guidance = document.querySelector("#project-target-guidance");
+  guidance.textContent = template?.guidance?.summary || "";
+  guidance.hidden = !guidance.textContent;
+  restoreNewProjectEmptyConfirmation(template?.catalog_key);
+  const equipmentId = state.configurationDraft.equipment?.preset_id;
+  state.projectCreationEquipmentId = equipmentId;
+  for (const intent of template?.acquisition_intents || []) {
+    const filters = intent.supported_filters.filter(item => item.equipment_id === equipmentId);
+    const row = document.createElement("fieldset");
+    row.dataset.newIntentId = intent.acquisition_intent_id;
+    const legend = document.createElement("legend");
+    legend.textContent = intent.label;
+    row.append(legend);
+    if (intent.guidance) {
+      const difficulty = document.createElement("p");
+      difficulty.className = "target-difficulty";
+      difficulty.textContent = intent.guidance.difficulty;
+      const purpose = document.createElement("p");
+      purpose.textContent = intent.guidance.purpose;
+      const details = document.createElement("details");
+      details.className = "target-choice-help";
+      const summary = document.createElement("summary");
+      summary.textContent = "Conseils pour cette cible";
+      const advice = document.createElement("p");
+      advice.textContent = intent.guidance.advice;
+      const duration = document.createElement("p");
+      duration.textContent = "Combien d’heures prévoir ? Cette bêta ne dispose pas encore d’une estimation fiable pour votre matériel et votre ciel. Choisissez un objectif total que vous pourrez ajuster après vos premières images. Le minimum de 1 h du formulaire ne garantit pas un résultat visible.";
+      details.append(summary, advice, duration);
+      // Only curated help is linked; never turn arbitrary template data into a URL.
+      if (["https://science.nasa.gov/", "https://esahubble.org/", "https://www.eso.org/"].some(prefix => template.guidance?.source_url?.startsWith(prefix))) {
+        const source = document.createElement("a");
+        source.href = template.guidance.source_url;
+        source.textContent = template.guidance.source_label;
+        source.target = "_blank";
+        source.rel = "noopener noreferrer";
+        details.append(source);
+      }
+      row.append(difficulty, purpose, details);
+    }
+    const confirmation = document.createElement("label");
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.disabled = filters.length !== 1;
+    const copy = document.createElement("span");
+    copy.textContent = filters.length === 1
+      ? `Je veux photographier avec ce filtre et je confirme le posséder : ${filters[0].label} (${filters[0].fwhm_nm} nm).`
+      : "Cette bêta ne dispose pas d’un filtre précisément compatible avec le matériel choisi. Ne changez pas votre matériel pour contourner cette limite.";
+    confirmation.append(check, copy);
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "number"; input.min = "1"; input.step = "any";
+    input.dataset.targetHours = "true";
+    label.className = "field";
+    label.append(document.createTextNode("Temps de pose total souhaité avec ce filtre (heures, au moins 1 h)"), input);
+    const note = document.createElement("small");
+    note.textContent = "Sur toutes vos nuits réunies. Ce n’est pas votre disponibilité de ce soir.";
+    label.append(note);
+    row.dataset.intentSelected = "false";
+    check.addEventListener("change", () => {row.dataset.intentSelected = String(check.checked);});
+    label.classList.add("new-intent-goal");
+    row.append(confirmation, label);
+    container.append(row);
+  }
+}
+
+function newProjectFromInputs(template, entries, emptyConfirmed, existingProjects) {
+  if (!template) throw new Error("Choisissez une cible à photographier.");
+  if (Object.hasOwn(existingProjects, template.catalog_key)) {
+    throw new Error("Ce projet existe déjà. Ouvrez-le pour modifier son avancement ; il ne sera pas remplacé.");
+  }
+  if (!emptyConfirmed) throw new Error("Confirmez que ce nouveau projet ne contient pas déjà des images acquises.");
+  const targets = [];
+  for (const entry of entries.filter(item => item.selected)) {
+    const hours = Number(entry.hours);
+    const intent = template.acquisition_intents.find(item => item.acquisition_intent_id === entry.id);
+    const equipmentId = state.configurationDraft.equipment?.preset_id;
+    if (!intent || intent.supported_filters.filter(item => item.equipment_id === equipmentId).length !== 1) {
+      throw new Error("Le filtre précis n’est pas pris en charge pour votre matériel.");
+    }
+    if (!Number.isFinite(hours) || hours < 1) throw new Error("Indiquez un objectif de pose d’au moins 1 heure pour chaque filtre choisi.");
+    targets.push({ acquisition_intent_id: entry.id, target_hours: hours });
+  }
+  if (!targets.length) throw new Error("Choisissez au moins une prise de vue avec un filtre que vous possédez.");
+  const total = targets.reduce((sum, item) => sum + item.target_hours, 0);
+  if (!Number.isFinite(total)) throw new Error("L’objectif total de pose est trop grand.");
+  return { hours: 0, target_hours: total, imaging_field_id: template.imaging_field_id,
+    acquisition_intent_targets: targets, acquisition_intent_progress: targets.map(item => ({
+      acquisition_intent_id: item.acquisition_intent_id, acquired_duration_manual: 0 })) };
+}
+
+function addNewProject() {
+  if (state.savingConfiguration) return;
+  const feedback = document.querySelector("#project-create-feedback");
+  try {
+    if (!confirmDiscardProjectProgress()) return;
+    const key = document.querySelector("#project-template").value;
+    const template = state.projectTemplates?.find(item => item.catalog_key === key);
+    const entries = [...document.querySelectorAll("fieldset[data-new-intent-id]")].map(row => ({
+      id: row.dataset.newIntentId, selected: row.querySelector('input[type="checkbox"]').checked,
+      hours: row.querySelector('input[data-target-hours]').value,
+    }));
+    const projects = state.configurationDraft.projects || {};
+    const project = newProjectFromInputs(template, entries,
+      document.querySelector("#project-new-empty").checked, projects);
+    state.configurationDraft.projects = { ...projects, [key]: project };
+    state.selectedProjectId = key;
+    consumeNewProjectEmptyConfirmation(key);
+    renderProjects();
+    document.querySelector("#project-create").open = false;
+    feedback.textContent = "Projet ajouté au brouillon. Enregistrez pour conserver ce choix. Aucun temps de pose n’a été crédité.";
+    if (appliedUiMode === "simple") saveConfiguration();
+  } catch (error) {
+    feedback.textContent = error.message;
+  }
 }
 
 function progressDuration(seconds) {
@@ -4709,16 +5129,23 @@ async function openProjectProgress(projectId, { discardConfirmed = false } = {})
   if (!discardConfirmed && !confirmDiscardProjectProgress()) return;
   const editor = document.querySelector("#project-progress-editor");
   editor.hidden = false;
+  document.documentElement.dataset.progressOpen = "true";
+  const simpleList = document.querySelector("#simple-projects");
+  if (simpleList) simpleList.hidden = true;
   editor.textContent = "Chargement du projet…";
+  const generation = (state.progressEditorGeneration || 0) + 1;
+  state.progressEditorGeneration = generation;
   state.progressEditor = null;
   state.progressEditorBaseline = null;
   try {
     const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/progress`);
     if (!response.ok) throw new Error("load failed");
-    state.progressEditor = await response.json();
+    const data = await response.json();
+    if (generation !== state.progressEditorGeneration || state.view !== "projects") return;
+    state.progressEditor = data;
     renderProjectProgressEditor();
   } catch (_error) {
-    editor.textContent = "Le projet ne peut pas être ouvert. Réessayez.";
+    if (generation === state.progressEditorGeneration && state.view === "projects") editor.textContent = "Le projet ne peut pas être ouvert. Réessayez.";
   }
 }
 
@@ -4727,7 +5154,7 @@ function renderProjectProgressEditor(message = "") {
   const editor = document.querySelector("#project-progress-editor");
   editor.replaceChildren();
   const heading = document.createElement("h3");
-  heading.textContent = data.project_id;
+  heading.textContent = `Modifier mon projet : ${data.project_id}`;
   const feedback = document.createElement("p");
   feedback.className = "project-progress-feedback";
   feedback.textContent = message;
@@ -4771,7 +5198,11 @@ function renderProjectProgressEditor(message = "") {
       const section = document.createElement("fieldset");
       section.dataset.intentId = id;
       const legend = document.createElement("legend");
-      legend.textContent = `${id} · ${intent.filter_type}`;
+      legend.textContent = `Filtre ${intent.filter_type === "Ha" ? "Hα" : intent.filter_type}`;
+      legend.dataset.simpleText = legend.textContent;
+      legend.dataset.proText = `${id} · ${intent.filter_type}`;
+      if (appliedUiMode === "pro") legend.textContent = legend.dataset.proText;
+      if (!target && !progress && data.acquisition_intent_targets?.length) section.dataset.proOnly = "true";
       const mode = document.createElement("select");
       mode.dataset.field = "mode";
       for (const [value, label] of [["unknown", "non renseigné"], ["detailed", "Poses × secondes"], ["manual", "Durée manuelle (secondes)"]]) {
@@ -4785,7 +5216,12 @@ function renderProjectProgressEditor(message = "") {
       const frames = progressInput("Poses acquises ", progress?.acquired_frames, "acquired_frames");
       const exposure = progressInput("Secondes par pose ", progress?.exposure_seconds, "exposure_seconds");
       const manual = progressInput("Durée acquise (secondes) ", progress?.acquired_duration_manual, "acquired_duration_manual");
-      const hours = progressInput("Objectif (heures, facultatif) ", target?.target_hours, "target_hours");
+      const hours = progressInput("Objectif total sur plusieurs nuits (heures) ", target?.target_hours, "target_hours");
+      const goalSummary = document.createElement("p");
+      goalSummary.dataset.proOnly = "true";
+      const updateGoalSummary = () => {goalSummary.textContent = hours.querySelector("input").value !== "" ? `Votre objectif total : ${hours.querySelector("input").value} h, sur une ou plusieurs nuits.` : "Indiquez votre objectif total pour ce filtre.";};
+      hours.querySelector("input").addEventListener("input", updateGoalSummary);
+      updateGoalSummary();
       const computed = document.createElement("output");
       const update = () => {
         frames.hidden = exposure.hidden = mode.value !== "detailed";
@@ -4800,12 +5236,14 @@ function renderProjectProgressEditor(message = "") {
       };
       mode.addEventListener("change", update);
       for (const input of [frames, exposure, manual]) input.querySelector("input").addEventListener("input", update);
-      section.append(legend, mode, frames, exposure, manual, hours, computed);
+      section.append(legend, goalSummary, mode, frames, exposure, manual, hours, computed);
+      if (typeof addSimpleDurationFields === "function") addSimpleDurationFields(section, mode, manual, update, credited.has(id), [mode, frames, exposure, manual, computed]);
       if (credited.has(id)) {
         mode.disabled = true;
         for (const input of [frames, exposure, manual]) input.querySelector("input").disabled = true;
         const note = document.createElement("p");
         note.textContent = "Base verrouillée après crédit d’exécution ; l’objectif reste modifiable.";
+        note.dataset.proOnly = "true";
         section.append(note);
       }
       intents.append(section);
@@ -4834,17 +5272,31 @@ function renderProjectProgressEditor(message = "") {
   const save = document.createElement("button");
   save.type = "button";
   save.className = "primary-button";
-  save.textContent = "Enregistrer l’avancement";
+  save.textContent = "Enregistrer les modifications";
   save.addEventListener("click", saveProjectProgress);
-  editor.append(heading, feedback, fieldLabel, intents, save);
+  if (data.imaging_field_id) fieldLabel.dataset.proOnly = "true";
+  const baselineHelp = document.createElement("p");
+  baselineHelp.dataset.simpleText = "Modifiez ici le temps de pose total que vous souhaitez accumuler, sur une ou plusieurs nuits.";
+  baselineHelp.dataset.proText = "L’objectif est le temps total souhaité sur toutes vos nuits. Le temps de départ exclut les sessions déjà ajoutées par NightMerit. Pour ajouter une session, ouvrez sa mission depuis Mes projets.";
+  baselineHelp.textContent = baselineHelp.dataset[appliedUiMode === "pro" ? "proText" : "simpleText"];
+  const back = document.createElement("button");
+  back.type = "button"; back.className = "secondary-button"; back.textContent = "Retour à mes projets";
+  back.addEventListener("click", () => { if (typeof navigateGuidedProjects === "function") navigateGuidedProjects(); });
+  editor.append(heading, feedback, baselineHelp, fieldLabel, intents, save, back);
   renderIntents();
   state.progressEditorBaseline = progressEditorSnapshot();
 }
 
 async function saveProjectProgress() {
+  if (state.savingProjectProgress) return;
   const data = state.progressEditor;
   const editor = document.querySelector("#project-progress-editor");
   const feedback = editor.querySelector(".project-progress-feedback");
+  const configuration = state.configuration;
+  if (!data || data.profile_revision !== configuration?.profile_revision) {
+    feedback.textContent = "La configuration a changé. Rechargez la page avant d’enregistrer ; votre saisie n’a pas été envoyée.";
+    return;
+  }
   const field = editor.querySelector("#project-imaging-field").value;
   if (!field) {
     feedback.textContent = "Choisissez un champ d’imagerie.";
@@ -4859,9 +5311,16 @@ async function saveProjectProgress() {
     if (mode === "detailed") {
       const frames = Number(value("acquired_frames"));
       const seconds = Number(value("exposure_seconds"));
-      if (value("acquired_frames") === "" || !Number.isInteger(frames) || frames < 0
-          || value("exposure_seconds") === "" || !Number.isFinite(seconds) || seconds <= 0) {
-        feedback.textContent = `Corrigez les poses et la durée de ${id}.`;
+      if (value("acquired_frames") === "") {
+        feedback.textContent = "Indiquez le nombre de poses déjà réalisées. Si vous n’avez pas encore commencé, saisissez 0.";
+        return;
+      }
+      if (!Number.isInteger(frames) || frames < 0) {
+        feedback.textContent = "Indiquez un nombre entier de poses, égal ou supérieur à 0.";
+        return;
+      }
+      if (value("exposure_seconds") === "" || !Number.isFinite(seconds) || seconds <= 0) {
+        feedback.textContent = "Indiquez la durée d’une pose en secondes, strictement supérieure à 0.";
         return;
       }
       progress.push({ acquisition_intent_id: id, acquired_frames: frames, exposure_seconds: seconds });
@@ -4884,6 +5343,9 @@ async function saveProjectProgress() {
   }
   const body = { expected_revision: data.profile_revision, imaging_field_id: field,
     acquisition_intent_progress: progress, acquisition_intent_targets: targets };
+  state.savingProjectProgress = true;
+  const controlsBeforeSave = [...editor.querySelectorAll("input, select, button")].map(control => [control, control.disabled]);
+  controlsBeforeSave.forEach(([control]) => {control.disabled = true;});
   try {
     const response = await fetch(`/v1/projects/${encodeURIComponent(data.project_id)}/progress`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -4904,17 +5366,256 @@ async function saveProjectProgress() {
       return;
     }
     if (!response.ok) throw new Error("save failed");
-    state.progressEditor = await response.json();
+    const saved = await response.json();
+    if (state.configuration !== configuration || state.progressEditor !== data) return;
+    state.progressEditor = saved;
     state.configuration.profile_revision = state.progressEditor.profile_revision;
     const project = state.configuration.projects[data.project_id];
     project.imaging_field_id = field;
     project.acquisition_intent_progress = progress;
     project.acquisition_intent_targets = targets;
     state.configurationDraft.projects[data.project_id] = structuredClone(project);
-    renderProjectProgressEditor("Avancement enregistré.");
+    renderProjectProgressEditor("Modifications du projet enregistrées.");
+
   } catch (_error) {
     feedback.textContent = "L’avancement n’a pas pu être enregistré. Vérifiez les valeurs et réessayez.";
+  } finally {
+    state.savingProjectProgress = false;
+    controlsBeforeSave.forEach(([control, disabled]) => {if (control.isConnected) control.disabled = disabled;});
   }
+}
+
+// Guided presentation uses the same live controls and canonical progress reads.
+function updateGuidedPresentation() {
+  const simple = appliedUiMode === "simple";
+  const view = state.view;
+  const configured = Boolean(state.configuration?.configured);
+  const observationsNav = document.querySelector("#saved-observations-open");
+  if (observationsNav) observationsNav.hidden = !configured;
+  const nav = document.querySelector("#main-navigation");
+  if (nav) nav.hidden = !configured || (state.guidedInitialConfiguration && view === "availability") || ["site", "equipment", "review", "loading_configuration", "configuration_error", "unresolved_acceptance"].includes(view);
+  document.querySelector("#nav-tonight")?.setAttribute("aria-current", view === "availability" || view === "recommendation" ? "page" : "false");
+  document.querySelector("#nav-projects")?.setAttribute("aria-current", view === "projects" ? "page" : "false");
+  document.documentElement.dataset.guidedView = view;
+  document.documentElement.dataset.guidedInitial = String(Boolean(state.guidedInitialConfiguration));
+  const availabilityKicker = document.querySelector(".availability-heading .state-kicker");
+  if (availabilityKicker) availabilityKicker.textContent = state.guidedInitialConfiguration ? "Étape 4 sur 4 · Disponibilité" : "Préparer une séance";
+  const title = document.querySelector("#projects-title");
+  if (title) title.textContent = configured ? "Mes projets" : "Que souhaitez-vous photographier ?";
+  const number = document.querySelector("#projects-step-number");
+  if (number) number.hidden = configured;
+  const intro = document.querySelector("#projects-intro");
+  if (intro) intro.textContent = configured
+    ? "Retrouvez votre avancement et préparez une prochaine séance. Vos projets sont conservés d’une nuit à l’autre."
+    : "Un projet décrit votre cible, votre filtre et le temps total à accumuler sur une ou plusieurs nuits.";
+  const hasProjects = Object.keys(state.configurationDraft.projects || {}).length > 0;
+  const creation = document.querySelector("#project-create");
+  if (creation) creation.dataset.firstProject = String(!hasProjects);
+  const next = document.querySelector("#projects-next");
+  if (next) {
+    next.hidden = simple && !hasProjects;
+    next.textContent = simple ? (configured ? "Préparer une séance" : "Enregistrer et choisir mes horaires") : "Continuer vers la vérification";
+  }
+  const actions = document.querySelector("#projects-step > .wizard-actions");
+  if (actions) actions.dataset.projectsConfigured = String(configured);
+  const form = document.querySelector("#availability-form");
+  if (form) form.hidden = view === "review";
+  const review = document.querySelector("#review-step");
+  if (review) {
+    if (view === "availability") review.dataset.proOnly = "true";
+    else delete review.dataset.proOnly;
+  }
+}
+
+function prepareGuidedProjectCreation() {
+  const hasProjects = Object.keys(state.configurationDraft.projects || {}).length > 0;
+  const creation = document.querySelector("#project-create");
+  if (appliedUiMode === "simple" && !hasProjects && creation) {
+    creation.open = !state.discoveryMode;
+    if (!state.projectTemplates) loadProjectTemplates();
+    else if (state.projectCreationEquipmentId !== state.configurationDraft.equipment?.preset_id) renderNewProjectIntents();
+  }
+}
+
+function navigateGuidedProjects() {
+  if (guardUnresolvedAcceptance() || state.savingProjectProgress) return;
+  if (renderProjects()) setView("projects");
+}
+
+function configurationDraftMatchesSaved() {
+  const comparable = draft => ({
+    site: draft.site ? {name:draft.site.name, latitude:draft.site.latitude,
+      longitude:draft.site.longitude, bortle:draft.site.bortle} : null,
+    equipment: draft.equipment, projects: draft.projects,
+  });
+  return JSON.stringify(comparable(state.configurationDraft))
+    === JSON.stringify(comparable(draftFromConfiguration(state.configuration)));
+}
+
+function prepareGuidedSession({saveDraft = false, projectId} = {}) {
+  if (guardUnresolvedAcceptance() || state.savingProjectProgress || !confirmDiscardProjectProgress()) return;
+  if (projectId !== undefined) state.selectedProjectId = projectId;
+  const unchanged = configurationDraftMatchesSaved();
+  if (!unchanged) {
+    if (saveDraft) {saveConfiguration(); return;}
+    showFormError("Votre configuration contient des modifications. Enregistrez-les avant de préparer une séance.");
+    setView("projects");
+    return;
+  }
+  showFormError("");
+  setView("availability");
+}
+
+function renderSimpleProjects(entries) {
+  const region = document.querySelector("#simple-projects");
+  if (!region) return;
+  const generation = (state.simpleProjectsGeneration || 0) + 1;
+  state.simpleProjectsGeneration = generation;
+  state.progressEditorGeneration = (state.progressEditorGeneration || 0) + 1;
+  region.replaceChildren();
+  region.hidden = !entries.length;
+  region.dataset.hasDrafts = String(entries.some(([key]) => !Object.hasOwn(state.configuration?.projects || {}, key)));
+  const configuration = state.configuration;
+  for (const [key, project] of entries) {
+    const card = document.createElement("article");
+    card.className = "simple-project-card";
+    const heading = document.createElement("h3");
+    heading.textContent = key;
+    const status = document.createElement("div");
+    const saved = Object.hasOwn(configuration?.projects || {}, key);
+    status.textContent = saved ? "Lecture de l’avancement enregistré…" : "Projet ajouté au brouillon ; l’enregistrement reste à confirmer.";
+    const controls = document.createElement("div");
+    controls.className = "simple-project-actions";
+    const prepare = document.createElement("button");
+    prepare.type = "button"; prepare.className = "primary-button";
+    prepare.textContent = configurationDraftMatchesSaved() ? "Préparer une séance" : "Enregistrer et préparer une séance";
+    prepare.disabled = true;
+    prepare.addEventListener("click", () => prepareGuidedSession({saveDraft:true, projectId:key}));
+    const more = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "J’ai pris des photos : renseigner mon temps de pose";
+    const purpose = document.createElement("p");
+    purpose.textContent = "Après chaque séance, vous pouvez ajouter son temps de pose utilisable au projet. NightMerit conserve le total, nuit après nuit, séparément pour chaque filtre. Chaque ajout doit être confirmé par vous.";
+    const note = document.createElement("p");
+    note.textContent = "Vous avez suivi cette séance dans NightMerit ? Retrouvez-la pour enregistrer le temps de pose des images que vous gardez, sans les pauses ni les images rejetées.";
+    const sessions = document.createElement("button");
+    sessions.type = "button"; sessions.className = "secondary-button";
+    sessions.textContent = "Retrouver mes sessions NightMerit";
+    sessions.disabled = !saved;
+    sessions.addEventListener("click", () => {
+      prepareGuidedSession();
+      if (state.view !== "availability") return;
+      if (ui.savedMissionEntry.hidden) {
+        showAvailabilityError("Les missions enregistrées ne sont pas disponibles ici. Rechargez la page pour tenter de les relire. Ne créez pas une nouvelle session pour remplacer une session déjà réalisée.");
+        return;
+      }
+      const revision = state.viewRevision;
+      requestAnimationFrame(() => {
+        if (state.view !== "availability" || state.viewRevision !== revision || ui.savedMissionEntry.hidden) return;
+        ui.savedMissionChoice.focus();
+        ui.savedMissionEntry.scrollIntoView({block: "center"});
+      });
+    });
+    const edit = document.createElement("button");
+    edit.type = "button"; edit.className = "secondary-button";
+    edit.textContent = "Renseigner mon temps de départ"; edit.disabled = !saved;
+    edit.addEventListener("click", () => openProjectProgress(key));
+    const earlierImages = document.createElement("p");
+    earlierImages.textContent = "Vous aviez déjà des images avant ce suivi ? Renseignez leur temps de pose total comme temps de départ, sans inclure les séances déjà ajoutées par NightMerit.";
+    more.append(summary, purpose, note, sessions, earlierImages, edit);
+    const modify = document.createElement("button");
+    modify.type = "button"; modify.className = "secondary-button";
+    modify.textContent = "Modifier mon projet"; modify.disabled = !saved;
+    modify.addEventListener("click", () => openProjectProgress(key));
+    controls.append(modify, prepare);
+    card.append(heading, status, controls, more);
+    region.append(card);
+    if (!saved) continue;
+    fetch(`/v1/projects/${encodeURIComponent(key)}/progress`).then(async response => {
+      if (!response.ok) throw new Error("progress unavailable");
+      const data = await response.json();
+      if (state.simpleProjectsGeneration !== generation || state.configuration !== configuration) return;
+      status.replaceChildren();
+      const targets = data.acquisition_intent_targets || [];
+      if (!targets.length) {
+        status.textContent = "L’objectif par filtre reste à renseigner. Votre projet historique est conservé.";
+        return;
+      }
+      prepare.disabled = false;
+      for (const target of targets) {
+        const intent = data.acquisition_intents.find(item => item.acquisition_intent_id === target.acquisition_intent_id);
+        const progress = data.intent_progress_breakdown.find(item => item.acquisition_intent_id === target.acquisition_intent_id);
+        const row = document.createElement("p");
+        const filter = intent?.filter_type === "Ha" ? "Hα" : intent?.filter_type || "à confirmer";
+        const known = progress?.effective_total_seconds != null;
+        row.textContent = `Filtre ${filter} · ${known ? progressDuration(progress.effective_total_seconds) : "Avancement non renseigné"} sur ${target.target_hours} h au total.`;
+        const remainder = document.createElement("small");
+        remainder.textContent = progress?.remaining_hours == null ? "Confirmez votre avancement pour calculer ce qu’il reste."
+          : progress.remaining_hours <= 0 ? "Objectif atteint pour ce filtre."
+          : `Il reste ${progressDuration(progress.remaining_hours * 3600)} à accumuler, sur une ou plusieurs nuits.`;
+        row.append(remainder); status.append(row);
+      }
+    }).catch(() => {
+      if (state.simpleProjectsGeneration === generation && state.configuration === configuration) {
+        status.textContent = "L’avancement ne peut pas être relu. Vos données sont conservées ; rouvrez Mes projets pour réessayer.";
+        prepare.disabled = true;
+      }
+    });
+  }
+}
+
+function addSimpleDurationFields(section, mode, manual, update, locked, advanced = []) {
+  const wrapper = document.createElement("details");
+  wrapper.dataset.modeDisclosure = "true";
+  wrapper.open = typeof appliedUiMode !== "undefined" && appliedUiMode === "pro";
+  const summary = document.createElement("summary");
+  summary.dataset.simpleText = "J’avais déjà des images avant de commencer ce suivi";
+  summary.dataset.proText = "Avancement acquis avant les séances suivies dans NightMerit";
+  summary.textContent = summary.dataset[wrapper.open ? "proText" : "simpleText"];
+  const heading = document.createElement("p");
+  heading.textContent = "Temps de pose utilisable de ces images";
+  const info = document.createElement("p");
+  const example = document.createElement("p");
+  example.textContent = "Exemple : 30 images conservées de 3 minutes = 1 heure et 30 minutes. N’incluez pas les séances déjà ajoutées au projet ni les images rejetées, flats, darks et bias.";
+  const fields = document.createElement("div");
+  fields.className = "form-grid two-columns";
+  const hours = progressInput("Heures ", "", "simple_hours");
+  const minutes = progressInput("Minutes ", "", "simple_minutes");
+  const h = hours.querySelector("input"), m = minutes.querySelector("input");
+  h.step = "1"; m.max = "59.999999999";
+  h.disabled = m.disabled = locked;
+  fields.append(hours, minutes);
+  const enter = document.createElement("button");
+  enter.type = "button"; enter.className = "secondary-button";
+  enter.textContent = "Renseigner une durée totale connue";
+  enter.disabled = locked;
+  const reflect = () => {
+    fields.hidden = mode.value !== "manual";
+    enter.hidden = mode.value !== "unknown";
+    const seconds = Number(manual.querySelector("input").value);
+    const known = manual.querySelector("input").value !== "" && Number.isFinite(seconds) && seconds >= 0;
+    h.value = known ? Math.floor(seconds / 3600) : "";
+    m.value = known ? (seconds % 3600) / 60 : "";
+    info.textContent = locked ? "Ce temps est conservé et verrouillé car des séances ont déjà été ajoutées au projet. Pour ajouter une nouvelle séance, retrouvez sa session NightMerit depuis Mes projets."
+      : mode.value === "detailed" ? "Ce temps est calculé à partir du nombre de poses conservées et de leur durée."
+      : mode.value === "unknown" ? "Ce temps n’est pas encore renseigné. Si vous commencez sans images, cliquez sur « Renseigner une durée totale connue », puis saisissez 0 heure et 0 minute."
+      : "Indiquez uniquement le temps de pose des images conservées avant ce suivi. Si vous commencez sans images, laissez 0 heure et 0 minute. Si vous modifiez seulement l’objectif, ne changez pas ces valeurs.";
+  };
+  const original = manual.querySelector("input");
+  const change = () => {
+    const wholeHours = Number(h.value), extraMinutes = Number(m.value);
+    original.value = h.value !== "" && m.value !== "" && Number.isInteger(wholeHours) && wholeHours >= 0
+      && Number.isFinite(extraMinutes) && extraMinutes >= 0 && extraMinutes < 60
+      ? wholeHours * 3600 + extraMinutes * 60 : "";
+    update();
+  };
+  h.addEventListener("input", change); m.addEventListener("input", change);
+  original.addEventListener("input", reflect); mode.addEventListener("change", reflect);
+  enter.addEventListener("click", () => {mode.value = "manual"; update(); reflect();});
+  for (const child of [mode, manual]) child.dataset.proOnly = "true";
+  for (const child of [heading, info, example, fields, enter]) child.dataset.simpleOnly = "true";
+  wrapper.append(summary, heading, info, example, ...advanced, fields, enter);
+  section.append(wrapper); reflect();
 }
 
 function prefillConfiguration() {
@@ -5062,6 +5763,7 @@ function showConfigurationError(message, { code = null } = {}) {
 }
 
 function initializeConfiguration(payload) {
+  if (!state.configuration && !payload.configured) state.guidedInitialConfiguration = true;
   if (state.configuration && decisionSiteFingerprint() !== decisionSiteFingerprint(payload.site)) {
     invalidateCurrentDecisionForSiteChange();
   }
@@ -5072,9 +5774,11 @@ function initializeConfiguration(payload) {
   )) clearAcceptedMission();
   invalidateAvailabilityForSiteChange(state.configuration?.site, payload.site);
   state.configuration = payload;
+  const projectFeedback = document.querySelector("#project-create-feedback");
+  if (projectFeedback) projectFeedback.textContent = "";
   try { localStorage.setItem(DECISION_SITE_STORAGE_KEY, decisionSiteFingerprint()); } catch (_) {}
   syncFieldObservationContext();
-  state.configurationDraft = draftFromConfiguration(payload);
+  setConfigurationDraft(draftFromConfiguration(payload));
   document.querySelector("#legacy-bortle-note").hidden = !payload.needs_configuration_confirmation;
   text("#onboarding-title", payload.needs_configuration_confirmation
     ? "Confirmez votre profil NightMerit."
@@ -5322,6 +6026,8 @@ async function saveConfiguration() {
     installCurrentConfiguration(payload, generation);
     if (!ownsNavigation) return;
     setView("availability");
+    const savedNotice = document.querySelector("#availability-save-confirmation");
+    if (savedNotice) savedNotice.hidden = false;
   } catch (_error) {
     if (!configurationOperationIsCurrent(generation)) return;
     if (!configurationOwnsNavigation(generation)) return;
@@ -5565,9 +6271,81 @@ const creationRefusalMessages = Object.freeze({
   legacy_filter_cannot_authorize_modern_mission: ["Filtre compatible à configurer", "Le filtre historique ne fournit pas le profil optique précis requis pour cette acquisition."],
 });
 
+function targetedIntentAssessments(payload) {
+  return (payload.acquisition_intent_assessments || []).filter(item =>
+    !(item.reason_codes || []).includes("intent_not_targeted_by_project"));
+}
+
+function intentsRefusedForProductiveWindow(payload) {
+  const assessments = targetedIntentAssessments(payload);
+  return payload.creation_refusal === "no_eligible_acquisition_intent"
+    && assessments.length > 0 && assessments.every(item =>
+      item.status === "not_eligible" && item.reason_codes?.length === 1
+      && item.reason_codes[0] === "insufficient_actionable_productive_window");
+}
+
+function refusalForecastMessage(payload) {
+  if (!intentsRefusedForProductiveWindow(payload)) return null;
+  const forecast = payload.refusal_weather;
+  if (!forecast || !Number.isFinite(forecast.cloud_cover_min)
+      || !Number.isFinite(forecast.cloud_cover_max)
+      || forecast.cloud_cover_min < 0 || forecast.cloud_cover_max > 100
+      || forecast.cloud_cover_min > forecast.cloud_cover_max) return null;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2}):\d{2}(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+  const start = iso.exec(forecast.window_start || "");
+  const end = iso.exec(forecast.window_end || "");
+  const retrieved = iso.exec(forecast.retrieved_at_utc || "");
+  if (!start || !end || !retrieved || !forecast.provider) return null;
+  const stamp = match => `${match[3]}.${match[2]}.${match[1]} à ${match[4]} UTC${match[5] === "Z" ? "" : match[5]}`;
+  const sameDay = start[1] === end[1] && start[2] === end[2] && start[3] === end[3] && start[5] === end[5];
+  const range = sameDay
+    ? `le ${start[3]}.${start[2]}.${start[1]}, de ${start[4]} à ${end[4]} (UTC${start[5] === "Z" ? "" : start[5]})`
+    : `du ${stamp(start)} au ${stamp(end)}`;
+  const low = Math.round(forecast.cloud_cover_min), high = Math.round(forecast.cloud_cover_max);
+  const clouds = low === high ? `${low} %` : `${low} à ${high} %`;
+  const overcast = forecast.cloud_cover_min === 100 && forecast.cloud_cover_max === 100;
+  return {
+    title: overcast ? "Ciel couvert prévu sur le créneau évalué" : "Créneau insuffisant pour ce projet",
+    body: `Votre projet est bien enregistré. Couverture nuageuse prévue : ${clouds} sur le créneau évalué ${range}. ${overcast ? "NightMerit ne recommande pas de séance photo pour ce projet dans ces conditions. " : "Aucun créneau suffisamment productif n’a été retenu pour ce projet. "}Votre projet est conservé. Prévisions récupérées le ${stamp(retrieved)}. Actualisez les prévisions avant de décider de sortir.`,
+    details: `Source : ${forecast.provider}. Il s’agit de prévisions, pas d’une mesure du ciel sur place. Le créneau évalué peut être plus court que votre disponibilité.`,
+    overcast,
+  };
+}
+
+function intentEligibilityRefusalMessage(payload) {
+  const assessments = targetedIntentAssessments(payload);
+  const forecast = refusalForecastMessage(payload);
+  if (forecast) return [forecast.title, forecast.body];
+  if (intentsRefusedForProductiveWindow(payload)) {
+    const names = assessments.map(item => item.label || item.filter_type).filter(Boolean).join(", ");
+    return ["Créneau insuffisant pour ce projet",
+      `Votre projet est bien enregistré. Sur la plage choisie, NightMerit ne trouve pas de créneau suffisamment productif${names ? ` pour ${names}` : ""}. Vous pouvez revoir vos horaires ou refaire l’analyse lorsque les conditions évoluent, sans garantie de trouver un créneau adapté. Votre projet est conservé.`];
+  }
+  const reasons = {
+    intent_target_completed: "l’objectif de pose est déjà atteint",
+    required_filter_unavailable: "le filtre requis n’est pas disponible pour le matériel choisi",
+    insufficient_actionable_productive_window: "aucun créneau suffisamment productif sur la plage choisie",
+    ambiguous_best_duration_window: "plusieurs créneaux restent à départager ; précisez vos horaires",
+    intent_progress_evidence_insufficient: "l’avancement de cette prise de vue doit être renseigné",
+    setup_capabilities_missing: "les capacités du matériel ne sont pas renseignées",
+    productive_window_evidence_missing: "les données de créneau exploitable sont insuffisantes",
+    weather_evidence_insufficient: "les données météo sont insuffisantes",
+    filter_profile_evidence_insufficient: "les caractéristiques précises du filtre ne permettent pas de vérifier sa compatibilité",
+    lunar_evidence_insufficient: "les données sur l’effet de la Lune sont insuffisantes",
+  };
+  const descriptions = assessments.map(item => {
+    const details = (item.reason_codes || []).map(code => reasons[code]
+      || "les données disponibles ne permettent pas de confirmer cette prise de vue");
+    return `${item.label || item.filter_type || "Prise de vue"} : ${details.join(" ; ") || "raison non précisée"}.`;
+  });
+  return ["Aucune prise de vue réalisable pour ce projet",
+    `Votre projet est conservé. ${descriptions.join(" ") || "Aucune prise de vue ne peut être confirmée avec les données actuelles."}`];
+}
+
 function creationRefusalMessage(payload) {
+  if (payload.creation_refusal === "no_eligible_acquisition_intent") return intentEligibilityRefusalMessage(payload);
   if (payload.creation_refusal === "modern_mission_authorization_required" && payload.provenance === "discovery") {
-    return ["Projet d’acquisition requis", "Cette cible a été trouvée en découverte. Aucun projet d’acquisition configuré ne permet encore de créer une mission. Configurez un projet avec une acquisition et un filtre compatibles."];
+    return ["Préparons votre premier projet", "Une cible a été repérée, mais aucune mission n’est encore prête. Un projet indique ce que vous souhaitez photographier, avec quel filtre et pendant combien de temps au total. Créez un projet pour une cible prise en charge par cette bêta, puis relancez l’analyse avec vos horaires conservés."];
   }
   return creationRefusalMessages[payload.creation_refusal]
     || ["Création de mission refusée", "La cause précise du refus n’est pas reconnue par cette version de l’interface."];
@@ -5683,8 +6461,9 @@ function showTonightUnavailable(payload) {
     : creationRefused
     ? creationRefusalMessage(payload)
     : partialMessages[payload.status] || ["Décision indisponible", "Aucune recommandation exploitable."];
+  const forecast = refusalForecastMessage(payload);
   const shortWindow = payload.actionability_refusal?.refusal_stage === "continuous_window_too_short";
-  const editAvailability = canEditRefusedAvailability(payload);
+  const editAvailability = canEditRefusedAvailability(payload) || (intentsRefusedForProductiveWindow(payload) && !forecast?.overcast);
   const body = creationRefused
     ? technical
     : productiveRefusal
@@ -5692,17 +6471,30 @@ function showTonightUnavailable(payload) {
       ? `Le créneau utilisable est trop court pour lancer une mission. Réessayez plus tard si les conditions évoluent.${editAvailability ? " Vous pouvez revoir votre disponibilité, sans garantie de trouver un créneau suffisant." : ""}`
       : "Aucun créneau ne permet de lancer une mission dans les conditions évaluées. Réessayez plus tard lorsque les prévisions évoluent."
     : `${technical} Réessayez plus tard lorsque les données ou les conditions évoluent.`;
-  showMessage(title, body, { kicker: "Analyse terminée" });
-  text("#message-technical", technical);
+  const chosen = state.selectedProjectId;
+  const simpleTitle = appliedUiMode === "simple" && productiveRefusal
+    ? (shortWindow ? "Le créneau disponible est trop court" : "Aucun créneau adapté à vos horaires")
+    : title;
+  showMessage(simpleTitle, chosen
+    ? `Cible choisie : ${chosen}. ${body} Votre choix est conservé ; aucune autre cible ne le remplace.${forecast?.overcast ? " Vous pourrez reprendre ce projet lorsque les prévisions évolueront." : " Pour chercher une alternative, cochez « Me proposer une cible avec mon matériel » dans la préparation de séance."}`
+    : body, { kicker: "Analyse terminée" });
+  text("#message-technical", forecast?.details || technical);
   const details = document.querySelector("#message-details");
   details.hidden = false;
   details.open = appliedUiMode === "pro";
-  ui.retry.textContent = "Réessayer plus tard";
+  const needsProject = creationRefused && payload.provenance === "discovery"
+    && payload.creation_refusal === "modern_mission_authorization_required";
+  document.querySelector("#message-create-project").hidden = !needsProject;
+  ui.retry.hidden = needsProject;
+  ui.retry.textContent = payload.creation_refusal === "no_eligible_acquisition_intent"
+    ? "Actualiser les prévisions" : "Réessayer plus tard";
   document.querySelector("#message-edit-availability").hidden = !editAvailability;
 }
 
 function showMessage(title, body, { kicker = "Décision indisponible", retry = true } = {}) {
   const details = document.querySelector("#message-details");
+  const createProject = document.querySelector("#message-create-project");
+  if (createProject) createProject.hidden = true;
   if (details) details.hidden = true;
   const editAvailability = document.querySelector("#message-edit-availability");
   if (editAvailability) editAvailability.hidden = true;
@@ -6051,6 +6843,9 @@ async function loadTonight(availability) {
   const configurationGeneration = state.configurationGeneration;
   const siteGeneration = state.decisionSiteGeneration;
   const siteFingerprint = decisionSiteFingerprint();
+  const discovery = Boolean(state.discoveryMode);
+  const selectedProjectId = discovery ? null : state.selectedProjectId;
+  const confirmedFilters = discovery ? discoveryConfirmedFilters() : [];
   state.requestingRecommendation = true;
   state.availability = { ...availability };
   ui.recommendationSubmit.disabled = true;
@@ -6058,6 +6853,8 @@ async function loadTonight(availability) {
   show("loading");
   const navigationOwner = {view: state.view, revision: state.viewRevision || 0};
   const isCurrent = () => configurationGeneration === state.configurationGeneration
+    && selectedProjectId === (state.discoveryMode ? null : state.selectedProjectId)
+    && discovery === Boolean(state.discoveryMode)
     && siteGeneration === state.decisionSiteGeneration
     && siteFingerprint === decisionSiteFingerprint() && !state.decisionSiteReloadRequired
     && navigationOwner.view === state.view
@@ -6065,13 +6862,40 @@ async function loadTonight(availability) {
   ui.refresh.disabled = true;
   setCurrentFieldObservationDecision(null);
 
+  const waitMessage = document.querySelector("#analysis-wait");
+  if (waitMessage) { waitMessage.hidden = true; waitMessage.textContent = ""; }
+  const controller = new AbortController();
+  let deadlineExceeded = false;
+  const slowTimer = setTimeout(() => {
+    if (!isCurrent() || !waitMessage) return;
+    waitMessage.textContent = "L’analyse prend plus de temps que prévu. La récupération météo ou le calcul peuvent être en cause. Vos horaires sont conservés.";
+    waitMessage.hidden = false;
+  }, 10000);
+  let deadlineTimer;
+  const deadline = new Promise((_resolve, reject) => {
+    deadlineTimer = setTimeout(() => {
+      deadlineExceeded = true;
+      reject(new Error("analysis_response_timeout"));
+      controller.abort();
+    }, 90000);
+  });
+
   try {
-    const response = await fetch("/v1/tonight", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ availability }),
-    });
-    const payload = await response.json().catch(() => ({}));
+    // The bound includes decoding the body. A late reply cannot reach rendering
+    // even if a transport ignores abort; this does not claim to stop server work.
+    const {response, payload} = await Promise.race([deadline, (async () => {
+      const options = {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: discovery ? JSON.stringify({availability, confirmed_filter_profile_ids: confirmedFilters}) : JSON.stringify({ availability, ...(selectedProjectId ? {selected_project_id: selectedProjectId} : {}) }),
+        signal: controller.signal,
+      };
+      const response = await (discovery
+        ? fetch("/v1/target-suggestions", options)
+        : fetch("/v1/tonight", options));
+      const payload = await response.json().catch(() => ({}));
+      return {response, payload};
+    })()]);
     if (!isCurrent()) return;
 
     if (!response.ok) {
@@ -6081,21 +6905,28 @@ async function loadTonight(availability) {
       }
       if (payload?.detail?.code === "location_timezone_unresolved") {
         state.availability = null;
-        state.configurationDraft = draftFromConfiguration(state.configuration);
+        setConfigurationDraft(draftFromConfiguration(state.configuration));
         prefillConfiguration();
         showFormError("Le fuseau horaire du site ne peut pas être déterminé. Vérifiez les coordonnées du site avant de choisir une heure précise.");
         setView("site");
         return;
       }
       if (payload?.detail?.code === "invalid_tonight_equipment") {
-        state.configurationDraft = draftFromConfiguration(state.configuration);
+        setConfigurationDraft(draftFromConfiguration(state.configuration));
         prefillConfiguration();
         showFormError("Vérifiez le matériel actif avant de préparer la nuit.");
         setView("equipment");
         return;
       }
       if (response.status === 422) {
-        showAvailabilityError(backendAvailabilityMessage(payload?.detail));
+        if (payload?.detail?.code === "selected_project_unavailable") {
+          showAvailabilityError(payload.detail.message);
+          setView("availability");
+          return;
+        }
+        showAvailabilityError(payload?.detail?.code?.startsWith("discovery_")
+          ? "Vérifiez les filtres possédés et vos horaires avant de relancer la recherche."
+          : backendAvailabilityMessage(payload?.detail));
         setView("availability");
         return;
       }
@@ -6105,6 +6936,10 @@ async function loadTonight(availability) {
       return;
     }
 
+    if (discovery) {
+      renderTargetSuggestions(payload);
+      return;
+    }
     clearAcceptedMission();
     setCurrentFieldObservationDecision(payload);
     if (payload.status === "weather_refused") {
@@ -6120,9 +6955,13 @@ async function loadTonight(availability) {
     renderDecision(payload);
   } catch (_error) {
     if (!isCurrent()) return;
-    showAvailabilityError("Connexion impossible. Vos horaires sont conservés; réessayez dans un instant.");
+    showAvailabilityError(deadlineExceeded
+      ? "L’analyse n’a pas répondu après 90 secondes. Vos horaires sont conservés ; réessayez dans un instant."
+      : "Connexion impossible. Vos horaires sont conservés ; réessayez dans un instant.");
     setView("availability");
   } finally {
+    clearTimeout(slowTimer);
+    clearTimeout(deadlineTimer);
     state.requestingRecommendation = false;
     ui.recommendationSubmit.disabled = false;
     ui.refresh.disabled = false;
@@ -6148,13 +6987,18 @@ document.querySelector("#equipment-next").addEventListener("click", () => {
   }
   state.configurationDraft.equipment = equipment;
   showFormError("");
-  renderReview();
-  setView("review");
+  if (renderProjects()) setView("projects");
 });
 
 document.querySelector("#projects-next").addEventListener("click", () => {
   if (!confirmDiscardProjectProgress()) return;
   showFormError("");
+  if (appliedUiMode === "simple") {
+    const unchanged = configurationDraftMatchesSaved();
+    if (state.configuration?.configured && unchanged) setView("availability");
+    else saveConfiguration();
+    return;
+  }
   renderReview();
   setView("review");
 });
@@ -6174,7 +7018,7 @@ for (const input of document.querySelectorAll('input[name="equipment-kind"]')) {
 function editConfiguration() {
   if (guardUnresolvedAcceptance()) return;
   if (state.view !== "review") {
-    state.configurationDraft = draftFromConfiguration(state.configuration);
+    setConfigurationDraft(draftFromConfiguration(state.configuration));
     prefillConfiguration();
   }
   showFormError("");
@@ -6182,6 +7026,18 @@ function editConfiguration() {
 }
 
 document.querySelector("#save-configuration").addEventListener("click", saveConfiguration);
+document.querySelector("#project-templates-load").addEventListener("click", loadProjectTemplates);
+document.querySelector("#project-template").addEventListener("change", renderNewProjectIntents);
+document.querySelector("#project-add").addEventListener("click", addNewProject);
+document.querySelector("#message-create-project").addEventListener("click", () => {
+  if (guardUnresolvedAcceptance()) return;
+  if (!renderProjects()) return;
+  setView("projects");
+  document.querySelector("#project-create").open = true;
+  document.querySelector(document.querySelector("#project-create-fields").hidden
+    ? "#project-templates-load" : "#project-template").focus();
+});
+
 document.querySelector("#configuration-projects").addEventListener("click", () => {
   if (guardUnresolvedAcceptance()) return;
   if (renderProjects()) setView("projects");
@@ -6230,6 +7086,10 @@ ui.availabilityForm.addEventListener("submit", (event) => {
   try {
     const availability = collectAvailabilityPayload();
     showAvailabilityError("");
+    if (state.discoveryMode && !discoveryConfirmedFilters().length) {
+      showAvailabilityError("Cochez un filtre que vous possédez avant de chercher une cible.");
+      return;
+    }
     loadTonight(availability);
   } catch (error) {
     const message = availabilityValidationMessages[error.availabilityCode]
@@ -6341,7 +7201,18 @@ ui.observation.addEventListener("close", () => {
   invalidateFieldObservationOperation();
   state.outcomeToken = (state.outcomeToken || 0) + 1;
 });
-document.querySelector("#outcome-reopen").addEventListener("click", reopenRecentFieldObservations);
+document.querySelector("#outcome-reopen").addEventListener("click", openSavedObservationLibrary);
+document.querySelector("#saved-observations-open").addEventListener("click", openSavedObservationLibrary);
+document.querySelector("#saved-observations-close").addEventListener("click", () => document.querySelector("#saved-observations-dialog").close());
+document.querySelector("#saved-observation-back").addEventListener("click", () => {
+  ui.observation.close();
+  openSavedObservationLibrary();
+});
+document.querySelector("#saved-observations-dialog").addEventListener("close", () => {
+  if (state.savedObservationLibrary) state.savedObservationLibrary.generation++;
+});
+document.querySelector("#saved-observations-more").addEventListener("click", () => loadSavedObservationLibrary(true));
+document.querySelector("#saved-observations-retry").addEventListener("click", () => loadSavedObservationLibrary(false));
 document.querySelector("#outcome-compare").addEventListener("click", () => consultOutcomeEvaluation(true));
 document.querySelector("#outcome-read").addEventListener("click", () => consultOutcomeEvaluation(false));
 document.querySelector("#outcome-observation").addEventListener("change", event => {
@@ -6352,6 +7223,11 @@ document.querySelector("#outcome-observation").addEventListener("change", event 
   clearOutcomePresentation();
   document.querySelector("#outcome-result").textContent = "Observation enregistrée sélectionnée. Consultez ou comparez explicitement.";
 });
+uiPresentationListener = updateGuidedPresentation;
+document.querySelector("#nav-projects").addEventListener("click", navigateGuidedProjects);
+document.querySelector("#nav-tonight").addEventListener("click", prepareGuidedSession);
+updateGuidedPresentation();
+
 // Outcome History: independent read-only view and request generation.
 function invalidateOutcomeHistory() {
   historyState.generation += 1;
@@ -6543,6 +7419,257 @@ document.querySelector("#history-current-site").addEventListener("click", () => 
   document.querySelector("#history-table").replaceChildren();
   document.querySelector("#history-message").textContent = "Site sélectionné. Rechargez l’historique.";
 });
+
+
+function discoveryConfirmedFilters() {
+  return [...document.querySelectorAll("#discovery-filter-choices input:checked")].map(input => input.value);
+}
+
+async function setDiscoveryMode(enabled) {
+  const generation = (state.discoveryGeneration || 0) + 1;
+  state.discoveryGeneration = generation;
+  state.discoveryMode = enabled;
+  if (enabled) state.selectedProjectId = null;
+  const chosenNotice = document.querySelector("#availability-selected-project");
+  if (enabled && chosenNotice) chosenNotice.hidden = true;
+  document.querySelector("#discover-targets").checked = enabled;
+  document.querySelector("#discovery-filters").hidden = !enabled;
+  ui.recommendationSubmit.textContent = enabled ? "Chercher une cible pour mes horaires" : "Préparer ma nuit";
+  if (!enabled) return;
+  const feedback = document.querySelector("#discovery-filter-feedback");
+  feedback.textContent = "Chargement des filtres pris en charge…";
+  const equipment = state.configurationDraft.equipment?.preset_id;
+  await loadProjectTemplates();
+  if (!state.discoveryMode || generation !== state.discoveryGeneration || equipment !== state.configurationDraft.equipment?.preset_id) return;
+  const choices = document.querySelector("#discovery-filter-choices");
+  const previouslyConfirmed = equipment === state.discoveryEquipment ? new Set(discoveryConfirmedFilters()) : new Set();
+  choices.replaceChildren();
+  state.discoveryEquipment = equipment;
+  const filters = new Map();
+  for (const template of (state.projectTemplates || []).filter(item => item.discovery_supported)) {
+    for (const intent of template.acquisition_intents) {
+      for (const filter of intent.supported_filters.filter(item => item.equipment_id === equipment)) filters.set(filter.filter_profile_id, filter);
+    }
+  }
+  for (const filter of filters.values()) {
+    const label = document.createElement("label"); label.className = "check-field";
+    const input = document.createElement("input"); input.type = "checkbox"; input.value = filter.filter_profile_id;
+    input.checked = previouslyConfirmed.has(input.value);
+    const text = document.createElement("span"); text.textContent = `${filter.label} (${filter.fwhm_nm} nm)`;
+    label.append(input, text); choices.append(label);
+  }
+  feedback.textContent = filters.size ? "La recherche retient jusqu’à trois cibles parmi les nébuleuses prises en charge en Hα, si les conditions le permettent."
+    : "Aucun filtre précisément compatible n’est disponible pour ce matériel dans cette bêta. Vos réglages sont conservés.";
+}
+
+document.querySelector("#discover-targets").addEventListener("change", event => setDiscoveryMode(event.target.checked));
+document.querySelector("#discover-from-projects").addEventListener("click", async () => {
+  if (guardUnresolvedAcceptance() || !confirmDiscardProjectProgress()) return;
+  const revision = state.viewRevision;
+  const configurationGeneration = state.configurationGeneration;
+  await setDiscoveryMode(true);
+  if (revision !== state.viewRevision || configurationGeneration !== state.configurationGeneration || !state.discoveryMode) return;
+  if (state.configuration?.configured && configurationDraftMatchesSaved()) setView("availability");
+  else await saveConfiguration();
+});
+document.querySelector("#discovery-back").addEventListener("click", () => { if (!guardUnresolvedAcceptance()) setView("availability"); });
+document.querySelector("#discovery-refresh").addEventListener("click", () => {
+  if (guardUnresolvedAcceptance() || state.requestingRecommendation) return;
+  if (!state.discoveryMode || !state.availability) {
+    setView("availability");
+    return;
+  }
+  loadTonight(state.availability);
+});
+
+function renderTargetSuggestions(payload) {
+  setView("discovery");
+  const hasSuggestions = Boolean(payload.suggestions?.length);
+  document.querySelector("#target-suggestions-title").textContent = hasSuggestions
+    ? "Que pourriez-vous photographier ?" : "Aucune cible proposée pour vos horaires";
+  document.querySelector("#discovery-refresh").hidden = hasSuggestions;
+  const cards = document.querySelector("#target-suggestion-cards"); cards.replaceChildren();
+  document.querySelector("#target-suggestions-status").textContent = hasSuggestions
+    ? payload.notice : "La recherche n’a retenu aucune cible parmi celles prises en charge avec vos horaires, votre matériel, vos filtres confirmés et les conditions prévues. Vos réglages et vos projets sont conservés. Vous pouvez réessayer lorsque les prévisions évoluent, sans refaire la configuration.";
+  document.querySelector("#target-suggestions-scope").textContent = payload.scope || "";
+  renderEquipmentCatalogue(payload.catalogue);
+  for (const suggestion of payload.suggestions || []) {
+    const card = document.createElement("article"); card.className = "target-suggestion-card";
+    const title = document.createElement("h3"); title.textContent = suggestion.display_name;
+    const figure = document.createElement("figure");
+    const image = document.createElement("img"); image.src = suggestion.image.src; image.alt = suggestion.image.alt || `Image de référence de ${suggestion.display_name}`;
+    image.width = 160; image.height = 140;
+    image.addEventListener("error", () => { image.hidden = true; });
+    const caption = document.createElement("figcaption");
+    const source = document.createElement("a"); source.href = suggestion.image.source_url; source.textContent = suggestion.image.credit;
+    source.target = "_blank"; source.rel = "noopener noreferrer";
+    const license = document.createElement("a"); license.href = suggestion.image.license_url; license.textContent = suggestion.image.license_label || "CC BY 4.0"; license.target = "_blank"; license.rel = "noopener noreferrer";
+    caption.append(source, document.createTextNode(" · "), license);
+    figure.append(image, caption);
+    const reference = document.createElement("p"); reference.className = "field-note";
+    reference.textContent = suggestion.image.note || "Image de référence en couleur. En Hα, votre image sera monochrome ; son cadrage et ses détails dépendront de votre matériel et de vos poses.";
+    const timing = document.createElement("p"); timing.textContent = `Créneau estimé : ${missionDateTimeLabel(suggestion.window_start, currentSiteTimezone())} → ${missionDateTimeLabel(suggestion.window_end, currentSiteTimezone())}.`;
+    const filter = document.createElement("p"); filter.textContent = `Filtre confirmé : ${suggestion.filter.label} (${suggestion.filter.fwhm_nm} nm).`;
+    const why = document.createElement("p"); why.textContent = suggestion.guidance.purpose;
+    const difficulty = document.createElement("p"); difficulty.textContent = suggestion.guidance.difficulty;
+    const advice = document.createElement("p"); advice.textContent = suggestion.guidance.advice;
+    const choose = document.createElement("button"); choose.type = "button"; choose.className = "primary-button";
+    choose.textContent = suggestion.already_saved ? "Retrouver ce projet" : "Choisir cette cible";
+    choose.addEventListener("click", async () => {
+      if (guardUnresolvedAcceptance() || !confirmDiscardProjectProgress()) return;
+      await setDiscoveryMode(false);
+      state.selectedProjectId = suggestion.existing_project_key || suggestion.catalog_key;
+      setView("projects");
+      const existingKey = suggestion.existing_project_key || suggestion.catalog_key;
+      if (Object.hasOwn(state.configuration?.projects || {}, existingKey)) { openProjectProgress(existingKey); return; }
+      if (!state.projectTemplates?.length) await loadProjectTemplates();
+      document.querySelector("#project-create").open = true;
+      document.querySelector("#project-template").value = suggestion.catalog_key;
+      renderNewProjectIntents();
+      const row = [...document.querySelectorAll("fieldset[data-new-intent-id]")].find(item => item.dataset.newIntentId === suggestion.acquisition_intent_id);
+      if (row) {
+        const check = row.querySelector('input[type="checkbox"]'); check.checked = true; row.dataset.intentSelected = "true";
+        requestAnimationFrame(() => row.querySelector('input[data-target-hours]')?.focus());
+      }
+      document.querySelector("#project-create-feedback").textContent = "Cible choisie. Indiquez votre objectif total sur une ou plusieurs nuits, puis confirmez le départ sans images si c’est votre cas. Enregistrez le projet et relancez l’analyse pour préparer une mission.";
+    });
+    const details = document.createElement("details");
+    const summary = document.createElement("summary"); summary.textContent = "Pourquoi cette cible et ce filtre ?";
+    details.append(summary, why, advice);
+    if (suggestion.equipment_match) {
+      const material = suggestion.equipment_match;
+      const match = document.createElement("p");
+      match.textContent = `${material.framing.label} ${material.extent_scope}`;
+      details.append(match);
+    }
+    card.append(title, figure, reference, timing, filter, difficulty, choose, details); cards.append(card);
+  }
+  document.querySelector("#target-suggestions-title").focus();
+}
+
+function renderEquipmentCatalogue(catalogue) {
+  const container = document.querySelector("#equipment-catalogue");
+  container.replaceChildren();
+  if (!catalogue) return;
+  const details = document.createElement("details");
+  const summary = document.createElement("summary"); summary.textContent = "Comprendre les correspondances avec mon matériel";
+  const notice = document.createElement("p"); notice.textContent = catalogue.notice;
+  details.append(summary, notice);
+  if (catalogue.extended_catalogue) {
+    const browse = document.createElement("a");
+    browse.href = `/catalogue?equipment=${encodeURIComponent(catalogue.equipment_id)}`;
+    browse.textContent = `Rechercher parmi les ${catalogue.extended_catalogue.records.toLocaleString("fr-CH")} fiches du catalogue étendu`;
+    browse.target = "_blank"; browse.rel = "noopener noreferrer"; details.append(browse);
+  }
+  const geometry = catalogue.geometry;
+  const field = document.createElement("p");
+  field.textContent = geometry.status === "nominal"
+    ? `Champ approximatif : ${geometry.field_width_deg.toFixed(2)}° × ${geometry.field_height_deg.toFixed(2)}°. ${geometry.assumptions}`
+    : geometry.reason;
+  details.append(field);
+  for (const family of catalogue.reference_filter_families || []) {
+    const reference = document.createElement("p");
+    reference.textContent = `Référence LRGB documentée : ${family.manufacturer} ${family.name}. Sa présence dans le catalogue ne confirme pas que vous possédez ce modèle et ne l’active pas pour une mission. `;
+    const source = document.createElement("a"); source.href = catalogue.sources[family.source_id].url;
+    source.textContent = "Fiche du fabricant"; source.target = "_blank"; source.rel = "noopener noreferrer";
+    reference.append(source); details.append(reference);
+  }
+  for (const target of catalogue.targets) {
+    const item = document.createElement("details");
+    const heading = document.createElement("summary"); heading.textContent = target.name;
+    const size = document.createElement("p");
+    size.textContent = target.extent_arcmin == null ? "Étendue photographique non documentée."
+      : `Étendue ${target.extent_bound === "lower_limit" ? "supérieure à" : "cataloguée approximative :"} ${target.extent_arcmin} minutes d’arc. ${target.difficulty}.`;
+    const content = document.createElement("p");
+    content.textContent = `${target.scope} ${target.framing.label} ${target.advice}`;
+    const filters = document.createElement("p");
+    filters.textContent = `Approche retenue : ${target.filter_types.join(" / ")}. ` +
+      (target.confirmed_filters.length ? target.confirmed_filters.map(filter => filter.label).join(" ") : "Références exactes et possession des filtres à confirmer.");
+    const support = document.createElement("p");
+    support.textContent = target.project_supported ? "Projet présent dans cette bêta pour certaines configurations ; vérifier les filtres pris en charge puis relancer l’analyse."
+      : "Fiche de référence uniquement : cette bêta ne propose pas encore de mission pour cette cible.";
+    const source = document.createElement("a");
+    source.href = catalogue.sources[target.extent_source].url;
+    source.textContent = "Source des dimensions ou de la nature de la cible";
+    source.target = "_blank"; source.rel = "noopener noreferrer";
+    item.append(heading, size, content, filters, support, source); details.append(item);
+  }
+  const limits = document.createElement("p"); limits.textContent = catalogue.limits.join(" ");
+  details.append(limits); container.append(details);
+}
+
+
+// Explicit read-only copy identification. No browser pointer or guessed profile state.
+const dataContextUI = {generation: 0, controller: null};
+function openDataContext(fromObservations = false) {
+  const dialog = document.querySelector('#data-context-dialog');
+  if (dialog.open) return;
+  if (fromObservations) document.querySelector('#saved-observations-dialog').close();
+  document.querySelector('#data-context-back').hidden = !fromObservations;
+  dialog.showModal();
+  loadDataContext();
+}
+async function loadDataContext() {
+  dataContextUI.controller?.abort();
+  const controller = dataContextUI.controller = new AbortController();
+  const generation = ++dataContextUI.generation;
+  const dialog = document.querySelector('#data-context-dialog');
+  const current = () => generation === dataContextUI.generation && dialog.open;
+  const status = document.querySelector('#data-context-status');
+  const details = document.querySelector('#data-context-details');
+  const technical = document.querySelector('#data-context-technical');
+  const retry = document.querySelector('#data-context-retry');
+  const host = document.querySelector('#data-context-host');
+  const hostNote = document.querySelector('#data-context-host-note');
+  details.hidden = technical.hidden = retry.hidden = host.hidden = hostNote.hidden = true;
+  for (const id of ['#data-context-version', '#data-context-directory', '#data-context-executable', '#data-context-host-kit', '#data-context-host-data', '#data-context-host-note']) document.querySelector(id).textContent = '';
+  document.querySelector('#data-context-directory-label').textContent = 'Dossier de données utilisé';
+  status.textContent = 'Lecture de la version et du dossier de données…';
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch('/v1/data-context', {method: 'GET', cache: 'no-store', signal: controller.signal});
+    if (!response.ok) throw new Error('data_context_unavailable');
+    const data = await response.json();
+    if (!current()) return;
+    if (![data.runtime?.version, data.runtime?.build, data.data_directory, data.application_executable]
+      .every(value => typeof value === 'string' && value.trim())) throw new Error('invalid_data_context');
+    document.querySelector('#data-context-version').textContent = `${data.runtime.version} · ${data.runtime.build}`;
+    document.querySelector('#data-context-directory').textContent = data.data_directory;
+    document.querySelector('#data-context-executable').textContent = data.application_executable;
+    const copy = data.private_copy;
+    if (copy?.status === 'provided_by_launcher') {
+      if (![copy.host?.kit_directory, copy.host?.data_directory].every(value => typeof value === 'string' && value.trim())) throw new Error('invalid_host_context');
+      document.querySelector('#data-context-host-kit').textContent = copy.host.kit_directory;
+      document.querySelector('#data-context-host-data').textContent = copy.host.data_directory;
+      document.querySelector('#data-context-directory-label').textContent = 'Chemin interne utilisé dans Windows Sandbox';
+      host.hidden = hostNote.hidden = false;
+      hostNote.textContent = 'Emplacements sur votre PC transmis par le lanceur de ce kit. Le chemin interne de Sandbox peut être identique dans plusieurs copies ; comparez les dossiers sur votre PC pour les distinguer.';
+    } else if (copy?.status === 'unavailable' || /^C:\\NightMeritResults\\profil\\?$/i.test(data.data_directory)) {
+      hostNote.hidden = false;
+      hostNote.textContent = 'Le dossier du kit sur votre PC n’a pas pu être identifié. Dans Windows Sandbox, le chemin C:\\NightMeritResults\\profil est commun à plusieurs copies : vérifiez le dossier depuis lequel vous avez lancé le kit. Aucun emplacement sur votre PC n’a été deviné.';
+    }
+    details.hidden = technical.hidden = false;
+    status.textContent = 'L’application actuellement ouverte utilise le dossier indiqué ci-dessous.';
+  } catch (_) {
+    if (!current()) return;
+    status.textContent = 'Impossible d’identifier le dossier pour le moment. Cela ne signifie pas que vos données sont absentes. Réessayez la lecture.';
+    retry.hidden = false;
+  } finally { clearTimeout(timer); }
+}
+document.querySelector('#data-context-open').addEventListener('click', () => openDataContext());
+document.querySelector('#data-context-footer').addEventListener('click', () => openDataContext());
+document.querySelector('#saved-observations-data-context').addEventListener('click', () => openDataContext(true));
+document.querySelector('#data-context-close').addEventListener('click', () => document.querySelector('#data-context-dialog').close());
+document.querySelector('#data-context-retry').addEventListener('click', loadDataContext);
+document.querySelector('#data-context-dialog').addEventListener('close', () => {
+  dataContextUI.generation++;
+  dataContextUI.controller?.abort();
+});
+document.querySelector('#data-context-back').addEventListener('click', () => {
+  document.querySelector('#data-context-dialog').close();
+  openSavedObservationLibrary();
+});
+// End copy identification.
 
 updateHistoryFilterSummary();
 // End Outcome History.

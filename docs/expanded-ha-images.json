@@ -1,0 +1,51 @@
+{
+  "california": {
+    "asset": "target-california.jpg",
+    "download_url": "https://www.nebulaphotos.com/img/ngc1499Medium.jpg",
+    "bytes": 140880,
+    "sha256": "3fb4a915ab582766ea11177b1d40c00f8de36482a3621d7ad69f43a76c9cb45d",
+    "unchanged": true
+  },
+  "pelican": {
+    "asset": "target-pelican.jpg",
+    "download_url": "https://www.nebulaphotos.com/img/ngc7000Medium.jpg",
+    "bytes": 517380,
+    "sha256": "0222d7232ef2c796a23cdba620a25f9ab500ba624b50730b2f4a27f616513611",
+    "unchanged": true
+  },
+  "seagull": {
+    "asset": "target-seagull.jpg",
+    "download_url": "https://www.nebulaphotos.com/img/ic2177-HAMedium.jpg",
+    "bytes": 112222,
+    "sha256": "fe3830cb1dedd46083b43bd55d04e0876d89f86f8af093ce1f6326509a0849bb",
+    "unchanged": true
+  },
+  "eagle-omega": {
+    "asset": "target-eagle-omega.jpg",
+    "download_url": "https://cdn.eso.org/images/screen/b15.jpg",
+    "bytes": 403436,
+    "sha256": "1edd0799fc3d42e9f99ceeb5e71ad649132befe38b6ca1458496fac3291fc307",
+    "unchanged": true
+  },
+  "carina": {
+    "asset": "target-carina.jpg",
+    "download_url": "https://cdn.eso.org/images/screen/eso0905a.jpg",
+    "bytes": 389444,
+    "sha256": "f066c5404b293b90634eb2d7052c96b0086e6a1be3147168b78598530ee123dd",
+    "unchanged": true
+  },
+  "prawn": {
+    "asset": "target-prawn.jpg",
+    "download_url": "https://cdn.eso.org/images/screen/eso1340b.jpg",
+    "bytes": 446130,
+    "sha256": "1567adfac377dbbb4b8e58a6358bd0303d663ab2a3491e0a88d7d1451a4e85cb",
+    "unchanged": true
+  },
+  "horsehead": {
+    "asset": "target-horsehead.jpg",
+    "download_url": "https://cdn.eso.org/images/screen/eso0202a.jpg",
+    "bytes": 327157,
+    "sha256": "2da28cab6ca70e3e0c1ecf4fec55d3d97b14cef348616b0c1758670dd6a3a63c",
+    "unchanged": true
+  }
+}

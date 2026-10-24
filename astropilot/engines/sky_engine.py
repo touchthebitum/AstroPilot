@@ -37,6 +37,7 @@ class SkyEngine:
     def __init__(self, context=None):
         self.context = context or {}
         self._hour_geometry_cache = {}
+        self._moon_position_cache = {}
 
     @staticmethod
     def astronomical_night_window(
@@ -126,21 +127,24 @@ class SkyEngine:
             return None
 
     def moon_target_separation(self, target_ra, target_dec, obs_time, lat, lon):
-        location = EarthLocation(
-            lat=lat * u.deg,
-            lon=lon * u.deg
-        )
-
         target = SkyCoord(
             ra=target_ra * u.deg,
             dec=target_dec * u.deg
         )
 
-        moon_pos = get_body(
-            "moon",
-            Time(obs_time),
-            location=location
-        )
+        # Within this engine, the apparent Moon position is independent of
+        # the target. Reuse the exact result, without rounding time or location.
+        observation_time = Time(obs_time)
+        key = ((observation_time.jd1, observation_time.jd2,
+                observation_time.scale, lat, lon) if observation_time.isscalar else None)
+        moon_pos = self._moon_position_cache.get(key) if key is not None else None
+        if moon_pos is None:
+            location = EarthLocation(lat=lat * u.deg, lon=lon * u.deg)
+            moon_pos = get_body("moon", observation_time, location=location)
+            if key is not None:
+                if len(self._moon_position_cache) >= 256:
+                    self._moon_position_cache.clear()
+                self._moon_position_cache[key] = moon_pos
 
         return target.separation(moon_pos).deg
 

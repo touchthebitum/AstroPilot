@@ -134,3 +134,35 @@ multi-tab storage delivery and deferred catalogue/selection promises, together
 with the existing Outcome warnings and mobile provider checks at 390/1280 px.
 JavaScript syntax and `git diff --check` passed. Exceptional recovery wording
 remains deferred; no backend, API, schema, scoring or business persistence change.
+
+## Guided private-beta configuration (18 October 2026)
+
+The validated Simple journey uses one current task: Site → Equipment → Project →
+Availability. Decision, terrain and history sections stay out of configuration.
+Options/help remain available through a disclosure; essential validation messages
+and recovery guards remain visible. Pro retains its technical controls. Switching
+presentation only changes visibility and wording of the same live form nodes.
+
+Simple saves a new project with the existing revision-checked configuration write
+before showing availability. Exact filter ownership and zero starting integration
+still require explicit confirmation. Unsupported setups stay unsupported; no new
+scientific capability, filter ownership or weather recommendation is inferred.
+Bortle remains required by the existing calculation contract; its visible help
+explains uncertainty instead of supplying an invented value. All-night continues
+to use the existing undated all_night contract for the next computed night. Dated
+start/end windows and the additional Pro availability modes retain their existing
+wall-clock validation and rollover rules.
+
+Ce soir and Mes projets are direct destinations after configuration. Simple
+project cards read the canonical per-filter progress endpoint, including execution
+credits, rather than presenting the legacy scalar hours as a trustworthy total.
+Unknown progress remains unknown. Failed reads do not substitute zero, and late
+reads cannot replace a newer card generation.
+
+Images predating NightMerit and credited executions remain distinct. Historical
+baseline entry uses hours/minutes mapped to the same absolute manual seconds
+field; it is not an incremental credit action. Fractional seconds are retained
+unless explicitly edited. Credit-locked baselines remain locked in both modes;
+users add a later session through its existing mission/session workflow. Unused
+acquisitions and technical IDs are hidden in Simple, not deleted. Goal and progress
+saves retain the existing revision, conflict and credit-integrity guards.

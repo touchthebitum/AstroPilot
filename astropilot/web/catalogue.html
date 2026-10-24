@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catalogue de cibles — NightMerit</title>
+  <link rel="stylesheet" href="/ui/catalogue.css">
+  <script src="/ui/catalogue.js" defer></script>
+</head>
+<body><main>
+  <a href="/">← Retour à NightMerit</a>
+  <h1>Explorer le catalogue de cibles</h1>
+  <p>Recherchez une galaxie, une nébuleuse ou un amas. Le catalogue compare son étendue documentée au champ de votre matériel.</p>
+  <p id="catalogue-count" role="status">Chargement du catalogue local…</p>
+  <p id="equipment-summary"></p>
+  <form id="catalogue-search">
+    <label>Nom ou référence <input id="catalogue-query" type="search" maxlength="120" placeholder="M31, NGC 7000, IC 1396…"></label>
+    <label>Type de cible <select id="catalogue-kind">
+      <option value="">Tous les types</option><option value="galaxy">Galaxies</option>
+      <option value="galaxy_group">Groupes de galaxies</option><option value="hii_region">Régions d’hydrogène ionisé</option>
+      <option value="emission_nebula">Nébuleuses en émission</option><option value="reflection_nebula">Nébuleuses par réflexion</option>
+      <option value="dark_nebula">Nébuleuses sombres</option><option value="nebula">Autres nébuleuses</option>
+      <option value="planetary_nebula">Nébuleuses planétaires</option><option value="supernova_remnant">Rémanents de supernova</option>
+      <option value="open_cluster">Amas ouverts</option><option value="globular_cluster">Amas globulaires</option>
+      <option value="cluster_nebula">Amas avec nébulosité</option><option value="association">Associations d’étoiles</option>
+      <option value="star">Étoiles</option><option value="double_star">Étoiles doubles</option>
+      <option value="unknown">Classification à confirmer</option>
+    </select></label>
+    <label>Cadrage avec mon matériel <select id="catalogue-framing">
+      <option value="">Toutes les tailles</option><option value="nominal_fit">Étendue compatible avec le champ nominal</option>
+      <option value="small_in_field">Petite cible dans mon champ</option><option value="requires_framing_check">Cadrage à vérifier</option>
+      <option value="unknown">Dimensions insuffisantes</option>
+    </select></label>
+    <button type="submit">Rechercher</button>
+  </form>
+  <p class="notice">Une fiche répertoriée n’est pas une recommandation de sortie. Le cadrage ne vérifie pas la visibilité depuis votre site aux horaires choisis, la météo, le filtre, le suivi ni la difficulté. Cette consultation ne crée pas de mission.</p>
+  <p id="catalogue-status" role="status" aria-live="polite"></p>
+  <section id="catalogue-results" aria-label="Résultats du catalogue"></section>
+  <nav aria-label="Pages des résultats"><button id="catalogue-previous" type="button" disabled>Page précédente</button><button id="catalogue-next" type="button" disabled>Page suivante</button></nav>
+  <details><summary>Sources, méthode et limites</summary>
+    <p>OpenNGC, Mattia Verga et contributeurs · <a href="https://github.com/mattiaverga/OpenNGC">Catalogue original</a> · <a href="/ui/catalogue-license.txt">Licence CC BY-SA 4.0</a>.</p>
+    <p id="catalogue-provenance"></p>
+    <p>Dimensions en minutes d’arc, coordonnées J2000 telles que déclarées par la source. Les valeurs manquantes restent inconnues. Les limites des nébuleuses dépendent de la profondeur et de la longueur d’onde de l’image.</p>
+    <p>Les régions étendues et leurs petites composantes peuvent avoir des fiches distinctes. Les entrées explicitement marquées comme doublons ou inexistantes sont exclues. La présence d’une étoile double ou d’une classification incertaine ne la transforme pas en cible pour une première photo du ciel profond.</p>
+    <p>Le cadrage utilise une enveloppe circulaire approximative de la dimension principale et une marge de 10 %, comparée au petit côté du capteur. Une cible est signalée petite sous 15 % du grand côté du champ. Ces choix éditoriaux ne sont pas des seuils physiques de détection. Aucun filtre ni temps de pose idéal n’est déduit du seul type d’objet.</p>
+  </details>
+</main></body></html>

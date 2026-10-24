@@ -195,7 +195,8 @@ async function fetch(url, options) {
 
 
 def test_configuration_changes_invalidate_restored_mission():
-    initialize = _javascript_between("function initializeConfiguration(payload) {", "async function restoreSavedMission() {")
+    initialize = _javascript_between("function setConfigurationDraft(", "function restoreNewProjectEmptyConfirmation(")
+    initialize += _javascript_between("function initializeConfiguration(payload) {", "async function restoreSavedMission() {")
     save = _javascript_between("async function saveConfiguration() {", "const availabilityFieldsByMode")
     _run_javascript("""
 const assert = require('node:assert/strict');
@@ -252,6 +253,7 @@ def test_failed_recommendation_retains_restored_mission_until_success():
     _run_javascript("""
 const assert = require('node:assert/strict');
 const entry = {hidden: false};
+const document = {querySelector: () => null};
 const ui = {savedMissionEntry: entry, recommendationSubmit: {disabled: false}, refresh: {disabled: false}};
 const saved = {mission_id: 'saved', source: 'persisted', mission: {target: 'M31'}};
 const state = {acceptedMission: saved, requestingRecommendation: false, currentDecision: null,

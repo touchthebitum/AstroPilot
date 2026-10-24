@@ -22,6 +22,7 @@ def test_configuration_and_acceptance_generation_races():
     helpers += between('function setView(', 'const labels = Object.freeze')
     helpers += between('function show(view)', 'function duration(')
     helpers += between('function setCurrentFieldObservationDecision(', 'function normalizeError(')
+    helpers += between('function setConfigurationDraft(', 'function restoreNewProjectEmptyConfirmation(')
     helpers += between('function initializeConfiguration(', 'async function restoreSavedMission(')
     helpers += between('async function loadConfiguration(', 'const availabilityFieldsByMode')
     helpers += between('async function retryPendingAcceptance(', 'document.querySelector("#site-next")')
@@ -41,7 +42,7 @@ const element = () => ({hidden: true, disabled: false, querySelector: element,
 const crypto = require("node:crypto");
 const PENDING_ACCEPTANCE_STORAGE_KEY = "astropilot.pendingAcceptance";
 const PENDING_ACCEPTANCE_STORAGE_VERSION = 2;
-const document = {querySelector: element, querySelectorAll: () => [], createElement: element};
+const document = {documentElement:{dataset:{}},querySelector: element, querySelectorAll: () => [], createElement: element};
 const wizardStates = ["site", "equipment", "projects", "review"];
 function requestAnimationFrame(callback) {callback();}
 function invalidateOutcomeHistory() {}

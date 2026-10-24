@@ -55,14 +55,18 @@ const assert = require('node:assert/strict');
  }
 
  // Terrain uses the original controls and respects their former ancestor visibility.
- await page.evaluate(() => document.querySelector('#field-observation-dialog').close());
+ await page.evaluate(() => {
+  document.querySelector('#field-observation-dialog').close();
+  // Terrain belongs to the recommendation screen in the guided journey.
+  setView('recommendation');
+ });
  for (const mode of ['simple','pro']) for (const width of [390,1280]) {
   await page.setViewportSize({width,height:900});
   await page.evaluate(mode => applyUiMode(mode), mode);
   assert.equal(await page.locator('#decision [id^="add-field-observation"]').count(),0);
   assert.equal(await page.locator('#message-state [id^="add-field-observation"]').count(),0);
   assert.equal(await page.locator('#terrain #outcome-reopen').count(),1);
-  assert.equal(await page.locator('#add-field-observation-decision').textContent(),mode==='simple'?'Ajouter une observation':'Ajouter une observation terrain');
+  assert.equal(await page.locator('#add-field-observation-decision').textContent(),mode==='simple'?'Noter les conditions sur place':'Ajouter une observation terrain');
   assert.equal(await page.locator('#outcome-reopen').textContent(),mode==='simple'?'Mes observations':'Retrouver les observations enregistrées récentes');
   assert.equal(await page.locator('#terrain #history-open').count(),0);
   assert.equal(await page.locator('#history-section #history-open').count(),1);
@@ -271,6 +275,33 @@ const assert = require('node:assert/strict');
    if (state.recentDecisions.items.length!==(key==='unrelated.preference'?1:0)) throw Error('stale response accepted');
   }
  });
+ // A first project must remain reachable when Pro left its disclosure closed.
+ const firstProject = await context.newPage();
+ await firstProject.goto('http://nightmerit.test/');
+ await firstProject.waitForFunction(() => state.view === 'configuration_error');
+ await firstProject.evaluate(() => {
+  applyUiMode('pro');
+  state.configuration = {configured:false, projects:{}};
+  state.configurationDraft = {site:null, equipment:{preset_id:'samyang_183'}, projects:{}};
+  renderProjects(); setView('projects');
+  document.querySelector('#project-create').open = false;
+ });
+ const firstProjectRequests = requests;
+ await firstProject.locator('#ui-mode').selectOption('simple');
+ assert.equal(await firstProject.locator('#project-create').evaluate(e=>e.open),false);
+ assert.equal(await firstProject.locator('#project-create > summary').isVisible(),true,
+  'Pro → Simple must leave a visible way to open first-project creation');
+ assert.equal(requests,firstProjectRequests,'presentation switch must not load templates or write configuration');
+ await firstProject.locator('#project-create > summary').click();
+ assert.equal(await firstProject.locator('#project-templates-load').isVisible(),true);
+ await firstProject.locator('#ui-mode').selectOption('pro');
+ await firstProject.locator('#project-create > summary').click();
+ await firstProject.locator('#ui-mode').selectOption('simple');
+ assert.equal(await firstProject.locator('#project-create > summary').isVisible(),true,
+  'closing creation in Pro and returning to Simple must remain recoverable');
+ assert.equal(await firstProject.evaluate(()=>Object.keys(state.configurationDraft.projects).length),0);
+ assert.equal(requests,firstProjectRequests);
+ await firstProject.close();
  await other.close();
  assert.deepEqual(errors,[]);
  console.log('Browser checks passed: persistence, multi-tab, draft/guards/filter retention, disclosures, 390/1280px.');

@@ -14,11 +14,11 @@ def test_exports_exact_production_objects_and_composite_field():
     assert tuple(
         definition.celestial_object_id
         for definition in CELESTIAL_OBJECT_DEFINITIONS
-    ) == ("sh2-129", "ou4")
+    ) == ("sh2-129", "ou4", "ngc7000", "rosette", "m42", "sh2-190", "sh2-199", "m16", "m17", "ngc1499", "ic5070", "ic434", "sh2-296", "ngc3372", "ic4628")
     assert tuple(
         definition.imaging_field_id
         for definition in IMAGING_FIELD_DEFINITIONS
-    ) == ("sh2-129_ou4",)
+    ) == ("sh2-129_ou4", "ngc7000", "rosette", "m42", "sh2-190", "sh2-199", "m16", "m17", "ngc1499", "ic5070", "ic434", "sh2-296", "ngc3372", "ic4628")
     assert CELESTIAL_OBJECT_DEFINITIONS[0].object_type == "emission nebula"
     assert CELESTIAL_OBJECT_DEFINITIONS[0].object_subtype == "H II region"
     assert CELESTIAL_OBJECT_DEFINITIONS[1].object_type == "bipolar outflow"

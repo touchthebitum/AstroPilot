@@ -155,6 +155,15 @@ jobs:
           if ($cases.Count -ne 11 -or $unsuccessful.Count -ne 0) {
             throw 'Expected all 11 profile recovery regressions to execute and pass without skips.'
           }
+          $observationsReport = Join-Path $env:RUNNER_TEMP 'saved-observations.xml'
+          uv run --locked --no-sync python -m pytest -q tests/api/test_saved_observation_catalogue.py tests/api/test_outcome_evaluation_ui.py tests/api/test_data_context.py tests/api/test_runtime_identity.py tests/api/test_private_kit_context.py --junitxml="$observationsReport"
+          if ($LASTEXITCODE -ne 0) { throw 'Saved observation catalogue and comparison UI regressions failed' }
+      - name: Validate Windows host copy context with native PowerShell 5.1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -File scripts/private_beta_windows/test_context.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Private kit host context regressions failed' }
       - name: Validate readable mission times in isolated Windows and Mac environments
         shell: pwsh
         run: |
@@ -167,6 +176,13 @@ jobs:
           $report = Join-Path $env:RUNNER_TEMP 'mission-times.xml'
           uv run --locked --no-sync python -m pytest -q tests/api/test_mission_task_times_ui.py tests/architecture/test_timezone_authority.py tests/api/test_timezone_authority_transport.py --junitxml="$report"
           if ($LASTEXITCODE -ne 0) { throw 'Mission local time regressions failed' }
+      - name: Export saved observation regressions
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: saved-observations-${{ matrix.os }}
+          path: ${{ runner.temp }}/saved-observations.xml
+          retention-days: 14
       - name: Export native mission time regressions
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

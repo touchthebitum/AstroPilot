@@ -83,15 +83,36 @@ def test_wheel_includes_only_immutable_product_assets():
     package_data = _pyproject()["tool"]["setuptools"]["package-data"]
 
     assert package_data == {
-        "astropilot": ["knowledge/objects/*.json", "web/*", "reference_stations_v1.json"],
+        "astropilot": ["knowledge/objects/*.json", "web/*", "reference_stations_v1.json", "catalogue_data/*"],
     }
     declared_patterns = package_data["astropilot"]
     assert "data/user_profile.json" not in declared_patterns
     assert "user_filters.json" not in declared_patterns
+    assert {item.name for item in (ROOT / "astropilot/catalogue_data").iterdir() if item.is_file()} == {
+        "NGC.csv", "addendum.csv", "NGC_guide.txt", "AUTHORS", "CC-BY-SA-4.0.txt", "README.md", "manifest.json", "UPSTREAM-COPYRIGHT.txt",
+    }
 
 
 def test_obsolete_image_quality_demo_is_not_shipped_as_a_module():
     assert not (ROOT / "decision" / "test_decision_context_image_quality.py").exists()
+
+
+@pytest.mark.parametrize("spec_name", ["AstroPilot.spec", "AstroPilot-windows.spec"])
+def test_native_specs_include_every_immutable_catalogue_file(spec_name):
+    """Wheel inclusion alone does not put these resources in the frozen runtime."""
+    # Execute the real data declarations, without importing PyInstaller or
+    # compiling platform-specific bootloaders, and compare to the pinned files.
+    source = (ROOT / spec_name).read_text(encoding="utf-8")
+    declarations = source[source.index("datas = ["):source.index("analysis = Analysis(")]
+    context = {"ROOT": ROOT, "collect_data_files": lambda _name: [],
+               "copy_metadata": lambda _name: []}
+    exec(declarations, context)
+    packaged = {Path(origin).name: Path(origin)
+                for origin, destination in context["datas"]
+                if destination == "astropilot/catalogue_data"}
+    expected = {p.name: p for p in (ROOT / "astropilot/catalogue_data").iterdir() if p.is_file()}
+    assert len(expected) == 8
+    assert packaged == expected
 
 
 def test_launcher_and_internal_field_lab_entry_points_are_explicit():

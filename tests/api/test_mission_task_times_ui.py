@@ -69,6 +69,15 @@ assert.match(copy,/16\.10\.2026.*01:10.*UTC\+2/);
 assert.doesNotMatch(copy,/T-\d|Fin \+/);
 for (const action of ['Installer le matériel','Effectuer la mise en station',
  'Régler la mise au point automatique','Prendre les images de calibration (flats)']) assert(copy.includes(action));
+const renderedTasks=document.querySelector('#mission-tasks').children;
+assert.equal(renderedTasks.length,tasks.length+1);
+const review=renderedTasks[renderedTasks.length-1];
+assert.equal(review.children[0].textContent,'Après les flats · le lendemain si besoin');
+assert.match(flattened(review),/Trier les images, puis enregistrer les poses utilisables dans mon projet/);
+assert.match(flattened(review),/pour cette séance/);
+assert.match(flattened(review),/images rejetées ni les flats, darks et bias/);
+assert.match(flattened(review),/confirmerez ensuite son ajout/);
+assert.doesNotMatch(flattened(review),/UTC|→|\d{2}:\d{2}/);
 assert.equal(JSON.stringify(mission),before);
 // Reopen the same persisted DTO after a configuration/site change.
 state.configuration={site:{timezone:'America/Los_Angeles'}};

@@ -26,18 +26,19 @@
         </span>
         <span>NightMerit</span>
       </a>
-      <div class="night-context">
+      <nav id="main-navigation" class="main-navigation" aria-label="Navigation principale" hidden><button class="secondary-button" id="nav-tonight" type="button">Préparer ma séance</button><button class="secondary-button" id="nav-projects" type="button">Mes projets</button></nav>
+      <div class="night-context" data-pro-only>
         <span class="context-label">Ce soir</span>
         <time id="night-date">—</time>
       </div>
       <div class="header-actions">
+        <button class="secondary-button" id="saved-observations-open" type="button" aria-haspopup="dialog" hidden>Mes observations</button>
+        <details id="header-options" class="header-options" data-mode-disclosure><summary>Options et aide</summary><div class="header-options-content">
         <button class="secondary-button" id="alerts-status-open" type="button" aria-haspopup="dialog">État des alertes</button>
         <button class="secondary-button" id="help-open" type="button" aria-haspopup="dialog">Aide</button>
-        <label class="ui-mode-control" for="ui-mode">Présentation
-          <select id="ui-mode" aria-label="Mode de présentation">
-            <option value="simple">Simple</option><option value="pro">Pro</option>
-          </select>
-        </label>
+        <button class="secondary-button" id="data-context-open" type="button" aria-haspopup="dialog">Version et données</button>
+        <a class="secondary-button" href="/catalogue" target="_blank" rel="noopener noreferrer">Catalogue de cibles</a>
+
         <button class="secondary-button" id="edit-availability" type="button" hidden>
           Modifier ma disponibilité
         </button>
@@ -50,6 +51,12 @@
           </svg>
           <span>Actualiser</span>
         </button>
+        </div></details>
+        <label class="ui-mode-control" for="ui-mode">Présentation
+          <select id="ui-mode" aria-label="Mode de présentation">
+            <option value="simple">Simple</option><option value="pro">Pro</option>
+          </select>
+        </label>
       </div>
     </header>
 
@@ -113,6 +120,7 @@
           <ol class="wizard-progress" aria-label="Progression">
             <li data-progress="site">Site</li>
             <li data-progress="equipment">Matériel</li>
+            <li data-progress="projects">Projets</li>
             <li data-progress="review">Disponibilité</li>
           </ol>
         </div>
@@ -120,8 +128,8 @@
         <p id="configuration-form-error" class="form-error" role="alert" hidden></p>
 
         <section id="site-step" class="wizard-step" data-step="site" aria-labelledby="site-title">
-          <p class="eyebrow">Étape 1</p>
-          <h2 id="site-title" tabindex="-1">Site d’observation</h2>
+          <p class="eyebrow">Étape 1 sur 4 · Site</p>
+          <h2 id="site-title" tabindex="-1">Où allez-vous observer ?</h2>
           <p class="step-intro">Indiquez l’endroit depuis lequel vous observez habituellement.</p>
           <div class="geolocation-row">
             <button class="secondary-button" id="use-geolocation" type="button">Utiliser ma position</button>
@@ -145,19 +153,19 @@
             <label class="field full-width" for="site-bortle">
               <span>Pollution lumineuse / qualité du ciel (Bortle)</span>
               <input id="site-bortle" name="site-bortle" type="number" min="1" max="9" step="1" inputmode="numeric" required>
-              <small>1 correspond à un ciel très sombre, 9 à un ciel urbain très lumineux.</small>
+              <small>Cette échelle décrit la pollution lumineuse : 1 = ciel très sombre ; 9 = centre-ville très lumineux.</small><details class="bortle-help"><summary>Comment choisir si je débute ?</summary><p>Il s’agit de la luminosité habituelle du ciel causée par les éclairages, pas des nuages de ce soir. N’indiquez pas une valeur au hasard : faites confirmer la classe de votre lieu par un club d’astronomie ou une carte de pollution lumineuse avant de continuer.</p></details>
               <small id="legacy-bortle-note" hidden>Pour ce profil historique, confirmez cette valeur avant toute recommandation.</small>
             </label>
           </div>
           <p id="site-summary" class="field-note" aria-live="polite"></p>
           <div class="wizard-actions end">
-            <button class="primary-button" id="site-next" type="button">Continuer</button>
+            <button class="primary-button" id="site-next" type="button">Continuer vers le matériel</button>
           </div>
         </section>
 
         <section id="equipment-step" class="wizard-step" data-step="equipment" aria-labelledby="equipment-title" hidden>
-          <p class="eyebrow">Étape 2</p>
-          <h2 id="equipment-title" tabindex="-1">Votre matériel</h2>
+          <p class="eyebrow">Étape 2 sur 4 · Matériel</p>
+          <h2 id="equipment-title" tabindex="-1">Avec quel matériel ?</h2>
           <p class="step-intro">Choisissez une configuration connue ou décrivez votre optique et votre caméra.</p>
           <div class="choice-tabs" role="radiogroup" aria-label="Type de matériel">
             <label><input type="radio" name="equipment-kind" value="preset" checked> Configuration proposée</label>
@@ -182,41 +190,76 @@
           </fieldset>
           <div class="wizard-actions">
             <button class="secondary-button" data-back="site" type="button">Retour</button>
-            <button class="primary-button" id="equipment-next" type="button">Continuer</button>
+            <button class="primary-button" id="equipment-next" type="button">Continuer vers mon projet</button>
           </div>
         </section>
 
         <section id="projects-step" class="wizard-step" data-step="projects" aria-labelledby="projects-title" hidden>
-          <p class="eyebrow">Étape 3</p>
+          <p class="eyebrow" id="projects-step-number">Étape 3 sur 4 · Projet</p>
           <h2 id="projects-title" tabindex="-1">Vos projets</h2>
-          <p class="step-intro">Vous pourrez organiser vos projets plus tard.</p>
-          <div id="existing-projects" class="project-summary" hidden></div>
+          <p class="step-intro" id="projects-intro">Un projet décrit ce que vous voulez photographier et le temps de pose utile que vous souhaitez accumuler, éventuellement sur plusieurs nuits. Il est nécessaire pour préparer une mission.</p>
+          <div id="existing-projects" class="project-summary" data-pro-only hidden></div><div id="simple-projects" class="simple-projects" data-simple-only hidden aria-live="polite"></div>
           <div id="project-progress-editor" class="project-progress-editor" hidden></div>
-          <label id="zero-projects-wrap" class="project-none" for="zero-projects">
+          <label id="zero-projects-wrap" class="project-none" data-pro-only for="zero-projects">
             <input id="zero-projects" type="checkbox" checked>
-            <span><strong>Aucun projet pour l’instant</strong><small>NightMerit peut déjà découvrir une cible adaptée sans projet.</small></span>
+            <span><strong>Aucun projet pour l’instant</strong><small>Sans projet, NightMerit peut rechercher une cible, mais ne pourra pas préparer de mission.</small></span>
           </label>
+          <div class="discovery-entry">
+            <button class="secondary-button" id="discover-from-projects" type="button">Je ne sais pas quoi photographier</button>
+            <p class="field-note">NightMerit peut rechercher une cible parmi celles prises en charge, selon votre matériel et vos horaires.</p>
+          </div>
+          <details id="project-create">
+            <summary>Créer mon premier projet ou ajouter un projet</summary>
+            <p>Choisissez une cible prise en charge par cette bêta, puis le filtre et votre objectif de pose. Ce choix ne garantit pas que la cible sera adaptée à ce soir.</p>
+            <p>Les filtres proposés sont des références précises. Ne confirmez pas un filtre dont vous ne connaissez pas le modèle.</p>
+            <button class="secondary-button" id="project-templates-load" type="button">Afficher les cibles prises en charge</button>
+            <div id="project-create-fields" hidden>
+              <label for="project-template">Cible à photographier</label>
+              <select id="project-template"><option value="">Choisir une cible</option></select>
+              <p id="project-target-guidance" class="field-note" hidden></p>
+              <div id="project-new-intents"></div>
+              <label class="check-field"><input id="project-new-empty" type="checkbox"><span>Je commence ce projet sans images déjà acquises.</span></label>
+              <button class="primary-button" id="project-add" type="button" data-simple-text="Enregistrer mon projet et continuer" data-pro-text="Ajouter ce projet à ma configuration">Enregistrer mon projet et continuer</button>
+            </div>
+            <p id="project-create-feedback" role="status" aria-live="polite"></p>
+          </details>
           <div class="wizard-actions">
             <button class="secondary-button" data-back="equipment" type="button">Retour</button>
-            <button class="primary-button" id="projects-next" type="button">Continuer</button>
+            <button class="primary-button" id="projects-next" type="button">Enregistrer et choisir mes horaires</button>
           </div>
         </section>
 
       </section>
 
+      <section id="target-suggestions" class="availability-panel" aria-labelledby="target-suggestions-title" hidden>
+        <h2 id="target-suggestions-title" tabindex="-1">Que pourriez-vous photographier ?</h2>
+        <p id="target-suggestions-status" role="status"></p>
+        <div class="wizard-actions">
+          <button class="primary-button" id="discovery-refresh" type="button" hidden>Actualiser la recherche avec mes horaires</button>
+          <button class="secondary-button" id="discovery-back" type="button">Revoir mes horaires ou mes filtres</button>
+        </div>
+        <div id="target-suggestion-cards"></div>
+        <details data-mode-disclosure>
+          <summary>Cibles prises en charge et limites de la recherche</summary>
+          <p id="target-suggestions-scope" class="field-note"></p>
+        </details>
+        <div id="equipment-catalogue"></div>
+      </section>
       <section id="availability-step" class="availability-panel" hidden aria-labelledby="availability-title">
         <div class="availability-heading">
           <p class="state-kicker">Préparer ma nuit</p>
           <h2 id="availability-title" tabindex="-1">Quand êtes-vous disponible ce soir&nbsp;?</h2>
           <p>NightMerit utilisera uniquement la plage que vous indiquez pour cette recommandation.</p>
+          <p id="availability-save-confirmation" class="field-note" role="status" hidden>Votre projet et votre configuration sont enregistrés. Choisissez maintenant votre disponibilité.</p>
+          <p id="availability-selected-project" class="field-note" role="status" hidden></p>
           <p id="availability-site-timezone" class="field-note" hidden></p>
           <p id="availability-timezone-warning" class="form-error" role="alert" hidden>Le fuseau horaire du site ne peut pas être déterminé. Vérifiez les coordonnées du site avant de choisir une heure précise.</p>
         </div>
         <p id="current-decision-site-warning" class="field-note" role="status"></p>
         <button class="secondary-button" id="open-observation-catalogue" type="button">Observer avec une décision récente du site</button>
         <section id="review-step" class="wizard-step" aria-labelledby="review-title">
-          <p class="eyebrow">Étape 3</p>
-          <h2 id="review-title" tabindex="-1">Site, matériel et disponibilité</h2>
+          <p class="eyebrow">Vérification avant enregistrement</p>
+          <h2 id="review-title" tabindex="-1">Vérifier ma configuration</h2>
           <dl class="review-grid">
             <div><dt>Site</dt><dd id="review-site">—</dd></div>
             <div><dt>Ciel</dt><dd id="review-bortle">—</dd></div>
@@ -234,6 +277,13 @@
           </div>
         </section>
         <form id="availability-form" novalidate>
+          <label class="check-field"><input id="discover-targets" type="checkbox"><span>Me proposer une cible avec mon matériel</span></label>
+          <fieldset id="discovery-filters" hidden>
+            <legend>Quels filtres possédez-vous ?</legend>
+            <p>Cochez uniquement les modèles que vous possédez. La recherche ne modifie pas vos projets.</p>
+            <div id="discovery-filter-choices"></div>
+            <p id="discovery-filter-feedback" role="status"></p>
+          </fieldset>
           <div id="saved-mission-entry" class="saved-mission-entry" hidden>
             <div><strong>Missions enregistrées</strong><p id="saved-mission-target"></p>
               <label for="saved-mission-choice">Choisir une mission</label>
@@ -243,10 +293,10 @@
           <fieldset class="availability-modes">
             <legend>Ma disponibilité</legend>
             <label><input type="radio" name="availability-mode" value="all_night"><span><strong>Toute la nuit</strong><small>Je peux observer pendant toute la nuit astronomique.</small></span></label>
-            <label><input type="radio" name="availability-mode" value="duration"><span><strong>Pendant environ X heures</strong><small>NightMerit place cette durée dans la meilleure fenêtre.</small></span></label>
-            <label><input type="radio" name="availability-mode" value="start_and_duration"><span><strong>À partir de HH:MM pendant X heures</strong><small>Je connais mon heure de début.</small></span></label>
-            <label><input type="radio" name="availability-mode" value="until"><span><strong>Jusqu’à HH:MM</strong><small>Je dois avoir terminé avant cette heure.</small></span></label>
-            <label><input type="radio" name="availability-mode" value="fixed_window"><span><strong>Entre HH:MM et HH:MM</strong><small>Je dispose d’une plage précise.</small></span></label>
+            <label data-advanced-availability><input type="radio" name="availability-mode" value="duration"><span><strong>Pendant environ X heures</strong><small>NightMerit place cette durée dans la meilleure fenêtre.</small></span></label>
+            <label data-advanced-availability><input type="radio" name="availability-mode" value="start_and_duration"><span><strong>À partir de HH:MM pendant X heures</strong><small>Je connais mon heure de début.</small></span></label>
+            <label data-advanced-availability><input type="radio" name="availability-mode" value="until"><span><strong>Jusqu’à HH:MM</strong><small>Je dois avoir terminé avant cette heure.</small></span></label>
+            <label><input type="radio" name="availability-mode" value="fixed_window"><span><strong>Entre deux horaires</strong><small>Je dispose d’une plage précise.</small></span></label>
           </fieldset>
 
           <div class="availability-fields">
@@ -256,11 +306,11 @@
               <small>Exemple&nbsp;: 1,5 pour 1 h 30.</small>
             </label>
             <label class="field" data-availability-field="start" for="availability-start" hidden>
-              <span>Début</span>
+              <span>Début · date et heure</span>
               <input id="availability-start" type="datetime-local">
             </label>
             <label class="field" data-availability-field="end" for="availability-end" hidden>
-              <span>Fin</span>
+              <span>Fin · date et heure</span>
               <input id="availability-end" type="datetime-local">
             </label>
           </div>
@@ -281,6 +331,7 @@
           <p class="state-kicker">Analyse en cours</p>
           <h2>NightMerit observe votre nuit…</h2>
           <p>Météo, cible, fenêtre et qualité du ciel.</p>
+          <p id="analysis-wait" role="status" hidden></p>
         </div>
       </section>
 
@@ -295,6 +346,7 @@
         </div>
         <div class="message-actions">
           <button class="secondary-button" id="message-retry" type="button">Réessayer</button>
+          <button class="primary-button" id="message-create-project" type="button" hidden>Créer mon premier projet</button>
           <button class="secondary-button" id="message-edit-availability" type="button" hidden>Modifier ma disponibilité</button>
         </div>
       </section>
@@ -517,6 +569,7 @@
             <label for="session-choice">Sessions de cette mission</label>
             <select id="session-choice"></select>
             <p id="session-status" role="status"></p>
+            <p id="session-next-step" class="session-next-step" data-simple-only></p>
             <section id="guardian-renewal" hidden aria-label="Confirmation Guardian">
               <p>Cette confirmation vient de vous. NightMerit ne vérifie pas techniquement que l’acquisition continue.</p>
               <p>Les actions Guardian restent des recommandations, sans contrôle matériel.</p>
@@ -532,10 +585,11 @@
               <button class="secondary-button" id="session-interrupt" type="button">Interrompre la session</button>
             </div>
             <div id="session-evidence" hidden>
-              <p>Indiquez uniquement la durée d’intégration réellement utilisable.</p>
+              <p>Après avoir vérifié et trié vos clichés, indiquez le temps de pose total des images conservées de cette session uniquement. Excluez l’installation, les pauses, les images rejetées et les images de calibration (flats, darks et bias). N’indiquez pas le total de votre projet. Vous pouvez le faire le lendemain.</p>
               <label>Heures <input id="session-hours" type="number" min="0" step="1" value="0"></label>
               <label>Minutes <input id="session-minutes" type="number" min="0" max="59" step="1" value="0"></label>
               <button class="primary-button" id="session-record-evidence" type="button">Enregistrer la durée utilisable</button>
+              <small>Cette étape conserve la durée. Le bouton suivant permettra de l’ajouter à votre projet.</small>
             </div>
             <div id="session-credit" hidden>
               <p id="session-credit-preview"></p>
@@ -561,6 +615,18 @@
         </div>
       </dialog>
 
+      <dialog class="observation-dialog" id="saved-observations-dialog" aria-labelledby="saved-observations-title">
+        <div class="observation-surface">
+          <header class="observation-heading"><h2 id="saved-observations-title">Mes observations</h2><button class="secondary-button" id="saved-observations-close" type="button">Fermer</button></header>
+          <p>Retrouvez vos relevés enregistrés dans ce profil, du plus récent au plus ancien. Leur consultation ne crée ni observation ni session photo.</p>
+          <p id="saved-observations-status" role="status" aria-live="polite"></p>
+          <div id="saved-observations-list"></div>
+          <button class="secondary-button" id="saved-observations-data-context" type="button" hidden>Retrouver le dossier de mes données</button>
+          <button class="secondary-button" id="saved-observations-more" type="button" hidden>Afficher les observations plus anciennes</button>
+          <button class="secondary-button" id="saved-observations-retry" type="button" hidden>Recharger la liste</button>
+        </div>
+      </dialog>
+
       <dialog class="observation-dialog" id="field-observation-dialog" aria-labelledby="observation-title">
         <div class="observation-surface observation-panel">
           <header class="observation-heading">
@@ -577,11 +643,13 @@
             <p id="observation-time-summary"></p>
             <span id="observation-linkage">Sans session</span>
           </section>
-            <div class="observation-heading">
+            <div class="observation-heading observation-entry-heading">
               <div>
+                <p data-simple-only>Indiquez les conditions que vous constatez pour les comparer aux prévisions.</p>
                 <h3>Comment est le ciel maintenant&nbsp;?</h3>
               </div>
             </div>
+            <p id="saved-observation-details"></p>
             <form id="field-observation-form">
               <details class="observation-context-editor"><summary>Modifier l’heure ou la décision</summary>
               <label class="observation-time" for="observation-observed-at">
@@ -679,13 +747,14 @@
             </form>
             <section class="outcome-panel" aria-labelledby="outcome-title">
               <h3 id="outcome-title">Comparer une observation enregistrée</h3>
-              <label for="outcome-observation">Observations confirmées par le serveur</label>
+              <label for="outcome-observation">Choisir un relevé enregistré</label>
               <select id="outcome-observation"></select>
-              <button class="secondary-button" id="outcome-read" type="button">Consulter la comparaison enregistrée</button>
-              <button class="secondary-button" id="outcome-compare" type="button" disabled>Comparer avec la prévision</button>
+              <button class="secondary-button" id="outcome-read" type="button">Voir la comparaison enregistrée</button>
+              <button class="secondary-button" id="outcome-compare" type="button" disabled>Créer une comparaison si elle manque</button>
               <div id="outcome-result" role="status" aria-live="polite"></div>
               <details data-mode-disclosure><summary>Détails techniques</summary><pre id="outcome-trace"></pre></details>
             </section>
+            <button class="secondary-button" id="saved-observation-back" type="button">Retour à mes observations</button>
         </div>
       </dialog>
       <section id="history-section" class="compact-actions-section" aria-labelledby="history-section-title">
@@ -722,6 +791,7 @@
       <span>NightMerit</span>
       <span aria-hidden="true">·</span>
       <span>Une décision. Une nuit.</span>
+      <button class="secondary-button" id="data-context-footer" type="button" aria-haspopup="dialog">Version et données</button>
       <span aria-hidden="true">·</span>
       <a href="https://open-meteo.com/" rel="noreferrer">Données météo par Open-Meteo.com</a>
     </footer>
@@ -741,6 +811,30 @@
       <p id="alerts-status-action"></p>
       <p id="alerts-status-note" class="field-note">La configuration affichée est celle du dernier démarrage. Un cycle réussi ne signifie pas qu’une alerte a été trouvée. Une notification acceptée par le système ne garantit pas son affichage. Cette vue ne confirme pas que le service tourne encore.</p>
       <button class="secondary-button" id="alerts-status-refresh" type="button">Actualiser l’état</button>
+    </dialog>
+    <dialog id="data-context-dialog" aria-labelledby="data-context-title">
+      <header class="help-heading">
+        <h2 id="data-context-title">Version et données</h2>
+        <button class="secondary-button" id="data-context-close" type="button" autofocus>Fermer</button>
+      </header>
+      <p>Chaque copie de test peut utiliser un dossier de données différent. Ouvrir un nouveau kit vierge ne reprend pas automatiquement vos projets et vos observations.</p>
+      <p id="data-context-status" role="status" aria-live="polite"></p>
+      <dl id="data-context-host" hidden>
+        <dt>Copie utilisée sur votre PC</dt><dd id="data-context-host-kit"></dd>
+        <dt>Dossier de vos données sur votre PC</dt><dd id="data-context-host-data"></dd>
+      </dl>
+      <p id="data-context-host-note" hidden></p>
+      <dl id="data-context-details" hidden>
+        <dt>Version ouverte</dt><dd id="data-context-version"></dd>
+        <dt id="data-context-directory-label">Dossier de données utilisé</dt><dd id="data-context-directory"></dd>
+      </dl>
+      <details id="data-context-technical" hidden><summary>Identifier précisément cette application</summary><p id="data-context-executable"></p><p>Dans Windows Sandbox, le dossier C:\NightMeritResults correspond au dossier RESULTATS du kit lancé sur votre PC.</p></details>
+      <h3>Pour reprendre vos essais</h3>
+      <p>Rouvrez le dossier de la copie que vous utilisiez et son lanceur. Si une nouvelle copie paraît vide, vérifiez d’abord le dossier utilisé ; ne recréez pas vos projets pour retrouver les anciens.</p>
+      <p>Conservez les anciennes copies et leurs données jusqu’à ce que la reprise dans la nouvelle version ait été vérifiée. Le transfert doit être préparé séparément, application arrêtée, sans remplacer un dossier existant.</p>
+      <p>Ce panneau consulte seulement la version et les emplacements. Il ne transfère et ne réinitialise aucune donnée.</p>
+      <button class="secondary-button" id="data-context-retry" type="button" hidden>Réessayer la lecture</button>
+      <button class="secondary-button" id="data-context-back" type="button" hidden>Retour à mes observations</button>
     </dialog>
     <dialog id="help-dialog" aria-labelledby="help-title">
       <header class="help-heading">

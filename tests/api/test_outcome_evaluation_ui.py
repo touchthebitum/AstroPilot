@@ -30,12 +30,12 @@ def test_outcome_layout_keeps_result_below_controls_at_all_widths():
                 self.in_panel = False
 
     parser = OutcomeParser()
-    parser.feed((ROOT / 'astropilot/web/index.html').read_text())
+    parser.feed((ROOT / 'astropilot/web/index.html').read_text(encoding="utf-8"))
     assert [tag for tag, _ in parser.children] == ['h3', 'label', 'select', 'button', 'button', 'div', 'details', 'summary', 'pre']
     result = parser.children[5][1]
     assert result['id'] == 'outcome-result'
     assert result['role'] == 'status' and result['aria-live'] == 'polite'
-    css = (ROOT / 'astropilot/web/styles.css').read_text()
+    css = (ROOT / 'astropilot/web/styles.css').read_text(encoding="utf-8")
     rules = re.findall(r'([^{}]+)\{([^{}]*)\}', css)
 
     def declarations(selector):
@@ -60,7 +60,7 @@ def test_outcome_click_recovery_stale_and_readback():
     engine = UTIL['javascript_engine']()
     if not engine or engine.endswith('osascript'):
         pytest.skip('Node required')
-    source = (ROOT / 'astropilot/web/app.js').read_text()
+    source = (ROOT / 'astropilot/web/app.js').read_text(encoding="utf-8")
     helpers = source[source.index('// Outcome state is independent'):source.index('async function finishFieldObservationSubmission(')]
     program = r'''
 const assert = require('assert').strict;
@@ -268,7 +268,7 @@ const missing = () => response(404,{detail:{code:'outcome_evaluation_not_found'}
 
 
 def test_explicit_click_and_confirmation_precedes_cleanup():
-    source=(ROOT/'astropilot/web/app.js').read_text()
+    source=(ROOT/'astropilot/web/app.js').read_text(encoding="utf-8")
     assert source.count('consultOutcomeEvaluation(true)') == 1
     assert 'state.outcomeManualObservationId = state.outcomeObservationId;' in source
     assert '#outcome-compare").addEventListener("click", () => consultOutcomeEvaluation(true)' in source
@@ -282,7 +282,7 @@ def test_explicit_click_and_confirmation_precedes_cleanup():
 
 
 def test_unchanged_context_does_not_discard_outcome_response():
-    source = (ROOT/'astropilot/web/app.js').read_text()
+    source = (ROOT/'astropilot/web/app.js').read_text(encoding="utf-8")
     body = source[source.index('function syncFieldObservationContext('):source.index('function restorePendingFieldObservation(')]
     assert body.index('sameFieldObservationContext(') < body.index('state.outcomeToken =')
 
@@ -292,7 +292,7 @@ def run_outcome_ui(body, fixtures=None):
     engine = UTIL['javascript_engine']()
     if not engine or engine.endswith('osascript'):
         pytest.skip('Node required')
-    source = (ROOT / 'astropilot/web/app.js').read_text()
+    source = (ROOT / 'astropilot/web/app.js').read_text(encoding="utf-8")
     helpers = source[source.index('// Outcome state is independent'):source.index('async function finishFieldObservationSubmission(')]
     program = r'''
 const assert=require('assert').strict;
@@ -654,4 +654,144 @@ resolveGet(missing());await pending;
 assert.deepEqual(calls,['GET','POST']);
 assert.match(element('#outcome-result').textContent,/erreur signée/);
 assert.equal(element('#outcome-compare').disabled,false);
+''')
+
+
+@pytest.mark.parametrize("status", ["not_comparable", "partial"])
+def test_temporal_rejection_is_clear_without_inventing_forecast_time(status):
+    run_outcome_ui(r"""
+const saved=obs('o','2026-10-22T19:03:00Z');
+rememberConfirmedFieldObservation(saved);
+state.fieldObservationDraftContext={timezone:'Europe/Zurich'};
+// An edited clock must never replace the saved observation's timestamp.
+element('#observation-observed-at').value='2030-01-01T00:00';
+element('#outcome-result').dataset={};
+document.documentElement={dataset:{uiMode:'simple'}};
+const value=projection();value.status=fixtures.status;
+const reason={code:'forecast_outside_temporal_tolerance',variable:null};
+value.reasons=[reason,reason];
+value.results=['temperature_c','relative_humidity_percent','cloud_cover_percent'].map(variable=>({
+ variable,status:'not_comparable',unit:variable==='temperature_c'?'°C':'%',reasons:[{...reason,variable}]}));
+if(fixtures.status==='partial'){
+ value.results[0]={...projection().results[0],forecast_point:{selected_forecast_for_utc:'2026-10-22T19:00:00Z'}};
+}
+const before=JSON.stringify(value),beforeSaved=JSON.stringify(saved);
+renderOutcomeEvaluation(value,['Historique / remplacée (ou chaîne incohérente).']);
+const output=element('#outcome-result');
+assert.ok(output.textContent.startsWith('Historique / remplacée'));
+assert.match(output.textContent,/Votre observation est enregistrée/);
+assert.match(output.textContent,/Heure du relevé : .*22.*10.*2026.*21:03.*UTC\+2/);
+assert.doesNotMatch(output.textContent,/2030/);
+assert.equal((output.textContent.match(/trop éloignée/g)||[]).length,1);
+assert.match(output.textContent,/Conservez l’heure réelle/);
+assert.match(output.textContent,/ne dit pas si la prévision était juste ou fausse/);
+if(fixtures.status==='not_comparable'){
+ assert.match(output.textContent,/L’heure de la prévision rejetée n’est pas disponible/);
+ assert.doesNotMatch(output.textContent,/Prévision utilisée|23:00|erreur signée/);
+}else{
+ assert.match(output.textContent,/Certaines conditions ne peuvent pas être comparées/);
+ assert.match(output.textContent,/Prévision utilisée \(Température\) : .*21:00/);
+ assert.match(output.textContent,/Température : Prévu 8 °C, Observé 7 °C/);
+}
+assert.equal(JSON.stringify(value),before);
+assert.equal(JSON.stringify(saved),beforeSaved);
+// Technical per-variable reasons remain available when the operator switches modes.
+output.textContent=output.dataset.proText;
+assert.match(output.textContent,/Prévision trop éloignée de l’heure observée/);
+assert.ok(output.textContent.startsWith('Historique / remplacée'));
+output.textContent=output.dataset.simpleText;
+assert.equal((output.textContent.match(/trop éloignée/g)||[]).length,1);
+""", {'status': status})
+
+
+def test_comparison_times_use_confirmed_selection_and_distinguish_clock_change():
+    run_outcome_ui(r"""
+state.visibleObservationsForContext=[obs('other','2026-10-25T00:03:00Z'),obs('o','2026-10-25T01:03:00Z')];
+state.fieldObservationDraftContext={timezone:'Europe/Zurich'};
+element('#outcome-result').dataset={};
+document.documentElement={dataset:{uiMode:'simple'}};
+const value=projection();
+value.results[0].forecast_point={selected_forecast_for_utc:'2026-10-25T00:00:00Z'};
+renderOutcomeEvaluation(value);
+let text=element('#outcome-result').textContent;
+assert.match(text,/Heure du relevé : .*02:03.*UTC\+1/);
+assert.match(text,/Prévision utilisée \(Température\) : .*02:00.*UTC\+2/);
+assert.doesNotMatch(text,/Conservez l’heure réelle|trop éloignée/);
+// Missing/invalid traceability is displayed honestly, without using the editable clock.
+state.visibleObservationsForContext=[];delete value.results[0].forecast_point;
+renderOutcomeEvaluation(value);
+text=element('#outcome-result').textContent;
+assert.doesNotMatch(text,/Heure du relevé|Prévision utilisée/);
+assert.match(text,/Température : Prévu 8/);
+""")
+
+
+def test_saved_library_survives_missing_browser_context_and_opens_read_only():
+    run_outcome_ui(r'''
+globalThis.ui={observation:element('#field-observation-dialog')};
+ui.observation.dataset={};ui.observation.open=false;
+ui.observation.showModal=function(){this.open=true;};
+globalThis.setFieldObservationEditorDisabled=()=>{};
+const node=()=>({textContent:'',children:[],dataset:{},append(...values){this.children.push(...values);},addEventListener(){}});
+document.createElement=node;
+for(const id of ['#saved-observations-dialog','#saved-observations-list']){
+ const el=element(id);el.replaceChildren=function(){this.children=[];};el.append=function(...values){this.children.push(...values);};
+ el.showModal=function(){this.open=true;};el.close=function(){this.open=false;};
+}
+element('#saved-observations-dialog').open=false;
+document.documentElement={dataset:{uiMode:'simple'}};
+const saved={...obs('o','2026-10-22T19:03:00Z'),conditions:{cloud_state:'overcast',surface_condition:'dew_present'}};
+const item={observation:saved,context:{site_name:'Buttes',latitude:46.9,longitude:6.5,timezone:'Europe/Zurich'}};
+const calls=[];
+fetch=async(url,options)=>{calls.push([options.method||'GET',url]);
+ if(url==='/v1/field-observations')return response(200,{items:[item],next_before:null});
+ if(url==='/v1/decisions/d/field-observations')return response(200,[saved,{...saved,observation_id:'other',execution_id:'exec'}]);
+ if(url.endsWith('/outcome-evaluation'))return response(200,projection());
+ throw Error('unexpected request '+url);
+};
+await openSavedObservationLibrary();
+assert.equal(element('#saved-observations-list').children.length,1);
+assert.match(element('#saved-observations-list').children[0].children[0].textContent,/22 octobre 2026.*21:03.*UTC\+2/);
+await openSavedObservationRecord(item);
+assert.equal(ui.observation.dataset.readOnly,'true');
+assert.equal(state.fieldObservationContextInvalid,true,'capture stays disabled in consultation');
+assert.equal(state.outcomeObservationId,'o');
+assert.deepEqual(state.visibleObservationsForContext.map(o=>o.observation_id),['o'],'no report from another execution');
+assert.match(element('#saved-observation-details').textContent,/Nuages : Couvert/);
+assert.match(element('#observation-time-summary').textContent,/21:03/);
+assert.ok(calls.every(([method])=>method==='GET'));
+assert.deepEqual(calls.map(([,url])=>url),['/v1/field-observations','/v1/decisions/d/field-observations','/v1/field-observations/o/outcome-evaluation']);
+ui.observation.open=false;
+fetch=async(url)=>{assert.equal(url,'/v1/decisions/d/field-observations');return response(200,[obs('different')]);};
+await openSavedObservationRecord(item);
+assert.equal(state.outcomeObservationId,null,'missing requested record cannot silently select another');
+assert.equal(element('#outcome-compare').disabled,true);
+assert.equal(element('#saved-observation-details').textContent,'');
+assert.match(element('#outcome-result').textContent,/Aucun autre relevé n’a été sélectionné/);
+ui.observation.open=false;
+element('#saved-observation-details').textContent='Conditions from the previous report';
+fetch=async()=>{throw Error('read unavailable');};
+await openSavedObservationRecord(item);
+assert.equal(element('#saved-observation-details').textContent,'','failed reads cannot retain another report’s conditions');
+assert.match(element('#outcome-result').textContent,/Lecture canonique indisponible/);
+
+''')
+
+
+def test_saved_library_error_and_stale_response_never_become_an_empty_success():
+    run_outcome_ui(r'''
+globalThis.ui={observation:{open:false}};
+const dialog=element('#saved-observations-dialog');dialog.showModal=function(){this.open=true;};
+element('#saved-observations-list').replaceChildren=function(){this.children=[];};
+fetch=async()=>response(503,{});
+await openSavedObservationLibrary();
+assert.match(element('#saved-observations-status').textContent,/n’a pas pu être chargée complètement/);
+assert.doesNotMatch(element('#saved-observations-status').textContent,/Aucune observation/);
+assert.equal(element('#saved-observations-retry').hidden,false);
+let release;fetch=()=>new Promise(resolve=>{release=resolve;});
+const pending=openSavedObservationLibrary();
+dialog.open=false;state.savedObservationLibrary.generation++;
+element('#saved-observations-status').textContent='closed';
+release(response(200,{items:[],next_before:null}));await pending;
+assert.equal(element('#saved-observations-status').textContent,'closed');
 ''')

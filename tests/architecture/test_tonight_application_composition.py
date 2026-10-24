@@ -114,7 +114,7 @@ def test_api_production_factory_uses_common_durable_factory(monkeypatch):
 def test_factory_wires_exact_production_dependencies():
     service = astro_score.build_tonight_application_service()
 
-    assert service.forecast_nights is astro_score.forecast_astro
+    assert service.forecast_nights is astro_score.forecast_session_astro
     assert service.build_candidates is astro_score.recommend_project_for_night
     assert (
         service.opportunity_recommendation_service

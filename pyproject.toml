@@ -52,7 +52,7 @@ pythonpath = [
 py-modules = ["astro_score"]
 
 [tool.setuptools.package-data]
-astropilot = ["knowledge/objects/*.json", "web/*", "reference_stations_v1.json"]
+astropilot = ["knowledge/objects/*.json", "web/*", "reference_stations_v1.json", "catalogue_data/*"]
 
 [tool.setuptools.packages.find]
 include = [
