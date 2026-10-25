@@ -11,7 +11,7 @@ python scripts/render_private_windows_launcher.py --source-sha FULL_APPROVED_SHA
 ```
 
 Copy the resulting `Audit/controller.ps1`, `Audit/launch-sandbox.ps1`,
-`sandbox-start.cmd` and `LANCER-TEST-WINDOWS.cmd` into the new kit **before**
+`sandbox-start.cmd`, `LANCER-TEST-WINDOWS.cmd` and `GERER-MES-DONNEES.cmd` into the new kit **before**
 creating its manifest/ZIP. Do not reuse old launcher copies. Keep the existing
 browser/application integrity checks, profile-source marker and result-export
 restrictions in the private-kit assembler. The CMD bootstrap verifies the host
@@ -37,3 +37,8 @@ configuration contains the host paths needed for mapping and stays local.
 `test_context.ps1` runs only the pure context functions under native Windows
 PowerShell 5.1. It does not launch Sandbox, start the app, read a profile or
 write a host folder. Native CI also tests the Python validator and API.
+
+The second CMD entry point selects the separate offline data assistant through a
+fixed mode argument, independent of display-only host context. Both bootstrap
+scripts verify the same reviewed host script. Assistant downloads persist in
+host `RESULTATS/SAUVEGARDES`. See [backup workflow](../../docs/profile-backup.md).

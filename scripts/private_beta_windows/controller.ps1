@@ -36,13 +36,14 @@ function Stop-Copy {
  Stop-Owned $script:appProcess
  $script:browserProcess = $null; $script:appProcess = $null
 }
-function Start-Copy {
+function Start-Copy([bool]$dataTransfer = $false) {
  $listener = @(Get-NetTCPConnection -State Listen -LocalPort 8000 -ErrorAction SilentlyContinue)
  if ($listener.Count) { throw 'Le port 8000 est occupe dans Sandbox. Aucun processus existant ne sera arrete.' }
  $start = [Diagnostics.ProcessStartInfo]::new()
  $start.FileName = Join-Path $workRoot 'candidate\AstroPilot.exe'
  $start.WorkingDirectory = $workRoot
  $start.UseShellExecute = $false
+ if ($dataTransfer) { $start.Arguments = '--data-transfer' }
  foreach ($key in @($start.EnvironmentVariables.Keys)) {
   if ($key -match '^(ASTROPILOT_|NIGHTMERIT_|FIELD_LAB_)' -or $key -in @('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','NO_PROXY','REQUESTS_CA_BUNDLE','CURL_CA_BUNDLE','SSL_CERT_FILE','SSL_CERT_DIR')) { $start.EnvironmentVariables.Remove($key) }
  }
@@ -81,7 +82,17 @@ function Start-Copy {
  if (-not $ready) { throw 'Le demarrage de NightMerit a depasse le delai prevu.' }
  $run.stage='launch_browser'; Write-Run
  $chrome = Join-Path $workRoot 'browser\chrome.exe'
- $arguments = @('--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-gpu',('--user-data-dir='+$workRoot+'\navigateur'),'http://127.0.0.1:8000/')
+ $browserProfile = Join-Path $workRoot 'navigateur'
+ if ($dataTransfer) {
+  $browserProfile = Join-Path $workRoot 'navigateur-donnees'
+  $preferences = Join-Path $browserProfile 'Default\Preferences'
+  New-Item -ItemType Directory -Force -Path (Split-Path $preferences) | Out-Null
+  $downloads = Join-Path $results 'SAUVEGARDES'
+  New-Item -ItemType Directory -Force -Path $downloads | Out-Null
+  $settings = @{download=@{default_directory=$downloads;prompt_for_download=$false}} | ConvertTo-Json -Depth 4
+  [IO.File]::WriteAllText($preferences,$settings,[Text.UTF8Encoding]::new($false))
+ }
+ $arguments = @('--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-gpu',('--user-data-dir='+$browserProfile),'http://127.0.0.1:8000/')
  $script:browserProcess = Start-Process -FilePath $chrome -ArgumentList $arguments -WorkingDirectory $workRoot -PassThru
  $run.stage='browser_started'; $run.status='running'; Write-Run
 }
@@ -113,7 +124,7 @@ try {
  Copy-Item -LiteralPath (Join-Path $inputRoot 'candidate') -Destination $workRoot -Recurse
  Copy-Item -LiteralPath (Join-Path $inputRoot 'browser') -Destination $workRoot -Recurse
  [IO.File]::WriteAllText((Join-Path $workRoot 'no-browser.cmd'), "@exit /b 0`r`n")
- Write-Run; Start-Copy
+ Write-Run; Start-Copy ($env:NIGHTMERIT_OPEN_DATA_TRANSFER -eq '1')
  $run.stage='interactive_console'; Write-Run
  Write-Host 'TEST PRIVE NightMerit - profil separe - meteo reelle' -ForegroundColor Cyan
  Write-Host 'Gardez cette fenetre ouverte pendant votre essai.'

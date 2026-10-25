@@ -28,11 +28,13 @@ def render(source_sha: str, output: Path):
                  f"if((Get-FileHash -LiteralPath $script -Algorithm SHA256).Hash.ToLowerInvariant() -cne '{host_hash}')"
                  "{throw 'Lanceur modifie. Extrayez une nouvelle copie du kit.'};"
                  "& ([ScriptBlock]::Create([IO.File]::ReadAllText($script)))")
-    encoded = base64.b64encode(bootstrap.encode('utf-16le')).decode('ascii')
-    cmd = ('@echo off\r\nset "NIGHTMERIT_PRIVATE_KIT=%~dp0"\r\n'
-           f'powershell.exe -NoProfile -EncodedCommand {encoded}\r\nif errorlevel 1 pause\r\n')
-    assert max(map(len, cmd.splitlines())) < 8190
-    (output / 'LANCER-TEST-WINDOWS.cmd').write_bytes(cmd.encode('ascii'))
+    for name, mode in [('LANCER-TEST-WINDOWS.cmd', '0'), ('GERER-MES-DONNEES.cmd', '1')]:
+        code = "$env:NIGHTMERIT_OPEN_DATA_TRANSFER='" + mode + "';" + bootstrap
+        encoded = base64.b64encode(code.encode('utf-16le')).decode('ascii')
+        cmd = ('@echo off\r\nset "NIGHTMERIT_PRIVATE_KIT=%~dp0"\r\n'
+               f'powershell.exe -NoProfile -EncodedCommand {encoded}\r\nif errorlevel 1 pause\r\n')
+        assert max(map(len, cmd.splitlines())) < 8190
+        (output / name).write_bytes(cmd.encode('ascii'))
     return output
 
 

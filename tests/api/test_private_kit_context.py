@@ -88,6 +88,11 @@ def test_rendered_launcher_roundtrip_and_existing_destination_refusal(tmp_path):
     assert hashlib.sha256(host.read_bytes()).hexdigest() in bootstrap
     assert 'ReadAllText($script)' in bootstrap
     assert max(map(len, cmd.splitlines())) < 8190
+    transfer = (output / 'GERER-MES-DONNEES.cmd').read_text(encoding='ascii')
+    transfer_code = base64.b64decode(transfer.split('-EncodedCommand ', 1)[1].splitlines()[0]).decode('utf-16le')
+    assert "NIGHTMERIT_OPEN_DATA_TRANSFER='0'" in bootstrap
+    assert "NIGHTMERIT_OPEN_DATA_TRANSFER='1'" in transfer_code
+    assert hashlib.sha256(host.read_bytes()).hexdigest() in transfer_code
     controller = (output / 'Audit/controller.ps1').read_text(encoding='utf-8')
     assert '__SOURCE_' not in controller and SHA in controller
     assert 'Compress-Archive -LiteralPath (Join-Path $results' in controller

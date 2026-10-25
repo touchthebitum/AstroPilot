@@ -829,9 +829,15 @@
         <dt id="data-context-directory-label">Dossier de données utilisé</dt><dd id="data-context-directory"></dd>
       </dl>
       <details id="data-context-technical" hidden><summary>Identifier précisément cette application</summary><p id="data-context-executable"></p><p>Dans Windows Sandbox, le dossier C:\NightMeritResults correspond au dossier RESULTATS du kit lancé sur votre PC.</p></details>
+      <details><summary>Sauvegarder mes données ou les reprendre dans une nouvelle copie</summary>
+        <p>Fermez d’abord cette copie normalement. Dans le dossier de votre kit, ouvrez <strong>GERER-MES-DONNEES.command</strong> sur Mac ou <strong>GERER-MES-DONNEES.cmd</strong> sur Windows. L’assistant fonctionne séparément, sans séance photo en cours.</p>
+        <p>Dans l’ancienne copie, choisissez « Télécharger ma sauvegarde ». Dans la nouvelle copie vierge, ouvrez le même assistant, choisissez votre sauvegarde, vérifiez le nombre de projets et de relevés, puis confirmez leur reprise. Aucune donnée déjà présente n’est remplacée ni fusionnée.</p>
+        <p>Sur Windows, le fichier téléchargé reste dans RESULTATS\SAUVEGARDES du kit, sur votre PC. Avant d’ouvrir l’assistant dans le nouveau kit, placez ce fichier dans son dossier ; vous le retrouverez dans C:\NightMeritInput.</p>
+        <p>Conservez l’ancienne copie jusqu’à avoir retrouvé vos essais. Les copies Mac et Windows ne se synchronisent pas automatiquement. Les anciens kits sans cet assistant nécessitent une première reprise préparée séparément.</p>
+      </details>
       <h3>Pour reprendre vos essais</h3>
       <p>Rouvrez le dossier de la copie que vous utilisiez et son lanceur. Si une nouvelle copie paraît vide, vérifiez d’abord le dossier utilisé ; ne recréez pas vos projets pour retrouver les anciens.</p>
-      <p>Conservez les anciennes copies et leurs données jusqu’à ce que la reprise dans la nouvelle version ait été vérifiée. Le transfert doit être préparé séparément, application arrêtée, sans remplacer un dossier existant.</p>
+      <p>Conservez les anciennes copies et leurs données jusqu’à ce que la reprise dans la nouvelle version ait été vérifiée. L’assistant de reprise exige une copie vide et l’application fermée ; il ne fusionne pas plusieurs profils.</p>
       <p>Ce panneau consulte seulement la version et les emplacements. Il ne transfère et ne réinitialise aucune donnée.</p>
       <button class="secondary-button" id="data-context-retry" type="button" hidden>Réessayer la lecture</button>
       <button class="secondary-button" id="data-context-back" type="button" hidden>Retour à mes observations</button>

@@ -56,10 +56,12 @@ assumption about these private-kit paths.
 4. Retain the old copy until the new one has been verified. Browser settings
    alone are not the saved profile; saved observations are read from the server.
 
-This change implements identification and guidance only. It adds no profile
-import, merge, automatic discovery of other copies, reset, folder opener or
-background migration. The private launcher adds display-only provenance; Sandbox mappings and
-filesystem permissions are unchanged. A future transfer flow needs its own conflict handling and validation.
+The panel implements identification and guidance only. New kits can include a
+separate offline [guided backup and restore assistant](profile-backup.md), opened
+by their `GERER-MES-DONNEES` launcher after closing the observing application.
+It verifies a backup and accepts explicit restoration only into an empty profile.
+Older distributed kits remain unchanged; their first transfer still needs separate
+preparation. No live import, automatic discovery, reset or merge is added here.
 
 ## Validation scope
 

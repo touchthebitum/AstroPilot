@@ -10,6 +10,8 @@ function New-KitContext([string]$kitDirectory, [string]$sourceSha) {
 }
 $kit = [IO.Path]::GetFullPath($env:NIGHTMERIT_PRIVATE_KIT)
 $copyContext = New-KitContext $kit '__SOURCE_SHA__'
+$transferMode = '0'
+if ($env:NIGHTMERIT_OPEN_DATA_TRANSFER -eq '1') { $transferMode = '1' }
 $exe = Join-Path $env:WINDIR 'System32\WindowsSandbox.exe'
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Windows Sandbox est indisponible. Aucun programme de test ne sera lance sur ce PC.' }
 # On the host, only create the kit's own results folder and Sandbox configuration.
@@ -27,7 +29,7 @@ $config = @"
   <MappedFolder><HostFolder>$inputXml</HostFolder><SandboxFolder>C:\NightMeritInput</SandboxFolder><ReadOnly>true</ReadOnly></MappedFolder>
   <MappedFolder><HostFolder>$outputXml</HostFolder><SandboxFolder>C:\NightMeritResults</SandboxFolder><ReadOnly>false</ReadOnly></MappedFolder>
  </MappedFolders>
- <LogonCommand><Command>cmd.exe /c start "NightMerit - test prive" cmd.exe /k C:\NightMeritInput\sandbox-start.cmd "$copyContext"</Command></LogonCommand>
+ <LogonCommand><Command>cmd.exe /c start "NightMerit - test prive" cmd.exe /k C:\NightMeritInput\sandbox-start.cmd "$copyContext" "$transferMode"</Command></LogonCommand>
 </Configuration>
 "@
 $target = Join-Path $kit 'TEST-ISOLE-GENERE.wsb'
