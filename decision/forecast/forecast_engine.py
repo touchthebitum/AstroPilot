@@ -97,6 +97,7 @@ class ForecastEngine:
         profile,
         decision_engine,
         availability=None,
+        target_refusals=None,
     ):
         all_results = []
 
@@ -116,6 +117,11 @@ class ForecastEngine:
                 **({"availability": availability} if availability is not None else {}),
             )
 
+            if result is None and target_refusals is not None and isinstance(self.target_objects, dict):
+                from decision.forecast.target_refusal import missing_target_refusal
+                target_refusals[obj_name] = missing_target_refusal(
+                    sky=sky, hours=hours, target=self.target_objects[obj_name], catalog_key=obj_name,
+                    profile=profile, availability=availability, lat=lat, lon=lon)
             if result is not None:
                 all_results.append(result)
 
@@ -244,6 +250,7 @@ class ForecastEngine:
 
         weather_forecast = self.build_weather_forecast(rows)
 
+        target_refusals = {}
         all_results = self.evaluate_targets(
             sky=sky,
             hours=hours,
@@ -259,13 +266,14 @@ class ForecastEngine:
             profile=profile,
             decision_engine=decision_engine,
             availability=availability,
+            target_refusals=target_refusals,
         )
 
         night_evaluation = self.evaluate_night(
             all_results=all_results,
         )
 
-        if night_evaluation is None:
+        if night_evaluation is None and not target_refusals:
             return None
 
         return {
@@ -277,4 +285,5 @@ class ForecastEngine:
             "moon_set": moon_set,
             "hours": hours,
             "evaluation": night_evaluation,
+            "target_refusals": target_refusals,
         }

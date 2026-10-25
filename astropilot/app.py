@@ -1409,7 +1409,34 @@ class ActionabilityRefusalModel(
     model_config = ConfigDict(frozen=True)
 
 
+class TargetVisibilityRefusalModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    catalog_key: str = Field(min_length=1, max_length=200)
+    code: Literal["target_below_minimum_altitude", "target_window_unavailable"]
+    minimum_altitude_deg: float = Field(ge=0, le=90, allow_inf_nan=False, strict=True)
+    sample_count: int = Field(ge=0, le=10000, strict=True)
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_evidence(self):
+        if self.code == "target_below_minimum_altitude" and self.sample_count == 0:
+            raise ValueError("altitude_refusal_requires_samples")
+        for value in (self.window_start, self.window_end):
+            if value is not None and value.utcoffset() is None:
+                raise ValueError("refusal_timezone_required")
+        return self
+
+
 class TonightResponseModel(BaseModel):
+    target_refusal: TargetVisibilityRefusalModel | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def validate_target_refusal_status(self):
+        if self.target_refusal is not None and self.status != "no_candidate":
+            raise ValueError("target_refusal_status_mismatch")
+        return self
+
     acquisition_intent_choice_available: bool = False
     opportunity_alert: OpportunityAlertResponse | None = Field(default=None, exclude_if=lambda value: value is None)
     model_config = ConfigDict(
@@ -2019,6 +2046,7 @@ def create_app(
     guardian_renewal_enabled: bool | None = None,
     guardian_attestation_path: Path | None = None,
     guardian_command_capacity: int = 4096,
+    analysis_store_factory: Callable | None = None,
 ) -> FastAPI:
     from decision.timezone_authority import bundle_json, identity as time_authority_id
 
@@ -2048,6 +2076,12 @@ def create_app(
             if guardian_adapter is not None:
                 guardian_adapter.close()
                 guardian_adapter = None
+
+    def analysis_store():
+        from astropilot.analysis_history import FileAnalysisHistory
+        if analysis_store_factory is not None:
+            return analysis_store_factory()
+        return FileAnalysisHistory(get_user_data_dir() / "analysis_history")
 
     application = FastAPI(title="AstroPilot API", version=application_version, lifespan=lifespan)
 
@@ -3288,6 +3322,21 @@ def create_app(
 
         if isinstance(weather, WeatherSnapshot):
             payload["weather_trust"] = weather.trust_transport(weather_freshness)
+        if payload["status"] == "no_candidate" and selected_project_id and result.night:
+            refusal = result.night.get("target_refusals", {}).get(selected_project_id)
+            if refusal is not None:
+                payload["target_refusal"] = TargetVisibilityRefusalModel.model_validate(refusal).model_dump(mode="json")
+        # Fake application services have no durable store unless explicitly injected.
+        # Production always archives the validated display transport before success.
+        if payload.get("decision_id") and (service_factory is _production_service_factory or analysis_store_factory is not None):
+            try:
+                validated = TonightResponseModel.model_validate(payload).model_dump(mode="json")
+                archive_request = request.model_dump(mode="json", exclude_none=True)
+                archive_request.update(location=inputs.location, equipment=inputs.equipment, bortle=inputs.bortle)
+                analysis_store().save(key=payload["decision_id"], created_at=reference_time_utc,
+                                      request=archive_request, result=validated)
+            except (OSError, ValueError) as error:
+                raise HTTPException(status_code=503, detail={"code": "analysis_history_unavailable"}, headers={"Cache-Control": "no-store"}) from error
         if request.claim_opportunity_alert:
             # Validate transport before the irreversible durable alert claim.
             TonightResponseModel.model_validate(payload)
@@ -3299,6 +3348,34 @@ def create_app(
                 ledger=alert_ledger_factory(), logical_time=reference_time_utc,
             )
         return payload
+
+    @application.get("/v1/analysis-history")
+    def list_analysis_history(before: str | None = None, limit: int = Query(default=20, ge=1, le=50)):
+        from astropilot.analysis_history import identity
+        if before is not None:
+            try:
+                identity(before)
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail={"code": "invalid_analysis_identity"}, headers={"Cache-Control": "no-store"}) from error
+        try:
+            return JSONResponse(analysis_store().list_records(before=before, limit=limit), headers={"Cache-Control": "no-store"})
+        except (OSError, ValueError) as error:
+            raise HTTPException(status_code=503, detail={"code": "analysis_history_unavailable"}, headers={"Cache-Control": "no-store"}) from error
+
+    @application.get("/v1/analysis-history/{decision_id}")
+    def read_analysis_history(decision_id: str):
+        from astropilot.analysis_history import identity
+        try:
+            identity(decision_id)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail={"code": "invalid_analysis_identity"}) from error
+        try:
+            record = analysis_store().load(decision_id)
+        except (OSError, ValueError) as error:
+            raise HTTPException(status_code=503, detail={"code": "analysis_history_unavailable"}, headers={"Cache-Control": "no-store"}) from error
+        if record is None:
+            raise HTTPException(status_code=404, detail={"code": "analysis_not_archived"}, headers={"Cache-Control": "no-store"})
+        return JSONResponse(record, headers={"Cache-Control": "no-store"})
 
     @application.post(
         "/v1/decision-selections",

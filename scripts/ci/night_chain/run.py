@@ -57,7 +57,18 @@ def main():
         rows.append({'intent': intent, 'result': 'PASS'})
         (out / 'result.json').write_text(json.dumps({'result': 'PASS' if len(rows) == 3 else 'RUNNING', 'source_sha': source_sha, 'rows': rows}, indent=2), encoding='utf-8')
     assert len(rows) == 3
-    print('All three native browser journeys PASS')
+    # Reuse the same pinned native browser for the archived-analysis DOM checks.
+    history_case = Path(tempfile.mkdtemp(prefix='analysis-history-case-', dir=os.environ.get('RUNNER_TEMP')))
+    history_proof = out / 'analysis-history'
+    history_proof.mkdir()
+    env = {**os.environ, 'CASE_ROOT': str(history_case), 'CASE_PROOF': str(history_proof),
+           'CHROME_BINARY': str(browser), 'PYTHON_BINARY': sys.executable,
+           'NIGHT_CHAIN_SOURCE_SHA': source_sha}
+    with (history_proof / 'case.log').open('wb') as log:
+        subprocess.run([env.get('NODE_BINARY', 'node'), str(ROOT / 'tests/ui/analysis_history_native.cjs')],
+                       cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=150)
+    assert json.loads((history_proof / 'result.json').read_text())['result'] == 'PASS'
+    print('All three native browser journeys and archived analysis PASS')
 
 if __name__ == '__main__':
     main()

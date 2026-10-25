@@ -765,6 +765,7 @@
         <h2 id="history-title">Mon historique</h2>
         <p id="history-description">Comparez les prévisions aux conditions observées. Les statistiques ne concluent pas à la qualité globale des prévisions.</p>
         <button class="secondary-button" id="history-close" type="button">Fermer</button>
+        <button class="secondary-button" data-open-analysis-history type="button">Relire mes analyses</button>
         <form id="history-filters" class="history-filters">
           <label>Depuis (UTC)<input name="observed_from" type="datetime-local" step="1"></label>
           <label>Jusqu’au (UTC)<input name="observed_to" type="datetime-local" step="1"></label>
@@ -785,12 +786,22 @@
         <div id="history-table" class="history-table"></div>
         <button class="secondary-button" id="history-next" type="button" hidden>Page suivante</button>
       </dialog>
+      <dialog id="analysis-history-dialog" aria-labelledby="analysis-history-title">
+        <h2 id="analysis-history-title">Mes analyses enregistrées</h2>
+        <p>Résultats et prévisions archivés, conservés après fermeture. Leur consultation ne relance aucun calcul, ne crée aucun relevé et n’autorise aucune mission. Actualisez les prévisions avant une nouvelle séance.</p>
+        <button class="secondary-button" id="analysis-history-close" type="button">Fermer</button>
+        <p id="analysis-history-message" role="status" aria-live="polite"></p>
+        <div id="analysis-history-list" class="compact-actions"></div>
+        <button class="secondary-button" id="analysis-history-next" type="button" hidden>Analyses suivantes</button>
+        <section id="analysis-history-detail" aria-live="polite"></section>
+      </dialog>
     </main>
 
     <footer class="page-footer">
       <span>NightMerit</span>
       <span aria-hidden="true">·</span>
       <span>Une décision. Une nuit.</span>
+      <button class="secondary-button" data-open-analysis-history type="button">Mes analyses</button>
       <button class="secondary-button" id="data-context-footer" type="button" aria-haspopup="dialog">Version et données</button>
       <span aria-hidden="true">·</span>
       <a href="https://open-meteo.com/" rel="noreferrer">Données météo par Open-Meteo.com</a>

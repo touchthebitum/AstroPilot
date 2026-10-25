@@ -2050,7 +2050,12 @@ def build_forecast_result(
     night_evaluation,
     night_context,
     bortle,
+    target_refusals=None,
 ):
+    if night_evaluation is None:
+        return {"date": str(night_date), "duration": len(night_context["hours"]),
+                "top_objects": [], "object_evaluations": {},
+                "target_refusals": target_refusals or {}}
     night_score = night_evaluation.night_score
     best = night_evaluation.best
     best_score = night_evaluation.best_score
@@ -2079,6 +2084,7 @@ def build_forecast_result(
         "global_score": top3[0].get("global_score", 0),
         "best_object_score": all_results[0]["global_score"],
         "all_objects": all_results,
+        "target_refusals": target_refusals or {},
         "object_evaluations": {
             r["catalog_key"]: r
             for r in top_objects_for_night
@@ -2275,10 +2281,16 @@ def forecast_astro(
         if night_context is None:
             continue
 
-        night_evaluation = portfolio_engine.enrich(
-            night_evaluation=night_context["evaluation"],
-            projects=profile.get("projects", {}),
-        )
+        night_evaluation = night_context["evaluation"]
+        if night_evaluation is None and not first_available_night_only:
+            # Legacy multi-night reports require ranked objects. Session callers
+            # retain the actual refused evening rather than advancing to another.
+            continue
+        if night_evaluation is not None:
+            night_evaluation = portfolio_engine.enrich(
+                night_evaluation=night_evaluation,
+                projects=profile.get("projects", {}),
+            )
 
         results.append(
             build_forecast_result(
@@ -2286,6 +2298,7 @@ def forecast_astro(
                 night_evaluation=night_evaluation,
                 night_context=night_context,
                 bortle=bortle,
+                target_refusals=night_context.get("target_refusals", {}),
             )
         )
 
