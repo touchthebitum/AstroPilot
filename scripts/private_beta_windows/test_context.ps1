@@ -86,8 +86,16 @@ try {
   Check ($roundtrip.host_kit_directory.TrimEnd('\') -ceq ($personal+$suffix)) 'CMD context did not preserve the host path'
   Write-Host ('CMD padding '+$padding+': original exact='+($old -ceq $encoded)+'; quoted exact=True')
  }
+ # The mode is a separate fixed argument, never decoded from host context.
+ $modeReader='$ErrorActionPreference="Stop";[IO.File]::WriteAllText($env:NIGHTMERIT_TRANSPORT_OUTPUT,$env:NIGHTMERIT_OPEN_DATA_TRANSFER,[Text.UTF8Encoding]::new($false))'
+ $mode64=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($modeReader))
+ $modePrefix=([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'sandbox-start.cmd')) -split '\r?\n')[0..3] -join "`r`n"
+ [IO.File]::WriteAllText($transportFile,($modePrefix+"`r`npowershell.exe -NoProfile -EncodedCommand "+$mode64+"`r`n"),[Text.Encoding]::ASCII)
+ Check ((Invoke-ContextTransport ('"'+$encoded+'" "1"')) -ceq '1') 'Assistant mode did not cross CMD boundary'
+ Check ((Invoke-ContextTransport ('"'+$encoded+'" "0"')) -ceq '0') 'Normal mode did not reset assistant flag'
+ Check ((Invoke-ContextTransport ('"'+$encoded+'"')) -ceq '0') 'Missing mode must keep ordinary startup'
  Check ($paddings.Count -eq 3) 'Missing CMD padding case'
- Check ($hostText.Contains('sandbox-start.cmd "$copyContext"</Command>')) 'The real Sandbox startup must quote the data argument'
+ Check ($hostText.Contains('sandbox-start.cmd "$copyContext" "$transferMode"</Command>')) 'The real Sandbox startup must quote the data argument and pass the separate fixed mode'
  Write-Host ('PASS: real CMD to PowerShell context transport; all three Base64 padding cases; original transport mismatches='+$originalFailures)
 } finally {
  if(Test-Path -LiteralPath $transportRoot){Remove-Item -LiteralPath $transportRoot -Recurse -Force}

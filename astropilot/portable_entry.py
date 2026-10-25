@@ -3,6 +3,18 @@ import sys
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--prepare-stable-beta":
+        from astropilot.stable_beta_data import main as prepare_main
+        prepare_main(sys.argv[2])
+        return 0
+    if sys.argv[1:] == ["--data-transfer"]:
+        from astropilot.profile_transfer_app import main as transfer_main
+        transfer_main()
+        return 0
+    if len(sys.argv) == 3 and sys.argv[1] == "--validate-data-backup":
+        from astropilot.profile_backup import validate_profile_child
+        validate_profile_child(sys.argv[2])
+        return 0
     if sys.argv[1:2] == ["--guardian-http-worker"]:
         from astropilot.guardian_http_worker import main as worker_main
         return worker_main(sys.argv[2:])

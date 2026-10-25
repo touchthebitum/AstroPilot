@@ -7652,9 +7652,11 @@ async function loadDataContext() {
       document.querySelector('#data-context-directory-label').textContent = 'Chemin interne utilisé dans Windows Sandbox';
       host.hidden = hostNote.hidden = false;
       hostNote.textContent = 'Emplacements sur votre PC transmis par le lanceur de ce kit. Le chemin interne de Sandbox peut être identique dans plusieurs copies ; comparez les dossiers sur votre PC pour les distinguer.';
-    } else if (copy?.status === 'unavailable' || /^C:\\NightMeritResults\\profil\\?$/i.test(data.data_directory)) {
+      if (copy.host.storage_mode === 'stable_private_beta') hostNote.textContent = 'Vos données bêta sont conservées en dehors du programme. Les versions prévues pour ce mode retrouvent ce même dossier, sans nouveau transfert. Les anciennes copies de test restent indépendantes.';
+    } else if (copy?.status === 'unavailable' || /^C:\\NightMerit(?:Results|Data)\\profil\\?$/i.test(data.data_directory)) {
       hostNote.hidden = false;
       hostNote.textContent = 'Le dossier du kit sur votre PC n’a pas pu être identifié. Dans Windows Sandbox, le chemin C:\\NightMeritResults\\profil est commun à plusieurs copies : vérifiez le dossier depuis lequel vous avez lancé le kit. Aucun emplacement sur votre PC n’a été deviné.';
+      if (/^C:\\NightMeritData\\profil\\?$/i.test(data.data_directory)) hostNote.textContent = 'Le dossier de vos données bêta sur le PC n’a pas pu être identifié. Aucun emplacement sur votre PC n’a été deviné.';
     }
     details.hidden = technical.hidden = false;
     status.textContent = 'L’application actuellement ouverte utilise le dossier indiqué ci-dessous.';

@@ -1,15 +1,41 @@
 $ErrorActionPreference = 'Stop'
-function New-KitContext([string]$kitDirectory, [string]$sourceSha) {
+function New-KitContext([string]$kitDirectory, [string]$sourceSha, [string]$stableRoot = $null) {
  if ($sourceSha -cnotmatch '^[0-9a-f]{40}$') { throw 'Identite de source invalide.' }
  $hostKit = [IO.Path]::GetFullPath($kitDirectory)
  $value = [ordered]@{schema='nightmerit.private_copy_context.v1'; source_sha=$sourceSha; host_kit_directory=$hostKit; host_results_directory=(Join-Path $hostKit 'RESULTATS'); guest_data_directory='C:\NightMeritResults\profil'}
+ if ($stableRoot) {
+  $value.schema='nightmerit.private_copy_context.v2'
+  $value['host_data_directory']=Join-Path $stableRoot 'profil'
+  $value.guest_data_directory='C:\NightMeritData\profil'
+ }
  $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($value | ConvertTo-Json -Compress)))
  # Only a Base64 data argument crosses cmd/XML, never executable path text.
  if ($encoded.Length -gt 5000) { throw 'Le chemin du kit est trop long pour le lanceur.' }
  return $encoded
 }
 $kit = [IO.Path]::GetFullPath($env:NIGHTMERIT_PRIVATE_KIT)
-$copyContext = New-KitContext $kit '__SOURCE_SHA__'
+$dataMode = '__DATA_MODE__'
+$stableRoot = $null
+$stableMapping = ''
+if ($dataMode -eq 'stable') {
+ $localData = [Environment]::GetFolderPath('LocalApplicationData')
+ if (-not $localData) { throw 'Le dossier de donnees Windows est indisponible.' }
+ $stableRoot = Join-Path $localData 'NightMerit\PrivateBeta'
+ # Refuse directory aliases, including aliases among the existing ancestors.
+ $check = $stableRoot
+ while ($check) {
+  if (Test-Path -LiteralPath $check) {
+   if ((Get-Item -LiteralPath $check -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Un dossier de donnees lie est refuse.' }
+  }
+  $check = Split-Path -Parent $check
+ }
+ New-Item -ItemType Directory -Force -Path $stableRoot | Out-Null
+ $stableXml = [Security.SecurityElement]::Escape($stableRoot)
+ $stableMapping = '<MappedFolder><HostFolder>'+ $stableXml +'</HostFolder><SandboxFolder>C:\NightMeritData</SandboxFolder><ReadOnly>false</ReadOnly></MappedFolder>'
+}
+$copyContext = New-KitContext $kit '__SOURCE_SHA__' $stableRoot
+$transferMode = '0'
+if ($env:NIGHTMERIT_OPEN_DATA_TRANSFER -eq '1') { $transferMode = '1' }
 $exe = Join-Path $env:WINDIR 'System32\WindowsSandbox.exe'
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Windows Sandbox est indisponible. Aucun programme de test ne sera lance sur ce PC.' }
 # On the host, only create the kit's own results folder and Sandbox configuration.
@@ -26,8 +52,9 @@ $config = @"
  <MappedFolders>
   <MappedFolder><HostFolder>$inputXml</HostFolder><SandboxFolder>C:\NightMeritInput</SandboxFolder><ReadOnly>true</ReadOnly></MappedFolder>
   <MappedFolder><HostFolder>$outputXml</HostFolder><SandboxFolder>C:\NightMeritResults</SandboxFolder><ReadOnly>false</ReadOnly></MappedFolder>
+ $stableMapping
  </MappedFolders>
- <LogonCommand><Command>cmd.exe /c start "NightMerit - test prive" cmd.exe /k C:\NightMeritInput\sandbox-start.cmd "$copyContext"</Command></LogonCommand>
+ <LogonCommand><Command>cmd.exe /c start "NightMerit - test prive" cmd.exe /k C:\NightMeritInput\sandbox-start.cmd "$copyContext" "$transferMode"</Command></LogonCommand>
 </Configuration>
 "@
 $target = Join-Path $kit 'TEST-ISOLE-GENERE.wsb'

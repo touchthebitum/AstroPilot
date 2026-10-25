@@ -156,7 +156,7 @@ jobs:
             throw 'Expected all 11 profile recovery regressions to execute and pass without skips.'
           }
           $observationsReport = Join-Path $env:RUNNER_TEMP 'saved-observations.xml'
-          uv run --locked --no-sync python -m pytest -q tests/api/test_saved_observation_catalogue.py tests/api/test_outcome_evaluation_ui.py tests/api/test_data_context.py tests/api/test_runtime_identity.py tests/api/test_private_kit_context.py --junitxml="$observationsReport"
+          uv run --locked --no-sync python -m pytest -q tests/api/test_saved_observation_catalogue.py tests/api/test_outcome_evaluation_ui.py tests/api/test_data_context.py tests/api/test_runtime_identity.py tests/api/test_private_kit_context.py tests/api/test_profile_backup.py tests/api/test_profile_transfer_ui.py tests/architecture/test_private_macos_launcher.py tests/architecture/test_private_windows_browser.py tests/api/test_stable_beta_data.py tests/architecture/test_stable_beta_native.py --junitxml="$observationsReport"
           if ($LASTEXITCODE -ne 0) { throw 'Saved observation catalogue and comparison UI regressions failed' }
       - name: Validate Windows host copy context with native PowerShell 5.1
         if: runner.os == 'Windows'
@@ -266,3 +266,66 @@ jobs:
             ${{ runner.temp }}/packaging-provenance/native-inno.json
             ${{ runner.temp }}/packaging-provenance/iscc-file-version.txt
           retention-days: 30
+
+  private-beta-windows-candidate:
+    name: Compiled private-beta snapshot Windows
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          python-version: '3.13.5'
+          version: '0.12.5'
+          enable-cache: false
+      - name: Verify exact clean source before packaging
+        shell: pwsh
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_SOURCE_SHA) { throw 'Unexpected candidate source' }
+          $dirty = git status --porcelain --untracked-files=all
+          if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'Candidate checkout is not clean' }
+      - run: uv sync --locked --extra test --extra packaging
+      - name: Compile the portable executable and exercise the complete synthetic upgrade graph
+        shell: pwsh
+        run: |
+          $fullSha = (git rev-parse HEAD).Trim()
+          $env:ASTROPILOT_BUILD_COMMIT = $fullSha.Substring(0,7)
+          $env:ASTROPILOT_DATA_DIR = Join-Path $env:RUNNER_TEMP 'private-beta-unused-identity-profile'
+          uv run --locked --no-sync python -m PyInstaller --noconfirm --clean AstroPilot-windows.spec
+          if ($LASTEXITCODE -ne 0) { throw 'Portable candidate build failed' }
+          $candidate = Join-Path $PWD 'dist/AstroPilot'
+          $identityText = & (Join-Path $candidate 'AstroPilot.exe') --runtime-identity
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen identity failed' }
+          $identity = $identityText | ConvertFrom-Json
+          if ($identity.application -cne 'astropilot' -or $identity.build -cne $fullSha.Substring(0,7) -or $identity.version -cne '1.0.0b8' -or $identity.architecture -cne 'x86_64') { throw 'Incorrect frozen identity' }
+          $identityText | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'private-beta-runtime-identity.json') -Encoding utf8
+          $fixture = Join-Path $env:RUNNER_TEMP 'private-beta-snapshot-fixture'
+          $case = Join-Path $env:RUNNER_TEMP 'private-beta-snapshot-case'
+          uv run --locked --no-sync python scripts/ci/private_beta_windows/make_snapshot_fixture.py --output $fixture
+          if ($LASTEXITCODE -ne 0) { throw 'Complete synthetic fixture failed' }
+          & scripts/ci/private_beta_windows/frozen_stable_snapshot.ps1 -CandidateDirectory $candidate -FixtureDirectory $fixture -WorkDirectory $case -BuildSha $fullSha
+          uv run --locked --no-sync python scripts/ci/private_beta_windows/verify_snapshot_proof.py --case-directory $case --fixture-directory $fixture
+          if ($LASTEXITCODE -ne 0) { throw 'Compiled snapshot archive verification failed' }
+      - name: Retain synthetic validation evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: private-beta-windows-snapshot-proof
+          path: |
+            ${{ runner.temp }}/private-beta-runtime-identity.json
+            ${{ runner.temp }}/private-beta-snapshot-case/proof.json
+            ${{ runner.temp }}/private-beta-snapshot-fixture/fixture.json
+          retention-days: 14
+      - name: Retain the private portable candidate
+        if: success()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: private-beta-windows-candidate
+          path: dist/AstroPilot/
+          retention-days: 7

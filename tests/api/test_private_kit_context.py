@@ -88,6 +88,11 @@ def test_rendered_launcher_roundtrip_and_existing_destination_refusal(tmp_path):
     assert hashlib.sha256(host.read_bytes()).hexdigest() in bootstrap
     assert 'ReadAllText($script)' in bootstrap
     assert max(map(len, cmd.splitlines())) < 8190
+    transfer = (output / 'GERER-MES-DONNEES.cmd').read_text(encoding='ascii')
+    transfer_code = base64.b64decode(transfer.split('-EncodedCommand ', 1)[1].splitlines()[0]).decode('utf-16le')
+    assert "NIGHTMERIT_OPEN_DATA_TRANSFER='0'" in bootstrap
+    assert "NIGHTMERIT_OPEN_DATA_TRANSFER='1'" in transfer_code
+    assert hashlib.sha256(host.read_bytes()).hexdigest() in transfer_code
     controller = (output / 'Audit/controller.ps1').read_text(encoding='utf-8')
     assert '__SOURCE_' not in controller and SHA in controller
     assert 'Compress-Archive -LiteralPath (Join-Path $results' in controller
@@ -103,3 +108,39 @@ def test_rendered_launcher_roundtrip_and_existing_destination_refusal(tmp_path):
     with pytest.raises(ValueError):
         render('bad', tmp_path / 'bad')
     assert not (tmp_path / 'bad').exists()
+
+
+def test_stable_metadata_tracks_same_host_data_across_two_application_versions():
+    from astropilot.private_kit_context import STABLE_SCHEMA
+    value=context();value.update(schema=STABLE_SCHEMA,
+        host_data_directory=r'C:\Users\Franck\AppData\Local\NightMerit\PrivateBeta\profil',
+        guest_data_directory=r'C:\NightMeritData\profil')
+    first=read(value,data=r'C:\NightMeritData\profil')
+    assert first['host']['storage_mode']=='stable_private_beta'
+    assert first['host']['data_directory']==value['host_data_directory']
+    value.update(host_kit_directory=r'C:\Next version\Kit',host_results_directory=r'C:\Next version\Kit\RESULTATS')
+    second=read(value,data=r'C:\NightMeritData\profil')
+    assert first['host']['kit_directory']!=second['host']['kit_directory']
+    assert first['host']['data_directory']==second['host']['data_directory']
+    assert read(value)['status']=='unavailable'  # Bound to the real guest profile.
+    for bad in [None,'relative',r'C:\data\..\other','C:\\bad\npath']:
+        value['host_data_directory']=bad
+        assert read(value,data=r'C:\NightMeritData\profil')['status']=='unavailable'
+
+
+def test_stable_launcher_rendering_remains_explicit_and_separate_from_virgin_tests(tmp_path):
+    import base64,hashlib
+    root=Path(__file__).resolve().parents[2]
+    render=runpy.run_path(str(root/'scripts/render_private_windows_launcher.py'))['render']
+    stable=render(SHA,tmp_path/'persistent',data_mode='stable')
+    isolated=render(SHA,tmp_path/'virgin')
+    assert "$dataMode = 'stable'" in (stable/'Audit/controller.ps1').read_text()
+    assert "$dataMode = 'isolated'" in (isolated/'Audit/controller.ps1').read_text()
+    for kit in [stable,isolated]:
+        host=kit/'Audit/launch-sandbox.ps1'
+        command=(kit/'LANCER-TEST-WINDOWS.cmd').read_text()
+        code=base64.b64decode(command.split('-EncodedCommand ',1)[1].splitlines()[0]).decode('utf-16le')
+        assert hashlib.sha256(host.read_bytes()).hexdigest() in code
+    assert (stable/'Audit/launch-sandbox.ps1').read_bytes()!=(isolated/'Audit/launch-sandbox.ps1').read_bytes()
+    with pytest.raises(ValueError):render(SHA,tmp_path/'bad-mode',data_mode='unknown')
+    assert not (tmp_path/'bad-mode').exists()
