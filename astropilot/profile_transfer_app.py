@@ -14,10 +14,11 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from astropilot.profile_backup import (BackupError, MAX_ARCHIVE, create_backup,
-                                      inspect_backup, restore_empty, _safe_root)
+                                      inspect_backup, restore_empty, profile_state)
 from astropilot.user_profile import get_user_data_dir
 
 MESSAGES = {
+    "backup_no_user_data": "Cette copie ne contient aucun profil enregistré à sauvegarder. Pour reprendre vos essais, ouvrez l’assistant dans une nouvelle copie vierge, avant de lancer l’application.",
     "backup_destination_not_empty": "Cette copie contient déjà des données. Elles restent intactes. Ouvrez une nouvelle copie vierge pour reprendre une sauvegarde.",
     "backup_invalid": "Cette sauvegarde est incomplète ou endommagée. Aucune donnée n’a été reprise.",
     "backup_incompatible": "Cette sauvegarde ne peut pas être validée par cette version. Conservez l’ancienne copie ; aucune donnée n’a été reprise.",
@@ -72,9 +73,9 @@ def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
     @app.get("/transfer/status")
     def status():
         # No profile initialization, cursor key creation or fallback to another copy.
-        safe = _safe_root(root)
-        occupied = safe.exists() and any(safe.iterdir())
-        return {"has_data": occupied, "can_restore": not occupied,
+        state = profile_state(root)
+        return {"state": state, "has_data": state in {"profile", "unrecognized"},
+                "can_export": state == "profile", "can_restore": state == "empty",
                 "platform": "windows" if os.name == "nt" else "other"}
 
     @app.post("/transfer/export")

@@ -17,15 +17,20 @@ const html=fs.readFileSync(process.argv[1],'utf8');
 const code=html.match(/<script nonce="[^"]+">([\s\S]+)<\/script>/)[1];
 const nodes=new Map();
 function el(id){if(!nodes.has(id))nodes.set(id,{hidden:true,disabled:false,textContent:'',files:[],listeners:{},addEventListener(event,fn){this.listeners[event]=fn;}});return nodes.get(id);}
-const requests=[];let fail=false,aborts=0;
+const requests=[];let fail=false,aborts=0,statusState='runtime_only';
 const context={document:{querySelector:el,querySelectorAll:()=>[el('#export'),el('#restore')],createElement:()=>({click(){}})},
  AbortController:class{constructor(){this.signal={};}abort(){aborts++;}},
  setTimeout(){return 1;},clearTimeout(){}, URL:{createObjectURL(){return 'blob:local';},revokeObjectURL(){}},
- async fetch(url,opts){requests.push({url,opts});return{ok:!fail,headers:{get(){return null;}},async json(){if(fail)return{message:'<img src=x onerror=attack()>'};if(url.endsWith('status'))return{has_data:false,can_restore:true,platform:'windows'};if(url.endsWith('preview'))return{confirmation:'nonce',summary:{projects:1,sessions:2,observations:3,comparisons:1}};return {restored:true};}};}};
+ async fetch(url,opts){requests.push({url,opts});return{ok:!fail,headers:{get(){return null;}},async json(){if(fail)return{message:'<img src=x onerror=attack()>'};if(url.endsWith('status'))return{state:statusState,has_data:statusState==='profile',can_export:statusState==='profile',can_restore:statusState==='empty',platform:'windows'};if(url.endsWith('preview'))return{confirmation:'nonce',summary:{projects:1,sessions:2,observations:3,comparisons:1}};return {restored:true};}};}};
 vm.createContext(context);vm.runInContext(code,context);
 async function flush(){for(let i=0;i<20;i++)await Promise.resolve();}
 (async()=>{
- await flush();assert.equal(el('#restore-section').hidden,false);assert.equal(el('#windows-note').hidden,false);
+ await flush();assert.equal(el('#restore-section').hidden,true);assert.equal(el('#export-section').hidden,true);
+ assert.equal(el('#fresh-copy-section').hidden,false);assert.equal(el('#next-section').hidden,true);
+ assert.match(el('#message').textContent,/traces techniques/);
+ statusState='unrecognized';await vm.runInContext('status()',context);assert.match(el('#message').textContent,/aucun profil/);
+ statusState='profile';await vm.runInContext('status()',context);assert.equal(el('#export-section').hidden,false);
+ statusState='empty';await vm.runInContext('status()',context);assert.equal(el('#restore-section').hidden,false);assert.equal(el('#windows-note').hidden,false);
  el('#archive').files=[{size:128}];await el('#archive').listeners.change();
  assert.equal(el('#restore').hidden,false);assert.match(el('#preview').textContent,/1 projet/);
  assert(!requests.some(r=>r.url.endsWith('restore')));

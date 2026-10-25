@@ -12,6 +12,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -32,6 +33,8 @@ MAX_ARCHIVE = 64 * 1024 * 1024
 MAX_TOTAL = 128 * 1024 * 1024
 MAX_FILE = 8 * 1024 * 1024
 MAX_FILES = 5000
+MAX_MANIFEST = 2 * 1024 * 1024
+ZIP_CHUNK = 64 * 1024
 STORES = frozenset({"decision_lineage", "execution_lineage", "decision_forecast_evidence",
                     "field_observations", "outcome_evaluations"})
 LOCAL_ONLY = frozenset({"Logs", "guardian", "guardian_scheduler", ".DS_Store",
@@ -40,6 +43,28 @@ LOCAL_ONLY = frozenset({"Logs", "guardian", "guardian_scheduler", ".DS_Store",
 
 class BackupError(ValueError):
     pass
+
+
+def profile_state(root):
+    """Metadata only: startup traces are not an exportable user profile.
+
+    Existing traces still block restoration. Never remove them to make a copy
+    appear empty; guide the operator to a fresh kit instead.
+    """
+    root = _safe_root(root)
+    entries = list(root.iterdir()) if root.exists() else []
+    if not entries:
+        return "empty"
+    for path in entries:
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise BackupError("backup_unsafe_path")
+    if any(p.name == "user_profile.json" and p.is_file() for p in entries):
+        return "profile"
+    if all(p.name in LOCAL_ONLY or (p.name.startswith(".") and p.name.endswith(".lock"))
+           for p in entries):
+        return "runtime_only"
+    return "unrecognized"
 
 
 def _json(raw):
@@ -190,6 +215,8 @@ def validate_graph(files):
 
 def create_backup(root, *, validator=validate_graph):
     files = snapshot(root)
+    if not files:
+        raise BackupError("backup_no_user_data")
     summary = validator(files)
     # Detect a writer changing, adding or removing any domain document.
     if snapshot(root) != files:
@@ -209,23 +236,91 @@ def create_backup(root, *, validator=validate_graph):
     return raw, summary
 
 
+def _central_directory(raw):
+    """Bound the actual directory count before ZipFile allocates its entries.
+
+    The backup producer never needs ZIP64 or multi-disk archives. Do not trust
+    the EOCD entry count alone: ZipFile enumerates the directory's actual bytes.
+    """
+    end = raw.rfind(b"PK\x05\x06", max(0, len(raw) - 65557))
+    if end < 0 or end + 22 > len(raw):
+        raise BackupError("backup_invalid")
+    _, disk, directory_disk, disk_count, count, size, offset, comment = struct.unpack_from("<4s4H2IH", raw, end)
+    if (disk or directory_disk or disk_count != count or not 1 <= count <= MAX_FILES + 1
+            or end + 22 + comment != len(raw) or offset + size != end):
+        raise BackupError("backup_invalid")
+    position, actual = offset, 0
+    while position < end:
+        if position + 46 > end or raw[position:position + 4] != b"PK\x01\x02":
+            raise BackupError("backup_invalid")
+        name, extra, annotation = struct.unpack_from("<3H", raw, position + 28)
+        position += 46 + name + extra + annotation
+        actual += 1
+        if actual > MAX_FILES + 1 or position > end:
+            raise BackupError("backup_invalid")
+    if position != end or actual != count:
+        raise BackupError("backup_invalid")
+    return offset
+
+
+def _read_member(raw, item, limit, directory_offset):
+    """Decode the actual stream with bounded output, including its true EOF.
+
+    ZipExtFile truncates output at the declared file_size. Its read(-1) can
+    allocate a much larger deflate output before truncating it, hiding a forged
+    length. Decode compressed blocks directly and reject any extra output.
+    """
+    header = struct.unpack_from("<4s5H3I2H", raw, item.header_offset)
+    if (header[0] != b"PK\x03\x04" or header[2] != item.flag_bits
+            or header[3] != item.compress_type):
+        raise BackupError("backup_invalid")
+    name_start = item.header_offset + 30
+    start = name_start + header[9] + header[10]
+    end = start + item.compress_size
+    if (item.header_offset < 0 or end > directory_offset
+            or raw[name_start:name_start + header[9]] != item.filename.encode("utf-8")
+            or item.file_size > limit):
+        raise BackupError("backup_invalid")
+    if not item.flag_bits & 8 and header[6:9] != (item.CRC, item.compress_size, item.file_size):
+        raise BackupError("backup_invalid")
+    result = bytearray()
+    decoder = zlib.decompressobj(-zlib.MAX_WBITS) if item.compress_type == zipfile.ZIP_DEFLATED else None
+    for position in range(start, end, ZIP_CHUNK):
+        block = memoryview(raw)[position:min(position + ZIP_CHUNK, end)]
+        if decoder is None:
+            result.extend(block)
+            if len(result) > item.file_size or len(result) > limit:
+                raise BackupError("backup_invalid")
+            continue
+        while block:
+            decoded = decoder.decompress(block, min(ZIP_CHUNK, item.file_size - len(result) + 1))
+            result.extend(decoded)
+            if len(result) > item.file_size or len(result) > limit or decoder.unused_data:
+                raise BackupError("backup_invalid")
+            block = decoder.unconsumed_tail
+    if (decoder is not None and not decoder.eof) or len(result) != item.file_size or zlib.crc32(result) != item.CRC:
+        raise BackupError("backup_invalid")
+    return bytes(result)
+
+
 def inspect_backup(raw, *, validator=validate_graph):
     if len(raw) > MAX_ARCHIVE:
         raise BackupError("backup_too_large")
     try:
+        directory_offset = _central_directory(raw)
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             entries = archive.infolist()
             names = [i.filename for i in entries]
             if (len(entries) > MAX_FILES + 1 or len(names) != len(set(names))
-                    or "manifest.json" not in names or sum(i.file_size for i in entries) > MAX_TOTAL + 2 * 1024 * 1024):
+                    or "manifest.json" not in names or sum(i.file_size for i in entries) > MAX_TOTAL + MAX_MANIFEST):
                 raise BackupError("backup_invalid")
             for item in entries:
                 mode = item.external_attr >> 16
                 if (item.flag_bits & 1 or stat.S_IFMT(mode) not in (0, stat.S_IFREG) or item.is_dir()
                         or item.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
-                        or item.file_size > (2 * 1024 * 1024 if item.filename == "manifest.json" else MAX_FILE)):
+                        or item.file_size > (MAX_MANIFEST if item.filename == "manifest.json" else MAX_FILE)):
                     raise BackupError("backup_invalid")
-            manifest = _json(archive.read("manifest.json"))
+            manifest = _json(_read_member(raw, archive.getinfo("manifest.json"), MAX_MANIFEST, directory_offset))
             if (not isinstance(manifest, dict) or manifest.get("schema") != SCHEMA
                     or manifest.get("application_version") != canonical_version()
                     or not isinstance(manifest.get("files"), dict)):
@@ -236,12 +331,12 @@ def inspect_backup(raw, *, validator=validate_graph):
             for name, record in manifest["files"].items():
                 if not _allowed(name) or not isinstance(record, dict):
                     raise BackupError("backup_invalid")
-                data = archive.read("data/" + name)
+                data = _read_member(raw, archive.getinfo("data/" + name), MAX_FILE, directory_offset)
                 if (type(record.get("size")) is not int or len(data) != record["size"]
                         or hashlib.sha256(data).hexdigest() != record.get("sha256")):
                     raise BackupError("backup_invalid")
                 files[name] = data
-    except (zipfile.BadZipFile, KeyError, TypeError, RuntimeError, NotImplementedError, zlib.error, EOFError) as exc:
+    except (zipfile.BadZipFile, KeyError, TypeError, RuntimeError, NotImplementedError, zlib.error, EOFError, struct.error) as exc:
         raise BackupError("backup_invalid") from exc
     summary = validator(files)
     return files, {**summary, "created_at_utc": manifest.get("created_at_utc"),

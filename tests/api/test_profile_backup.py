@@ -325,3 +325,132 @@ def test_handle_ctime_difference_does_not_masquerade_as_changed_file(source, mon
             st_ctime_ns=info.st_ctime_ns-10000000, st_mode=info.st_mode)
     monkeypatch.setattr(backup.os, 'fstat', handle_stat)
     assert 'user_profile.json' in snapshot(source)
+
+
+def test_startup_traces_are_not_an_exportable_profile_and_remain_intact(tmp_path):
+    root = tmp_path / 'opened'
+    logs = root / 'Logs';logs.mkdir(parents=True)
+    (logs / 'AstroPilot.log').write_bytes(b'kept startup trace')
+    client = TestClient(create_transfer_app(root, origin='http://testserver'))
+    token = re.search(r'const token="([^"]+)"', client.get('/').text)[1]
+    state = client.get('/transfer/status').json()
+    assert state['state'] == 'runtime_only'
+    assert state['has_data'] is state['can_export'] is state['can_restore'] is False
+    rejected = client.post('/transfer/export', headers={'X-NightMerit-Transfer':token})
+    assert rejected.status_code == 409
+    assert 'aucun profil enregistré' in rejected.json()['message']
+    assert 'endommagée' not in rejected.json()['message']
+    assert (logs / 'AstroPilot.log').read_bytes() == b'kept startup trace'
+    assert not (root / 'user_profile.json').exists()
+
+
+def test_unidentified_files_never_offer_empty_restore_or_invalid_export(tmp_path):
+    root = tmp_path / 'unknown';root.mkdir()
+    (root / 'future.json').write_bytes(b'keep user data')
+    state = TestClient(create_transfer_app(root, origin='http://testserver')).get('/transfer/status').json()
+    assert state['state'] == 'unrecognized' and state['has_data'] is True
+    assert state['can_export'] is state['can_restore'] is False
+    assert (root / 'future.json').read_bytes() == b'keep user data'
+
+
+def forged_member_archive(source, member, method=zipfile.ZIP_DEFLATED, hidden_bytes=4*1024*1024):
+    """Small ZIP with coherent declared lengths/CRC but hidden expanded bytes."""
+    import hashlib, struct, zlib
+    raw, _ = create_backup(source, validator=validate_documents)
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        values = {name:archive.read(name) for name in archive.namelist()}
+    # Keep a valid manifest/profile prefix, so the old implementation accepted
+    # the archive after ZipExtFile silently truncated the deflate output.
+    if member == 'data/user_profile.json':
+        prefix = values[member].ljust(4096, b' ')
+        manifest = json.loads(values['manifest.json'])
+        manifest['files']['user_profile.json'] = {'size':len(prefix),'sha256':hashlib.sha256(prefix).hexdigest()}
+        values['manifest.json'] = json.dumps(manifest).encode()
+    else:
+        prefix = values[member]
+    values[member] = prefix + b'x' * hidden_bytes
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', method) as archive:
+        for name, value in values.items(): archive.writestr(name, value)
+    raw = bytearray(buffer.getvalue());filename = member.encode()
+    for signature, size_offset, crc_offset, name_offset in [
+            (b'PK\x03\x04',22,14,30),(b'PK\x01\x02',24,16,46)]:
+        start = 0
+        while True:
+            start = raw.find(signature, start)
+            assert start >= 0
+            if raw[start+name_offset:start+name_offset+len(filename)] == filename:
+                struct.pack_into('<I',raw,start+size_offset,len(prefix))
+                struct.pack_into('<I',raw,start+crc_offset,zlib.crc32(prefix))
+                break
+            start += 4
+    return bytes(raw)
+
+
+@pytest.mark.parametrize('member', ['manifest.json','data/user_profile.json'])
+def test_forged_expansion_is_rejected_with_bounded_memory_before_validation(source, member):
+    import tracemalloc
+    raw = forged_member_archive(source, member)
+    assert len(raw) < 10000
+    called = []
+    tracemalloc.start()
+    try:
+        with pytest.raises(BackupError, match='backup_invalid'):
+            inspect_backup(raw, validator=lambda files:called.append(files))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert called == []
+    assert peak < 2 * 1024 * 1024  # The forged stream expands to over 4 MiB.
+
+
+def test_forged_central_directory_count_is_checked_before_zipfile_allocation(source, monkeypatch):
+    import struct
+    import astropilot.profile_backup as backup
+    from unittest.mock import Mock
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as archive:
+        for i in range(5):archive.writestr(f'entry-{i}', b'x')
+    raw = bytearray(buffer.getvalue());end = raw.rfind(b'PK\x05\x06')
+    struct.pack_into('<2H',raw,end+8,1,1)  # Both advertised counts lie.
+    monkeypatch.setattr(backup, 'MAX_FILES', 2)
+    reader = Mock(side_effect=AssertionError('Unbounded ZIP directory parsed'))
+    monkeypatch.setattr(backup.zipfile, 'ZipFile', reader)
+    with pytest.raises(BackupError):inspect_backup(bytes(raw))
+    reader.assert_not_called()
+
+
+@pytest.mark.parametrize('method', [zipfile.ZIP_STORED,zipfile.ZIP_DEFLATED])
+def test_normal_zip_methods_and_large_document_roundtrip(source, method):
+    raw, _ = create_backup(source, validator=validate_documents)
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        values = {name:archive.read(name) for name in archive.namelist()}
+    import hashlib
+    values['data/user_profile.json'] = values['data/user_profile.json'].ljust(3*65536+97, b' ')
+    manifest = json.loads(values['manifest.json'])
+    profile = values['data/user_profile.json']
+    manifest['files']['user_profile.json'] = {'size':len(profile),'sha256':hashlib.sha256(profile).hexdigest()}
+    values['manifest.json'] = json.dumps(manifest).encode()
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer,'w',method) as archive:
+        for name,value in values.items():archive.writestr(name,value)
+    expected = {name[5:]:value for name,value in values.items() if name.startswith('data/')}
+    assert inspect_backup(buffer.getvalue(),validator=validate_documents)[0] == expected
+
+
+@pytest.mark.parametrize('damage', ['truncated','trailing'])
+def test_deflate_must_reach_true_eof_without_extra_compressed_bytes(damage):
+    import struct, zlib
+    from astropilot.profile_backup import _read_member
+    value = b'{"valid":"prefix"}'
+    encoder = zlib.compressobj(wbits=-zlib.MAX_WBITS)
+    compressed = encoder.compress(value) + encoder.flush()
+    compressed = compressed[:-1] if damage == 'truncated' else compressed + b'extra'
+    item = zipfile.ZipInfo('data/user_profile.json')
+    item.header_offset = item.flag_bits = 0
+    item.compress_type = zipfile.ZIP_DEFLATED
+    item.file_size = len(value);item.compress_size = len(compressed);item.CRC = zlib.crc32(value)
+    name = item.filename.encode()
+    header = struct.pack('<4s5H3I2H',b'PK\x03\x04',20,0,8,0,0,item.CRC,item.compress_size,item.file_size,len(name),0)
+    raw = header + name + compressed
+    with pytest.raises(BackupError):_read_member(raw,item,1024,len(raw))

@@ -19,7 +19,12 @@
 <label for="archive">Ma sauvegarde NightMerit</label><input id="archive" type="file" accept=".zip,application/zip">
 <p id="preview" role="status"></p>
 <button id="restore" type="button" hidden>Confirmer la reprise de ces données</button></section>
-<section><h2>Pour continuer ensuite</h2>
+<section id="fresh-copy-section" hidden><h2>Reprendre ma sauvegarde dans une nouvelle copie</h2>
+<ol><li>Conservez ce dossier et fermez cet assistant. Sur Windows, fermez Windows Sandbox.</li>
+<li>Extrayez le kit dans un nouveau dossier. Sur Windows, placez-y votre fichier de sauvegarde.</li>
+<li>Ouvrez directement <strong>GERER-MES-DONNEES.command</strong> sur Mac ou <strong>GERER-MES-DONNEES.cmd</strong> sur Windows, avant de lancer l’application.</li></ol>
+<p>Vous pourrez alors choisir votre sauvegarde et confirmer la reprise de vos essais.</p></section>
+<section id="next-section" hidden><h2>Pour continuer ensuite</h2>
 <p>Sur Mac, fermez sa fenêtre de navigateur. Sur Windows, fermez Windows Sandbox. Ouvrez ensuite le lanceur habituel <strong>de cette même copie</strong>. Retrouvez votre projet dans « Mes projets » et vos relevés dans « Mes observations ».</p>
 <p class="note">Les sauvegardes sont indépendantes : une nouvelle saisie sur le Mac ne modifie pas automatiquement la copie Windows. Aucun dossier contenant déjà des données n’est remplacé ni fusionné.</p></section>
 </main><script nonce="__TRANSFER_TOKEN__">
@@ -35,8 +40,10 @@ async function request(url,options={},format="json"){
  }finally{clearTimeout(timer);}
 }
 function failed(error){message.textContent=error.name==='AbortError'?'La réponse prend trop de temps. Conservez votre ancienne copie et vérifiez les données avant de réessayer.':error.message;}
-async function status(){try{const {data:state}=await request('/transfer/status');document.querySelector('#export-section').hidden=!state.has_data;document.querySelector('#restore-section').hidden=!state.can_restore;document.querySelector('#windows-note').hidden=state.platform!=='windows';
- message.textContent=state.has_data?'Cette copie contient des données. Vous pouvez les sauvegarder. Pour reprendre une autre sauvegarde, ouvrez cet assistant dans une nouvelle copie vierge.':'Cette copie est vide. Vous pouvez y reprendre vos essais depuis une sauvegarde.';
+async function status(){try{const {data:state}=await request('/transfer/status');document.querySelector('#export-section').hidden=!state.can_export;document.querySelector('#restore-section').hidden=!state.can_restore;document.querySelector('#windows-note').hidden=state.platform!=='windows';
+ const blocked=!state.can_export&&!state.can_restore;document.querySelector('#fresh-copy-section').hidden=!blocked;document.querySelector('#next-section').hidden=blocked;
+ const messages={profile:'Cette copie contient un profil enregistré. Vous pouvez le sauvegarder. Pour reprendre une autre sauvegarde, ouvrez cet assistant dans une nouvelle copie vierge.',empty:'Cette copie est vide. Vous pouvez y reprendre vos essais depuis une sauvegarde.',runtime_only:'Cette copie ne contient pas de profil enregistré, mais des traces techniques de son ouverture. Elles sont conservées. Pour reprendre une sauvegarde, suivez les étapes ci-dessous.',unrecognized:'Cette copie contient des fichiers, mais aucun profil enregistré identifiable. Conservez ce dossier. Pour reprendre une sauvegarde, suivez les étapes ci-dessous.'};
+ message.textContent=messages[state.state]||'Cette copie ne peut pas être identifiée. Conservez son dossier et vérifiez la version utilisée.';
  }catch(error){failed(error);}}
 document.querySelector('#export').addEventListener('click',async()=>{if(busy)return;setBusy(true);try{const response=await request('/transfer/export',{method:'POST'},'blob');const blob=response.data;const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=(response.headers.get('Content-Disposition')||'').match(/filename="([^"]+)"/)?.[1]||'NightMerit-sauvegarde.zip';link.click();setTimeout(()=>URL.revokeObjectURL(url),60000);message.textContent='Le téléchargement a été demandé à votre navigateur. Vérifiez que le fichier de sauvegarde est bien présent avant de changer de copie.';}catch(error){failed(error);}finally{setBusy(false);}});
 archive.addEventListener('change',async()=>{if(busy)return;confirmation=null;restore.hidden=true;preview.textContent='';const file=archive.files?.[0];if(!file)return;if(file.size>64*1024*1024){message.textContent='Ce fichier dépasse la limite de cette bêta.';return;}setBusy(true);try{message.textContent='Vérification de la sauvegarde…';const {data}=await request('/transfer/preview',{method:'POST',body:file});confirmation=data.confirmation;const s=data.summary;preview.textContent=`${s.projects} projet(s), ${s.sessions} session(s), ${s.observations} observation(s), ${s.comparisons} comparaison(s).`;message.textContent='Sauvegarde vérifiée. Confirmez si vous souhaitez reprendre ces données dans cette copie vide.';restore.hidden=false;}catch(error){failed(error);}finally{setBusy(false);}});

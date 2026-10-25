@@ -23,6 +23,14 @@ The ordinary **Version et données** panel remains read-only.
    kit. Check **Mes projets**, **Mes observations** and an existing comparison.
    Retain the original copy until these checks pass.
 
+If the kit has already been opened and contains only startup traces (notably
+Windows `Logs/AstroPilot.log`), the assistant does not offer an impossible export.
+It explains that no user profile is recorded and gives the new-folder steps.
+Keep that folder intact and open the assistant **before** the ordinary application
+in the new copy. Unknown files also block restoration with explicit guidance;
+they are never treated as disposable startup traces.
+
+
 Older kits lacking the assistant cannot export through it. The first migration
 from those kits must still be prepared separately, with the original application
 closed and the original copy retained. Adding a new command file to an old binary
@@ -46,6 +54,10 @@ is not an upgrade. This feature does not retroactively update distributed kits.
   5,000 documents. Only explicit domain paths are accepted. Unknown domain
   files fail export rather than being silently lost; archive extras, duplicate
   names/JSON keys, special files, links, traversal and ambiguous paths fail.
+  The actual central-directory count is bounded before ZIP objects are allocated.
+  Members are decoded in bounded compressed/output blocks, checking true deflate
+  EOF, actual length and CRC instead of trusting advertised uncompressed sizes.
+  ZIP64 and multi-disk archives are not produced or accepted by this format.
 - The manifest requires `nightmerit.profile_backup.v1` and the current canonical
   application version. Build hashes may differ. Future incompatible versions
   require explicit migration work. SHA-256 detects corruption, not authorship;
