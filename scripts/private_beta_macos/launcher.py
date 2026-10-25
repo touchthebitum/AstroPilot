@@ -86,7 +86,7 @@ def start(root,selftest=False,data_transfer=False):
    browser_case=case/'assistant-donnees'
    preferences=browser_case/'navigateur/Default/Preferences'
    preferences.parent.mkdir(parents=True,exist_ok=True)
-   downloads=case/'SAUVEGARDES';downloads.mkdir(exist_ok=True)
+   downloads=case/'SAUVEGARDES';downloads.mkdir(mode=0o700,exist_ok=True);downloads.chmod(0o700)
    # Dedicated browser profile only; no personal browser preferences are touched.
    preferences.write_text(json.dumps({'download':{'default_directory':str(downloads),'prompt_for_download':False}}))
   base=browser_arguments(chrome,browser_case)

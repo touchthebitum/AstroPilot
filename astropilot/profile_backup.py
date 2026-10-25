@@ -154,7 +154,7 @@ def validate_documents(files):
 def _write_files(folder, files):
     for name, raw in files.items():
         target = folder / name
-        target.parent.mkdir(parents=True, exist_ok=True)
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         with target.open("xb") as stream:
             stream.write(raw)
             stream.flush()
@@ -253,7 +253,7 @@ def restore_empty(root, files, *, validator=validate_graph):
     root.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".nightmerit-restore-", dir=root.parent) as temporary:
         stage = Path(temporary) / "profile"
-        stage.mkdir()
+        stage.mkdir(mode=0o700)
         _write_files(stage, files)
         for directory in [p for p in stage.iterdir() if p.is_dir()] + [stage]:
             fsync_directory(directory)
