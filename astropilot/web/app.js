@@ -7687,10 +7687,6 @@ document.querySelector('#data-context-back').addEventListener('click', () => {
 
 updateHistoryFilterSummary();
 // End Outcome History.
-restoreFieldObservationLock();
-restorePendingFieldObservationInventory();
-if (restorePendingAcceptanceAttempt()) showUnresolvedAcceptance();
-else loadConfiguration();
 
 function analysisTimeLabel(value) {
   if (typeof value !== "string") return "";
@@ -7791,3 +7787,8 @@ document.querySelectorAll("[data-open-analysis-history]").forEach(button => butt
 document.querySelector("#analysis-history-close").addEventListener("click", () => document.querySelector("#analysis-history-dialog").close());
 document.querySelector("#analysis-history-dialog").addEventListener("close", () => { analysisHistoryState.generation += 1; });
 document.querySelector("#analysis-history-next").addEventListener("click", () => loadAnalysisHistory(true));
+
+restoreFieldObservationLock();
+restorePendingFieldObservationInventory();
+if (restorePendingAcceptanceAttempt()) showUnresolvedAcceptance();
+else loadConfiguration();
