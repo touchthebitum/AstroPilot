@@ -117,7 +117,10 @@ def snapshot(root):
             fd = os.open(path, flags)
             try:
                 opened = os.fstat(fd)
-                if not stat.S_ISREG(opened.st_mode) or _signature(info) != _signature(opened):
+                # Windows stat/fstat can expose different ctime semantics. Match
+                # the opened identity/size/mtime, then check the path's full
+                # signature (including ctime) again after reading.
+                if not stat.S_ISREG(opened.st_mode) or _signature(info)[:4] != _signature(opened)[:4]:
                     raise BackupError("backup_changed")
                 with os.fdopen(fd, "rb", closefd=False) as stream:
                     raw = stream.read(MAX_FILE + 1)

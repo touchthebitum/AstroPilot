@@ -312,3 +312,16 @@ def test_writer_arriving_after_empty_check_cannot_be_deleted(source, tmp_path, m
     with pytest.raises(BackupError, match='backup_destination_not_empty'):
         restore_empty(target, snapshot(source), validator=validate_documents)
     assert (target / 'arrived.json').read_bytes() == b'preserve late writer'
+
+
+def test_handle_ctime_difference_does_not_masquerade_as_changed_file(source, monkeypatch):
+    import astropilot.profile_backup as backup
+    from types import SimpleNamespace
+    original = backup.os.fstat
+    def handle_stat(fd):
+        info = original(fd)
+        return SimpleNamespace(st_dev=info.st_dev, st_ino=info.st_ino,
+            st_size=info.st_size, st_mtime_ns=info.st_mtime_ns,
+            st_ctime_ns=info.st_ctime_ns-10000000, st_mode=info.st_mode)
+    monkeypatch.setattr(backup.os, 'fstat', handle_stat)
+    assert 'user_profile.json' in snapshot(source)
