@@ -299,3 +299,16 @@ def test_duplicate_json_keys_and_future_versions_fail_before_restore(source):
             archive.writestr('manifest.json', encoded)
             archive.writestr('data/user_profile.json', data)
         with pytest.raises(BackupError): inspect_backup(buffer.getvalue(), validator=validate_documents)
+
+
+def test_writer_arriving_after_empty_check_cannot_be_deleted(source, tmp_path, monkeypatch):
+    target = tmp_path / 'target';target.mkdir()
+    rmdir = Path.rmdir
+    def racing_rmdir(path):
+        if path == target:
+            (target / 'arrived.json').write_bytes(b'preserve late writer')
+        return rmdir(path)
+    monkeypatch.setattr(Path, 'rmdir', racing_rmdir)
+    with pytest.raises(BackupError, match='backup_destination_not_empty'):
+        restore_empty(target, snapshot(source), validator=validate_documents)
+    assert (target / 'arrived.json').read_bytes() == b'preserve late writer'

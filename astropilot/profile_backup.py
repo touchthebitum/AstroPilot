@@ -5,6 +5,7 @@ stopped. Hashes detect corruption; they do not authenticate an archive's author.
 """
 from datetime import datetime, timezone
 import hashlib
+import errno
 import io
 import json
 import os
@@ -264,14 +265,21 @@ def restore_empty(root, files, *, validator=validate_graph):
         if had_empty_root:
             if any(root.iterdir()):
                 raise BackupError("backup_destination_not_empty")
-            os.rename(root, Path(temporary) / "empty")
+            # rmdir checks emptiness atomically. Never move an old profile
+            # into a temporary directory that cleanup could later remove.
+            try:
+                root.rmdir()
+            except OSError as exc:
+                if exc.errno in (errno.ENOTEMPTY, errno.EEXIST):
+                    raise BackupError("backup_destination_not_empty") from exc
+                raise
         try:
             # Directory publication: no per-file partially restored profile.
             os.rename(stage, root)
             fsync_directory(root.parent)
         except BaseException:
             if had_empty_root and not root.exists():
-                os.rename(Path(temporary) / "empty", root)
+                root.mkdir(mode=0o700)
             raise
     return summary
 
