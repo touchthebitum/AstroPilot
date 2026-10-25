@@ -454,3 +454,26 @@ def test_deflate_must_reach_true_eof_without_extra_compressed_bytes(damage):
     header = struct.pack('<4s5H3I2H',b'PK\x03\x04',20,0,8,0,0,item.CRC,item.compress_size,item.file_size,len(name),0)
     raw = header + name + compressed
     with pytest.raises(BackupError):_read_member(raw,item,1024,len(raw))
+
+
+def test_data_assistant_never_takes_over_a_live_listener():
+    from astropilot.profile_transfer_app import reserve_listener
+    with reserve_listener(port=0) as first:
+        port = first.getsockname()[1]
+        with pytest.raises(OSError):reserve_listener(port=port)
+        assert first.fileno() >= 0
+
+
+@pytest.mark.skipif(__import__('os').name=='nt',reason='Windows copies close Sandbox; no Windows address sharing')
+def test_data_assistant_restarts_immediately_after_a_real_connection():
+    import socket
+    from astropilot.profile_transfer_app import reserve_listener
+    first = reserve_listener(port=0)
+    address = first.getsockname()
+    with socket.socket() as client:
+        client.connect(address)
+        accepted, _ = first.accept()
+        accepted.close()  # A real server-side close enters TIME_WAIT.
+    first.close()
+    with reserve_listener(port=address[1]) as second:
+        assert second.getsockname() == address

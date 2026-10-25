@@ -127,14 +127,31 @@ def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
     return app
 
 
+def reserve_listener(port=8000):
+    """Reserve loopback without taking over a live listener.
+
+    On POSIX, allow a stopped assistant's TIME_WAIT connections so the next
+    copy can open immediately. Do not enable Windows address sharing: the
+    private Windows flow closes Sandbox between copies instead.
+    """
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if os.name != "nt":
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", port))
+        listener.listen(128)
+        return listener
+    except BaseException:
+        listener.close()
+        raise
+
+
 def main():
     import uvicorn
     from astropilot.file_lock import exclusive_file_lock
     # Reserve before opening a browser. Never hand off to or stop another copy.
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener = reserve_listener()
     try:
-        listener.bind(("127.0.0.1", 8000))
-        listener.listen(128)
         app = create_transfer_app()
         server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=8000,
                                               log_config=None, access_log=False))
