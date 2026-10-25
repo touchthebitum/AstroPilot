@@ -6460,15 +6460,16 @@ function canEditRefusedAvailability(payload) {
 }
 
 function showTonightUnavailable(payload) {
+  const candidateMessage = payload.status === "no_candidate" ? noCandidateMessage(payload) : null;
   const productiveRefusal = payload.status === "no_productive_window";
   const creationRefused = payload.status === "no_mission" && Boolean(payload.creation_refusal);
-  const [title, technical] = payload.status === "weather_refused"
+  const [title, technical] = candidateMessage || (payload.status === "weather_refused"
     ? [payload.weather_decision.presentation.label, payload.weather_decision.presentation.summary]
     : productiveRefusal
     ? actionabilityRefusalMessage(payload.actionability_refusal)
     : creationRefused
     ? creationRefusalMessage(payload)
-    : partialMessages[payload.status] || ["Décision indisponible", "Aucune recommandation exploitable."];
+    : partialMessages[payload.status] || ["Décision indisponible", "Aucune recommandation exploitable."]);
   const forecast = refusalForecastMessage(payload);
   const shortWindow = payload.actionability_refusal?.refusal_stage === "continuous_window_too_short";
   const editAvailability = canEditRefusedAvailability(payload) || (intentsRefusedForProductiveWindow(payload) && !forecast?.overcast);
@@ -6486,7 +6487,7 @@ function showTonightUnavailable(payload) {
   showMessage(simpleTitle, chosen
     ? `Cible choisie : ${chosen}. ${body} Votre choix est conservé ; aucune autre cible ne le remplace.${forecast?.overcast ? " Vous pourrez reprendre ce projet lorsque les prévisions évolueront." : " Pour chercher une alternative, cochez « Me proposer une cible avec mon matériel » dans la préparation de séance."}`
     : body, { kicker: "Analyse terminée" });
-  text("#message-technical", forecast?.details || technical);
+  text("#message-technical", candidateMessage?.[2] || forecast?.details || technical);
   const details = document.querySelector("#message-details");
   details.hidden = false;
   details.open = appliedUiMode === "pro";
@@ -6530,6 +6531,9 @@ function normalizeError(response, payload) {
     return ["Configuration requise", "NightMerit doit relire votre configuration avant de préparer la nuit."];
   }
   if (response.status === 503) {
+    if (detail?.code === "analysis_history_unavailable") {
+      return ["Analyse non conservée", "L’enregistrement de cette analyse n’a pas abouti. Vos relevés restent intacts. Vérifiez l’espace disponible ou l’accès au dossier de données avant de réessayer."];
+    }
     if (detail?.code === "weather_unavailable") {
       return ["Météo temporairement indisponible", "NightMerit ne peut pas encore lire les conditions de votre site. Réessayez dans un instant."];
     }
@@ -7687,3 +7691,103 @@ restoreFieldObservationLock();
 restorePendingFieldObservationInventory();
 if (restorePendingAcceptanceAttempt()) showUnresolvedAcceptance();
 else loadConfiguration();
+
+function analysisTimeLabel(value) {
+  if (typeof value !== "string") return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2}):\d{2}(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  return m ? m[3]+"."+m[2]+"."+m[1]+" à "+m[4]+" UTC"+(m[5] === "Z" ? "" : m[5]) : "";
+}
+function noCandidateMessage(payload) {
+  const refusal = payload.target_refusal;
+  if (refusal?.code === "target_below_minimum_altitude"
+      && Number.isFinite(refusal.minimum_altitude_deg) && refusal.sample_count > 0) {
+    const range = [analysisTimeLabel(refusal.window_start), analysisTimeLabel(refusal.window_end)].filter(Boolean).join(" → ");
+    return ["Cible trop basse sur ce créneau",
+      refusal.catalog_key+" est trop basse sur le créneau choisi. NightMerit exige une hauteur d’au moins "+refusal.minimum_altitude_deg+"°.",
+      (range ? "Créneau demandé : "+range+". " : "")+"Aucun échantillon des fenêtres évaluées n’atteint le seuil d’altitude. Ce motif ne conclut pas à la qualité de la météo."];
+  }
+  if (refusal?.code === "target_window_unavailable") {
+    return ["Aucune fenêtre évaluable pour cette cible",
+      "Aucune fenêtre n’a pu être retenue pour "+refusal.catalog_key+" avec la disponibilité choisie.",
+      "La cause physique précise n’est pas établie par les preuves disponibles. Vérifiez les horaires et la visibilité de la cible ; aucun projet n’a été modifié."];
+  }
+  const labels = {
+    non_positive_evaluation_score: "le score d’évaluation est nul ou négatif",
+    legacy_read_only: "ce projet ancien est consultable mais ne peut pas autoriser une nouvelle mission",
+    modern_provenance_missing: "les informations du projet d’acquisition sont incomplètes",
+    legacy_project_completed: "l’objectif du projet est déjà atteint",
+    intent_targets_completed: "les objectifs des acquisitions sont déjà atteints",
+  };
+  const reasons = (payload.rejected_targets || []).map(item =>
+    (item.target || item.catalog_key)+" : "+(labels[item.basis] || "motif de rejet non reconnu par cette interface")+".");
+  return [partialMessages.no_candidate[0], partialMessages.no_candidate[1],
+    reasons.join(" ") || "Aucun motif précis n’a été conservé pour cette analyse. Il n’est pas possible d’attribuer ce refus à la météo, au matériel ou aux horaires."];
+}
+const analysisHistoryState = {generation: 0, before: null};
+async function loadAnalysisHistory(more = false) {
+  const dialog = document.querySelector("#analysis-history-dialog");
+  const generation = ++analysisHistoryState.generation;
+  const current = () => dialog.open && generation === analysisHistoryState.generation;
+  const message = document.querySelector("#analysis-history-message");
+  const list = document.querySelector("#analysis-history-list");
+  document.querySelector("#analysis-history-next").hidden = true;
+  if (!more) {
+    list.replaceChildren();
+    document.querySelector("#analysis-history-detail").replaceChildren();
+    analysisHistoryState.before = null;
+  }
+  message.textContent = "Lecture des analyses enregistrées…";
+  try {
+    const params = new URLSearchParams({limit: "20"});
+    if (more && analysisHistoryState.before) params.set("before", analysisHistoryState.before);
+    const response = await fetch("/v1/analysis-history?"+params, {cache: "no-store"});
+    if (!response.ok) throw new Error("unavailable");
+    const data = await response.json();
+    if (!current()) return;
+    for (const record of data.items) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button";
+      button.textContent = savedObservationTime(record.created_at_utc, record.result.weather_trust?.timezone || "UTC")+" — "+(record.request.selected_project_id || record.result.target || "Analyse de nuit");
+      button.addEventListener("click", () => renderArchivedAnalysis(record));
+      list.append(button);
+    }
+    analysisHistoryState.before = data.next_before;
+    document.querySelector("#analysis-history-next").hidden = !data.next_before;
+    message.textContent = list.childElementCount ? "Choisissez une analyse pour relire son résultat." : "Aucune analyse archivée. Les analyses des anciens kits ne peuvent pas être reconstituées après coup.";
+  } catch (_) {
+    if (current()) message.textContent = "Les analyses enregistrées ne peuvent pas être lues. Aucun enregistrement existant n’a été modifié.";
+  }
+}
+function renderArchivedAnalysis(record) {
+  const root = document.querySelector("#analysis-history-detail");
+  root.replaceChildren();
+  const payload = record.result;
+  const message = payload.status === "no_candidate" ? noCandidateMessage(payload)
+    : payload.status === "no_productive_window" ? actionabilityRefusalMessage(payload.actionability_refusal)
+    : payload.status === "weather_refused"
+      ? [payload.weather_decision?.presentation?.label, payload.weather_decision?.presentation?.summary]
+      : partialMessages[payload.status] || ["Résultat enregistré", "Consultez les détails de cette analyse archivée."];
+  for (const [tag, value] of [["h3", message[0]], ["p", message[1]], ["p", message[2]]]) {
+    if (!value) continue;
+    const node = document.createElement(tag);
+    node.textContent = value;
+    root.append(node);
+  }
+  const details = document.createElement("details");
+  const summary = document.createElement("summary");
+  summary.textContent = "Détails enregistrés de l’analyse";
+  const content = document.createElement("pre");
+  content.style.whiteSpace = "pre-wrap";
+  content.style.overflowWrap = "anywhere";
+  content.textContent = JSON.stringify({horaires_et_configuration: record.request, resultat: record.result}, null, 2);
+  details.append(summary, content);
+  root.append(details);
+}
+document.querySelectorAll("[data-open-analysis-history]").forEach(button => button.addEventListener("click", () => {
+  document.querySelector("#analysis-history-dialog").showModal();
+  loadAnalysisHistory();
+}));
+document.querySelector("#analysis-history-close").addEventListener("click", () => document.querySelector("#analysis-history-dialog").close());
+document.querySelector("#analysis-history-dialog").addEventListener("close", () => { analysisHistoryState.generation += 1; });
+document.querySelector("#analysis-history-next").addEventListener("click", () => loadAnalysisHistory(true));

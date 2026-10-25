@@ -782,3 +782,8 @@ html[data-ui-mode="pro"][data-guided-view="availability"]:not([data-guided-initi
 #data-context-dialog summary { padding: 12px 0; cursor: pointer; }
 #data-context-executable { overflow-wrap: anywhere; }
 .page-footer { flex-wrap: wrap; align-items: center; }
+
+#analysis-history-dialog { width: min(900px, calc(100vw - 32px)); max-height: 90vh; overflow: auto; padding: 1.5rem; color: var(--ink); background: var(--night-soft); border: 1px solid var(--line-bright); border-radius: var(--radius); box-sizing: border-box; }
+#analysis-history-dialog::backdrop { background: rgba(1, 6, 12, .82); }
+#analysis-history-list { display: flex; flex-wrap: wrap; gap: .75rem; }
+#analysis-history-dialog button { white-space: normal; overflow-wrap: anywhere; }
