@@ -1,20 +1,32 @@
 $ErrorActionPreference = 'Stop'
 $expected = '__SOURCE_SHA__'
-function Read-KitContext([string]$encoded, [string]$sourceSha) {
+$dataMode = '__DATA_MODE__'
+$stableRoot = 'C:\NightMeritData'
+$profileDirectory = if ($dataMode -eq 'stable') { Join-Path $stableRoot 'profil' } else { 'C:\NightMeritResults\profil' }
+$stableLock = $null
+function Read-KitContext([string]$encoded, [string]$sourceSha, [string]$mode = 'isolated') {
  if (-not $encoded -or $encoded.Length -gt 5000) { throw 'Contexte du lanceur absent ou trop long.' }
  $json = ([Text.UTF8Encoding]::new($false,$true)).GetString([Convert]::FromBase64String($encoded))
  $value = $json | ConvertFrom-Json
- if ($value.schema -cne 'nightmerit.private_copy_context.v1' -or $value.source_sha -cne $sourceSha -or $sourceSha -cnotmatch '^[0-9a-f]{40}$') { throw 'Contexte du lanceur incompatible.' }
+ $schema = if ($mode -eq 'stable') { 'nightmerit.private_copy_context.v2' } else { 'nightmerit.private_copy_context.v1' }
+ if ($value.schema -cne $schema -or $value.source_sha -cne $sourceSha -or $sourceSha -cnotmatch '^[0-9a-f]{40}$') { throw 'Contexte du lanceur incompatible.' }
  foreach ($name in @('host_kit_directory','host_results_directory','guest_data_directory')) {
   $path = $value.$name
   if ($path -isnot [string] -or -not $path -or $path.Length -gt 2048 -or $path -match '[\x00-\x1f]' -or -not [IO.Path]::IsPathRooted($path) -or $path -match '(^|[\\/])\.\.([\\/]|$)') { throw 'Chemin de contexte invalide.' }
   if ([IO.Path]::GetFullPath($path).TrimEnd('\') -ine $path.TrimEnd('\')) { throw 'Chemin de contexte non absolu.' }
  }
- if ($value.host_results_directory.TrimEnd('\') -ine (Join-Path $value.host_kit_directory 'RESULTATS').TrimEnd('\') -or $value.guest_data_directory -ine 'C:\NightMeritResults\profil') { throw 'Correspondance de contexte invalide.' }
+ $guest = if ($mode -eq 'stable') { 'C:\NightMeritData\profil' } else { 'C:\NightMeritResults\profil' }
+ if ($mode -eq 'stable') {
+  if ($value.host_data_directory -isnot [string] -or -not [IO.Path]::IsPathRooted($value.host_data_directory) -or $value.host_data_directory -match '[\x00-\x1f]|(^|[\\/])\.\.([\\/]|$)') { throw 'Contexte des donnees partagees invalide.' }
+ }
+ if ($value.host_results_directory.TrimEnd('\') -ine (Join-Path $value.host_kit_directory 'RESULTATS').TrimEnd('\') -or $value.guest_data_directory -ine $guest) { throw 'Correspondance de contexte invalide.' }
  return ($value | ConvertTo-Json -Compress)
 }
 $inputRoot = 'C:\NightMeritInput'
 $workRoot = 'C:\NightMeritWork'
+# Guest-only standard locations retain Chromium sandbox access permissions.
+$browserInstallRoot = Join-Path $env:ProgramFiles 'NightMeritPrivateBrowser'
+$browserProfilesRoot = Join-Path $env:LOCALAPPDATA 'NightMeritPrivateBrowserProfiles'
 $results = 'C:\NightMeritResults'
 $appProcess = $null
 $browserProcess = $null
@@ -52,10 +64,24 @@ function Start-Copy([bool]$dataTransfer = $false) {
   New-Item -ItemType Directory -Force -Path $folder | Out-Null
   $start.EnvironmentVariables[$key] = $folder
  }
- $start.EnvironmentVariables['ASTROPILOT_DATA_DIR'] = Join-Path $results 'profil'
+ $start.EnvironmentVariables['ASTROPILOT_DATA_DIR'] = $profileDirectory
  # Display-only metadata. It never selects the application or data locations.
  if ($script:copyContext) { $start.EnvironmentVariables['NIGHTMERIT_PRIVATE_COPY_CONTEXT'] = $script:copyContext }
- $start.EnvironmentVariables['BROWSER'] = 'C:\Windows\System32\cmd.exe /c C:\NightMeritWork\no-browser.cmd %s'
+ # Python webbrowser parses BROWSER with shlex; a failing cmd fallback opens Edge.
+ # This fixed no-op succeeds without executing the substituted URL.
+ $start.EnvironmentVariables['BROWSER'] = '"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "exit 0 # %s"'
+ if ($dataMode -eq 'stable') {
+  $start.Arguments = '--prepare-stable-beta '+$expected
+  $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
+  $preparation=[Diagnostics.Process]::Start($start)
+  try {
+   if (-not $preparation.WaitForExit(120000)) { Stop-Owned $preparation; throw 'La preparation des donnees a depasse le delai. Vos donnees sont conservees.' }
+   $diagnostic=$preparation.StandardError.ReadToEnd()
+   if ($preparation.ExitCode -ne 0) { throw ('Preparation arretee avant le lancement : '+$diagnostic) }
+  } finally { $preparation.Dispose() }
+  $start.RedirectStandardOutput=$false; $start.RedirectStandardError=$false
+  $start.Arguments = if ($dataTransfer) { '--data-transfer' } else { '' }
+ }
  $script:appProcess = [Diagnostics.Process]::Start($start)
  $ready = $false
  $http = [Net.WebClient]::new(); $http.Proxy = $null
@@ -81,10 +107,12 @@ function Start-Copy([bool]$dataTransfer = $false) {
  }
  if (-not $ready) { throw 'Le demarrage de NightMerit a depasse le delai prevu.' }
  $run.stage='launch_browser'; Write-Run
- $chrome = Join-Path $workRoot 'browser\chrome.exe'
- $browserProfile = Join-Path $workRoot 'navigateur'
+ $chrome = Join-Path $browserInstallRoot 'chrome.exe'
+ $browserProfile = Join-Path $browserProfilesRoot 'normal'
+ $run.browser_executable = $chrome
+ $run.browser_kind = 'bundled_chromium'
  if ($dataTransfer) {
-  $browserProfile = Join-Path $workRoot 'navigateur-donnees'
+  $browserProfile = Join-Path $browserProfilesRoot 'donnees'
   $preferences = Join-Path $browserProfile 'Default\Preferences'
   New-Item -ItemType Directory -Force -Path (Split-Path $preferences) | Out-Null
   $downloads = Join-Path $results 'SAUVEGARDES'
@@ -92,8 +120,13 @@ function Start-Copy([bool]$dataTransfer = $false) {
   $settings = @{download=@{default_directory=$downloads;prompt_for_download=$false}} | ConvertTo-Json -Depth 4
   [IO.File]::WriteAllText($preferences,$settings,[Text.UTF8Encoding]::new($false))
  }
- $arguments = @('--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-gpu',('--user-data-dir='+$browserProfile),'http://127.0.0.1:8000/')
+ $arguments = @('--enable-logging',('--log-file='+$results+'\browser-debug.log'),'--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-gpu',('--user-data-dir="'+$browserProfile+'"'),'http://127.0.0.1:8000/')
  $script:browserProcess = Start-Process -FilePath $chrome -ArgumentList $arguments -WorkingDirectory $workRoot -PassThru
+ Start-Sleep -Milliseconds 1500
+ if ($script:browserProcess.HasExited) { throw ('Le navigateur fourni s est arrete : code '+$script:browserProcess.ExitCode) }
+ $run.browser_pid = $script:browserProcess.Id
+ $run.browser_profile = $browserProfile
+ if ($dataTransfer) { $run.backup_download_directory = $downloads }
  $run.stage='browser_started'; $run.status='running'; Write-Run
 }
 try {
@@ -110,20 +143,26 @@ try {
  # Context absence never prevents resuming a valid existing profile. Tell the UI
  # explicitly that identification failed instead of retaining an inherited path.
  $script:copyContext = '{"schema":"unavailable"}'
- try { $script:copyContext = Read-KitContext $env:NIGHTMERIT_KIT_CONTEXT_B64 $expected } catch { Write-Host 'Emplacement du kit sur le PC non disponible. Les donnees utilisees restent celles de RESULTATS.' -ForegroundColor Yellow }
- $profile = Join-Path $results 'profil'
+ try { $script:copyContext = Read-KitContext $env:NIGHTMERIT_KIT_CONTEXT_B64 $expected $dataMode } catch { Write-Host 'Emplacement du kit sur le PC non disponible. Le dossier de donnees selectionne par le lanceur reste inchange.' -ForegroundColor Yellow }
+ if ($dataMode -eq 'stable') {
+  if (-not (Test-Path -LiteralPath $stableRoot -PathType Container)) { throw 'Le dossier partage des donnees beta est indisponible.' }
+  $leasePath=Join-Path $stableRoot '.nightmerit-session.lock'
+  if ((Test-Path -LiteralPath $leasePath) -and ((Get-Item -LiteralPath $leasePath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Un verrou de donnees lie est refuse.' }
+  $stableLock=[IO.File]::Open($leasePath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+ }
+ $profile = $profileDirectory
  if (Test-Path -LiteralPath $profile) {
   if ((Get-Item -LiteralPath $profile).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Profil lie refuse.' }
  } else { New-Item -ItemType Directory -Path $profile | Out-Null }
  $marker=Join-Path $results 'profil-source.txt'
  if (Test-Path $marker) { if ((Get-Content $marker -Raw).Trim() -cne $expected) { throw 'Ce dossier de donnees appartient a un autre kit.' } }
- elseif (@(Get-ChildItem -LiteralPath $profile -Force).Count) { throw 'Profil non vide sans provenance : aucun import automatique.' }
+ elseif ($dataMode -ne 'stable' -and @(Get-ChildItem -LiteralPath $profile -Force).Count) { throw 'Profil non vide sans provenance : aucun import automatique.' }
  else { [IO.File]::WriteAllText($marker,$expected) }
  if (Test-Path -LiteralPath $workRoot) { throw 'Cette instance Sandbox contient deja une copie. Fermez Sandbox puis relancez le kit.' }
  New-Item -ItemType Directory -Path $workRoot | Out-Null
  Copy-Item -LiteralPath (Join-Path $inputRoot 'candidate') -Destination $workRoot -Recurse
- Copy-Item -LiteralPath (Join-Path $inputRoot 'browser') -Destination $workRoot -Recurse
- [IO.File]::WriteAllText((Join-Path $workRoot 'no-browser.cmd'), "@exit /b 0`r`n")
+ if (Test-Path -LiteralPath $browserInstallRoot) { throw 'Le dossier du navigateur de test existe deja dans cette Sandbox.' }
+ Copy-Item -LiteralPath (Join-Path $inputRoot 'browser') -Destination $browserInstallRoot -Recurse
  Write-Run; Start-Copy ($env:NIGHTMERIT_OPEN_DATA_TRANSFER -eq '1')
  $run.stage='interactive_console'; Write-Run
  Write-Host 'TEST PRIVE NightMerit - profil separe - meteo reelle' -ForegroundColor Cyan
@@ -141,10 +180,11 @@ try {
  Stop-Copy
  $run.status='stopped'; $run.completed_utc=[DateTime]::UtcNow.ToString('o'); Write-Run
  $export = Join-Path $results ('resultats-kit-__SOURCE_SHORT__-windows-'+[DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')+'-'+[Guid]::NewGuid().ToString('N').Substring(0,6)+'.zip')
- # Export the operator report only; the retained profile stays local in RESULTATS.
+ # Export the operator report only; the retained profile is never included.
  Compress-Archive -LiteralPath (Join-Path $results 'dernier-test.json'),(Join-Path $inputRoot 'LIRE-MOI.txt') -DestinationPath $export -ErrorAction Stop
  Write-Host ('Resultats exportes : '+$export) -ForegroundColor Green
- Write-Host 'Le profil reste dans RESULTATS\profil. Ne le supprimez pas.'
+ if ($dataMode -eq 'stable') { Write-Host 'Votre profil reste dans le dossier commun NightMerit\PrivateBeta sur votre PC. Ne le supprimez pas.' }
+ else { Write-Host 'Le profil reste dans RESULTATS\profil. Ne le supprimez pas.' }
 } catch {
  $run.status='error'; $run.error=$_.Exception.Message
  $run.error_line=$_.InvocationInfo.ScriptLineNumber
@@ -154,6 +194,7 @@ try {
  Write-Host ('ARRET : '+$_.Exception.Message) -ForegroundColor Red
 } finally {
  try { Stop-Copy } catch { Write-Host $_.Exception.Message -ForegroundColor Red }
+ if ($null -ne $stableLock) { $stableLock.Dispose() }
  if ($null -ne $lock) { $lock.Dispose() }
  Read-Host 'Appuyez sur Entree pour fermer cette fenetre' | Out-Null
 }

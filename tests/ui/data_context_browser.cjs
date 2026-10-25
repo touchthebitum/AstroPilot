@@ -54,6 +54,16 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
    await page.locator('#data-context-close').click();
   }
   assert.notEqual(hostData[0],hostData[1],'same-build copies with the same guest paths remain distinguishable');
+  for(const mode of ['simple','pro'])for(const width of [390,1280]){
+   await page.setViewportSize({width,height:900});await page.evaluate(mode=>applyUiMode(mode),mode);
+   const shared=String.raw`C:\Users\Franck\AppData\Local\NightMerit\PrivateBeta\profil`;
+   fixture={runtime:{version:'1.0.0b8',build:'abcdef0'},data_directory:String.raw`C:\NightMeritData\profil`,application_executable:String.raw`C:\NightMeritWork\candidate\AstroPilot.exe`,private_copy:{status:'provided_by_launcher',host:{kit_directory:String.raw`C:\Version suivante\Kit`,data_directory:shared,storage_mode:'stable_private_beta'}}};
+   await page.locator('#data-context-footer').click();await page.locator('#data-context-host').waitFor();
+   assert.equal(await page.locator('#data-context-host-data').textContent(),shared);
+   assert.match(await page.locator('#data-context-host-note').innerText(),/sans nouveau transfert/);
+   assert.equal(await page.locator('#data-context-dialog').evaluate(e=>e.scrollWidth<=e.clientWidth),true);
+   await page.locator('#data-context-close').click();
+  }
   fixture.private_copy={status:'unavailable',host:null};
   await page.locator('#data-context-footer').click();await page.locator('#data-context-details').waitFor();
   assert.equal(await page.locator('#data-context-host').isVisible(),false);

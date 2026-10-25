@@ -8,16 +8,18 @@ import re
 TEMPLATES = Path(__file__).with_name('private_beta_windows')
 
 
-def render(source_sha: str, output: Path):
+def render(source_sha: str, output: Path, *, data_mode="isolated"):
     if not re.fullmatch(r'[0-9a-f]{40}', source_sha):
         raise ValueError('Full lowercase source SHA required')
+    if data_mode not in {"stable", "isolated"}:
+        raise ValueError("Unknown private data mode")
     # A generated launcher must never overwrite an existing kit or profile.
     output.mkdir(parents=True, exist_ok=False)
     audit = output / 'Audit'
     audit.mkdir()
     for name in ['controller.ps1', 'launch-sandbox.ps1', 'sandbox-start.cmd']:
         text = (TEMPLATES / name).read_text(encoding='utf-8')
-        text = text.replace('__SOURCE_SHA__', source_sha).replace('__SOURCE_SHORT__', source_sha[:7])
+        text = text.replace('__SOURCE_SHA__', source_sha).replace('__SOURCE_SHORT__', source_sha[:7]).replace('__DATA_MODE__', data_mode)
         target = audit / name if name.endswith('.ps1') else output / name
         target.write_bytes(text.replace('\r\n', '\n').replace('\n', '\r\n').encode('utf-8'))
     host_hash = hashlib.sha256((audit / 'launch-sandbox.ps1').read_bytes()).hexdigest()
@@ -42,8 +44,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-sha', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument("--data-mode", choices=["stable", "isolated"], default="isolated")
     args = parser.parse_args()
-    render(args.source_sha, args.output)
+    render(args.source_sha, args.output, data_mode=args.data_mode)
 
 
 if __name__ == '__main__':

@@ -3,6 +3,7 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import argparse, fcntl, hashlib, json, os, secrets, signal, socket, subprocess, sys, threading, time, urllib.request
 SHA='__SOURCE_SHA__'
+DATA_MODE='__DATA_MODE__'
 ROOT=Path(sys.executable).resolve().parents[1] if getattr(sys,'frozen',False) else Path(__file__).resolve().parent
 OPENER=urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -32,6 +33,13 @@ def environment(case,launcher):
   p=case/'environment'/key;p.mkdir(parents=True,exist_ok=True);env[key]=str(p)
  env['ASTROPILOT_DATA_DIR']=str(case/'profil');env['BROWSER']=f'"{launcher}" --ignore-browser %s'
  return env
+
+def stable_data_directory(home):
+ root=Path(home)/'Library/Application Support/NightMerit/PrivateBeta'
+ for path in (root,*root.parents):
+  if path.is_symlink():raise RuntimeError('Un dossier de données lié est refusé.')
+ root.mkdir(parents=True,exist_ok=True,mode=0o700)
+ return root
 
 def browser_arguments(chrome,case):
  # This dedicated local browser has no account/password use. Chromium's test
@@ -64,13 +72,23 @@ def start(root,selftest=False,data_transfer=False):
  except BlockingIOError:raise RuntimeError('Cette copie bêta est déjà lancée.')
  exe=root/'candidate/AstroPilot.app/Contents/MacOS/AstroPilot'
  chrome=root/'browser/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'
- env=environment(case,Path(sys.executable));app=browser=None;logs=[];server=None;thread=None;done=threading.Event();control_file=case/'controle.json';token=secrets.token_urlsafe(32)
+ env=environment(case,Path(sys.executable));app=browser=None;logs=[];server=None;thread=None;done=threading.Event();control_file=case/'controle.json';token=secrets.token_urlsafe(32);stable_lock=None
  for name in ('SIGINT','SIGTERM','SIGHUP'):signal.signal(getattr(signal,name),lambda *_:done.set())
  try:
   if owners(8000):raise RuntimeError('Une application occupe le port 8000. Fermez-la normalement puis relancez cette copie. Aucun processus existant n’a été arrêté.')
   with socket.socket() as s:
    if s.connect_ex(('127.0.0.1',8000))==0:raise RuntimeError('Le port 8000 est occupé.')
   for name in ('application-stdout.log','application-stderr.log'):logs.append((case/name).open('ab'))
+  if DATA_MODE=='stable' and not selftest:
+   data_root=stable_data_directory(Path.home())
+   lock_path=data_root/'.nightmerit-session.lock'
+   if lock_path.is_symlink():raise RuntimeError('Un verrou de données lié est refusé.')
+   stable_lock=lock_path.open('a+b')
+   try:fcntl.flock(stable_lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+   except BlockingIOError:raise RuntimeError('Vos données bêta sont déjà utilisées. Fermez la copie ouverte.')
+   env['ASTROPILOT_DATA_DIR']=str(data_root/'profil')
+   prepared=subprocess.run([str(exe),'--prepare-stable-beta',SHA],cwd=case,env=env,capture_output=True,text=True,timeout=120)
+   if prepared.returncode:raise RuntimeError(prepared.stderr.strip() or 'La préparation des données bêta a échoué. Vos données sont conservées.')
   app=subprocess.Popen([str(exe)]+(['--data-transfer'] if data_transfer else []),cwd=case,env=env,stdout=logs[0],stderr=logs[1],start_new_session=True)
   identity=None
   for _ in range(240):
@@ -110,7 +128,8 @@ def start(root,selftest=False,data_transfer=False):
   write(control_file,{'pid':os.getpid(),'port':server.server_address[1],'token':token})
   browser_log=(case/'browser.log').open('ab');logs.append(browser_log)
   browser=subprocess.Popen(base+['http://127.0.0.1:8000/'],cwd=case,env=env,stdout=browser_log,stderr=browser_log,start_new_session=True)
-  print('NightMerit bêta privée — profil dédié — météo réelle\nGardez cette fenêtre ouverte. Pour arrêter : ARRETER-BETA.command.\nVos saisies seront conservées uniquement dans DONNEES-BETA.',flush=True)
+  location=str(data_root/'profil') if DATA_MODE=='stable' else str(case/'profil')
+  print('NightMerit bêta privée — météo réelle\nGardez cette fenêtre ouverte. Pour arrêter : ARRETER-BETA.command.\nDossier de vos données : '+location,flush=True)
   while not done.wait(.5):
    if app.poll() is not None:
     if data_transfer and app.returncode==0:break
@@ -130,6 +149,7 @@ def start(root,selftest=False,data_transfer=False):
     if not owners(8000):break
     time.sleep(.1)
    else:raise RuntimeError('Le port ne s’est pas libéré après arrêt de notre copie.')
+  if stable_lock:fcntl.flock(stable_lock,fcntl.LOCK_UN);stable_lock.close()
   fcntl.flock(lock,fcntl.LOCK_UN);lock.close()
 
 if __name__=='__main__':

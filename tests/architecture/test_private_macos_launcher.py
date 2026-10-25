@@ -53,3 +53,38 @@ def test_rendered_mac_commands_are_separate_and_refuse_existing_directory(tmp_pa
  before=(output/'launcher.py').read_bytes()
  with pytest.raises(FileExistsError):render('a'*40,output)
  assert (output/'launcher.py').read_bytes()==before
+
+
+def test_stable_mac_versions_share_only_the_beta_profile_and_release_their_lease(tmp_path,monkeypatch):
+ from types import SimpleNamespace
+ import fcntl
+ home=tmp_path/'home';home.mkdir();monkeypatch.setattr(m.Path,'home',lambda:home)
+ monkeypatch.setattr(m,'DATA_MODE','stable');monkeypatch.setattr(m,'verify',lambda root:None)
+ monkeypatch.setattr(m,'owners',lambda port:set())
+ socket_stub=__import__('unittest.mock',fromlist=['MagicMock']).MagicMock()
+ socket_stub.__enter__.return_value.connect_ex.return_value=1
+ monkeypatch.setattr(m.socket,'socket',lambda *a,**k:socket_stub)
+ calls=[]
+ def prepare(args,**kw):
+  calls.append((args,kw['env']['ASTROPILOT_DATA_DIR']))
+  return SimpleNamespace(returncode=0,stderr='')
+ monkeypatch.setattr(m.subprocess,'run',prepare)
+ monkeypatch.setattr(m.subprocess,'Popen',__import__('unittest.mock',fromlist=['Mock']).Mock(side_effect=RuntimeError('sentinel')))
+ for name,sha in [('version1','a'*40),('version2','b'*40)]:
+  root=tmp_path/name;root.mkdir();monkeypatch.setattr(m,'SHA',sha)
+  with pytest.raises(RuntimeError,match='sentinel'):m.start(root)
+ assert calls[0][1]==calls[1][1]==str(home/'Library/Application Support/NightMerit/PrivateBeta/profil')
+ assert calls[0][0][-2:]==['--prepare-stable-beta','a'*40]
+ assert calls[1][0][-2:]==['--prepare-stable-beta','b'*40]
+ # Neither old nor new application folder receives the shared profile.
+ assert not (tmp_path/'version1/DONNEES-BETA/profil').exists()
+ with (home/'Library/Application Support/NightMerit/PrivateBeta/.nightmerit-session.lock').open('a+b') as lease:
+  fcntl.flock(lease,fcntl.LOCK_EX|fcntl.LOCK_NB)
+
+
+def test_stable_mac_root_is_not_the_production_profile_and_refuses_aliases(tmp_path):
+ root=m.stable_data_directory(tmp_path)
+ assert root==tmp_path/'Library/Application Support/NightMerit/PrivateBeta'
+ assert root!=tmp_path/'Library/Application Support/AstroPilot'
+ bad=tmp_path/'redirected';bad.mkdir();(bad/'Library').symlink_to(tmp_path/'Library',target_is_directory=True)
+ with pytest.raises(RuntimeError,match='lié'):m.stable_data_directory(bad)

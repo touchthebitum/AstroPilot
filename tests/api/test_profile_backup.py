@@ -265,6 +265,23 @@ def test_complete_session_and_observation_graph_roundtrip(tmp_path, monkeypatch)
     assert credit(resumed, 'execution-1', 'evidence-1').json()['status'] == 'already_applied'
     assert snapshot(target) == before
 
+    # New beta builds resume the same store; the pre-update snapshot must keep
+    # saved comparison evidence and already credited exposures exactly once.
+    from astropilot.stable_beta_data import prepare
+    shared=tmp_path/'stable-beta'/'profil'
+    prepare(shared,'a'*40)
+    restore_empty(shared,files)
+    assert prepare(shared,'b'*40)['backup_created']
+    automatic=next((shared.parent/'SAUVEGARDES-AUTO').glob('*.zip'))
+    saved,counts=inspect_backup(automatic.read_bytes())
+    assert saved==before==snapshot(shared)
+    assert counts['sessions']==counts['observations']==counts['comparisons']==1
+    monkeypatch.setenv('ASTROPILOT_DATA_DIR',str(shared))
+    next_build=TestClient(create_app(service_factory=build_durable_tonight_application_service,
+                                   guardian_renewal_enabled=False))
+    assert credit(next_build,'execution-1','evidence-1').json()['status']=='already_applied'
+    assert snapshot(shared)==before
+
 
 def test_preview_expiry_and_bounded_uploads(source, tmp_path, monkeypatch):
     import astropilot.profile_transfer_app as transfer
