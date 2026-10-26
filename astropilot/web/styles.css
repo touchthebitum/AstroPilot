@@ -180,6 +180,16 @@ button { color: inherit; }
 .equipment-choice:has(input:checked) { background: var(--cyan-soft); border-color: rgba(103,228,209,.38); }
 .equipment-choice strong, .equipment-choice small { display: block; }
 .equipment-choice small { margin-top: 4px; color: var(--muted); font-size: 11px; }
+.equipment-choice input { min-width: 22px; min-height: 22px; margin: 0; accent-color: var(--cyan); }
+.equipment-choice span { min-width: 0; overflow-wrap: anywhere; }
+#equipment-search-panel > .field { max-width: 560px; }
+#equipment-clear-search { margin-top: 8px; }
+#equipment-search-status { margin: 12px 0; font-size: 13px; }
+#equipment-selection-summary { font-size: 13px; }
+#equipment-no-results { margin: 16px 0; }
+#equipment-no-results button { margin: 0 8px 8px 0; max-width: 100%; white-space: normal; }
+.equipment-filter-help { margin: 20px 0; }
+.equipment-filter-help summary, .custom-equipment summary { min-height: 44px; padding: 10px 0; cursor: pointer; }
 .custom-equipment { margin: 0; padding: 22px; border: 1px solid var(--line); border-radius: 12px; }
 .custom-equipment legend { padding: 0 8px; color: var(--cyan); font-size: 12px; font-weight: 700; }
 .check-field { display: flex; gap: 9px; align-items: center; color: #cad3df; font-size: 13px; }

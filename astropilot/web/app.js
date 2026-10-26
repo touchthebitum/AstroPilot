@@ -4812,8 +4812,6 @@ function draftFromConfiguration(configuration) {
     };
   } else if (active) {
     equipment = { preset_id: active.id };
-  } else if (configuration.preset_equipment?.length) {
-    equipment = { preset_id: configuration.preset_equipment[0].id };
   }
   return {
     site: configuration.site ? { ...configuration.site } : null,
@@ -4830,6 +4828,7 @@ function showFormError(message) {
 function renderPresetChoices() {
   const container = document.querySelector("#preset-equipment");
   container.replaceChildren();
+  document.querySelector("#equipment-search").value = "";
   for (const choice of state.configuration?.preset_equipment || []) {
     const label = document.createElement("label");
     const radio = document.createElement("input");
@@ -4840,16 +4839,40 @@ function renderPresetChoices() {
     radio.type = "radio";
     radio.name = "preset-equipment";
     radio.value = choice.id;
+    radio.addEventListener("change", () => { showFormError(""); updateEquipmentSearch(); });
     name.textContent = choice.name;
     details.textContent = `${choice.optics_manufacturer} ${choice.optics_model} · ${choice.camera_manufacturer} ${choice.camera_model}`;
     copy.append(name, details);
     label.append(radio, copy);
     container.append(label);
   }
+  updateEquipmentSearch();
+}
+
+function updateEquipmentSearch() {
+  const normalize = value => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const terms = normalize(document.querySelector("#equipment-search").value).split(/\s+/).filter(Boolean);
+  document.querySelector("#equipment-clear-search").hidden = document.querySelector("#equipment-search").value.length === 0;
+  const choices = [...document.querySelectorAll("#preset-equipment .equipment-choice")];
+  let visible = 0;
+  for (const choice of choices) {
+    const searchable = normalize(choice.textContent);
+    choice.hidden = !terms.every(term => searchable.includes(term));
+    if (!choice.hidden) visible++;
+  }
+  document.querySelector("#equipment-search-status").textContent = terms.length
+    ? `${visible} ensemble${visible === 1 ? "" : "s"} trouvé${visible === 1 ? "" : "s"} dans les ${choices.length} configurations proposées par cette bêta.`
+    : `${choices.length} ensembles proposés par cette bêta. Votre modèle peut être saisi séparément s’il n’est pas dans la liste.`;
+  document.querySelector("#equipment-no-results").hidden = visible !== 0;
+  const selected = choices.find(choice => choice.querySelector("input").checked);
+  document.querySelector("#equipment-selection-summary").textContent = selected
+    ? `Votre choix : ${selected.querySelector("strong").textContent}.${selected.hidden ? " Effacez la recherche pour le revoir ou choisissez un autre matériel." : ""}`
+    : "Choisissez l’ensemble qui correspond à votre matériel pour continuer.";
 }
 
 function toggleEquipmentKind() {
   const kind = document.querySelector('input[name="equipment-kind"]:checked')?.value;
+  document.querySelector("#equipment-search-panel").hidden = kind !== "preset";
   document.querySelector("#preset-equipment").hidden = kind !== "preset";
   document.querySelector("#custom-equipment").hidden = kind !== "custom";
 }
@@ -5641,6 +5664,7 @@ function prefillConfiguration() {
   const preset = [...document.querySelectorAll('input[name="preset-equipment"]')]
     .find((input) => input.value === presetId);
   if (preset) preset.checked = true;
+  updateEquipmentSearch();
   for (const [name, selector, type] of customEquipmentFields) {
     const input = document.querySelector(selector);
     if (type === "boolean") input.checked = Boolean(custom?.[name]);
@@ -5709,6 +5733,9 @@ function readEquipment() {
   }
   const selected = document.querySelector('input[name="preset-equipment"]:checked');
   if (!selected) return [null, "Choisissez une configuration matérielle."];
+  if (selected.closest(".equipment-choice").hidden) {
+    return [null, "Votre configuration sélectionnée est masquée par la recherche. Cliquez sur « Revoir toute la liste » ou choisissez un autre matériel."];
+  }
   return [{ preset_id: selected.value }, null];
 }
 
@@ -7024,8 +7051,21 @@ for (const button of document.querySelectorAll("[data-back]")) {
 }
 
 for (const input of document.querySelectorAll('input[name="equipment-kind"]')) {
-  input.addEventListener("change", toggleEquipmentKind);
+  input.addEventListener("change", () => { showFormError(""); toggleEquipmentKind(); });
 }
+document.querySelector("#equipment-search").addEventListener("input", () => { showFormError(""); updateEquipmentSearch(); });
+document.querySelector("#equipment-clear-search").addEventListener("click", () => {
+  showFormError("");
+  document.querySelector("#equipment-search").value = "";
+  updateEquipmentSearch();
+  document.querySelector("#equipment-search").focus();
+});
+document.querySelector("#equipment-enter-custom").addEventListener("click", () => {
+  showFormError("");
+  document.querySelector('input[name="equipment-kind"][value="custom"]').checked = true;
+  toggleEquipmentKind();
+  document.querySelector("#custom-optics-manufacturer").focus();
+});
 
 function editConfiguration() {
   if (guardUnresolvedAcceptance()) return;
