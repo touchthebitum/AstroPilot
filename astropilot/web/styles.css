@@ -822,6 +822,8 @@ body.layout-nightline {
   background: var(--night);
 }
 body.layout-nightline::before { display: none; }
+/* This heading receives navigation focus for screen readers, but is not a control. */
+body.layout-nightline #availability-title:focus { outline: none; }
 body.layout-nightline .topbar {
   display: flex;
   flex-wrap: wrap;
