@@ -5595,7 +5595,11 @@ function configurationDraftMatchesSaved() {
 
 function prepareGuidedSession({saveDraft = false, projectId} = {}) {
   if (guardUnresolvedAcceptance() || state.savingProjectProgress || !confirmDiscardProjectProgress()) return;
-  if (projectId !== undefined) state.selectedProjectId = projectId;
+  if (projectId !== undefined) {
+    // An explicit saved-project choice supersedes any previous alternative search.
+    setDiscoveryMode(false);
+    state.selectedProjectId = projectId;
+  }
   const unchanged = configurationDraftMatchesSaved();
   if (!unchanged) {
     if (saveDraft) {saveConfiguration(); return;}

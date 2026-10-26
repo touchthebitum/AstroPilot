@@ -20,9 +20,10 @@ const mission={mission_id:'nightline-mission',decision_id:decision.decision_id,t
  try{
  const page=await browser.newPage({timezoneId:'America/New_York'}),errors=[],requests=[];
  page.on('pageerror',e=>errors.push(e.message));
+ page.on('request',request=>{if(new URL(request.url()).origin==='https://nightline.test')requests.push([request.method(),new URL(request.url()).pathname]);});
  const web=path.resolve(__dirname,'../../astropilot/web');
  await page.route('https://nightline.test/**',route=>{
-  const p=new URL(route.request().url()).pathname;requests.push([route.request().method(),p]);
+  const p=new URL(route.request().url()).pathname;
   if(p==='/ui/timezone-data.js')return route.fulfill({headers:timeHeaders,contentType:'text/javascript',body:timeData});
   const name=p==='/'?'index.html':p.startsWith('/ui/')?path.basename(p):'';
   const file=path.join(web,name);
@@ -79,6 +80,16 @@ const mission={mission_id:'nightline-mission',decision_id:decision.decision_id,t
  }
  // Refusal navigation preserves the chosen project until an explicit alternative search.
  await page.route('https://nightline.test/v1/project-templates',route=>route.fulfill({headers:timeHeaders,json:[]}));
+ await page.route('https://nightline.test/v1/projects/M42/progress',route=>route.fulfill({headers:timeHeaders,json:{
+  acquisition_intent_targets:[{acquisition_intent_id:'m42_ha',target_hours:15}],
+  acquisition_intents:[{acquisition_intent_id:'m42_ha',filter_type:'Ha'}],
+  intent_progress_breakdown:[{acquisition_intent_id:'m42_ha',effective_total_seconds:0,remaining_hours:15}],
+ }}));
+ const targetedRequests=[];
+ await page.route('https://nightline.test/v1/tonight',route=>{
+  targetedRequests.push(route.request().postDataJSON());
+  return route.fulfill({headers:timeHeaders,json:{status:'no_productive_window'}});
+ });
  for(const mode of ['simple','pro']) {
   await page.evaluate(mode=>{
    applyUiMode(mode);state.configuration.projects={M42:{target_hours:15}};
@@ -106,10 +117,33 @@ const mission={mission_id:'nightline-mission',decision_id:decision.decision_id,t
   assert.equal(await page.evaluate(()=>state.selectedProjectId),null);
   assert.equal(await page.inputValue('#availability-start'),'2026-10-26T20:00');
   assert.equal(await page.evaluate(()=>JSON.stringify(state.configuration)),saved);
+  // Return from alternative search to the explicitly chosen saved project.
+  await page.locator('#nav-projects').click();
+  if(mode==='simple') {
+   await page.waitForFunction(()=>!document.querySelector('#simple-projects .simple-project-actions .primary-button').disabled);
+   await page.locator('#simple-projects .simple-project-actions .primary-button').click();
+  } else {
+   await page.evaluate(()=>prepareGuidedSession({projectId:'M42'}));
+  }
+  assert.equal(await page.evaluate(()=>state.view),'availability');
+  assert.equal(await page.evaluate(()=>state.selectedProjectId),'M42');
+  assert.equal(await page.evaluate(()=>state.discoveryMode),false);
+  assert.equal(await page.locator('#discover-targets').isChecked(),false);
+  assert.equal(await page.locator('#discovery-filters').isVisible(),false);
+  assert.match(await page.locator('#availability-selected-project').innerText(),/M42/);
+  assert.equal(await page.inputValue('#availability-start'),'2026-10-26T20:00');
+  assert.equal(await page.inputValue('#availability-end'),'2026-10-26T22:00');
+  await page.locator('input[name="availability-mode"][value="fixed_window"]').check();
+  await page.locator('#request-recommendation').click();
+  await page.waitForFunction(()=>!state.requestingRecommendation);
+  assert.equal(targetedRequests.at(-1).selected_project_id,'M42');
+  assert.equal(Object.hasOwn(targetedRequests.at(-1),'confirmed_filter_profile_ids'),false);
+  assert.equal(await page.evaluate(()=>JSON.stringify(state.configuration)),saved);
   await page.evaluate(()=>showMessage('Erreur réseau','Connexion impossible'));
   assert.equal(await page.locator('#message-discover-targets').isVisible(),false);
  }
- assert(requests.every(([method])=>method==='GET'),'visual checks must not write through the API');assert.deepEqual(errors,[]);
- console.log(JSON.stringify({result:'PASS',cases,read_only:true,mission_close_stays_visible:true,availability_preserved:true}));
+ assert.equal(targetedRequests.length,2);
+ assert.deepEqual(requests.filter(([method])=>method!=='GET'),[['POST','/v1/tonight'],['POST','/v1/tonight']],'only mocked targeted analyses may be requested; no profile or observation writes');assert.deepEqual(errors,[]);
+ console.log(JSON.stringify({result:'PASS',cases,mocked_targeted_analyses:targetedRequests.length,profile_writes:false,mission_close_stays_visible:true,availability_preserved:true}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1)});
