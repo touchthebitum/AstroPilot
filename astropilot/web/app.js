@@ -6616,7 +6616,11 @@ function showTonightUnavailable(payload) {
     : partialMessages[payload.status] || ["Décision indisponible", "Aucune recommandation exploitable."]);
   const forecast = refusalForecastMessage(payload);
   const shortWindow = payload.actionability_refusal?.refusal_stage === "continuous_window_too_short";
-  const editAvailability = canEditRefusedAvailability(payload) || (intentsRefusedForProductiveWindow(payload) && !forecast?.overcast);
+  // Navigation choices do not imply that different hours or a target will succeed.
+  const chosen = state.selectedProjectId;
+  const offerAlternatives = Boolean(chosen) && (["no_candidate", "no_productive_window", "weather_refused"].includes(payload.status)
+    || intentsRefusedForProductiveWindow(payload));
+  const editAvailability = offerAlternatives || canEditRefusedAvailability(payload) || (intentsRefusedForProductiveWindow(payload) && !forecast?.overcast);
   const body = creationRefused
     ? technical
     : productiveRefusal
@@ -6624,12 +6628,11 @@ function showTonightUnavailable(payload) {
       ? `Le créneau utilisable est trop court pour lancer une mission. Réessayez plus tard si les conditions évoluent.${editAvailability ? " Vous pouvez revoir votre disponibilité, sans garantie de trouver un créneau suffisant." : ""}`
       : "Aucun créneau ne permet de lancer une mission dans les conditions évaluées. Réessayez plus tard lorsque les prévisions évoluent."
     : `${technical} Réessayez plus tard lorsque les données ou les conditions évoluent.`;
-  const chosen = state.selectedProjectId;
   const simpleTitle = appliedUiMode === "simple" && productiveRefusal
     ? (shortWindow ? "Le créneau disponible est trop court" : "Aucun créneau adapté à vos horaires")
     : title;
   showMessage(simpleTitle, chosen
-    ? `Cible choisie : ${chosen}. ${body} Votre choix est conservé ; aucune autre cible ne le remplace.${forecast?.overcast ? " Vous pourrez reprendre ce projet lorsque les prévisions évolueront." : " Pour chercher une alternative, cochez « Me proposer une cible avec mon matériel » dans la préparation de séance."}`
+    ? `Cible choisie : ${chosen}. ${body} Votre projet est conservé.${offerAlternatives ? " Vous pouvez modifier vos horaires ou chercher une autre cible, sans garantie de créneau disponible." : " Votre choix est conservé ; aucune autre cible ne le remplace."}`
     : body, { kicker: "Analyse terminée" });
   text("#message-technical", candidateMessage?.[2] || forecast?.details || technical);
   const details = document.querySelector("#message-details");
@@ -6642,6 +6645,8 @@ function showTonightUnavailable(payload) {
   ui.retry.textContent = payload.creation_refusal === "no_eligible_acquisition_intent"
     ? "Actualiser les prévisions" : "Réessayer plus tard";
   document.querySelector("#message-edit-availability").hidden = !editAvailability;
+  document.querySelector("#message-discover-targets").hidden = !offerAlternatives;
+  if (offerAlternatives) ui.retry.textContent = "Actualiser l’analyse";
 }
 
 function showMessage(title, body, { kicker = "Décision indisponible", retry = true } = {}) {
@@ -6651,6 +6656,8 @@ function showMessage(title, body, { kicker = "Décision indisponible", retry = t
   if (details) details.hidden = true;
   const editAvailability = document.querySelector("#message-edit-availability");
   if (editAvailability) editAvailability.hidden = true;
+  const discoverTargets = document.querySelector("#message-discover-targets");
+  if (discoverTargets) discoverTargets.hidden = true;
   ui.retry.textContent = "Réessayer";
   text("#message-kicker", kicker);
   text("#message-title", title);
@@ -7654,6 +7661,16 @@ document.querySelector("#discover-from-projects").addEventListener("click", asyn
   if (revision !== state.viewRevision || configurationGeneration !== state.configurationGeneration || !state.discoveryMode) return;
   if (state.configuration?.configured && configurationDraftMatchesSaved()) setView("availability");
   else await saveConfiguration();
+});
+document.querySelector("#message-discover-targets").addEventListener("click", () => {
+  if (guardUnresolvedAcceptance() || !confirmDiscardProjectProgress()) return;
+  if (!state.configuration?.configured || !configurationDraftMatchesSaved()) {
+    showFormError("Enregistrez vos réglages avant de chercher une autre cible.");
+    setView("projects");
+    return;
+  }
+  setView("availability");
+  setDiscoveryMode(true);
 });
 document.querySelector("#discovery-back").addEventListener("click", () => { if (!guardUnresolvedAcceptance()) setView("availability"); });
 document.querySelector("#discovery-refresh").addEventListener("click", () => {

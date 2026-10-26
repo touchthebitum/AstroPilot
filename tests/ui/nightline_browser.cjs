@@ -77,6 +77,38 @@ const mission={mission_id:'nightline-mission',decision_id:decision.decision_id,t
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   cases.push({mode,width});
  }
+ // Refusal navigation preserves the chosen project until an explicit alternative search.
+ await page.route('https://nightline.test/v1/project-templates',route=>route.fulfill({headers:timeHeaders,json:[]}));
+ for(const mode of ['simple','pro']) {
+  await page.evaluate(mode=>{
+   applyUiMode(mode);state.configuration.projects={M42:{target_hours:15}};
+   state.configurationDraft=draftFromConfiguration(state.configuration);
+   state.selectedProjectId='M42';setDiscoveryMode(false);
+   state.availability={mode:'fixed_window',start:'2026-10-26T20:00',end:'2026-10-26T22:00'};
+   document.querySelector('#availability-start').value='2026-10-26T20:00';
+   document.querySelector('#availability-end').value='2026-10-26T22:00';
+   showTonightUnavailable({status:'no_candidate',target_refusal:{code:'target_below_minimum_altitude',minimum_altitude_deg:30,sample_count:8,window_start:'2026-10-26T20:00:00+01:00',window_end:'2026-10-26T22:00:00+01:00'}});
+  },mode);
+  const saved=await page.evaluate(()=>JSON.stringify(state.configuration));
+  assert.match(await page.locator('#message-title').innerText(),/trop basse/);
+  assert.equal(await page.locator('#message-edit-availability').innerText(),'Modifier mes horaires');
+  assert.equal(await page.locator('#message-discover-targets').isVisible(),true);
+  await page.locator('#message-edit-availability').click();
+  assert.equal(await page.evaluate(()=>state.view),'availability');
+  assert.equal(await page.evaluate(()=>state.selectedProjectId),'M42');
+  assert.equal(await page.locator('#discover-targets').isChecked(),false);
+  assert.equal(await page.inputValue('#availability-end'),'2026-10-26T22:00');
+  await page.evaluate(()=>showTonightUnavailable({status:'no_productive_window'}));
+  await page.locator('#message-discover-targets').click();
+  await page.waitForFunction(()=>state.discoveryMode && !state.projectTemplatesLoading);
+  assert.equal(await page.evaluate(()=>state.view),'availability');
+  assert.equal(await page.locator('#discover-targets').isChecked(),true);
+  assert.equal(await page.evaluate(()=>state.selectedProjectId),null);
+  assert.equal(await page.inputValue('#availability-start'),'2026-10-26T20:00');
+  assert.equal(await page.evaluate(()=>JSON.stringify(state.configuration)),saved);
+  await page.evaluate(()=>showMessage('Erreur réseau','Connexion impossible'));
+  assert.equal(await page.locator('#message-discover-targets').isVisible(),false);
+ }
  assert(requests.every(([method])=>method==='GET'),'visual checks must not write through the API');assert.deepEqual(errors,[]);
  console.log(JSON.stringify({result:'PASS',cases,read_only:true,mission_close_stays_visible:true,availability_preserved:true}));
  }finally{await browser.close();}
