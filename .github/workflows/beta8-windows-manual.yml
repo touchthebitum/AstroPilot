@@ -73,7 +73,7 @@ jobs:
           New-Item -ItemType Directory -Path $env:ASTROPILOT_DATA_DIR -ErrorAction Stop
 
       - name: Set up locked packaging tools
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.12.6"
           python-version: "3.13.5"
@@ -141,7 +141,7 @@ jobs:
             !/user_profile.json
             !/user_filters.json
             !/data/user_profile.json
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e
         with:
           version: "0.12.6"
           python-version: "3.13.5"
