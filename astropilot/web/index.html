@@ -17,7 +17,7 @@
     <script src="/ui/timezone-authority.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
     <script src="/ui/app.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
   </head>
-  <body>
+  <body class="layout-nightline">
     <div class="sky-glow" aria-hidden="true"></div>
     <header class="topbar">
       <a class="brand" href="/" aria-label="NightMerit — Ce soir">
@@ -26,14 +26,13 @@
         </span>
         <span>NightMerit</span>
       </a>
-      <nav id="main-navigation" class="main-navigation" aria-label="Navigation principale" hidden><button class="secondary-button" id="nav-tonight" type="button">Préparer ma séance</button><button class="secondary-button" id="nav-projects" type="button">Mes projets</button></nav>
+      <nav id="main-navigation" class="main-navigation" aria-label="Navigation principale" hidden><button class="secondary-button" id="nav-tonight" type="button">Préparer ma séance</button><button class="secondary-button" id="nav-projects" type="button">Mes projets</button><button class="secondary-button" id="saved-observations-open" type="button" aria-haspopup="dialog" hidden>Mes observations</button></nav>
       <div class="night-context" data-pro-only>
         <span class="context-label">Ce soir</span>
         <time id="night-date">—</time>
       </div>
       <div class="header-actions">
-        <button class="secondary-button" id="saved-observations-open" type="button" aria-haspopup="dialog" hidden>Mes observations</button>
-        <details id="header-options" class="header-options" data-mode-disclosure><summary>Options et aide</summary><div class="header-options-content">
+        <details id="header-options" class="header-options"><summary aria-label="Options et aide"><span class="options-label-full">Options et aide</span><span class="options-label-compact">Options</span></summary><div class="header-options-content">
         <button class="secondary-button" id="alerts-status-open" type="button" aria-haspopup="dialog">État des alertes</button>
         <button class="secondary-button" id="help-open" type="button" aria-haspopup="dialog">Aide</button>
         <button class="secondary-button" id="data-context-open" type="button" aria-haspopup="dialog">Version et données</button>

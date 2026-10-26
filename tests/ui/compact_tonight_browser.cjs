@@ -8,7 +8,7 @@ const assert=require('node:assert/strict');
 const decision={status:'available',decision_id:'d',catalog_key:'M31',target:'Galaxie d’Andromède',
  target_decision_status:'recommended',action:'observe',night_date:'2026-10-04',
  window_start:'2026-10-04T20:00:00+02:00',window_end:'2026-10-04T22:00:00+02:00',recommended_hours:1.5,
- selected_filter:{name:'L-Pro',filter_type:'broadband'},astro_quality:{score:78,label:'good',limiting_factor:'clouds'},
+ selected_filter:{name:'L-Pro',filter_type:'broadband'},astro_quality:{score:78,decision_score:78,decision_eligible:true,label:'good',limiting_factor:'clouds'},
  recommendation_confidence:.84,explanation:{positives:[{title:'Cible bien placée',value:'Altitude favorable pendant votre session'}],
  warnings:[{title:'Nuages à surveiller'}]},weather_trust:{validation_status:'validated',freshness_status:'fresh',
  timezone:'Europe/Zurich',snapshot_age_minutes:15,maximum_age_minutes:120},
@@ -97,7 +97,7 @@ const decision={status:'available',decision_id:'d',catalog_key:'M31',target:'Gal
   // Read-only audit of e5d4df6, same fixture and configured site, at scrollY=0.
   const baseline=width===390?{'open-mission':883,'window-value':1034,'filter-value':1259}
    :{'open-mission':698,'window-value':816,'filter-value':818};
-  for(const [id,y] of Object.entries(baseline))assert.ok(measured[id]<y,`${id} must improve over baseline`);
+  for(const [id,y] of Object.entries(baseline))assert.ok(measured[id]<y,`${id} must improve over baseline: ${JSON.stringify({mode,width,measured,baseline})}`);
   assert.ok(measured['window-value']<700);assert.ok(measured['filter-value']<750);
   assert.ok(measured['open-mission']<850,'CTA must stay close to first viewport, including weather warning');
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
@@ -216,7 +216,7 @@ const decision={status:'available',decision_id:'d',catalog_key:'M31',target:'Gal
    applyUiMode(mode);state.acceptedMission={mission_id:'saved',mission,windowTimezone:'Europe/Zurich'};
    await restoreSavedMission();setView('availability');
   },{mission,mode});
-  assert.match(await page.locator('#saved-mission-choice').textContent(),/20:00 · Europe\/Zurich/);
+  assert.match(await page.locator('#saved-mission-choice').textContent(),/20:00 → 04\.10\.2026 22:00 · Europe\/Zurich/);
   await page.locator('#open-saved-mission').scrollIntoViewIfNeeded();
   const bounds=await page.evaluate(()=>{
    const rect=id=>{const r=document.getElementById(id).getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height}};

@@ -802,3 +802,189 @@ html[data-ui-mode="pro"][data-guided-view="availability"]:not([data-guided-initi
 #analysis-history-dialog::backdrop { background: rgba(1, 6, 12, .82); }
 #analysis-history-list { display: flex; flex-wrap: wrap; gap: .75rem; }
 #analysis-history-dialog button { white-space: normal; overflow-wrap: anywhere; }
+
+/* Ligne de nuit: presentation only. Existing DTOs, controls and DOM order remain authoritative. */
+body.layout-nightline {
+  --ink: #ecf2f1;
+  --muted: #a1b6bd;
+  --subtle: #91a7af;
+  --night: #08131b;
+  --night-soft: #0c1b25;
+  --panel: #10202b;
+  --panel-strong: #10202b;
+  --line: #2c414c;
+  --line-bright: #3e5661;
+  --cyan: #8ce0ce;
+  --cyan-soft: #193c3d;
+  --gold: #e8c28b;
+  --radius: 14px;
+  --shadow: none;
+  background: var(--night);
+}
+body.layout-nightline::before { display: none; }
+body.layout-nightline .topbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 14px 22px;
+  width: min(1180px, calc(100% - 64px));
+  padding: 18px 0;
+  min-height: 86px;
+}
+body.layout-nightline .brand { font-weight: 550; font-size: 20px; letter-spacing: -.045em; }
+body.layout-nightline .brand-mark { box-shadow: none; border-color: var(--line-bright); }
+body.layout-nightline .main-navigation { flex: 1; }
+body.layout-nightline .main-navigation button { border-color: transparent; border-radius: 6px; min-height: 44px; }
+body.layout-nightline .header-actions { margin-left: auto; gap: 12px; }
+body.layout-nightline .night-context { text-align: left; }
+body.layout-nightline .header-options > summary { display: list-item; min-height: 44px; padding: 11px 4px; }
+.options-label-compact { display: none; }
+body.layout-nightline .header-options-content {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  width: min(440px, calc(100vw - 32px));
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line-bright);
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.2);
+}
+body.layout-nightline .ui-mode-control { font-size: 12px; color: var(--muted); }
+body.layout-nightline .ui-mode-control select { min-height: 44px; padding: 8px 10px; color: var(--ink); background: var(--panel); border: 1px solid var(--line-bright); border-radius: 7px; font: inherit; }
+body.layout-nightline .shell { width: min(1024px, calc(100% - 64px)); }
+body.layout-nightline .shell:has(#decision:not([hidden])) .intro,
+body.layout-nightline .shell:has(#message-state:not([hidden])) .intro { display: none; }
+body.layout-nightline .intro { padding-top: 35px; }
+body.layout-nightline .intro h1 { font-family: inherit; font-size: 36px; letter-spacing: -.04em; }
+body.layout-nightline .decision,
+body.layout-nightline .state-panel,
+body.layout-nightline .onboarding,
+body.layout-nightline .availability-panel { background: var(--night-soft); box-shadow: none; }
+body.layout-nightline .primary-button,
+body.layout-nightline .secondary-button,
+body.layout-nightline .mission-button { min-height: 46px; border-radius: 7px; }
+body.layout-nightline .primary-button,
+body.layout-nightline #open-mission { font-weight: 650; }
+body.layout-nightline .field > input,
+body.layout-nightline .field > select { min-height: 46px; font: inherit; }
+body.layout-nightline .check-field { min-height: 44px; }
+body.layout-nightline .check-field input[type="checkbox"],
+body.layout-nightline .availability-modes input { min-width: 22px; min-height: 22px; accent-color: var(--cyan); }
+body.layout-nightline .wizard-heading h2,
+body.layout-nightline .wizard-step h2,
+body.layout-nightline .availability-heading h2 { font-family: inherit; letter-spacing: -.035em; line-height: 1.15; }
+body.layout-nightline .availability-heading { border-bottom: 1px solid var(--line); }
+body.layout-nightline #availability-step { max-width: 940px; margin: 32px auto; }
+body.layout-nightline .availability-modes label { background: transparent; padding: 20px 16px; border-radius: 7px; }
+body.layout-nightline .availability-modes label:has(input:checked) { background: var(--cyan-soft); border-color: var(--cyan); }
+body.layout-nightline .availability-modes small { font-size: 13px; }
+body.layout-nightline .availability-heading .field-note { font-size: 13px; }
+body.layout-nightline #decision-essential { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.2fr); padding: 28px; column-gap: 28px; }
+body.layout-nightline #decision-essential .decision-head { grid-column: 1; grid-row: 1; padding: 0 0 24px; }
+body.layout-nightline #decision-essential h2 { font-family: inherit; font-size: 56px; font-weight: 400; letter-spacing: -.055em; line-height: 1.08; margin: 14px 0 10px; }
+body.layout-nightline #decision-essential .target-label { font-weight: 500; font-size: 11px; }
+body.layout-nightline #decision-essential .recommendation-line { font-size: 11px; }
+body.layout-nightline #decision-essential .decision-grid { grid-column: 2; grid-row: 1; align-self: center; display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; padding-bottom: 24px; }
+body.layout-nightline #decision-essential .metric-card { border: 0; background: none; padding: 10px 0 0; min-width: 0; }
+body.layout-nightline #decision-essential .window-card { grid-column: 1 / -1; padding: 0 0 10px; }
+body.layout-nightline #decision-essential .window-card .metric-value { font-size: 36px; font-weight: 400; letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
+body.layout-nightline #decision-essential .metric-value { font-family: inherit; font-size: 21px; font-weight: 400; }
+body.layout-nightline #decision-essential .metric-value.compact { font-size: 16px; }
+body.layout-nightline #decision-essential .metric-label { font-size: 11px; color: var(--muted); }
+body.layout-nightline #decision-essential .metric-note { font-size: 12px; }
+body.layout-nightline #decision-essential .decision-warning { grid-column: 1 / -1; margin: 0 0 20px; padding: 12px 14px; border-radius: 6px; font-size: 13px; }
+body.layout-nightline #decision-essential .decision-footer { grid-column: 1 / -1; padding: 22px 0 0; border-top: 2px solid var(--cyan); display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 24px; background: transparent; }
+body.layout-nightline #decision-essential .decision-footer > div:first-child { flex: 1; }
+body.layout-nightline #decision-essential .decision-actions { flex: 0 1 300px; }
+body.layout-nightline #decision-essential #decision-reason { font-size: 14px; margin: 0; }
+body.layout-nightline #open-mission { padding: 14px 20px; min-height: 50px; }
+body.layout-nightline .decision-details > summary { min-height: 48px; padding-block: 16px; }
+body.layout-nightline .message-panel { gap: 24px; padding: 32px; }
+body.layout-nightline .message-panel h2 { font-size: 29px; letter-spacing: -.035em; }
+body.layout-nightline .message-panel .message-actions { min-width: 180px; }
+body.layout-nightline .mission-dialog { width: min(1040px, calc(100% - 40px)); background: var(--night-soft); border-radius: 14px; }
+body.layout-nightline .mission-surface { overflow: visible; background: var(--night-soft); box-shadow: none; }
+body.layout-nightline .mission-header { position: sticky; top: 0; z-index: 2; background: var(--night-soft); padding: 27px 32px; border-bottom: 1px solid var(--line); }
+body.layout-nightline .mission-header h2 { font-family: inherit; font-size: 44px; letter-spacing: -.045em; }
+body.layout-nightline .dialog-close { min-width: 44px; min-height: 44px; width: 44px; height: 44px; flex-shrink: 0; }
+body.layout-nightline .mission-overview { background: var(--cyan-soft); }
+body.layout-nightline .mission-overview > div { padding: 19px 32px; }
+body.layout-nightline .mission-overview strong { font-family: inherit; font-size: 23px; font-variant-numeric: tabular-nums; }
+body.layout-nightline .mission-overview span { color: var(--muted); font-size: 11px; }
+body.layout-nightline .mission-columns { grid-template-columns: minmax(0,.85fr) minmax(0,1.3fr); }
+body.layout-nightline .mission-section { padding: 28px 32px; min-width: 0; }
+body.layout-nightline .mission-section-heading h3 { font-weight: 550; font-size: 17px; }
+body.layout-nightline .setup-list li { font-size: 14px; color: var(--muted); }
+body.layout-nightline .filter-callout { border-radius: 5px; border-color: transparent; }
+body.layout-nightline .mission-timeline li { padding-bottom: 23px; }
+body.layout-nightline .mission-timeline li::before { box-shadow: none; }
+body.layout-nightline .task-time { font-size: 12px; color: var(--cyan); }
+body.layout-nightline .task-copy strong { font-size: 15px; font-weight: 550; }
+body.layout-nightline .task-copy small { font-size: 13px; line-height: 1.6; }
+body.layout-nightline .mission-footer { padding: 20px 32px; }
+body.layout-nightline .page-footer { color: var(--muted); }
+@media (max-width: 1000px) {
+  body.layout-nightline .topbar { width: calc(100% - 40px); }
+  body.layout-nightline .header-actions { flex-wrap: wrap; }
+  body.layout-nightline .main-navigation { flex-basis: 100%; order: 3; }
+  body.layout-nightline .main-navigation button { flex: 1; min-width: 0; }
+  body.layout-nightline .shell { width: calc(100% - 40px); }
+  body.layout-nightline #decision-essential { column-gap: 22px; padding: 24px; }
+  body.layout-nightline #decision-essential h2 { font-size: 45px; }
+  body.layout-nightline #decision-essential .window-card .metric-value { font-size: 31px; }
+}
+@media (max-width: 600px) {
+  body.layout-nightline .topbar { width: calc(100% - 32px); gap: 12px; padding: 14px 0 12px; }
+  body.layout-nightline .brand { font-size: 18px; }
+  body.layout-nightline .brand-mark { display: none; }
+  body.layout-nightline .header-actions { flex: 1; justify-content: flex-end; margin-left: 0; gap: 4px 10px; }
+  body.layout-nightline .main-navigation button { font-size: 12px; padding-inline: 8px; overflow-wrap: anywhere; }
+  body.layout-nightline .options-label-full { display: none; }
+  body.layout-nightline .options-label-compact { display: inline; }
+  body.layout-nightline .header-options > summary { padding-inline: 2px; font-size: 12px; }
+  body.layout-nightline .ui-mode-control { font-size: 0; gap: 0; }
+  body.layout-nightline .ui-mode-control select { font-size: 16px; padding: 8px; }
+  body.layout-nightline .shell { width: calc(100% - 24px); }
+  body.layout-nightline .intro { padding: 20px 0; }
+  body.layout-nightline .intro h1 { font-size: 26px; }
+  body.layout-nightline .wizard-step, body.layout-nightline .availability-heading { padding: 24px 20px; }
+  body.layout-nightline #availability-form { padding: 24px 20px; }
+  body.layout-nightline #availability-step { margin-block: 20px; }
+  body.layout-nightline .availability-heading h2 { font-size: 29px; }
+  body.layout-nightline .availability-modes { grid-template-columns: 1fr; }
+  body.layout-nightline .field > input, body.layout-nightline .field > select { font-size: 16px; min-height: 48px; }
+  body.layout-nightline .availability-actions > button { min-height: 48px; }
+  body.layout-nightline #decision-essential { display: block; padding: 22px 20px; }
+  body.layout-nightline #decision-essential .decision-head { padding: 0 0 13px; }
+  body.layout-nightline #decision-essential h2 { font-size: 40px; margin: 10px 0 8px; }
+  body.layout-nightline #decision-essential .decision-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; padding-bottom: 16px; }
+  body.layout-nightline #decision-essential .window-card { padding: 0; }
+  body.layout-nightline #decision-essential .window-card .metric-value { font-size: 31px; }
+  body.layout-nightline #decision-essential .metric-card { padding: 0; }
+  body.layout-nightline #decision-essential .metric-card:last-child { grid-column: auto; }
+  body.layout-nightline #decision-essential .metric-value.compact { font-size: 15px; }
+  body.layout-nightline #decision-essential .decision-warning { margin-bottom: 16px; padding: 11px 12px; }
+  body.layout-nightline #decision-essential .decision-footer { flex-direction: column; align-items: stretch; padding-top: 16px; gap: 15px; }
+  body.layout-nightline #decision-essential .decision-actions { flex-basis: auto; }
+  body.layout-nightline #decision-essential .decision-footer:not(:has(.intent-choice:not([hidden]))) .decision-actions { order: -1; }
+  body.layout-nightline #decision-essential #decision-reason { font-size: 13px; }
+  body.layout-nightline .message-panel { padding: 24px 20px; align-items: flex-start; flex-wrap: wrap; }
+  body.layout-nightline .message-panel .message-icon { display: none; }
+  body.layout-nightline .message-panel h2 { font-size: 27px; }
+  body.layout-nightline .message-panel .message-actions { width: 100%; min-width: 0; }
+  body.layout-nightline .message-panel .message-actions button { min-height: 48px; }
+  body.layout-nightline .mission-dialog { width: calc(100% - 12px); max-height: calc(100dvh - 12px); }
+  body.layout-nightline .mission-header { padding: 20px; gap: 12px; }
+  body.layout-nightline .mission-header h2 { font-size: 34px; }
+  body.layout-nightline .mission-overview { grid-template-columns: 1fr 1fr; }
+  body.layout-nightline .mission-overview > div { padding: 14px 20px; }
+  body.layout-nightline .mission-overview > div:first-child { grid-column: 1 / -1; }
+  body.layout-nightline .mission-overview > div + div { border-top: 1px solid var(--line); }
+  body.layout-nightline .mission-overview > div:last-child { border-left: 1px solid var(--line); }
+  body.layout-nightline .mission-overview strong { font-size: 22px; }
+  body.layout-nightline .mission-columns { grid-template-columns: 1fr; }
+  body.layout-nightline .mission-section { padding: 24px 20px; }
+  body.layout-nightline .mission-footer { padding: 20px; }
+  body.layout-nightline .mission-footer button { width: 100%; }
+}
