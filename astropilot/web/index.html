@@ -178,10 +178,24 @@
             <div id="preset-equipment" class="equipment-choices"></div>
             <div id="equipment-no-results" hidden>
               <p>Aucun ensemble de cette liste ne correspond à votre recherche.</p>
+              <button class="secondary-button" id="equipment-find-component" type="button">Chercher cette référence par composant</button>
               <button class="secondary-button" id="equipment-enter-custom" type="button">Saisir mon objectif ou télescope et ma caméra</button>
             </div>
             <p id="equipment-selection-summary" class="field-note" aria-live="polite"></p>
           </div>
+          <details id="equipment-reference-panel" class="equipment-filter-help">
+            <summary>Rechercher séparément mon optique, ma caméra ou mes filtres</summary>
+            <p>Retrouvez une référence puis vérifiez sa variante sur votre matériel. Le catalogue est en cours d’enrichissement : un modèle absent peut être saisi manuellement.</p>
+            <div class="form-grid two-columns">
+              <label class="field" for="equipment-reference-category"><span>Type de matériel</span><select id="equipment-reference-category"><option value="all">Tous les types</option><option value="optics">Objectif ou télescope</option><option value="camera">Caméra</option><option value="filter">Filtres</option></select></label>
+              <label class="field" for="equipment-reference-query"><span>Marque, modèle ou type</span><input id="equipment-reference-query" type="search" placeholder="Ex. Newton, FRA400, ASI183, LRGB…" autocomplete="off"></label>
+            </div>
+            <p id="equipment-reference-status" class="field-note" role="status"></p>
+            <button id="equipment-reference-retry" class="secondary-button" type="button" hidden>Recharger le catalogue</button>
+            <p class="field-note">Répertorié ne signifie pas compatible pour une mission. Le report des caractéristiques prépare une saisie personnalisée ; les montages et filtres autorisés pour les missions restent vérifiés séparément.</p>
+            <div id="equipment-reference-results"></div>
+            <p id="equipment-reference-applied" role="status"></p>
+          </details>
           <fieldset id="custom-equipment" class="custom-equipment" hidden>
             <legend>Optique et caméra</legend>
             <p>Recopiez les références et les mesures de la fiche du fabricant. N’utilisez pas les valeurs d’un modèle voisin.</p>
@@ -200,7 +214,7 @@
               <label class="check-field full-width" for="custom-monochrome"><input id="custom-monochrome" type="checkbox"><span>Caméra monochrome</span></label>
             </div>
           </fieldset>
-          <details class="equipment-filter-help"><summary>Et mes filtres ?</summary><p>Vous les confirmerez au choix de la cible ou lors de la recherche de cibles. Choisir un ensemble de matériel ne confirme pas que vous possédez ses filtres.</p><p>Vérifiez sur la boîte, la facture ou la fiche du fabricant la marque, le modèle, le type (Hα, OIII, LRGB…) et, si elle est indiquée, la largeur en nm. Une inscription « Hα » seule ne suffit pas à identifier une référence précise.</p><p>Si vous ne reconnaissez pas la référence proposée, laissez la case décochée. La présence d’un filtre dans le catalogue ne confirme ni sa possession ni sa compatibilité avec votre matériel.</p></details>
+          <details class="equipment-filter-help"><summary>Et mes filtres ?</summary><p><strong>Rien à renseigner à cette étape. Vous choisirez vos filtres ensuite.</strong> Vous les confirmerez au choix de la cible ou lors de la recherche de cibles. Choisir un ensemble de matériel ne confirme pas que vous possédez ses filtres.</p><p>Vérifiez sur la boîte, la facture ou la fiche du fabricant la marque, le modèle, le type (Hα, OIII, LRGB…) et, si elle est indiquée, la largeur en nm. Une inscription « Hα » seule ne suffit pas à identifier une référence précise.</p><p>Si vous ne reconnaissez pas la référence proposée, laissez la case décochée. La présence d’un filtre dans le catalogue ne confirme ni sa possession ni sa compatibilité avec votre matériel.</p></details>
           <div class="wizard-actions">
             <button class="secondary-button" data-back="site" type="button">Retour</button>
             <button class="primary-button" id="equipment-next" type="button">Continuer vers mon projet</button>
