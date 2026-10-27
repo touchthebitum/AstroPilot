@@ -1002,3 +1002,7 @@ body.layout-nightline .page-footer { color: var(--muted); }
 #altitude-guidance-intervals article { border-top: 1px solid var(--line); padding: 16px 0; }
 #altitude-guidance-dialog button { white-space: normal; }
 #altitude-guidance-dialog input { max-width: 100%; }
+
+/* Readable evidence remains secondary to the decision. */
+#message-technical, .refusal-evidence { white-space: pre-line; overflow-wrap: anywhere; line-height: 1.6; }
+.refusal-window { color: var(--muted); font-size: .9rem; line-height: 1.5; }

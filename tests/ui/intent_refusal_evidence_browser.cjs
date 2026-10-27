@@ -34,9 +34,18 @@ const fixtures=JSON.parse(fs.readFileSync(process.env.INTENT_REFUSAL_FIXTURES,'u
     const stage=record.result.actionability_refusal?.refusal_stage;
     const scoped=record.decision_id.startsWith('scoped-');
     const noOverlap=scoped && !record.result.actionability_refusal.evidence_scope.evaluated_start;
-    const title=noOverlap?'Fenêtre hors de votre disponibilité':stage==='no_productive_slice'?'Aucune tranche productive':stage==='continuous_window_too_short'?'Fenêtre productive trop courte':'Créneau insuffisant pour ce projet';
+    const title=mode==='simple' && stage ? (noOverlap?'Aucun créneau dans vos horaires':stage==='continuous_window_too_short'?'Le créneau favorable est trop court':'Pas de séance photo recommandée') : noOverlap?'Fenêtre hors de votre disponibilité':stage==='no_productive_slice'?'Aucune tranche productive':stage==='continuous_window_too_short'?'Fenêtre productive trop courte':'Créneau insuffisant pour ce projet';
     assert.equal(await page.locator('#message-title').innerText(),title);
     const technical=await page.locator('#message-technical').textContent();
+    if(stage && mode==='simple'){
+     const main=await page.locator('#message-body').innerText();
+     assert(main.length<360);assert.doesNotMatch(main,/points|seuil|tranche|productive_slice/i);
+     assert.equal(await page.locator('#message-details').evaluate(e=>e.open),false);
+    }
+    if(scoped && !noOverlap){
+     assert.match(technical,/01:32 UTC\+1/);
+     assert.doesNotMatch(technical,/00:32 UTC(?:[^+]|$)/);
+    }
     if(scoped){
      assert.match(technical,/Disponibilité demandée/);assert.match(technical,/Fenêtre candidate/);
      if(noOverlap){assert.doesNotMatch(technical,/Meilleure tranche|Nuages : −/);}
@@ -44,6 +53,7 @@ const fixtures=JSON.parse(fs.readFileSync(process.env.INTENT_REFUSAL_FIXTURES,'u
       assert.match(technical,/Portion évaluée dans votre disponibilité/);
       assert.match(technical,/05:27/);assert.match(technical,/sans nouveau calcul à la minute/);
       assert.match(technical,/6 (portions|évaluées)/);
+      assert.match(await page.locator('#message-window').innerText(),/05:27/);
       if(stage==='no_productive_slice')assert.match(technical,/20 %.*70 %/);
       else assert.match(await page.locator('#message-body').innerText(),/27 min.*60 min/);
      }
@@ -63,6 +73,13 @@ const fixtures=JSON.parse(fs.readFileSync(process.env.INTENT_REFUSAL_FIXTURES,'u
     await page.locator('[data-open-analysis-history]').last().click();
     await page.waitForFunction(()=>document.querySelector('#analysis-history-list button'));
     await page.locator('#analysis-history-list button').nth(fixtures.records.indexOf(record)).click();
+    const evidence=page.locator('#analysis-history-detail > details');
+    assert.equal(await evidence.evaluate(e=>e.open),mode==='pro');
+    if(mode==='simple'){
+      const visible=await page.locator('#analysis-history-detail').innerText();
+      assert.doesNotMatch(visible,/Nuages : −|Meilleure tranche|best_slice_score/);
+      await evidence.locator('summary').first().click();
+    }
     const archived=await page.locator('#analysis-history-detail').innerText();
     assert(archived.includes(title));
     if(scoped)assert.match(archived,/Fenêtre candidate/);
@@ -77,7 +94,28 @@ const fixtures=JSON.parse(fs.readFileSync(process.env.INTENT_REFUSAL_FIXTURES,'u
   await page.reload();await page.waitForFunction(()=>appliedUiMode!==null);await setup('simple');
   await page.locator('[data-open-analysis-history]').last().click();await page.waitForFunction(()=>document.querySelector('#analysis-history-list button'));
   await page.locator('#analysis-history-list button').first().click();
-  assert.match(await page.locator('#analysis-history-detail').innerText(),/Aucune tranche productive/);
+  assert.match(await page.locator('#analysis-history-detail').innerText(),/Pas de séance photo recommandée/);
+  const record=fixtures.records.find(r=>r.decision_id==='scoped-outside_productive');
+  if(record){
+   const original=JSON.stringify(record);
+   const labels=await page.evaluate(record=>{
+    state.configuration.site.timezone='America/Los_Angeles';
+    applyUiMode('simple');renderArchivedAnalysis(record);
+    const historical=document.querySelector('#analysis-history-detail').innerText;
+    const unknown=JSON.parse(JSON.stringify(record));delete unknown.request.location;unknown.result.weather_trust=null;
+    renderArchivedAnalysis(unknown);
+    return {historical,unknown:document.querySelector('#analysis-history-detail').innerText,
+     beforeFold:refusalTimeLabel('2026-10-25T00:30:00Z','Europe/Zurich'),
+     afterFold:refusalTimeLabel('2026-10-25T01:30:00Z','Europe/Zurich'),
+     midnight:refusalTimeLabel('2026-10-27T23:30:00Z','Europe/Zurich')};
+   },record);
+   assert.match(labels.historical,/04:00.*05:27.*Europe\/Zurich/);
+   assert.doesNotMatch(labels.historical,/Los_Angeles|UTC−/);
+   assert.match(labels.unknown,/03:00.*04:27.*UTC/);
+   assert.match(labels.beforeFold,/02:30 UTC\+2/);assert.match(labels.afterFold,/02:30 UTC\+1/);
+   assert.match(labels.midnight,/28.10.2026 00:30 UTC\+1/);
+   assert.equal(JSON.stringify(record),original);
+  }
   assert(requests.every(([method])=>method==='GET'));assert.deepEqual(errors,[]);
   console.log(JSON.stringify({result:'PASS',synthetic:true,read_only:true,simple_pro:true,widths:[390,768,1280],reload_reread:true,no_forecast_recalculation:true}));
  }finally{await browser.close();}

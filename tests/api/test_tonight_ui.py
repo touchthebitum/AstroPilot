@@ -261,14 +261,14 @@ def test_tonight_ui_assets_are_served():
     assert "Date.now(" not in script.text
     assert "Récupérées il y a" in script.text
     assert "no_productive_window" in script.text
-    assert "actionabilityRefusalMessage(payload.actionability_refusal)" in script.text
+    assert "actionabilityRefusalMessage(payload.actionability_refusal, timeZone)" in script.text
     assert "Meilleure fenêtre trouvée : ${foundMinutes} min" in script.text
     assert "Seuil requis : ${requiredMinutes} min" in script.text
     assert "La cause précise n’est pas établie" in script.text
     assert "insufficient_actionable_productive_window" in script.text
     assert "productive_window_evidence_missing" in script.text
     refusal_renderer = script.text.split(
-        "function actionabilityRefusalMessage(refusal)",
+        "function actionabilityRefusalMessage(refusal,",
         1,
     )[1].split("function showMessage", 1)[0]
     assert "cloud_loss" not in refusal_renderer
@@ -1528,7 +1528,7 @@ for (const stage of ['no_productive_slice','continuous_window_too_short']) {
  for (const mode of ['simple','pro']) {
   appliedUiMode=mode;showTonightUnavailable(payload);
   assert.equal(shown.title,mode==='simple'
-    ? (stage==='continuous_window_too_short'?'Le créneau disponible est trop court':'Aucun créneau adapté à vos horaires')
+    ? (stage==='continuous_window_too_short'?'Le créneau favorable est trop court':'Pas de séance photo recommandée')
     : (stage==='continuous_window_too_short'?'Fenêtre productive trop courte':'Aucune tranche productive'));
   assert.match(shown.body,/Réessayez plus tard/);
   assert.doesNotMatch(shown.body,/seuil|points/i);
@@ -1588,14 +1588,14 @@ for (const mode of ['simple','pro']) {
  assert.equal(document.querySelector('#message-create-project').hidden,true);
  assert.equal(ui.retry.textContent,'Actualiser les prévisions');
 }
-const overcast = {...noIntent,refusal_weather:{window_start:'2026-10-18T21:00:00+02:00',window_end:'2026-10-18T23:00:00+02:00',cloud_cover_min:100,cloud_cover_max:100,retrieved_at_utc:'2026-10-18T11:25:00+00:00',provider:'fixture'}};
+const overcast = {...noIntent,weather_trust:{timezone:'Europe/Zurich'},refusal_weather:{window_start:'2026-10-18T21:00:00+02:00',window_end:'2026-10-18T23:00:00+02:00',cloud_cover_min:100,cloud_cover_max:100,retrieved_at_utc:'2026-10-18T11:25:00+00:00',provider:'fixture'}};
 for (const mode of ['simple','pro']) {
  appliedUiMode=mode;showTonightUnavailable(overcast);
  assert.equal(shown.title,'Ciel couvert prévu sur le créneau évalué');
  assert.match(shown.body,/100 %/);
- assert.match(shown.body,/de 21:00 à 23:00 \(UTC\+02:00\)/);
+ assert.match(shown.body,/21:00 UTC\+2.*23:00 UTC\+2.*Europe\/Zurich/);
  assert.match(shown.body,/18.10.2026/);
- assert.match(shown.body,/11:25 UTC\+00:00/);
+ assert.match(shown.body,/13:25 UTC\+2/);
  assert.doesNotMatch(document.querySelector('#message-technical').textContent,/Votre projet est bien enregistré/);
  assert.equal(document.querySelector('#message-edit-availability').hidden,true);
 }
