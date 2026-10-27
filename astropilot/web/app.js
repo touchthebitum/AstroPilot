@@ -335,9 +335,11 @@ function sessionEvidenceDuration() {
   }
   const hours = Number(document.querySelector("#session-hours").value);
   const minutes = Number(document.querySelector("#session-minutes").value);
+  const seconds = Number(document.querySelector("#session-seconds").value);
+  const total = (hours * 60 + minutes) * 60 + seconds;
   return Number.isInteger(hours) && hours >= 0 && Number.isInteger(minutes) && minutes >= 0
-    && minutes <= 59 && hours * 60 + minutes > 0 && (hours * 60 + minutes) * 60 <= Number.MAX_SAFE_INTEGER
-      ? (hours * 60 + minutes) * 60 : null;
+    && minutes <= 59 && Number.isFinite(seconds) && seconds >= 0 && seconds < 60
+    && Number.isFinite(total) && total >= 0.000001 && total <= Number.MAX_SAFE_INTEGER ? total : null;
 }
 
 function usablePoseDuration(seconds) {
@@ -365,21 +367,18 @@ function restoreSessionEvidenceInputs(session) {
   const executionId = session?.execution.execution_id || null;
   if (executionId === state.sessionEvidenceInputExecutionId) return;
   state.sessionEvidenceInputExecutionId = executionId;
-  let minutes = 0;
   const evidence = usableEvidence(session);
-  if (evidence) {
-    minutes = Math.round(Number(evidence.usable_integration_duration) / 60);
-  } else if (executionId) {
-    const saved = JSON.parse(localStorage.getItem(`astropilot.pendingEvidence.${executionId}`) || "null");
-    if (Number.isInteger(saved?.minutes) && saved.minutes > 0) minutes = saved.minutes;
-  }
   const pending = executionId ? JSON.parse(localStorage.getItem(`astropilot.pendingEvidence.${executionId}`) || "null") : null;
-  document.querySelector("#session-duration-method").value = evidence || pending?.minutes ? "duration" : "frames";
+  const savedSeconds = Number.isFinite(pending?.seconds) ? pending.seconds
+    : Number.isFinite(pending?.minutes) ? pending.minutes * 60 : 0;
+  const total = evidence ? Number(evidence.usable_integration_duration) : Math.max(0, savedSeconds);
+  document.querySelector("#session-duration-method").value = evidence || total > 0 ? "duration" : "frames";
   document.querySelector("#session-retained-frames").value = pending?.frames ?? "";
   document.querySelector("#session-frame-seconds").value = pending?.frame_seconds ?? "";
   if (!evidence && pending?.method === "frames") document.querySelector("#session-duration-method").value = "frames";
-  document.querySelector("#session-hours").value = String(Math.floor(minutes / 60));
-  document.querySelector("#session-minutes").value = String(minutes % 60);
+  document.querySelector("#session-hours").value = String(Math.floor(total / 3600));
+  document.querySelector("#session-minutes").value = String(Math.floor(total / 60) % 60);
+  document.querySelector("#session-seconds").value = String(Math.round((total % 60) * 1000000) / 1000000);
   updateSessionDurationPreview();
 }
 
@@ -603,7 +602,7 @@ async function recordSessionEvidence() {
   if (seconds == null) {
     sessionMessage(document.querySelector("#session-duration-method").value === "frames"
       ? "Indiquez un nombre entier de clichés conservés supérieur à zéro et une durée par cliché supérieure à zéro."
-      : "Saisissez une durée utilisable positive en heures et minutes.");
+      : "Saisissez une durée utilisable positive en heures, minutes et secondes (minutes de 0 à 59 ; secondes de 0 à moins de 60).");
     return;
   }
   const key = `astropilot.pendingEvidence.${session.execution.execution_id}`;
@@ -7653,7 +7652,7 @@ guardianVisualTimer?.unref?.();
 document.querySelector("#session-start").addEventListener("click", () => sessionCommand(startSession, {transition: true}));
 document.querySelector("#session-complete").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "completed"), {transition: true}));
 document.querySelector("#session-interrupt").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "interrupted"), {transition: true}));
-for (const id of ["session-duration-method", "session-retained-frames", "session-frame-seconds", "session-hours", "session-minutes"]) {
+for (const id of ["session-duration-method", "session-retained-frames", "session-frame-seconds", "session-hours", "session-minutes", "session-seconds"]) {
   document.getElementById(id).addEventListener("input", updateSessionDurationPreview);
 }
 document.querySelector("#session-record-evidence").addEventListener("click", () => sessionCommand(recordSessionEvidence));

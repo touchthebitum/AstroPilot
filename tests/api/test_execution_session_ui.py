@@ -64,6 +64,28 @@ renderSession();
 assert.equal(document.querySelector('#session-hours').value, '0');
 assert.equal(document.querySelector('#session-minutes').value, '30');
 assert.equal(observationLinkageRenderCount, 3);
+// Mixed exposures: 5 × 45 s + 5 × 60 s = 8 min 45 s.
+localStorage.setItem('astropilot.pendingEvidence.execution-1', JSON.stringify({
+  evidence_id: 'mixed', seconds: 525, minutes: 8.75, method: 'duration',
+}));
+state.sessionEvidenceInputExecutionId = null;
+renderSession();
+assert.equal(document.querySelector('#session-minutes').value, '8');
+assert.equal(document.querySelector('#session-seconds').value, '45');
+assert.equal(sessionEvidenceDuration(), 525);
+assert.match(document.querySelector('#session-duration-preview').textContent, /8 45 s/);
+for (const invalid of ['-1', '60', 'Infinity']) {
+  document.querySelector('#session-seconds').value = invalid;
+  assert.equal(sessionEvidenceDuration(), null);
+}
+document.querySelector('#session-hours').value = '0';
+document.querySelector('#session-minutes').value = '0';
+document.querySelector('#session-seconds').value = '1.5';
+assert.equal(sessionEvidenceDuration(), 1.5);
+state.activeSessionId = 'execution-2';
+renderSession();
+assert.equal(document.querySelector('#session-seconds').value, '0');
+
 '''
     result = run_with_time_authority([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr

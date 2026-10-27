@@ -37,6 +37,14 @@ await page.evaluate(()=>{state.sessionEvidenceInputExecutionId=null;renderSessio
 assert.equal(await page.locator('#session-retained-frames').inputValue(),'18');
 assert.equal(await page.locator('#session-frame-seconds').inputValue(),'300');
 await page.selectOption('#session-duration-method','duration');
+await page.locator('#session-hours').fill('0');await page.locator('#session-minutes').fill('8');await page.locator('#session-seconds').fill('45');
+assert.match(await page.locator('#session-duration-preview').innerText(),/0 h 08 45 s/);
+count=writes.length;await page.evaluate(()=>recordSessionEvidence());assert.equal(writes.length,count+1);assert.equal(writes.at(-1).body.usable_integration_duration,525);
+await page.evaluate(()=>{state.sessionEvidenceInputExecutionId=null;renderSession()});
+assert.equal(await page.locator('#session-duration-method').inputValue(),'duration');assert.equal(await page.locator('#session-seconds').inputValue(),'45');
+for(const invalid of ['-1','60']){await page.locator('#session-seconds').fill(invalid);count=writes.length;await page.evaluate(()=>recordSessionEvidence());assert.equal(writes.length,count);}
+await page.locator('#session-seconds').fill('0');
+
 await page.locator('#session-hours').fill('1');await page.locator('#session-minutes').fill('30');
 count=writes.length;await page.evaluate(()=>recordSessionEvidence());assert.equal(writes.length,count+1);assert.equal(writes.at(-1).body.usable_integration_duration,5400);
 await page.evaluate(session=>{state.sessions=[session];renderSession()},proof.before);
