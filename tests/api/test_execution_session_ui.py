@@ -135,7 +135,7 @@ async function fetch(url, options) {
   assert.equal(document.querySelector('#session-before').textContent, '1 h 00');
   assert.equal(document.querySelector('#session-added').textContent, '0 h 30');
   assert.equal(document.querySelector('#session-after').textContent, '1 h 30');
-  assert.equal(document.querySelector('#session-after-label').textContent, 'Acquis après ce crédit');
+  assert.equal(document.querySelector('#session-after-label').textContent, 'Acquis après cette session');
   canonical.current_acquired_seconds = 6300;
   canonical.remaining_hours = .25;
   await reloadSessions();
@@ -642,7 +642,7 @@ async function fetch(url, options) {
       assert.equal(state.acceptedMission.mission_id, `mission-${kind}`);
       assert.equal(state.acceptedMission.mission.selected_filter.name, display);
       assert.equal(document.querySelector('#session-current').textContent, amount);
-      assert.equal(document.querySelector('#session-status').textContent, 'Crédit enregistré.');
+      assert.equal(document.querySelector('#session-status').textContent, 'Cette durée a été ajoutée à votre projet.');
     }
   }
   assert.equal(opened, 4);
