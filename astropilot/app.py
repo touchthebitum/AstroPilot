@@ -31,6 +31,7 @@ from pydantic import (
     model_validator,
 )
 
+from decision.night_productivity.refusal_evidence_scope import ProductivityEvidenceScope
 from astropilot.altitude_guidance import AltitudeGuidance, GuidanceError, altitude_guidance
 
 from astropilot.guardian_renewal_api import (GuardianRenewalAdapter, RenewalRequest, Rejection,
@@ -1105,6 +1106,8 @@ class TonightAdviceModel(BaseModel):
 
 
 class RefusalWeatherSummaryModel(BaseModel):
+    window_kind: Literal["candidate_window", "availability_intersection"] | None = None
+    sample_times: tuple[AwareDatetime, ...] = ()
     window_start: AwareDatetime
     window_end: AwareDatetime
     cloud_cover_min: float = Field(ge=0, le=100)
@@ -1374,12 +1377,20 @@ class ConstraintsActionabilityRefusalModel(ActionabilityRefusalBaseModel):
         "continuous_window_too_short",
     ] | None = None
     productivity_breakdown: ProductivityBreakdownModel | None = None
+    evidence_scope: ProductivityEvidenceScope | None = None
 
     @model_validator(mode="after")
     def validate_breakdown_stage(self):
+        scope = self.evidence_scope
         if self.productivity_breakdown is None:
             return self
         breakdown = self.productivity_breakdown
+        if scope is not None:
+            if scope.partial_slice_count is not None and scope.partial_slice_count > breakdown.evaluated_slice_count:
+                raise ValueError("scope_partial_count_exceeds_evaluated")
+            if breakdown.evaluated_slice_count and (scope.evaluated_start is None or scope.evaluated_end is None
+                    or not scope.evaluated_start.astimezone(timezone.utc) <= breakdown.best_slice_start.astimezone(timezone.utc) < breakdown.best_slice_end.astimezone(timezone.utc) <= scope.evaluated_end.astimezone(timezone.utc)):
+                raise ValueError("scope_best_slice_outside_intersection")
         if self.refusal_stage == "no_productive_slice":
             if breakdown.productive_slice_count != 0:
                 raise ValueError("no_productive_slice_requires_zero_productive")

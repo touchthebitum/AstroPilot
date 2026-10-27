@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from math import isfinite
 
 from decision.mission.mission_assembler import ProductiveWindowAssessment
+from decision.night_productivity.refusal_evidence_scope import ProductivityEvidenceScope, scoped_refusal_breakdown
 from decision.models.session_availability import (
     SessionAvailability,
     SessionAvailabilityMode,
@@ -78,6 +79,7 @@ def _refusal(
     best_minutes: float | None,
     refusal_stage: ProductivityRefusalStage | None = None,
     productivity_breakdown: ProductivityBreakdown | None = None,
+    evidence_scope: ProductivityEvidenceScope | None = None,
 ) -> ActionableProductiveWindowSelection:
     return ActionableProductiveWindowSelection(
         window=None,
@@ -89,6 +91,7 @@ def _refusal(
             required_continuous_minutes=_required_continuous_minutes(),
             refusal_stage=refusal_stage,
             productivity_breakdown=productivity_breakdown,
+            evidence_scope=evidence_scope,
         ),
     )
 
@@ -176,6 +179,7 @@ def evaluate_physical_productive_window(
     analysis_hours = _elapsed_hours(analysis_start, analysis_end)
     candidates = []
     best_rejected_duration = timedelta(0)
+    has_usable_productive_portion = False
     for window in productive_windows:
         values = (
             getattr(window, "start_hour", None),
@@ -221,6 +225,7 @@ def evaluate_physical_productive_window(
             if duration_cap is not None
             else available_duration,
         )
+        has_usable_productive_portion |= available_duration > timedelta(0)
         best_rejected_duration = max(best_rejected_duration, duration)
         if duration < MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW:
             continue
@@ -254,12 +259,8 @@ def evaluate_physical_productive_window(
         candidates.append((duration, candidate_productivity, start, end))
 
     if not candidates:
-        breakdown = assessment.productivity_breakdown
-        has_productive_slice = (
-            breakdown.productive_slice_count > 0
-            if breakdown is not None
-            else bool(productive_windows)
-        )
+        breakdown, scope = scoped_refusal_breakdown(assessment, lower_bound, upper_bound)
+        has_productive_slice = has_usable_productive_portion
         refusal_stage = (
             ProductivityRefusalStage.CONTINUOUS_WINDOW_TOO_SHORT
             if has_productive_slice
@@ -274,6 +275,7 @@ def evaluate_physical_productive_window(
             best_minutes=best_rejected_duration.total_seconds() / 60,
             refusal_stage=refusal_stage,
             productivity_breakdown=breakdown,
+            evidence_scope=scope,
         )
     if (
         availability is not None

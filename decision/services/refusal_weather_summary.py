@@ -14,6 +14,8 @@ class RefusalWeatherSummary:
     cloud_cover_max: float
     retrieved_at_utc: str
     provider: str
+    window_kind: str = "candidate_window"
+    sample_times: tuple[str, ...] = ()
 
 
 def refusal_weather_summary(result):
@@ -34,8 +36,22 @@ def refusal_weather_summary(result):
     start_utc, end_utc = start.astimezone(timezone.utc), end.astimezone(timezone.utc)
     if not timedelta(0) < end_utc - start_utc <= timedelta(days=1):
         return None
+    kind = "candidate_window"
+    if len(assessments) == 1:
+        scope = getattr(getattr(assessments[0], 'actionability_refusal', None), 'evidence_scope', None)
+        if scope is not None:
+            if (scope.candidate_start.astimezone(timezone.utc) != start_utc
+                    or scope.candidate_end.astimezone(timezone.utc) != end_utc):
+                return None
+            if scope.evaluated_start is None or scope.evaluated_end is None:
+                return None
+            start, end = scope.evaluated_start, scope.evaluated_end
+            start_utc, end_utc = start.astimezone(timezone.utc), end.astimezone(timezone.utc)
+            kind = "availability_intersection"
     expected = set()
-    cursor = start_utc
+    # Hourly forecast samples support the intersecting hours. No interpolation
+    # or new minute-level forecast is inferred for a partial hour.
+    cursor = start_utc.replace(minute=0, second=0, microsecond=0)
     while cursor < end_utc:
         expected.add(cursor)
         cursor += timedelta(hours=1)
@@ -58,4 +74,5 @@ def refusal_weather_summary(result):
         return None
     provider, retrieved = sources.pop()
     return RefusalWeatherSummary(start.isoformat(), end.isoformat(),
-                                min(found.values()), max(found.values()), retrieved, provider)
+                                min(found.values()), max(found.values()), retrieved, provider, kind,
+                                tuple(t.isoformat() for t in sorted(found)))

@@ -56,7 +56,7 @@ def assessment(stage, *, breakdown=True):
     return window
 
 
-def composed_candidate(window, *, field_id="m42", key="M42"):
+def composed_candidate(window, *, field_id="m42", key="M42", availability=AVAILABILITY):
     field = build_production_imaging_field_resolver().resolve(field_id)
     targets = tuple(ProjectAcquisitionIntentTarget(intent.acquisition_intent_id, 15)
                     for intent in field.acquisition_intents)
@@ -64,7 +64,7 @@ def composed_candidate(window, *, field_id="m42", key="M42"):
         imaging_field=field, project_targets=targets,
         remaining_progress=tuple(AcquisitionIntentRemainingProgress(t.acquisition_intent_id, 0, 0, 15, 15) for t in targets),
         setup_filter_capabilities=SetupFilterCapabilities("test", ("Ha", "OIII")),
-        productive_window=window, session_availability=AVAILABILITY, weather_trust_decision=TRUST,
+        productive_window=window, session_availability=availability, weather_trust_decision=TRUST,
         site=None, filter_profile_resolver=Mock(), evidence_builder=Mock(), contamination_estimator=Mock(),
     )
     assert selected.status.value == "no_eligible_intent"
@@ -74,16 +74,16 @@ def composed_candidate(window, *, field_id="m42", key="M42"):
                    acquisition_intent_assessments=selected.acquisition_intent_assessments)
 
 
-def service_for(candidate):
+def service_for(candidate, start=START):
     location = WeatherLocation(46.7508, 6.5495)
     points = tuple(WeatherForecastPoint(
-        provider_id="synthetic", retrieved_at_utc=START - timedelta(hours=1), forecast_for_utc=START + timedelta(hours=i),
+        provider_id="synthetic", retrieved_at_utc=start - timedelta(hours=1), forecast_for_utc=start + timedelta(hours=i),
         requested_location=location, grid_location=location,
         values=(WeatherValue(WeatherVariable.CLOUD_COVER_PERCENT, 0, "%"),
                 WeatherValue(WeatherVariable.RELATIVE_HUMIDITY_PERCENT, humidity, "%")),
     ) for i, humidity in enumerate((95, 93)))
-    night = {"date": "2026-10-26", "top_objects": [{"catalog_key": candidate.catalog_key}],
-             "object_evaluations": {candidate.catalog_key: {"window": {"start": START, "end": START + timedelta(hours=2)}}}}
+    night = {"date": (start.date() - timedelta(days=1)).isoformat(), "top_objects": [{"catalog_key": candidate.catalog_key}],
+             "object_evaluations": {candidate.catalog_key: {"window": {"start": start, "end": start + timedelta(hours=2)}}}}
     rec = make_result().recommendation
     mission_gate = Mock(side_effect=AssertionError("A refused acquisition must not reach mission creation"))
     service = TonightApplicationService(
@@ -174,12 +174,14 @@ def test_old_v11_lineage_remains_readable_without_reconstruction_and_v12_retains
     assert store.load_context("decision-1").recommendation.opportunity.candidate.acquisition_intent_assessments == candidate.acquisition_intent_assessments
     assert path.read_bytes() == before
     document = json.loads(before)
-    assert document["schema_version"] == 12
+    assert document["schema_version"] == 13
     document["schema_version"] = 11
     def strip(value):
         if isinstance(value, dict):
             if value.get("class") == "decision.models.acquisition_intent_assessment.AcquisitionIntentAssessment":
                 value["fields"].pop("actionability_refusal", None)
+            if value.get("class") == "decision.models.actionability_refusal.ActionabilityRefusal":
+                value["fields"].pop("evidence_scope", None)
             for child in value.values(): strip(child)
         elif isinstance(value, list):
             for child in value: strip(child)
@@ -341,3 +343,120 @@ def test_live_refusal_archive_restart_preserves_three_observations_and_compariso
     assert len(list((tmp_path / "outcome_evaluations").glob("*.json"))) == 3
     assert not (tmp_path / "execution_lineage").exists()
     gate.assert_not_called()
+
+
+def scoped_browser_fixtures():
+    from tests.architecture.test_refusal_evidence_scope import window, START as S, AVAIL
+    records=[]
+    for kind,scores,availability in (
+        ('outside_productive', [.2]*6+[.9]*2, AVAIL),
+        ('partial_productive', [.2]*4+[.9]*4, AVAIL),
+        ('no_overlap', [.9]*8, replace(AVAIL,end=S-timedelta(minutes=1))),
+    ):
+        candidate=composed_candidate(window(scores), availability=availability)
+        service,_=service_for(candidate, start=S)
+        result=replace(service.evaluate(profile={**valid_profile(), "projects":{"M42":{"hours":0,"target_hours":15}}}, weather=object(), reference_time_utc=S,
+            bortle=4, availability=availability, selected_project_id='M42'), decision_id='scoped-'+kind)
+        body=TonightResponseModel.model_validate(TonightResponse.from_result(result).to_dict()).model_dump(mode='json')
+        records.append({'decision_id':result.decision_id,'created_at_utc':S.isoformat(),
+            'request':{'selected_project_id':'M42'},'result':body})
+    return {'records':records}
+
+
+def test_saved_ha_scoped_refusal_survives_restart_and_backup_without_touching_observations(source,tmp_path):
+    from test_saved_observation_catalogue import seed
+    from astropilot.profile_backup import create_backup, inspect_backup, restore_empty, snapshot
+    seed(source)
+    from tests.architecture.test_outcome_evaluation_persistence_contract import evaluation
+    from astropilot.outcome_evaluation_store import FileOutcomeEvaluationStore
+    for index in range(3):
+        FileOutcomeEvaluationStore(source / 'outcome_evaluations').save(
+            evaluation=evaluation(execution=False, comparison_id=str(index + 1) * 64))
+    records=scoped_browser_fixtures()['records']
+    for record in records:
+        payload=record['result']
+        refusal=payload['acquisition_intent_assessments'][0]['actionability_refusal']
+        assert refusal == payload['actionability_refusal']
+        assert payload['acquisition_intent_assessments'][0]['acquisition_intent_id'] == 'm42_ha'
+        FileAnalysisHistory(source/'analysis_history').save(key=record['decision_id'],
+            created_at=datetime.fromisoformat(record['created_at_utc']),request=record['request'],result=payload)
+    before=snapshot(source)
+    raw,summary=create_backup(source)
+    files,_=inspect_backup(raw)
+    restore_empty(tmp_path/'restored',files)
+    for directory in (source,tmp_path/'restored'):
+        reopened=FileAnalysisHistory(directory/'analysis_history')
+        for record in records:
+            assert reopened.load(record['decision_id'])['result'] == record['result']
+        assert snapshot(directory) == before
+    assert summary['observations'] == summary['comparisons'] == 3
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Archived reads must not recalculate or open a mission')
+    with TestClient(create_app(service_factory=forbidden, profile_provider=forbidden,
+        weather_provider=forbidden, analysis_store_factory=lambda: FileAnalysisHistory(source/'analysis_history'))) as restarted:
+        for record in records:
+            response=restarted.get('/v1/analysis-history/'+record['decision_id'])
+            assert response.status_code==200
+            assert response.json()['result']==record['result']
+    assert snapshot(source) == before
+
+
+def test_public_contract_rejects_scoped_best_slice_outside_availability():
+    from pydantic import ValidationError
+    payload=scoped_browser_fixtures()['records'][0]['result']
+    for refusal in (payload['actionability_refusal'],payload['acquisition_intent_assessments'][0]['actionability_refusal']):
+        refusal['productivity_breakdown']['best_slice_start']='2026-10-28T05:30:00+01:00'
+        refusal['productivity_breakdown']['best_slice_end']='2026-10-28T05:45:00+01:00'
+    with pytest.raises(ValidationError,match='scope_best_slice_outside_intersection'):
+        TonightResponseModel.model_validate(payload)
+
+
+def test_v12_lineage_stays_readable_without_inventing_scope(tmp_path):
+    import json
+    from astropilot.decision_acceptance_lineage_store import FileDecisionAcceptanceLineageStore
+    from tests.architecture.test_decision_acceptance_lineage_persistence import context
+    candidate=composed_candidate(assessment('no_productive_slice'))
+    original=context()
+    current=replace(original,recommendation=replace(original.recommendation,
+        opportunity=replace(original.recommendation.opportunity,candidate=candidate)))
+    store=FileDecisionAcceptanceLineageStore(tmp_path)
+    store.create_context(current)
+    path=tmp_path/'decision-1.json'
+    document=json.loads(path.read_bytes())
+    document['schema_version']=12
+    def strip(value):
+        if isinstance(value,dict):
+            if value.get('class')=='decision.models.actionability_refusal.ActionabilityRefusal':
+                value['fields'].pop('evidence_scope',None)
+            for child in value.values():strip(child)
+        elif isinstance(value,list):
+            for child in value:strip(child)
+    strip(document)
+    path.write_text(json.dumps(document))
+    before=path.read_bytes()
+    loaded=store.load_context('decision-1')
+    diagnostic=loaded.recommendation.opportunity.candidate.acquisition_intent_assessments[0].actionability_refusal
+    assert diagnostic.evidence_scope is None
+    assert diagnostic.productivity_breakdown.evaluated_slice_count == 8
+    assert path.read_bytes()==before
+
+
+def test_typed_lineage_roundtrips_partial_scope_without_recalculation(tmp_path):
+    from astropilot.decision_acceptance_lineage_store import FileDecisionAcceptanceLineageStore
+    from tests.architecture.test_decision_acceptance_lineage_persistence import context
+    from tests.architecture.test_refusal_evidence_scope import window, AVAIL
+    candidate=composed_candidate(window([.2]*4+[.9]*4),availability=AVAIL)
+    original=context()
+    current=replace(original,recommendation=replace(original.recommendation,
+        opportunity=replace(original.recommendation.opportunity,candidate=candidate)))
+    store=FileDecisionAcceptanceLineageStore(tmp_path)
+    store.create_context(current)
+    path=tmp_path/'decision-1.json'
+    before=path.read_bytes()
+    reopened=FileDecisionAcceptanceLineageStore(tmp_path).load_context('decision-1')
+    original_refusal=candidate.acquisition_intent_assessments[0].actionability_refusal
+    restored=reopened.recommendation.opportunity.candidate.acquisition_intent_assessments[0].actionability_refusal
+    assert restored == original_refusal
+    assert restored.evidence_scope.partial_slice_count==1
+    assert restored.productivity_breakdown.evaluated_slice_count==6
+    assert path.read_bytes()==before

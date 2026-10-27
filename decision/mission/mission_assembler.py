@@ -19,6 +19,7 @@ from decision.night_productivity.night_productivity_context import NightProducti
 from decision.night_productivity.night_productivity_result import NightProductivityResult
 from decision.night_productivity.productivity_diagnostics import (
     ProductivityBreakdown,
+    SliceProductivityEvaluation,
 )
 from decision.mission.night_planner import NightPlanner
 from decision.intelligence.season_analysis import SeasonAnalysis
@@ -68,6 +69,7 @@ class ProductiveWindowAssessment:
     productivity_breakdown: ProductivityBreakdown | None = None
     acquisition_capacity: AcquisitionIntentRemainingProgress | None = None
     evidence_issues: tuple[str, ...] = ()
+    productivity_slice_evaluations: tuple[SliceProductivityEvaluation, ...] = ()
 
     @classmethod
     def build(
@@ -258,6 +260,7 @@ class ProductiveWindowAssessment:
                 else None
             ),
             productivity_breakdown=productivity_evaluation.breakdown,
+            productivity_slice_evaluations=productivity_evaluation.slice_evaluations,
             acquisition_capacity=(
                 mission_input.acquisition_capacity if mission_input is not None else None
             ),

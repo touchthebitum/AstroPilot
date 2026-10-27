@@ -1,10 +1,12 @@
 """Immutable diagnostics produced by productive-window evaluation, without recalculation."""
 
+from datetime import timezone
 from dataclasses import dataclass
 from enum import Enum
 from math import isfinite
 
 from decision.night_productivity.productivity_diagnostics import ProductivityBreakdown
+from decision.night_productivity.refusal_evidence_scope import ProductivityEvidenceScope
 
 
 class ActionabilityRefusalConclusion(str, Enum):
@@ -32,6 +34,7 @@ class ActionabilityRefusal:
     limiting_factors: tuple[dict[str, str], ...] = ()
     refusal_stage: ProductivityRefusalStage | None = None
     productivity_breakdown: ProductivityBreakdown | None = None
+    evidence_scope: ProductivityEvidenceScope | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.conclusion, ActionabilityRefusalConclusion):
@@ -89,6 +92,21 @@ class ActionabilityRefusal:
             )
         ):
             raise ValueError("insufficient_evidence_forbids_productivity_breakdown")
+        if self.evidence_scope is not None:
+            if not isinstance(self.evidence_scope, ProductivityEvidenceScope):
+                raise TypeError("Expected ProductivityEvidenceScope")
+            if self.status is not ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL:
+                raise ValueError("scope_requires_constraints_refusal")
+            breakdown = self.productivity_breakdown
+            if breakdown is not None:
+                count = self.evidence_scope.partial_slice_count
+                if count is not None and count > breakdown.evaluated_slice_count:
+                    raise ValueError("scope_partial_count_exceeds_evaluated")
+                if breakdown.evaluated_slice_count:
+                    scope = self.evidence_scope
+                    if (scope.evaluated_start is None or scope.evaluated_end is None
+                            or not scope.evaluated_start.astimezone(timezone.utc) <= breakdown.best_slice_start.astimezone(timezone.utc) < breakdown.best_slice_end.astimezone(timezone.utc) <= scope.evaluated_end.astimezone(timezone.utc)):
+                        raise ValueError("scope_best_slice_outside_intersection")
         if self.productivity_breakdown is not None:
             expected_stage = (
                 ProductivityRefusalStage.NO_PRODUCTIVE_SLICE

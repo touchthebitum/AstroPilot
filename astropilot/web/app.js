@@ -6464,10 +6464,16 @@ function refusalForecastMessage(payload) {
   const low = Math.round(forecast.cloud_cover_min), high = Math.round(forecast.cloud_cover_max);
   const clouds = low === high ? `${low} %` : `${low} à ${high} %`;
   const overcast = forecast.cloud_cover_min === 100 && forecast.cloud_cover_max === 100;
+  const perimeter = forecast.window_kind === "availability_intersection"
+    ? "la portion de la fenêtre candidate comprise dans votre disponibilité"
+    : forecast.window_kind === "candidate_window" ? "la fenêtre candidate, qui peut dépasser votre disponibilité"
+      : "la fenêtre météo archivée, dont le périmètre par rapport à votre disponibilité n’est pas enregistré";
+  const sampling = forecast.sample_times?.length
+    ? ` Échantillons horaires utilisés : ${forecast.sample_times.map(analysisTimeLabel).join(" ; ")}. Une heure partielle conserve la prévision horaire d’origine, sans interpolation.` : "";
   return {
     title: overcast ? "Ciel couvert prévu sur le créneau évalué" : "Créneau insuffisant pour ce projet",
-    body: `Votre projet est bien enregistré. Couverture nuageuse prévue : ${clouds} sur le créneau évalué ${range}. ${overcast ? "NightMerit ne recommande pas de séance photo pour ce projet dans ces conditions. " : "Aucun créneau suffisamment productif n’a été retenu pour ce projet. "}Votre projet est conservé. Prévisions récupérées le ${stamp(retrieved)}. Actualisez les prévisions avant de décider de sortir.`,
-    details: `Source : ${forecast.provider}. Il s’agit de prévisions, pas d’une mesure du ciel sur place. Le créneau évalué peut être plus court que votre disponibilité.`,
+    body: `Votre projet est bien enregistré. Couverture nuageuse prévue : ${clouds} sur ${perimeter} ${range}. ${overcast ? "NightMerit ne recommande pas de séance photo pour ce projet dans ces conditions. " : "Aucun créneau suffisamment productif n’a été retenu pour ce projet. "}Votre projet est conservé. Prévisions récupérées le ${stamp(retrieved)}. Actualisez les prévisions avant de décider de sortir.`,
+    details: `Source : ${forecast.provider}. Il s’agit de prévisions, pas d’une mesure du ciel sur place. Ce contexte météo ne désigne pas la cause physique du refus.${sampling}`,
     overcast,
   };
 }
@@ -6481,8 +6487,9 @@ function intentEligibilityRefusalMessage(payload) {
       const refusal = item.actionability_refusal;
       const [title, detail, breakdown] = actionabilityRefusalMessage(refusal);
       const label = item.label || item.filter_type || item.acquisition_intent_id;
-      const summary = refusal.refusal_stage === "no_productive_slice"
-        ? `Aucune tranche évaluée n’atteint le seuil de productivité. Une mission exige au moins ${Math.ceil(refusal.required_continuous_minutes)} minutes productives continues.`
+      const summary = refusal.evidence_scope && !refusal.evidence_scope.evaluated_start ? detail
+        : refusal.refusal_stage === "no_productive_slice"
+        ? `Aucune tranche évaluée dans votre disponibilité n’atteint le seuil de productivité. Une mission exige au moins ${Math.ceil(refusal.required_continuous_minutes)} minutes productives continues.`
         : refusal.refusal_stage === "continuous_window_too_short"
           ? `Des tranches sont productives, mais la meilleure durée continue est de ${Math.floor(refusal.best_productive_window_minutes)} min ; il faut au moins ${Math.ceil(refusal.required_continuous_minutes)} min.`
           : detail;
@@ -6540,6 +6547,33 @@ const actionabilityCauseLabels = Object.freeze({
 });
 
 function actionabilityRefusalMessage(refusal) {
+  const message = rawActionabilityRefusalMessage(refusal);
+  if (refusal?.status !== "constraints_refusal") return message;
+  const scope = refusal.evidence_scope;
+  if (!scope) {
+    if (!refusal.productivity_breakdown && !refusal.refusal_stage) return message;
+    message[2] = `${message[2] || message[1] || ""} Périmètre du bilan non enregistré dans cette ancienne analyse : les tranches peuvent dépasser votre disponibilité. Ce bilan historique n’a pas été recalculé.`;
+    return message;
+  }
+  const stamp = value => value ? analysisTimeLabel(value) : "non précisé";
+  const requested = scope.availability_start || scope.availability_end
+    ? `Disponibilité demandée : ${scope.availability_start ? stamp(scope.availability_start) : "début sans borne imposée"} → ${scope.availability_end ? stamp(scope.availability_end) : "fin sans borne imposée"}.`
+    : "Disponibilité sans bornes horaires imposées.";
+  const bounds = `${requested} Fenêtre candidate : ${stamp(scope.candidate_start)} → ${stamp(scope.candidate_end)}.`;
+  if (!scope.evaluated_start || !scope.evaluated_end) {
+    return ["Fenêtre hors de votre disponibilité", "La fenêtre candidate ne chevauche pas votre disponibilité. Aucune portion ne peut être utilisée pour cette mission.", bounds];
+  }
+  let detail = `${bounds} Portion évaluée dans votre disponibilité : ${stamp(scope.evaluated_start)} → ${stamp(scope.evaluated_end)}.`;
+  if (scope.partial_slice_count > 0) {
+    detail += ` ${scope.partial_slice_count} portion(s) raccourcie(s) aux bornes de votre disponibilité : score et bilan repris de leur tranche d’origine, sans nouveau calcul à la minute.`;
+    detail += ` Tranche d’origine du meilleur score : ${stamp(scope.best_source_slice_start)} → ${stamp(scope.best_source_slice_end)}.`;
+    for (let i = 1; i < message.length; i++) message[i] = message[i].replaceAll("tranches de 15 min", "portions de 15 min maximum");
+  }
+  message[2] = `${message[2] || ""} ${detail}`.trim();
+  return message;
+}
+
+function rawActionabilityRefusalMessage(refusal) {
   const title = "Aucun créneau suffisamment productif";
   if (!refusal || refusal.conclusion !== "no_productive_window") {
     return [title, partialMessages.no_productive_window[1]];

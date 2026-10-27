@@ -1285,6 +1285,7 @@ def test_known_constraint_refusal_is_not_presented_as_insufficient_evidence():
         "limiting_factors": [],
         "refusal_stage": None,
         "productivity_breakdown": None,
+        "evidence_scope": None,
     }
 
 

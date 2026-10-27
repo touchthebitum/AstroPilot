@@ -1346,6 +1346,7 @@ def test_tonight_api_serializes_actionability_refusal_without_recalculation():
         "limiting_factors": [],
         "refusal_stage": None,
         "productivity_breakdown": None,
+        "evidence_scope": None,
     }
     assert payload["target_decision_status"] == "not_recommended"
 

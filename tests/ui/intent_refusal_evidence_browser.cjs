@@ -32,10 +32,22 @@ const fixtures=JSON.parse(fs.readFileSync(process.env.INTENT_REFUSAL_FIXTURES,'u
    for(const record of fixtures.records){
     await page.evaluate(payload=>showTonightUnavailable(payload),record.result);
     const stage=record.result.actionability_refusal?.refusal_stage;
-    const title=stage==='no_productive_slice'?'Aucune tranche productive':stage==='continuous_window_too_short'?'Fenêtre productive trop courte':'Créneau insuffisant pour ce projet';
+    const scoped=record.decision_id.startsWith('scoped-');
+    const noOverlap=scoped && !record.result.actionability_refusal.evidence_scope.evaluated_start;
+    const title=noOverlap?'Fenêtre hors de votre disponibilité':stage==='no_productive_slice'?'Aucune tranche productive':stage==='continuous_window_too_short'?'Fenêtre productive trop courte':'Créneau insuffisant pour ce projet';
     assert.equal(await page.locator('#message-title').innerText(),title);
     const technical=await page.locator('#message-technical').textContent();
-    if(stage==='no_productive_slice'){
+    if(scoped){
+     assert.match(technical,/Disponibilité demandée/);assert.match(technical,/Fenêtre candidate/);
+     if(noOverlap){assert.doesNotMatch(technical,/Meilleure tranche|Nuages : −/);}
+     else{
+      assert.match(technical,/Portion évaluée dans votre disponibilité/);
+      assert.match(technical,/05:27/);assert.match(technical,/sans nouveau calcul à la minute/);
+      assert.match(technical,/6 (portions|évaluées)/);
+      if(stage==='no_productive_slice')assert.match(technical,/20 %.*70 %/);
+      else assert.match(await page.locator('#message-body').innerText(),/27 min.*60 min/);
+     }
+    }else if(stage==='no_productive_slice'){
      assert.match(technical,/55 %.*70 %/);assert.match(technical,/Lune : −40 points/);
      assert.match(technical,/Humidité : −5 points/);assert.doesNotMatch(technical,/Nuages : −/);
      assert.match(technical,/cause physique unique/);
@@ -53,8 +65,9 @@ const fixtures=JSON.parse(fs.readFileSync(process.env.INTENT_REFUSAL_FIXTURES,'u
     await page.locator('#analysis-history-list button').nth(fixtures.records.indexOf(record)).click();
     const archived=await page.locator('#analysis-history-detail').innerText();
     assert(archived.includes(title));
-    if(stage==='continuous_window_too_short')assert.match(archived,/30 min.*60 min/);
-    if(stage==='no_productive_slice')assert.match(archived,/55 %.*70 %/);
+    if(scoped)assert.match(archived,/Fenêtre candidate/);
+    if(!scoped && stage==='continuous_window_too_short')assert.match(archived,/30 min.*60 min/);
+    if(!scoped && stage==='no_productive_slice')assert.match(archived,/55 %.*70 %/);
     if(!stage)assert.match(archived,/n’ont pas été conservés/);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
     await page.locator('#analysis-history-close').click();

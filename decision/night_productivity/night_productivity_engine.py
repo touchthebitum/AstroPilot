@@ -17,6 +17,7 @@ from decision.night_productivity.night_timeline_builder import NightTimelineBuil
 from decision.night_productivity.productivity_diagnostics import (
     PRODUCTIVE_SLICE_THRESHOLD,
     ProductivityBreakdown,
+    SliceProductivityEvaluation,
 )
 
 
@@ -24,6 +25,7 @@ from decision.night_productivity.productivity_diagnostics import (
 class NightProductivityEvaluation:
     result: NightProductivityResult
     breakdown: ProductivityBreakdown | None
+    slice_evaluations: tuple[SliceProductivityEvaluation, ...] = ()
 
 
 class NightProductivityEngine:
@@ -133,7 +135,7 @@ class NightProductivityEngine:
                 productive_slice_threshold=PRODUCTIVE_SLICE_THRESHOLD,
                 losses=slice_evaluations[best_index].losses,
             )
-        return NightProductivityEvaluation(result=result, breakdown=breakdown)
+        return NightProductivityEvaluation(result=result, breakdown=breakdown, slice_evaluations=slice_evaluations)
 
 
 NightProductivityEngine.evaluate._provides_productivity_breakdown = True
