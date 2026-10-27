@@ -417,7 +417,7 @@ def test_assessment_rejects_invalid_status_reason_gap_combinations(assessment):
         assessment()
 
 
-def test_contract_has_only_the_four_frozen_output_fields():
+def test_contract_keeps_optional_frozen_refusal_evidence():
     assert tuple(field.name for field in fields(
         AcquisitionIntentEligibilityAssessment
     )) == (
@@ -425,6 +425,7 @@ def test_contract_has_only_the_four_frozen_output_fields():
         "status",
         "blocking_reasons",
         "evidence_gaps",
+        "actionability_refusal",
     )
 
 

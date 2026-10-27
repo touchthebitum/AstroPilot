@@ -355,12 +355,21 @@ class TonightApplicationService:
         # configuration error. Never select an intent or bypass the refusal.
         if (getattr(candidate, "acquisition_intent_selection_status", None)
                 is AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT):
+            targeted_assessments = tuple(
+                item for item in candidate.acquisition_intent_assessments
+                if "intent_not_targeted_by_project" not in item.reason_codes
+            )
+            # A global diagnostic is unambiguous only for a sole targeted intent.
+            # All per-intent diagnostics remain available on the candidate.
+            refusal = (targeted_assessments[0].actionability_refusal
+                       if len(targeted_assessments) == 1 else None)
             return TonightResult(
                 night, recommendation, None,
                 status=TonightStatus.NO_MISSION,
                 forecast_evidence=forecast_evidence,
                 candidate_rejections=candidate_rejections,
                 creation_refusal="no_eligible_acquisition_intent",
+                actionability_refusal=refusal,
             )
 
         # Comparative lunar evidence belongs to the candidate until an intent

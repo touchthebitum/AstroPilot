@@ -6471,11 +6471,34 @@ function refusalForecastMessage(payload) {
 function intentEligibilityRefusalMessage(payload) {
   const assessments = targetedIntentAssessments(payload);
   const forecast = refusalForecastMessage(payload);
-  if (forecast) return [forecast.title, forecast.body];
+  const diagnosed = assessments.filter(item => item.actionability_refusal);
+  if (diagnosed.length) {
+    const summaries = diagnosed.map(item => {
+      const refusal = item.actionability_refusal;
+      const [title, detail, breakdown] = actionabilityRefusalMessage(refusal);
+      const label = item.label || item.filter_type || item.acquisition_intent_id;
+      const summary = refusal.refusal_stage === "no_productive_slice"
+        ? `Aucune tranche évaluée n’atteint le seuil de productivité. Une mission exige au moins ${Math.ceil(refusal.required_continuous_minutes)} minutes productives continues.`
+        : refusal.refusal_stage === "continuous_window_too_short"
+          ? `Des tranches sont productives, mais la meilleure durée continue est de ${Math.floor(refusal.best_productive_window_minutes)} min ; il faut au moins ${Math.ceil(refusal.required_continuous_minutes)} min.`
+          : detail;
+      return {title, summary: `${label} : ${summary}`, detail: `${label} : ${detail}${breakdown ? ` ${breakdown}` : ""}`};
+    });
+    const undiagnosed = assessments.filter(item => !item.actionability_refusal);
+    return [
+      assessments.length === 1 ? summaries[0].title : "Aucune prise de vue réalisable pour ce projet",
+      `Votre projet est conservé. ${summaries.map(item => item.summary).join(" ")}${undiagnosed.length ? " D’autres prises de vue ont des motifs distincts ; consultez les détails." : ""}`,
+      summaries.map(item => item.detail).join("\n")
+        + undiagnosed.map(item => `\n${item.label || item.acquisition_intent_id} : ${(item.reason_codes || []).join(", ")}. Diagnostic détaillé non disponible.`).join("")
+        + (forecast ? `\nContexte des prévisions, sans attribution de la cause : ${forecast.body} ${forecast.details}` : ""),
+    ];
+  }
+  const missingDiagnostic = "La durée productive calculée, l’étape du refus et le bilan des facteurs n’ont pas été conservés dans cette analyse. Les prévisions seules ne permettent pas d’établir la cause physique du refus.";
+  if (forecast) return [forecast.title, forecast.body, `${missingDiagnostic} ${forecast.details}`];
   if (intentsRefusedForProductiveWindow(payload)) {
     const names = assessments.map(item => item.label || item.filter_type).filter(Boolean).join(", ");
     return ["Créneau insuffisant pour ce projet",
-      `Votre projet est bien enregistré. Sur la plage choisie, NightMerit ne trouve pas de créneau suffisamment productif${names ? ` pour ${names}` : ""}. Vous pouvez revoir vos horaires ou refaire l’analyse lorsque les conditions évoluent, sans garantie de trouver un créneau adapté. Votre projet est conservé.`];
+      `Votre projet est bien enregistré. Sur la plage choisie, NightMerit ne trouve pas de créneau suffisamment productif${names ? ` pour ${names}` : ""}. Vous pouvez revoir vos horaires ou refaire l’analyse lorsque les conditions évoluent, sans garantie de trouver un créneau adapté. Votre projet est conservé.`, missingDiagnostic];
   }
   const reasons = {
     intent_target_completed: "l’objectif de pose est déjà atteint",
@@ -6517,9 +6540,18 @@ function actionabilityRefusalMessage(refusal) {
   if (!refusal || refusal.conclusion !== "no_productive_window") {
     return [title, partialMessages.no_productive_window[1]];
   }
+  if (refusal.status === "constraints_refusal" && refusal.cause_code === "ambiguous_best_duration_window") {
+    return ["Plusieurs créneaux à départager", "Plusieurs créneaux de même durée restent à départager. Précisez vos horaires pour poursuivre."];
+  }
   const cause = actionabilityCauseLabels[refusal.cause_code]
     || (refusal.cause_code ? `cause moteur : ${refusal.cause_code}` : null);
   const breakdown = refusal.productivity_breakdown;
+  if (refusal.status === "constraints_refusal" && refusal.refusal_stage === "no_productive_slice" && breakdown?.evaluated_slice_count === 0) {
+    return ["Aucune tranche productive", "Le calcul ne contient aucune tranche évaluée. Aucun bilan chiffré des facteurs limitants n’est disponible."];
+  }
+  if (refusal.status === "constraints_refusal" && refusal.refusal_stage === "no_productive_slice" && !breakdown) {
+    return ["Aucune tranche productive", "Aucune tranche évaluée n’atteint le seuil de productivité. Le bilan détaillé des facteurs n’est pas disponible."];
+  }
   if (
     refusal.status === "constraints_refusal"
     && refusal.refusal_stage === "no_productive_slice"
@@ -6545,7 +6577,7 @@ function actionabilityRefusalMessage(refusal) {
     const lossText = losses.length ? ` ${losses.join(" · ")}.` : "";
     return [
       "Aucune tranche productive",
-      `${bestLabel} : ${score} % — seuil requis : ${threshold} %.${lossText} Aucune des ${breakdown.evaluated_slice_count} tranches de 15 min n’atteint le seuil.`,
+      `${bestLabel} : ${score} % — seuil requis : ${threshold} %.${lossText} Aucune des ${breakdown.evaluated_slice_count} tranches de 15 min n’atteint le seuil. Ce bilan décrit le calcul pour cette tranche, pas une cause physique unique du refus.`,
     ];
   }
   if (
@@ -6556,10 +6588,19 @@ function actionabilityRefusalMessage(refusal) {
   ) {
     const foundMinutes = Math.max(0, Math.floor(refusal.best_productive_window_minutes));
     const requiredMinutes = Math.max(0, Math.ceil(refusal.required_continuous_minutes));
-    return [
+    const message = [
       "Fenêtre productive trop courte",
       `Des tranches productives existent, mais la meilleure fenêtre continue après vos contraintes dure ${foundMinutes} min. Seuil requis : ${requiredMinutes} min.`,
     ];
+    if (breakdown) {
+      const names = {cloud:"Nuages",moon:"Lune",altitude:"Altitude",humidity:"Humidité",wind:"Vent"};
+      const losses = Object.entries(breakdown.losses || {}).filter(([name, value]) => names[name] && Number.isFinite(value) && value > 0)
+        .map(([name, value]) => `${names[name]} : −${Math.round(value * 100)} points`).join(" · ");
+      message.push(`${breakdown.productive_slice_count} tranches productives sur ${breakdown.evaluated_slice_count} évaluées. Meilleure tranche : ${Math.round(breakdown.best_slice_score * 100)} % ; seuil : ${Math.round(breakdown.productive_slice_threshold * 100)} %.${losses ? ` Bilan calculé pour cette tranche : ${losses}.` : ""} Ce bilan ne désigne pas une cause physique unique du refus.`);
+    } else {
+      message.push("Le bilan détaillé des facteurs n’est pas disponible.");
+    }
+    return message;
   }
   if (
     refusal.status === "constraints_refusal"
@@ -6611,7 +6652,7 @@ function showTonightUnavailable(payload) {
   const candidateMessage = payload.status === "no_candidate" ? noCandidateMessage(payload) : null;
   const productiveRefusal = payload.status === "no_productive_window";
   const creationRefused = payload.status === "no_mission" && Boolean(payload.creation_refusal);
-  const [title, technical] = candidateMessage || (payload.status === "weather_refused"
+  const [title, technical, detailed] = candidateMessage || (payload.status === "weather_refused"
     ? [payload.weather_decision.presentation.label, payload.weather_decision.presentation.summary]
     : productiveRefusal
     ? actionabilityRefusalMessage(payload.actionability_refusal)
@@ -6638,7 +6679,7 @@ function showTonightUnavailable(payload) {
   showMessage(simpleTitle, chosen
     ? `Cible choisie : ${chosen}. ${body} Votre projet est conservé.${offerAlternatives ? " Vous pouvez modifier vos horaires ou chercher une autre cible, sans garantie de créneau disponible." : " Votre choix est conservé ; aucune autre cible ne le remplace."}`
     : body, { kicker: "Analyse terminée" });
-  text("#message-technical", candidateMessage?.[2] || forecast?.details || technical);
+  text("#message-technical", candidateMessage?.[2] || detailed || forecast?.details || technical);
   const details = document.querySelector("#message-details");
   details.hidden = false;
   details.open = appliedUiMode === "pro";
@@ -7953,6 +7994,7 @@ function renderArchivedAnalysis(record) {
   const payload = record.result;
   const message = payload.status === "no_candidate" ? noCandidateMessage(payload)
     : payload.status === "no_productive_window" ? actionabilityRefusalMessage(payload.actionability_refusal)
+    : payload.status === "no_mission" && payload.creation_refusal ? creationRefusalMessage(payload)
     : payload.status === "weather_refused"
       ? [payload.weather_decision?.presentation?.label, payload.weather_decision?.presentation?.summary]
       : partialMessages[payload.status] || ["Résultat enregistré", "Consultez les détails de cette analyse archivée."];

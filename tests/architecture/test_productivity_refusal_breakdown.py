@@ -328,7 +328,7 @@ def test_insufficient_evidence_has_no_stage_or_causal_breakdown():
 
 
 def test_persistent_lineage_productivity_structures_are_unchanged():
-    assert SCHEMA_VERSION == 11
+    assert SCHEMA_VERSION == 12
     assert [item.name for item in fields(NightSlice)] == [
         "start_hour", "end_hour", "target_altitude", "target_azimuth",
         "moon_altitude", "moon_separation", "moon_penalty", "cloud_cover",

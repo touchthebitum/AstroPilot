@@ -1185,9 +1185,16 @@ class TonightAcquisitionIntentAssessmentModel(BaseModel):
         AcquisitionIntentEligibilityReason | AcquisitionIntentEvidenceGap,
         ...,
     ]
+    actionability_refusal: ActionabilityRefusalModel | None = None
 
     @model_validator(mode="after")
     def validate_status_reasons(self):
+        if self.actionability_refusal is not None:
+            refusal = self.actionability_refusal.root
+            expected_status = ("not_eligible" if refusal.status == "constraints_refusal"
+                               else "insufficient_evidence")
+            if self.status.value != expected_status or refusal.cause_code not in self.reason_codes:
+                raise ValueError("intent_refusal_evidence_mismatch")
         if self.status is AcquisitionIntentEligibilityStatus.ELIGIBLE:
             if self.reason_codes:
                 raise ValueError("eligible_must_not_have_reason_codes")
@@ -1677,6 +1684,17 @@ class TonightResponseModel(BaseModel):
     target_explanations: list[TargetExplanationResponseModel] = Field(
         default_factory=list
     )
+
+    @model_validator(mode="after")
+    def validate_unselected_intent_refusal(self):
+        if self.status == "no_mission" and self.actionability_refusal is not None:
+            targeted = [item for item in self.acquisition_intent_assessments
+                        if "intent_not_targeted_by_project" not in item.reason_codes]
+            if not (self.creation_refusal == "no_eligible_acquisition_intent"
+                    and len(targeted) == 1
+                    and targeted[0].actionability_refusal == self.actionability_refusal):
+                raise ValueError("unselected_intent_refusal_evidence_mismatch")
+        return self
 
 
 def _acquisition_intent_choice_available(result) -> bool:
