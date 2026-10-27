@@ -3806,6 +3806,10 @@ const PENDING_ACCEPTANCE_STORAGE_VERSION = 2;
 const wizardStates = Object.freeze(["site", "equipment", "projects", "review"]);
 
 function setView(view) {
+  const guidanceDialog = document.querySelector("#altitude-guidance-dialog");
+  if (guidanceDialog?.open) guidanceDialog.close();
+  const guidanceButton = document.querySelector("#availability-altitude-guidance");
+  if (guidanceButton) guidanceButton.hidden = !state.selectedProjectId || state.discoveryMode;
   const selectedNotice = document.querySelector("#availability-selected-project");
   if (selectedNotice) {
     selectedNotice.hidden = !state.selectedProjectId || state.discoveryMode;
@@ -6691,10 +6695,13 @@ function showTonightUnavailable(payload) {
     ? "Actualiser les prévisions" : "Réessayer plus tard";
   document.querySelector("#message-edit-availability").hidden = !editAvailability;
   document.querySelector("#message-discover-targets").hidden = !offerAlternatives;
+  document.querySelector("#message-altitude-guidance").hidden = !chosen || payload.target_refusal?.code !== "target_below_minimum_altitude";
   if (offerAlternatives) ui.retry.textContent = "Actualiser l’analyse";
 }
 
 function showMessage(title, body, { kicker = "Décision indisponible", retry = true } = {}) {
+  const altitudeButton = document.querySelector("#message-altitude-guidance");
+  if (altitudeButton) altitudeButton.hidden = true;
   const details = document.querySelector("#message-details");
   const createProject = document.querySelector("#message-create-project");
   if (createProject) createProject.hidden = true;
@@ -7298,6 +7305,116 @@ ui.retry.addEventListener("click", () => {
   if (state.availability) loadTonight(state.availability);
   else setView("availability");
 });
+// Geometry is an explicit read-only aid, never a cached decision or mission.
+let altitudeGuidanceRequest = null;
+function altitudeGuidanceIsCurrent(owner) {
+  return altitudeGuidanceRequest === owner && owner.project === state.selectedProjectId
+    && !state.discoveryMode && owner.generation === state.configurationGeneration
+    && owner.site === decisionSiteFingerprint() && owner.revision === state.viewRevision
+    && document.querySelector("#altitude-guidance-dialog").open;
+}
+function renderAltitudeCurve(data) {
+  const svg = document.querySelector("#altitude-guidance-chart");
+  svg.querySelectorAll("g").forEach(node => node.remove());
+  const ns = "http://www.w3.org/2000/svg", group = document.createElementNS(ns, "g");
+  svg.append(group);
+  const add = (tag, attributes, label) => {
+    const node = document.createElementNS(ns, tag);
+    for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
+    if (label !== undefined) node.textContent = label;
+    group.append(node);return node;
+  };
+  const from = Date.parse(data.night_start), to = Date.parse(data.night_end);
+  const x = time => 48 + (Date.parse(time) - from) / (to - from) * 560;
+  const y = altitude => 190 - (altitude + 90) / 180 * 164;
+  for (const angle of new Set([0, data.minimum_altitude_deg, 90])) {
+    add("line", {x1:48, x2:608, y1:y(angle), y2:y(angle), stroke:"currentColor", opacity:.4,
+      "stroke-dasharray": angle === data.minimum_altitude_deg ? "6 4" : "none"});
+    add("text", {x:42, y:y(angle)+4, "text-anchor":"end", fill:"currentColor", "font-size":12}, `${angle}°`);
+  }
+  add("polyline", {points:data.points.map(point => `${x(point.time)},${y(point.altitude_deg)}`).join(" "),
+    fill:"none", stroke:"var(--accent, #8bdccf)", "stroke-width":3});
+  for (const [time, anchor] of [[data.night_start,"start"],[data.points[Math.floor(data.points.length/2)].time,"middle"],[data.night_end,"end"]]) {
+    const label = new NightMeritTime.DateTimeFormat("fr-CH", {timeZone:data.timezone,hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(time));
+    add("text", {x:x(time),y:218,"text-anchor":anchor,fill:"currentColor","font-size":13},label);
+  }
+  text("#altitude-curve-description", `${data.project_id}, seuil ${data.minimum_altitude_deg}°. ${siteDateTime(data.night_start,data.timezone)} à ${siteDateTime(data.night_end,data.timezone)}. Les horaires au-dessus du seuil sont listés sous la courbe.`);
+}
+async function openAltitudeGuidance({keepDate = false} = {}) {
+  if (guardUnresolvedAcceptance() || !state.selectedProjectId || state.discoveryMode) return;
+  const dialog = document.querySelector("#altitude-guidance-dialog");
+  altitudeGuidanceRequest?.controller.abort();
+  const owner = {project:state.selectedProjectId,generation:state.configurationGeneration,
+    site:decisionSiteFingerprint(),revision:state.viewRevision,startedAt:performance.now(),controller:new AbortController()};
+  altitudeGuidanceRequest = owner;
+  const dateInput = document.querySelector("#altitude-guidance-date");
+  if (!keepDate) {
+    const mode = document.querySelector('input[name="availability-mode"]:checked')?.value;
+    const start = mode === "fixed_window" || mode === "start_and_duration" ? document.querySelector("#availability-start").value : "";
+    dateInput.value = start ? start.slice(0,10) : "";
+    if (start && Number(start.slice(11,13)) < 12) {
+      const day = new Date(`${start.slice(0,10)}T12:00:00Z`); day.setUTCDate(day.getUTCDate()-1);
+      dateInput.value = day.toISOString().slice(0,10);
+    }
+  }
+  text("#altitude-guidance-title", `Hauteur de ${owner.project} pendant la nuit`);
+  text("#altitude-guidance-status", "Calcul de la hauteur, sans récupération météo…");
+  document.querySelector("#altitude-guidance-result").hidden = true;
+  document.querySelector("#altitude-guidance-intervals").replaceChildren();
+  if (!dialog.open) dialog.showModal();
+  const timer = setTimeout(() => owner.controller.abort(),10000);
+  try {
+    const query = dateInput.value ? `?night_date=${encodeURIComponent(dateInput.value)}` : "";
+    const response = await fetch(`/v1/projects/${encodeURIComponent(owner.project)}/altitude-guidance${query}`,{cache:"no-store",signal:owner.controller.signal});
+    const data = await response.json();
+    if (!altitudeGuidanceIsCurrent(owner)) return;
+    if (!response.ok) throw new Error(data?.detail?.code || "guidance_unavailable");
+    const site = state.configuration?.site;
+    if (data.project_id !== owner.project || data.latitude !== site?.latitude || data.longitude !== site?.longitude || data.timezone !== currentSiteTimezone()) throw new Error("guidance_site_changed");
+    dateInput.value = data.night_date;
+    if (data.status === "astronomical_night_unavailable") {
+      text("#altitude-guidance-status", "La nuit astronomique ne peut pas être délimitée pour ce site et cette date. Aucun horaire n’est proposé.");return;
+    }
+    const nightLabel = new NightMeritTime.DateTimeFormat("fr-CH",{timeZone:"UTC",day:"numeric",month:"long",year:"numeric"}).format(new Date(`${data.night_date}T12:00:00Z`));
+    text("#altitude-guidance-status", `Site : ${data.site_name} · horaires ${data.timezone} · nuit du ${nightLabel}`);
+    text("#altitude-guidance-summary", `Seuil configuré : ${data.minimum_altitude_deg}°. Hauteur maximale sur la courbe : ${Math.max(...data.points.map(point=>point.altitude_deg)).toLocaleString("fr-CH",{maximumFractionDigits:1})}°. Ce calcul ne garantit pas un créneau productif.`);
+    renderAltitudeCurve(data);
+    const container = document.querySelector("#altitude-guidance-intervals");
+    if (!data.intervals.length) {
+      const p = document.createElement("p");p.textContent = "Aucun intervalle encore à venir au-dessus du seuil n’est trouvé pour cette nuit. Choisissez une autre date ou une autre cible.";container.append(p);
+    }
+    for (const interval of data.intervals) {
+      const card=document.createElement("article"),p=document.createElement("p");
+      p.textContent=`${siteDateTime(interval.start,data.timezone)} → ${siteDateTime(interval.end,data.timezone)} · ${interval.duration_minutes} min au-dessus du seuil.`;card.append(p);
+      if (interval.can_analyze) {
+        const button=document.createElement("button");button.type="button";button.className="primary-button";button.textContent="Analyser ce créneau";
+        button.addEventListener("click",()=>{
+          if (!altitudeGuidanceIsCurrent(owner) || guardUnresolvedAcceptance()) return;
+          if (Date.parse(interval.start) <= Date.parse(data.computed_at) + performance.now() - owner.startedAt) { text("#altitude-guidance-status","Cet horaire de début est déjà passé. Choisissez à nouveau la date pour actualiser les horaires.");return; }
+          const availability={mode:"fixed_window",start:interval.start,end:interval.end};
+          document.querySelector('input[name="availability-mode"][value="fixed_window"]').checked=true;
+          document.querySelector("#availability-start").value=formatDateTimeLocalInZone(new Date(interval.start),data.timezone);
+          document.querySelector("#availability-end").value=formatDateTimeLocalInZone(new Date(interval.end),data.timezone);
+          updateAvailabilityFields();dialog.close();loadTonight(availability);
+        });card.append(button);
+      } else {
+        const note=document.createElement("p");note.className="field-note";note.textContent=`Trop court : une mission exige au moins ${data.required_continuous_minutes} minutes productives continues.`;card.append(note);
+      }
+      container.append(card);
+    }
+    document.querySelector("#altitude-guidance-result").hidden=false;
+  } catch (error) {
+    if (altitudeGuidanceIsCurrent(owner)) text("#altitude-guidance-status",error.message==="guidance_site_changed"
+      ? "La configuration du site a changé. Fermez cette aide et rechargez votre configuration."
+      : "Impossible de calculer ces horaires. Vérifiez la date (hier à dans 14 jours) et votre configuration, puis réessayez. Vos données sont conservées.");
+  } finally {clearTimeout(timer);}
+}
+for (const id of ["availability-altitude-guidance","message-altitude-guidance"]) document.querySelector(`#${id}`).addEventListener("click",()=>openAltitudeGuidance());
+document.querySelector("#altitude-guidance-close").addEventListener("click",()=>document.querySelector("#altitude-guidance-dialog").close());
+document.querySelector("#altitude-guidance-dialog").addEventListener("close",()=>{altitudeGuidanceRequest?.controller.abort();altitudeGuidanceRequest=null;});
+document.querySelector("#altitude-guidance-date").addEventListener("change",()=>openAltitudeGuidance({keepDate:true}));
+document.querySelector("#altitude-guidance-refresh").addEventListener("click",()=>openAltitudeGuidance({keepDate:true}));
+
 document.querySelector("#message-edit-availability").addEventListener("click", () => {
   if (guardUnresolvedAcceptance()) return;
   setView("availability");
@@ -7665,6 +7782,8 @@ async function setDiscoveryMode(enabled) {
   state.discoveryGeneration = generation;
   state.discoveryMode = enabled;
   if (enabled) state.selectedProjectId = null;
+  document.querySelector("#availability-altitude-guidance").hidden = enabled || !state.selectedProjectId;
+  if (document.querySelector("#altitude-guidance-dialog").open) document.querySelector("#altitude-guidance-dialog").close();
   const chosenNotice = document.querySelector("#availability-selected-project");
   if (enabled && chosenNotice) chosenNotice.hidden = true;
   document.querySelector("#discover-targets").checked = enabled;

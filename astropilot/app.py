@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import importlib.metadata
 import math
 import os
@@ -30,6 +30,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from astropilot.altitude_guidance import AltitudeGuidance, GuidanceError, altitude_guidance
 
 from astropilot.guardian_renewal_api import (GuardianRenewalAdapter, RenewalRequest, Rejection,
     valid_key, valid_execution_id, response as guardian_response, unavailable as guardian_unavailable)
@@ -2269,6 +2271,17 @@ def create_app(
                     and cause.filename == str(get_user_data_dir() / "user_profile.json")):
                 return {}
             raise
+
+    @application.get("/v1/projects/{project_id}/altitude-guidance", response_model=AltitudeGuidance)
+    def get_altitude_guidance(project_id: str, response: Response, night_date: date | None = None):
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            return altitude_guidance(profile=profile_provider(), project_id=project_id,
+                                     reference_time=clock(), night_date=night_date)
+        except GuidanceError as exc:
+            raise HTTPException(status_code=422, detail={"code": str(exc)}) from None
+        except (OSError, ValueError, UserProfileError, TypeError):
+            raise HTTPException(status_code=503, detail={"code": "guidance_unavailable"}) from None
 
     @application.get("/v1/target-catalogue")
     def get_target_catalogue(equipment: str | None = None):

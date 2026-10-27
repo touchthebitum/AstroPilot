@@ -279,6 +279,7 @@
           <p>NightMerit utilisera uniquement la plage que vous indiquez pour cette recommandation.</p>
           <p id="availability-save-confirmation" class="field-note" role="status" hidden>Votre projet et votre configuration sont enregistrés. Choisissez maintenant votre disponibilité.</p>
           <p id="availability-selected-project" class="field-note" role="status" hidden></p>
+          <button class="secondary-button" id="availability-altitude-guidance" type="button" hidden>À quelle heure cette cible sera-t-elle assez haute ?</button>
           <p id="availability-site-timezone" class="field-note" hidden></p>
           <p id="availability-timezone-warning" class="form-error" role="alert" hidden>Le fuseau horaire du site ne peut pas être déterminé. Vérifiez les coordonnées du site avant de choisir une heure précise.</p>
         </div>
@@ -373,6 +374,7 @@
           <details id="message-details" data-mode-disclosure hidden><summary>Détails de l’analyse</summary><p id="message-technical"></p></details>
         </div>
         <div class="message-actions">
+          <button class="secondary-button" id="message-altitude-guidance" type="button" hidden>Voir les horaires où la cible est assez haute</button>
           <button class="secondary-button" id="message-edit-availability" type="button" hidden>Modifier mes horaires</button>
           <button class="secondary-button" id="message-discover-targets" type="button" hidden>Chercher une autre cible</button>
           <button class="secondary-button" id="message-retry" type="button">Réessayer</button>
@@ -815,6 +817,26 @@
         <div id="history-table" class="history-table"></div>
         <button class="secondary-button" id="history-next" type="button" hidden>Page suivante</button>
       </dialog>
+      <dialog id="altitude-guidance-dialog" aria-labelledby="altitude-guidance-title">
+        <header class="altitude-guidance-heading">
+          <h2 id="altitude-guidance-title">À quelle heure cette cible sera-t-elle assez haute ?</h2>
+          <button class="secondary-button" id="altitude-guidance-close" type="button" autofocus>Fermer</button>
+        </header>
+        <p>Cette aide montre uniquement la hauteur de la cible pendant la nuit astronomique. La météo, le matériel et la durée productive seront vérifiés lors de l’analyse.</p>
+        <label for="altitude-guidance-date">Nuit commençant le</label>
+        <input id="altitude-guidance-date" type="date">
+        <button class="secondary-button" id="altitude-guidance-refresh" type="button">Actualiser les horaires</button>
+        <p id="altitude-guidance-status" role="status" aria-live="polite"></p>
+        <div id="altitude-guidance-result" hidden>
+          <p id="altitude-guidance-summary"></p>
+          <figure class="altitude-curve"><svg id="altitude-guidance-chart" viewBox="0 0 640 240" role="img" aria-labelledby="altitude-curve-title altitude-curve-description"><title id="altitude-curve-title">Hauteur de la cible</title><desc id="altitude-curve-description"></desc></svg></figure>
+          <p class="field-note">Courbe échantillonnée toutes les 5 minutes ; limites des horaires approximatives à une minute près. Aucun obstacle local (arbre, bâtiment, relief) n’est pris en compte.</p>
+          <h3>Horaires encore à venir au-dessus du seuil</h3>
+          <p>Choisissez uniquement un créneau où vous serez disponible. « Analyser ce créneau » vérifie sa faisabilité ; cela ne démarre aucune prise de vue.</p>
+          <div id="altitude-guidance-intervals"></div>
+        </div>
+      </dialog>
+
       <dialog id="analysis-history-dialog" aria-labelledby="analysis-history-title">
         <h2 id="analysis-history-title">Mes analyses enregistrées</h2>
         <p>Résultats et prévisions archivés, conservés après fermeture. Leur consultation ne relance aucun calcul, ne crée aucun relevé et n’autorise aucune mission. Actualisez les prévisions avant une nouvelle séance.</p>
