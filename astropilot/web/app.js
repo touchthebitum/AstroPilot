@@ -7956,7 +7956,10 @@ document.querySelectorAll("[data-open-analysis-history]").forEach(button => butt
   loadAnalysisHistory();
 }));
 document.querySelector("#analysis-history-close").addEventListener("click", () => document.querySelector("#analysis-history-dialog").close());
-document.querySelector("#analysis-history-dialog").addEventListener("close", () => { analysisHistoryState.generation += 1; });
+document.querySelector("#analysis-history-dialog").addEventListener("close", () => {
+  // A queued close event from the previous opening must not cancel a new read.
+  if (!document.querySelector("#analysis-history-dialog").open) analysisHistoryState.generation += 1;
+});
 document.querySelector("#analysis-history-next").addEventListener("click", () => loadAnalysisHistory(true));
 
 restoreFieldObservationLock();

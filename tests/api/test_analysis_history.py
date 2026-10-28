@@ -315,3 +315,30 @@ def test_fold_samples_remain_distinct_and_missing_geometry_does_not_blame_altitu
     assert missing_target_refusal(**args)["sample_count"] == 2
     monkeypatch.setattr(sky, "target_altitude", lambda *args: float("nan"))
     assert missing_target_refusal(**args)["code"] == "target_window_unavailable"
+
+
+def test_late_dialog_close_event_does_not_invalidate_reopened_history():
+    """The native dialog close event is queued and can arrive after reopening."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node required for the actual close handler")
+    source = (Path(__file__).parents[2] / "astropilot/web/app.js").read_text()
+    start = source.index('document.querySelector("#analysis-history-dialog").addEventListener("close",')
+    end = source.index('document.querySelector("#analysis-history-next")', start)
+    handler = source[start:end]
+    program = r'''
+const assert = require('node:assert/strict');
+let close;
+const analysisHistoryState = {generation: 7};
+const dialog = {open: true, addEventListener: (event, fn) => {assert.equal(event, 'close');close = fn;}};
+const document = {querySelector: selector => {assert.equal(selector, '#analysis-history-dialog');return dialog;}};
+''' + handler + r'''
+// Read generation 7 belongs to a reopened dialog: an old queued event is harmless.
+close();assert.equal(analysisHistoryState.generation, 7);
+// A current closing still invalidates pending reads.
+dialog.open = false;close();assert.equal(analysisHistoryState.generation, 8);
+'''
+    result = subprocess.run([node, "-e", program], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
