@@ -11,7 +11,7 @@ def test_discovery_entry_saves_dirty_configuration_and_ignores_late_completion()
     if not node:
         pytest.skip('Node required for actual UI handler')
     source = (Path(__file__).parents[2] / 'astropilot/web/app.js').read_text()
-    handler = source[source.index('document.querySelector("#discover-from-projects").addEventListener'):source.index('document.querySelector("#discovery-back").addEventListener')]
+    handler = source[source.index('document.querySelector("#discover-from-projects").addEventListener'):source.index('document.querySelector("#message-discover-targets").addEventListener')]
     program = r'''
 const assert=require('node:assert/strict');let handler,saved=0,navigated=[],unchanged=true,locked=false,release;
 const state={configuration:{configured:true},configurationGeneration:1,viewRevision:1};

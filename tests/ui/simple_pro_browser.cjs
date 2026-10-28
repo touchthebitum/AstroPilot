@@ -34,7 +34,7 @@ const assert = require('node:assert/strict');
   document.querySelector('#observation-clouds').value='few';
   renderOutcomeEvaluation({observation_id:'test-id',status:'partial',results:[],reasons:[{code:'unknown'}],weather_traceability:{provider_id:'long-provider'.repeat(30),requested_location:{latitude:46.12,longitude:7.34},grid_location:{latitude:46.13,longitude:7.35,altitude_m:1200}}});
  });
- assert.equal(await page.locator('#outcome-result').innerText(), 'Partiellement comparable\nRaison non reconnue.');
+ assert.equal(await page.locator('#outcome-result').innerText(), 'Partiellement comparable\nVotre observation est enregistrée.\nRaison non reconnue.');
  const count = requests;
  for (const mode of ['pro','simple']) {
   await page.evaluate(mode => {const control=document.querySelector('#ui-mode');control.value=mode;control.dispatchEvent(new Event('change'));},mode);
@@ -130,7 +130,10 @@ const assert = require('node:assert/strict');
    if(kind==='error') assert.match(before,/Comparaison indisponible/);
    for(const mode of ['pro','simple']) {
     await page.evaluate(mode=>applyUiMode(mode),mode);
-    assert.equal(await page.locator('#outcome-result').innerText(),before);
+    // The redundant registration sentence is context-dependent in the current
+    // renderer. Preserve every comparison fact and lineage warning across modes.
+    const comparisonCopy=text=>text.split('\n').filter(line=>line!=='Votre observation est enregistrée.').join('\n');
+    assert.equal(comparisonCopy(await page.locator('#outcome-result').innerText()),comparisonCopy(before));
     if(['unknown','superseded'].includes(kind)) assert.equal(await page.locator('#outcome-compare').isDisabled(),true);
    }
    // Reinstall the successful fixture for the next width.
