@@ -620,6 +620,7 @@ def test_tonight_exposes_modern_ou4_acquisition_intent_candidate(
             "label": "Hα · Sh2-129",
             "status": "eligible",
             "reason_codes": [],
+            "actionability_refusal": None,
         },
         {
             "acquisition_intent_id": "ou4_oiii",
@@ -627,6 +628,7 @@ def test_tonight_exposes_modern_ou4_acquisition_intent_candidate(
             "label": "OIII · Ou4",
             "status": "eligible",
             "reason_codes": [],
+            "actionability_refusal": None,
         },
     ]
     assert payload["weather_decision"] == {
