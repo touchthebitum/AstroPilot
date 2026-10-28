@@ -49,6 +49,11 @@ const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_pro
   await page.locator('#equipment-reference-query').fill('Newton');assert.equal(await page.locator('.equipment-reference-card').count(),5);
   assert.match(await page.locator('#equipment-reference-status').textContent(),/Newton désigne un type/);
   await page.locator('#equipment-reference-query').fill('Skywatcher Quattro');assert.equal(await page.locator('.equipment-reference-card').count(),5);
+  for(const query of ['Quattro Sky-Watcher','Newton 150','150 Newton']){
+   await page.locator('#equipment-reference-query').fill(query);
+   assert.equal(await page.locator('.equipment-reference-card').count(),query.includes('150')?2:5,query);
+  }
+
   await page.locator('#equipment-reference-query').fill('Newton');
   const ambiguous=page.locator('[data-reference-id="skywatcher_quattro_200"]');await ambiguous.locator('summary').click();assert.equal(await ambiguous.locator('button').count(),0);
   const native=page.locator('[data-reference-id="skywatcher_quattro_150_native"]');await native.locator('summary').click();
@@ -77,6 +82,16 @@ const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_pro
   for(const mode of ['simple','pro'])for(const width of [390,1280]){
    await page.evaluate(m=>applyUiMode(m),mode);await page.setViewportSize({width,height:1000});await page.locator('#equipment-reference-category').selectOption('optics');await page.locator('#equipment-reference-query').fill('Newton');
    await page.locator('[data-reference-id="skywatcher_quattro_150_native"] summary').click();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+   await page.locator('#equipment-reference-category').selectOption('camera');
+   for(const query of ['ZWO 183','ASI183 ZWO','ZWO ASI 183','zwo-asi183','183 zwo']){
+    await page.locator('#equipment-reference-query').fill(query);
+    const ids=await page.locator('.equipment-reference-card').evaluateAll(cards=>cards.map(card=>card.dataset.referenceId).sort());
+    assert.deepEqual(ids,['zwo_asi183mc_pro','zwo_asi183mm_pro'],`${mode} ${width} ${query}`);
+   }
+   for(const query of ['ZWO 183 introuvable','ZWO 6200 183']){
+    await page.locator('#equipment-reference-query').fill(query);assert.equal(await page.locator('.equipment-reference-card').count(),0,query);
+   }
+
    if(mode==='simple'&&width===1280&&process.env.REFERENCE_SCREENSHOT)await page.screenshot({path:process.env.REFERENCE_SCREENSHOT,fullPage:true});
   }
   assert.equal(referenceCalls,2);

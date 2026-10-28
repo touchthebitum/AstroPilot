@@ -4874,7 +4874,7 @@ function updateEquipmentSearch() {
 let equipmentReferenceEntries = null;
 let equipmentReferenceLoading = false;
 const normalizeEquipmentReference = value => String(value).replace(/[αΑ]/g, "alpha").normalize("NFD")
-  .replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  .replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 async function loadEquipmentReferences() {
   if (equipmentReferenceEntries) return renderEquipmentReferences();
