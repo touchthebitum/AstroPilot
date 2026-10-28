@@ -166,14 +166,40 @@
         <section id="equipment-step" class="wizard-step" data-step="equipment" aria-labelledby="equipment-title" hidden>
           <p class="eyebrow">Étape 2 sur 4 · Matériel</p>
           <h2 id="equipment-title" tabindex="-1">Avec quel matériel ?</h2>
-          <p class="step-intro">Choisissez une configuration connue ou décrivez votre optique et votre caméra.</p>
+          <p class="step-intro">Retrouvez votre objectif ou télescope et votre caméra. Choisissez un ensemble seulement si les deux modèles correspondent aux vôtres.</p>
           <div class="choice-tabs" role="radiogroup" aria-label="Type de matériel">
-            <label><input type="radio" name="equipment-kind" value="preset" checked> Configuration proposée</label>
-            <label><input type="radio" name="equipment-kind" value="custom"> Matériel personnalisé</label>
+            <label><input type="radio" name="equipment-kind" value="preset" checked> Retrouver mon matériel</label>
+            <label><input type="radio" name="equipment-kind" value="custom"> Saisir un autre matériel</label>
           </div>
-          <div id="preset-equipment" class="equipment-choices"></div>
+          <div id="equipment-search-panel">
+            <label class="field" for="equipment-search"><span>Rechercher une marque ou un modèle</span><input id="equipment-search" type="search" placeholder="Ex. Samyang, ASI183, Askar…" aria-describedby="equipment-search-status" autocomplete="off"></label>
+            <button class="secondary-button" id="equipment-clear-search" type="button" hidden>Revoir toute la liste</button>
+            <p id="equipment-search-status" class="field-note" role="status"></p>
+            <div id="preset-equipment" class="equipment-choices"></div>
+            <div id="equipment-no-results" hidden>
+              <p>Aucun ensemble de cette liste ne correspond à votre recherche.</p>
+              <button class="secondary-button" id="equipment-find-component" type="button">Chercher cette référence par composant</button>
+              <button class="secondary-button" id="equipment-enter-custom" type="button">Saisir mon objectif ou télescope et ma caméra</button>
+            </div>
+            <p id="equipment-selection-summary" class="field-note" aria-live="polite"></p>
+          </div>
+          <details id="equipment-reference-panel" class="equipment-filter-help">
+            <summary>Rechercher séparément mon optique, ma caméra ou mes filtres</summary>
+            <p>Retrouvez une référence puis vérifiez sa variante sur votre matériel. Le catalogue est en cours d’enrichissement : un modèle absent peut être saisi manuellement.</p>
+            <div class="form-grid two-columns">
+              <label class="field" for="equipment-reference-category"><span>Type de matériel</span><select id="equipment-reference-category"><option value="all">Tous les types</option><option value="optics">Objectif ou télescope</option><option value="camera">Caméra</option><option value="filter">Filtres</option></select></label>
+              <label class="field" for="equipment-reference-query"><span>Marque, modèle ou type</span><input id="equipment-reference-query" type="search" placeholder="Ex. Newton, FRA400, ASI183, LRGB…" autocomplete="off"></label>
+            </div>
+            <p id="equipment-reference-status" class="field-note" role="status"></p>
+            <button id="equipment-reference-retry" class="secondary-button" type="button" hidden>Recharger le catalogue</button>
+            <p class="field-note">Répertorié ne signifie pas compatible pour une mission. Le report des caractéristiques prépare une saisie personnalisée ; les montages et filtres autorisés pour les missions restent vérifiés séparément.</p>
+            <div id="equipment-reference-results"></div>
+            <p id="equipment-reference-applied" role="status"></p>
+          </details>
           <fieldset id="custom-equipment" class="custom-equipment" hidden>
             <legend>Optique et caméra</legend>
+            <p>Recopiez les références et les mesures de la fiche du fabricant. N’utilisez pas les valeurs d’un modèle voisin.</p>
+            <details><summary>Où trouver ces informations ?</summary><p>Le modèle est indiqué sur l’objectif, le télescope ou la caméra. La fiche du fabricant donne la focale, le diamètre d’ouverture et le rapport focal de l’optique ; pour la caméra, la taille des pixels et les dimensions du capteur en pixels. Vérifiez aussi si votre caméra est monochrome ou couleur.</p></details>
             <div class="form-grid two-columns">
               <label class="field" for="custom-optics-manufacturer"><span>Fabricant de l’optique</span><input id="custom-optics-manufacturer" type="text"></label>
               <label class="field" for="custom-optics-model"><span>Modèle de l’optique</span><input id="custom-optics-model" type="text"></label>
@@ -188,6 +214,7 @@
               <label class="check-field full-width" for="custom-monochrome"><input id="custom-monochrome" type="checkbox"><span>Caméra monochrome</span></label>
             </div>
           </fieldset>
+          <details class="equipment-filter-help"><summary>Et mes filtres ?</summary><p><strong>Rien à renseigner à cette étape. Vous choisirez vos filtres ensuite.</strong> Vous les confirmerez au choix de la cible ou lors de la recherche de cibles. Choisir un ensemble de matériel ne confirme pas que vous possédez ses filtres.</p><p>Vérifiez sur la boîte, la facture ou la fiche du fabricant la marque, le modèle, le type (Hα, OIII, LRGB…) et, si elle est indiquée, la largeur en nm. Une inscription « Hα » seule ne suffit pas à identifier une référence précise.</p><p>Si vous ne reconnaissez pas la référence proposée, laissez la case décochée. La présence d’un filtre dans le catalogue ne confirme ni sa possession ni sa compatibilité avec votre matériel.</p></details>
           <div class="wizard-actions">
             <button class="secondary-button" data-back="site" type="button">Retour</button>
             <button class="primary-button" id="equipment-next" type="button">Continuer vers mon projet</button>
@@ -212,6 +239,7 @@
             <summary>Créer mon premier projet ou ajouter un projet</summary>
             <p>Choisissez une cible prise en charge par cette bêta, puis le filtre et votre objectif de pose. Ce choix ne garantit pas que la cible sera adaptée à ce soir.</p>
             <p>Les filtres proposés sont des références précises. Ne confirmez pas un filtre dont vous ne connaissez pas le modèle.</p>
+            <details class="equipment-filter-help"><summary>Je ne connais pas la référence de mon filtre</summary><p>Retrouvez la marque et le modèle sur la boîte ou la facture, puis comparez le type et la largeur en nm à la référence proposée. Si vous ne pouvez pas confirmer cette référence exacte, laissez sa case décochée. Choisir une cible ne signifie pas que vous possédez le filtre nécessaire.</p></details>
             <button class="secondary-button" id="project-templates-load" type="button">Afficher les cibles prises en charge</button>
             <div id="project-create-fields" hidden>
               <label for="project-template">Cible à photographier</label>
@@ -281,6 +309,7 @@
           <fieldset id="discovery-filters" hidden>
             <legend>Quels filtres possédez-vous ?</legend>
             <p>Cochez uniquement les modèles que vous possédez. La recherche ne modifie pas vos projets.</p>
+            <details class="equipment-filter-help"><summary>Je ne connais pas la référence de mon filtre</summary><p>Vérifiez la marque, le modèle, le type et la largeur en nm sur la boîte, la facture ou la fiche du fabricant. Si la référence reste inconnue, ne cochez pas un modèle ressemblant : la recherche a besoin d’un filtre précisément identifié.</p></details>
             <div id="discovery-filter-choices"></div>
             <p id="discovery-filter-feedback" role="status"></p>
           </fieldset>

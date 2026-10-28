@@ -1,0 +1,564 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "askar_fra300_pro",
+      "category": "optics",
+      "manufacturer": "Askar",
+      "model": "FRA300 Pro",
+      "variant": "Focale native, sans réducteur",
+      "aliases": [
+        "lunette",
+        "réfracteur",
+        "refractor",
+        "APO",
+        "Petzval"
+      ],
+      "specs": {
+        "aperture_mm": 60,
+        "focal_length_mm": 300,
+        "f_ratio": 5
+      },
+      "notes": "Valeurs nominales du fabricant. Un réducteur change la focale et le rapport focal ; ne sélectionnez cette variante que sans réducteur.",
+      "source": {
+        "title": "Askar FRA300 Pro — caractéristiques fabricant",
+        "url": "https://www.sharpstar-optics.com/Products_1/22.html",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "askar_fra400",
+      "category": "optics",
+      "manufacturer": "Askar",
+      "model": "FRA400",
+      "variant": "Focale native, sans réducteur",
+      "aliases": [
+        "lunette",
+        "réfracteur",
+        "refractor",
+        "APO",
+        "Petzval"
+      ],
+      "specs": {
+        "aperture_mm": 72,
+        "focal_length_mm": 400,
+        "f_ratio": 5.6
+      },
+      "notes": "Valeurs nominales du fabricant. Un réducteur change la focale et le rapport focal ; ne sélectionnez cette variante que sans réducteur.",
+      "source": {
+        "title": "Askar FRA400 — caractéristiques fabricant",
+        "url": "https://www.sharpstar-optics.com/Products_1/34.html",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "askar_fra500",
+      "category": "optics",
+      "manufacturer": "Askar",
+      "model": "FRA500",
+      "variant": "Focale native, sans réducteur",
+      "aliases": [
+        "lunette",
+        "réfracteur",
+        "refractor",
+        "APO",
+        "Petzval"
+      ],
+      "specs": {
+        "aperture_mm": 90,
+        "focal_length_mm": 500,
+        "f_ratio": 5.6
+      },
+      "notes": "Valeurs nominales du fabricant. Un réducteur change la focale et le rapport focal ; ne sélectionnez cette variante que sans réducteur.",
+      "source": {
+        "title": "Askar FRA500 — caractéristiques fabricant",
+        "url": "https://www.sharpstar-optics.com/Products_1/35.html",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "askar_fra600",
+      "category": "optics",
+      "manufacturer": "Askar",
+      "model": "FRA600",
+      "variant": "Focale native, sans réducteur",
+      "aliases": [
+        "lunette",
+        "réfracteur",
+        "refractor",
+        "APO",
+        "Petzval"
+      ],
+      "specs": {
+        "aperture_mm": 108,
+        "focal_length_mm": 600,
+        "f_ratio": 5.6
+      },
+      "notes": "Valeurs nominales du fabricant. Un réducteur change la focale et le rapport focal ; ne sélectionnez cette variante que sans réducteur.",
+      "source": {
+        "title": "Askar FRA600 — caractéristiques fabricant",
+        "url": "https://www.sharpstar-optics.com/Products_1/36.html",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "skywatcher_quattro_150_native",
+      "category": "optics",
+      "manufacturer": "Sky-Watcher",
+      "model": "Quattro 150P",
+      "variant": "Tube natif, sans correcteur réducteur",
+      "aliases": [
+        "Newton",
+        "newtonien",
+        "réflecteur",
+        "reflector",
+        "télescope"
+      ],
+      "specs": {
+        "focal_length_mm": 600,
+        "f_ratio": 4,
+        "aperture_mm": 150
+      },
+      "notes": "Le correcteur réducteur fourni conduit à une autre configuration, répertoriée séparément.",
+      "source": {
+        "title": "Sky-Watcher USA — Quattro 150P",
+        "url": "https://www.skywatcherusa.com/products/quattro-150p-imaging-newtonian-6",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "skywatcher_quattro_150_reduced",
+      "category": "optics",
+      "manufacturer": "Sky-Watcher",
+      "model": "Quattro 150P",
+      "variant": "Avec le correcteur réducteur fourni pour le 150P",
+      "aliases": [
+        "Newton",
+        "newtonien",
+        "réflecteur",
+        "reflector",
+        "télescope"
+      ],
+      "specs": {
+        "focal_length_mm": 518,
+        "f_ratio": 3.45,
+        "aperture_mm": 150
+      },
+      "notes": "Cette focale ne vaut que pour le correcteur réducteur décrit sur cette fiche, pas pour un correcteur quelconque.",
+      "source": {
+        "title": "Sky-Watcher USA — Quattro 150P",
+        "url": "https://www.skywatcherusa.com/products/quattro-150p-imaging-newtonian-6",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "skywatcher_quattro_200",
+      "category": "optics",
+      "manufacturer": "Sky-Watcher",
+      "model": "Quattro 200P",
+      "variant": "Référence USA à vérifier — ouverture non reportée",
+      "aliases": [
+        "Newton",
+        "newtonien",
+        "réflecteur",
+        "reflector",
+        "télescope"
+      ],
+      "specs": {
+        "focal_length_mm": 800,
+        "f_ratio": 4
+      },
+      "notes": "La fiche USA annonce 205 mm pour le modèle nommé 200P. Vérifiez la variante et le diamètre de votre tube : aucune ouverture n’est reportée automatiquement.",
+      "source": {
+        "title": "Sky-Watcher USA — Quattro 200P",
+        "url": "https://www.skywatcherusa.com/products/sky-watcher-quattro-200p-imaging-newtonian-8-205-mm",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "skywatcher_quattro_250",
+      "category": "optics",
+      "manufacturer": "Sky-Watcher",
+      "model": "Quattro 250P",
+      "variant": "Tube natif, référence USA 254 mm",
+      "aliases": [
+        "Newton",
+        "newtonien",
+        "réflecteur",
+        "reflector",
+        "télescope"
+      ],
+      "specs": {
+        "focal_length_mm": 1000,
+        "f_ratio": 4,
+        "aperture_mm": 254
+      },
+      "notes": "Diamètre et rapport focal arrondi repris de la fiche USA. Vérifiez votre variante et les accessoires avant de reporter ces valeurs.",
+      "source": {
+        "title": "Sky-Watcher USA — Quattro 250P",
+        "url": "https://www.skywatcherusa.com/products/sky-watcher-quattro-250p-imaging-newtonian-10-254-mm",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "skywatcher_quattro_300",
+      "category": "optics",
+      "manufacturer": "Sky-Watcher",
+      "model": "Quattro 300P",
+      "variant": "Tube natif, référence USA 305 mm",
+      "aliases": [
+        "Newton",
+        "newtonien",
+        "réflecteur",
+        "reflector",
+        "télescope"
+      ],
+      "specs": {
+        "focal_length_mm": 1200,
+        "f_ratio": 4,
+        "aperture_mm": 305
+      },
+      "notes": "Diamètre et rapport focal arrondi repris de la fiche USA. Vérifiez votre variante et les accessoires avant de reporter ces valeurs.",
+      "source": {
+        "title": "Sky-Watcher USA — Quattro 300P",
+        "url": "https://www.skywatcherusa.com/products/sky-watcher-quattro-300p-imaging-newtonian-12-305-mm",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "zwo_asi183mm_pro",
+      "category": "camera",
+      "manufacturer": "ZWO",
+      "model": "ASI183MM Pro",
+      "variant": "Monochrome",
+      "aliases": [
+        "caméra",
+        "camera",
+        "mono",
+        "monochrome"
+      ],
+      "specs": {
+        "pixel_size_um": 2.4,
+        "sensor_width_px": 5496,
+        "sensor_height_px": 3672,
+        "monochrome": true
+      },
+      "notes": "Capteur entier, pixels natifs : sans binning ni recadrage. La variante MM est monochrome ; MC est couleur.",
+      "source": {
+        "title": "ZWO — ASI183MM Pro",
+        "url": "https://us.zwoastro.com/products/asi183",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "zwo_asi183mc_pro",
+      "category": "camera",
+      "manufacturer": "ZWO",
+      "model": "ASI183MC Pro",
+      "variant": "Couleur (OSC)",
+      "aliases": [
+        "caméra",
+        "camera",
+        "couleur",
+        "color",
+        "OSC"
+      ],
+      "specs": {
+        "pixel_size_um": 2.4,
+        "sensor_width_px": 5496,
+        "sensor_height_px": 3672,
+        "monochrome": false
+      },
+      "notes": "Capteur entier, pixels natifs : sans binning ni recadrage. La variante MM est monochrome ; MC est couleur.",
+      "source": {
+        "title": "ZWO — ASI183MC Pro",
+        "url": "https://us.zwoastro.com/products/asi183",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "zwo_asi533mm_pro",
+      "category": "camera",
+      "manufacturer": "ZWO",
+      "model": "ASI533MM Pro",
+      "variant": "Monochrome",
+      "aliases": [
+        "caméra",
+        "camera",
+        "mono",
+        "monochrome"
+      ],
+      "specs": {
+        "pixel_size_um": 3.76,
+        "sensor_width_px": 3008,
+        "sensor_height_px": 3008,
+        "monochrome": true
+      },
+      "notes": "Capteur entier, pixels natifs : sans binning ni recadrage. La variante MM est monochrome ; MC est couleur.",
+      "source": {
+        "title": "ZWO — ASI533 manuel fabricant",
+        "url": "https://i.zwoastro.com/wp-content/uploads/2024/07/9f26af0bec5c60ea84107dfec8314859.pdf",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "zwo_asi533mc_pro",
+      "category": "camera",
+      "manufacturer": "ZWO",
+      "model": "ASI533MC Pro",
+      "variant": "Couleur (OSC)",
+      "aliases": [
+        "caméra",
+        "camera",
+        "couleur",
+        "color",
+        "OSC"
+      ],
+      "specs": {
+        "pixel_size_um": 3.76,
+        "sensor_width_px": 3008,
+        "sensor_height_px": 3008,
+        "monochrome": false
+      },
+      "notes": "Capteur entier, pixels natifs : sans binning ni recadrage. La variante MM est monochrome ; MC est couleur.",
+      "source": {
+        "title": "ZWO — ASI533 manuel fabricant",
+        "url": "https://i.zwoastro.com/wp-content/uploads/2024/07/9f26af0bec5c60ea84107dfec8314859.pdf",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "zwo_asi2600mm_pro_p25",
+      "category": "camera",
+      "manufacturer": "ZWO",
+      "model": "ASI2600MM Pro P25",
+      "variant": "Monochrome",
+      "aliases": [
+        "caméra",
+        "camera",
+        "mono",
+        "monochrome"
+      ],
+      "specs": {
+        "pixel_size_um": 3.76,
+        "sensor_width_px": 6248,
+        "sensor_height_px": 4176,
+        "monochrome": true
+      },
+      "notes": "Capteur entier, pixels natifs : sans binning ni recadrage. P25 est une variante distincte des anciennes Pro, Duo et Air.",
+      "source": {
+        "title": "ZWO — ASI2600MM Pro P25",
+        "url": "https://www.zwoastro.com/product/new-asi2600mm-mc-pro/",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "zwo_asi2600mc_pro_p25",
+      "category": "camera",
+      "manufacturer": "ZWO",
+      "model": "ASI2600MC Pro P25",
+      "variant": "Couleur (OSC)",
+      "aliases": [
+        "caméra",
+        "camera",
+        "couleur",
+        "color",
+        "OSC"
+      ],
+      "specs": {
+        "pixel_size_um": 3.76,
+        "sensor_width_px": 6248,
+        "sensor_height_px": 4176,
+        "monochrome": false
+      },
+      "notes": "Capteur entier, pixels natifs : sans binning ni recadrage. P25 est une variante distincte des anciennes Pro, Duo et Air.",
+      "source": {
+        "title": "ZWO — ASI2600MC Pro P25",
+        "url": "https://www.zwoastro.com/product/new-asi2600mm-mc-pro/",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "zwo_asi6200mm_pro_p25",
+      "category": "camera",
+      "manufacturer": "ZWO",
+      "model": "ASI6200MM Pro P25",
+      "variant": "Monochrome",
+      "aliases": [
+        "caméra",
+        "camera",
+        "mono",
+        "monochrome"
+      ],
+      "specs": {
+        "pixel_size_um": 3.76,
+        "sensor_width_px": 9576,
+        "sensor_height_px": 6388,
+        "monochrome": true
+      },
+      "notes": "Capteur entier, pixels natifs : sans binning ni recadrage. P25 est une variante distincte des anciennes Pro, Duo et Air.",
+      "source": {
+        "title": "ZWO — ASI6200MM Pro P25",
+        "url": "https://www.zwoastro.com/product/asi6200/",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "zwo_asi6200mc_pro_p25",
+      "category": "camera",
+      "manufacturer": "ZWO",
+      "model": "ASI6200MC Pro P25",
+      "variant": "Couleur (OSC)",
+      "aliases": [
+        "caméra",
+        "camera",
+        "couleur",
+        "color",
+        "OSC"
+      ],
+      "specs": {
+        "pixel_size_um": 3.76,
+        "sensor_width_px": 9576,
+        "sensor_height_px": 6388,
+        "monochrome": false
+      },
+      "notes": "Capteur entier, pixels natifs : sans binning ni recadrage. P25 est une variante distincte des anciennes Pro, Duo et Air.",
+      "source": {
+        "title": "ZWO — ASI6200MC Pro P25",
+        "url": "https://www.zwoastro.com/product/asi6200/",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "astronomik_lrgb_2c_10220125",
+      "category": "filter",
+      "manufacturer": "Astronomik",
+      "model": "L-RGB Type 2c — 10220125",
+      "variant": "1,25″ (M28,5)",
+      "aliases": [
+        "LRGB",
+        "L RGB",
+        "luminance",
+        "rouge",
+        "vert",
+        "bleu"
+      ],
+      "specs": {
+        "filter_type": "LRGB",
+        "format": "1,25″ (M28,5)"
+      },
+      "notes": "Jeu L-RGB, pas un filtre à bande étroite : aucune largeur en nm n’est déduite. Vérifiez la référence et le format sur votre boîte. La consultation n’active aucun filtre.",
+      "source": {
+        "title": "Astronomik — fiche produit 10220125",
+        "url": "https://www.astronomik.com/en/Astronomik-L-RGB-Type-2c-Filterset-1-25-M28-5/10220125",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "astronomik_lrgb_2c_10220200",
+      "category": "filter",
+      "manufacturer": "Astronomik",
+      "model": "L-RGB Type 2c — 10220200",
+      "variant": "2″ (M48)",
+      "aliases": [
+        "LRGB",
+        "L RGB",
+        "luminance",
+        "rouge",
+        "vert",
+        "bleu"
+      ],
+      "specs": {
+        "filter_type": "LRGB",
+        "format": "2″ (M48)"
+      },
+      "notes": "Jeu L-RGB, pas un filtre à bande étroite : aucune largeur en nm n’est déduite. Vérifiez la référence et le format sur votre boîte. La consultation n’active aucun filtre.",
+      "source": {
+        "title": "Astronomik — fiche produit 10220200",
+        "url": "https://www.astronomik.com/en/Astronomik-L-RGB-Type-2c-Filterset-2-M48/10220200",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "baader_highspeed_set_2961661",
+      "category": "filter",
+      "manufacturer": "Baader",
+      "model": "Jeu f/2 Highspeed 6,5 nm — 2961661",
+      "variant": "31 mm",
+      "aliases": [
+        "Ha",
+        "Hα",
+        "OIII",
+        "SII",
+        "H alpha",
+        "bande étroite",
+        "narrowband"
+      ],
+      "specs": {
+        "filter_type": "Jeu Hα / OIII / SII",
+        "format": "31 mm",
+        "fwhm_nm": 6.5
+      },
+      "notes": "Jeu de trois filtres. Ne pas confondre Highspeed 6,5 nm et Ultra-Highspeed 3,5 / 4 nm. La largeur et le rapport focal seuls ne prouvent pas la compatibilité de votre montage. Aucun filtre n’est activé ici.",
+      "source": {
+        "title": "Baader — liste fabricant, références 2961661 à 2961663",
+        "url": "https://www.baader-planetarium.com/en/downloads/dl/file/id/1908/baader-planetarium-price-list-04-2026.pdf",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "baader_highspeed_set_2961662",
+      "category": "filter",
+      "manufacturer": "Baader",
+      "model": "Jeu f/2 Highspeed 6,5 nm — 2961662",
+      "variant": "36 mm",
+      "aliases": [
+        "Ha",
+        "Hα",
+        "OIII",
+        "SII",
+        "H alpha",
+        "bande étroite",
+        "narrowband"
+      ],
+      "specs": {
+        "filter_type": "Jeu Hα / OIII / SII",
+        "format": "36 mm",
+        "fwhm_nm": 6.5
+      },
+      "notes": "Jeu de trois filtres. Ne pas confondre Highspeed 6,5 nm et Ultra-Highspeed 3,5 / 4 nm. La largeur et le rapport focal seuls ne prouvent pas la compatibilité de votre montage. Aucun filtre n’est activé ici.",
+      "source": {
+        "title": "Baader — liste fabricant, références 2961661 à 2961663",
+        "url": "https://www.baader-planetarium.com/en/downloads/dl/file/id/1908/baader-planetarium-price-list-04-2026.pdf",
+        "checked_on": "2026-10-26"
+      }
+    },
+    {
+      "id": "baader_highspeed_set_2961663",
+      "category": "filter",
+      "manufacturer": "Baader",
+      "model": "Jeu f/2 Highspeed 6,5 nm — 2961663",
+      "variant": "2″",
+      "aliases": [
+        "Ha",
+        "Hα",
+        "OIII",
+        "SII",
+        "H alpha",
+        "bande étroite",
+        "narrowband"
+      ],
+      "specs": {
+        "filter_type": "Jeu Hα / OIII / SII",
+        "format": "2″",
+        "fwhm_nm": 6.5
+      },
+      "notes": "Jeu de trois filtres. Ne pas confondre Highspeed 6,5 nm et Ultra-Highspeed 3,5 / 4 nm. La largeur et le rapport focal seuls ne prouvent pas la compatibilité de votre montage. Aucun filtre n’est activé ici.",
+      "source": {
+        "title": "Baader — liste fabricant, références 2961661 à 2961663",
+        "url": "https://www.baader-planetarium.com/en/downloads/dl/file/id/1908/baader-planetarium-price-list-04-2026.pdf",
+        "checked_on": "2026-10-26"
+      }
+    }
+  ]
+}

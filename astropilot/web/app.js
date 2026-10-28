@@ -4812,8 +4812,6 @@ function draftFromConfiguration(configuration) {
     };
   } else if (active) {
     equipment = { preset_id: active.id };
-  } else if (configuration.preset_equipment?.length) {
-    equipment = { preset_id: configuration.preset_equipment[0].id };
   }
   return {
     site: configuration.site ? { ...configuration.site } : null,
@@ -4830,6 +4828,7 @@ function showFormError(message) {
 function renderPresetChoices() {
   const container = document.querySelector("#preset-equipment");
   container.replaceChildren();
+  document.querySelector("#equipment-search").value = "";
   for (const choice of state.configuration?.preset_equipment || []) {
     const label = document.createElement("label");
     const radio = document.createElement("input");
@@ -4840,16 +4839,150 @@ function renderPresetChoices() {
     radio.type = "radio";
     radio.name = "preset-equipment";
     radio.value = choice.id;
+    radio.addEventListener("change", () => { showFormError(""); updateEquipmentSearch(); });
     name.textContent = choice.name;
     details.textContent = `${choice.optics_manufacturer} ${choice.optics_model} · ${choice.camera_manufacturer} ${choice.camera_model}`;
     copy.append(name, details);
     label.append(radio, copy);
     container.append(label);
   }
+  updateEquipmentSearch();
+}
+
+function updateEquipmentSearch() {
+  const normalize = value => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const terms = normalize(document.querySelector("#equipment-search").value).split(/\s+/).filter(Boolean);
+  document.querySelector("#equipment-clear-search").hidden = document.querySelector("#equipment-search").value.length === 0;
+  const choices = [...document.querySelectorAll("#preset-equipment .equipment-choice")];
+  let visible = 0;
+  for (const choice of choices) {
+    const searchable = normalize(choice.textContent);
+    choice.hidden = !terms.every(term => searchable.includes(term));
+    if (!choice.hidden) visible++;
+  }
+  document.querySelector("#equipment-search-status").textContent = terms.length
+    ? `${visible} ensemble${visible === 1 ? "" : "s"} trouvé${visible === 1 ? "" : "s"} dans les ${choices.length} configurations proposées par cette bêta.`
+    : `${choices.length} ensembles proposés par cette bêta. Votre modèle peut être saisi séparément s’il n’est pas dans la liste.`;
+  document.querySelector("#equipment-no-results").hidden = visible !== 0;
+  const selected = choices.find(choice => choice.querySelector("input").checked);
+  document.querySelector("#equipment-selection-summary").textContent = selected
+    ? `Votre choix : ${selected.querySelector("strong").textContent}.${selected.hidden ? " Effacez la recherche pour le revoir ou choisissez un autre matériel." : ""}`
+    : "Choisissez l’ensemble qui correspond à votre matériel pour continuer.";
+}
+
+// References only fill the local custom editor. They never select a preset or confirm filters.
+let equipmentReferenceEntries = null;
+let equipmentReferenceLoading = false;
+const normalizeEquipmentReference = value => String(value).replace(/[αΑ]/g, "alpha").normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+async function loadEquipmentReferences() {
+  if (equipmentReferenceEntries) return renderEquipmentReferences();
+  if (equipmentReferenceLoading) return;
+  equipmentReferenceLoading = true;
+  const status = document.querySelector("#equipment-reference-status");
+  status.textContent = "Chargement du catalogue…";
+  document.querySelector("#equipment-reference-retry").hidden = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch("/v1/equipment-references", {signal: controller.signal});
+    if (!response.ok) throw new Error("catalogue_unavailable");
+    const data = await response.json();
+    if (data.schema_version !== 1 || !Array.isArray(data.entries)) throw new Error("invalid_catalogue");
+    equipmentReferenceEntries = data.entries;
+    renderEquipmentReferences();
+  } catch (_) {
+    status.textContent = "Le catalogue est indisponible. Votre saisie est conservée. Réessayez ou saisissez les références du fabricant dans « Saisir un autre matériel ».";
+    document.querySelector("#equipment-reference-retry").hidden = false;
+  } finally {
+    clearTimeout(timeout);
+    equipmentReferenceLoading = false;
+  }
+}
+
+function renderEquipmentReferences() {
+  if (!equipmentReferenceEntries) return;
+  const category = document.querySelector("#equipment-reference-category").value;
+  const terms = normalizeEquipmentReference(document.querySelector("#equipment-reference-query").value).trim().split(/\s+/).filter(Boolean);
+  const entries = equipmentReferenceEntries.filter(entry => (category === "all" || entry.category === category)
+    && terms.every(term => {
+      const searchable = normalizeEquipmentReference([entry.manufacturer, entry.model, entry.variant, ...entry.aliases].join(" "));
+      return searchable.includes(term) || searchable.replaceAll(" ", "").includes(term);
+    }));
+  const status = document.querySelector("#equipment-reference-status");
+  status.textContent = `${entries.length} référence(s) trouvée(s) dans ce premier catalogue de ${equipmentReferenceEntries.length} références. `
+    + (terms.includes("newton") ? "Newton désigne un type de télescope : vérifiez le modèle, le diamètre et le correcteur. " : "")
+    + (entries.length ? "Ouvrez une fiche pour vérifier sa variante." : "Essayez la marque ou le modèle inscrit sur votre matériel, puis la saisie manuelle si nécessaire. Aucun modèle voisin n’est sélectionné.");
+  const container = document.querySelector("#equipment-reference-results");
+  container.replaceChildren();
+  const labels = {focal_length_mm: "Focale (mm)", aperture_mm: "Ouverture (mm)", f_ratio: "Rapport focal",
+    pixel_size_um: "Pixels (µm)", sensor_width_px: "Largeur (px)", sensor_height_px: "Hauteur (px)",
+    monochrome: "Caméra monochrome", filter_type: "Type", format: "Format", fwhm_nm: "Largeur (nm)"};
+  for (const entry of entries) {
+    const card = document.createElement("details");
+    card.className = "equipment-reference-card";
+    card.dataset.referenceId = entry.id;
+    const summary = document.createElement("summary");
+    summary.textContent = `${entry.manufacturer} ${entry.model} · ${entry.variant}`;
+    const badge = document.createElement("p");
+    badge.className = "field-note";
+    badge.textContent = "Référence documentée · Compatibilité pour une mission non vérifiée";
+    const specs = document.createElement("p");
+    specs.textContent = Object.entries(entry.specs).map(([key, value]) => `${labels[key]} : ${typeof value === "boolean" ? (value ? "oui" : "non") : String(value).replace(".", ",")}`).join(" · ");
+    const notes = document.createElement("p");
+    notes.textContent = entry.notes;
+    const source = document.createElement("a");
+    // Only HTTPS links from the validated local catalogue; no HTML from references.
+    if (entry.source.url.startsWith("https://")) source.href = entry.source.url;
+    source.target = "_blank";
+    source.rel = "noopener noreferrer";
+    source.textContent = `${entry.source.title} (vérifié le ${entry.source.checked_on})`;
+    card.append(summary, badge, specs, notes, source);
+    if (entry.can_copy && entry.category !== "filter") {
+      const label = document.createElement("label");
+      label.className = "check-field equipment-reference-confirm";
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      const copy = document.createElement("span");
+      copy.textContent = "Je confirme ce modèle exact et cette variante. Le report remplacera les champs de ce composant dans ma saisie personnalisée.";
+      label.append(check, copy);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button";
+      button.textContent = entry.category === "optics" ? "Reporter cette optique dans ma saisie" : "Reporter cette caméra dans ma saisie";
+      button.disabled = true;
+      check.addEventListener("change", () => { button.disabled = !check.checked; });
+      button.addEventListener("click", () => {
+        if (!check.checked) return;
+        const component = entry.category === "optics" ? "optics" : "camera";
+        document.querySelector(`#custom-${component}-manufacturer`).value = entry.manufacturer;
+        document.querySelector(`#custom-${component}-model`).value = entry.model + (component === "optics" ? ` — ${entry.variant}` : "");
+        for (const [key, value] of Object.entries(entry.specs)) {
+          const input = document.querySelector(`#custom-${key.replaceAll("_", "-")}`);
+          if (input) { if (typeof value === "boolean") input.checked = value; else input.value = value; }
+        }
+        document.querySelector('input[name="equipment-kind"][value="custom"]').checked = true;
+        toggleEquipmentKind();
+        document.querySelector("#equipment-reference-applied").textContent = `${entry.manufacturer} ${entry.model} reporté dans votre saisie, sans enregistrement. Vérifiez l’autre composant ci-dessous. Aucun filtre n’a été confirmé ; ce montage personnalisé n’est pas validé pour les missions de cette bêta.`;
+        document.querySelector(`#custom-${component}-model`).focus();
+      });
+      card.append(label, button);
+    } else {
+      const explanation = document.createElement("p");
+      explanation.className = "field-note";
+      explanation.textContent = entry.category === "filter"
+        ? "Cette fiche sert à identifier votre filtre. Rien n’est activé ici : confirmez sa référence exacte au choix du projet si elle est prise en charge."
+        : "Données à vérifier : aucun report automatique. Utilisez la fiche du fabricant et la saisie manuelle.";
+      card.append(explanation);
+    }
+    container.append(card);
+  }
 }
 
 function toggleEquipmentKind() {
   const kind = document.querySelector('input[name="equipment-kind"]:checked')?.value;
+  document.querySelector("#equipment-search-panel").hidden = kind !== "preset";
   document.querySelector("#preset-equipment").hidden = kind !== "preset";
   document.querySelector("#custom-equipment").hidden = kind !== "custom";
 }
@@ -5628,6 +5761,13 @@ function addSimpleDurationFields(section, mode, manual, update, locked, advanced
 
 function prefillConfiguration() {
   renderPresetChoices();
+  document.querySelector("#equipment-reference-applied").textContent = "";
+  for (const card of document.querySelectorAll(".equipment-reference-card")) {
+    const check = card.querySelector("input[type=checkbox]");
+    if (check) check.checked = false;
+    const button = card.querySelector("button");
+    if (button) button.disabled = true;
+  }
   const site = state.configurationDraft.site || {};
   document.querySelector("#site-name").value = site.name?.trim() ? site.name : "Mon site";
   document.querySelector("#site-latitude").value = site.latitude ?? "";
@@ -5641,6 +5781,7 @@ function prefillConfiguration() {
   const preset = [...document.querySelectorAll('input[name="preset-equipment"]')]
     .find((input) => input.value === presetId);
   if (preset) preset.checked = true;
+  updateEquipmentSearch();
   for (const [name, selector, type] of customEquipmentFields) {
     const input = document.querySelector(selector);
     if (type === "boolean") input.checked = Boolean(custom?.[name]);
@@ -5709,6 +5850,9 @@ function readEquipment() {
   }
   const selected = document.querySelector('input[name="preset-equipment"]:checked');
   if (!selected) return [null, "Choisissez une configuration matérielle."];
+  if (selected.closest(".equipment-choice").hidden) {
+    return [null, "Votre configuration sélectionnée est masquée par la recherche. Cliquez sur « Revoir toute la liste » ou choisissez un autre matériel."];
+  }
   return [{ preset_id: selected.value }, null];
 }
 
@@ -7024,8 +7168,35 @@ for (const button of document.querySelectorAll("[data-back]")) {
 }
 
 for (const input of document.querySelectorAll('input[name="equipment-kind"]')) {
-  input.addEventListener("change", toggleEquipmentKind);
+  input.addEventListener("change", () => { showFormError(""); toggleEquipmentKind(); });
 }
+document.querySelector("#equipment-reference-panel").addEventListener("toggle", event => {
+  if (event.target.open) loadEquipmentReferences();
+});
+document.querySelector("#equipment-reference-retry").addEventListener("click", loadEquipmentReferences);
+for (const selector of ["#equipment-reference-category", "#equipment-reference-query"]) {
+  document.querySelector(selector).addEventListener(selector.endsWith("query") ? "input" : "change", renderEquipmentReferences);
+}
+document.querySelector("#equipment-find-component").addEventListener("click", () => {
+  document.querySelector("#equipment-reference-query").value = document.querySelector("#equipment-search").value;
+  document.querySelector("#equipment-reference-category").value = "all";
+  document.querySelector("#equipment-reference-panel").open = true;
+  loadEquipmentReferences();
+  document.querySelector("#equipment-reference-query").focus();
+});
+document.querySelector("#equipment-search").addEventListener("input", () => { showFormError(""); updateEquipmentSearch(); });
+document.querySelector("#equipment-clear-search").addEventListener("click", () => {
+  showFormError("");
+  document.querySelector("#equipment-search").value = "";
+  updateEquipmentSearch();
+  document.querySelector("#equipment-search").focus();
+});
+document.querySelector("#equipment-enter-custom").addEventListener("click", () => {
+  showFormError("");
+  document.querySelector('input[name="equipment-kind"][value="custom"]').checked = true;
+  toggleEquipmentKind();
+  document.querySelector("#custom-optics-manufacturer").focus();
+});
 
 function editConfiguration() {
   if (guardUnresolvedAcceptance()) return;
@@ -7785,7 +7956,10 @@ document.querySelectorAll("[data-open-analysis-history]").forEach(button => butt
   loadAnalysisHistory();
 }));
 document.querySelector("#analysis-history-close").addEventListener("click", () => document.querySelector("#analysis-history-dialog").close());
-document.querySelector("#analysis-history-dialog").addEventListener("close", () => { analysisHistoryState.generation += 1; });
+document.querySelector("#analysis-history-dialog").addEventListener("close", () => {
+  // A queued close event from the previous opening must not cancel a new read.
+  if (!document.querySelector("#analysis-history-dialog").open) analysisHistoryState.generation += 1;
+});
 document.querySelector("#analysis-history-next").addEventListener("click", () => loadAnalysisHistory(true));
 
 restoreFieldObservationLock();

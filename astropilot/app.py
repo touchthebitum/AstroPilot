@@ -2505,6 +2505,14 @@ def create_app(
                     raise HTTPException(status_code=409, headers=headers, detail={"code": code}) from exc
             raise HTTPException(status_code=503, headers=headers, detail={"code": "configuration_corrupt"}) from exc
 
+    @application.get("/v1/equipment-references", summary="Read manufacturer component references")
+    def get_equipment_references():
+        from astropilot.equipment_references import equipment_references
+        try:
+            return equipment_references()
+        except (OSError, ValueError):
+            raise HTTPException(status_code=503, detail={"code": "equipment_references_unavailable"})
+
     @application.get(
         "/v1/configuration",
         response_model=ConfigurationResponse,
