@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import importlib.metadata
 import math
 import os
@@ -30,6 +30,9 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from decision.night_productivity.refusal_evidence_scope import ProductivityEvidenceScope
+from astropilot.altitude_guidance import AltitudeGuidance, GuidanceError, altitude_guidance
 
 from astropilot.guardian_renewal_api import (GuardianRenewalAdapter, RenewalRequest, Rejection,
     valid_key, valid_execution_id, response as guardian_response, unavailable as guardian_unavailable)
@@ -1103,6 +1106,8 @@ class TonightAdviceModel(BaseModel):
 
 
 class RefusalWeatherSummaryModel(BaseModel):
+    window_kind: Literal["candidate_window", "availability_intersection"] | None = None
+    sample_times: tuple[AwareDatetime, ...] = ()
     window_start: AwareDatetime
     window_end: AwareDatetime
     cloud_cover_min: float = Field(ge=0, le=100)
@@ -1185,9 +1190,16 @@ class TonightAcquisitionIntentAssessmentModel(BaseModel):
         AcquisitionIntentEligibilityReason | AcquisitionIntentEvidenceGap,
         ...,
     ]
+    actionability_refusal: ActionabilityRefusalModel | None = None
 
     @model_validator(mode="after")
     def validate_status_reasons(self):
+        if self.actionability_refusal is not None:
+            refusal = self.actionability_refusal.root
+            expected_status = ("not_eligible" if refusal.status == "constraints_refusal"
+                               else "insufficient_evidence")
+            if self.status.value != expected_status or refusal.cause_code not in self.reason_codes:
+                raise ValueError("intent_refusal_evidence_mismatch")
         if self.status is AcquisitionIntentEligibilityStatus.ELIGIBLE:
             if self.reason_codes:
                 raise ValueError("eligible_must_not_have_reason_codes")
@@ -1365,12 +1377,20 @@ class ConstraintsActionabilityRefusalModel(ActionabilityRefusalBaseModel):
         "continuous_window_too_short",
     ] | None = None
     productivity_breakdown: ProductivityBreakdownModel | None = None
+    evidence_scope: ProductivityEvidenceScope | None = None
 
     @model_validator(mode="after")
     def validate_breakdown_stage(self):
+        scope = self.evidence_scope
         if self.productivity_breakdown is None:
             return self
         breakdown = self.productivity_breakdown
+        if scope is not None:
+            if scope.partial_slice_count is not None and scope.partial_slice_count > breakdown.evaluated_slice_count:
+                raise ValueError("scope_partial_count_exceeds_evaluated")
+            if breakdown.evaluated_slice_count and (scope.evaluated_start is None or scope.evaluated_end is None
+                    or not scope.evaluated_start.astimezone(timezone.utc) <= breakdown.best_slice_start.astimezone(timezone.utc) < breakdown.best_slice_end.astimezone(timezone.utc) <= scope.evaluated_end.astimezone(timezone.utc)):
+                raise ValueError("scope_best_slice_outside_intersection")
         if self.refusal_stage == "no_productive_slice":
             if breakdown.productive_slice_count != 0:
                 raise ValueError("no_productive_slice_requires_zero_productive")
@@ -1677,6 +1697,17 @@ class TonightResponseModel(BaseModel):
     target_explanations: list[TargetExplanationResponseModel] = Field(
         default_factory=list
     )
+
+    @model_validator(mode="after")
+    def validate_unselected_intent_refusal(self):
+        if self.status == "no_mission" and self.actionability_refusal is not None:
+            targeted = [item for item in self.acquisition_intent_assessments
+                        if "intent_not_targeted_by_project" not in item.reason_codes]
+            if not (self.creation_refusal == "no_eligible_acquisition_intent"
+                    and len(targeted) == 1
+                    and targeted[0].actionability_refusal == self.actionability_refusal):
+                raise ValueError("unselected_intent_refusal_evidence_mismatch")
+        return self
 
 
 def _acquisition_intent_choice_available(result) -> bool:
@@ -2251,6 +2282,17 @@ def create_app(
                     and cause.filename == str(get_user_data_dir() / "user_profile.json")):
                 return {}
             raise
+
+    @application.get("/v1/projects/{project_id}/altitude-guidance", response_model=AltitudeGuidance)
+    def get_altitude_guidance(project_id: str, response: Response, night_date: date | None = None):
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            return altitude_guidance(profile=profile_provider(), project_id=project_id,
+                                     reference_time=clock(), night_date=night_date)
+        except GuidanceError as exc:
+            raise HTTPException(status_code=422, detail={"code": str(exc)}) from None
+        except (OSError, ValueError, UserProfileError, TypeError):
+            raise HTTPException(status_code=503, detail={"code": "guidance_unavailable"}) from None
 
     @application.get("/v1/target-catalogue")
     def get_target_catalogue(equipment: str | None = None):

@@ -692,7 +692,9 @@ def test_productive_window_assessment_is_immutable_and_gate_compatible(
         "productivity_breakdown",
         "acquisition_capacity",
         "evidence_issues",
+        "productivity_slice_evaluations",
     ]
+    assert assessment.productivity_slice_evaluations == ()
     assert assessment.window_start is input_data.window_start
     assert assessment.window_end is input_data.window_end
     assert assessment.recommended_hours == 0.75

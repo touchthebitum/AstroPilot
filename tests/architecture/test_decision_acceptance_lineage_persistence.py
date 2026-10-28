@@ -463,7 +463,7 @@ def test_v10_candidate_document_contains_exact_additive_provenance_keys():
     )
     candidate_fields = candidate_field_documents(document)
 
-    assert document["schema_version"] == 11
+    assert document["schema_version"] == 13
     assert candidate_fields
     assert all(
         fields["imaging_field_id"] == "sh2-129_ou4"
@@ -1591,7 +1591,7 @@ def test_duplicate_identity_in_another_aggregate_fails_globally(
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda document: document.update(schema_version=12),
+        lambda document: document.update(schema_version=14),
         lambda document: document.pop("schema_version"),
         lambda document: document["context"].update(
             {"$type": "unsupported.DomainType"}
@@ -1692,7 +1692,7 @@ def test_concurrent_conflicting_commits_allow_exactly_one_success(tmp_path):
         outcomes = list(executor.map(commit, ("M31", "M42")))
 
     assert sorted(outcomes) == ["conflict", "saved"]
-    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 11
+    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 13
 
 
 def test_unique_temporary_files_are_cleaned(tmp_path, monkeypatch):
@@ -1715,6 +1715,8 @@ def test_unique_temporary_files_are_cleaned(tmp_path, monkeypatch):
 
 def remove_lunar_snapshot_fields(document):
     if isinstance(document, dict):
+        if document.get("class") == "decision.models.acquisition_intent_assessment.AcquisitionIntentAssessment":
+            document["fields"].pop("actionability_refusal", None)
         if document.get("$type") == "dataclass" and document.get("class") in {
             "decision.models.candidate.Candidate",
             "decision.mission.mission_input.MissionInput",

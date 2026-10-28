@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from enum import Enum
 
+from decision.models.actionability_refusal import ActionabilityRefusal
+
 
 class AcquisitionIntentEligibilityStatus(str, Enum):
     ELIGIBLE = "eligible"
@@ -40,6 +42,7 @@ class AcquisitionIntentEligibilityAssessment:
     status: AcquisitionIntentEligibilityStatus
     blocking_reasons: tuple[AcquisitionIntentEligibilityReason, ...]
     evidence_gaps: tuple[AcquisitionIntentEvidenceGap, ...]
+    actionability_refusal: ActionabilityRefusal | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -69,6 +72,17 @@ class AcquisitionIntentEligibilityAssessment:
             raise TypeError("evidence_gaps_must_contain_evidence_gaps")
         if len(set(self.evidence_gaps)) != len(self.evidence_gaps):
             raise ValueError("duplicate_evidence_gap")
+
+        if self.actionability_refusal is not None:
+            if not isinstance(self.actionability_refusal, ActionabilityRefusal):
+                raise TypeError("Expected ActionabilityRefusal")
+            expected_status = (
+                "not_eligible" if self.actionability_refusal.status.value == "constraints_refusal"
+                else "insufficient_evidence"
+            )
+            if (self.status.value != expected_status or self.actionability_refusal.cause_code not in
+                    (*self.blocking_reasons, *self.evidence_gaps)):
+                raise ValueError("intent_refusal_evidence_mismatch")
 
         if self.status is AcquisitionIntentEligibilityStatus.ELIGIBLE:
             if self.blocking_reasons or self.evidence_gaps:

@@ -990,3 +990,19 @@ body.layout-nightline .page-footer { color: var(--muted); }
   body.layout-nightline .mission-footer { padding: 20px; }
   body.layout-nightline .mission-footer button { width: 100%; }
 }
+
+/* Read-only altitude aid. Controls stay reachable on short mobile screens. */
+#altitude-guidance-dialog { width: min(760px, calc(100vw - 24px)); max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow: auto; box-sizing: border-box; padding: 20px; background: var(--night-soft); color: var(--ink); border: 1px solid var(--line-bright); border-radius: var(--radius); }
+#altitude-guidance-dialog::backdrop { background: rgba(1, 6, 12, .82); }
+.altitude-guidance-heading { position: sticky; top: -20px; background: var(--night-soft); z-index: 1; display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 16px 0; }
+.altitude-guidance-heading h2 { margin: 0; font-size: 1.3rem; }
+.altitude-guidance-heading button { flex: 0 0 auto; }
+.altitude-curve { margin: 20px 0; }
+.altitude-curve svg { display: block; width: 100%; height: auto; color: var(--ink); }
+#altitude-guidance-intervals article { border-top: 1px solid var(--line); padding: 16px 0; }
+#altitude-guidance-dialog button { white-space: normal; }
+#altitude-guidance-dialog input { max-width: 100%; }
+
+/* Readable evidence remains secondary to the decision. */
+#message-technical, .refusal-evidence { white-space: pre-line; overflow-wrap: anywhere; line-height: 1.6; }
+.refusal-window { color: var(--muted); font-size: .9rem; line-height: 1.5; }

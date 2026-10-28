@@ -3806,6 +3806,10 @@ const PENDING_ACCEPTANCE_STORAGE_VERSION = 2;
 const wizardStates = Object.freeze(["site", "equipment", "projects", "review"]);
 
 function setView(view) {
+  const guidanceDialog = document.querySelector("#altitude-guidance-dialog");
+  if (guidanceDialog?.open) guidanceDialog.close();
+  const guidanceButton = document.querySelector("#availability-altitude-guidance");
+  if (guidanceButton) guidanceButton.hidden = !state.selectedProjectId || state.discoveryMode;
   const selectedNotice = document.querySelector("#availability-selected-project");
   if (selectedNotice) {
     selectedNotice.hidden = !state.selectedProjectId || state.discoveryMode;
@@ -6440,7 +6444,63 @@ function intentsRefusedForProductiveWindow(payload) {
       && item.reason_codes[0] === "insufficient_actionable_productive_window");
 }
 
-function refusalForecastMessage(payload) {
+// Read a historical zone only from the archived response/request, never today's site.
+function refusalSiteTimezone(payload, {archived = false, request = null} = {}) {
+  const candidate = payload?.weather_trust?.timezone || request?.location?.timezone
+    || (!archived && typeof currentSiteTimezone === "function" ? currentSiteTimezone() : null);
+  if (candidate) {
+    try { return new NightMeritTime.DateTimeFormat("fr-CH", {timeZone: candidate}).resolvedOptions().timeZone; }
+    catch (_) { /* Unknown zones retain an explicit UTC fallback. */ }
+  }
+  return "UTC";
+}
+
+function refusalTimeLabel(value, timeZone) {
+  if (!value || !Number.isFinite(Date.parse(value))) return "non précisé";
+  if (!timeZone) return analysisTimeLabel(value);
+  return new NightMeritTime.DateTimeFormat("fr-CH", {timeZone, year:"numeric", month:"2-digit",
+    day:"2-digit", hour:"2-digit", minute:"2-digit", hour12:false,
+    timeZoneName:"shortOffset"}).format(new Date(value));
+}
+
+function refusalRangeLabel(start, end, timeZone) {
+  if (![start, end].every(value => value && Number.isFinite(Date.parse(value)))) return "";
+  const day = new NightMeritTime.DateTimeFormat("fr-CH", {timeZone, year:"numeric", month:"2-digit", day:"2-digit"});
+  const hour = new NightMeritTime.DateTimeFormat("fr-CH", {timeZone, hour:"2-digit", minute:"2-digit", hour12:false});
+  const a = new Date(start), b = new Date(end);
+  const from = `${day.format(a)}, ${hour.format(a)}`;
+  const until = day.format(a) === day.format(b) ? hour.format(b) : `${day.format(b)}, ${hour.format(b)}`;
+  return `${from} → ${until} · ${timeZone}`;
+}
+
+function refusalEvaluatedRange(payload, timeZone) {
+  const diagnosed = targetedIntentAssessments(payload).map(item => item.actionability_refusal).filter(Boolean);
+  const refusal = diagnosed.length === 1 ? diagnosed[0] : !diagnosed.length ? payload.actionability_refusal : null;
+  const scope = refusal?.evidence_scope;
+  if (!scope?.evaluated_start || !scope?.evaluated_end) return "";
+  return `Plage évaluée : ${refusalRangeLabel(scope.evaluated_start, scope.evaluated_end, timeZone)}.`;
+}
+
+function simpleProductivityRefusal(payload) {
+  const assessments = targetedIntentAssessments(payload);
+  const refusal = assessments.length === 1 ? assessments[0].actionability_refusal
+    : !assessments.length ? payload.actionability_refusal : null;
+  if (!refusal || refusal.status !== "constraints_refusal" || refusal.conclusion !== "no_productive_window") return null;
+  if (refusal.evidence_scope && !refusal.evidence_scope.evaluated_start) {
+    return ["Aucun créneau dans vos horaires", "La fenêtre trouvée est en dehors de votre disponibilité."];
+  }
+  if (refusal.refusal_stage === "no_productive_slice") {
+    return ["Pas de séance photo recommandée", "Aucun moment assez favorable n’a été retenu sur la plage évaluée."];
+  }
+  if (refusal.refusal_stage === "continuous_window_too_short"
+      && Number.isFinite(refusal.best_productive_window_minutes) && Number.isFinite(refusal.required_continuous_minutes)) {
+    return ["Le créneau favorable est trop court",
+      `${Math.floor(refusal.best_productive_window_minutes)} minutes favorables d’affilée ont été trouvées. Il en faut au moins ${Math.ceil(refusal.required_continuous_minutes)} minutes pour proposer une séance.`];
+  }
+  return null;
+}
+
+function refusalForecastMessage(payload, timeZone = null) {
   if (!intentsRefusedForProductiveWindow(payload)) return null;
   const forecast = payload.refusal_weather;
   if (!forecast || !Number.isFinite(forecast.cloud_cover_min)
@@ -6452,30 +6512,60 @@ function refusalForecastMessage(payload) {
   const end = iso.exec(forecast.window_end || "");
   const retrieved = iso.exec(forecast.retrieved_at_utc || "");
   if (!start || !end || !retrieved || !forecast.provider) return null;
-  const stamp = match => `${match[3]}.${match[2]}.${match[1]} à ${match[4]} UTC${match[5] === "Z" ? "" : match[5]}`;
+  const stamp = match => refusalTimeLabel(match[0], timeZone);
   const sameDay = start[1] === end[1] && start[2] === end[2] && start[3] === end[3] && start[5] === end[5];
-  const range = sameDay
+  const range = timeZone ? `du ${stamp(start)} au ${stamp(end)} · ${timeZone}` : sameDay
     ? `le ${start[3]}.${start[2]}.${start[1]}, de ${start[4]} à ${end[4]} (UTC${start[5] === "Z" ? "" : start[5]})`
     : `du ${stamp(start)} au ${stamp(end)}`;
   const low = Math.round(forecast.cloud_cover_min), high = Math.round(forecast.cloud_cover_max);
   const clouds = low === high ? `${low} %` : `${low} à ${high} %`;
   const overcast = forecast.cloud_cover_min === 100 && forecast.cloud_cover_max === 100;
+  const perimeter = forecast.window_kind === "availability_intersection"
+    ? "la portion de la fenêtre candidate comprise dans votre disponibilité"
+    : forecast.window_kind === "candidate_window" ? "la fenêtre candidate, qui peut dépasser votre disponibilité"
+      : "la fenêtre météo archivée, dont le périmètre par rapport à votre disponibilité n’est pas enregistré";
+  const sampling = forecast.sample_times?.length
+    ? ` Échantillons horaires utilisés : ${forecast.sample_times.map(value => refusalTimeLabel(value, timeZone)).join(" ; ")}. Une heure partielle conserve la prévision horaire d’origine, sans interpolation.` : "";
   return {
     title: overcast ? "Ciel couvert prévu sur le créneau évalué" : "Créneau insuffisant pour ce projet",
-    body: `Votre projet est bien enregistré. Couverture nuageuse prévue : ${clouds} sur le créneau évalué ${range}. ${overcast ? "NightMerit ne recommande pas de séance photo pour ce projet dans ces conditions. " : "Aucun créneau suffisamment productif n’a été retenu pour ce projet. "}Votre projet est conservé. Prévisions récupérées le ${stamp(retrieved)}. Actualisez les prévisions avant de décider de sortir.`,
-    details: `Source : ${forecast.provider}. Il s’agit de prévisions, pas d’une mesure du ciel sur place. Le créneau évalué peut être plus court que votre disponibilité.`,
+    body: `Nuages prévus : ${clouds} sur ${perimeter} ${range}. Prévisions récupérées le ${stamp(retrieved)}. Actualisez-les avant une nouvelle séance.`,
+    details: `Source : ${forecast.provider}. Il s’agit de prévisions, pas d’une mesure du ciel sur place. Ce contexte météo ne désigne pas la cause physique du refus.${sampling}`,
     overcast,
   };
 }
 
-function intentEligibilityRefusalMessage(payload) {
+function intentEligibilityRefusalMessage(payload, timeZone = null) {
   const assessments = targetedIntentAssessments(payload);
-  const forecast = refusalForecastMessage(payload);
-  if (forecast) return [forecast.title, forecast.body];
+  const forecast = refusalForecastMessage(payload, timeZone);
+  const diagnosed = assessments.filter(item => item.actionability_refusal);
+  if (diagnosed.length) {
+    const summaries = diagnosed.map(item => {
+      const refusal = item.actionability_refusal;
+      const [title, detail, breakdown] = actionabilityRefusalMessage(refusal, timeZone);
+      const label = item.label || item.filter_type || item.acquisition_intent_id;
+      const summary = refusal.evidence_scope && !refusal.evidence_scope.evaluated_start ? detail
+        : refusal.refusal_stage === "no_productive_slice"
+        ? `Aucune tranche évaluée dans votre disponibilité n’atteint le seuil de productivité. Une mission exige au moins ${Math.ceil(refusal.required_continuous_minutes)} minutes productives continues.`
+        : refusal.refusal_stage === "continuous_window_too_short"
+          ? `Des tranches sont productives, mais la meilleure durée continue est de ${Math.floor(refusal.best_productive_window_minutes)} min ; il faut au moins ${Math.ceil(refusal.required_continuous_minutes)} min.`
+          : detail;
+      return {title, summary: `${label} : ${summary}`, detail: `${label} : ${detail}${breakdown ? `\n${breakdown}` : ""}`};
+    });
+    const undiagnosed = assessments.filter(item => !item.actionability_refusal);
+    return [
+      assessments.length === 1 ? summaries[0].title : "Aucune prise de vue réalisable pour ce projet",
+      `Votre projet est conservé. ${summaries.map(item => item.summary).join(" ")}${undiagnosed.length ? " D’autres prises de vue ont des motifs distincts ; consultez les détails." : ""}`,
+      summaries.map(item => item.detail).join("\n")
+        + undiagnosed.map(item => `\n${item.label || item.acquisition_intent_id} : ${(item.reason_codes || []).join(", ")}. Diagnostic détaillé non disponible.`).join("")
+        + (forecast ? `\n\nContexte des prévisions, sans attribution de la cause : ${forecast.body} ${forecast.details}` : ""),
+    ];
+  }
+  const missingDiagnostic = "La durée productive calculée, l’étape du refus et le bilan des facteurs n’ont pas été conservés dans cette analyse. Les prévisions seules ne permettent pas d’établir la cause physique du refus.";
+  if (forecast) return [forecast.title, forecast.body, `${missingDiagnostic} ${forecast.details}`];
   if (intentsRefusedForProductiveWindow(payload)) {
     const names = assessments.map(item => item.label || item.filter_type).filter(Boolean).join(", ");
     return ["Créneau insuffisant pour ce projet",
-      `Votre projet est bien enregistré. Sur la plage choisie, NightMerit ne trouve pas de créneau suffisamment productif${names ? ` pour ${names}` : ""}. Vous pouvez revoir vos horaires ou refaire l’analyse lorsque les conditions évoluent, sans garantie de trouver un créneau adapté. Votre projet est conservé.`];
+      `Votre projet est bien enregistré. Sur la plage choisie, NightMerit ne trouve pas de créneau suffisamment productif${names ? ` pour ${names}` : ""}. Vous pouvez revoir vos horaires ou refaire l’analyse lorsque les conditions évoluent, sans garantie de trouver un créneau adapté. Votre projet est conservé.`, missingDiagnostic];
   }
   const reasons = {
     intent_target_completed: "l’objectif de pose est déjà atteint",
@@ -6498,8 +6588,8 @@ function intentEligibilityRefusalMessage(payload) {
     `Votre projet est conservé. ${descriptions.join(" ") || "Aucune prise de vue ne peut être confirmée avec les données actuelles."}`];
 }
 
-function creationRefusalMessage(payload) {
-  if (payload.creation_refusal === "no_eligible_acquisition_intent") return intentEligibilityRefusalMessage(payload);
+function creationRefusalMessage(payload, timeZone = null) {
+  if (payload.creation_refusal === "no_eligible_acquisition_intent") return intentEligibilityRefusalMessage(payload, timeZone);
   if (payload.creation_refusal === "modern_mission_authorization_required" && payload.provenance === "discovery") {
     return ["Préparons votre premier projet", "Une cible a été repérée, mais aucune mission n’est encore prête. Un projet indique ce que vous souhaitez photographier, avec quel filtre et pendant combien de temps au total. Créez un projet pour une cible prise en charge par cette bêta, puis relancez l’analyse avec vos horaires conservés."];
   }
@@ -6512,14 +6602,50 @@ const actionabilityCauseLabels = Object.freeze({
   productive_window_evidence_missing: "les preuves temporelles de fenêtre productive sont manquantes ou invalides",
 });
 
-function actionabilityRefusalMessage(refusal) {
+function actionabilityRefusalMessage(refusal, timeZone = null) {
+  const message = rawActionabilityRefusalMessage(refusal);
+  if (refusal?.status !== "constraints_refusal") return message;
+  const scope = refusal.evidence_scope;
+  if (!scope) {
+    if (!refusal.productivity_breakdown && !refusal.refusal_stage) return message;
+    message[2] = `${message[2] || message[1] || ""} Périmètre du bilan non enregistré dans cette ancienne analyse : les tranches peuvent dépasser votre disponibilité. Ce bilan historique n’a pas été recalculé.`;
+    return message;
+  }
+  const stamp = value => value ? refusalTimeLabel(value, timeZone) : "non précisé";
+  const requested = scope.availability_start || scope.availability_end
+    ? `Disponibilité demandée : ${scope.availability_start ? stamp(scope.availability_start) : "début sans borne imposée"} → ${scope.availability_end ? stamp(scope.availability_end) : "fin sans borne imposée"}.`
+    : "Disponibilité sans bornes horaires imposées.";
+  const bounds = `${requested}\nFenêtre candidate : ${stamp(scope.candidate_start)} → ${stamp(scope.candidate_end)}.`;
+  if (!scope.evaluated_start || !scope.evaluated_end) {
+    return ["Fenêtre hors de votre disponibilité", "La fenêtre candidate ne chevauche pas votre disponibilité. Aucune portion ne peut être utilisée pour cette mission.", bounds];
+  }
+  let detail = `${bounds}\nPortion évaluée dans votre disponibilité : ${stamp(scope.evaluated_start)} → ${stamp(scope.evaluated_end)}.`;
+  if (scope.partial_slice_count > 0) {
+    detail += ` ${scope.partial_slice_count} portion(s) raccourcie(s) aux bornes de votre disponibilité : score et bilan repris de leur tranche d’origine, sans nouveau calcul à la minute.`;
+    detail += ` Tranche d’origine du meilleur score : ${stamp(scope.best_source_slice_start)} → ${stamp(scope.best_source_slice_end)}.`;
+    for (let i = 1; i < message.length; i++) message[i] = message[i].replaceAll("tranches de 15 min", "portions de 15 min maximum");
+  }
+  message[2] = `${message[2] || ""}\n\n${detail}`.trim();
+  return message;
+}
+
+function rawActionabilityRefusalMessage(refusal) {
   const title = "Aucun créneau suffisamment productif";
   if (!refusal || refusal.conclusion !== "no_productive_window") {
     return [title, partialMessages.no_productive_window[1]];
   }
+  if (refusal.status === "constraints_refusal" && refusal.cause_code === "ambiguous_best_duration_window") {
+    return ["Plusieurs créneaux à départager", "Plusieurs créneaux de même durée restent à départager. Précisez vos horaires pour poursuivre."];
+  }
   const cause = actionabilityCauseLabels[refusal.cause_code]
     || (refusal.cause_code ? `cause moteur : ${refusal.cause_code}` : null);
   const breakdown = refusal.productivity_breakdown;
+  if (refusal.status === "constraints_refusal" && refusal.refusal_stage === "no_productive_slice" && breakdown?.evaluated_slice_count === 0) {
+    return ["Aucune tranche productive", "Le calcul ne contient aucune tranche évaluée. Aucun bilan chiffré des facteurs limitants n’est disponible."];
+  }
+  if (refusal.status === "constraints_refusal" && refusal.refusal_stage === "no_productive_slice" && !breakdown) {
+    return ["Aucune tranche productive", "Aucune tranche évaluée n’atteint le seuil de productivité. Le bilan détaillé des facteurs n’est pas disponible."];
+  }
   if (
     refusal.status === "constraints_refusal"
     && refusal.refusal_stage === "no_productive_slice"
@@ -6545,7 +6671,7 @@ function actionabilityRefusalMessage(refusal) {
     const lossText = losses.length ? ` ${losses.join(" · ")}.` : "";
     return [
       "Aucune tranche productive",
-      `${bestLabel} : ${score} % — seuil requis : ${threshold} %.${lossText} Aucune des ${breakdown.evaluated_slice_count} tranches de 15 min n’atteint le seuil.`,
+      `${bestLabel} : ${score} % — seuil requis : ${threshold} %.${lossText} Aucune des ${breakdown.evaluated_slice_count} tranches de 15 min n’atteint le seuil. Ce bilan décrit le calcul pour cette tranche, pas une cause physique unique du refus.`,
     ];
   }
   if (
@@ -6556,10 +6682,19 @@ function actionabilityRefusalMessage(refusal) {
   ) {
     const foundMinutes = Math.max(0, Math.floor(refusal.best_productive_window_minutes));
     const requiredMinutes = Math.max(0, Math.ceil(refusal.required_continuous_minutes));
-    return [
+    const message = [
       "Fenêtre productive trop courte",
       `Des tranches productives existent, mais la meilleure fenêtre continue après vos contraintes dure ${foundMinutes} min. Seuil requis : ${requiredMinutes} min.`,
     ];
+    if (breakdown) {
+      const names = {cloud:"Nuages",moon:"Lune",altitude:"Altitude",humidity:"Humidité",wind:"Vent"};
+      const losses = Object.entries(breakdown.losses || {}).filter(([name, value]) => names[name] && Number.isFinite(value) && value > 0)
+        .map(([name, value]) => `${names[name]} : −${Math.round(value * 100)} points`).join(" · ");
+      message.push(`${breakdown.productive_slice_count} tranches productives sur ${breakdown.evaluated_slice_count} évaluées. Meilleure tranche : ${Math.round(breakdown.best_slice_score * 100)} % ; seuil : ${Math.round(breakdown.productive_slice_threshold * 100)} %.${losses ? ` Bilan calculé pour cette tranche : ${losses}.` : ""} Ce bilan ne désigne pas une cause physique unique du refus.`);
+    } else {
+      message.push("Le bilan détaillé des facteurs n’est pas disponible.");
+    }
+    return message;
   }
   if (
     refusal.status === "constraints_refusal"
@@ -6608,17 +6743,18 @@ function canEditRefusedAvailability(payload) {
 }
 
 function showTonightUnavailable(payload) {
-  const candidateMessage = payload.status === "no_candidate" ? noCandidateMessage(payload) : null;
+  const timeZone = refusalSiteTimezone(payload);
+  const candidateMessage = payload.status === "no_candidate" ? noCandidateMessage(payload, timeZone) : null;
   const productiveRefusal = payload.status === "no_productive_window";
   const creationRefused = payload.status === "no_mission" && Boolean(payload.creation_refusal);
-  const [title, technical] = candidateMessage || (payload.status === "weather_refused"
+  const [title, technical, detailed] = candidateMessage || (payload.status === "weather_refused"
     ? [payload.weather_decision.presentation.label, payload.weather_decision.presentation.summary]
     : productiveRefusal
-    ? actionabilityRefusalMessage(payload.actionability_refusal)
+    ? actionabilityRefusalMessage(payload.actionability_refusal, timeZone)
     : creationRefused
-    ? creationRefusalMessage(payload)
+    ? creationRefusalMessage(payload, timeZone)
     : partialMessages[payload.status] || ["Décision indisponible", "Aucune recommandation exploitable."]);
-  const forecast = refusalForecastMessage(payload);
+  const forecast = refusalForecastMessage(payload, timeZone);
   const shortWindow = payload.actionability_refusal?.refusal_stage === "continuous_window_too_short";
   // Navigation choices do not imply that different hours or a target will succeed.
   const chosen = state.selectedProjectId;
@@ -6635,10 +6771,17 @@ function showTonightUnavailable(payload) {
   const simpleTitle = appliedUiMode === "simple" && productiveRefusal
     ? (shortWindow ? "Le créneau disponible est trop court" : "Aucun créneau adapté à vos horaires")
     : title;
-  showMessage(simpleTitle, chosen
+  const concise = simpleProductivityRefusal(payload);
+  const conciseBody = concise ? `${chosen ? `Cible choisie : ${chosen}. ` : ""}${concise[1]} Votre projet est conservé.${offerAlternatives ? " Vous pouvez modifier vos horaires ou chercher une autre cible." : " Réessayez plus tard si les conditions évoluent."}` : null;
+  showMessage(appliedUiMode === "simple" && concise ? concise[0] : simpleTitle, conciseBody || (chosen
     ? `Cible choisie : ${chosen}. ${body} Votre projet est conservé.${offerAlternatives ? " Vous pouvez modifier vos horaires ou chercher une autre cible, sans garantie de créneau disponible." : " Votre choix est conservé ; aucune autre cible ne le remplace."}`
-    : body, { kicker: "Analyse terminée" });
-  text("#message-technical", candidateMessage?.[2] || forecast?.details || technical);
+    : body), { kicker: "Analyse terminée" });
+  const range = document.querySelector("#message-window");
+  if (range) {
+    range.textContent = refusalEvaluatedRange(payload, timeZone);
+    range.hidden = !range.textContent;
+  }
+  text("#message-technical", candidateMessage?.[2] || detailed || forecast?.details || technical);
   const details = document.querySelector("#message-details");
   details.hidden = false;
   details.open = appliedUiMode === "pro";
@@ -6650,10 +6793,15 @@ function showTonightUnavailable(payload) {
     ? "Actualiser les prévisions" : "Réessayer plus tard";
   document.querySelector("#message-edit-availability").hidden = !editAvailability;
   document.querySelector("#message-discover-targets").hidden = !offerAlternatives;
+  document.querySelector("#message-altitude-guidance").hidden = !chosen || payload.target_refusal?.code !== "target_below_minimum_altitude";
   if (offerAlternatives) ui.retry.textContent = "Actualiser l’analyse";
 }
 
 function showMessage(title, body, { kicker = "Décision indisponible", retry = true } = {}) {
+  const range = document.querySelector("#message-window");
+  if (range) range.hidden = true;
+  const altitudeButton = document.querySelector("#message-altitude-guidance");
+  if (altitudeButton) altitudeButton.hidden = true;
   const details = document.querySelector("#message-details");
   const createProject = document.querySelector("#message-create-project");
   if (createProject) createProject.hidden = true;
@@ -7257,6 +7405,116 @@ ui.retry.addEventListener("click", () => {
   if (state.availability) loadTonight(state.availability);
   else setView("availability");
 });
+// Geometry is an explicit read-only aid, never a cached decision or mission.
+let altitudeGuidanceRequest = null;
+function altitudeGuidanceIsCurrent(owner) {
+  return altitudeGuidanceRequest === owner && owner.project === state.selectedProjectId
+    && !state.discoveryMode && owner.generation === state.configurationGeneration
+    && owner.site === decisionSiteFingerprint() && owner.revision === state.viewRevision
+    && document.querySelector("#altitude-guidance-dialog").open;
+}
+function renderAltitudeCurve(data) {
+  const svg = document.querySelector("#altitude-guidance-chart");
+  svg.querySelectorAll("g").forEach(node => node.remove());
+  const ns = "http://www.w3.org/2000/svg", group = document.createElementNS(ns, "g");
+  svg.append(group);
+  const add = (tag, attributes, label) => {
+    const node = document.createElementNS(ns, tag);
+    for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
+    if (label !== undefined) node.textContent = label;
+    group.append(node);return node;
+  };
+  const from = Date.parse(data.night_start), to = Date.parse(data.night_end);
+  const x = time => 48 + (Date.parse(time) - from) / (to - from) * 560;
+  const y = altitude => 190 - (altitude + 90) / 180 * 164;
+  for (const angle of new Set([0, data.minimum_altitude_deg, 90])) {
+    add("line", {x1:48, x2:608, y1:y(angle), y2:y(angle), stroke:"currentColor", opacity:.4,
+      "stroke-dasharray": angle === data.minimum_altitude_deg ? "6 4" : "none"});
+    add("text", {x:42, y:y(angle)+4, "text-anchor":"end", fill:"currentColor", "font-size":12}, `${angle}°`);
+  }
+  add("polyline", {points:data.points.map(point => `${x(point.time)},${y(point.altitude_deg)}`).join(" "),
+    fill:"none", stroke:"var(--accent, #8bdccf)", "stroke-width":3});
+  for (const [time, anchor] of [[data.night_start,"start"],[data.points[Math.floor(data.points.length/2)].time,"middle"],[data.night_end,"end"]]) {
+    const label = new NightMeritTime.DateTimeFormat("fr-CH", {timeZone:data.timezone,hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(time));
+    add("text", {x:x(time),y:218,"text-anchor":anchor,fill:"currentColor","font-size":13},label);
+  }
+  text("#altitude-curve-description", `${data.project_id}, seuil ${data.minimum_altitude_deg}°. ${siteDateTime(data.night_start,data.timezone)} à ${siteDateTime(data.night_end,data.timezone)}. Les horaires au-dessus du seuil sont listés sous la courbe.`);
+}
+async function openAltitudeGuidance({keepDate = false} = {}) {
+  if (guardUnresolvedAcceptance() || !state.selectedProjectId || state.discoveryMode) return;
+  const dialog = document.querySelector("#altitude-guidance-dialog");
+  altitudeGuidanceRequest?.controller.abort();
+  const owner = {project:state.selectedProjectId,generation:state.configurationGeneration,
+    site:decisionSiteFingerprint(),revision:state.viewRevision,startedAt:performance.now(),controller:new AbortController()};
+  altitudeGuidanceRequest = owner;
+  const dateInput = document.querySelector("#altitude-guidance-date");
+  if (!keepDate) {
+    const mode = document.querySelector('input[name="availability-mode"]:checked')?.value;
+    const start = mode === "fixed_window" || mode === "start_and_duration" ? document.querySelector("#availability-start").value : "";
+    dateInput.value = start ? start.slice(0,10) : "";
+    if (start && Number(start.slice(11,13)) < 12) {
+      const day = new Date(`${start.slice(0,10)}T12:00:00Z`); day.setUTCDate(day.getUTCDate()-1);
+      dateInput.value = day.toISOString().slice(0,10);
+    }
+  }
+  text("#altitude-guidance-title", `Hauteur de ${owner.project} pendant la nuit`);
+  text("#altitude-guidance-status", "Calcul de la hauteur, sans récupération météo…");
+  document.querySelector("#altitude-guidance-result").hidden = true;
+  document.querySelector("#altitude-guidance-intervals").replaceChildren();
+  if (!dialog.open) dialog.showModal();
+  const timer = setTimeout(() => owner.controller.abort(),10000);
+  try {
+    const query = dateInput.value ? `?night_date=${encodeURIComponent(dateInput.value)}` : "";
+    const response = await fetch(`/v1/projects/${encodeURIComponent(owner.project)}/altitude-guidance${query}`,{cache:"no-store",signal:owner.controller.signal});
+    const data = await response.json();
+    if (!altitudeGuidanceIsCurrent(owner)) return;
+    if (!response.ok) throw new Error(data?.detail?.code || "guidance_unavailable");
+    const site = state.configuration?.site;
+    if (data.project_id !== owner.project || data.latitude !== site?.latitude || data.longitude !== site?.longitude || data.timezone !== currentSiteTimezone()) throw new Error("guidance_site_changed");
+    dateInput.value = data.night_date;
+    if (data.status === "astronomical_night_unavailable") {
+      text("#altitude-guidance-status", "La nuit astronomique ne peut pas être délimitée pour ce site et cette date. Aucun horaire n’est proposé.");return;
+    }
+    const nightLabel = new NightMeritTime.DateTimeFormat("fr-CH",{timeZone:"UTC",day:"numeric",month:"long",year:"numeric"}).format(new Date(`${data.night_date}T12:00:00Z`));
+    text("#altitude-guidance-status", `Site : ${data.site_name} · horaires ${data.timezone} · nuit du ${nightLabel}`);
+    text("#altitude-guidance-summary", `Seuil configuré : ${data.minimum_altitude_deg}°. Hauteur maximale sur la courbe : ${Math.max(...data.points.map(point=>point.altitude_deg)).toLocaleString("fr-CH",{maximumFractionDigits:1})}°. Ce calcul ne garantit pas un créneau productif.`);
+    renderAltitudeCurve(data);
+    const container = document.querySelector("#altitude-guidance-intervals");
+    if (!data.intervals.length) {
+      const p = document.createElement("p");p.textContent = "Aucun intervalle encore à venir au-dessus du seuil n’est trouvé pour cette nuit. Choisissez une autre date ou une autre cible.";container.append(p);
+    }
+    for (const interval of data.intervals) {
+      const card=document.createElement("article"),p=document.createElement("p");
+      p.textContent=`${siteDateTime(interval.start,data.timezone)} → ${siteDateTime(interval.end,data.timezone)} · ${interval.duration_minutes} min au-dessus du seuil.`;card.append(p);
+      if (interval.can_analyze) {
+        const button=document.createElement("button");button.type="button";button.className="primary-button";button.textContent="Analyser ce créneau";
+        button.addEventListener("click",()=>{
+          if (!altitudeGuidanceIsCurrent(owner) || guardUnresolvedAcceptance()) return;
+          if (Date.parse(interval.start) <= Date.parse(data.computed_at) + performance.now() - owner.startedAt) { text("#altitude-guidance-status","Cet horaire de début est déjà passé. Choisissez à nouveau la date pour actualiser les horaires.");return; }
+          const availability={mode:"fixed_window",start:interval.start,end:interval.end};
+          document.querySelector('input[name="availability-mode"][value="fixed_window"]').checked=true;
+          document.querySelector("#availability-start").value=formatDateTimeLocalInZone(new Date(interval.start),data.timezone);
+          document.querySelector("#availability-end").value=formatDateTimeLocalInZone(new Date(interval.end),data.timezone);
+          updateAvailabilityFields();dialog.close();loadTonight(availability);
+        });card.append(button);
+      } else {
+        const note=document.createElement("p");note.className="field-note";note.textContent=`Trop court : une mission exige au moins ${data.required_continuous_minutes} minutes productives continues.`;card.append(note);
+      }
+      container.append(card);
+    }
+    document.querySelector("#altitude-guidance-result").hidden=false;
+  } catch (error) {
+    if (altitudeGuidanceIsCurrent(owner)) text("#altitude-guidance-status",error.message==="guidance_site_changed"
+      ? "La configuration du site a changé. Fermez cette aide et rechargez votre configuration."
+      : "Impossible de calculer ces horaires. Vérifiez la date (hier à dans 14 jours) et votre configuration, puis réessayez. Vos données sont conservées.");
+  } finally {clearTimeout(timer);}
+}
+for (const id of ["availability-altitude-guidance","message-altitude-guidance"]) document.querySelector(`#${id}`).addEventListener("click",()=>openAltitudeGuidance());
+document.querySelector("#altitude-guidance-close").addEventListener("click",()=>document.querySelector("#altitude-guidance-dialog").close());
+document.querySelector("#altitude-guidance-dialog").addEventListener("close",()=>{altitudeGuidanceRequest?.controller.abort();altitudeGuidanceRequest=null;});
+document.querySelector("#altitude-guidance-date").addEventListener("change",()=>openAltitudeGuidance({keepDate:true}));
+document.querySelector("#altitude-guidance-refresh").addEventListener("click",()=>openAltitudeGuidance({keepDate:true}));
+
 document.querySelector("#message-edit-availability").addEventListener("click", () => {
   if (guardUnresolvedAcceptance()) return;
   setView("availability");
@@ -7624,6 +7882,8 @@ async function setDiscoveryMode(enabled) {
   state.discoveryGeneration = generation;
   state.discoveryMode = enabled;
   if (enabled) state.selectedProjectId = null;
+  document.querySelector("#availability-altitude-guidance").hidden = enabled || !state.selectedProjectId;
+  if (document.querySelector("#altitude-guidance-dialog").open) document.querySelector("#altitude-guidance-dialog").close();
   const chosenNotice = document.querySelector("#availability-selected-project");
   if (enabled && chosenNotice) chosenNotice.hidden = true;
   document.querySelector("#discover-targets").checked = enabled;
@@ -7885,11 +8145,11 @@ function analysisTimeLabel(value) {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2}):\d{2}(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/.exec(value);
   return m ? m[3]+"."+m[2]+"."+m[1]+" à "+m[4]+" UTC"+(m[5] === "Z" ? "" : m[5]) : "";
 }
-function noCandidateMessage(payload) {
+function noCandidateMessage(payload, timeZone = null) {
   const refusal = payload.target_refusal;
   if (refusal?.code === "target_below_minimum_altitude"
       && Number.isFinite(refusal.minimum_altitude_deg) && refusal.sample_count > 0) {
-    const range = [analysisTimeLabel(refusal.window_start), analysisTimeLabel(refusal.window_end)].filter(Boolean).join(" → ");
+    const range = [refusalTimeLabel(refusal.window_start, timeZone), refusalTimeLabel(refusal.window_end, timeZone)].filter(Boolean).join(" → ");
     return ["Cible trop basse sur ce créneau",
       refusal.catalog_key+" est trop basse sur le créneau choisi. NightMerit exige une hauteur d’au moins "+refusal.minimum_altitude_deg+"°.",
       (range ? "Créneau demandé : "+range+". " : "")+"Aucun échantillon des fenêtres évaluées n’atteint le seuil d’altitude. Ce motif ne conclut pas à la qualité de la météo."];
@@ -7951,12 +8211,23 @@ function renderArchivedAnalysis(record) {
   const root = document.querySelector("#analysis-history-detail");
   root.replaceChildren();
   const payload = record.result;
-  const message = payload.status === "no_candidate" ? noCandidateMessage(payload)
-    : payload.status === "no_productive_window" ? actionabilityRefusalMessage(payload.actionability_refusal)
+  const timeZone = refusalSiteTimezone(payload, {archived:true, request:record.request});
+  const message = payload.status === "no_candidate" ? noCandidateMessage(payload, timeZone)
+    : payload.status === "no_productive_window" ? actionabilityRefusalMessage(payload.actionability_refusal, timeZone)
+    : payload.status === "no_mission" && payload.creation_refusal ? creationRefusalMessage(payload, timeZone)
     : payload.status === "weather_refused"
       ? [payload.weather_decision?.presentation?.label, payload.weather_decision?.presentation?.summary]
       : partialMessages[payload.status] || ["Résultat enregistré", "Consultez les détails de cette analyse archivée."];
-  for (const [tag, value] of [["h3", message[0]], ["p", message[1]], ["p", message[2]]]) {
+  if (!payload.weather_trust?.timezone && !record.request?.location?.timezone) {
+    const note = document.createElement("p");
+    note.className = "refusal-window";
+    note.textContent = "Fuseau historique non enregistré : horaires affichés en UTC.";
+    root.append(note);
+  }
+  const concise = simpleProductivityRefusal(payload);
+  const title = appliedUiMode === "simple" && concise ? concise[0] : message[0];
+  const body = concise ? `${concise[1]} Votre projet est conservé.` : message[1];
+  for (const [tag, value] of [["h3", title], ["p", body], ["p", refusalEvaluatedRange(payload, timeZone)]]) {
     if (!value) continue;
     const node = document.createElement(tag);
     node.textContent = value;
@@ -7964,12 +8235,22 @@ function renderArchivedAnalysis(record) {
   }
   const details = document.createElement("details");
   const summary = document.createElement("summary");
-  summary.textContent = "Détails enregistrés de l’analyse";
+  summary.textContent = "Comprendre le résultat";
+  details.setAttribute("data-mode-disclosure", "");
+  details.open = appliedUiMode === "pro";
+  const explanation = document.createElement("p");
+  explanation.className = "refusal-evidence";
+  explanation.textContent = [message[1], message[2]].filter(Boolean).join("\n\n");
+  const raw = document.createElement("details");
+  const rawSummary = document.createElement("summary");
+  rawSummary.textContent = "Données brutes archivées (horaires ISO d’origine)";
+  raw.append(rawSummary);
   const content = document.createElement("pre");
   content.style.whiteSpace = "pre-wrap";
   content.style.overflowWrap = "anywhere";
   content.textContent = JSON.stringify({horaires_et_configuration: record.request, resultat: record.result}, null, 2);
-  details.append(summary, content);
+  raw.append(content);
+  details.append(summary, explanation, raw);
   root.append(details);
 }
 document.querySelectorAll("[data-open-analysis-history]").forEach(button => button.addEventListener("click", () => {

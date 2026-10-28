@@ -218,6 +218,7 @@ def test_tonight_exposes_sh2_129_refusals_when_viable_options_are_empty():
             "label": "Hα · Sh2-129",
             "status": "insufficient_evidence",
             "reason_codes": ["weather_evidence_insufficient"],
+            "actionability_refusal": None,
         },
         {
             "acquisition_intent_id": "ou4_oiii",
@@ -225,6 +226,7 @@ def test_tonight_exposes_sh2_129_refusals_when_viable_options_are_empty():
             "label": "OIII · Ou4",
             "status": "insufficient_evidence",
             "reason_codes": ["weather_evidence_insufficient"],
+            "actionability_refusal": None,
         },
     ]
 
@@ -1344,6 +1346,7 @@ def test_tonight_api_serializes_actionability_refusal_without_recalculation():
         "limiting_factors": [],
         "refusal_stage": None,
         "productivity_breakdown": None,
+        "evidence_scope": None,
     }
     assert payload["target_decision_status"] == "not_recommended"
 
@@ -2191,6 +2194,7 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
         "label",
         "status",
         "reason_codes",
+        "actionability_refusal",
     }
     assert assessment_schema["properties"]["status"]["$ref"].endswith(
         "AcquisitionIntentEligibilityStatus"
