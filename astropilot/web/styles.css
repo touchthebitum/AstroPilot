@@ -941,7 +941,9 @@ body.layout-nightline .page-footer { color: var(--muted); }
   body.layout-nightline .brand { font-size: 18px; }
   body.layout-nightline .brand-mark { display: none; }
   body.layout-nightline .header-actions { flex: 1; justify-content: flex-end; margin-left: 0; gap: 4px 10px; }
-  body.layout-nightline .main-navigation button { font-size: 12px; padding-inline: 8px; overflow-wrap: anywhere; }
+  body.layout-nightline .main-navigation { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.layout-nightline .main-navigation button { font-size: 14px; min-height: 48px; padding-inline: 8px; overflow-wrap: normal; }
+  body.layout-nightline .main-navigation button:first-child { grid-column: 1 / -1; }
   body.layout-nightline .options-label-full { display: none; }
   body.layout-nightline .options-label-compact { display: inline; }
   body.layout-nightline .header-options > summary { padding-inline: 2px; font-size: 12px; }
@@ -1006,3 +1008,9 @@ body.layout-nightline .page-footer { color: var(--muted); }
 /* Readable evidence remains secondary to the decision. */
 #message-technical, .refusal-evidence { white-space: pre-line; overflow-wrap: anywhere; line-height: 1.6; }
 .refusal-window { color: var(--muted); font-size: .9rem; line-height: 1.5; }
+
+/* Keep retained-image entry readable and tappable inside narrow mission dialogs. */
+#session-evidence label { display: grid; gap: 8px; margin-top: 14px; }
+#session-evidence input, #session-evidence select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 48px; font-size: 16px; }
+#session-evidence small { display: block; margin-top: 12px; }
+#session-duration-preview { padding: 12px; border-left: 2px solid var(--cyan); }

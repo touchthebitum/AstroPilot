@@ -324,20 +324,62 @@ function sessionStatus(status) {
     in_progress: "En cours", not_started: "À démarrer"})[status] || status;
 }
 
+function sessionEvidenceDuration() {
+  const method = document.querySelector("#session-duration-method").value;
+  if (method === "frames") {
+    const frames = Number(document.querySelector("#session-retained-frames").value);
+    const seconds = Number(document.querySelector("#session-frame-seconds").value);
+    const total = frames * seconds;
+    return Number.isSafeInteger(frames) && frames > 0 && Number.isFinite(seconds) && seconds >= 0.000001
+      && Number.isFinite(total) && total <= Number.MAX_SAFE_INTEGER ? total : null;
+  }
+  const hours = Number(document.querySelector("#session-hours").value);
+  const minutes = Number(document.querySelector("#session-minutes").value);
+  const seconds = Number(document.querySelector("#session-seconds").value);
+  const total = (hours * 60 + minutes) * 60 + seconds;
+  return Number.isInteger(hours) && hours >= 0 && Number.isInteger(minutes) && minutes >= 0
+    && minutes <= 59 && Number.isFinite(seconds) && seconds >= 0 && seconds < 60
+    && Number.isFinite(total) && total >= 0.000001 && total <= Number.MAX_SAFE_INTEGER ? total : null;
+}
+
+function usablePoseDuration(seconds) {
+  if (seconds == null) return "inconnu";
+  seconds = Math.round(seconds * 1000000) / 1000000;
+  const whole = Math.floor(seconds);
+  const remainder = Math.round((seconds - whole) * 1000000) / 1000000;
+  const trailing = (whole % 60) + remainder;
+  return `${Math.floor(whole / 3600)} h ${String(Math.floor(whole / 60) % 60).padStart(2, "0")}`
+    + (trailing ? ` ${String(trailing).replace(".", ",")} s` : "");
+}
+
+function updateSessionDurationPreview() {
+  const frames = document.querySelector("#session-duration-method").value === "frames";
+  document.querySelector("#session-frames-inputs").hidden = !frames;
+  document.querySelector("#session-duration-inputs").hidden = frames;
+  const seconds = sessionEvidenceDuration();
+  if (seconds != null) sessionMessage("Vérifiez le total ci-dessous, puis enregistrez la durée.");
+  text("#session-duration-preview", seconds == null
+    ? (frames ? "Renseignez les clichés conservés et leur durée pour calculer le total." : "Indiquez le temps de pose total des images conservées.")
+    : `Temps de pose à enregistrer pour cette session : ${usablePoseDuration(seconds)}.`);
+}
+
 function restoreSessionEvidenceInputs(session) {
   const executionId = session?.execution.execution_id || null;
   if (executionId === state.sessionEvidenceInputExecutionId) return;
   state.sessionEvidenceInputExecutionId = executionId;
-  let minutes = 0;
   const evidence = usableEvidence(session);
-  if (evidence) {
-    minutes = Math.round(Number(evidence.usable_integration_duration) / 60);
-  } else if (executionId) {
-    const saved = JSON.parse(localStorage.getItem(`astropilot.pendingEvidence.${executionId}`) || "null");
-    if (Number.isInteger(saved?.minutes) && saved.minutes > 0) minutes = saved.minutes;
-  }
-  document.querySelector("#session-hours").value = String(Math.floor(minutes / 60));
-  document.querySelector("#session-minutes").value = String(minutes % 60);
+  const pending = executionId ? JSON.parse(localStorage.getItem(`astropilot.pendingEvidence.${executionId}`) || "null") : null;
+  const savedSeconds = Number.isFinite(pending?.seconds) ? pending.seconds
+    : Number.isFinite(pending?.minutes) ? pending.minutes * 60 : 0;
+  const total = evidence ? Number(evidence.usable_integration_duration) : Math.max(0, savedSeconds);
+  document.querySelector("#session-duration-method").value = evidence || total > 0 ? "duration" : "frames";
+  document.querySelector("#session-retained-frames").value = pending?.frames ?? "";
+  document.querySelector("#session-frame-seconds").value = pending?.frame_seconds ?? "";
+  if (!evidence && pending?.method === "frames") document.querySelector("#session-duration-method").value = "frames";
+  document.querySelector("#session-hours").value = String(Math.floor(total / 3600));
+  document.querySelector("#session-minutes").value = String(Math.floor(total / 60) % 60);
+  document.querySelector("#session-seconds").value = String(Math.round((total % 60) * 1000000) / 1000000);
+  updateSessionDurationPreview();
 }
 
 function renderSession() {
@@ -398,7 +440,7 @@ function renderSession() {
   document.querySelector("#session-credit").hidden = status !== "completed" || !evidence || Boolean(session.credit);
   document.querySelector("#session-apply-credit").disabled = state.sessionBusy || status !== "completed";
   if (status === "completed" && evidence && !session.credit) {
-    text("#session-credit-preview", `Base historique : ${sessionHours(session.historical_baseline_seconds)} · crédit proposé : ${sessionHours(Number(evidence.usable_integration_duration))}`);
+    text("#session-credit-preview", (Number(session.historical_baseline_seconds) > 0 ? `Temps déjà acquis avant vos sessions NightMerit : ${usablePoseDuration(session.historical_baseline_seconds)}. ` : "") + `Temps à ajouter pour cette session : ${usablePoseDuration(Number(evidence.usable_integration_duration))}.`);
     text("#session-credit-intent", `Intent : ${session.acquisition_intent_id}`);
     const mustConfirm = Number(session.historical_baseline_seconds) > 0 && !session.historical_baseline_confirmed;
     document.querySelector("#session-baseline-confirm-wrap").hidden = !mustConfirm;
@@ -406,17 +448,17 @@ function renderSession() {
   }
   document.querySelector("#session-progress").hidden = !session;
   if (session) {
-    text("#session-before-label", session.credit ? "Acquis avant ce crédit" : "Acquis actuel (avant crédit)");
-    text("#session-after-label", session.credit ? "Acquis après ce crédit" : "Acquis projeté sans crédit");
-    text("#session-before", sessionHours(session.acquired_before_seconds));
-    text("#session-added", sessionHours(session.session_credit_seconds));
-    text("#session-after", sessionHours(session.acquired_after_seconds));
-    text("#session-current", sessionHours(session.current_acquired_seconds));
-    text("#session-remaining", session.target_hours == null ? "objectif non défini" : sessionHours(session.remaining_hours * 3600));
+    text("#session-before-label", session.credit ? "Acquis avant cette session" : "Acquis actuel (avant ajout)");
+    text("#session-after-label", session.credit ? "Acquis après cette session" : "Acquis actuel (durée pas encore ajoutée)");
+    text("#session-before", usablePoseDuration(session.acquired_before_seconds));
+    text("#session-added", usablePoseDuration(session.session_credit_seconds));
+    text("#session-after", usablePoseDuration(session.acquired_after_seconds));
+    text("#session-current", usablePoseDuration(session.current_acquired_seconds));
+    text("#session-remaining", session.target_hours == null ? "objectif non défini" : usablePoseDuration(session.remaining_hours * 3600));
     sessionMessage(!knownStatus ? "État de session non reconnu. Actualisez ou resélectionnez la session."
       : status === "unconfirmed" ? "Session non confirmée : aucune action disponible."
       : status === "interrupted" ? "Session interrompue : aucun crédit."
-      : session.credit ? "Crédit enregistré." : status === "completed" ? "Session terminée."
+      : session.credit ? "Cette durée a été ajoutée à votre projet." : status === "completed" ? "Session terminée."
       : status === "in_progress" ? "Session en cours." : "Session prête à démarrer.");
   } else sessionMessage("Aucune session enregistrée pour cette mission.");
   renderObservationLinkage();
@@ -556,16 +598,17 @@ async function closeSession(missionId, status) {
 async function recordSessionEvidence() {
   const session = currentSession();
   if (session?.execution.status !== "completed" || usableEvidence(session)) return;
-  const hours = Number(document.querySelector("#session-hours").value);
-  const minutes = Number(document.querySelector("#session-minutes").value);
-  if (!Number.isInteger(hours) || hours < 0 || !Number.isInteger(minutes) || minutes < 0 || minutes > 59 || hours * 60 + minutes <= 0) {
-    sessionMessage("Saisissez une durée utilisable positive en heures et minutes.");
+  const seconds = sessionEvidenceDuration();
+  if (seconds == null) {
+    sessionMessage(document.querySelector("#session-duration-method").value === "frames"
+      ? "Indiquez un nombre entier de clichés conservés supérieur à zéro et une durée par cliché supérieure à zéro."
+      : "Saisissez une durée utilisable positive en heures, minutes et secondes (minutes de 0 à 59 ; secondes de 0 à moins de 60).");
     return;
   }
   const key = `astropilot.pendingEvidence.${session.execution.execution_id}`;
   const saved = JSON.parse(localStorage.getItem(key) || "null");
   const evidenceId = saved?.evidence_id || crypto.randomUUID();
-  localStorage.setItem(key, JSON.stringify({ evidence_id: evidenceId, minutes: hours * 60 + minutes }));
+  localStorage.setItem(key, JSON.stringify({ evidence_id: evidenceId, minutes: seconds / 60, seconds, method: document.querySelector("#session-duration-method").value, frames: document.querySelector("#session-retained-frames").value, frame_seconds: document.querySelector("#session-frame-seconds").value }));
   const lookup = await fetch(`/v1/executions/${encodeURIComponent(session.execution.execution_id)}/session`);
   if (!lookup.ok) throw await sessionHttpError(lookup);
   const canonical = await lookup.json();
@@ -573,7 +616,7 @@ async function recordSessionEvidence() {
   await postSession("/v1/outcome-evidence", {
     evidence_id: evidenceId, execution_id: session.execution.execution_id,
     category: "acquisition", observed_at: new Date().toISOString(), source: "user",
-    usable_integration_duration: (hours * 60 + minutes) * 60,
+    usable_integration_duration: seconds,
   });
 }
 
@@ -7609,6 +7652,9 @@ guardianVisualTimer?.unref?.();
 document.querySelector("#session-start").addEventListener("click", () => sessionCommand(startSession, {transition: true}));
 document.querySelector("#session-complete").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "completed"), {transition: true}));
 document.querySelector("#session-interrupt").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "interrupted"), {transition: true}));
+for (const id of ["session-duration-method", "session-retained-frames", "session-frame-seconds", "session-hours", "session-minutes", "session-seconds"]) {
+  document.getElementById(id).addEventListener("input", updateSessionDurationPreview);
+}
 document.querySelector("#session-record-evidence").addEventListener("click", () => sessionCommand(recordSessionEvidence));
 document.querySelector("#session-apply-credit").addEventListener("click", () => sessionCommand(creditSession));
 document.querySelector("#observation-choose-decision").addEventListener("click", openRecentDecisions);

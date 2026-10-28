@@ -618,22 +618,37 @@
             </div>
             <div id="session-evidence" hidden>
               <p>Après avoir vérifié et trié vos clichés, indiquez le temps de pose total des images conservées de cette session uniquement. Excluez l’installation, les pauses, les images rejetées et les images de calibration (flats, darks et bias). N’indiquez pas le total de votre projet. Vous pouvez le faire le lendemain.</p>
-              <label>Heures <input id="session-hours" type="number" min="0" step="1" value="0"></label>
-              <label>Minutes <input id="session-minutes" type="number" min="0" max="59" step="1" value="0"></label>
+              <label>Comment souhaitez-vous renseigner les images conservées ?
+                <select id="session-duration-method">
+                  <option value="frames">Clichés × durée par cliché</option>
+                  <option value="duration">Temps de pose total</option>
+                </select>
+              </label>
+              <div id="session-frames-inputs">
+                <label>Nombre de clichés conservés <input id="session-retained-frames" type="number" min="1" step="1" inputmode="numeric"></label>
+                <label>Temps de pose de chaque cliché (secondes) <input id="session-frame-seconds" type="number" min="0.000001" step="any" inputmode="decimal"></label>
+                <small>Utilisez ce calcul si tous les clichés conservés ont la même durée. Sinon, choisissez le temps de pose total.</small>
+              </div>
+              <div id="session-duration-inputs" hidden>
+                <label>Heures <input id="session-hours" type="number" min="0" step="1" value="0" inputmode="numeric"></label>
+                <label>Minutes <input id="session-minutes" type="number" min="0" max="59" step="1" value="0" inputmode="numeric"></label>
+                <label>Secondes <input id="session-seconds" type="number" min="0" max="59.999999" step="0.000001" value="0" inputmode="decimal"></label>
+              </div>
+              <p id="session-duration-preview" role="status" aria-live="polite"></p>
               <button class="primary-button" id="session-record-evidence" type="button">Enregistrer la durée utilisable</button>
               <small>Cette étape conserve la durée. Le bouton suivant permettra de l’ajouter à votre projet.</small>
             </div>
             <div id="session-credit" hidden>
               <p id="session-credit-preview"></p>
               <p id="session-credit-intent" data-pro-only></p>
-              <label id="session-baseline-confirm-wrap" hidden><input id="session-baseline-confirm" type="checkbox"> Je confirme la valeur historique affichée</label>
+              <label id="session-baseline-confirm-wrap" hidden><input id="session-baseline-confirm" type="checkbox"> Je confirme le temps de pose déjà acquis avant mes sessions NightMerit</label>
               <button class="primary-button" id="session-apply-credit" type="button">Ajouter cette durée à mon avancement</button>
             </div>
             <button class="primary-button" id="session-start" type="button">Créer et démarrer une session</button>
             <dl id="session-progress" hidden>
-              <div><dt id="session-before-label">Acquis avant ce crédit</dt><dd id="session-before">—</dd></div>
-              <div><dt>Crédit de cette session</dt><dd id="session-added">—</dd></div>
-              <div><dt id="session-after-label">Acquis après ce crédit</dt><dd id="session-after">—</dd></div>
+              <div><dt id="session-before-label">Acquis avant cette session</dt><dd id="session-before">—</dd></div>
+              <div><dt>Temps ajouté par cette session</dt><dd id="session-added">—</dd></div>
+              <div><dt id="session-after-label">Acquis après cette session</dt><dd id="session-after">—</dd></div>
               <div><dt data-simple-text="Durée acquise actuellement" data-pro-text="Acquis actuel de cet intent">Durée acquise actuellement</dt><dd id="session-current">—</dd></div>
               <div><dt data-simple-text="Durée restante jusqu’à l’objectif" data-pro-text="Restant actuel jusqu’à l’objectif de cet intent">Durée restante jusqu’à l’objectif</dt><dd id="session-remaining">—</dd></div>
             </dl>

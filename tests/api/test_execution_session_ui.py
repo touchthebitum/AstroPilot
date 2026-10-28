@@ -64,6 +64,28 @@ renderSession();
 assert.equal(document.querySelector('#session-hours').value, '0');
 assert.equal(document.querySelector('#session-minutes').value, '30');
 assert.equal(observationLinkageRenderCount, 3);
+// Mixed exposures: 5 × 45 s + 5 × 60 s = 8 min 45 s.
+localStorage.setItem('astropilot.pendingEvidence.execution-1', JSON.stringify({
+  evidence_id: 'mixed', seconds: 525, minutes: 8.75, method: 'duration',
+}));
+state.sessionEvidenceInputExecutionId = null;
+renderSession();
+assert.equal(document.querySelector('#session-minutes').value, '8');
+assert.equal(document.querySelector('#session-seconds').value, '45');
+assert.equal(sessionEvidenceDuration(), 525);
+assert.match(document.querySelector('#session-duration-preview').textContent, /8 45 s/);
+for (const invalid of ['-1', '60', 'Infinity']) {
+  document.querySelector('#session-seconds').value = invalid;
+  assert.equal(sessionEvidenceDuration(), null);
+}
+document.querySelector('#session-hours').value = '0';
+document.querySelector('#session-minutes').value = '0';
+document.querySelector('#session-seconds').value = '1.5';
+assert.equal(sessionEvidenceDuration(), 1.5);
+state.activeSessionId = 'execution-2';
+renderSession();
+assert.equal(document.querySelector('#session-seconds').value, '0');
+
 '''
     result = run_with_time_authority([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
@@ -135,7 +157,7 @@ async function fetch(url, options) {
   assert.equal(document.querySelector('#session-before').textContent, '1 h 00');
   assert.equal(document.querySelector('#session-added').textContent, '0 h 30');
   assert.equal(document.querySelector('#session-after').textContent, '1 h 30');
-  assert.equal(document.querySelector('#session-after-label').textContent, 'Acquis après ce crédit');
+  assert.equal(document.querySelector('#session-after-label').textContent, 'Acquis après cette session');
   canonical.current_acquired_seconds = 6300;
   canonical.remaining_hours = .25;
   await reloadSessions();
@@ -642,7 +664,7 @@ async function fetch(url, options) {
       assert.equal(state.acceptedMission.mission_id, `mission-${kind}`);
       assert.equal(state.acceptedMission.mission.selected_filter.name, display);
       assert.equal(document.querySelector('#session-current').textContent, amount);
-      assert.equal(document.querySelector('#session-status').textContent, 'Crédit enregistré.');
+      assert.equal(document.querySelector('#session-status').textContent, 'Cette durée a été ajoutée à votre projet.');
     }
   }
   assert.equal(opened, 4);
