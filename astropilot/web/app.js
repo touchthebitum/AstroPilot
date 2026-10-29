@@ -382,7 +382,14 @@ function restoreSessionEvidenceInputs(session) {
   updateSessionDurationPreview();
 }
 
+function updateMissionConditionsControl() {
+  document.querySelector("#mission-check-conditions").disabled = !state.missionConditionsReady
+    || state.requestingRecommendation || state.sessionBusy || state.sessionWriteUncertain
+    || state.sessions.some(item => ["in_progress", "unconfirmed"].includes(item.execution?.status));
+}
+
 function renderSession() {
+  updateMissionConditionsControl();
   const session = currentSession();
   restoreSessionEvidenceInputs(session);
   const status = session?.execution.status;
@@ -473,6 +480,7 @@ async function reloadSessions({ selectId = null, readGuardian = true } = {}) {
   const sessions = await response.json();
   if (state.acceptedMission?.mission_id !== missionId) return;
   state.sessions = sessions;
+  state.missionConditionsReady = true;
   const pending = JSON.parse(localStorage.getItem(SESSION_PENDING_KEY) || "null");
   const candidate = selectId || (pending?.mission_id === missionId ? pending.execution_id : null);
   const explicitlySelectedExecutionId = state.fieldObservationSelectedExecutionId;
@@ -524,6 +532,7 @@ async function sessionCommand(command, { transition = false } = {}) {
     state.sessionWriteUncertain = false;
     document.querySelectorAll(".session-panel button").forEach((button) => { button.disabled = false; });
     document.querySelector("#session-apply-credit").disabled = currentSession()?.execution.status !== "completed";
+    updateMissionConditionsControl();
     renderGuardianRenewal();
   }
 }
@@ -4139,6 +4148,7 @@ function missionTaskTitle(title) {
 }
 
 function renderMission(mission) {
+  state.missionConditionsReady = false;
   state.sessions = [];
   state.activeSessionId = null;
   state.fieldObservationSelectedExecutionId = null;
@@ -4211,6 +4221,37 @@ function renderMission(mission) {
   renderSession();
   reloadSessions().catch(() => sessionMessage("Sessions momentanément indisponibles. Rechargez avant une action."));
 
+}
+
+async function checkMissionConditions() {
+  if (guardUnresolvedAcceptance() || state.requestingRecommendation || state.sessionBusy
+      || !state.missionConditionsReady || state.sessionWriteUncertain || state.sessions.some(item =>
+        ["in_progress", "unconfirmed"].includes(item.execution?.status))) return;
+  const accepted = state.acceptedMission;
+  const mission = accepted?.mission;
+  const projectId = accepted?.selectedCatalogKey;
+  const sameSite = acceptedMissionMatchesSite();
+  const start = Date.parse(mission?.window_start);
+  const end = Date.parse(mission?.window_end);
+  if (ui.mission.open) ui.mission.close();
+  if (!projectId || !Object.hasOwn(state.configuration?.projects || {}, projectId)) {
+    navigateGuidedProjects();
+    showFormError("Le projet de cette mission n’est plus disponible. Choisissez un projet enregistré avant une nouvelle analyse.");
+    return;
+  }
+  prepareGuidedSession({projectId});
+  if (state.view !== "availability" || state.selectedProjectId !== projectId) return;
+  if (!sameSite || !Number.isFinite(start) || !Number.isFinite(end) || start >= end || start <= Date.now()) {
+    showAvailabilityError("Vérifiez votre site et vos horaires avant de relancer l’analyse de ce projet. La mission enregistrée est conservée.");
+    return;
+  }
+  const availability = {mode: "fixed_window", start: mission.window_start, end: mission.window_end};
+  document.querySelector('input[name="availability-mode"][value="fixed_window"]').checked = true;
+  const zone = missionTimezone(mission, accepted);
+  document.querySelector("#availability-start").value = formatDateTimeLocalInZone(new Date(start), zone);
+  document.querySelector("#availability-end").value = formatDateTimeLocalInZone(new Date(end), zone);
+  updateAvailabilityFields();
+  await loadTonight(availability);
 }
 
 function showAcceptanceStatus(message, { error = false } = {}) {
@@ -7690,6 +7731,7 @@ ui.observation.addEventListener("click", (event) => {
   });
 ui.closeMission.addEventListener("click", () => ui.mission.close());
 ui.missionBack.addEventListener("click", () => ui.mission.close());
+document.querySelector("#mission-check-conditions").addEventListener("click", checkMissionConditions);
 ui.mission.addEventListener("click", (event) => {
   if (event.target === ui.mission) ui.mission.close();
 });
