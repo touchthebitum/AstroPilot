@@ -4833,7 +4833,7 @@ function renderDecision(decision) {
     warningCopy.unshift(weatherDecision.presentation?.summary || "Conditions météo à vérifier avant de démarrer.");
   }
   if (decision.dew_risk && String(decision.dew_risk.level).toLowerCase() === "high") {
-    warningCopy.push("Rosée : risque élevé.");
+    warningCopy.push("Rosée : risque élevé. Si vous disposez d’un chauffage antibuée, activez-le et vérifiez l’absence de condensation sur l’optique avant les poses.");
   }
   if (insufficient) warningCopy.unshift(evidenceMessage);
   const warningElement = document.querySelector("#decision-warning");
