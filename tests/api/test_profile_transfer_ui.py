@@ -32,7 +32,7 @@ async function flush(){for(let i=0;i<20;i++)await Promise.resolve();}
  statusState='profile';await vm.runInContext('status()',context);assert.equal(el('#export-section').hidden,false);
  statusState='empty';await vm.runInContext('status()',context);assert.equal(el('#restore-section').hidden,false);assert.equal(el('#windows-note').hidden,false);
  el('#archive').files=[{size:128}];await el('#archive').listeners.change();
- assert.equal(el('#restore').hidden,false);assert.match(el('#preview').textContent,/1 projet/);
+ assert.equal(el('#restore').hidden,false);assert.match(el('#preview').textContent,/1 projet/);assert.equal(el('#next-section').hidden,true);
  assert(!requests.some(r=>r.url.endsWith('restore')));assert.equal(el('#not-restored').hidden,false);assert.match(el('#stage').textContent,/à confirmer/);assert.equal(el('#open-profile').hidden,true);
  fail=true;await el('#archive').listeners.change();assert.equal(el('#restore').hidden,true);
  assert.match(el('#message').textContent,/<img/);assert.equal(el('#message').innerHTML,undefined);
