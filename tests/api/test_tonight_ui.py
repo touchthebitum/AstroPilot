@@ -688,6 +688,7 @@ let startValue = "";
 let endValue = "";
 const hint = {hidden: true, textContent: ""};
 const ui = {availabilityOvernightHint: hint};
+const state = {};
 const wallClockAvailabilityModes = Object.freeze(["start_and_duration", "until", "fixed_window"]);
 function currentSiteTimezone() { return "Europe/Zurich"; }
 const document = {

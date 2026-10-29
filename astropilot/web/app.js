@@ -4230,7 +4230,6 @@ async function checkMissionConditions() {
   const accepted = state.acceptedMission;
   const mission = accepted?.mission;
   const projectId = accepted?.selectedCatalogKey;
-  const sameSite = acceptedMissionMatchesSite();
   const start = Date.parse(mission?.window_start);
   const end = Date.parse(mission?.window_end);
   if (ui.mission.open) ui.mission.close();
@@ -4241,17 +4240,35 @@ async function checkMissionConditions() {
   }
   prepareGuidedSession({projectId});
   if (state.view !== "availability" || state.selectedProjectId !== projectId) return;
-  if (!sameSite || !Number.isFinite(start) || !Number.isFinite(end) || start >= end || start <= Date.now()) {
-    showAvailabilityError("Vérifiez votre site et vos horaires avant de relancer l’analyse de ce projet. La mission enregistrée est conservée.");
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) {
+    showAvailabilityError("Les horaires de cette mission sont incomplets. Indiquez le créneau à vérifier. La mission enregistrée est conservée.");
     return;
   }
-  const availability = {mode: "fixed_window", start: mission.window_start, end: mission.window_end};
+  const zone = currentSiteTimezone();
+  if (!zone) {
+    showAvailabilityError("Vérifiez le fuseau horaire de votre site avant de reprendre les horaires de cette mission. La mission enregistrée est conservée.");
+    return;
+  }
   document.querySelector('input[name="availability-mode"][value="fixed_window"]').checked = true;
-  const zone = missionTimezone(mission, accepted);
-  document.querySelector("#availability-start").value = formatDateTimeLocalInZone(new Date(start), zone);
-  document.querySelector("#availability-end").value = formatDateTimeLocalInZone(new Date(end), zone);
+  let startLocal, endLocal;
+  try {
+    startLocal = formatDateTimeLocalInZone(new Date(start), zone);
+    endLocal = formatDateTimeLocalInZone(new Date(end), zone);
+  } catch (_) {
+    showAvailabilityError("Le fuseau horaire du site n’est pas utilisable. Vérifiez votre site avant de relancer l’analyse.");
+    return;
+  }
+  document.querySelector("#availability-start").value = startLocal;
+  document.querySelector("#availability-end").value = endLocal;
+  // Keep the original instants, including repeated local times at a clock change.
+  // A persisted mission need not have an in-memory acceptance fingerprint.
+  state.missionRecheck = {
+    projectId, start: mission.window_start, end: mission.window_end,
+    startLocal, endLocal, siteFingerprint: decisionSiteFingerprint(),
+    summary: `Mission enregistrée : ${savedMissionLabel(accepted)}. Vérification pour le site actuel : ${state.configuration.site.name} (${zone}). Les dates sont reprises sans être décalées. Confirmez ce créneau ou modifiez-le avant de lancer l’analyse.`,
+  };
   updateAvailabilityFields();
-  await loadTonight(availability);
+  updateGuidedPresentation();
 }
 
 function showAcceptanceStatus(message, { error = false } = {}) {
@@ -5627,6 +5644,17 @@ function updateGuidedPresentation() {
   document.querySelector("#nav-projects")?.setAttribute("aria-current", view === "projects" ? "page" : "false");
   document.documentElement.dataset.guidedView = view;
   document.documentElement.dataset.guidedInitial = String(Boolean(state.guidedInitialConfiguration));
+  const recheck = state.missionRecheck && state.missionRecheck.projectId === state.selectedProjectId && !state.discoveryMode;
+  document.querySelector("#availability-title").textContent = recheck
+    ? "Vérifier les conditions de ma mission" : "Quand êtes-vous disponible ce soir ?";
+  document.querySelector("#availability-intro").textContent = recheck
+    ? "Les horaires de votre mission sont déjà renseignés ci-dessous."
+    : "NightMerit utilisera uniquement la plage que vous indiquez pour cette recommandation.";
+  const recheckSummary = document.querySelector("#mission-recheck-summary");
+  recheckSummary.hidden = !recheck;
+  recheckSummary.textContent = recheck ? state.missionRecheck.summary : "";
+  ui.recommendationSubmit.textContent = state.discoveryMode ? "Chercher une cible pour mes horaires"
+    : recheck ? "Vérifier les conditions sur ce créneau" : "Préparer ma nuit";
   const availabilityKicker = document.querySelector(".availability-heading .state-kicker");
   if (availabilityKicker) availabilityKicker.textContent = state.guidedInitialConfiguration ? "Étape 4 sur 4 · Disponibilité" : "Préparer une séance";
   const title = document.querySelector("#projects-title");
@@ -5688,6 +5716,7 @@ function prepareGuidedSession({saveDraft = false, projectId} = {}) {
     setDiscoveryMode(false);
     state.selectedProjectId = projectId;
   }
+  state.missionRecheck = null;
   const unchanged = configurationDraftMatchesSaved();
   if (!unchanged) {
     if (saveDraft) {saveConfiguration(); return;}
@@ -6430,6 +6459,12 @@ function collectAvailabilityPayload() {
     return availability;
   }
   if (mode === "fixed_window") {
+    const recheck = state.missionRecheck;
+    if (recheck && !state.discoveryMode && recheck.projectId === state.selectedProjectId
+        && recheck.siteFingerprint === decisionSiteFingerprint()
+        && startValue === recheck.startLocal && endValue === recheck.endLocal) {
+      return {mode: "fixed_window", start: recheck.start, end: recheck.end};
+    }
     if (!start) throw availabilityInputError("availability_start_required");
     if (!end) throw availabilityInputError("availability_end_required");
     const sameDate = start.slice(0, 10) === end.slice(0, 10);
@@ -7966,6 +8001,7 @@ function discoveryConfirmedFilters() {
 }
 
 async function setDiscoveryMode(enabled) {
+  state.missionRecheck = null;
   const generation = (state.discoveryGeneration || 0) + 1;
   state.discoveryGeneration = generation;
   state.discoveryMode = enabled;
@@ -7977,6 +8013,7 @@ async function setDiscoveryMode(enabled) {
   document.querySelector("#discover-targets").checked = enabled;
   document.querySelector("#discovery-filters").hidden = !enabled;
   ui.recommendationSubmit.textContent = enabled ? "Chercher une cible pour mes horaires" : "Préparer ma nuit";
+  updateGuidedPresentation();
   if (!enabled) return;
   const feedback = document.querySelector("#discovery-filter-feedback");
   feedback.textContent = "Chargement des filtres pris en charge…";
