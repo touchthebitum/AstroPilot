@@ -12,6 +12,7 @@ import webbrowser
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from starlette.background import BackgroundTask
 
 from astropilot.profile_backup import (BackupError, MAX_ARCHIVE, create_backup,
                                       inspect_backup, restore_empty, profile_state)
@@ -30,12 +31,14 @@ MESSAGES = {
 
 
 def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
-                        exporter=create_backup, inspector=inspect_backup, restorer=restore_empty):
+                        exporter=create_backup, inspector=inspect_backup, restorer=restore_empty,
+                        open_application=None):
     root = Path(directory) if directory is not None else get_user_data_dir()
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     token = secrets.token_urlsafe(32)
     pending = None
     operations = asyncio.Lock()
+    opening = False
 
     @app.middleware("http")
     async def local_requests(request, call_next):
@@ -76,6 +79,8 @@ def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
         state = profile_state(root)
         return {"state": state, "has_data": state in {"profile", "unrecognized"},
                 "can_export": state == "profile", "can_restore": state == "empty",
+                "can_open": open_application is not None and state == "profile",
+                "open_supported": open_application is not None,
                 "platform": "windows" if os.name == "nt" else "other"}
 
     @app.post("/transfer/export")
@@ -124,6 +129,23 @@ def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
             summary = await asyncio.to_thread(restorer, root, files)
             return {"restored": True, "summary": summary}
 
+    @app.post("/transfer/open")
+    async def open_restored_copy():
+        nonlocal opening
+        async with operations:
+            if open_application is None or profile_state(root) != "profile":
+                return JSONResponse({"message": "Reprenez d’abord vos données dans cette copie avant de l’ouvrir."}, status_code=409)
+            from astropilot.app import runtime_identity_payload
+            payload = {"opening": True, "data_directory": os.path.abspath(root),
+                       "runtime": runtime_identity_payload()}
+            if opening:
+                return JSONResponse(payload, status_code=202)
+            opening = True
+            # Send the acknowledgement before stopping this HTTP server.
+            # No executable, profile path or URL is accepted from the request.
+            return JSONResponse(payload, status_code=202,
+                                background=BackgroundTask(open_application))
+
     return app
 
 
@@ -151,8 +173,13 @@ def main():
     from astropilot.file_lock import exclusive_file_lock
     # Reserve before opening a browser. Never hand off to or stop another copy.
     listener = reserve_listener()
+    launch_requested = threading.Event()
     try:
-        app = create_transfer_app()
+        def open_application():
+            launch_requested.set()
+            server.should_exit = True
+
+        app = create_transfer_app(open_application=open_application)
         server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=8000,
                                               log_config=None, access_log=False))
         finished = threading.Event()
@@ -171,3 +198,8 @@ def main():
             worker.join(timeout=2)
     finally:
         listener.close()
+    if launch_requested.is_set():
+        # Keep the same process, executable and data environment, after both
+        # the assistant listener and its exclusive profile lock are released.
+        from astropilot.launcher import main as launch_main
+        launch_main()

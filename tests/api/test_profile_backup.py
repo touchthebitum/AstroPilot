@@ -494,3 +494,79 @@ def test_data_assistant_restarts_immediately_after_a_real_connection():
     first.close()
     with reserve_listener(port=address[1]) as second:
         assert second.getsockname() == address
+
+
+def test_open_copy_requires_restored_profile_and_explicit_separate_request(source, tmp_path):
+    before = snapshot(source)
+    raw, _ = create_backup(source, validator=validate_documents)
+    target = tmp_path / 'restore-and-open'
+    calls = []
+    client = TestClient(create_transfer_app(target, origin='http://testserver',
+        inspector=lambda raw: inspect_backup(raw, validator=validate_documents),
+        restorer=lambda root, files: restore_empty(root, files, validator=validate_documents),
+        open_application=lambda: calls.append('open-same-process')))
+    token = re.search(r'const token="([^"]+)"', client.get('/').text)[1]
+    headers = {'X-NightMerit-Transfer': token}
+    assert client.get('/transfer/status').json()['can_open'] is False
+    assert client.post('/transfer/open', headers=headers).status_code == 409
+    assert calls == [] and not target.exists()
+    preview = client.post('/transfer/preview', content=raw, headers=headers).json()
+    assert calls == [] and not target.exists()
+    response = client.post('/transfer/restore', json={'confirmation':preview['confirmation'], 'confirm':True}, headers=headers)
+    assert response.status_code == 200 and calls == []
+    assert client.get('/transfer/status').json()['can_open'] is True
+    assert client.post('/transfer/open').status_code == 403
+    assert client.post('/transfer/open', headers={**headers,'Origin':'https://outside.invalid'}).status_code == 403
+    response = client.post('/transfer/open', json={'executable':'untrusted','data_directory':'elsewhere'}, headers=headers)
+    assert response.status_code == 202
+    assert response.json()['data_directory'] == str(target)
+    assert calls == ['open-same-process']
+    assert client.post('/transfer/open', headers=headers).status_code == 202
+    assert calls == ['open-same-process']
+    assert snapshot(target) == before == snapshot(source)
+
+
+def test_open_is_unavailable_without_a_local_handoff(source):
+    client = TestClient(create_transfer_app(source, origin='http://testserver'))
+    token = re.search(r'const token="([^"]+)"', client.get('/').text)[1]
+    assert client.get('/transfer/status').json()['can_open'] is False
+    assert client.post('/transfer/open', headers={'X-NightMerit-Transfer':token}).status_code == 409
+
+
+def test_assistant_closes_listener_and_releases_lock_before_opening_same_process(tmp_path, monkeypatch):
+    import contextlib
+    import types
+    import astropilot.profile_transfer_app as transfer
+    import astropilot.file_lock as locking
+    import astropilot.launcher as launcher
+    root = tmp_path / 'profile';root.mkdir()
+    (root / 'user_profile.json').write_text('{}')
+    events = []
+    class Listener:
+        def close(self):events.append('listener-closed')
+    @contextlib.contextmanager
+    def lock(path):
+        events.append('lock-held')
+        try:yield
+        finally:events.append('lock-released')
+    class Server:
+        started = False
+        should_exit = False
+        def __init__(self, app):self.app=app
+        def run(self, sockets):
+            assert events == ['lock-held']
+            client=TestClient(self.app, base_url="http://127.0.0.1:8000")
+            token=re.search(r'const token="([^"]+)"', client.get('/').text)[1]
+            assert client.post('/transfer/open', headers={'X-NightMerit-Transfer':token}).status_code==202
+            assert self.should_exit
+    fake_uvicorn=types.SimpleNamespace(Config=lambda app,**kw:app,Server=Server)
+    monkeypatch.setitem(__import__('sys').modules,'uvicorn',fake_uvicorn)
+    monkeypatch.setattr(transfer,'reserve_listener',lambda:Listener())
+    monkeypatch.setattr(transfer,'get_user_data_dir',lambda:root)
+    monkeypatch.setattr(locking,'exclusive_file_lock',lock)
+    def launch():
+        assert events == ['lock-held','lock-released','listener-closed']
+        events.append('normal-application')
+    monkeypatch.setattr(launcher,'main',launch)
+    transfer.main()
+    assert events[-1] == 'normal-application'

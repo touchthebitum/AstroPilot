@@ -17,11 +17,11 @@ const html=fs.readFileSync(process.argv[1],'utf8');
 const code=html.match(/<script nonce="[^"]+">([\s\S]+)<\/script>/)[1];
 const nodes=new Map();
 function el(id){if(!nodes.has(id))nodes.set(id,{hidden:true,disabled:false,textContent:'',files:[],listeners:{},addEventListener(event,fn){this.listeners[event]=fn;}});return nodes.get(id);}
-const requests=[];let fail=false,aborts=0,statusState='runtime_only';
-const context={document:{querySelector:el,querySelectorAll:()=>[el('#export'),el('#restore')],createElement:()=>({click(){}})},
+const requests=[];let fail=false,aborts=0,statusState='runtime_only',wrongCopy=false,navigations=[];
+const context={window:{location:{assign(url){navigations.push(url);}}},document:{querySelector:el,querySelectorAll:()=>[el('#export'),el('#restore')],createElement:()=>({click(){}})},
  AbortController:class{constructor(){this.signal={};}abort(){aborts++;}},
  setTimeout(){return 1;},clearTimeout(){}, URL:{createObjectURL(){return 'blob:local';},revokeObjectURL(){}},
- async fetch(url,opts){requests.push({url,opts});return{ok:!fail,headers:{get(){return null;}},async json(){if(fail)return{message:'<img src=x onerror=attack()>'};if(url.endsWith('status'))return{state:statusState,has_data:statusState==='profile',can_export:statusState==='profile',can_restore:statusState==='empty',platform:'windows'};if(url.endsWith('preview'))return{confirmation:'nonce',summary:{projects:1,sessions:2,observations:3,comparisons:1}};return {restored:true};}};}};
+ async fetch(url,opts){requests.push({url,opts});return{ok:!fail,headers:{get(){return null;}},async json(){if(fail)return{message:'<img src=x onerror=attack()>'};if(url.endsWith('status'))return{state:statusState,has_data:statusState==='profile',can_export:statusState==='profile',can_restore:statusState==='empty',platform:'windows',open_supported:true,can_open:statusState==='profile'};if(url.endsWith('preview'))return{confirmation:'nonce',summary:{projects:1,sessions:2,observations:3,comparisons:1}};if(url==='/transfer/open')return{opening:true,data_directory:'/fictive/profile',runtime:{build:'abc1234'}};if(url==='/v1/data-context')return{data_directory:wrongCopy?'/another/copy':'/fictive/profile',runtime:{build:'abc1234'}};return {restored:true,summary:{projects:1,sessions:2,observations:3,comparisons:1}};}};}};
 vm.createContext(context);vm.runInContext(code,context);
 async function flush(){for(let i=0;i<20;i++)await Promise.resolve();}
 (async()=>{
@@ -33,16 +33,16 @@ async function flush(){for(let i=0;i<20;i++)await Promise.resolve();}
  statusState='empty';await vm.runInContext('status()',context);assert.equal(el('#restore-section').hidden,false);assert.equal(el('#windows-note').hidden,false);
  el('#archive').files=[{size:128}];await el('#archive').listeners.change();
  assert.equal(el('#restore').hidden,false);assert.match(el('#preview').textContent,/1 projet/);
- assert(!requests.some(r=>r.url.endsWith('restore')));
+ assert(!requests.some(r=>r.url.endsWith('restore')));assert.equal(el('#not-restored').hidden,false);assert.match(el('#stage').textContent,/à confirmer/);assert.equal(el('#open-profile').hidden,true);
  fail=true;await el('#archive').listeners.change();assert.equal(el('#restore').hidden,true);
  assert.match(el('#message').textContent,/<img/);assert.equal(el('#message').innerHTML,undefined);
  await el('#restore').listeners.click();assert(!requests.some(r=>r.url.endsWith('restore')));
  fail=false;await el('#archive').listeners.change();await el('#restore').listeners.click();
  const restored=requests.filter(r=>r.url.endsWith('restore'));assert.equal(restored.length,1);
  assert.deepEqual(JSON.parse(restored[0].opts.body),{confirmation:'nonce',confirm:true});
- assert.equal(el('#restore-section').hidden,true);assert.match(el('#message').textContent,/reprises/);
+ assert.equal(el('#restore-section').hidden,true);assert.match(el('#message').textContent,/reprises/);assert.match(el('#restored-summary').textContent,/1 projet, 2 sessions, 3 observations, 1 comparaison/);assert.equal(el('#open-profile').hidden,false);assert.match(el('#stage').textContent,/Données reprises/);
  await el('#restore').listeners.click();assert.equal(requests.filter(r=>r.url.endsWith('restore')).length,1);
- assert.equal(aborts,0);
+ wrongCopy=true;await el('#open-profile').listeners.click();assert.deepEqual(navigations,[]);assert.match(el('#message').textContent,/autre copie/);wrongCopy=false;await el('#open-profile').listeners.click();assert.deepEqual(navigations,['/']);assert.equal(aborts,0);
 })().catch(e=>{console.error(e);process.exitCode=1;});
 '''
     subprocess.run([node, '-e', script, str(html)], check=True, timeout=15)
