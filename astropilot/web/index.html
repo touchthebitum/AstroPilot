@@ -737,6 +737,27 @@
                 </label>
               </div>
 
+              <fieldset class="observation-wind-qualitative">
+                <legend>Le vent vous gêne-t-il ?</legend>
+                <p>Décrivez ce que vous constatez, même sans anémomètre. Aucune vitesse n’est déduite de ces choix.</p>
+                <label for="observation-wind-strength">Vent ressenti
+                  <select id="observation-wind-strength">
+                    <option value="">Non renseigné</option><option value="none">Aucun</option>
+                    <option value="light">Faible</option><option value="moderate">Modéré</option>
+                    <option value="strong">Fort</option><option value="unknown">Je ne sais pas</option>
+                  </select>
+                </label>
+                <label for="observation-wind-impact">Effet sur la prise de vue
+                  <select id="observation-wind-impact">
+                    <option value="">Non renseigné</option><option value="none">Aucune gêne constatée</option>
+                    <option value="vibrations">Vibrations du matériel</option>
+                    <option value="elongated_stars">Étoiles déformées</option>
+                    <option value="impossible">Séance impossible</option><option value="unknown">Je ne sais pas</option>
+                  </select>
+                </label>
+                <p>Ces indications sont conservées comme constats qualitatifs, sans comparaison numérique aux prévisions.</p>
+              </fieldset>
+
               <fieldset class="surface-choice">
                 <legend>Surface</legend>
                 <label><input type="radio" name="observation-surface" value="dry"> Sèche</label>

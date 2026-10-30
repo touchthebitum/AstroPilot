@@ -1014,3 +1014,8 @@ body.layout-nightline .page-footer { color: var(--muted); }
 #session-evidence input, #session-evidence select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 48px; font-size: 16px; }
 #session-evidence small { display: block; margin-top: 12px; }
 #session-duration-preview { padding: 12px; border-left: 2px solid var(--cyan); }
+
+.observation-wind-qualitative { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; min-width: 0; margin: 16px 0; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+.observation-wind-qualitative > p { grid-column: 1 / -1; margin: 0; color: var(--muted); }
+.observation-wind-qualitative label { display: grid; gap: 6px; min-width: 0; }
+.observation-wind-qualitative select { width: 100%; min-width: 0; padding: 10px; color: var(--ink); background: var(--panel-strong); border: 1px solid var(--line-bright); border-radius: 6px; }

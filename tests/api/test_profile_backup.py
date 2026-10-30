@@ -221,7 +221,8 @@ assert main()==0
         subprocess.run([sys.executable, '-c', script], check=True, timeout=10)
 
 
-def test_complete_session_and_observation_graph_roundtrip(tmp_path, monkeypatch):
+@pytest.mark.parametrize("qualitative_wind", [False, True])
+def test_complete_session_and_observation_graph_roundtrip(tmp_path, monkeypatch, qualitative_wind):
     from test_tonight_api import (lineage_client, lineage_selection_payload,
         DEFAULT_WEATHER_REFERENCE_TIME, valid_profile, LINEAGE_START)
     import decision.services.durable_tonight_application_service as durable
@@ -243,9 +244,12 @@ def test_complete_session_and_observation_graph_roundtrip(tmp_path, monkeypatch)
                                    guardian_renewal_enabled=False))
     create_completed(client, 'execution-1', mission_id='mission-lineage', evidence_id='evidence-1')
     from test_field_observation_api import payload
-    recorded = client.post('/v1/field-observations', json=payload(
+    observation_payload = payload(
         observation_id='obs-1', decision_id='decision-lineage', execution_id=None,
-        observed_at_utc=LINEAGE_START.isoformat(), recorded_at_utc=LINEAGE_START.isoformat()))
+        observed_at_utc=LINEAGE_START.isoformat(), recorded_at_utc=LINEAGE_START.isoformat())
+    if qualitative_wind:
+        observation_payload['conditions'].update(wind_strength='strong', wind_impact='impossible')
+    recorded = client.post('/v1/field-observations', json=observation_payload)
     assert recorded.status_code == 201, recorded.text
     compared = client.post('/v1/field-observations/obs-1/outcome-evaluation')
     assert compared.status_code == 201, compared.text
@@ -261,6 +265,11 @@ def test_complete_session_and_observation_graph_roundtrip(tmp_path, monkeypatch)
     monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(target))
     resumed = TestClient(create_app(service_factory=build_durable_tonight_application_service,
                                    guardian_renewal_enabled=False))
+    if qualitative_wind:
+        restored = resumed.get('/v1/field-observations/obs-1').json()
+        assert restored['conditions']['wind_strength'] == 'strong'
+        assert restored['conditions']['wind_impact'] == 'impossible'
+        assert restored['conditions']['wind_speed_kmh'] == observation_payload['conditions']['wind_speed_kmh']
     assert resumed.get('/v1/executions/execution-1/session').status_code == 200
     assert credit(resumed, 'execution-1', 'evidence-1').json()['status'] == 'already_applied'
     assert snapshot(target) == before

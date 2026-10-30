@@ -59,6 +59,27 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
    assert.equal(await page.locator('#session-choice').inputValue(),'session');
    await page.locator('#add-field-observation-mission').click();
    await capture('depuis-session-affichee','session');
+   await setup();
+   await page.locator('#add-field-observation-mission').click();
+   await page.selectOption('#observation-wind-strength','strong');
+   await page.selectOption('#observation-wind-impact','impossible');
+   const qualitative=await page.evaluate(()=>fieldObservationDraftForContext(state.fieldObservationDraftContext));
+   assert.equal(qualitative.conditions.wind_strength,'strong');
+   assert.equal(qualitative.conditions.wind_impact,'impossible');
+   assert.equal(qualitative.conditions.wind_speed_kmh,null);
+   assert.equal(qualitative.conditions.temperature_c,null);
+   assert.equal(await page.locator('#field-observation-dialog').evaluate(e=>e.scrollWidth<=e.clientWidth),true);
+   await page.evaluate(()=>{
+     const draft=fieldObservationDraftForContext(state.fieldObservationDraftContext);
+     state.visibleObservationsForContext=[{observation_id:'wind-only',observed_at_utc:'2026-10-30T19:00:00Z',conditions:draft.conditions}];
+     state.outcomeObservationId='wind-only';renderSavedObservationDetails();
+   });
+   assert.match(await page.locator('#saved-observation-details').innerText(),/Vent ressenti : Fort/);
+   assert.match(await page.locator('#saved-observation-details').innerText(),/Séance impossible/);
+   assert.doesNotMatch(await page.locator('#saved-observation-details').innerText(),/km\/h/);
+   if(process.argv[2]&&mode==='simple')await page.locator('#field-observation-dialog').screenshot({path:path.join(process.argv[2],`vent-${width}.png`)});
+   await setup();
+
    // Selecting the already displayed option is not a new choice event.
    await page.locator('#session-choice').selectOption('');
    await page.locator('#session-choice').selectOption('session');

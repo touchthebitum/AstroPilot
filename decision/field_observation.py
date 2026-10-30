@@ -47,6 +47,22 @@ class SurfaceCondition(str, Enum):
     UNKNOWN = "unknown"
 
 
+class WindStrength(str, Enum):
+    NONE = "none"
+    LIGHT = "light"
+    MODERATE = "moderate"
+    STRONG = "strong"
+    UNKNOWN = "unknown"
+
+
+class WindImpact(str, Enum):
+    NONE = "none"
+    VIBRATIONS = "vibrations"
+    ELONGATED_STARS = "elongated_stars"
+    IMPOSSIBLE = "impossible"
+    UNKNOWN = "unknown"
+
+
 class StopReason(str, Enum):
     COMPLETED = "completed"
     CLOUDS = "clouds"
@@ -161,6 +177,8 @@ class ObservedConditions:
     wind_speed_kmh: float | None = None
     surface_condition: SurfaceCondition | None = None
     moon_halo: bool | None = None
+    wind_strength: WindStrength | None = None
+    wind_impact: WindImpact | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -187,6 +205,8 @@ class ObservedConditions:
                 minimum=0,
             ),
         )
+        _optional_enum(self.wind_strength, WindStrength, field="wind_strength")
+        _optional_enum(self.wind_impact, WindImpact, field="wind_impact")
         _optional_enum(self.cloud_state, CloudState, field="cloud_state")
         _optional_enum(self.transparency, Transparency, field="transparency")
         _optional_enum(self.seeing, SeeingCondition, field="seeing")
@@ -210,6 +230,8 @@ class ObservedConditions:
                 self.wind_speed_kmh,
                 self.surface_condition,
                 self.moon_halo,
+                self.wind_strength,
+                self.wind_impact,
             )
         )
 

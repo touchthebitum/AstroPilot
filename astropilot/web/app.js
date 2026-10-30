@@ -652,6 +652,8 @@ const OBSERVATION_CHOICES = Object.freeze({
   clouds: Object.freeze(["clear", "few", "partly_cloudy", "mostly_cloudy", "overcast"]),
   transparency: Object.freeze(["poor", "fair", "good", "excellent"]),
 });
+const OBSERVATION_WIND_STRENGTH = Object.freeze({none:"Aucun", light:"Faible", moderate:"Modéré", strong:"Fort", unknown:"Je ne sais pas"});
+const OBSERVATION_WIND_IMPACT = Object.freeze({none:"Aucune gêne constatée", vibrations:"Vibrations du matériel", elongated_stars:"Étoiles déformées", impossible:"Séance impossible", unknown:"Je ne sais pas"});
 const OBSERVATION_SEEING_CHOICES = Object.freeze(["poor", "fair", "good", "excellent"]);
 const OBSERVATION_STOP_REASONS = Object.freeze([
   "completed", "clouds", "dew", "wind", "technical", "target_lost", "user", "daylight", "not_started", "other",
@@ -1402,6 +1404,12 @@ function fieldObservationDraftForContext(context) {
     surface_condition: surface,
     moon_halo: moonHalo === "" ? null : moonHalo === "true",
   };
+  const windStrength = document.querySelector("#observation-wind-strength")?.value || null;
+  const windImpact = document.querySelector("#observation-wind-impact")?.value || null;
+  if (windStrength !== null || windImpact !== null) {
+    conditions.wind_strength = windStrength;
+    conditions.wind_impact = windImpact;
+  }
   const acquisition = {
     attempted_frames: optionalObservationNumber("#observation-attempted-frames"),
     usable_frames: optionalObservationNumber("#observation-usable-frames"),
@@ -1524,10 +1532,12 @@ function validPendingFieldObservationPayload(payload, expectedContext) {
     || payload.quality_flags[1] !== "partial") return false;
 
   const conditions = payload.conditions;
-  if (!exactObservationKeys(conditions, [
-    "temperature_c", "relative_humidity_percent", "cloud_state", "transparency", "seeing",
-    "wind_speed_kmh", "surface_condition", "moon_halo",
-  ])) return false;
+  const conditionKeys = ["temperature_c", "relative_humidity_percent", "cloud_state", "transparency", "seeing",
+    "wind_speed_kmh", "surface_condition", "moon_halo"];
+  if (!exactObservationKeys(conditions, conditionKeys)
+      && !exactObservationKeys(conditions, [...conditionKeys, "wind_strength", "wind_impact"])) return false;
+  if (!validOptionalObservationChoice(conditions.wind_strength ?? null, Object.keys(OBSERVATION_WIND_STRENGTH))
+      || !validOptionalObservationChoice(conditions.wind_impact ?? null, Object.keys(OBSERVATION_WIND_IMPACT))) return false;
   if (!validOptionalObservationNumber(conditions.temperature_c)
     || !validOptionalObservationNumber(conditions.relative_humidity_percent, {minimum: 0, maximum: 100})
     || !validOptionalObservationChoice(conditions.cloud_state, OBSERVATION_CHOICES.clouds)
@@ -2531,6 +2541,8 @@ function restorePendingFieldObservation() {
   document.querySelector("#observation-clouds").value = payload.conditions?.cloud_state || "";
   document.querySelector("#observation-transparency").value = payload.conditions?.transparency || "";
   setOptionalObservationValue("#observation-wind", payload.conditions?.wind_speed_kmh);
+  setOptionalObservationValue("#observation-wind-strength", payload.conditions?.wind_strength);
+  setOptionalObservationValue("#observation-wind-impact", payload.conditions?.wind_impact);
   setOptionalObservationValue("#observation-temperature", payload.conditions?.temperature_c);
   setOptionalObservationValue("#observation-humidity", payload.conditions?.relative_humidity_percent);
   document.querySelector("#observation-seeing").value = payload.conditions?.seeing || "";
@@ -2872,6 +2884,8 @@ function renderSavedObservationDetails() {
   const labels = {clear: "Dégagé", few: "Quelques nuages", partly_cloudy: "Partiellement couvert", mostly_cloudy: "Très nuageux", overcast: "Couvert", dry: "Sèche", damp: "Humide", dew_present: "Rosée"};
   const lines = [];
   if (conditions.cloud_state) lines.push(`Nuages : ${labels[conditions.cloud_state] || conditions.cloud_state}`);
+  if (conditions.wind_strength) lines.push(`Vent ressenti : ${OBSERVATION_WIND_STRENGTH[conditions.wind_strength] || conditions.wind_strength}`);
+  if (conditions.wind_impact) lines.push(`Effet du vent sur la prise de vue : ${OBSERVATION_WIND_IMPACT[conditions.wind_impact] || conditions.wind_impact}`);
   if (conditions.surface_condition) lines.push(`Surface : ${labels[conditions.surface_condition] || conditions.surface_condition}`);
   for (const [key, label, unit] of [["temperature_c", "Température", "°C"], ["relative_humidity_percent", "Humidité", "%"], ["wind_speed_kmh", "Vent", "km/h"]]) {
     if (Number.isFinite(conditions[key])) lines.push(`${label} : ${conditions[key]} ${unit}`);
@@ -3125,7 +3139,8 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
       // Only describe conditions actually present on this confirmed observation.
       const extraLabels = {temperature_c: "Température", relative_humidity_percent: "Humidité",
         wind_speed_kmh: "Vent", cloud_state: "Nuages", seeing: "Seeing", transparency: "Transparence",
-        surface_condition: "État de la surface", moon_halo: "Halo lunaire"};
+        surface_condition: "État de la surface", moon_halo: "Halo lunaire",
+        wind_strength: "Vent ressenti", wind_impact: "Effet du vent sur la prise de vue"};
       const evaluated = new Set(evaluation.results.map(item =>
         item.variable === "cloud_cover_percent" ? "cloud_state" : item.variable));
       const notCompared = Object.entries(extraLabels).filter(([key]) => {

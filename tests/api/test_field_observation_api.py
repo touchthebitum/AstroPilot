@@ -524,3 +524,20 @@ def test_archived_context_exposes_only_unambiguous_requested_site(case):
         if case == 'consistent' else None)}
     assert calls == ['decision-1']
     assert service.evidence_store.load(decision_id='decision-1') == archived
+
+
+def test_qualitative_wind_only_create_read_and_replay():
+    client, service = client_and_service()
+    body = payload(conditions={'wind_strength': 'strong', 'wind_impact': 'impossible'})
+    first = client.post('/v1/field-observations', json=body)
+    assert first.status_code == 201
+    loaded = client.get('/v1/field-observations/observation-1').json()
+    assert loaded['conditions']['wind_strength'] == 'strong'
+    assert loaded['conditions']['wind_impact'] == 'impossible'
+    assert loaded['conditions']['wind_speed_kmh'] is None
+    replay = client.post('/v1/field-observations', json=body)
+    assert replay.status_code == 200
+    assert replay.json()['created'] is False
+    assert len(service.observations) == 1
+    invalid = client.post('/v1/field-observations', json=payload(conditions={'wind_strength': '50 km/h'}))
+    assert invalid.status_code == 422

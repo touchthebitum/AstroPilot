@@ -165,6 +165,8 @@ from decision.field_observation import (
     StopReason,
     SurfaceCondition,
     Transparency,
+    WindStrength,
+    WindImpact,
     validate_observation_identity,
 )
 from decision.models.forecast_observation_comparison import NumericVariableComparison
@@ -834,6 +836,8 @@ class FieldObservationConditionsRequest(BaseModel):
     wind_speed_kmh: float | None = None
     surface_condition: SurfaceCondition | None = None
     moon_halo: bool | None = None
+    wind_strength: WindStrength | None = None
+    wind_impact: WindImpact | None = None
 
     def to_domain(self) -> ObservedConditions:
         return ObservedConditions(**self.model_dump())
@@ -3562,6 +3566,9 @@ def create_app(
                     else observation.conditions.seeing.value
                 ),
                 "wind_speed_kmh": observation.conditions.wind_speed_kmh,
+                **({"wind_strength": observation.conditions.wind_strength.value if observation.conditions.wind_strength else None,
+                    "wind_impact": observation.conditions.wind_impact.value if observation.conditions.wind_impact else None}
+                   if observation.conditions.wind_strength is not None or observation.conditions.wind_impact is not None else {}),
                 "surface_condition": (
                     None
                     if observation.conditions.surface_condition is None

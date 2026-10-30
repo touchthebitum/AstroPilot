@@ -26,11 +26,13 @@ from decision.field_observation import (
     StopReason,
     SurfaceCondition,
     Transparency,
+    WindStrength,
+    WindImpact,
     validate_observation_identity,
 )
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DOMAIN_VERSION = "field_observation.v1"
 _ROOT_V2_FIELDS = frozenset(("schema_version", "domain_version", "observation"))
 _OBSERVATION_V2_FIELDS = frozenset(
@@ -60,6 +62,7 @@ _CONDITION_FIELDS = frozenset(
         "moon_halo",
     )
 )
+_CONDITION_V3_FIELDS = _CONDITION_FIELDS | {"wind_strength", "wind_impact"}
 _ACQUISITION_FIELDS = frozenset(
     ("attempted_frames", "usable_frames", "stop_reason")
 )
@@ -126,7 +129,7 @@ def serialize_field_observation(observation: FieldObservation) -> str:
             "legacy_field_observation_read_only"
         )
     document = {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": 2,
         "domain_version": DOMAIN_VERSION,
         "observation": {
             "observation_id": observation.observation_id,
@@ -183,6 +186,12 @@ def serialize_field_observation(observation: FieldObservation) -> str:
             },
         },
     }
+    if observation.conditions.wind_strength is not None or observation.conditions.wind_impact is not None:
+        document["schema_version"] = SCHEMA_VERSION
+        document["observation"]["conditions"].update({
+            "wind_strength": _enum_value(observation.conditions.wind_strength),
+            "wind_impact": _enum_value(observation.conditions.wind_impact),
+        })
     try:
         return json.dumps(
             document,
@@ -273,7 +282,7 @@ def _deserialize_v2(
         raise FieldObservationPersistenceError("observation_id_mismatch")
     conditions = _mapping(
         document["conditions"],
-        fields=_CONDITION_FIELDS,
+        fields=_CONDITION_V3_FIELDS if root["schema_version"] == 3 else _CONDITION_FIELDS,
         code="invalid_conditions_fields",
     )
     acquisition = _mapping(
@@ -336,6 +345,8 @@ def _deserialize_v2(
                     field="surface_condition",
                 ),
                 moon_halo=conditions["moon_halo"],
+                wind_strength=_enum(conditions.get("wind_strength"), WindStrength, field="wind_strength"),
+                wind_impact=_enum(conditions.get("wind_impact"), WindImpact, field="wind_impact"),
             ),
             acquisition=ObservedAcquisition(
                 attempted_frames=acquisition["attempted_frames"],
@@ -496,7 +507,7 @@ def deserialize_field_observation(
             code="invalid_root_fields",
         )
         return _deserialize_v1(root, observation_id=identity)
-    if version != SCHEMA_VERSION:
+    if version not in (2, SCHEMA_VERSION):
         raise FieldObservationPersistenceError("invalid_schema_version")
     root = _mapping(
         payload,
