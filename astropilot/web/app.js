@@ -931,6 +931,16 @@ function acceptedMissionMatchesSite() {
     && mission.acceptedSiteGeneration === state.decisionSiteGeneration
     && mission?.acceptedSiteFingerprint === decisionSiteFingerprint();
 }
+// A restored mission can authorize observation capture only after its archived
+// requested site was checked. This does not authorize a new mission or analysis.
+function restoredMissionObservationMatchesSite() {
+  const mission = state.acceptedMission;
+  const proof = mission?.observationSiteProof;
+  return mission?.source === "persisted" && !state.decisionSiteReloadRequired
+    && !!decisionSiteFingerprint() && proof?.fingerprint === decisionSiteFingerprint()
+    && proof?.siteGeneration === state.decisionSiteGeneration
+    && proof?.configurationGeneration === state.configurationGeneration;
+}
 function currentDecisionMatchesSite() {
   const fingerprint = decisionSiteFingerprint();
   if (state.decisionSiteReloadRequired || !fingerprint || state.currentDecisionSiteFingerprint !== fingerprint) return false;
@@ -988,7 +998,9 @@ function observationContext(source) {
   if (state.decisionSiteReloadRequired) return null;
   if (source === "catalogue") return {decision_id: null, execution_id: null, night_date: null,
     source, timezone: siteTimezone(), site_identity: siteConfigurationIdentity(), mission_id: null};
-  if (source === "mission" ? !acceptedMissionMatchesSite() : !currentDecisionMatchesSite()) return null;
+  if (source === "mission"
+      ? !(acceptedMissionMatchesSite() || restoredMissionObservationMatchesSite())
+      : !currentDecisionMatchesSite()) return null;
   const decision = source === "mission" ? state.acceptedMission : state.currentDecision;
   const decisionId = decision?.decision_id;
   if (!decisionId) return null;
@@ -1133,7 +1145,7 @@ function fieldObservationConflictMessage() {
 
 // Clicking the session's own observation action is an explicit choice of context.
 // Do not infer this association for the general decision-screen action.
-function openSessionFieldObservation() {
+async function openSessionFieldObservation() {
   if (state.sessionBusy || state.sessionWriteUncertain || state.observationBusy) return;
   const session = currentSession();
   const missionId = state.acceptedMission?.mission_id;
@@ -1144,6 +1156,43 @@ function openSessionFieldObservation() {
   if (session && !["not_started", "in_progress", "completed", "interrupted"].includes(session.execution.status)) {
     sessionMessage("Vérifiez l’état de cette session avant de lui associer un relevé.");
     return;
+  }
+  const mission = state.acceptedMission;
+  if (mission?.source === "persisted" && !acceptedMissionMatchesSite()) {
+    const configuration = state.configuration;
+    const generation = state.configurationGeneration;
+    const siteGeneration = state.decisionSiteGeneration;
+    const revision = state.viewRevision;
+    const fingerprint = decisionSiteFingerprint();
+    const request = (state.observationSiteCheckSequence || 0) + 1;
+    state.observationSiteCheckSequence = request;
+    delete mission.observationSiteProof;
+    const stillCurrent = () => state.observationSiteCheckSequence === request
+      && state.acceptedMission === mission && currentSession() === session
+      && ui.mission.open && !state.sessionBusy && !state.observationBusy
+      && state.configuration === configuration && state.configurationGeneration === generation
+      && state.decisionSiteGeneration === siteGeneration && state.viewRevision === revision
+      && !state.decisionSiteReloadRequired && decisionSiteFingerprint() === fingerprint;
+    try {
+      sessionMessage("Vérification du site enregistré pour cette session…");
+      const canonical = await fieldObservationNetworkRequest(
+        `/v1/decisions/${encodeURIComponent(mission.decision_id)}/context`, {},
+        async response => response.ok ? response.json() : null);
+      if (!stillCurrent()) return;
+      const location = canonical?.requested_site;
+      if (!fingerprint || canonical?.decision_id !== mission.decision_id
+          || !Number.isFinite(location?.latitude) || !Number.isFinite(location?.longitude)
+          || location.latitude !== configuration.site.latitude
+          || location.longitude !== configuration.site.longitude
+          || mission.mission?.site_timezone !== siteTimezone()) {
+        sessionMessage("Le site enregistré de cette mission ne correspond pas au site actuel, ou ne peut pas être vérifié. Aucun relevé n’a été créé.");
+        return;
+      }
+      mission.observationSiteProof = {fingerprint, siteGeneration, configurationGeneration: generation};
+    } catch (_) {
+      if (stillCurrent()) sessionMessage("Impossible de vérifier le site enregistré. Réessayez ; aucun relevé n’a été créé.");
+      return;
+    }
   }
   state.fieldObservationSelectedExecutionId = session?.execution.execution_id || null;
   openFieldObservation("mission");

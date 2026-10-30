@@ -6,7 +6,7 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
  const browser=await chromium.launch({headless:true,chromiumSandbox:true,
   ...(process.env.NIGHTMERIT_TEST_CHROME?{executablePath:process.env.NIGHTMERIT_TEST_CHROME}:{channel:'chrome'})});
  try{
-  const context=await browser.newContext({timezoneId:'America/New_York'}),writes=[];let sessions=[],fail=false;
+  const context=await browser.newContext({timezoneId:'America/New_York'}),writes=[];let sessions=[],fail=false,requestedSite={latitude:47,longitude:7},contextFailure=false,contextGate=null,contextReadStarted=false;
   await context.route('http://127.0.0.1:18461/**',async route=>{
    const url=new URL(route.request().url()),method=route.request().method();
    if(method!=='GET')writes.push({path:url.pathname,body:route.request().postDataJSON()});
@@ -14,6 +14,7 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
    if(url.pathname==='/')return route.fulfill({headers:timeHeaders,contentType:'text/html',body:fs.readFileSync(path.join(web,'index.html'),'utf8').replaceAll('__ASTROPILOT_SESSION_TIMING__','').replaceAll('__ASTROPILOT_ASSET_TOKEN__','review')});
    const file={'/ui/timezone-authority.js':'timezone-authority.js','/ui/app.js':'app.js','/ui/styles.css':'styles.css'}[url.pathname];
    if(file)return route.fulfill({headers:timeHeaders,contentType:file.endsWith('.js')?'text/javascript':'text/css',body:fs.readFileSync(path.join(web,file),'utf8')});
+   if(url.pathname==='/v1/decisions/decision/context'){contextReadStarted=true;if(contextGate)await contextGate;return route.fulfill({headers:timeHeaders,status:contextFailure?503:200,json:{decision_id:'decision',requested_site:requestedSite}});}
    if(url.pathname==='/v1/missions/mission/executions')return route.fulfill({headers:timeHeaders,json:sessions});
    if(url.pathname==='/v1/tonight')return route.fulfill({headers:timeHeaders,status:fail?503:200,json:fail?{detail:{code:'weather_unavailable'}}:{status:'no_candidate',creation_refusal:'no_eligible_acquisition_intent'}});
    return route.fulfill({headers:timeHeaders,status:503,json:{}});
@@ -67,6 +68,41 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
    await page.evaluate(()=>{show('decision');ui.addObservationDecision.hidden=false;});
    await page.locator('#add-field-observation-decision').click();
    await capture('depuis-ecran-general',null);
+   // Restored session capture must read archived site proof, not manufacture acceptance.
+   await setup();
+   await page.evaluate(()=>{state.acceptedMission.source='persisted';state.acceptedMission.mission.site_timezone='Europe/Zurich';delete state.acceptedMission.acceptedSiteGeneration;delete state.acceptedMission.acceptedSiteFingerprint;});
+   await page.locator('#add-field-observation-mission').click();
+   await page.locator('#field-observation-dialog').waitFor();
+   assert.equal(await page.evaluate(()=>acceptedMissionMatchesSite()),false);
+   await capture('depuis-session-rouverte-site-verifie','session');
+   requestedSite={latitude:48,longitude:7};
+   await page.locator('#add-field-observation-mission').click();
+   await page.waitForFunction(()=>document.querySelector('#session-status').textContent.includes('ne correspond pas'));
+   assert.equal(await page.locator('#field-observation-dialog').isVisible(),false);
+   requestedSite=null;
+   await page.locator('#add-field-observation-mission').click();
+   await page.waitForFunction(()=>document.querySelector('#session-status').textContent.includes('ne peut pas être vérifié'));
+   assert.equal(await page.locator('#field-observation-dialog').isVisible(),false);
+   requestedSite={latitude:47,longitude:7};contextFailure=true;
+   await page.locator('#add-field-observation-mission').click();
+   await page.waitForFunction(()=>document.querySelector('#session-status').textContent.includes('ne peut pas être vérifié'));
+   assert.equal(await page.locator('#field-observation-dialog').isVisible(),false);
+   contextFailure=false;
+   await page.evaluate(()=>state.acceptedMission.mission.site_timezone='UTC');
+   await page.locator('#add-field-observation-mission').click();
+   await page.waitForFunction(()=>document.querySelector('#session-status').textContent.includes('ne correspond pas'));
+   assert.equal(await page.locator('#field-observation-dialog').isVisible(),false);
+   await page.evaluate(()=>state.acceptedMission.mission.site_timezone='Europe/Zurich');
+   let releaseContext;
+   contextGate=new Promise(resolve=>{releaseContext=resolve});contextReadStarted=false;
+   await page.locator('#add-field-observation-mission').click();
+   while(!contextReadStarted)await new Promise(resolve=>setTimeout(resolve,5));
+   await page.evaluate(()=>{state.configurationGeneration=(state.configurationGeneration||0)+1;});
+   releaseContext();contextGate=null;
+   await page.waitForTimeout(50);
+   assert.equal(await page.locator('#field-observation-dialog').isVisible(),false,'stale site response cannot open the editor');
+   await setup();
+
   }
   // No chosen session must stay independent even if the mission has sessions.
   await page.evaluate(()=>{state.activeSessionId=null;state.fieldObservationSelectedExecutionId='session';ui.mission.showModal();});
@@ -88,6 +124,6 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
   assert.match(await page.locator('#session-status').innerText(),/Vérifiez l’état/);
   assert.deepEqual(writes,[],'no writes, real or fictive');assert.deepEqual(errors,[]);
   if(process.argv[2])fs.writeFileSync(path.join(process.argv[2],'resultats.json'),JSON.stringify(results,null,2));
-  console.log('PASS: 24 scénarios Simple/Pro 390/768/1280/1600 : lien depuis session affichée et sélection explicite, identité visible, écran général indépendant, absence de session choisie et deux protections de contexte. Aucun POST.');
+  console.log('PASS: 32 scénarios et protections de site archivé, fuseau, réponse périmée : Simple/Pro 390/768/1280/1600 : lien depuis session affichée et sélection explicite, identité visible, écran général indépendant, absence de session choisie et deux protections de contexte. Aucun POST.');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

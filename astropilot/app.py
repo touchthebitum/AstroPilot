@@ -3800,7 +3800,17 @@ def create_app(
             raise HTTPException(
                 status_code=404, detail={"code": "decision_not_found"},
             )
-        return {"decision_id": decision_id}
+        # Only an unambiguous archived requested location may confirm the site.
+        # Grid coordinates describe the model cell, not the observing site.
+        points = evidence.forecast_points
+        locations = [point.requested_location for point in points]
+        location = locations[0] if locations else None
+        requested_site = None
+        if location is not None and all(item is not None
+                and item.latitude == location.latitude
+                and item.longitude == location.longitude for item in locations):
+            requested_site = {"latitude": location.latitude, "longitude": location.longitude}
+        return {"decision_id": decision_id, "requested_site": requested_site}
 
     @application.post("/v1/field-observations", status_code=201)
     def create_field_observation(

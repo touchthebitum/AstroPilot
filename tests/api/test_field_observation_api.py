@@ -495,3 +495,32 @@ def test_canonical_decision_context_read_is_validated_and_fail_closed(
     assert response.status_code == expected_status
     assert response.json() == {"detail": {"code": expected_code}}
     assert calls == ([] if expected_status == 422 else [decision_id])
+
+@pytest.mark.parametrize('case', ['consistent', 'empty', 'mixed'])
+def test_archived_context_exposes_only_unambiguous_requested_site(case):
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from tests.architecture.test_outcome_evaluation_orchestration_contract import (
+        evidence, WeatherVariable, WeatherLocation, DecisionForecastEvidence,
+    )
+    original = evidence(WeatherVariable.TEMPERATURE_C)
+    point = original.forecast_points[0]
+    if case == 'empty':
+        archived = DecisionForecastEvidence(())
+    elif case == 'mixed':
+        archived = DecisionForecastEvidence((point, replace(point, requested_location=WeatherLocation(47, 7))))
+    else:
+        archived = DecisionForecastEvidence((point, replace(point, grid_location=WeatherLocation(48, 8))))
+    calls = []
+    def load(*, decision_id):
+        calls.append(decision_id)
+        return archived
+    service = SimpleNamespace(evidence_store=SimpleNamespace(load=load))
+    client = TestClient(create_app(service_factory=lambda: service))
+    response = client.get('/v1/decisions/decision-1/context')
+    assert response.status_code == 200
+    assert response.json() == {'decision_id': 'decision-1', 'requested_site': (
+        {'latitude': point.requested_location.latitude, 'longitude': point.requested_location.longitude}
+        if case == 'consistent' else None)}
+    assert calls == ['decision-1']
+    assert service.evidence_store.load(decision_id='decision-1') == archived
