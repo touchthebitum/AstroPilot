@@ -3042,7 +3042,7 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
       const coordinates = value => value ? `${value.latitude}, ${value.longitude}` : unavailable;
       technicalLines.push(`Coordonnées demandées : ${coordinates(point.requested_location)} · grille : ${coordinates(point.grid_location)} · altitude grille : ${point.grid_location?.altitude_m == null ? unavailable : `${point.grid_location.altitude_m} m`}.`);
     }
-    technicalLines.push(`Récupération : ${dateText(point.retrieved_at_utc ?? evaluation.weather_traceability?.retrieved_at_utc)} · provider : ${point.provider_id || evaluation.weather_traceability?.provider_id || unavailable} · modèle : ${point.model_id || evaluation.weather_traceability?.model_id || unavailable}.`);
+    technicalLines.push(`Récupération : ${dateText(point.retrieved_at_utc ?? evaluation.weather_traceability?.retrieved_at_utc)} · provider : ${point.provider_id || evaluation.weather_traceability?.provider_id || unavailable} · Modèle météo précis : ${point.model_id || evaluation.weather_traceability?.model_id || "non renseigné dans les données enregistrées"}.`);
   }
   const coords = value => value ? `${value.latitude}, ${value.longitude}` : unavailable;
   const trace = evaluation.weather_traceability;

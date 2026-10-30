@@ -888,3 +888,25 @@ assert.match(output.textContent,/Prévision absente/);
 assert.match(output.dataset.proText,/erreur signée/);
 assert.doesNotMatch(output.dataset.simpleText,/erreur signée/);
 """)
+
+
+def test_weather_model_label_distinguishes_missing_identity_from_missing_forecast():
+    run_outcome_ui(r"""
+const value=projection();
+value.results[0].forecast_point={provider_id:'Open-Meteo',model_id:null,selected_forecast_for_utc:'2026-01-01T00:00:00Z',retrieved_at_utc:'2025-12-31T23:00:00Z'};
+let before=JSON.stringify(value);
+renderOutcomeEvaluation(value);
+assert.match(element('#outcome-trace').textContent,/Modèle météo précis : non renseigné dans les données enregistrées/);
+assert.doesNotMatch(element('#outcome-trace').textContent,/modèle : Non disponible/);
+assert.match(element('#outcome-trace').textContent,/Open-Meteo/);
+assert.equal(JSON.stringify(value),before);
+value.results[0].forecast_point.model_id='model-fictif';before=JSON.stringify(value);
+renderOutcomeEvaluation(value);
+assert.match(element('#outcome-trace').textContent,/Modèle météo précis : model-fictif/);
+assert.doesNotMatch(element('#outcome-trace').textContent,/non renseigné dans les données enregistrées/);
+assert.equal(JSON.stringify(value),before);
+value.results[0].forecast_point.model_id=null;
+value.weather_traceability={model_id:'modele-trace-fictif'};
+renderOutcomeEvaluation(value);
+assert.match(element('#outcome-trace').textContent,/Modèle météo précis : modele-trace-fictif/);
+""")
