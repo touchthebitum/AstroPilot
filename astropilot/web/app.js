@@ -2970,6 +2970,19 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
     const rounded = Number(value.toFixed(2));
     return numberFormat.format(Object.is(rounded, -0) ? 0 : rounded);
   };
+  const simpleNumericLine = (item, name) => {
+    const unit = item.variable === "relative_humidity_percent"
+      ? (Number(item.absolute_error.toFixed(2)) === 1 ? "point de pourcentage" : "points de pourcentage") : item.unit;
+    const values = `prévu ${displayNumber(item.forecast)} ${item.unit}, relevé ${displayNumber(item.observed)} ${item.unit}`;
+    if (item.signed_error === 0) return `${name} : valeur identique à la prévision (${values}).`;
+    const magnitude = Number(item.absolute_error.toFixed(2)) === 0
+      ? "moins de 0,01" : displayNumber(item.absolute_error);
+    const higher = item.signed_error < 0; // Canonical convention: forecast minus observed.
+    const direction = item.variable === "wind_speed_kmh"
+      ? (higher ? "plus fort" : "plus faible")
+      : (higher ? "plus élevée" : item.variable === "temperature_c" ? "plus basse" : "plus faible");
+    return `${name} : ${magnitude} ${unit} ${direction} que prévu (${values}).`;
+  };
   const labels = {temperature_c: "Température", relative_humidity_percent: "Humidité relative",
     wind_speed_kmh: "Vent", cloud_cover_percent: "Nuages"};
   const statuses = {comparable: "Comparable", partial: "Partiellement comparable", not_comparable: "Non comparable"};
@@ -2985,13 +2998,17 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
     const name = labels[item.variable] || "Variable";
     if (item.status !== "comparable") {
       lines.push(`${name} : non comparable. ${item.reasons.map(reasonText).join(" ")}`);
+      comparableLines.push(`${name} : comparaison indisponible.`);
     } else if (item.variable === "cloud_cover_percent") {
       const line = `${name} : Prévu ${cloud[item.forecast] || item.forecast}, Observé ${cloud[item.observed] || item.observed} — ${item.outcome === "match" ? "catégories identiques" : "catégories différentes"}.`;
-      lines.push(line); comparableLines.push(line);
+      lines.push(line);
+      comparableLines.push(item.outcome === "match"
+        ? `${name} : ${String(cloud[item.forecast] || item.forecast).toLocaleLowerCase("fr")} prévu et observé.`
+        : `${name} : ${String(cloud[item.forecast] || item.forecast).toLocaleLowerCase("fr")} prévu, ${String(cloud[item.observed] || item.observed).toLocaleLowerCase("fr")} observé.`);
     } else {
       const errorUnit = item.variable === "relative_humidity_percent" ? "points de pourcentage" : item.unit;
       const line = `${name} : Prévu ${displayNumber(item.forecast)} ${item.unit}, Observé ${displayNumber(item.observed)} ${item.unit} ; erreur signée (prévision − observation) ${displayNumber(item.signed_error)} ${errorUnit} ; erreur absolue ${displayNumber(item.absolute_error)} ${errorUnit}.`;
-      lines.push(line); comparableLines.push(line);
+      lines.push(line); comparableLines.push(simpleNumericLine(item, name));
     }
   }
   lines.push(...evaluation.reasons.map(reasonText));
@@ -3056,6 +3073,18 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
       }
       for (const [time, variables] of forecastTimes) simpleLines.push(`Prévision utilisée (${variables.join(", ")}) : ${dateText(time, true)}.`);
       simpleLines.push(...comparableLines);
+      // Only describe conditions actually present on this confirmed observation.
+      const extraLabels = {temperature_c: "Température", relative_humidity_percent: "Humidité",
+        wind_speed_kmh: "Vent", cloud_state: "Nuages", seeing: "Seeing", transparency: "Transparence",
+        surface_condition: "État de la surface", moon_halo: "Halo lunaire"};
+      const evaluated = new Set(evaluation.results.map(item =>
+        item.variable === "cloud_cover_percent" ? "cloud_state" : item.variable));
+      const notCompared = Object.entries(extraLabels).filter(([key]) => {
+        const value = observation?.conditions?.[key];
+        return value !== null && value !== undefined && value !== "" && value !== "unknown" && !evaluated.has(key);
+      }).map(([, label]) => label);
+      if (notCompared.length) simpleLines.push(`Conditions renseignées mais non comparées ici : ${notCompared.join(", ")}.`);
+
       const reasons = new Map();
       for (const item of evaluation.results) {
         for (const reason of item.reasons) {

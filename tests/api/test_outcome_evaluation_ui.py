@@ -38,16 +38,22 @@ for (const mode of ['simple','pro']) {
   renderOutcomeEvaluation(evaluation);
   const output=document.querySelector('#outcome-result');
   const text=output.textContent;
-  assert.match(text,/Prévu 5,5 °C, Observé 6,4 °C/);
-  assert.match(text,/-0,9 °C/);
+  if(mode==='pro'){
+    assert.match(text,/Prévu 5,5 °C, Observé 6,4 °C/);
+    assert.match(text,/-0,9 °C/);
+    assert.match(text,/Prévu 76 %, Observé 83 %/);
+    assert.match(text,/-7 points de pourcentage/);
+    assert.match(text,/Prévu 1,23 km\/h, Observé 1,2 km\/h/);
+    assert.match(text,/catégories identiques/);
+  }else{
+    assert.match(text,/Température : 0,9 °C plus élevée que prévu/);
+    assert.match(text,/Humidité relative : 7 points de pourcentage plus élevée que prévu/);
+    assert.match(text,/Vent : 0,03 km\/h plus faible que prévu/);
+    assert.match(text,/Nuages : couvert prévu et observé/);
+    assert.doesNotMatch(text,/erreur signée|erreur absolue|Écart \(prévu/);
+  }
   assert.doesNotMatch(text,/900000000|6\.4|5\.5/);
-  assert.match(text,/Prévu 76 %, Observé 83 %/);
-  assert.match(text,/-7 points de pourcentage/);
-  assert.match(text,/7 points de pourcentage/);
   assert.doesNotMatch(text,/-7 %/);
-  assert.match(text,/Prévu 1,23 km\/h, Observé 1,2 km\/h/);
-  assert.match(text,/0,03 km\/h/);
-  assert.match(text,/catégories identiques/);
   assert.equal(JSON.stringify(evaluation),original,'rendering never changes persisted precision');
   assert.equal(output.dataset[mode==='pro'?'proText':'simpleText'],text);
   const tiny = {...evaluation,results:[numeric('temperature_c',0,0.0001,'°C')]};
@@ -743,7 +749,7 @@ if(fixtures.status==='not_comparable'){
 }else{
  assert.match(output.textContent,/Certaines conditions ne peuvent pas être comparées/);
  assert.match(output.textContent,/Prévision utilisée \(Température\) : .*21:00/);
- assert.match(output.textContent,/Température : Prévu 8 °C, Observé 7 °C/);
+ assert.match(output.textContent,/Température : 1 °C plus basse que prévu.*prévu 8 °C, relevé 7 °C/);
 }
 assert.equal(JSON.stringify(value),before);
 assert.equal(JSON.stringify(saved),beforeSaved);
@@ -774,7 +780,7 @@ state.visibleObservationsForContext=[];delete value.results[0].forecast_point;
 renderOutcomeEvaluation(value);
 text=element('#outcome-result').textContent;
 assert.doesNotMatch(text,/Heure du relevé|Prévision utilisée/);
-assert.match(text,/Température : Prévu 8/);
+assert.match(text,/Température : 1 °C plus basse que prévu/);
 """)
 
 
@@ -847,3 +853,38 @@ element('#saved-observations-status').textContent='closed';
 release(response(200,{items:[],next_before:null}));await pending;
 assert.equal(element('#saved-observations-status').textContent,'closed');
 ''')
+
+
+def test_simple_comparison_direction_zero_partial_and_uncompared_conditions():
+    run_outcome_ui(r"""
+document.documentElement={dataset:{uiMode:'simple'}};
+element('#outcome-result').dataset={};
+const numeric=(variable,forecast,observed,unit)=>({variable,status:'comparable',forecast,observed,unit,signed_error:forecast-observed,absolute_error:Math.abs(forecast-observed),reasons:[]});
+const value=projection();
+state.visibleObservationsForContext=[{...obs('o'),conditions:{temperature_c:8.3,relative_humidity_percent:65,cloud_state:'partly_cloudy',seeing:'fair',moon_halo:false,wind_speed_kmh:null,surface_condition:'dew_present'}}];
+value.results=[numeric('temperature_c',4.6,8.3,'°C'),numeric('relative_humidity_percent',84,65,'%'),{variable:'cloud_cover_percent',status:'comparable',forecast:'clear',observed:'partly_cloudy',outcome:'mismatch',unit:'%',reasons:[]}];
+const original=JSON.stringify(value),observation=JSON.stringify(state.visibleObservationsForContext);
+renderOutcomeEvaluation(value);
+let output=element('#outcome-result');
+assert.match(output.textContent,/3,7 °C plus élevée/);
+assert.match(output.textContent,/19 points de pourcentage plus faible/);
+assert.match(output.textContent,/ciel clair prévu, partiellement nuageux observé/);
+assert.match(output.textContent,/non comparées ici : Seeing, État de la surface, Halo lunaire/);
+assert.doesNotMatch(output.textContent,/non comparées ici :.*Vent/);
+assert.equal(JSON.stringify(value),original);assert.equal(JSON.stringify(state.visibleObservationsForContext),observation);
+value.results=[numeric('temperature_c',8,8,'°C'),numeric('wind_speed_kmh',0,2,'km/h')];
+renderOutcomeEvaluation(value);
+assert.match(output.textContent,/Température : valeur identique à la prévision/);
+assert.match(output.textContent,/Vent : 2 km\/h plus fort/);
+value.results=[numeric('temperature_c',8,8.00001,'°C')];renderOutcomeEvaluation(value);
+assert.match(output.textContent,/moins de 0,01 °C plus élevée/);
+assert.doesNotMatch(output.textContent,/valeur identique/);
+value.status='partial';value.results.push({variable:'relative_humidity_percent',status:'not_comparable',unit:'%',reasons:[{code:'forecast_variable_unavailable',variable:'relative_humidity_percent'}]});
+renderOutcomeEvaluation(value);
+assert.match(output.textContent,/Partiellement comparable/);
+assert.match(output.textContent,/Humidité relative : comparaison indisponible/);
+assert.match(output.textContent,/Prévision absente/);
+// Switching presentation uses complete precomputed wording, without recomputing data.
+assert.match(output.dataset.proText,/erreur signée/);
+assert.doesNotMatch(output.dataset.simpleText,/erreur signée/);
+""")
