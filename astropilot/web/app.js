@@ -843,8 +843,20 @@ function renderObservationLinkage() {
   const element = document.querySelector("#observation-linkage");
   if (!element) return;
   const context = state.fieldObservationDraftContext;
-  element.textContent = context?.execution_id
-    ? "Session liée" : "Sans session";
+  const session = currentSession();
+  const mission = state.acceptedMission?.mission;
+  if (context?.execution_id && session?.execution.execution_id === context.execution_id
+      && session.mission_id === context.mission_id) {
+    const target = mission?.target || "ce projet";
+    const filter = mission?.selected_filter?.name || mission?.selected_filter?.filter_type;
+    const started = session.execution.actual_start
+      ? ` · démarrée le ${missionDateTimeLabel(session.execution.actual_start, context.timezone)}` : "";
+    element.textContent = `Ce relevé sera lié à la session de ${target}${filter ? ` · ${filter}` : ""}${started}.`;
+  } else {
+    element.textContent = context?.execution_id
+      ? "Ce relevé sera lié à la session choisie."
+      : "Relevé météo indépendant · aucune session photo associée.";
+  }
   const night = context?.night_date ? ` · nuit du ${context.night_date}` : "";
   text("#observation-context-decision", context
     ? `Décision associée${night}` : "Décision indisponible");
@@ -1117,6 +1129,24 @@ function renderFieldObservationPendingDiagnostics() {
 
 function fieldObservationConflictMessage() {
   return "Conflit d’observation : le relevé précédent doit être résolu avant tout nouvel envoi. Le brouillon et son identifiant d’origine sont conservés ; utilisez « Réconcilier l’observation précédente ».";
+}
+
+// Clicking the session's own observation action is an explicit choice of context.
+// Do not infer this association for the general decision-screen action.
+function openSessionFieldObservation() {
+  if (state.sessionBusy || state.sessionWriteUncertain || state.observationBusy) return;
+  const session = currentSession();
+  const missionId = state.acceptedMission?.mission_id;
+  if (session && session.mission_id !== missionId) {
+    sessionMessage("La session affichée ne correspond plus à cette mission. Rouvrez la mission avant de noter les conditions.");
+    return;
+  }
+  if (session && !["not_started", "in_progress", "completed", "interrupted"].includes(session.execution.status)) {
+    sessionMessage("Vérifiez l’état de cette session avant de lui associer un relevé.");
+    return;
+  }
+  state.fieldObservationSelectedExecutionId = session?.execution.execution_id || null;
+  openFieldObservation("mission");
 }
 
 function openFieldObservation(source) {
@@ -7753,7 +7783,7 @@ document.querySelector("#open-observation-catalogue").addEventListener("click", 
 window.addEventListener("pageshow", handleFieldObservationPageShow);
 ui.addObservationMessage.addEventListener("click", () => openFieldObservation("decision"));
 ui.addObservationDecision.addEventListener("click", () => openFieldObservation("decision"));
-ui.addObservationMission.addEventListener("click", () => openFieldObservation("mission"));
+ui.addObservationMission.addEventListener("click", openSessionFieldObservation);
   ui.closeObservation.addEventListener("click", () => {
     invalidateFieldObservationOperation();
     ui.observation.close();
