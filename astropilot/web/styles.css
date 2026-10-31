@@ -1019,3 +1019,34 @@ body.layout-nightline .page-footer { color: var(--muted); }
 .observation-wind-qualitative > p { grid-column: 1 / -1; margin: 0; color: var(--muted); }
 .observation-wind-qualitative label { display: grid; gap: 6px; min-width: 0; }
 .observation-wind-qualitative select { width: 100%; min-width: 0; padding: 10px; color: var(--ink); background: var(--panel-strong); border: 1px solid var(--line-bright); border-radius: 6px; }
+
+
+/* Persistent action feedback, distinct from ordinary instructions. */
+.feedback-message:not(:empty), .observation-actions p.feedback-message:not(:empty) {
+  position: relative; box-sizing: border-box; width: 100%; min-width: 0;
+  margin: 12px 0; padding: 16px 18px 16px 54px; border: 1px solid #6685a0;
+  border-left-width: 5px; border-radius: 10px; background: #132c40;
+  color: #eff7ff; font-size: 16px; font-weight: 600; line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.feedback-message:empty { display: none; }
+.feedback-message:not(:empty)::before {
+  content: "i"; position: absolute; left: 16px; top: 16px;
+  width: 24px; height: 24px; border: 1px solid currentColor; border-radius: 50%;
+  text-align: center; line-height: 22px; font-weight: 800;
+}
+.feedback-message.confirmation-success:not(:empty),
+.observation-actions p.feedback-message.confirmation-success:not(:empty) {
+  background: #113b32; border-color: #64dfbd; color: #e7fff4;
+}
+.feedback-message.confirmation-success:not(:empty)::before { content: "✓"; }
+.feedback-message.observation-error:not(:empty),
+.observation-actions p.feedback-message.observation-error:not(:empty),
+.feedback-message.error:not(:empty) {
+  background: #461c23; border-color: #ff7b87; color: #ffe9ec !important;
+}
+.feedback-message.observation-error:not(:empty)::before,
+.feedback-message.error:not(:empty)::before { content: "!"; }
+@media (forced-colors: active) {
+  .feedback-message:not(:empty) { border: 2px solid CanvasText; }
+}

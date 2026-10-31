@@ -300,8 +300,11 @@ async function guardianTransitionHeaders(executionId) {
     "X-Guardian-Owner-Instance-Id": value.owner_instance_id} : {};
 }
 
-function sessionMessage(message) {
+function sessionMessage(message, {error = false, success = false} = {}) {
   text("#session-status", message);
+  const element = document.querySelector("#session-status");
+  element.classList?.toggle("error", error);
+  element.classList?.toggle("confirmation-success", success && !error);
 }
 
 function sessionHours(seconds) {
@@ -466,7 +469,8 @@ function renderSession() {
       : status === "unconfirmed" ? "Session non confirmée : aucune action disponible."
       : status === "interrupted" ? "Session interrompue : aucun crédit."
       : session.credit ? "Cette durée a été ajoutée à votre projet." : status === "completed" ? "Session terminée."
-      : status === "in_progress" ? "Session en cours." : "Session prête à démarrer.");
+      : status === "in_progress" ? "Session en cours." : "Session prête à démarrer.",
+      {error: !knownStatus || status === "unconfirmed", success: Boolean(session.credit) || status === "completed"});
   } else sessionMessage("Aucune session enregistrée pour cette mission.");
   renderObservationLinkage();
   renderGuardianRenewal();
@@ -520,11 +524,11 @@ async function sessionCommand(command, { transition = false } = {}) {
       sessionMessage(state.sessionWriteUncertain
         ? "État relu après une réponse incertaine. Vérifiez la session avant de poursuivre."
         : state.sessionWriteAttempted && error?.status ? sessionRefusalMessage(error)
-        : "Lecture ou reprise échouée. État actuel relu ; vérifiez avant de poursuivre.");
+        : "Lecture ou reprise échouée. État actuel relu ; vérifiez avant de poursuivre.", {error: true});
     } catch (_readError) {
       sessionMessage(state.sessionWriteAttempted && error?.status
         ? `${sessionRefusalMessage(error)} Lecture impossible ; rechargez la page.`
-        : "Lecture impossible. Rechargez la page avant une nouvelle action.");
+        : "Lecture impossible. Rechargez la page avant une nouvelle action.", {error: true});
     }
   } finally {
     state.sessionBusy = false;
@@ -611,7 +615,7 @@ async function recordSessionEvidence() {
   if (seconds == null) {
     sessionMessage(document.querySelector("#session-duration-method").value === "frames"
       ? "Indiquez un nombre entier de clichés conservés supérieur à zéro et une durée par cliché supérieure à zéro."
-      : "Saisissez une durée utilisable positive en heures, minutes et secondes (minutes de 0 à 59 ; secondes de 0 à moins de 60).");
+      : "Saisissez une durée utilisable positive en heures, minutes et secondes (minutes de 0 à 59 ; secondes de 0 à moins de 60).", {error: true});
     return;
   }
   const key = `astropilot.pendingEvidence.${session.execution.execution_id}`;
@@ -632,14 +636,14 @@ async function recordSessionEvidence() {
 async function creditSession(_missionId, confirmed) {
   const session = currentSession();
   if (session?.execution.status !== "completed") {
-    sessionMessage("Seule une session terminée peut ajouter une durée à votre avancement : aucun crédit pour cette session.");
+    sessionMessage("Seule une session terminée peut ajouter une durée à votre avancement : aucun crédit pour cette session.", {error: true});
     return;
   }
   const evidence = usableEvidence(session);
   if (!evidence || session.credit) return;
   const mustConfirm = Number(session.historical_baseline_seconds) > 0 && !session.historical_baseline_confirmed;
   if (mustConfirm && !confirmed) {
-    sessionMessage("Confirmez la valeur historique affichée avant de créditer.");
+    sessionMessage("Confirmez la valeur historique affichée avant de créditer.", {error: true});
     return;
   }
   await postSession(`/v1/executions/${encodeURIComponent(session.execution.execution_id)}/intent-progress-credit`, {
@@ -1152,11 +1156,11 @@ async function openSessionFieldObservation() {
   const session = currentSession();
   const missionId = state.acceptedMission?.mission_id;
   if (session && session.mission_id !== missionId) {
-    sessionMessage("La session affichée ne correspond plus à cette mission. Rouvrez la mission avant de noter les conditions.");
+    sessionMessage("La session affichée ne correspond plus à cette mission. Rouvrez la mission avant de noter les conditions.", {error: true});
     return;
   }
   if (session && !["not_started", "in_progress", "completed", "interrupted"].includes(session.execution.status)) {
-    sessionMessage("Vérifiez l’état de cette session avant de lui associer un relevé.");
+    sessionMessage("Vérifiez l’état de cette session avant de lui associer un relevé.", {error: true});
     return;
   }
   const mission = state.acceptedMission;
@@ -1187,12 +1191,12 @@ async function openSessionFieldObservation() {
           || location.latitude !== configuration.site.latitude
           || location.longitude !== configuration.site.longitude
           || mission.mission?.site_timezone !== siteTimezone()) {
-        sessionMessage("Le site enregistré de cette mission ne correspond pas au site actuel, ou ne peut pas être vérifié. Aucun relevé n’a été créé.");
+        sessionMessage("Le site enregistré de cette mission ne correspond pas au site actuel, ou ne peut pas être vérifié. Aucun relevé n’a été créé.", {error: true});
         return;
       }
       mission.observationSiteProof = {fingerprint, siteGeneration, configurationGeneration: generation};
     } catch (_) {
-      if (stillCurrent()) sessionMessage("Impossible de vérifier le site enregistré. Réessayez ; aucun relevé n’a été créé.");
+      if (stillCurrent()) sessionMessage("Impossible de vérifier le site enregistré. Réessayez ; aucun relevé n’a été créé.", {error: true});
       return;
     }
   }
@@ -1272,10 +1276,12 @@ function openFieldObservation(source) {
   }
 }
 
-function observationMessage(message, { error = false } = {}) {
+function observationMessage(message, { error = false, success = false } = {}) {
   const element = document.querySelector("#observation-status");
   element.textContent = message;
   element.classList.toggle("observation-error", error);
+  element.classList.toggle("confirmation-success", success && !error);
+  if (success && !error) element.scrollIntoView?.({block: "nearest"});
 }
 
 function optionalObservationNumber(selector) {
@@ -3308,7 +3314,7 @@ async function finishFieldObservationSubmission(key, submittedSnapshot, message,
   if (fieldObservationSnapshot() === submittedSnapshot) resetFieldObservationForm();
   else message += " Vos modifications en cours sont conservées.";
   if (!removed) message += " Le brouillon local n’a pas pu être nettoyé.";
-  observationMessage(message);
+  observationMessage(message, {success: removed});
   return removed;
 }
 
@@ -4342,7 +4348,7 @@ function renderMission(mission) {
   tasks.append(review);
 
   renderSession();
-  reloadSessions().catch(() => sessionMessage("Sessions momentanément indisponibles. Rechargez avant une action."));
+  reloadSessions().catch(() => sessionMessage("Sessions momentanément indisponibles. Rechargez avant une action.", {error: true}));
 
 }
 
@@ -5292,6 +5298,7 @@ async function loadProjectTemplatesOnce() {
   const button = document.querySelector("#project-templates-load");
   const feedback = document.querySelector("#project-create-feedback");
   button.disabled = true;
+  feedback.classList?.remove("error", "confirmation-success");
   feedback.textContent = "Chargement des cibles prises en charge…";
   try {
     const response = await fetch("/v1/project-templates");
@@ -5314,6 +5321,7 @@ async function loadProjectTemplatesOnce() {
       ? "Seules les cibles disposant de données de mission complètes sont proposées dans cette bêta."
       : "Aucune cible ne dispose encore des données nécessaires dans cette version.";
   } catch (_error) {
+    feedback.classList?.add("error");
     feedback.textContent = "Les cibles ne peuvent pas être chargées. Vos réglages sont conservés ; réessayez.";
   } finally {
     state.projectTemplatesLoading = false;
@@ -5451,6 +5459,7 @@ function newProjectFromInputs(template, entries, emptyConfirmed, existingProject
 function addNewProject() {
   if (state.savingConfiguration) return;
   const feedback = document.querySelector("#project-create-feedback");
+  feedback.classList?.remove("error", "confirmation-success");
   try {
     if (!confirmDiscardProjectProgress()) return;
     const key = document.querySelector("#project-template").value;
@@ -5470,6 +5479,7 @@ function addNewProject() {
     feedback.textContent = "Projet ajouté au brouillon. Enregistrez pour conserver ce choix. Aucun temps de pose n’a été crédité.";
     if (appliedUiMode === "simple") saveConfiguration();
   } catch (error) {
+    feedback.classList?.add("error");
     feedback.textContent = error.message;
   }
 }
@@ -5525,7 +5535,8 @@ function renderProjectProgressEditor(message = "") {
   const heading = document.createElement("h3");
   heading.textContent = `Modifier mon projet : ${data.project_id}`;
   const feedback = document.createElement("p");
-  feedback.className = "project-progress-feedback";
+  feedback.className = "project-progress-feedback feedback-message";
+  feedback.classList?.toggle("confirmation-success", Boolean(message));
   feedback.textContent = message;
   const fieldLabel = document.createElement("label");
   fieldLabel.textContent = "Champ d’imagerie ";
@@ -5662,6 +5673,8 @@ async function saveProjectProgress() {
   const editor = document.querySelector("#project-progress-editor");
   const feedback = editor.querySelector(".project-progress-feedback");
   const configuration = state.configuration;
+  feedback.classList?.remove("confirmation-success");
+  feedback.classList?.add("error");
   if (!data || data.profile_revision !== configuration?.profile_revision) {
     feedback.textContent = "La configuration a changé. Rechargez la page avant d’enregistrer ; votre saisie n’a pas été envoyée.";
     return;

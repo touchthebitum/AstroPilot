@@ -248,7 +248,7 @@
               <label class="check-field"><input id="project-new-empty" type="checkbox"><span>Je commence ce projet sans images déjà acquises.</span></label>
               <button class="primary-button" id="project-add" type="button" data-simple-text="Enregistrer mon projet et continuer" data-pro-text="Ajouter ce projet à ma configuration">Enregistrer mon projet et continuer</button>
             </div>
-            <p id="project-create-feedback" role="status" aria-live="polite"></p>
+            <p id="project-create-feedback" class="feedback-message" aria-atomic="true" role="status" aria-live="polite"></p>
           </details>
           <div class="wizard-actions">
             <button class="secondary-button" data-back="equipment" type="button">Retour</button>
@@ -278,7 +278,7 @@
           <h2 id="availability-title" tabindex="-1">Quand êtes-vous disponible ce soir&nbsp;?</h2>
           <p id="availability-intro">NightMerit utilisera uniquement la plage que vous indiquez pour cette recommandation.</p>
           <p id="mission-recheck-summary" class="field-note" role="status" hidden></p>
-          <p id="availability-save-confirmation" class="field-note" role="status" hidden>Votre projet et votre configuration sont enregistrés. Choisissez maintenant votre disponibilité.</p>
+          <p id="availability-save-confirmation" class="field-note feedback-message confirmation-success" role="status" hidden>Votre projet et votre configuration sont enregistrés. Choisissez maintenant votre disponibilité.</p>
           <p id="availability-selected-project" class="field-note" role="status" hidden></p>
           <button class="secondary-button" id="availability-altitude-guidance" type="button" hidden>À quelle heure cette cible sera-t-elle assez haute ?</button>
           <p id="availability-site-timezone" class="field-note" hidden></p>
@@ -452,7 +452,7 @@
             <div>
               <div id="primary-intent-choice" class="intent-choice" hidden></div>
               <p id="decision-reason">Décision calculée pour votre configuration actuelle.</p>
-              <p id="acceptance-status" class="acceptance-status" role="status" hidden></p>
+              <p id="acceptance-status" class="acceptance-status feedback-message" role="status" hidden></p>
             </div>
             <div class="decision-actions">
               <button class="mission-button" id="open-mission" type="button">
@@ -606,7 +606,7 @@
             <p id="session-intent" data-pro-only>Intent : —</p>
             <label for="session-choice">Sessions de cette mission</label>
             <select id="session-choice"></select>
-            <p id="session-status" role="status"></p>
+            <p id="session-status" class="feedback-message" aria-atomic="true" role="status"></p>
             <p id="session-next-step" class="session-next-step" data-simple-only></p>
             <section id="guardian-renewal" hidden aria-label="Confirmation Guardian">
               <p>Cette confirmation vient de vous. NightMerit ne vérifie pas techniquement que l’acquisition continue.</p>
@@ -811,7 +811,7 @@
 
               <div class="observation-actions">
                 <details class="observation-diagnostics" data-mode-disclosure><summary>Détails techniques</summary><p class="observation-compatibility">Publication sécurisée multi-onglets : navigateur avec Web Locks requis.</p></details>
-                <p id="observation-status" role="status">Choisissez les catégories observées, indiquez le vent mesuré en km/h ou précisez l’état de la surface.</p>
+                <p id="observation-status" class="feedback-message" aria-atomic="true" role="status">Choisissez les catégories observées, indiquez le vent mesuré en km/h ou précisez l’état de la surface.</p>
                 <section id="observation-pending-diagnostics" class="observation-pending-diagnostics" aria-label="Observations locales à résoudre" hidden></section>
                 <button class="secondary-button" id="observation-reconcile" type="button" hidden>Réconcilier l’observation précédente</button>
                 <button class="secondary-button" id="observation-refresh-context" type="button" hidden>Actualiser le contexte</button>
