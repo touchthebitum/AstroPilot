@@ -3351,7 +3351,7 @@ function finishFieldObservationSubmissionUnlocked(lock, submittedSnapshot, messa
   if (fieldObservationSnapshot() === submittedSnapshot) resetFieldObservationForm();
   else message += " Vos modifications en cours sont conservées.";
   if (!removed) message += " Le brouillon local n’a pas pu être nettoyé.";
-  observationMessage(message, {error: !removed});
+  observationMessage(message, {error: !removed, success: removed});
   return removed;
 }
 
