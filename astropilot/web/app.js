@@ -5725,6 +5725,8 @@ async function saveProjectProgress() {
   }
   const body = { expected_revision: data.profile_revision, imaging_field_id: field,
     acquisition_intent_progress: progress, acquisition_intent_targets: targets };
+  feedback.classList?.remove("error", "confirmation-success");
+  feedback.textContent = "Enregistrement des modifications en cours…";
   state.savingProjectProgress = true;
   const controlsBeforeSave = [...editor.querySelectorAll("input, select, button")].map(control => [control, control.disabled]);
   controlsBeforeSave.forEach(([control]) => {control.disabled = true;});
@@ -5734,6 +5736,7 @@ async function saveProjectProgress() {
     });
     if (response.status === 409) {
       const detail = (await response.json()).detail || {};
+      feedback.classList?.add("error");
       if (String(detail.code || "").startsWith("intent_progress_")) {
         feedback.textContent = "Crédit d’exécution présent : cette base ou ce champ ne peut plus être modifié. Rechargez le projet pour voir les dernières valeurs.";
         return;
@@ -5760,6 +5763,7 @@ async function saveProjectProgress() {
     renderProjectProgressEditor("Modifications du projet enregistrées.");
 
   } catch (_error) {
+    feedback.classList?.add("error");
     feedback.textContent = "L’avancement n’a pas pu être enregistré. Vérifiez les valeurs et réessayez.";
   } finally {
     state.savingProjectProgress = false;
