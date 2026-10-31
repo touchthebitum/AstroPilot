@@ -79,9 +79,31 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
   await page.locator('#mission-check-conditions').click();
   assert.equal(await page.locator('#availability-start').inputValue(),'2026-10-25T02:30');
   assert.equal(await page.locator('#availability-end').inputValue(),'2026-10-25T02:30');
+  const dstSummary=await page.locator('#mission-recheck-summary').innerText();
+  assert.match(dstSummary,/02:30 UTC\+2/);assert.match(dstSummary,/02:30 UTC\+1/);
+  assert.match(dstSummary,/Durée réelle : 1 h 00/);assert.match(dstSummary,/décalage horaire change/);
+  assert.match(await page.evaluate(()=>savedMissionLabel(state.acceptedMission)),/02:30 UTC\+2.*02:30 UTC\+1/);
+  if(process.env.NIGHTMERIT_DST_PROOF_DIR){
+   fs.writeFileSync(path.join(process.env.NIGHTMERIT_DST_PROOF_DIR,'horaires-dst-corriges.json'),JSON.stringify({start:await page.locator('#availability-start').inputValue(),end:await page.locator('#availability-end').inputValue(),summary:dstSummary},null,2));
+   await page.screenshot({path:path.join(process.env.NIGHTMERIT_DST_PROOF_DIR,'horaires-dst-corriges.png'),fullPage:true});
+  }
+
+
   assert.equal(writes.length,before);
   await page.locator('#request-recommendation').click();await page.waitForFunction(()=>!state.requestingRecommendation);
   assert.deepEqual(writes[before].body.availability,{mode:'fixed_window',start:dst.window_start,end:dst.window_end});
+  // A clock jump in spring is also explicit; elapsed time stays one hour.
+  const spring={window_start:'2026-03-29T00:30:00Z',window_end:'2026-03-29T01:30:00Z'};
+  for(const mode of ['simple','pro']){
+   await page.evaluate(mode=>applyUiMode(mode),mode);
+   await open({persisted:true,window:spring});const n=writes.length;
+   await page.locator('#mission-check-conditions').click();
+   const summary=await page.locator('#mission-recheck-summary').innerText();
+   assert.match(summary,/01:30 UTC\+1/);assert.match(summary,/03:30 UTC\+2/);
+   assert.match(summary,/Durée réelle : 1 h 00/);assert.match(summary,/décalage horaire change/);
+   await page.locator('#request-recommendation').click();await page.waitForFunction(()=>!state.requestingRecommendation);
+   assert.deepEqual(writes[n].body.availability,{mode:'fixed_window',start:spring.window_start,end:spring.window_end});
+  }
   // An edited window follows the normal server-validated local-time contract.
   await open({persisted:true});before=writes.length;await page.locator('#mission-check-conditions').click();
   await page.locator('#availability-start').fill('2026-11-01T20:00');

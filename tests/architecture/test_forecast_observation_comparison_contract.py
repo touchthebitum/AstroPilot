@@ -117,6 +117,8 @@ ALLOWED_IMPORTS = {
         ("decision.field_observation", "StopReason"),
         ("decision.field_observation", "SurfaceCondition"),
         ("decision.field_observation", "Transparency"),
+        ("decision.field_observation", "WindStrength"),
+        ("decision.field_observation", "WindImpact"),
         ("decision.models.forecast_observation_comparison", "ALGORITHM_VERSION"),
         ("decision.models.forecast_observation_comparison", "FORECAST_SCOPE"),
         ("decision.models.forecast_observation_comparison", "CloudComparisonOutcome"),

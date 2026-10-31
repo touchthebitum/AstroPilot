@@ -4131,7 +4131,7 @@ function savedMissionLabel(item) {
   const filter = mission.selected_filter?.name || mission.selected_filter?.filter_type || "Filtre non précisé";
   const formatter = new NightMeritTime.DateTimeFormat("fr-CH", {
     year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hour12: false, timeZone: zone,
+    hour: "2-digit", minute: "2-digit", hour12: false, timeZone: zone, timeZoneName: "shortOffset",
   });
   const dateTime = value => value && Number.isFinite(Date.parse(value))
     ? formatter.format(new Date(value)) : "Non précisée";
@@ -4391,10 +4391,20 @@ async function checkMissionConditions() {
   document.querySelector("#availability-end").value = endLocal;
   // Keep the original instants, including repeated local times at a clock change.
   // A persisted mission need not have an in-memory acceptance fingerprint.
+  const recheckFormatter = new NightMeritTime.DateTimeFormat("fr-CH", {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+    hour12: false, timeZone: zone, timeZoneName: "shortOffset",
+  });
+  const offsetAt = instant => recheckFormatter.formatToParts(new Date(instant))
+    .find(part => part.type === "timeZoneName")?.value;
+  const clockChangeNote = offsetAt(start) !== offsetAt(end)
+    ? " Le décalage horaire change pendant ce créneau : les heures locales peuvent se répéter ou être sautées." : "";
+  const localWindowNote = missionTimezone(mission, accepted) !== zone
+    ? ` Horaires sur ce site : ${recheckFormatter.format(new Date(start))} → ${recheckFormatter.format(new Date(end))}.` : "";
   state.missionRecheck = {
     projectId, start: mission.window_start, end: mission.window_end,
     startLocal, endLocal, siteFingerprint: decisionSiteFingerprint(),
-    summary: `Mission enregistrée : ${savedMissionLabel(accepted)}. Vérification pour le site actuel : ${state.configuration.site.name} (${zone}). Les dates sont reprises sans être décalées. Confirmez ce créneau ou modifiez-le avant de lancer l’analyse.`,
+    summary: `Mission enregistrée : ${savedMissionLabel(accepted)}. Site à vérifier : ${state.configuration.site.name} (${zone}).${localWindowNote} Durée réelle : ${usablePoseDuration((end - start) / 1000)}.${clockChangeNote} Confirmez ce créneau ou modifiez-le avant de lancer l’analyse.`,
   };
   updateAvailabilityFields();
   updateGuidedPresentation();
