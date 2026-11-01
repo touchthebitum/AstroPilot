@@ -165,6 +165,8 @@ from decision.field_observation import (
     StopReason,
     SurfaceCondition,
     Transparency,
+    WindStrength,
+    WindImpact,
     validate_observation_identity,
 )
 from decision.models.forecast_observation_comparison import NumericVariableComparison
@@ -834,6 +836,8 @@ class FieldObservationConditionsRequest(BaseModel):
     wind_speed_kmh: float | None = None
     surface_condition: SurfaceCondition | None = None
     moon_halo: bool | None = None
+    wind_strength: WindStrength | None = None
+    wind_impact: WindImpact | None = None
 
     def to_domain(self) -> ObservedConditions:
         return ObservedConditions(**self.model_dump())
@@ -3562,6 +3566,9 @@ def create_app(
                     else observation.conditions.seeing.value
                 ),
                 "wind_speed_kmh": observation.conditions.wind_speed_kmh,
+                **({"wind_strength": observation.conditions.wind_strength.value if observation.conditions.wind_strength else None,
+                    "wind_impact": observation.conditions.wind_impact.value if observation.conditions.wind_impact else None}
+                   if observation.conditions.wind_strength is not None or observation.conditions.wind_impact is not None else {}),
                 "surface_condition": (
                     None
                     if observation.conditions.surface_condition is None
@@ -3800,7 +3807,17 @@ def create_app(
             raise HTTPException(
                 status_code=404, detail={"code": "decision_not_found"},
             )
-        return {"decision_id": decision_id}
+        # Only an unambiguous archived requested location may confirm the site.
+        # Grid coordinates describe the model cell, not the observing site.
+        points = evidence.forecast_points
+        locations = [point.requested_location for point in points]
+        location = locations[0] if locations else None
+        requested_site = None
+        if location is not None and all(item is not None
+                and item.latitude == location.latitude
+                and item.longitude == location.longitude for item in locations):
+            requested_site = {"latitude": location.latitude, "longitude": location.longitude}
+        return {"decision_id": decision_id, "requested_site": requested_site}
 
     @application.post("/v1/field-observations", status_code=201)
     def create_field_observation(

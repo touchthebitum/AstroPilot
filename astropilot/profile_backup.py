@@ -195,10 +195,14 @@ def validate_graph(files):
     """Use production read gates in a disposable child, never the active profile."""
     summary = validate_documents(files)
     with tempfile.TemporaryDirectory(prefix="nightmerit-backup-check-") as temporary:
-        folder = Path(temporary) / "profile"
+        # Canonicalize only our freshly created temporary directory: macOS can
+        # expose its temporary root through /var -> /private/var. The source
+        # profile and archive paths still pass their unchanged safety checks.
+        temporary_root = Path(temporary).resolve(strict=True)
+        folder = temporary_root / "profile"
         folder.mkdir()
         _write_files(folder, files)
-        report = Path(temporary) / "result.json"
+        report = temporary_root / "result.json"
         env = {k: v for k, v in os.environ.items() if not k.startswith(("ASTROPILOT_", "FIELD_LAB_", "NIGHTMERIT_"))}
         env["ASTROPILOT_DATA_DIR"] = str(folder)
         args = ([sys.executable] if getattr(sys, "frozen", False)

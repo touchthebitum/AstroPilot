@@ -319,3 +319,40 @@ def test_supersession_rejects_cycle_in_corrupted_history(tmp_path):
                 supersedes_observation_id="observation-a",
             )
         )
+
+@pytest.mark.parametrize('strength,impact', [('strong', 'impossible'), ('none', 'none'), ('unknown', 'vibrations')])
+def test_qualitative_wind_round_trip_without_invented_speed(tmp_path, strength, impact):
+    from decision.field_observation import WindStrength, WindImpact
+    source = observation(conditions=ObservedConditions(
+        wind_strength=WindStrength(strength), wind_impact=WindImpact(impact)))
+    store = FileFieldObservationStore(tmp_path)
+    assert store.save(observation=source) is True
+    original = (tmp_path / 'observation-123.json').read_bytes()
+    document = json.loads(original)
+    assert document['schema_version'] == 3
+    assert document['observation']['conditions']['wind_speed_kmh'] is None
+    assert FileFieldObservationStore(tmp_path).load(observation_id=source.observation_id) == source
+    assert store.save(observation=source) is False
+    assert (tmp_path / 'observation-123.json').read_bytes() == original
+
+
+def test_legacy_wind_document_keeps_exact_serialization_and_optional_new_fields():
+    source = observation()
+    old_document = serialize_field_observation(source)
+    assert json.loads(old_document)['schema_version'] == 2
+    restored = deserialize_field_observation(old_document, observation_id=source.observation_id)
+    assert restored.conditions.wind_strength is None
+    assert restored.conditions.wind_impact is None
+    assert serialize_field_observation(restored) == old_document
+
+
+def test_v3_rejects_invalid_wind_and_v2_rejects_unversioned_extension():
+    from decision.field_observation import WindStrength
+    document = json.loads(serialize_field_observation(observation(
+        conditions=ObservedConditions(wind_strength=WindStrength.STRONG))))
+    document['observation']['conditions']['wind_strength'] = 'gusts_50_kmh'
+    with pytest.raises(FieldObservationPersistenceError):
+        deserialize_field_observation(json.dumps(document), observation_id='observation-123')
+    document['schema_version'] = 2
+    with pytest.raises(FieldObservationPersistenceError, match='invalid_conditions_fields'):
+        deserialize_field_observation(json.dumps(document), observation_id='observation-123')

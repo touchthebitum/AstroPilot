@@ -42,6 +42,41 @@ def test_stopped_profile_roundtrip_preserves_bytes_and_original(source, tmp_path
     assert snapshot(target) == before
 
 
+def test_backup_validation_uses_real_path_under_linked_temporary_root(source, tmp_path, monkeypatch):
+    import astropilot.profile_backup as backup
+    real_root = tmp_path / "temporary-real"
+    real_root.mkdir()
+    alias = tmp_path / "temporary-alias"
+    try:
+        alias.symlink_to(real_root, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Directory symlinks unavailable")
+    with pytest.raises(BackupError, match="backup_unsafe_path"):
+        snapshot(alias)  # User-supplied profile links remain forbidden.
+    monkeypatch.setattr(backup.tempfile, "tempdir", str(alias))
+    run = backup.subprocess.run
+    checked = []
+
+    def check_child_paths(*args, **kwargs):
+        folder = Path(kwargs["env"]["ASTROPILOT_DATA_DIR"])
+        assert folder.is_relative_to(real_root.resolve())
+        assert all(not part.is_symlink() for part in (folder, *folder.parents))
+        checked.append(folder)
+        return run(*args, **kwargs)
+
+    monkeypatch.setattr(backup.subprocess, "run", check_child_paths)
+    before = snapshot(source)
+    raw, summary = create_backup(source)
+    files, preview = inspect_backup(raw)
+    target = tmp_path / "restored-from-linked-temp"
+    assert restore_empty(target, files) == summary
+    assert {key: preview[key] for key in summary} == summary
+    assert snapshot(target) == before == snapshot(source)
+    assert len(checked) >= 2
+    assert all(not folder.parent.exists() for folder in checked)
+    assert list(real_root.iterdir()) == []
+
+
 def test_runtime_state_is_not_a_portable_authority(source):
     (source / "Logs").mkdir()
     (source / "Logs/launcher.log").write_text("private runtime")
@@ -221,7 +256,8 @@ assert main()==0
         subprocess.run([sys.executable, '-c', script], check=True, timeout=10)
 
 
-def test_complete_session_and_observation_graph_roundtrip(tmp_path, monkeypatch):
+@pytest.mark.parametrize("qualitative_wind", [False, True])
+def test_complete_session_and_observation_graph_roundtrip(tmp_path, monkeypatch, qualitative_wind):
     from test_tonight_api import (lineage_client, lineage_selection_payload,
         DEFAULT_WEATHER_REFERENCE_TIME, valid_profile, LINEAGE_START)
     import decision.services.durable_tonight_application_service as durable
@@ -243,9 +279,12 @@ def test_complete_session_and_observation_graph_roundtrip(tmp_path, monkeypatch)
                                    guardian_renewal_enabled=False))
     create_completed(client, 'execution-1', mission_id='mission-lineage', evidence_id='evidence-1')
     from test_field_observation_api import payload
-    recorded = client.post('/v1/field-observations', json=payload(
+    observation_payload = payload(
         observation_id='obs-1', decision_id='decision-lineage', execution_id=None,
-        observed_at_utc=LINEAGE_START.isoformat(), recorded_at_utc=LINEAGE_START.isoformat()))
+        observed_at_utc=LINEAGE_START.isoformat(), recorded_at_utc=LINEAGE_START.isoformat())
+    if qualitative_wind:
+        observation_payload['conditions'].update(wind_strength='strong', wind_impact='impossible')
+    recorded = client.post('/v1/field-observations', json=observation_payload)
     assert recorded.status_code == 201, recorded.text
     compared = client.post('/v1/field-observations/obs-1/outcome-evaluation')
     assert compared.status_code == 201, compared.text
@@ -261,6 +300,11 @@ def test_complete_session_and_observation_graph_roundtrip(tmp_path, monkeypatch)
     monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(target))
     resumed = TestClient(create_app(service_factory=build_durable_tonight_application_service,
                                    guardian_renewal_enabled=False))
+    if qualitative_wind:
+        restored = resumed.get('/v1/field-observations/obs-1').json()
+        assert restored['conditions']['wind_strength'] == 'strong'
+        assert restored['conditions']['wind_impact'] == 'impossible'
+        assert restored['conditions']['wind_speed_kmh'] == observation_payload['conditions']['wind_speed_kmh']
     assert resumed.get('/v1/executions/execution-1/session').status_code == 200
     assert credit(resumed, 'execution-1', 'evidence-1').json()['status'] == 'already_applied'
     assert snapshot(target) == before
@@ -494,3 +538,79 @@ def test_data_assistant_restarts_immediately_after_a_real_connection():
     first.close()
     with reserve_listener(port=address[1]) as second:
         assert second.getsockname() == address
+
+
+def test_open_copy_requires_restored_profile_and_explicit_separate_request(source, tmp_path):
+    before = snapshot(source)
+    raw, _ = create_backup(source, validator=validate_documents)
+    target = tmp_path / 'restore-and-open'
+    calls = []
+    client = TestClient(create_transfer_app(target, origin='http://testserver',
+        inspector=lambda raw: inspect_backup(raw, validator=validate_documents),
+        restorer=lambda root, files: restore_empty(root, files, validator=validate_documents),
+        open_application=lambda: calls.append('open-same-process')))
+    token = re.search(r'const token="([^"]+)"', client.get('/').text)[1]
+    headers = {'X-NightMerit-Transfer': token}
+    assert client.get('/transfer/status').json()['can_open'] is False
+    assert client.post('/transfer/open', headers=headers).status_code == 409
+    assert calls == [] and not target.exists()
+    preview = client.post('/transfer/preview', content=raw, headers=headers).json()
+    assert calls == [] and not target.exists()
+    response = client.post('/transfer/restore', json={'confirmation':preview['confirmation'], 'confirm':True}, headers=headers)
+    assert response.status_code == 200 and calls == []
+    assert client.get('/transfer/status').json()['can_open'] is True
+    assert client.post('/transfer/open').status_code == 403
+    assert client.post('/transfer/open', headers={**headers,'Origin':'https://outside.invalid'}).status_code == 403
+    response = client.post('/transfer/open', json={'executable':'untrusted','data_directory':'elsewhere'}, headers=headers)
+    assert response.status_code == 202
+    assert response.json()['data_directory'] == str(target)
+    assert calls == ['open-same-process']
+    assert client.post('/transfer/open', headers=headers).status_code == 202
+    assert calls == ['open-same-process']
+    assert snapshot(target) == before == snapshot(source)
+
+
+def test_open_is_unavailable_without_a_local_handoff(source):
+    client = TestClient(create_transfer_app(source, origin='http://testserver'))
+    token = re.search(r'const token="([^"]+)"', client.get('/').text)[1]
+    assert client.get('/transfer/status').json()['can_open'] is False
+    assert client.post('/transfer/open', headers={'X-NightMerit-Transfer':token}).status_code == 409
+
+
+def test_assistant_closes_listener_and_releases_lock_before_opening_same_process(tmp_path, monkeypatch):
+    import contextlib
+    import types
+    import astropilot.profile_transfer_app as transfer
+    import astropilot.file_lock as locking
+    import astropilot.launcher as launcher
+    root = tmp_path / 'profile';root.mkdir()
+    (root / 'user_profile.json').write_text('{}')
+    events = []
+    class Listener:
+        def close(self):events.append('listener-closed')
+    @contextlib.contextmanager
+    def lock(path):
+        events.append('lock-held')
+        try:yield
+        finally:events.append('lock-released')
+    class Server:
+        started = False
+        should_exit = False
+        def __init__(self, app):self.app=app
+        def run(self, sockets):
+            assert events == ['lock-held']
+            client=TestClient(self.app, base_url="http://127.0.0.1:8000")
+            token=re.search(r'const token="([^"]+)"', client.get('/').text)[1]
+            assert client.post('/transfer/open', headers={'X-NightMerit-Transfer':token}).status_code==202
+            assert self.should_exit
+    fake_uvicorn=types.SimpleNamespace(Config=lambda app,**kw:app,Server=Server)
+    monkeypatch.setitem(__import__('sys').modules,'uvicorn',fake_uvicorn)
+    monkeypatch.setattr(transfer,'reserve_listener',lambda:Listener())
+    monkeypatch.setattr(transfer,'get_user_data_dir',lambda:root)
+    monkeypatch.setattr(locking,'exclusive_file_lock',lock)
+    def launch():
+        assert events == ['lock-held','lock-released','listener-closed']
+        events.append('normal-application')
+    monkeypatch.setattr(launcher,'main',launch)
+    transfer.main()
+    assert events[-1] == 'normal-application'
