@@ -42,6 +42,41 @@ def test_stopped_profile_roundtrip_preserves_bytes_and_original(source, tmp_path
     assert snapshot(target) == before
 
 
+def test_backup_validation_uses_real_path_under_linked_temporary_root(source, tmp_path, monkeypatch):
+    import astropilot.profile_backup as backup
+    real_root = tmp_path / "temporary-real"
+    real_root.mkdir()
+    alias = tmp_path / "temporary-alias"
+    try:
+        alias.symlink_to(real_root, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Directory symlinks unavailable")
+    with pytest.raises(BackupError, match="backup_unsafe_path"):
+        snapshot(alias)  # User-supplied profile links remain forbidden.
+    monkeypatch.setattr(backup.tempfile, "tempdir", str(alias))
+    run = backup.subprocess.run
+    checked = []
+
+    def check_child_paths(*args, **kwargs):
+        folder = Path(kwargs["env"]["ASTROPILOT_DATA_DIR"])
+        assert folder.is_relative_to(real_root.resolve())
+        assert all(not part.is_symlink() for part in (folder, *folder.parents))
+        checked.append(folder)
+        return run(*args, **kwargs)
+
+    monkeypatch.setattr(backup.subprocess, "run", check_child_paths)
+    before = snapshot(source)
+    raw, summary = create_backup(source)
+    files, preview = inspect_backup(raw)
+    target = tmp_path / "restored-from-linked-temp"
+    assert restore_empty(target, files) == summary
+    assert {key: preview[key] for key in summary} == summary
+    assert snapshot(target) == before == snapshot(source)
+    assert len(checked) >= 2
+    assert all(not folder.parent.exists() for folder in checked)
+    assert list(real_root.iterdir()) == []
+
+
 def test_runtime_state_is_not_a_portable_authority(source):
     (source / "Logs").mkdir()
     (source / "Logs/launcher.log").write_text("private runtime")
