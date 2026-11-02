@@ -5281,7 +5281,11 @@ function renderProjects() {
       button.textContent = saved ? "Ouvrir" : "Enregistrer d’abord";
       button.disabled = !saved;
       button.addEventListener("click", () => openProjectProgress(catalogKey));
-      item.append(label, button);
+      const addPhotos = document.createElement("button");
+      addPhotos.type = "button"; addPhotos.className = "secondary-button";
+      addPhotos.textContent = "Ajouter mes photos conservées"; addPhotos.disabled = !saved;
+      addPhotos.addEventListener("click", () => openPhotoAddition(catalogKey));
+      item.append(label, button, addPhotos);
       list.append(item);
     }
     summary.append(heading, explanation, list);
@@ -5878,6 +5882,160 @@ function prepareGuidedSession({saveDraft = false, projectId} = {}) {
   setView("availability");
 }
 
+// One explicit user confirmation; the existing durable evidence/credit APIs remain authoritative.
+const photoAddition = {projectId: null, sessions: [], selected: null, busy: false, generation: 0};
+function photoElement(id) { return document.getElementById(`photos-${id}`); }
+function photoMessage(message, kind = "") {
+  const el = photoElement("status"); el.textContent = message;
+  el.classList.toggle("error", kind === "error");
+  el.classList.toggle("confirmation-success", kind === "success");
+}
+function photoSeconds() {
+  const saved = usableEvidence(photoAddition.selected);
+  if (saved) return Number(saved.usable_integration_duration);
+  const frames = Number(photoElement("frames").value), seconds = Number(photoElement("seconds").value);
+  const total = frames * seconds;
+  return Number.isSafeInteger(frames) && frames > 0 && Number.isFinite(seconds) && seconds >= .000001
+    && Number.isFinite(total) && total <= Number.MAX_SAFE_INTEGER ? total : null;
+}
+function renderPhotoAddition() {
+  const session = photoAddition.selected, status = session?.execution.status;
+  const saved = usableEvidence(session), duration = photoSeconds();
+  const allowed = ["completed", "in_progress"].includes(status) && !session?.credit
+    && Number.isFinite(session?.current_acquired_seconds);
+  photoElement("inputs").hidden = !allowed || Boolean(saved);
+  photoElement("frames").disabled = photoAddition.busy;
+  photoElement("seconds").disabled = photoAddition.busy;
+  photoElement("choice").disabled = photoAddition.busy;
+  photoElement("close").disabled = photoAddition.busy;
+  photoElement("submit").disabled = photoAddition.busy || !allowed || duration == null;
+  photoElement("submit").hidden = !allowed;
+  const before = session?.current_acquired_seconds;
+  photoElement("preview").textContent = session?.credit
+    ? `Déjà ajouté : ${usablePoseDuration(session.session_credit_seconds)}. Total actuel : ${usablePoseDuration(before)}.`
+    : allowed && duration != null
+      ? `À ajouter : ${usablePoseDuration(duration)}. Votre total passera de ${usablePoseDuration(before)} à ${usablePoseDuration(before + duration)}${session.target_hours == null ? "" : ` sur ${session.target_hours} h`}.`
+      : allowed ? "Indiquez uniquement les nouveaux clichés conservés de cette séance, après le tri."
+        : status === "interrupted" ? "Cette séance est interrompue. L’ajout de photos n’est pas disponible pour cet état ; votre avancement reste inchangé."
+        : "Choisissez la séance correspondant à vos nouveaux clichés. Aucune séance ne sera créée ici.";
+  photoElement("baseline").textContent = allowed && Number(session.historical_baseline_seconds) > 0 && !session.historical_baseline_confirmed
+    ? `Votre total de départ de ${usablePoseDuration(session.historical_baseline_seconds)} sera conservé. En confirmant l’ajout, vous confirmez que les nouveaux clichés ne sont pas déjà comptés dans ce total.` : "";
+  photoElement("finish").textContent = allowed && status === "in_progress"
+    ? "Cette séance est encore ouverte. Le bouton ci-dessous confirme que vos prises de vue sont finies : il terminera cette séance puis ajoutera uniquement la durée des clichés indiqués." : "";
+  photoElement("submit").textContent = photoAddition.busy ? "Enregistrement en cours…"
+    : `${status === "in_progress" ? "Terminer la séance et ajouter" : "Ajouter"} ${duration == null ? "mes photos conservées" : `${usablePoseDuration(duration)} à mon projet`}`;
+}
+async function photoRequest(url, options) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await sessionFetch(url, {...options, signal: controller.signal});
+    if (!response.ok) throw await sessionHttpError(response);
+    return await response.json();
+  }
+  finally { clearTimeout(timeout); }
+}
+async function photoRead(url) {
+  return photoRequest(url, {cache: "no-store"});
+}
+function photoSessionUrl(id) { return `/v1/executions/${encodeURIComponent(id)}/session`; }
+async function openPhotoAddition(projectId) {
+  if (photoAddition.busy) return;
+  const generation = ++photoAddition.generation;
+  photoAddition.projectId = projectId; photoAddition.selected = null; photoAddition.sessions = [];
+  photoElement("title").textContent = `Ajouter mes photos conservées · ${projectId}`;
+  photoElement("choice").replaceChildren();
+  photoElement("frames").value = ""; photoElement("seconds").value = "";
+  if (!photoElement("dialog").open) photoElement("dialog").showModal();
+  photoMessage("Lecture des séances enregistrées…"); renderPhotoAddition();
+  try {
+    const [sessions, progress] = await Promise.all([photoRead("/v1/execution-sessions"), photoRead(`/v1/projects/${encodeURIComponent(projectId)}/progress`)]);
+    if (generation !== photoAddition.generation || !photoElement("dialog").open) return;
+    photoAddition.sessions = sessions.filter(item => item.project_id === projectId);
+    const placeholder = document.createElement("option"); placeholder.value = "";
+    placeholder.textContent = "Choisir la date et le filtre de mes photos"; photoElement("choice").append(placeholder);
+    for (const item of photoAddition.sessions) {
+      const option = document.createElement("option"); option.value = item.execution.execution_id;
+      const zone = missionTimezone(item.mission, item);
+      const filter = progress.acquisition_intents?.find(intent => intent.acquisition_intent_id === item.acquisition_intent_id)?.filter_type;
+      option.textContent = `${missionDateTimeLabel(item.execution.actual_start || item.chronology_at, zone)} · Filtre ${filter === "Ha" ? "Hα" : filter || "à vérifier"} · ${item.credit ? "Déjà ajouté" : sessionStatus(item.execution.status)}`;
+      photoElement("choice").append(option);
+    }
+    // Never silently pick one of several nights or filters.
+    if (photoAddition.sessions.length === 1) {
+      photoAddition.selected = photoAddition.sessions[0];
+      photoElement("choice").value = photoAddition.selected.execution.execution_id;
+    }
+    photoMessage(photoAddition.sessions.length ? "" : "Aucune séance enregistrée pour ce projet. Les images acquises avant le suivi restent accessibles dans Modifier mon projet.");
+    renderPhotoAddition();
+  } catch (_) { photoMessage("Impossible de lire les séances. Fermez puis rouvrez cet écran pour réessayer. Aucune durée ajoutée.", "error"); }
+}
+async function submitPhotoAddition() {
+  if (photoAddition.busy || !photoAddition.selected) return;
+  const snapshot = photoAddition.selected, executionId = snapshot.execution.execution_id;
+  const seconds = photoSeconds();
+  if (seconds == null || !Number.isFinite(snapshot.current_acquired_seconds) || snapshot.credit || !["completed", "in_progress"].includes(snapshot.execution.status)) return;
+  photoAddition.busy = true; photoMessage("Enregistrement en cours…"); renderPhotoAddition();
+  const key = `astropilot.quickPhotos.${executionId}`;
+  try {
+    let canonical = await photoRead(photoSessionUrl(executionId));
+    const changed = canonical.project_id !== photoAddition.projectId || canonical.acquisition_intent_id !== snapshot.acquisition_intent_id
+      || canonical.profile_revision !== snapshot.profile_revision || canonical.execution.status !== snapshot.execution.status
+      || JSON.stringify(canonical.evidence) !== JSON.stringify(snapshot.evidence);
+    if (changed || canonical.credit) throw new Error("changed");
+    const post = async (url, body, headers = {}) => {
+      return photoRequest(url, {method: "POST", headers: {"Content-Type": "application/json", ...headers}, body: JSON.stringify(body)});
+    };
+    if (canonical.execution.status === "in_progress") {
+      const end = new Date(), start = new Date(canonical.execution.actual_start);
+      if (!Number.isFinite(start.getTime()) || end < start) throw new Error("invalid_start");
+      await post("/v1/execution-transitions", {execution_id: executionId, mission_id: canonical.mission_id,
+        status: "completed", actual_start: canonical.execution.actual_start, actual_end: end.toISOString(),
+        actual_duration: (end - start) / 1000}, await guardianTransitionHeaders(executionId));
+      canonical = await photoRead(photoSessionUrl(executionId));
+    }
+    if (canonical.execution.status !== "completed") throw new Error("not_completed");
+    let evidence = usableEvidence(canonical);
+    if (!evidence) {
+      const pending = JSON.parse(localStorage.getItem(key) || "null");
+      const evidenceId = pending?.evidence_id || crypto.randomUUID();
+      localStorage.setItem(key, JSON.stringify({evidence_id: evidenceId}));
+      await post("/v1/outcome-evidence", {evidence_id: evidenceId, execution_id: executionId,
+        category: "acquisition", source: "user", observed_at: new Date().toISOString(), usable_integration_duration: seconds});
+      canonical = await photoRead(photoSessionUrl(executionId)); evidence = usableEvidence(canonical);
+    }
+    if (!evidence || Number(evidence.usable_integration_duration) !== seconds || canonical.credit) throw new Error("changed");
+    // Do not acknowledge a changed historical baseline or other credit unseen in the preview.
+    if (canonical.profile_revision !== snapshot.profile_revision) throw new Error("changed");
+    await post(`/v1/executions/${encodeURIComponent(executionId)}/intent-progress-credit`, {
+      expected_revision: canonical.profile_revision, evidence_ids: [evidence.evidence_id],
+      confirm_historical_baseline: Number(canonical.historical_baseline_seconds) > 0 && !canonical.historical_baseline_confirmed});
+    canonical = await photoRead(photoSessionUrl(executionId));
+    if (!canonical.credit) throw new Error("unconfirmed");
+    photoAddition.selected = canonical; localStorage.removeItem(key);
+    photoMessage(`Photos ajoutées : ${usablePoseDuration(canonical.session_credit_seconds)}. Total : ${usablePoseDuration(canonical.current_acquired_seconds)}${canonical.remaining_hours == null ? "" : ` ; il reste ${usablePoseDuration(canonical.remaining_hours * 3600)}`}.`, "success");
+    renderProjects();
+  } catch (_) {
+    try {
+      const canonical = await photoRead(photoSessionUrl(executionId));
+      photoAddition.selected = canonical;
+      if (canonical.credit) {
+        localStorage.removeItem(key);
+        renderProjects();
+      }
+      photoMessage(canonical.credit ? "Cet ajout est déjà enregistré. Le total relu ci-dessous est conservé ; aucun second ajout n’est nécessaire."
+        : usableEvidence(canonical) ? "La durée est enregistrée mais pas encore ajoutée. Vérifiez le total relu, puis confirmez à nouveau l’ajout."
+        : "L’ajout n’est pas confirmé. Vérifiez la séance et les valeurs relues avant de réessayer.", canonical.credit ? "success" : "error");
+    } catch (_) {
+      photoAddition.selected = null;
+      photoMessage("Résultat non confirmé et relecture impossible. Fermez puis rouvrez cet écran avant de réessayer. Ne créez pas une nouvelle séance.", "error");
+    }
+  } finally {
+    photoAddition.busy = false; renderPhotoAddition();
+    photoElement("status").scrollIntoView({block: "nearest"});
+  }
+}
+
 function renderSimpleProjects(entries) {
   const region = document.querySelector("#simple-projects");
   if (!region) return;
@@ -5905,7 +6063,7 @@ function renderSimpleProjects(entries) {
     prepare.addEventListener("click", () => prepareGuidedSession({saveDraft:true, projectId:key}));
     const more = document.createElement("details");
     const summary = document.createElement("summary");
-    summary.textContent = "J’ai pris des photos : renseigner mon temps de pose";
+    summary.textContent = "Images antérieures et détails des sessions";
     const purpose = document.createElement("p");
     purpose.textContent = "Après chaque séance, vous pouvez ajouter son temps de pose utilisable au projet. NightMerit conserve le total, nuit après nuit, séparément pour chaque filtre. Chaque ajout doit être confirmé par vous.";
     const note = document.createElement("p");
@@ -5939,7 +6097,11 @@ function renderSimpleProjects(entries) {
     modify.type = "button"; modify.className = "secondary-button";
     modify.textContent = "Modifier mon projet"; modify.disabled = !saved;
     modify.addEventListener("click", () => openProjectProgress(key));
-    controls.append(modify, prepare);
+    const addPhotos = document.createElement("button");
+    addPhotos.type = "button"; addPhotos.className = "secondary-button";
+    addPhotos.textContent = "Ajouter mes photos conservées"; addPhotos.disabled = !saved;
+    addPhotos.addEventListener("click", () => openPhotoAddition(key));
+    controls.append(addPhotos, modify, prepare);
     card.append(heading, status, controls, more);
     region.append(card);
     if (!saved) continue;
@@ -8543,3 +8705,13 @@ restoreFieldObservationLock();
 restorePendingFieldObservationInventory();
 if (restorePendingAcceptanceAttempt()) showUnresolvedAcceptance();
 else loadConfiguration();
+
+photoElement("choice").addEventListener("change", event => {
+  photoAddition.selected = photoAddition.sessions.find(item => item.execution.execution_id === event.target.value) || null;
+  photoElement("frames").value = ""; photoElement("seconds").value = "";
+  photoMessage(""); renderPhotoAddition();
+});
+for (const id of ["frames", "seconds"]) photoElement(id).addEventListener("input", () => {photoMessage(""); renderPhotoAddition();});
+photoElement("submit").addEventListener("click", submitPhotoAddition);
+photoElement("close").addEventListener("click", () => { if (!photoAddition.busy) photoElement("dialog").close(); });
+photoElement("dialog").addEventListener("cancel", event => { if (photoAddition.busy) event.preventDefault(); });

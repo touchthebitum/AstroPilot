@@ -947,6 +947,20 @@
       <button class="secondary-button" id="data-context-retry" type="button" hidden>Réessayer la lecture</button>
       <button class="secondary-button" id="data-context-back" type="button" hidden>Retour à mes observations</button>
     </dialog>
+    <dialog id="photos-dialog" aria-labelledby="photos-title">
+      <header class="observation-heading"><h2 id="photos-title">Ajouter mes photos conservées</h2><button id="photos-close" class="secondary-button" type="button">Fermer</button></header>
+      <p>Ajoutez uniquement les nouveaux clichés conservés après le tri. Les images déjà comptées restent dans votre total.</p>
+      <label>Séance de prise de vue · date et filtre<select id="photos-choice"></select></label>
+      <div id="photos-inputs" class="form-grid two-columns">
+        <label>Nombre de nouveaux clichés conservés<input id="photos-frames" type="number" min="1" step="1" inputmode="numeric"></label>
+        <label>Durée de chaque cliché (secondes)<input id="photos-seconds" type="number" min="0.000001" step="any" inputmode="decimal"></label>
+        <small>Tous les clichés indiqués doivent avoir la même durée. Excluez les images rejetées, flats, darks et bias.</small>
+      </div>
+      <p id="photos-preview" class="session-next-step" aria-live="polite"></p>
+      <p id="photos-baseline"></p><p id="photos-finish"></p>
+      <p id="photos-status" class="feedback-message" role="status" aria-live="polite"></p>
+      <button id="photos-submit" class="primary-button" type="button" disabled>Ajouter mes photos conservées</button>
+    </dialog>
     <dialog id="help-dialog" aria-labelledby="help-title">
       <header class="help-heading">
         <h2 id="help-title">Aide NightMerit</h2>
