@@ -1050,3 +1050,19 @@ body.layout-nightline .page-footer { color: var(--muted); }
 @media (forced-colors: active) {
   .feedback-message:not(:empty) { border: 2px solid CanvasText; }
 }
+
+#photos-dialog { width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; padding: 24px; overflow: auto; color: var(--ink); background: var(--night-soft); border: 1px solid var(--line-bright); border-radius: var(--radius); }
+#photos-dialog::backdrop { background: rgba(1, 6, 12, .82); }
+#photos-dialog > *, #photos-dialog label { min-width: 0; overflow-wrap: anywhere; }
+#photos-dialog select, #photos-dialog input { width: 100%; box-sizing: border-box; }
+#photos-dialog .observation-heading { flex-wrap: wrap; }
+#photos-dialog #photos-status:empty, #photos-dialog #photos-baseline:empty, #photos-dialog #photos-finish:empty { display: none; }
+
+#photos-dialog h2 { margin: 0; font-family: inherit; font-size: clamp(22px, 3vw, 28px); line-height: 1.25; }
+#photos-dialog label { display: grid; gap: 8px; margin: 16px 0; }
+#photos-dialog select, #photos-dialog input { padding: 12px; color: var(--ink); background: var(--panel-strong); border: 1px solid var(--line-bright); border-radius: 9px; font: inherit; min-height: 44px; }
+#photos-dialog #photos-inputs small { grid-column: 1 / -1; }
+#photos-dialog .observation-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+#photos-dialog #photos-close { flex: 0 0 auto; }
+#photos-dialog input:focus-visible, #photos-dialog select:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+@media (max-width: 600px) { #photos-dialog .form-grid.two-columns { grid-template-columns: 1fr; } #photos-dialog { padding: 20px; } }
