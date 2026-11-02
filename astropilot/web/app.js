@@ -8701,11 +8701,6 @@ document.querySelector("#analysis-history-dialog").addEventListener("close", () 
 });
 document.querySelector("#analysis-history-next").addEventListener("click", () => loadAnalysisHistory(true));
 
-restoreFieldObservationLock();
-restorePendingFieldObservationInventory();
-if (restorePendingAcceptanceAttempt()) showUnresolvedAcceptance();
-else loadConfiguration();
-
 photoElement("choice").addEventListener("change", event => {
   photoAddition.selected = photoAddition.sessions.find(item => item.execution.execution_id === event.target.value) || null;
   photoElement("frames").value = ""; photoElement("seconds").value = "";
@@ -8715,3 +8710,8 @@ for (const id of ["frames", "seconds"]) photoElement(id).addEventListener("input
 photoElement("submit").addEventListener("click", submitPhotoAddition);
 photoElement("close").addEventListener("click", () => { if (!photoAddition.busy) photoElement("dialog").close(); });
 photoElement("dialog").addEventListener("cancel", event => { if (photoAddition.busy) event.preventDefault(); });
+
+restoreFieldObservationLock();
+restorePendingFieldObservationInventory();
+if (restorePendingAcceptanceAttempt()) showUnresolvedAcceptance();
+else loadConfiguration();
