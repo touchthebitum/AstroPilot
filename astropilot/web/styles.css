@@ -1142,3 +1142,9 @@ html[data-ui-mode="simple"] body.beginner-layout #beginner-choice { border: 0; p
 body .beginner-help-button { display: inline-grid; width: 32px; height: 32px; padding: 0; vertical-align: middle; }
 body .availability-modes legend:has(.beginner-help-button) { display: flex; align-items: center; }
 @media (pointer: coarse) { body .beginner-help-button { width: 44px; height: 44px; } }
+/* Headings receive programmatic focus for navigation, without an input-like frame. */
+body.beginner-layout h2[tabindex="-1"]:focus { outline: none; }
+#beginner-follow { max-height: calc(100dvh - 24px); box-sizing: border-box; overflow: auto; padding: 24px; color: var(--ink); background: var(--night-soft); border: 1px solid var(--line-bright); border-radius: var(--radius); }
+#beginner-follow::backdrop { background: rgba(1, 6, 12, .82); }
+#beginner-follow .help-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+#beginner-follow h2 { margin: 0; }
