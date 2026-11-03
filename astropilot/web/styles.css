@@ -1,3 +1,4 @@
+/* The beginner flow shares the canonical controls and data with Advanced. */
 :root {
   color-scheme: dark;
   --ink: #f4f7fb;
@@ -1066,3 +1067,78 @@ body.layout-nightline .page-footer { color: var(--muted); }
 #photos-dialog #photos-close { flex: 0 0 auto; }
 #photos-dialog input:focus-visible, #photos-dialog select:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 @media (max-width: 600px) { #photos-dialog .form-grid.two-columns { grid-template-columns: 1fr; } #photos-dialog { padding: 20px; } }
+
+/* Fil conducteur: four stable stages, without a parallel application state. */
+#beginner-guide { grid-column: 1; grid-row: 1 / span 3; align-self: start; padding: 24px 12px; }
+#beginner-guide ol { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 28px; }
+#beginner-guide li { display: grid; grid-template-columns: 32px 1fr; column-gap: 10px; color: var(--muted); }
+#beginner-guide li small { grid-column: 2; }
+#beginner-guide .beginner-number { grid-row: span 2; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: var(--night-soft); }
+#beginner-guide li.active { color: var(--ink); }
+#beginner-guide li.active .beginner-number { background: var(--cyan); color: var(--night); }
+body.beginner-layout main.shell { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 24px; max-width: 1280px; align-items: start; }
+body.beginner-layout main.shell > :not(#beginner-guide) { grid-column: 2; min-width: 0; width: 100%; margin-left: 0; margin-right: 0; }
+body.beginner-layout .availability-panel, body.beginner-layout .onboarding { max-width: none; }
+#beginner-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 22px 0; }
+#beginner-choice > label:not(#beginner-project-wrap) { display: flex; align-items: center; gap: 10px; padding: 16px; border: 1px solid var(--line-bright); border-radius: 12px; }
+#beginner-project-wrap { grid-column: 1 / -1; }
+#beginner-choice input { width: 24px; height: 24px; flex-shrink: 0; accent-color: var(--cyan); }
+#beginner-choice select { width: 100%; margin-top: 8px; min-height: 44px; padding: 12px; background: var(--panel-strong); color: var(--ink); border: 1px solid var(--line-bright); border-radius: 9px; font: inherit; }
+#beginner-context-details { margin-bottom: 20px; }
+#beginner-saved-missions { margin: 22px 0; }
+#beginner-tri { display: grid; gap: 16px; }
+#beginner-tri h3, #beginner-tri p { margin: 0; }
+#beginner-follow { width: min(520px, calc(100% - 24px)); }
+.beginner-follow-actions { display: grid; gap: 16px; }
+.beginner-help-button { display: inline-grid; place-items: center; border: 1px solid var(--line-bright); color: var(--ink); background: var(--night-soft); border-radius: 50%; min-width: 32px; min-height: 32px; margin: 4px 8px; }
+#beginner-help { position: fixed; z-index: 10000; max-width: min(320px, calc(100vw - 16px)); background: var(--panel-strong); color: var(--ink); border: 1px solid var(--line-bright); border-radius: 10px; padding: 14px; box-shadow: var(--shadow); }
+html[data-ui-mode="simple"] body.beginner-layout #message-details,
+html[data-ui-mode="simple"] body.beginner-layout #decision-metrics,
+html[data-ui-mode="simple"] body.beginner-layout .insights,
+html[data-ui-mode="simple"] body.beginner-layout #equipment-catalogue,
+html[data-ui-mode="simple"] body.beginner-layout #target-suggestions > details,
+html[data-ui-mode="simple"] body.beginner-layout #session-intent,
+html[data-ui-mode="simple"] body.beginner-layout #session-progress,
+html[data-ui-mode="simple"] body.beginner-layout #session-evidence,
+html[data-ui-mode="simple"] body.beginner-layout #session-credit,
+html[data-ui-mode="simple"] body.beginner-layout #session-next-step,
+html[data-ui-mode="simple"] body.beginner-layout #saved-observations-open,
+html[data-ui-mode="simple"] body.beginner-layout #configuration-projects,
+html[data-ui-mode="simple"] body.beginner-layout #availability-edit-configuration,
+html[data-ui-mode="simple"] body.beginner-layout #open-observation-catalogue,
+html[data-ui-mode="simple"] body.beginner-layout .observation-diagnostics,
+html[data-ui-mode="simple"] body.beginner-layout #outcome-trace,
+html[data-ui-mode="simple"] body.beginner-layout #history-open,
+html[data-ui-mode="simple"] body.beginner-layout .tonight-section-title,
+html[data-ui-mode="simple"] body.beginner-layout .mission-overview > :last-child { display: none !important; }
+html[data-ui-mode="simple"] body.beginner-layout .observation-advanced-grid > label:has(#observation-hfr),
+html[data-ui-mode="simple"] body.beginner-layout .observation-advanced-grid > label:has(#observation-hfr-unit),
+html[data-ui-mode="simple"] body.beginner-layout .observation-advanced-grid > label:has(#observation-guiding-rms) { display: none; }
+html[data-ui-mode="pro"] #beginner-tri, html[data-ui-mode="pro"] #beginner-guide,
+html[data-ui-mode="pro"] #beginner-choice, html[data-ui-mode="pro"] .beginner-help-button { display: none; }
+html[data-ui-mode="simple"] body.beginner-layout .mission-overview { grid-template-columns: 1fr 1fr; }
+html[data-ui-mode="simple"] body.beginner-layout #session-start.secondary-button { display: none; }
+html[data-ui-mode="simple"] body.beginner-layout #session-close-actions .primary-button { width: 100%; }
+html[data-ui-mode="simple"] body.beginner-layout #session-interrupt { margin-top: 12px; }
+html[data-ui-mode="simple"] body.beginner-layout .insight-grid { grid-template-columns: 1fr; }
+html[data-ui-mode="simple"] body.beginner-layout .project-summary { display: none; }
+@media (max-width: 760px) {
+ body.beginner-layout main.shell { grid-template-columns: minmax(0,1fr); gap: 18px; }
+ body.beginner-layout main.shell > :not(#beginner-guide) { grid-column: 1; }
+ #beginner-guide { grid-column: 1; grid-row: auto; padding: 12px 0; }
+ #beginner-guide > p { display: none; }
+ #beginner-guide ol { grid-template-columns: repeat(4,minmax(0,1fr)); gap: 4px; margin: 0; }
+ #beginner-guide li { display: flex; flex-direction: column; align-items: center; gap: 5px; text-align: center; }
+ #beginner-guide li small { display: none; }
+ #beginner-guide li strong { font-size: 11px; font-weight: 500; }
+ #beginner-choice { grid-template-columns: 1fr; }
+ .beginner-help-button { min-width: 44px; min-height: 44px; }
+}
+/* Keep the optional context out of the main reading path. */
+html[data-ui-mode="simple"] body.beginner-layout #availability-selected-project,
+html[data-ui-mode="simple"] body.beginner-layout #availability-altitude-guidance,
+html[data-ui-mode="simple"] body.beginner-layout .page-footer [data-open-analysis-history] { display: none !important; }
+html[data-ui-mode="simple"] body.beginner-layout #beginner-choice { border: 0; padding: 0; }
+body .beginner-help-button { display: inline-grid; width: 32px; height: 32px; padding: 0; vertical-align: middle; }
+body .availability-modes legend:has(.beginner-help-button) { display: flex; align-items: center; }
+@media (pointer: coarse) { body .beginner-help-button { width: 44px; height: 44px; } }

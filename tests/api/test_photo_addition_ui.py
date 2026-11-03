@@ -83,6 +83,10 @@ const second={...structuredClone(original),acquisition_intent_id:'sh2-129_ha',ex
 sessionFetch=async url=>({ok:true,json:async()=>url.includes('/progress')?{acquisition_intents:[{acquisition_intent_id:'ou4_oiii',filter_type:'OIII'},{acquisition_intent_id:'sh2-129_ha',filter_type:'Ha'}]}:[structuredClone(original),second,{...original,project_id:'Other'}]});
 await openPhotoAddition('Sh2-129');assert.equal(photoAddition.sessions.length,2);assert.equal(photoAddition.selected,null);
 assert.equal(photoElement('choice').children.length,3);assert.match(photoElement('choice').children[1].textContent,/OIII/);assert.match(photoElement('choice').children[2].textContent,/Hα/);assert.equal(writes.length,0);
+// A finished-session panel may explicitly select only a session of this project.
+await openPhotoAddition('Sh2-129',{executionId:'second'});assert.equal(photoAddition.selected.execution.execution_id,'second');
+await openPhotoAddition('Sh2-129',{executionId:'foreign-or-missing'});assert.equal(photoAddition.selected,null);
+assert.equal(writes.length,0);
 console.log('PASS: one confirmation, exact baseline+credit, lost responses at each step, HTTP errors, concurrent baseline, no duplicate, blocked states, project/date/filter discovery.');
 })().catch(e=>{console.error(e);process.exit(1)});
 '''
