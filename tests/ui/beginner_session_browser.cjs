@@ -12,7 +12,7 @@ const {chromium}=require('playwright'), assert=require('node:assert/strict'), fs
   if(process.env.NIGHTMERIT_RESTART !== '1'){
    for(const [url,body] of [
     ['/v1/executions',{execution_id:id,mission_id:'mission-1'}],
-    ['/v1/execution-transitions',{execution_id:id,mission_id:'mission-1',status:'in_progress',actual_start:'2026-09-12T20:10:00Z',actual_end:null,actual_duration:null}]
+    ['/v1/execution-transitions',{execution_id:id,mission_id:'mission-1',status:'in_progress',actual_start:'2026-09-12T20:20:00Z',actual_end:null,actual_duration:null}]
    ]) {const r=await page.request.post(origin+url,{data:body});assert.equal(r.status(),200,await r.text());}
    await page.locator('#beginner-saved-missions summary').click();
    await page.locator('#open-saved-mission').click();
@@ -39,7 +39,7 @@ const {chromium}=require('playwright'), assert=require('node:assert/strict'), fs
   await page.locator('#nav-projects').click();
   await page.getByRole('button',{name:'Ajouter mes photos conservées',exact:true}).click();
   await page.locator('#photos-choice').selectOption(id);
-  await page.getByText(/Déjà ajouté :/).waitFor();
+  await page.locator('#photos-preview').filter({hasText:/Déjà ajouté :/}).waitFor();
   assert.equal(await page.locator('#photos-submit').isVisible(),false);
   const session=await(await page.request.get(origin+`/v1/executions/${id}/session`)).json();
   assert.equal(session.current_acquired_seconds,2925);assert.equal(session.session_credit_seconds,2400);

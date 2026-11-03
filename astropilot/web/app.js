@@ -5954,11 +5954,24 @@ async function openPhotoAddition(projectId, {executionId = null} = {}) {
     photoAddition.sessions = sessions.filter(item => item.project_id === projectId);
     const placeholder = document.createElement("option"); placeholder.value = "";
     placeholder.textContent = "Choisir la date et le filtre de mes photos"; photoElement("choice").append(placeholder);
-    for (const item of photoAddition.sessions) {
-      const option = document.createElement("option"); option.value = item.execution.execution_id;
+    const labels = new Map(photoAddition.sessions.map(item => {
       const zone = missionTimezone(item.mission, item);
       const filter = progress.acquisition_intents?.find(intent => intent.acquisition_intent_id === item.acquisition_intent_id)?.filter_type;
-      option.textContent = `${missionDateTimeLabel(item.execution.actual_start || item.chronology_at, zone)} · Filtre ${filter === "Ha" ? "Hα" : filter || "à vérifier"} · ${item.credit ? "Déjà ajouté" : sessionStatus(item.execution.status)}`;
+      return [item.execution.execution_id, `${missionDateTimeLabel(item.execution.actual_start || item.chronology_at, zone)} · Filtre ${filter === "Ha" ? "Hα" : filter || "à vérifier"}`];
+    }));
+    const groups = new Map();
+    for (const [id, label] of labels) {
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push(id);
+    }
+    for (const ids of groups.values()) ids.sort();
+    for (const item of photoAddition.sessions) {
+      const option = document.createElement("option"); option.value = item.execution.execution_id;
+      const label = labels.get(item.execution.execution_id), sameTime = groups.get(label);
+      const distinction = sameTime.length > 1 ? ` · Séance ${sameTime.indexOf(item.execution.execution_id) + 1} sur ${sameTime.length}` : "";
+      const status = item.credit ? `Déjà ajouté : ${usablePoseDuration(item.session_credit_seconds)}`
+        : item.execution.status === "completed" ? "Photos à renseigner" : sessionStatus(item.execution.status);
+      option.textContent = `${label}${distinction} · ${status}`;
       photoElement("choice").append(option);
     }
     // A known session is an explicit selection from the finished-session panel.

@@ -18,6 +18,13 @@ const path = require('node:path');
     await page.getByRole('button',{name:'Préparer une séance',exact:true}).click();
     await page.locator('#beginner-choice').waitFor({state:'visible'});
     await page.waitForFunction(()=>document.querySelector('#beginner-project').value==='M42');
+    // One choice selects the project and continuation path together, with no radio to confirm.
+    assert.equal(await page.locator('input[name="beginner-path"]').count(),0);
+    await page.locator('#beginner-project').selectOption('__nightmerit_discover__');
+    await page.waitForFunction(()=>document.querySelector('#discover-targets').checked);
+    await page.locator('#beginner-project').selectOption('M42');
+    await page.waitForFunction(()=>!document.querySelector('#discover-targets').checked && document.querySelector('#beginner-project').value==='M42');
+    await page.getByRole('button',{name:'Vérifier mon projet',exact:true}).waitFor();
     const cases = [];
     for (const width of [320,390,768,1280]) {
       await page.setViewportSize({width,height:1000});
@@ -29,6 +36,7 @@ const path = require('node:path');
         await page.waitForTimeout(80);
         assert.equal(await page.locator('#availability-start').inputValue(),'2026-11-03T20:00');
         assert.equal(await page.locator('#beginner-guide').isVisible(),mode==='simple');
+        assert.equal(await page.locator('#history-section').evaluate(e=>getComputedStyle(e).display==='none'),mode==='simple');
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true,'page overflow '+width+' '+mode);
         cases.push({width,mode});
       }

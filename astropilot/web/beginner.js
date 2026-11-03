@@ -36,29 +36,24 @@
   // Reuse the real discovery choice. No filter is inferred or confirmed here.
   const discovery = $("#discover-targets");
   const choice = make("fieldset", {id: "beginner-choice"});
-  choice.append(make("legend", {}, "Que souhaitez-vous faire ?"));
-  const discoverLabel = make("label");
-  const discoverRadio = make("input", {type: "radio", name: "beginner-path", value: "discover"});
-  discoverLabel.append(discoverRadio, make("span", {}, "Aidez-moi à choisir une cible"));
-  const projectLabel = make("label");
-  const projectRadio = make("input", {type: "radio", name: "beginner-path", value: "project"});
-  projectLabel.append(projectRadio, make("span", {}, "Continuer mon projet"));
-  const projectWrap = make("label", {id: "beginner-project-wrap"}, "Mon projet");
-  const projectSelect = make("select", {id: "beginner-project", "aria-label": "Mon projet à préparer"});
+  choice.append(make("legend", {}, "Que souhaitez-vous photographier ?"));
+  const discoverValue = "__nightmerit_discover__";
+  const projectWrap = make("label", {id: "beginner-project-wrap"}, "Choisir une option");
+  const projectSelect = make("select", {id: "beginner-project", "aria-label": "Projet ou aide au choix de la cible"});
   projectWrap.append(projectSelect);
-  choice.append(discoverLabel, projectLabel, projectWrap);
+  choice.append(projectWrap);
   discovery.closest("label").after(choice);
   async function selectPath(discover) {
     if (state.requestingRecommendation || state.savingConfiguration || guardUnresolvedAcceptance()) return;
     await setDiscoveryMode(discover);
     refresh();
   }
-  discoverRadio.addEventListener("change", () => { if (discoverRadio.checked) void selectPath(true); });
-  projectRadio.addEventListener("change", () => { if (projectRadio.checked) void selectPath(false); });
   projectSelect.addEventListener("change", () => {
     if (state.requestingRecommendation || state.savingConfiguration || guardUnresolvedAcceptance()) { refresh(); return; }
-    if (!Object.hasOwn(state.configuration?.projects || {}, projectSelect.value)) return;
-    state.selectedProjectId = projectSelect.value;
+    const selected = projectSelect.value;
+    if (selected === discoverValue) { void selectPath(true); return; }
+    if (!Object.hasOwn(state.configuration?.projects || {}, selected)) { refresh(); return; }
+    state.selectedProjectId = selected;
     void selectPath(false);
   });
   const context = make("p", {id: "beginner-context", class: "field-note"});
@@ -69,7 +64,7 @@
   $("#availability-form").addEventListener("submit", event => {
     if (simple() && !state.discoveryMode && !state.selectedProjectId) {
       event.preventDefault(); event.stopImmediatePropagation();
-      showAvailabilityError("Choisissez un projet, ou « Aidez-moi à choisir une cible ».");
+      showAvailabilityError("Choisissez votre projet ou « Aidez-moi à choisir une cible » dans la liste.");
       projectSelect.focus();
     }
   }, true);
@@ -182,17 +177,13 @@
     const signature = JSON.stringify(keys);
     if (signature !== projectSignature) {
       projectSignature = signature;
-      projectSelect.replaceChildren(make("option", {value: ""}, "Choisir mon projet"));
+      projectSelect.replaceChildren(make("option", {value: ""}, "Choisir une option"),
+        make("option", {value: discoverValue}, "Aidez-moi à choisir une cible"));
       keys.forEach(key => projectSelect.append(make("option", {value: key}, key)));
     }
     const busy = state.requestingRecommendation || state.savingConfiguration || hasUnresolvedAcceptance();
-    discoverRadio.disabled = busy;
-    projectRadio.disabled = busy || !keys.length;
     projectSelect.disabled = busy;
-    projectSelect.value = keys.includes(state.selectedProjectId) ? state.selectedProjectId : "";
-    discoverRadio.checked = Boolean(state.discoveryMode);
-    projectRadio.checked = !state.discoveryMode && Boolean(state.selectedProjectId);
-    hide(projectWrap, Boolean(state.discoveryMode) || !keys.length);
+    projectSelect.value = state.discoveryMode ? discoverValue : keys.includes(state.selectedProjectId) ? state.selectedProjectId : "";
     setText(context, [state.configuration?.site?.name, $("#review-equipment")?.textContent].filter(v => v && v !== "—").join(" · ") || "Votre configuration enregistrée sera utilisée.");
     if (beginner && configured && state.view === "availability") {
       setText($("#availability-title"), state.missionRecheck ? "Vérifier ma séance" : "Préparer ma séance");
