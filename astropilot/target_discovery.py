@@ -1,11 +1,14 @@
 """Read-only physical preselection. No project, mission, goal or credit is created."""
 from math import isfinite
+from dataclasses import replace
+from zoneinfo import ZoneInfo
 
 from astropilot.project_templates import project_templates
 from astropilot.target_catalogue import canonical_target, equipment_catalogue
 from decision.services.candidate_assessment import CandidateAssessment, CandidateViabilityEvaluator
 from decision.services.session_availability_windowing import select_physical_productive_window
 from decision.services.tonight_application_service import _select_forecast_night
+from decision.services.remaining_night_availability import remaining_night_availability
 from decision.weather.provider_reliability import WeatherLocation
 
 # Curated reference images; never use a source photograph as framing evidence.
@@ -68,6 +71,11 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
                      reference_time_utc, confirmed_filter_profile_ids, forecast=None):
     if inputs.availability is None:
         raise ValueError("discovery_availability_required")
+    inputs = replace(inputs, availability=remaining_night_availability(
+        inputs.availability, reference_time_utc=reference_time_utc,
+        latitude=inputs.location["latitude"], longitude=inputs.location["longitude"],
+        zone=ZoneInfo(weather.timezone),
+    ))
     templates = project_templates()
     supported = {item["filter_profile_id"] for template in templates
                  for intent in template["acquisition_intents"]

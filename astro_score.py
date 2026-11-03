@@ -2259,10 +2259,21 @@ def forecast_astro(
         )
     )
     today = normalized_reference_time.astimezone(resolved_zone).date()
+    from decision.services.remaining_night_availability import remaining_night_availability
+    availability = remaining_night_availability(
+        availability, reference_time_utc=normalized_reference_time,
+        latitude=lat, longitude=lon, zone=resolved_zone,
+    )
     from decision.models.session_availability import requested_evening
     requested_date = requested_evening(availability, resolved_zone)
+    # Before dawn the current astronomical night began on the previous civil day.
+    first_date = today
+    if (requested_date == today - timedelta(days=1)
+            and availability.end is not None
+            and availability.end.astimezone(timezone.utc) > normalized_reference_time):
+        first_date = requested_date
     for d in range(7):
-        night_date = today + timedelta(days=d)
+        night_date = first_date + timedelta(days=d)
         if requested_date is not None and night_date != requested_date:
             continue
 
