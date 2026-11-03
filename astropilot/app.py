@@ -2879,6 +2879,17 @@ def create_app(
                 availability = request.availability.to_domain(
                     site_zone=site_zone
                 )
+                if availability.mode is SessionAvailabilityMode.ALL_NIGHT:
+                    from decision.services.remaining_night_availability import remaining_night_availability
+                    site_zone = LocationTimeResolver.resolve(
+                        preliminary_inputs.location["latitude"],
+                        preliminary_inputs.location["longitude"],
+                    ).zone
+                    availability = remaining_night_availability(
+                        availability, reference_time_utc=reference_time_utc,
+                        latitude=preliminary_inputs.location["latitude"],
+                        longitude=preliminary_inputs.location["longitude"], zone=site_zone,
+                    )
             inputs = resolve_tonight_inputs(
                 profile,
                 location=requested_location,

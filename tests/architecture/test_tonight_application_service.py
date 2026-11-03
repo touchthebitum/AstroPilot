@@ -48,7 +48,8 @@ from decision.weather.weather_ingress import WeatherSnapshot
 
 
 FORECAST_EVIDENCE = DecisionForecastEvidence(())
-REFERENCE_TIME = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
+# Synthetic September mission fixtures must belong to the requested night.
+REFERENCE_TIME = datetime(2026, 9, 1, 18, tzinfo=timezone.utc)
 
 
 def make_profile(*, available_equipment=None, active_equipment="samyang_183"):
@@ -142,13 +143,19 @@ def test_dated_availability_evaluates_requested_evening(availability, expected_e
         build_candidates=candidates,
     )
     result = service.evaluate(profile=make_profile(), weather=object(),
-        reference_time_utc=REFERENCE_TIME, bortle=3, availability=availability)
+        reference_time_utc=datetime(2026, 10, 12, 12, tzinfo=timezone.utc), bortle=3, availability=availability)
     selected = next(n for n in nights if n["date"] == expected_evening)
     assert result.night is selected
     assert result.forecast_evidence is FORECAST_EVIDENCE
     assert calls[0][0] == selected["top_objects"]
     assert calls[0][1]["available_hours"] == selected["duration"]
-    assert calls[0][1]["session_availability"] is availability
+    bounded = calls[0][1]["session_availability"]
+    if availability is not None and availability.mode is SessionAvailabilityMode.ALL_NIGHT:
+        assert bounded.mode is SessionAvailabilityMode.FIXED_WINDOW
+        assert bounded.start.date() == date(2026, 10, 12)
+        assert bounded.end.date() == date(2026, 10, 13)
+    else:
+        assert bounded is availability
 
 
 def test_missing_requested_evening_does_not_evaluate_another_night():
@@ -437,7 +444,9 @@ def test_evaluate_builds_real_availability_bound_actionability_mission():
     assert call["objects"] == [{"catalog_key": "M31"}]
     assert call["recommended_key"] == "M31"
     bound_input = call["build_mission_input"](object())
-    assert bound_input.availability is availability
+    assert bound_input.availability.mode is SessionAvailabilityMode.FIXED_WINDOW
+    assert bound_input.availability.start.astimezone(timezone.utc) >= REFERENCE_TIME
+    assert bound_input.availability.end > mission_input.window_end
     assert bound_input.mission_id is None
     assert bound_input.decision_id is None
     assert bound_input.selection_id is None
@@ -720,6 +729,10 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
         availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )
 
+    bounded = forecast_calls[0][1]["availability"]
+    assert bounded.mode is SessionAvailabilityMode.FIXED_WINDOW
+    assert bounded.start.astimezone(timezone.utc) >= REFERENCE_TIME
+    assert bounded.end.astimezone(timezone.utc) > mission.window_end
     assert forecast_calls == [
         (
             (47.1, 6.8, "La Chaux-de-Fonds", 4),
@@ -733,7 +746,7 @@ def test_evaluate_delegates_inputs_selects_earliest_and_preserves_identities():
                     "available_equipment": ["fra400_2600"],
                 },
                 "reference_time_utc": REFERENCE_TIME,
-                "availability": SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
+                "availability": bounded,
             },
         )
     ]
@@ -1077,7 +1090,7 @@ def test_result_transports_timeline_start_outside_persistent_mission_models():
 
     service = TonightApplicationService(
         forecast_nights=lambda *args, **kwargs: forecast_run([
-            {"date": "2026-10-25", "top_objects": []}
+            {"date": "2026-10-24", "top_objects": []}
         ]),
         build_candidates=lambda *args, **kwargs: [candidate],
         opportunity_recommendation_service=RecordingRecommendationService(
@@ -1098,7 +1111,7 @@ def test_result_transports_timeline_start_outside_persistent_mission_models():
     result = service.evaluate(
         profile=make_profile(),
         weather=object(),
-        reference_time_utc=REFERENCE_TIME,
+        reference_time_utc=datetime(2026, 10, 25, 0, tzinfo=timezone.utc),
         bortle=3,
         availability=SessionAvailability(SessionAvailabilityMode.ALL_NIGHT),
     )

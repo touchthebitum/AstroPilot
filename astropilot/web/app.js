@@ -5939,7 +5939,7 @@ async function photoRead(url) {
   return photoRequest(url, {cache: "no-store"});
 }
 function photoSessionUrl(id) { return `/v1/executions/${encodeURIComponent(id)}/session`; }
-async function openPhotoAddition(projectId) {
+async function openPhotoAddition(projectId, {executionId = null} = {}) {
   if (photoAddition.busy) return;
   const generation = ++photoAddition.generation;
   photoAddition.projectId = projectId; photoAddition.selected = null; photoAddition.sessions = [];
@@ -5954,16 +5954,30 @@ async function openPhotoAddition(projectId) {
     photoAddition.sessions = sessions.filter(item => item.project_id === projectId);
     const placeholder = document.createElement("option"); placeholder.value = "";
     placeholder.textContent = "Choisir la date et le filtre de mes photos"; photoElement("choice").append(placeholder);
-    for (const item of photoAddition.sessions) {
-      const option = document.createElement("option"); option.value = item.execution.execution_id;
+    const labels = new Map(photoAddition.sessions.map(item => {
       const zone = missionTimezone(item.mission, item);
       const filter = progress.acquisition_intents?.find(intent => intent.acquisition_intent_id === item.acquisition_intent_id)?.filter_type;
-      option.textContent = `${missionDateTimeLabel(item.execution.actual_start || item.chronology_at, zone)} · Filtre ${filter === "Ha" ? "Hα" : filter || "à vérifier"} · ${item.credit ? "Déjà ajouté" : sessionStatus(item.execution.status)}`;
+      return [item.execution.execution_id, `${missionDateTimeLabel(item.execution.actual_start || item.chronology_at, zone)} · Filtre ${filter === "Ha" ? "Hα" : filter || "à vérifier"}`];
+    }));
+    const groups = new Map();
+    for (const [id, label] of labels) {
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push(id);
+    }
+    for (const ids of groups.values()) ids.sort();
+    for (const item of photoAddition.sessions) {
+      const option = document.createElement("option"); option.value = item.execution.execution_id;
+      const label = labels.get(item.execution.execution_id), sameTime = groups.get(label);
+      const distinction = sameTime.length > 1 ? ` · Séance ${sameTime.indexOf(item.execution.execution_id) + 1} sur ${sameTime.length}` : "";
+      const status = item.credit ? `Déjà ajouté : ${usablePoseDuration(item.session_credit_seconds)}`
+        : item.execution.status === "completed" ? "Photos à renseigner" : sessionStatus(item.execution.status);
+      option.textContent = `${label}${distinction} · ${status}`;
       photoElement("choice").append(option);
     }
-    // Never silently pick one of several nights or filters.
-    if (photoAddition.sessions.length === 1) {
-      photoAddition.selected = photoAddition.sessions[0];
+    // A known session is an explicit selection from the finished-session panel.
+    const explicitSession = executionId && photoAddition.sessions.find(item => item.execution.execution_id === executionId);
+    if (explicitSession || photoAddition.sessions.length === 1) {
+      photoAddition.selected = explicitSession || photoAddition.sessions[0];
       photoElement("choice").value = photoAddition.selected.execution.execution_id;
     }
     photoMessage(photoAddition.sessions.length ? "" : "Aucune séance enregistrée pour ce projet. Les images acquises avant le suivi restent accessibles dans Modifier mon projet.");
@@ -8436,14 +8450,14 @@ function renderTargetSuggestions(payload) {
     });
     const details = document.createElement("details");
     const summary = document.createElement("summary"); summary.textContent = "Pourquoi cette cible et ce filtre ?";
-    details.append(summary, why, advice);
+    details.append(summary, advice);
     if (suggestion.equipment_match) {
       const material = suggestion.equipment_match;
       const match = document.createElement("p");
       match.textContent = `${material.framing.label} ${material.extent_scope}`;
       details.append(match);
     }
-    card.append(title, figure, reference, timing, filter, difficulty, choose, details); cards.append(card);
+    card.append(title, figure, reference, timing, filter, why, difficulty, choose, details); cards.append(card);
   }
   document.querySelector("#target-suggestions-title").focus();
 }

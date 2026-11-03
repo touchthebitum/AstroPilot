@@ -83,6 +83,22 @@ const second={...structuredClone(original),acquisition_intent_id:'sh2-129_ha',ex
 sessionFetch=async url=>({ok:true,json:async()=>url.includes('/progress')?{acquisition_intents:[{acquisition_intent_id:'ou4_oiii',filter_type:'OIII'},{acquisition_intent_id:'sh2-129_ha',filter_type:'Ha'}]}:[structuredClone(original),second,{...original,project_id:'Other'}]});
 await openPhotoAddition('Sh2-129');assert.equal(photoAddition.sessions.length,2);assert.equal(photoAddition.selected,null);
 assert.equal(photoElement('choice').children.length,3);assert.match(photoElement('choice').children[1].textContent,/OIII/);assert.match(photoElement('choice').children[2].textContent,/Hα/);assert.equal(writes.length,0);
+// A finished-session panel may explicitly select only a session of this project.
+await openPhotoAddition('Sh2-129',{executionId:'second'});assert.equal(photoAddition.selected.execution.execution_id,'second');
+await openPhotoAddition('Sh2-129',{executionId:'foreign-or-missing'});assert.equal(photoAddition.selected,null);
+assert.equal(writes.length,0);
+// Distinct executions in the same displayed minute/filter must have distinct stable labels.
+const credited={...structuredClone(original),execution:{...original.execution,execution_id:'already-credited'},credit:{total_duration_us:2400000000},session_credit_seconds:2400};
+const collisions=[structuredClone(original),credited,second];
+sessionFetch=async url=>({ok:true,json:async()=>url.includes('/progress')?{acquisition_intents:[{acquisition_intent_id:'ou4_oiii',filter_type:'OIII'},{acquisition_intent_id:'sh2-129_ha',filter_type:'Ha'}]}:collisions});
+await openPhotoAddition('Sh2-129');
+const firstLabels=new Map(photoElement('choice').children.slice(1).map(o=>[o.value,o.textContent]));
+assert.equal(new Set(firstLabels.values()).size,3);
+assert.match(firstLabels.get('e'),/Séance 2 sur 2.*Photos à renseigner/);
+assert.match(firstLabels.get('already-credited'),/Séance 1 sur 2.*Déjà ajouté : 0 h 40/);
+collisions.reverse();await openPhotoAddition('Sh2-129');
+for(const option of photoElement('choice').children.slice(1))assert.equal(option.textContent,firstLabels.get(option.value));
+assert.equal(writes.length,0);
 console.log('PASS: one confirmation, exact baseline+credit, lost responses at each step, HTTP errors, concurrent baseline, no duplicate, blocked states, project/date/filter discovery.');
 })().catch(e=>{console.error(e);process.exit(1)});
 '''
