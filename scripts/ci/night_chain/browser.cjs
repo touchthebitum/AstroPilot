@@ -116,6 +116,15 @@ async function journey() {
   `});
   await send('Page.navigate', {url});
   await waitFor(() => evaluate(`Boolean(document.querySelector('#availability-step') && !document.querySelector('#availability-step').hidden)`), 'availability UI');
+  // The beginner journey now requires an explicit project choice. Use its real
+  // change handler before submitting; never bypass the selection guard.
+  await waitFor(() => evaluate(`Boolean(Array.from(document.querySelector('#beginner-project')?.options || []).find(o => o.value === 'Sh2-129'))`), 'beginner project option');
+  await evaluate(`
+    const project = document.querySelector('#beginner-project');
+    project.value = 'Sh2-129';
+    project.dispatchEvent(new Event('change', {bubbles: true})); true;
+  `);
+  await waitFor(() => evaluate(`state.selectedProjectId === 'Sh2-129' && !state.discoveryMode`), 'explicit project selected');
   await evaluate(`
     document.querySelector('input[name="availability-mode"][value="fixed_window"]').click();
     document.querySelector('#availability-start').value = '2026-10-16T00:30';
@@ -206,6 +215,7 @@ async function journey() {
         .find(o => o.value === ${JSON.stringify(accepted.body.mission_id)});
       return option ? {value: option.value, label: option.textContent} : null;
     })()`), 'persisted mission label after reload');
+    await evaluate(`document.querySelector('#beginner-saved-missions').open = true; true;`);
     const formatSavedInstant = instant => new Intl.DateTimeFormat('fr-CH', {
       timeZone: accepted.body.mission.site_timezone, year:'numeric', month:'2-digit', day:'2-digit',
       hour:'2-digit', minute:'2-digit', hour12:false,
