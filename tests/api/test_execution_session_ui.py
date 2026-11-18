@@ -658,7 +658,7 @@ async function fetch(url, options) {
     assert.notEqual(labels[0], labels[1]);
     for (const [kind, display, amount] of [['ha', 'Ha 6.5 nm', '1 h 30'], ['oiii', 'OIII 6.5 nm', '0 h 15']]) {
       const option = ui.savedMissionChoice.children.find(o => o.value === `mission-${kind}`);
-      assert(option.textContent.includes(`Sh2-129 · ${display} · `));
+      assert(option.textContent.includes(`Sh2-129 + Ou4 · ${display} · `));
       for (const date of expected) assert(option.textContent.includes(date), option.textContent);
       assert(option.textContent.endsWith(zone));
       ui.savedMissionChoice.value = option.value;
@@ -667,6 +667,7 @@ async function fetch(url, options) {
       ui.openSavedMission.handler();
       assert.equal(state.acceptedMission.mission_id, `mission-${kind}`);
       assert.equal(state.acceptedMission.mission.selected_filter.name, display);
+      assert.equal(state.acceptedMission.mission.target, 'Sh2-129', 'display alias must not rename stored targets');
       assert.equal(document.querySelector('#session-current').textContent, amount);
       assert.equal(document.querySelector('#session-status').textContent, 'Cette durée a été ajoutée à votre projet.');
     }

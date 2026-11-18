@@ -46,6 +46,6 @@
  new MutationObserver(()=>{phase='filters';render();}).observe($('#discovery-filters'),{attributes:true,attributeFilter:['hidden']});
  $('#ui-mode').addEventListener('change',()=>{if(typeof renderSimpleEquipment==='function')renderSimpleEquipment();render();});
  const name=$('#site-name');name.setAttribute('aria-describedby','site-name-help');const help=document.createElement('small');help.id='site-name-help';help.textContent='Nom libre : Maison, Jardin, Site de vacances. La position est définie séparément.';name.after(help);
- 
+
  render();
 })();

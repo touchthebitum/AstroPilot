@@ -65,6 +65,8 @@ const reply = (request, payload, ok = true) => request.resolve({ok, status: ok ?
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 // Discovery presentation is outside the configuration race scenarios.
 function updateDiscoveryAvailability() {}
+// Project context has its own async ownership regressions; keep this race harness scoped.
+function updateSelectedProjectContext() {}
 function saveMissionWeatherCheck() {}
 function text() {}
 function syncFieldObservationContext() {}
