@@ -24,7 +24,7 @@ def test_session_availability_modes_are_exact_and_contract_is_immutable():
     ]
     availability = SessionAvailability(mode=SessionAvailabilityMode.ALL_NIGHT)
     assert [field.name for field in fields(availability)] == [
-        "mode", "start", "end", "duration",
+        "mode", "start", "end", "duration", "preparation_minutes", "flats_minutes",
     ]
     assert availability.start is availability.end is availability.duration is None
     with pytest.raises(FrozenInstanceError):

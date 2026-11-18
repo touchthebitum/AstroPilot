@@ -19,16 +19,18 @@ def acquisition_availability(availability):
     def shift(instant, delta):
         return (instant.astimezone(timezone.utc) + delta).astimezone(instant.tzinfo)
 
+    preparation = timedelta(minutes=availability.preparation_minutes)
+    flats = timedelta(minutes=availability.flats_minutes)
     mode = availability.mode
     if mode is SessionAvailabilityMode.UNTIL:
-        return SessionAvailability(mode, end=shift(availability.end, -FLATS_TIME))
+        return SessionAvailability(mode, end=shift(availability.end, -flats))
     if mode is SessionAvailabilityMode.DURATION:
-        duration = availability.duration - PREPARATION_TIME - FLATS_TIME
+        duration = availability.duration - preparation - flats
         if duration <= timedelta(0):
             raise ValueError("session_too_short_for_operational_tasks")
         return SessionAvailability(mode, duration=duration)
     end = availability.end if mode is SessionAvailabilityMode.FIXED_WINDOW else shift(availability.start, availability.duration)
-    start, end = shift(availability.start, PREPARATION_TIME), shift(end, -FLATS_TIME)
+    start, end = shift(availability.start, preparation), shift(end, -flats)
     if end.astimezone(timezone.utc) <= start.astimezone(timezone.utc):
         raise ValueError("session_too_short_for_operational_tasks")
     return SessionAvailability(SessionAvailabilityMode.FIXED_WINDOW, start=start, end=end)
@@ -50,20 +52,20 @@ class NightTask:
 class NightPlanner:
 
     @staticmethod
-    def build(night_productivity):
+    def build(night_productivity, *, preparation_minutes=30, flats_minutes=10):
         tasks = [
             NightTask("T-30 min", "T-20 min", "Installer le matériel"),
             NightTask("T-20 min", "T-10 min", "Mise en station"),
             NightTask("T-10 min", "T", "Autofocus"),
         ]
 
-        tasks.append(
-            NightTask(
-                "Fin",
-                "Fin +10 min",
-                "Flats",
-            )
-        )
-
+        if preparation_minutes != 30:
+            tasks = [NightTask(
+                f"T-{preparation_minutes} min" if preparation_minutes else "T", "T",
+                "Préparer le matériel et régler la mise au point" if preparation_minutes else "Matériel déjà prêt",
+            )]
+        tasks.append(NightTask(
+            "Fin", f"Fin +{flats_minutes} min" if flats_minutes else "Fin",
+            "Flats" if flats_minutes else "Flats non prévus dans ce plan",
+        ))
         return tasks
-

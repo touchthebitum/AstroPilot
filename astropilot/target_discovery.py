@@ -108,6 +108,7 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
         raise ValueError("forecast_unavailable")
     night = _select_forecast_night(run.nights, inputs.availability, weather) if run.nights else None
     suggestions = []
+    refusal_evidence = []
     cloud_refusals = []
     cloud_humidity_refusals = []
     if night:
@@ -155,10 +156,28 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
                     weather_snapshot=weather, weather_freshness=weather_freshness,
                     decision_location=WeatherLocation(latitude=inputs.location["latitude"], longitude=inputs.location["longitude"]),
                     build_mission_input=intent_input)
+                from decision.services.session_availability_windowing import evaluate_physical_productive_window
+                selection = evaluate_physical_productive_window(assessment.productive_window, inputs.availability)
+                diagnostic = selection.refusal
+                scope = diagnostic.evidence_scope if diagnostic is not None else None
+                if diagnostic is not None:
+                    breakdown = diagnostic.productivity_breakdown
+                    refusal_evidence.append({
+                        "catalog_key": key, "display_name": template["display_name"],
+                        "filter_type": intent["filter_type"], "acquisition_intent_id": intent["acquisition_intent_id"],
+                        "evaluated_start": scope.evaluated_start.isoformat() if scope and scope.evaluated_start else None,
+                        "evaluated_end": scope.evaluated_end.isoformat() if scope and scope.evaluated_end else None,
+                        "refusal_stage": diagnostic.refusal_stage.value if diagnostic.refusal_stage else None,
+                        "best_productive_window_minutes": diagnostic.best_productive_window_minutes,
+                        "required_continuous_minutes": diagnostic.required_continuous_minutes,
+                        "losses": ({name: getattr(breakdown.losses, name) for name in
+                            ("cloud", "moon", "altitude", "humidity", "wind")} if breakdown and breakdown.losses else None),
+                    })
+                has_evaluated_range = bool(scope and scope.evaluated_start and scope.evaluated_end)
                 slices = assessment.productive_window.productivity_slice_evaluations
-                cloud_refusals.append(not assessment.productive_window.evidence_issues
+                cloud_refusals.append(has_evaluated_range and not assessment.productive_window.evidence_issues
                     and bool(slices) and all(1.0 - item.losses.cloud < PRODUCTIVE_SLICE_THRESHOLD for item in slices))
-                cloud_humidity_refusals.append(not assessment.productive_window.evidence_issues
+                cloud_humidity_refusals.append(has_evaluated_range and not assessment.productive_window.evidence_issues
                     and bool(slices) and all(1.0 - item.losses.cloud - item.losses.humidity < PRODUCTIVE_SLICE_THRESHOLD for item in slices)
                     and any(item.losses.cloud > 0 for item in slices))
                 if not CandidateViabilityEvaluator.is_viable(assessment):
@@ -230,6 +249,9 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
                                if not suggestions and cloud_humidity_refusals
                                and all(cloud_humidity_refusals)
                                else None),
+            "refusal_evidence": refusal_evidence if not suggestions else [],
+            "weather_context": {"provider": weather.provider, "timezone": weather.timezone,
+                                "retrieved_at_utc": weather.retrieved_at_utc.isoformat()},
             "catalogue": catalogue,
             "scope": f"Catalogue étendu : {catalogue['extended_catalogue']['records']} fiches, dont {len(catalogue['targets'])} cibles étudiées. La présélection automatique de cette bêta couvre {sum(bool(t['discovery_supported']) for t in templates)} régions en Hα et la Rosette en OIII/SII, avec cadrage et référence de filtre vérifiés. Les indices lunaires sont relatifs et ne fixent pas de durée de pose. Une fiche de référence ne constitue pas à elle seule une mission.",
             "notice": "Le créneau est une estimation selon les prévisions. Confirmez votre projet, puis relancez l’analyse avant de sortir. Aucun temps de pose n’est enregistré.",

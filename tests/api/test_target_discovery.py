@@ -307,3 +307,26 @@ def test_rosette_missing_lunar_evidence_does_not_reuse_ha(tmp_path, monkeypatch)
     assert response.status_code == 200
     assert response.json()['suggestions'] == []
     assert response.json()['refusal_reason'] is None
+
+
+@pytest.mark.parametrize('kind',['oiii','sii'])
+def test_weather_refusal_exposes_exact_scoped_evidence_and_collection_time(tmp_path,monkeypatch,kind):
+    from dataclasses import replace
+    reference=datetime(2026,11,10,18,tzinfo=timezone.utc)
+    weather=november_weather(reference);payload=deepcopy(weather.payload)
+    payload['hourly']['cloud_cover']=[100.0]*weather.hour_count
+    weather=replace(weather,payload=payload)
+    monkeypatch.setenv('ASTROPILOT_DATA_DIR',str(tmp_path))
+    client=TestClient(create_app(profile_provider=profile,weather_provider=lambda *args:weather,clock=lambda:reference))
+    response=client.post('/v1/target-suggestions',json=request(confirmed_filter_profile_ids=[f'baader_{kind}_highspeed_6_5nm'],
+        availability={'mode':'fixed_window','start':'2026-11-14T03:00:00+01:00','end':'2026-11-14T05:00:00+01:00'}))
+    assert response.status_code==200,response.text
+    data=response.json();assert data['suggestions']==[]
+    assert data['weather_context']['retrieved_at_utc']==weather.retrieved_at_utc.isoformat()
+    evidence=data['refusal_evidence'];assert len(evidence)==1,data
+    assert evidence[0]['acquisition_intent_id']=='rosette_'+kind
+    assert datetime.fromisoformat(evidence[0]['evaluated_start'])>=datetime.fromisoformat('2026-11-14T03:00:00+01:00')
+    assert datetime.fromisoformat(evidence[0]['evaluated_end'])<=datetime.fromisoformat('2026-11-14T05:00:00+01:00')
+    assert evidence[0]['losses']['cloud']>0
+    assert evidence[0]['refusal_stage']=='no_productive_slice'
+    assert not list(tmp_path.rglob('*.json'))

@@ -358,6 +358,21 @@
           </div>
           <p id="availability-overnight-hint" class="field-note availability-overnight-hint" role="status" aria-live="polite" hidden></p>
 
+          <div class="availability-fields">
+            <details id="operational-timing" class="operational-timing">
+              <summary>Adapter le temps de préparation et de flats</summary>
+              <p>Pour cette séance, ces durées sont réservées dans votre disponibilité avant de calculer le temps de pose. Elles seront conservées avec le plan.</p>
+              <div class="form-grid two-columns">
+                <label class="field" for="availability-preparation-minutes">Préparation et réglages (minutes)
+                  <input id="availability-preparation-minutes" type="number" min="0" max="240" step="1" value="30">
+                </label>
+                <label class="field" for="availability-flats-minutes">Flats (minutes)
+                  <input id="availability-flats-minutes" type="number" min="0" max="240" step="1" value="10">
+                </label>
+              </div>
+              <p class="field-note">0 signifie que ce temps n’est pas à prévoir pendant cette séance. Choisissez des durées réalistes ; NightMerit ne les mesure pas. Les poses doivent conserver au moins une heure continue.</p>
+            </details>
+          </div>
           <p id="availability-error" class="form-error availability-error" role="alert" hidden></p>
           <div class="wizard-actions availability-actions">
             <button class="secondary-button" id="configuration-projects" type="button">Mes projets</button>
@@ -385,6 +400,7 @@
           <h2 id="message-title">Impossible de préparer la nuit.</h2>
           <p id="message-body"></p>
           <p id="message-window" class="refusal-window" hidden></p>
+          <div id="message-refusal-evidence" class="refusal-summary" hidden></div>
           <details id="message-details" data-mode-disclosure hidden><summary>Comprendre le résultat</summary><p id="message-technical"></p></details>
         </div>
         <div class="message-actions">
@@ -997,7 +1013,7 @@
       </nav>
       <div id="help-content" tabindex="0" aria-label="Contenu du guide"></div>
     </dialog>
-  <script src="/ui/choice-pages.js?v=beginner-clarity-20261108" defer></script><script src="/ui/goal-guidance.js" defer></script><script src="/ui/filter-inventory.js?v=project-balance-20261110-1" defer></script>
+  <script src="/ui/choice-pages.js?v=beginner-clarity-20261108" defer></script><script src="/ui/goal-guidance.js" defer></script><script src="/ui/filter-inventory.js?v=refusal-summary-20261110-1" defer></script>
   <script src="/ui/project-pages.js" defer></script><script src="/ui/location-search.js" defer></script>
 </body>
 </html>

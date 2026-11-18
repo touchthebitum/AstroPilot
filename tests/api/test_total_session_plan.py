@@ -52,7 +52,8 @@ def test_reservation_is_elapsed_time_and_does_not_mutate_user_availability(mode)
 
 
 @pytest.mark.parametrize('kind', ['oiii','sii'])
-def test_rosette_accepted_plan_captures_80_minutes_inside_two_hour_total(tmp_path,monkeypatch,kind):
+@pytest.mark.parametrize('prep,flats,capture', [(30,10,80),(20,5,95),(45,15,60),(0,0,120),(50,20,None)])
+def test_rosette_accepted_plan_reserves_custom_operations_inside_total(tmp_path,monkeypatch,kind,prep,flats,capture):
     import uuid
     monkeypatch.setenv('ASTROPILOT_DATA_DIR',str(tmp_path))
     ref = datetime(2026,11,10,18,tzinfo=timezone.utc)
@@ -69,17 +70,41 @@ def test_rosette_accepted_plan_captures_80_minutes_inside_two_hour_total(tmp_pat
         'equipment':{'preset_id':'samyang_183'},'projects':{'Rosette':project}})
     assert response.status_code==200,response.text
     availability={'mode':'fixed_window','start':START.isoformat(),'end':(START+timedelta(hours=2)).isoformat()}
+    if (prep,flats)!=(30,10): availability.update(preparation_minutes=prep,flats_minutes=flats)
     response=client.post('/v1/tonight',json={'availability':availability,'selected_project_id':'Rosette'})
     assert response.status_code==200,response.text
-    decision=response.json();assert decision['status']=='available',decision
+    decision=response.json()
+    if capture is None:
+        assert decision['status'] in {'no_mission','no_productive_window'},decision
+        assert client.get('/v1/accepted-mission/current').json() is None
+        return
+    assert decision['status']=='available',decision
     response=client.post('/v1/decision-selections',json={'acceptance_request_id':str(uuid.uuid4()),
         'decision_id':decision['decision_id'],'source':'primary_recommendation','selected_catalog_key':'Rosette',
         'acquisition_intent_id':'rosette_'+kind,'selected_at':ref.isoformat()})
     assert response.status_code==200,response.text
     mission=response.json()['mission']
-    assert datetime.fromisoformat(mission['window_start'])==START+timedelta(minutes=30)
-    assert datetime.fromisoformat(mission['window_end'])==START+timedelta(hours=1,minutes=50)
-    assert mission['recommended_hours']==pytest.approx(80/60)
-    assert mission['expected_gain']==pytest.approx(round((80/60)/3*100,2))
+    assert datetime.fromisoformat(mission['window_start'])==START+timedelta(minutes=prep)
+    assert datetime.fromisoformat(mission['window_end'])==START+timedelta(hours=2,minutes=-flats)
+    assert mission['recommended_hours']==pytest.approx(capture/60)
+    assert mission['expected_gain']==pytest.approx(round((capture/60)/3*100,2))
     assert mission['selected_filter']['filter_type']==kind.upper()
     assert client.get('/v1/configuration').json()['projects']['Rosette']['hours']==0
+
+
+@pytest.mark.parametrize('bad', [-1,241,1.5,True,"20",None])
+def test_operational_durations_fail_closed(tmp_path,monkeypatch,bad):
+    from astropilot.app import SessionAvailabilityRequest
+    with pytest.raises((ValueError,TypeError)):
+        SessionAvailabilityRequest(mode="all_night",preparation_minutes=bad)
+    with pytest.raises((ValueError,TypeError)):
+        SessionAvailability(Mode.ALL_NIGHT,flats_minutes=bad)
+
+
+def test_remaining_all_night_preserves_custom_operational_times():
+    from decision.services.remaining_night_availability import remaining_night_availability
+    from zoneinfo import ZoneInfo
+    value=SessionAvailability(Mode.ALL_NIGHT,preparation_minutes=20,flats_minutes=5)
+    result=remaining_night_availability(value,reference_time_utc=datetime(2026,11,10,18,tzinfo=timezone.utc),
+        latitude=46.888,longitude=6.55,zone=ZoneInfo('Europe/Zurich'))
+    assert (result.preparation_minutes,result.flats_minutes)==(20,5)

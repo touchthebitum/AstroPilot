@@ -535,7 +535,12 @@ class MissionAssembler:
         )
 
         risk = RiskEngine.evaluate(risk_context)
-        tasks = NightPlanner.build(productivity)
+        availability = mission_input.availability if mission_input is not None else None
+        if availability is not None and (availability.preparation_minutes, availability.flats_minutes) != (30, 10):
+            tasks = NightPlanner.build(productivity,
+                preparation_minutes=availability.preparation_minutes, flats_minutes=availability.flats_minutes)
+        else:
+            tasks = NightPlanner.build(productivity)
 
         analysis_context = AnalysisContext(
             target=target,

@@ -29,4 +29,6 @@ def remaining_night_availability(availability, *, reference_time_utc, latitude,
         SessionAvailabilityMode.FIXED_WINDOW,
         start=max(dusk.astimezone(timezone.utc), now).astimezone(zone),
         end=dawn,
+        preparation_minutes=availability.preparation_minutes,
+        flats_minutes=availability.flats_minutes,
     )

@@ -489,6 +489,8 @@ class SessionAvailabilityRequest(BaseModel):
     start_local: str | None = None
     end_local: str | None = None
     duration: timedelta | None = None
+    preparation_minutes: int = Field(default=30, ge=0, le=240, strict=True)
+    flats_minutes: int = Field(default=10, ge=0, le=240, strict=True)
 
     @property
     def has_local_wall_time(self) -> bool:
@@ -555,6 +557,8 @@ class SessionAvailabilityRequest(BaseModel):
             start=start,
             end=end,
             duration=self.duration,
+            preparation_minutes=self.preparation_minutes,
+            flats_minutes=self.flats_minutes,
         )
         if (
             not self.has_local_wall_time

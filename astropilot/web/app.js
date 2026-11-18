@@ -4368,7 +4368,8 @@ function renderMission(mission) {
   const review = document.createElement("li");
   const reviewWhen = document.createElement("span");
   reviewWhen.className = "task-time";
-  reviewWhen.textContent = "Après les flats · le lendemain si besoin";
+  reviewWhen.textContent = missionOperationalMinutes(mission).flats === 0
+    ? "Après la séance · le lendemain si besoin" : "Après les flats · le lendemain si besoin";
   const reviewCopy = document.createElement("div");
   reviewCopy.className = "task-copy";
   const reviewTitle = document.createElement("strong");
@@ -4386,21 +4387,26 @@ function renderMission(mission) {
 
 // Recheck the whole stored plan so setup/flats are not deducted again.
 // Historical plans keep their saved task offsets and are never rewritten.
-function missionPlanWindow(mission) {
-  let before = 0, after = 0;
+function missionOperationalMinutes(mission) {
+  let preparation = null, flats = null;
   for (const task of mission?.tasks || []) {
     for (const value of [task.start, task.end]) {
-      const setup = /^T\s*[-−]\s*(\d+)\s*min$/.exec(String(value));
-      const flats = /^Fin\s*\+\s*(\d+)\s*min$/.exec(String(value));
-      if (setup) before = Math.max(before, Number(setup[1]));
-      if (flats) after = Math.max(after, Number(flats[1]));
+      const setup = /^T(?:\s*[-−]\s*(\d+)\s*min)?$/.exec(String(value));
+      const calibration = /^Fin(?:\s*\+\s*(\d+)\s*min)?$/.exec(String(value));
+      if (setup) preparation = Math.max(preparation ?? 0, Number(setup[1] || 0));
+      if (calibration) flats = Math.max(flats ?? 0, Number(calibration[1] || 0));
     }
   }
+  return {preparation, flats};
+}
+
+function missionPlanWindow(mission) {
+  const {preparation, flats} = missionOperationalMinutes(mission);
   const shift = (value, minutes) => {
     if (!minutes || !Number.isFinite(Date.parse(value))) return value;
     return new Date(Date.parse(value) + minutes * 60000).toISOString();
   };
-  return {start: shift(mission?.window_start, -before), end: shift(mission?.window_end, after)};
+  return {start: shift(mission?.window_start, -(preparation || 0)), end: shift(mission?.window_end, flats || 0)};
 }
 
 async function checkMissionConditions() {
@@ -4439,6 +4445,9 @@ async function checkMissionConditions() {
     showAvailabilityError("Le fuseau horaire du site n’est pas utilisable. Vérifiez votre site avant de relancer l’analyse.");
     return;
   }
+  const operational = missionOperationalMinutes(mission);
+  if (operational.preparation !== null) document.querySelector("#availability-preparation-minutes").value = operational.preparation;
+  if (operational.flats !== null) document.querySelector("#availability-flats-minutes").value = operational.flats;
   document.querySelector("#availability-start").value = startLocal;
   document.querySelector("#availability-end").value = endLocal;
   // Keep the original instants, including repeated local times at a clock change.
@@ -4942,7 +4951,8 @@ function resetMissionPresentation() {
 
 function clearAcceptedMission() {
   state.acceptedMission = null;
-  ui.savedMissionEntry.hidden = true;
+  // Clearing the current analysis must preserve access to persisted plans.
+  ui.savedMissionEntry.hidden = !(state.savedMissions || []).some(item => item?.mission && item.source === "persisted");
   state.acceptingRecommendation = false;
   state.acceptanceRequestOwner = null;
   state.acceptanceBlocked = false;
@@ -6883,6 +6893,7 @@ const availabilityFieldsByMode = Object.freeze({
 });
 
 const availabilityValidationMessages = Object.freeze({
+  operational_durations_invalid: "Indiquez des durées entières entre 0 et 240 minutes pour la préparation et les flats.",
   availability_mode_required: "Choisissez votre disponibilité pour cette nuit.",
   availability_duration_required: "Indiquez une durée positive en heures.",
   availability_start_required: "Indiquez une heure de début valide.",
@@ -6986,7 +6997,16 @@ function collectAvailabilityPayload() {
   const mode = document.querySelector('input[name="availability-mode"]:checked')?.value;
   if (!mode) throw availabilityInputError("availability_mode_required");
 
-  if (mode === "all_night") return { mode: "all_night" };
+  const extra = {};
+  const preparation = document.querySelector("#availability-preparation-minutes");
+  const flats = document.querySelector("#availability-flats-minutes");
+  if (preparation?.type === "number" && flats?.type === "number") {
+    const prep = Number(preparation.value), calibration = Number(flats.value);
+    if (preparation.value === "" || flats.value === "" || !Number.isInteger(prep) || !Number.isInteger(calibration)
+        || prep < 0 || prep > 240 || calibration < 0 || calibration > 240) throw availabilityInputError("operational_durations_invalid");
+    if (prep !== 30 || calibration !== 10) Object.assign(extra, {preparation_minutes: prep, flats_minutes: calibration});
+  }
+  if (mode === "all_night") return { mode: "all_night", ...extra };
   if (wallClockAvailabilityModes.includes(mode) && !currentSiteTimezone()) {
     throw availabilityInputError("availability_timezone_unresolved");
   }
@@ -7003,7 +7023,7 @@ function collectAvailabilityPayload() {
     if (!duration) throw availabilityInputError("availability_duration_required");
     const availability = { mode: "duration" };
     availability.duration = duration;
-    return availability;
+    return {...availability, ...extra};
   }
   if (mode === "start_and_duration") {
     if (!start) throw availabilityInputError("availability_start_required");
@@ -7011,20 +7031,20 @@ function collectAvailabilityPayload() {
     const availability = { mode: "start_and_duration" };
     availability.start_local = start;
     availability.duration = duration;
-    return availability;
+    return {...availability, ...extra};
   }
   if (mode === "until") {
     if (!end) throw availabilityInputError("availability_end_required");
     const availability = { mode: "until" };
     availability.end_local = end;
-    return availability;
+    return {...availability, ...extra};
   }
   if (mode === "fixed_window") {
     const recheck = state.missionRecheck;
     if (recheck && !state.discoveryMode && recheck.projectId === state.selectedProjectId
         && recheck.siteFingerprint === decisionSiteFingerprint()
         && startValue === recheck.startLocal && endValue === recheck.endLocal) {
-      return {mode: "fixed_window", start: recheck.start, end: recheck.end};
+      return {mode: "fixed_window", start: recheck.start, end: recheck.end, ...extra};
     }
     if (!start) throw availabilityInputError("availability_start_required");
     if (!end) throw availabilityInputError("availability_end_required");
@@ -7035,7 +7055,7 @@ function collectAvailabilityPayload() {
     const availability = { mode: "fixed_window" };
     availability.start_local = start;
     availability.end_local = end;
-    return availability;
+    return {...availability, ...extra};
   }
   throw availabilityInputError("availability_mode_required");
 }
@@ -7126,7 +7146,7 @@ function intentsRefusedForProductiveWindow(payload) {
 
 // Read a historical zone only from the archived response/request, never today's site.
 function refusalSiteTimezone(payload, {archived = false, request = null} = {}) {
-  const candidate = payload?.weather_trust?.timezone || request?.location?.timezone
+  const candidate = payload?.weather_trust?.timezone || payload?.weather_context?.timezone || request?.location?.timezone
     || (!archived && typeof currentSiteTimezone === "function" ? currentSiteTimezone() : null);
   if (candidate) {
     try { return new NightMeritTime.DateTimeFormat("fr-CH", {timeZone: candidate}).resolvedOptions().timeZone; }
@@ -7159,6 +7179,84 @@ function refusalEvaluatedRange(payload, timeZone) {
   const scope = refusal?.evidence_scope;
   if (!scope?.evaluated_start || !scope?.evaluated_end) return "";
   return `Plage évaluée : ${refusalRangeLabel(scope.evaluated_start, scope.evaluated_end, timeZone)}.`;
+}
+
+// Display stored evidence only: a missing scope is never replaced by requested
+// hours, and a missing collection timestamp is never replaced by the current time.
+function refusalEvidenceSummary(payload, timeZone) {
+  const aware = value => typeof value === "string" && /(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
+  const weather = {...(payload.refusal_weather || {}), ...(payload.weather_trust || {}), ...(payload.weather_context || {})};
+  const simulated = globalThis.NightMeritPresentation?.simulatedWeather(weather);
+  const retrieved = weather.retrieved_at_utc || payload.refusal_weather?.retrieved_at_utc || payload.weather_retrieved_at;
+  const collected = aware(retrieved)
+    ? `${simulated ? "Données météo simulées datées du" : "Prévisions collectées le"} ${refusalTimeLabel(retrieved, timeZone)}${weather.provider ? ` · ${weather.provider}` : ""}.`
+    : "Heure de collecte des prévisions non disponible dans cette analyse.";
+  const assessments = targetedIntentAssessments(payload);
+  const diagnosed = assessments.filter(item => item.actionability_refusal);
+  const entries = payload.refusal_evidence || (diagnosed.length ? diagnosed.map(item => {
+    const refusal = item.actionability_refusal;
+    return {display_name: item.label || item.filter_type, filter_type: null,
+      evaluated_start: refusal.evidence_scope?.evaluated_start, evaluated_end: refusal.evidence_scope?.evaluated_end,
+      refusal_stage: refusal.refusal_stage, best_productive_window_minutes: refusal.best_productive_window_minutes,
+      required_continuous_minutes: refusal.required_continuous_minutes, losses: refusal.productivity_breakdown?.losses};
+  }) : payload.actionability_refusal ? [{
+    evaluated_start: payload.actionability_refusal.evidence_scope?.evaluated_start,
+    evaluated_end: payload.actionability_refusal.evidence_scope?.evaluated_end,
+    refusal_stage: payload.actionability_refusal.refusal_stage,
+    best_productive_window_minutes: payload.actionability_refusal.best_productive_window_minutes,
+    required_continuous_minutes: payload.actionability_refusal.required_continuous_minutes,
+    losses: payload.actionability_refusal.productivity_breakdown?.losses,
+  }] : []);
+  const names = {cloud:"nuages",humidity:"humidité",wind:"vent",moon:"lumière de la Lune",altitude:"faible hauteur de la cible"};
+  const rows = entries.map(item => {
+    const bounded = aware(item.evaluated_start) && aware(item.evaluated_end)
+      && Date.parse(item.evaluated_end) > Date.parse(item.evaluated_start);
+    const range = bounded ? `Horaires évalués : ${refusalRangeLabel(item.evaluated_start, item.evaluated_end, timeZone)}.`
+      : "Horaires évalués non disponibles : aucune cause météo n’est déduite pour vos horaires.";
+    let factors;
+    if (!bounded) factors = "Le diagnostic ne conserve aucune plage évaluée dans votre disponibilité.";
+    else if (item.refusal_stage === "continuous_window_too_short" && Number.isFinite(item.best_productive_window_minutes) && Number.isFinite(item.required_continuous_minutes)) {
+      factors = `Créneau favorable trop court : ${Math.floor(item.best_productive_window_minutes)} min continues, pour un minimum de ${Math.ceil(item.required_continuous_minutes)} min. Ce refus n’est pas attribué aux seuls facteurs météo.`;
+    } else if (item.refusal_stage === "no_productive_slice") {
+      const limiting = Object.entries(item.losses || {}).filter(([key,value]) => names[key] && Number.isFinite(value) && value > 0)
+        .sort((a,b)=>b[1]-a[1]).map(([key])=>names[key]);
+      factors = limiting.length ? `Facteurs limitants dans le calcul : ${limiting.join(", ")}.`
+        : "Facteurs limitants non conservés dans ce diagnostic.";
+    } else factors = "La cause précise ne peut pas être attribuée à la météo avec ce diagnostic.";
+    const factorNames = bounded && item.refusal_stage === "no_productive_slice"
+      ? Object.entries(item.losses || {}).filter(([key,value])=>names[key] && Number.isFinite(value) && value > 0).map(([key])=>names[key]) : [];
+    return {label:[item.display_name, item.filter_type === "Ha" ? "Hα" : item.filter_type].filter(Boolean).join(" · "),range,factors,factorNames};
+  });
+  return {collected,rows};
+}
+
+function renderRefusalEvidence(container, payload, timeZone, {includeRange = true} = {}) {
+  if (!container?.replaceChildren) return;
+  container.replaceChildren(); container.hidden = false;
+  const evidence = refusalEvidenceSummary(payload, timeZone);
+  const heading = document.createElement("h3"); heading.textContent = "Bilan du refus"; container.append(heading);
+  const collected = document.createElement("p"); collected.className = "field-note"; collected.textContent = evidence.collected; container.append(collected);
+  const appendRow = (parent,row) => {
+    if (row.label) {const title=document.createElement("strong");title.textContent=row.label;parent.append(title);}
+    if (includeRange) {const range=document.createElement("p");range.textContent=row.range;parent.append(range);}
+    const factors=document.createElement("p");factors.textContent=row.factors;parent.append(factors);
+  };
+  if (evidence.rows.length > 1) {
+    const common = [...new Set(evidence.rows.map(row=>row.range))];
+    if (includeRange) {const range=document.createElement("p");range.textContent=common.length===1 ? common[0] : "Horaires évalués : plusieurs plages distinctes, à consulter par cible et filtre ci-dessous.";container.append(range);}
+    const factors=[...new Set(evidence.rows.flatMap(row=>row.factorNames))];
+    const explanation=document.createElement("p");explanation.textContent=factors.length
+      ? `Facteurs limitants rencontrés selon les prises de vue : ${factors.join(", ")}.`
+      : "Les contraintes sont détaillées pour chaque prise de vue ci-dessous.";container.append(explanation);
+    const details=document.createElement("details"), summary=document.createElement("summary");
+    summary.textContent=`Voir les horaires et facteurs par cible et filtre (${evidence.rows.length})`;
+    details.append(summary); for (const row of evidence.rows) {const group=document.createElement("div");group.className="refusal-summary-row";appendRow(group,row);details.append(group);} container.append(details);
+  } else if (evidence.rows.length) appendRow(container,evidence.rows[0]);
+  else {const note=document.createElement("p");note.textContent="Aucun diagnostic météo précis n’est disponible pour expliquer ce refus.";container.append(note);}
+  const help=document.createElement("details"), summary=document.createElement("summary"), note=document.createElement("p");
+  summary.textContent="Comment lire ces informations ?";
+  note.textContent="Les facteurs décrivent la meilleure portion du calcul, sans désigner une cause physique unique. La collecte indique quand les données ont été récupérées, pas une mesure du ciel sur place. Une information non conservée n’est pas reconstituée. Les détails et seuils du calcul restent dans « Comprendre le résultat ».";
+  help.append(summary,note);container.append(help);
 }
 
 function simpleProductivityRefusal(payload) {
@@ -7475,6 +7573,9 @@ function showTonightUnavailable(payload) {
     range.textContent = refusalEvaluatedRange(payload, timeZone);
     range.hidden = !range.textContent;
   }
+  if (typeof renderRefusalEvidence === "function" && (payload.actionability_refusal || payload.refusal_weather || targetedIntentAssessments(payload).some(item => item.actionability_refusal))) {
+    renderRefusalEvidence(document.querySelector("#message-refusal-evidence"), payload, timeZone, {includeRange: !range?.textContent});
+  }
   text("#message-technical", candidateMessage?.[2] || detailed || forecast?.details || technical);
   const details = document.querySelector("#message-details");
   details.hidden = false;
@@ -7494,6 +7595,8 @@ function showTonightUnavailable(payload) {
 function showMessage(title, body, { kicker = "Décision indisponible", retry = true } = {}) {
   const range = document.querySelector("#message-window");
   if (range) range.hidden = true;
+  const evidence = document.querySelector("#message-refusal-evidence");
+  if (evidence) {evidence.hidden = true; evidence.replaceChildren?.();}
   const altitudeButton = document.querySelector("#message-altitude-guidance");
   if (altitudeButton) altitudeButton.hidden = true;
   const details = document.querySelector("#message-details");
@@ -8713,6 +8816,10 @@ function renderTargetSuggestions(payload) {
   status.textContent = status.dataset[appliedUiMode === "pro" ? "proText" : "simpleText"];
   document.querySelector("#target-suggestions-scope").textContent = payload.scope || "";
   renderEquipmentCatalogue(payload.catalogue);
+  let refusalEvidence = document.querySelector("#discovery-refusal-evidence");
+  if (!refusalEvidence) {refusalEvidence = document.createElement("div");refusalEvidence.id="discovery-refusal-evidence";refusalEvidence.className="refusal-summary";document.querySelector("#target-suggestions-status").after(refusalEvidence);}
+  refusalEvidence.replaceChildren(); refusalEvidence.hidden = hasSuggestions;
+  if (!hasSuggestions) renderRefusalEvidence(refusalEvidence,payload,refusalSiteTimezone(payload));
   for (const suggestion of payload.suggestions || []) {
     const card = document.createElement("article"); card.className = "target-suggestion-card";
     const title = document.createElement("h3"); title.textContent = `${suggestion.display_name} · ${suggestion.filter_type === "Ha" ? "Hα" : suggestion.filter_type}`;
@@ -9028,6 +9135,10 @@ function renderArchivedAnalysis(record) {
     const node = document.createElement(tag);
     node.textContent = value;
     root.append(node);
+  }
+  if (typeof renderRefusalEvidence === "function" && (payload.actionability_refusal || payload.refusal_weather || targetedIntentAssessments(payload).some(item=>item.actionability_refusal))) {
+    const evidence = document.createElement("div"); evidence.className="refusal-summary";
+    renderRefusalEvidence(evidence,payload,timeZone,{includeRange: !refusalEvaluatedRange(payload,timeZone)});root.append(evidence);
   }
   const details = document.createElement("details");
   const summary = document.createElement("summary");

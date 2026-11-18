@@ -1182,3 +1182,15 @@ html[data-ui-mode="simple"] #project-create:not([open]) { display: none; }
   .project-balance thead th { font-size: .76rem; }
   .project-balance .field-note { font-size: .78rem; }
 }
+
+.operational-timing { grid-column: 1 / -1; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+.operational-timing summary { cursor: pointer; color: var(--cyan); }
+.operational-timing p { color: var(--muted); font-size: .9rem; line-height: 1.5; }
+
+.refusal-summary { margin: 18px 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; min-width: 0; overflow-wrap: anywhere; }
+.refusal-summary h3 { margin: 0 0 10px; font-size: 1rem; }
+.refusal-summary p { margin: 10px 0; line-height: 1.5; }
+.refusal-summary .field-note { font-size: .85rem; color: var(--muted); }
+.refusal-summary details { margin-top: 12px; }
+.refusal-summary summary { cursor: pointer; color: var(--cyan); }
+.refusal-summary-row { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
