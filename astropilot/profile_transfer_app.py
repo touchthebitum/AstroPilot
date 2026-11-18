@@ -1,5 +1,6 @@
 """Separate offline data assistant. Not mounted in the observing application."""
 import asyncio
+import hashlib
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -7,7 +8,7 @@ import secrets
 import socket
 import threading
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, unquote
 import webbrowser
 
 from fastapi import FastAPI, Request
@@ -15,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from starlette.background import BackgroundTask
 
 from astropilot.profile_backup import (BackupError, MAX_ARCHIVE, create_backup,
-                                      inspect_backup, restore_empty, profile_state)
+                                      inspect_backup, inspect_backup_for_review, restore_empty, profile_state)
 from astropilot.user_profile import get_user_data_dir
 
 MESSAGES = {
@@ -32,7 +33,7 @@ MESSAGES = {
 
 
 def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
-                        exporter=create_backup, inspector=inspect_backup, restorer=restore_empty,
+                        exporter=create_backup, inspector=inspect_backup_for_review, restorer=restore_empty,
                         open_application=None, demo=False):
     from astropilot.launcher_context import LaunchSession, DIAGNOSTIC_ROUTES, blocked_response
     from astropilot.app import canonical_version
@@ -46,6 +47,26 @@ def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
     pending = None
     operations = asyncio.Lock()
     opening = False
+    activity = {'last_export': None, 'last_check': None}
+    from astropilot.backup_check_receipt import read_status as last_backup_status, remember as remember_backup
+
+    async def read_archive(request):
+        raw = bytearray()
+        async for chunk in request.stream():
+            raw.extend(chunk)
+            if len(raw) > MAX_ARCHIVE:
+                raise BackupError('backup_too_large')
+        return bytes(raw)
+
+    def selected_name(request):
+        raw = request.headers.get('X-NightMerit-File-Name', '')
+        if len(raw) > 2048:
+            return 'Fichier sélectionné'
+        name = unquote(raw).replace('\\', '/').split('/')[-1]
+        if not name or len(name) > 255 or any(ord(c) < 32 for c in name):
+            return 'Fichier sélectionné'
+        return name
+
 
     @app.middleware("http")
     async def local_requests(request, call_next):
@@ -102,30 +123,53 @@ def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
                 "open_supported": open_application is not None,
                 "can_continue": demo and state == "demo_started" and open_application is not None,
                 "demo": demo,
-                "platform": "windows" if os.name == "nt" else "other"}
+                "platform": "windows" if os.name == "nt" else "other",
+                "backup_activity": activity, "last_verified_backup": last_backup_status(root)}
 
     @app.post("/transfer/export")
     async def export():
+        nonlocal activity
         async with operations:
             raw, _summary = await asyncio.to_thread(exporter, root)
-        name = "NightMerit-sauvegarde-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + ".zip"
-        return Response(raw, media_type="application/zip",
-                        headers={"Content-Disposition": 'attachment; filename="' + name + '"'})
+            now = datetime.now(timezone.utc)
+            name = "NightMerit-sauvegarde-" + now.strftime("%Y%m%d-%H%M%S") + ".zip"
+            activity = {'last_export': {'filename': name, 'requested_at_utc': now.isoformat(),
+                        'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw)}, 'last_check': None}
+            return Response(raw, media_type="application/zip", headers={
+                "Content-Disposition": 'attachment; filename="' + name + '"',
+                'X-NightMerit-Export-Requested-At': now.isoformat()})
+
+    @app.post('/transfer/check')
+    async def check(request: Request):
+        nonlocal activity
+        async with operations:
+            activity = {**activity, 'last_check': None}
+            raw = await read_archive(request)
+            _files, summary = await asyncio.to_thread(inspector, raw)
+            digest = hashlib.sha256(raw).hexdigest()
+            receipt = activity['last_export']
+            result = {'verified': True, 'filename': selected_name(request), 'summary': summary,
+                      'checked_at_utc': datetime.now(timezone.utc).isoformat(),
+                      'matches_last_export': (digest == receipt['sha256'] and len(raw) == receipt['bytes']) if receipt else None}
+            try:
+                result['history_saved'] = await asyncio.to_thread(remember_backup, root, _files, result, digest)
+            except (OSError, ValueError, TypeError, BackupError):
+                result['history_saved'] = False
+            activity = {**activity, 'last_check': result}
+            return result
 
     @app.post("/transfer/preview")
     async def preview(request: Request):
         nonlocal pending
         async with operations:
             pending = None
-            raw = bytearray()
-            async for chunk in request.stream():
-                raw.extend(chunk)
-                if len(raw) > MAX_ARCHIVE:
-                    raise BackupError("backup_too_large")
-            files, summary = await asyncio.to_thread(inspector, bytes(raw))
+            raw = await read_archive(request)
+            files, summary = await asyncio.to_thread(inspector, raw)
             nonce = secrets.token_urlsafe(32)
             pending = (nonce, time.monotonic(), files)
-            return {"summary": summary, "confirmation": nonce}
+            return {"summary": summary, "confirmation": nonce,
+                    'filename': selected_name(request),
+                    'checked_at_utc': datetime.now(timezone.utc).isoformat()}
 
     @app.post("/transfer/restore")
     async def restore(request: Request):

@@ -207,7 +207,7 @@ def _write_files(folder, files):
         target.chmod(0o600)
 
 
-def validate_graph(files):
+def validate_graph(files, *, review=False):
     """Use production read gates in a disposable child, never the active profile."""
     summary = validate_documents(files)
     with tempfile.TemporaryDirectory(prefix="nightmerit-backup-check-") as temporary:
@@ -226,11 +226,20 @@ def validate_graph(files):
         try:
             run = subprocess.run(args + ["--validate-data-backup", str(report)], env=env,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90)
-            if run.returncode or _json(report.read_bytes()) != {"validated": True}:
+            result = _json(report.read_bytes())
+            if run.returncode or not isinstance(result, dict) or result.get("validated") is not True:
                 raise BackupError("backup_incompatible")
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise BackupError("backup_incompatible") from exc
+    if review:
+        if not isinstance(result.get('project_details'), list):
+            raise BackupError('backup_incompatible')
+        return {**summary, 'project_details': result['project_details']}
     return summary
+
+
+def inspect_backup_for_review(raw):
+    return inspect_backup(raw, validator=lambda files: validate_graph(files, review=True))
 
 
 def create_backup(root, *, validator=validate_graph):
@@ -515,8 +524,20 @@ def validate_profile_child(report):
                      guardian_renewal_enabled=False)
     routes = {r.path: r.endpoint for r in app.routes
               if hasattr(r, "endpoint") and "GET" in getattr(r, "methods", ())}
-    for project_id in profile.get("projects", {}):
-        routes["/v1/projects/{project_id}/progress"](project_id)
+    from decision.services.intent_progress_credit import retained_projects
+    project_details = []
+    for project_id, project in retained_projects(profile).items():
+        progress = routes["/v1/projects/{project_id}/progress"](project_id)
+        filters = {item['acquisition_intent_id']: item['filter_type'] for item in progress['acquisition_intents']}
+        targets = {item['acquisition_intent_id']: item['target_hours'] for item in progress['acquisition_intent_targets']}
+        project_details.append({'project_id': project_id,
+            'archived': project_id in profile.get('archived_projects', {}),
+            'filters': [{'acquisition_intent_id': item['acquisition_intent_id'],
+                         'filter_type': filters.get(item['acquisition_intent_id']),
+                         'acquired_seconds': item['effective_total_seconds'],
+                         'target_hours': targets.get(item['acquisition_intent_id'])}
+                        for item in progress['intent_progress_breakdown']],
+            'recorded_total_seconds': float(project.get('hours', 0)) * 3600})
     root = Path(os.environ["ASTROPILOT_DATA_DIR"])
     from astropilot.field_observation_store import FileFieldObservationStore
     FileFieldObservationStore(root / "field_observations").list_page(limit=1)
@@ -542,4 +563,4 @@ def validate_profile_child(report):
     FileAnalysisHistory(root / "analysis_history").list_records(limit=1)
     from astropilot.search_forecast_history import FileSearchForecastHistory
     FileSearchForecastHistory(root / "search_forecast_history").list_records(limit=1)
-    Path(report).write_text(json.dumps({"validated": True}))
+    Path(report).write_text(json.dumps({"validated": True, "project_details": project_details}))
