@@ -830,11 +830,22 @@ def test_cleanup_waits_for_active_restore_lock(tmp_path):
         assert future.result(timeout=5) == [orphan.name]
 
 
-def test_restore_cleans_owned_orphan_and_preserves_published_profile(source, tmp_path):
+@pytest.mark.parametrize('cleanup_capability', ['native', 'unavailable'])
+def test_restore_cleans_owned_orphan_and_preserves_published_profile(source, tmp_path, monkeypatch, cleanup_capability):
     import astropilot.profile_backup as backup
+    if cleanup_capability == 'unavailable':
+        monkeypatch.setattr(backup.shutil.rmtree, 'avoids_symlink_attacks', False)
+    safe_cleanup = getattr(backup.shutil.rmtree, 'avoids_symlink_attacks', False)
     target = tmp_path/'target'; target.mkdir(); orphan = _marked_restore_stage(tmp_path, target)
+    orphan_before = {str(p.relative_to(orphan)): p.read_bytes() for p in orphan.rglob('*') if p.is_file()}
     files = snapshot(source)
     restore_empty(target, files, validator=validate_documents)
-    assert not orphan.exists() and snapshot(target) == files
+    assert snapshot(target) == files
+    if safe_cleanup:
+        assert not orphan.exists()
+    else:
+        # A platform without descriptor-safe removal must preserve the orphan.
+        assert orphan.exists()
+        assert {str(p.relative_to(orphan)): p.read_bytes() for p in orphan.rglob('*') if p.is_file()} == orphan_before
     assert backup.cleanup_interrupted_restores(target) == []
     assert snapshot(target) == files
