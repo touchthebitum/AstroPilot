@@ -1999,6 +1999,7 @@ def evaluate_object(
     decision_engine = build_decision_engine()
 
     first_evaluation = None
+    window_refusals = []
     for best in windows:
         best = dict(best)
         best["best_setup"] = best_setup
@@ -2047,14 +2048,21 @@ def evaluate_object(
         if first_evaluation is None:
             first_evaluation = evaluation
         from decision.mission.mission_assembler import ProductiveWindowAssessment
-        from decision.services.session_availability_windowing import select_physical_productive_window
+        from decision.services.session_availability_windowing import evaluate_physical_productive_window
         mission_input = build_mission_input(evaluation, profile=profile, for_intent_selection=True)
         assessment = ProductiveWindowAssessment.build(target=obj_name,
             context=decision_context, mission_input=mission_input)
-        if (preselection_availability is not None
-                and select_physical_productive_window(assessment, preselection_availability) is not None):
-            return evaluation
-    # Keep the best overlapping evidence so ordinary guards can explain a refusal.
+        if preselection_availability is not None:
+            selection = evaluate_physical_productive_window(assessment, preselection_availability)
+            if selection.window is not None:
+                return evaluation
+            if selection.refusal is not None:
+                from dataclasses import asdict
+                window_refusals.append(asdict(selection.refusal))
+    # Preserve every failed physical check, separately from the filter diagnostic.
+    # These records explain the search; they never authorize a mission.
+    if first_evaluation is not None and window_refusals:
+        first_evaluation["preselection_window_refusals"] = window_refusals
     return first_evaluation
 
 

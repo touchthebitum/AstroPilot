@@ -217,3 +217,37 @@ def test_duration_ambiguity_does_not_abort_application_or_http(monkeypatch, tmp_
         assert result.status is TonightStatus.NO_CANDIDATE
         assert result.mission is None
     assert completed == ['ambiguous', 'other']
+
+
+def test_refusal_preserves_all_checked_windows_with_reserved_capture_bounds(monkeypatch):
+    availability = SessionAvailability(SessionAvailabilityMode.FIXED_WINDOW,
+        start=stamp(15, 20), end=stamp(15, 23) + timedelta(minutes=30),
+        preparation_minutes=20, flats_minutes=5)
+    windows = [window(stamp(15, hour), 99-hour, 100) for hour in range(19, 24)]
+    result, physical, _ = evaluate(monkeypatch, windows, availability)
+    assert physical is None
+    assert result['window']['start'] == stamp(15, 19)
+    refusals = result['preselection_window_refusals']
+    assert len(refusals) == 5
+    scopes = [r['evidence_scope'] for r in refusals]
+    assert scopes[0]['evaluated_start'] == stamp(15, 20) + timedelta(minutes=20)
+    assert scopes[-1]['evaluated_end'] == stamp(15, 23) + timedelta(minutes=25)
+    assert all(r['productivity_breakdown']['productive_slice_count'] == 0 for r in refusals)
+    assert all(r['productivity_breakdown']['losses']['cloud'] > 0 for r in refusals)
+
+
+def test_success_never_exposes_previous_candidates_as_final_refusals(monkeypatch):
+    availability = SessionAvailability(SessionAvailabilityMode.ALL_NIGHT)
+    result, physical, _ = evaluate(monkeypatch,
+        [window(stamp(15, 20), 99, 100), window(stamp(15, 22), 80, 0)], availability)
+    assert physical is not None
+    assert 'preselection_window_refusals' not in result
+
+
+def test_impossible_operational_reservations_do_not_invent_checks(monkeypatch):
+    availability = SessionAvailability(SessionAvailabilityMode.START_AND_DURATION,
+        start=stamp(15, 20), duration=timedelta(minutes=20),
+        preparation_minutes=20, flats_minutes=5)
+    result, physical, _ = evaluate(monkeypatch, [window(stamp(15, 20), 99, 100)], availability)
+    assert physical is None
+    assert 'preselection_window_refusals' not in result

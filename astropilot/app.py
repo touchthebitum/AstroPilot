@@ -1473,6 +1473,15 @@ class TargetVisibilityRefusalModel(BaseModel):
 
 
 class TonightResponseModel(BaseModel):
+    preselection_window_refusals: list[ActionabilityRefusalModel] = Field(default_factory=list,
+        exclude_if=lambda value: not value)
+
+    @model_validator(mode="after")
+    def validate_preselection_window_refusals(self):
+        if self.preselection_window_refusals and self.status != "no_mission":
+            raise ValueError("preselection_refusals_require_no_mission")
+        return self
+
     target_refusal: TargetVisibilityRefusalModel | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
@@ -3586,6 +3595,15 @@ def create_app(
             refusal = result.night.get("target_refusals", {}).get(selected_project_id)
             if refusal is not None:
                 payload["target_refusal"] = TargetVisibilityRefusalModel.model_validate(refusal).model_dump(mode="json")
+        # Explain all failed physical candidates without attributing them to a filter.
+        if payload["status"] == "no_mission" and result.night:
+            primary_evaluation = (result.night.get("object_evaluations") or {}).get(payload.get("catalog_key"), {})
+            window_refusals = primary_evaluation.get("preselection_window_refusals", [])
+            if window_refusals:
+                payload["preselection_window_refusals"] = [
+                    ActionabilityRefusalModel.model_validate(item).model_dump(mode="json")
+                    for item in window_refusals
+                ]
         # Fake application services have no durable store unless explicitly injected.
         # Production always archives the validated display transport before success.
         if payload.get("decision_id") and (service_factory is _production_service_factory or analysis_store_factory is not None):

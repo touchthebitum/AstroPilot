@@ -7383,7 +7383,9 @@ function refusalEvaluatedRange(payload, timeZone) {
   const refusal = diagnosed.length === 1 ? diagnosed[0] : !diagnosed.length ? payload.actionability_refusal : null;
   const scope = refusal?.evidence_scope;
   if (!scope?.evaluated_start || !scope?.evaluated_end) return "";
-  return `Plage évaluée : ${refusalRangeLabel(scope.evaluated_start, scope.evaluated_end, timeZone)}.`;
+  const label = payload.preselection_window_refusals?.length
+    ? "Fenêtre de référence du diagnostic" : "Plage évaluée";
+  return `${label} : ${refusalRangeLabel(scope.evaluated_start, scope.evaluated_end, timeZone)}.`;
 }
 
 // Display stored evidence only: a missing scope is never replaced by requested
@@ -7435,6 +7437,13 @@ function refusalEvidenceSummary(payload, timeZone) {
   return {collected,rows};
 }
 
+function preselectionRefusalSummary(payload, timeZone) {
+  const refusals = Array.isArray(payload.preselection_window_refusals) ? payload.preselection_window_refusals : [];
+  return refusals.flatMap(refusal => refusalEvidenceSummary({
+    actionability_refusal: refusal,
+  }, timeZone).rows);
+}
+
 function renderRefusalEvidence(container, payload, timeZone, {includeRange = true} = {}) {
   if (!container?.replaceChildren) return;
   container.replaceChildren(); container.hidden = false;
@@ -7458,6 +7467,23 @@ function renderRefusalEvidence(container, payload, timeZone, {includeRange = tru
     details.append(summary); for (const row of evidence.rows) {const group=document.createElement("div");group.className="refusal-summary-row";appendRow(group,row);details.append(group);} container.append(details);
   } else if (evidence.rows.length) appendRow(container,evidence.rows[0]);
   else {const note=document.createElement("p");note.textContent="Aucun diagnostic météo précis n’est disponible pour expliquer ce refus.";container.append(note);}
+  const windows = preselectionRefusalSummary(payload, timeZone);
+  if (windows.length) {
+    const note=document.createElement("p");
+    note.textContent=`${windows.length} fenêtre${windows.length > 1 ? "s" : ""} examinée${windows.length > 1 ? "s" : ""} dans vos horaires, après réservation de la préparation et des flats. Le diagnostic du filtre ci-dessus conserve une fenêtre de référence ; il ne décrit pas à lui seul toute la recherche.`;
+    container.append(note);
+    const details=document.createElement("details"), summary=document.createElement("summary");
+    summary.textContent=`Voir les plages examinées avant le choix du filtre (${windows.length})`;
+    details.append(summary);
+    for (const row of windows) {
+      const group=document.createElement("div");group.className="refusal-summary-row";
+      // Show the recorded range even in views that hide the main diagnostic range.
+      const range=document.createElement("p");range.textContent=row.range;group.append(range);
+      const factors=document.createElement("p");factors.textContent=row.factors;group.append(factors);
+      details.append(group);
+    }
+    container.append(details);
+  }
   const help=document.createElement("details"), summary=document.createElement("summary"), note=document.createElement("p");
   summary.textContent="Comment lire ces informations ?";
   note.textContent="Les facteurs décrivent la meilleure portion du calcul, sans désigner une cause physique unique. La collecte indique quand les données ont été récupérées, pas une mesure du ciel sur place. Une information non conservée n’est pas reconstituée. Les détails et seuils du calcul restent dans « Comprendre le résultat ».";

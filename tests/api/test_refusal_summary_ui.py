@@ -47,3 +47,49 @@ assert.equal(JSON.stringify(payload),before);
 '''
     result=run_with_time_authority([shutil.which('node'),'-'],input=program,text=True,capture_output=True)
     assert result.returncode==0,result.stderr
+
+
+def test_multiple_preselection_windows_are_distinct_from_filter_reference():
+    source=(Path(__file__).parents[2]/'astropilot/web/app.js').read_text()
+    helpers=source[source.index('function targetedIntentAssessments('):source.index('function simpleProductivityRefusal(')]
+    program=r'''
+const assert=require('node:assert/strict');
+'''+helpers+r'''
+const refusal=(start,end,losses)=>({evidence_scope:{evaluated_start:start,evaluated_end:end},
+ refusal_stage:'no_productive_slice',productivity_breakdown:{losses}});
+const payload={actionability_refusal:refusal('2026-11-17T20:00:00+01:00','2026-11-17T21:00:00+01:00',{cloud:.4}),
+ preselection_window_refusals:[
+ refusal('2026-11-17T20:20:00+01:00','2026-11-17T21:00:00+01:00',{cloud:.4,wind:.15}),
+ refusal('2026-11-17T21:00:00+01:00','2026-11-17T23:00:00+01:00',{cloud:.7}),
+ refusal('2026-11-17T23:00:00+01:00','2026-11-17T23:25:00+01:00',{cloud:.7,altitude:.1})]};
+const before=JSON.stringify(payload);
+const rows=preselectionRefusalSummary(payload,'Europe/Zurich');
+assert.equal(rows.length,3);assert.match(rows[0].range,/20:20.*21:00/);
+assert.match(rows[1].range,/21:00.*23:00/);assert.match(rows[2].range,/23:00.*23:25/);
+assert.match(rows[0].factors,/nuages, vent/);assert.doesNotMatch(rows[1].factors,/vent|hauteur/);
+assert.match(rows[2].factors,/hauteur/);
+assert.match(refusalEvaluatedRange(payload,'Europe/Zurich'),/Fenêtre de référence/);
+const old={actionability_refusal:payload.actionability_refusal};
+assert.deepEqual(preselectionRefusalSummary(old,'Europe/Zurich'),[]);
+assert.match(refusalEvaluatedRange(old,'Europe/Zurich'),/Plage évaluée/);
+const missing={preselection_window_refusals:[{refusal_stage:'no_productive_slice',productivity_breakdown:{losses:{cloud:.7}}}]};
+assert.match(preselectionRefusalSummary(missing,'Europe/Zurich')[0].factors,/aucune plage/);
+class Element {
+ constructor(tag){this.tag=tag;this.children=[];this.textContent='';}
+ append(...items){this.children.push(...items);}
+ replaceChildren(...items){this.children=[...items];}
+}
+globalThis.document={createElement:tag=>new Element(tag)};
+const container=new Element('div');
+renderRefusalEvidence(container,payload,'Europe/Zurich',{includeRange:false});
+function texts(node){return [node.textContent,...node.children.flatMap(texts)].join(' ');}
+const rendered=texts(container);
+assert.match(rendered,/3 fenêtres examinées.*préparation et des flats/);
+assert.match(rendered,/fenêtre de référence/);
+assert.match(rendered,/avant le choix du filtre \(3\)/);
+assert.match(rendered,/20:20.*21:00.*23:00.*23:25/);
+assert.match(rendered,/nuages, vent/);
+assert.equal(JSON.stringify(payload),before);
+'''
+    result=run_with_time_authority([shutil.which('node'),'-'],input=program,text=True,capture_output=True)
+    assert result.returncode==0,result.stderr
