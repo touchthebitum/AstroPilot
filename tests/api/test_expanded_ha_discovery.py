@@ -1,3 +1,4 @@
+from test_target_discovery import assert_discovery_weather_only
 """Seasonal end-to-end checks with synthetic weather, never operator field evidence."""
 from copy import deepcopy
 import csv
@@ -67,7 +68,7 @@ def test_each_new_field_can_be_physically_preselected_and_explicitly_accepted(
     assert proposal['filter']['filter_profile_id'] == HA
     assert proposal['equipment_match']['framing']['status'] == 'nominal_fit'
     assert saved == before
-    assert not list(tmp_path.rglob('*.json'))
+    assert_discovery_weather_only(tmp_path, response)
     assert client.get(proposal['image']['src']).content[:2] == b'\xff\xd8'
 
     def factory():

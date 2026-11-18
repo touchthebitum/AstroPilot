@@ -82,7 +82,7 @@ from decision.services.user_selection_validator import (
 from decision.weather.weather_forecast import WeatherForecast
 
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 _IDENTITY_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _LEGACY_ROOT_FIELDS = frozenset(
     ("schema_version", "decision_id", "context", "selections", "missions")
@@ -458,6 +458,8 @@ def _decode(value: object, *, schema_version: int = SCHEMA_VERSION) -> object:
             expected -= frozenset(("actionability_refusal",))
         if dataclass_type is ActionabilityRefusal and schema_version <= 12:
             expected -= frozenset(("evidence_scope",))
+        if dataclass_type is SessionAvailability and schema_version <= 13:
+            expected -= frozenset(("preparation_minutes", "flats_minutes"))
         supplied = _exact_mapping(
             supplied, expected, "invalid_dataclass_fields"
         )
@@ -732,7 +734,7 @@ def deserialize_decision_acceptance_aggregate(
     if (
         isinstance(version, bool)
         or not isinstance(version, int)
-        or version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, SCHEMA_VERSION)
+        or version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, SCHEMA_VERSION)
     ):
         raise AcceptanceLineageCorruptionError("invalid_schema_version")
     root = _exact_mapping(

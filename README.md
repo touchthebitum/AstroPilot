@@ -286,3 +286,16 @@ The final release ZIP excludes AppleDouble (`._*`) and `__MACOSX` entries.
 The workflow extracts that ZIP and rechecks the extracted application signature,
 stapling, and Gatekeeper before generating its SHA-256 sidecar. These pipeline
 checks are complemented by the passed native beta.3 clean-machine test.
+
+### Development and kit provenance
+
+Develop changes on a Git branch and commit code, tests and documentation before
+building a kit. Validate the commit being packaged and record its Git SHA and
+dirty state alongside the source checksum. A source checksum is additional
+provenance; it is not a Git commit. Keep personal profiles, backup ZIPs, runtime
+logs and scientific collections outside source commits.
+
+The [18 November 2026 consolidation audit](docs/audits/2026-11-18-kit-source-consolidation.txt)
+links the retained beta 8 kit source to the reconstructed commits and records
+the validation scope. The frozen reference and its Field Lab decision gate
+remain separate from this development branch.

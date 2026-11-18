@@ -548,7 +548,7 @@ def test_expected_gain_is_prorated_to_the_selected_actionable_hour(
     availability = SessionAvailability(
         SessionAvailabilityMode.FIXED_WINDOW,
         start=frozen_time,
-        end=frozen_time + timedelta(hours=1),
+        end=frozen_time + timedelta(hours=1, minutes=40),
     )
 
     result = MissionAssembler.build(
@@ -803,7 +803,7 @@ def test_tonight_composes_intent_filter_through_real_input_and_assembler(
 
 @pytest.mark.parametrize("legacy_remaining", [0.0, 4.0])
 @pytest.mark.parametrize("acquired", [0.5, 0.764, 1.0, 1.5, 2.0])
-@pytest.mark.parametrize("user_hours", [None, 1.1])
+@pytest.mark.parametrize("user_hours", [None, 1.1, 2.0])
 def test_tonight_caps_duration_and_gain_by_intent_through_real_assembly(
     monkeypatch, frozen_time, summary, context, isolated_dependencies,
     legacy_remaining, acquired, user_hours,
@@ -867,10 +867,13 @@ def test_tonight_caps_duration_and_gain_by_intent_through_real_assembly(
         recommended_key="Sh2-129",
         build_mission_input=build_input,
     )
-    if remaining.remaining_hours < 1:
+    if remaining.remaining_hours < 1 or (user_hours is not None and user_hours - 2/3 < 1):
         assert mission is None
     else:
-        expected_hours = min(1.5, remaining.remaining_hours, user_hours or 4)
+        # The fixture has 1.5 productive hours from the user start: setup
+        # consumes its first half hour when availability has a lower bound.
+        expected_hours = min(1.5 if user_hours is None else 1.0,
+            remaining.remaining_hours, (user_hours - 2/3) if user_hours else 4)
         assert mission.recommended_hours == pytest.approx(expected_hours)
         assert mission.recommended_hours <= remaining.remaining_hours
         assert mission.recommended_hours <= (user_hours or 4)

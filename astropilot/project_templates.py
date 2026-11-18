@@ -48,8 +48,22 @@ for identity, name, purpose, advice, source in (
     PROJECT_GUIDANCE[identity] = {"summary": "Un projet Hα pour découvrir " + name + ". Le ciel, le suivi et le traitement restent déterminants.",
         "source_url": source, "source_label": "Découvrir cette nébuleuse et la source de son image"}
     INTENT_GUIDANCE[(identity, identity + "_ha")] = {
-        "difficulty": "Pour progresser · nébuleuse étendue",
-        "purpose": purpose + " Le filtre Hα isole l’émission de l’hydrogène.", "advice": advice}
+        "difficulty": "Une grande nébuleuse à photographier en plusieurs séances.",
+        "purpose": purpose + " Le filtre Hα isole l’émission de l’hydrogène.", "advice": advice + " Elle occupe une grande zone du ciel. Accumuler davantage de photos conservées permet de mieux faire ressortir les détails."}
+
+
+# Rosette emissions documented by NASA APOD (2024-02-09); no duration is inferred.
+PROJECT_GUIDANCE["rosette"] = {
+    "summary": "La Rosette peut être photographiée en Hα, OIII et SII. Chaque filtre constitue une acquisition distincte ; une image couleur demande de les assembler au traitement.",
+    "source_url": "https://science.nasa.gov/image-article/apod-2024-february-9-when-roses-arent-red/",
+    "source_label": "Hydrogène, oxygène et soufre dans la Rosette · NASA",
+}
+for suffix, element in (("oiii", "oxygène doublement ionisé"), ("sii", "soufre ionisé")):
+    INTENT_GUIDANCE[("rosette", "rosette_" + suffix)] = {
+        "difficulty": "Une acquisition complémentaire à évaluer sur vos premières images.",
+        "purpose": "Photographier l’émission de l’" + element + "." if suffix == "oiii" else "Photographier l’émission du soufre ionisé.",
+        "advice": "Ce filtre fournit une image monochrome distincte du Hα. Les acquisitions peuvent être combinées au traitement pour une image couleur. Cette bêta ne propose pas encore de durée de départ pour ce filtre ; le conseil Hα ne s’y applique pas.",
+    }
 
 
 from decision.definitions.production_extended_targets import EXTENDED_HA_TARGETS
@@ -62,6 +76,37 @@ for target in EXTENDED_HA_TARGETS:
         "difficulty": target["difficulty"],
         "purpose": "Photographier l’émission de l’hydrogène de " + target["name"] + " avec le filtre Hα.",
         "advice": target["advice"] + " En Hα, le résultat est monochrome. Le ciel, le suivi et le traitement restent déterminants."}
+
+
+# Editorial starting ranges, not measured averages or a calibrated exposure model.
+# References are acquisition examples; equipment, sky and processing differ.
+EXPOSURE_GUIDANCE = {
+    "ngc7000_ha": {
+        "min_hours": 2, "max_hours": 4, "suggested_hours": 3,
+        "basis": "editorial_starting_point", "filter_type": "Ha",
+        "sources": [{"label": "HellaNebula : NGC 7000, 1 h 30 en Hα, 135 mm, Bortle 5",
+                     "url": "https://www.hellanebula.com/gallery/coast-yttf2"}],
+        "note": "Repère de départ choisi pour apprendre, inspiré d’un exemple publié ; ce n’est pas une moyenne. La durée dépend aussi de votre matériel, du ciel et du traitement. Aucun réglage automatique selon Bortle ou la météo.",
+    },
+    "m42_ha": {
+        "min_hours": 2, "max_hours": 4, "suggested_hours": 3,
+        "basis": "editorial_starting_point", "filter_type": "Ha",
+        "sources": [{"label": "Starry Wonders : M42 en Hα, 3 h 30",
+                     "url": "https://www.starrywonders.com/m42stlha.html"}],
+        "note": "Repère de départ, pas une moyenne ni une prévision pour votre matériel et votre ciel. Le cœur d’Orion peut saturer : vérifiez vos images et prévoyez aussi des poses plus courtes si nécessaire.",
+    },
+    "rosette_ha": {
+        "min_hours": 4, "max_hours": 8, "suggested_hours": 6,
+        "basis": "editorial_starting_point", "filter_type": "Ha",
+        "sources": [
+            {"label": "Starry Wonders : Rosette en Hα, 4 h",
+             "url": "https://www.starrywonders.com/rosettestl.html"},
+            {"label": "Astronewton : Hα seul, 8 h 10, autres filtres séparés",
+             "url": "https://www.astronewton.com/rosette-nebula"},
+        ],
+        "note": "Fourchette de départ inspirée d’exemples publiés avec d’autres matériels. Ce n’est pas une moyenne ni une prévision personnalisée. La lumière du ciel, le suivi et le traitement changent le résultat.",
+    },
+}
 
 
 def project_templates() -> list[dict]:
@@ -84,6 +129,8 @@ def project_templates() -> list[dict]:
             "acquisition_intents": [
                 {"acquisition_intent_id": intent.acquisition_intent_id,
                  "label": intent.label, "filter_type": intent.filter_type,
+                 **({"exposure_guidance": EXPOSURE_GUIDANCE[intent.acquisition_intent_id]}
+                    if intent.acquisition_intent_id in EXPOSURE_GUIDANCE and intent.filter_type == "Ha" else {}),
                  **({"guidance": dict(INTENT_GUIDANCE[(field.imaging_field_id, intent.acquisition_intent_id)])}
                     if (field.imaging_field_id, intent.acquisition_intent_id) in INTENT_GUIDANCE else {}),
                  "supported_filters": [

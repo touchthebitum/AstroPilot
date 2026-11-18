@@ -36,6 +36,13 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
   await page.locator('#photos-status.confirmation-success').waitFor();
   assert.match(await page.locator('#photos-status').innerText(),/14 h 15.*5 h 45/);
   assert.equal(await page.locator('#photos-submit').isVisible(),false);
+  assert.match(await page.locator('#photos-choice option:checked').innerText(),/OIII.*Déjà ajouté : 0 h 40/,'credited status updates before closing or reloading');
+  const creditedChoice=await page.locator('#photos-choice').inputValue();
+  await page.locator('#photos-choice').selectOption('');
+  await page.locator('#photos-choice').selectOption(creditedChoice);
+  assert.match(await page.locator('#photos-choice option:checked').innerText(),/OIII.*Déjà ajouté : 0 h 40/);
+  assert.equal(await page.locator('#photos-submit').isVisible(),false,'reselecting the same credited session cannot restore the addition button');
+  assert.match(await page.locator('#photos-preview').innerText(),/Déjà ajouté : 0 h 40.*14 h 15/);
   assert.equal(posts.filter(x=>x.url==='/v1/outcome-evidence').length,1);
   assert.equal(posts.filter(x=>x.url.endsWith('/intent-progress-credit')).length,1);
   assert.equal(posts.length,2,'one click, existing completed session, two durable stages only');

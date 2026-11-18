@@ -174,10 +174,13 @@ def test_old_v11_lineage_remains_readable_without_reconstruction_and_v12_retains
     assert store.load_context("decision-1").recommendation.opportunity.candidate.acquisition_intent_assessments == candidate.acquisition_intent_assessments
     assert path.read_bytes() == before
     document = json.loads(before)
-    assert document["schema_version"] == 13
+    assert document["schema_version"] == 14
     document["schema_version"] = 11
     def strip(value):
         if isinstance(value, dict):
+            if value.get("class") == "decision.models.session_availability.SessionAvailability":
+                value["fields"].pop("preparation_minutes", None)
+                value["fields"].pop("flats_minutes", None)
             if value.get("class") == "decision.models.acquisition_intent_assessment.AcquisitionIntentAssessment":
                 value["fields"].pop("actionability_refusal", None)
             if value.get("class") == "decision.models.actionability_refusal.ActionabilityRefusal":
@@ -426,6 +429,9 @@ def test_v12_lineage_stays_readable_without_inventing_scope(tmp_path):
     document['schema_version']=12
     def strip(value):
         if isinstance(value,dict):
+            if value.get('class')=='decision.models.session_availability.SessionAvailability':
+                value['fields'].pop('preparation_minutes',None)
+                value['fields'].pop('flats_minutes',None)
             if value.get('class')=='decision.models.actionability_refusal.ActionabilityRefusal':
                 value['fields'].pop('evidence_scope',None)
             for child in value.values():strip(child)

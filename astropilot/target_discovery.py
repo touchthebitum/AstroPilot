@@ -10,6 +10,7 @@ from decision.services.session_availability_windowing import select_physical_pro
 from decision.services.tonight_application_service import _select_forecast_night
 from decision.services.remaining_night_availability import remaining_night_availability
 from decision.weather.provider_reliability import WeatherLocation
+from decision.night_productivity.productivity_diagnostics import PRODUCTIVE_SLICE_THRESHOLD
 
 # Curated reference images; never use a source photograph as framing evidence.
 TARGET_IMAGES = {
@@ -82,6 +83,10 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
                  for item in intent["supported_filters"]
                  if item["equipment_id"] == inputs.equipment}
     confirmed = set(confirmed_filter_profile_ids)
+    from astropilot.filter_inventory import declared_filter_ids
+    installed=declared_filter_ids(profile,inputs.equipment)
+    if installed is not None and not confirmed <= installed:
+        raise ValueError("discovery_filter_not_installed")
     if not confirmed or not confirmed <= supported:
         raise ValueError("discovery_filter_confirmation_required")
     catalogue = equipment_catalogue(profile=profile, equipment_id=inputs.equipment,
@@ -103,6 +108,9 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
         raise ValueError("forecast_unavailable")
     night = _select_forecast_night(run.nights, inputs.availability, weather) if run.nights else None
     suggestions = []
+    refusal_evidence = []
+    cloud_refusals = []
+    cloud_humidity_refusals = []
     if night:
         from astro_score import build_mission_input
         evaluations = {item["catalog_key"]: item for item in night["all_objects"]}
@@ -116,16 +124,6 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
                 continue
             score = evaluation.get("global_score", evaluation.get("score"))
             if isinstance(score, bool) or not isinstance(score, (int, float)) or not isfinite(score) or score <= 0:
-                continue
-            assessment = CandidateAssessment.build_for_catalog_key(
-                catalog_key=key, object_evaluations=evaluations, profile=effective,
-                weather_snapshot=weather, weather_freshness=weather_freshness,
-                decision_location=WeatherLocation(latitude=inputs.location["latitude"], longitude=inputs.location["longitude"]),
-                build_mission_input=lambda evaluation, *, profile: build_mission_input(evaluation, profile=profile, for_intent_selection=True))
-            if not CandidateViabilityEvaluator.is_viable(assessment):
-                continue
-            window = select_physical_productive_window(assessment.productive_window, inputs.availability)
-            if window is None:
                 continue
             # Catalogue aliases identify an already saved project without migrating
             # its key or overwriting progress. Ambiguous legacy duplicates are not
@@ -145,24 +143,116 @@ def discover_targets(*, inputs, profile, weather, weather_freshness,
                     if item["filter_profile_id"] == matches[0]["filter_profile_id"]), None)
                 if not optical_match or optical_match["status"] != "documented_match":
                     continue
+                # Build a separate evidence-only assessment for this exact intent.
+                # No project, exposure goal, capacity or authorization is fabricated.
+                def intent_input(evaluation, *, profile):
+                    base = build_mission_input(evaluation, profile=profile, for_intent_selection=True)
+                    return replace(base, imaging_field_id=template["imaging_field_id"],
+                                   acquisition_intent_id=intent["acquisition_intent_id"],
+                                   selected_filter=None, evidence_only=True,
+                                   creation_authorization=None)
+                assessment = CandidateAssessment.build_for_catalog_key(
+                    catalog_key=key, object_evaluations=evaluations, profile=effective,
+                    weather_snapshot=weather, weather_freshness=weather_freshness,
+                    decision_location=WeatherLocation(latitude=inputs.location["latitude"], longitude=inputs.location["longitude"]),
+                    build_mission_input=intent_input)
+                from decision.services.session_availability_windowing import evaluate_physical_productive_window
+                selection = evaluate_physical_productive_window(assessment.productive_window, inputs.availability)
+                diagnostic = selection.refusal
+                scope = diagnostic.evidence_scope if diagnostic is not None else None
+                if diagnostic is not None:
+                    breakdown = diagnostic.productivity_breakdown
+                    refusal_evidence.append({
+                        "catalog_key": key, "display_name": template["display_name"],
+                        "filter_type": intent["filter_type"], "acquisition_intent_id": intent["acquisition_intent_id"],
+                        "evaluated_start": scope.evaluated_start.isoformat() if scope and scope.evaluated_start else None,
+                        "evaluated_end": scope.evaluated_end.isoformat() if scope and scope.evaluated_end else None,
+                        "refusal_stage": diagnostic.refusal_stage.value if diagnostic.refusal_stage else None,
+                        "best_productive_window_minutes": diagnostic.best_productive_window_minutes,
+                        "required_continuous_minutes": diagnostic.required_continuous_minutes,
+                        "losses": ({name: getattr(breakdown.losses, name) for name in
+                            ("cloud", "moon", "altitude", "humidity", "wind")} if breakdown and breakdown.losses else None),
+                    })
+                has_evaluated_range = bool(scope and scope.evaluated_start and scope.evaluated_end)
+                slices = assessment.productive_window.productivity_slice_evaluations
+                cloud_refusals.append(has_evaluated_range and not assessment.productive_window.evidence_issues
+                    and bool(slices) and all(1.0 - item.losses.cloud < PRODUCTIVE_SLICE_THRESHOLD for item in slices))
+                cloud_humidity_refusals.append(has_evaluated_range and not assessment.productive_window.evidence_issues
+                    and bool(slices) and all(1.0 - item.losses.cloud - item.losses.humidity < PRODUCTIVE_SLICE_THRESHOLD for item in slices)
+                    and any(item.losses.cloud > 0 for item in slices))
+                if not CandidateViabilityEvaluator.is_viable(assessment):
+                    continue
+                window = select_physical_productive_window(assessment.productive_window, inputs.availability)
+                if window is None:
+                    continue
+                lunar = None
+                if key == "Rosette":
+                    from dataclasses import asdict
+                    from astro_score import (filter_optical_profile_resolver,
+                        intent_night_evidence_builder, lunar_contamination_estimator)
+                    from decision.services.intent_night_evidence_builder import IntentNightEvidenceBuildError
+                    from decision.services.lunar_contamination_estimator import LunarContaminationEstimationError
+                    optical = filter_optical_profile_resolver.resolve(matches[0]["filter_profile_id"])
+                    try:
+                        evidence = intent_night_evidence_builder.build(
+                            imaging_field_id=template["imaging_field_id"],
+                            actionable_window_start=window.window_start,
+                            actionable_window_end=window.window_end,
+                            site=evaluation["decision_context"].site)
+                        estimate = lunar_contamination_estimator.estimate(evidence, optical)
+                    except (IntentNightEvidenceBuildError, LunarContaminationEstimationError):
+                        continue
+                    lunar = {**asdict(estimate), "central_wavelength_nm": optical.central_wavelength_nm,
+                        "fwhm_nm": optical.fwhm_nm, "reference_time": evidence.reference_time.isoformat(),
+                        "model": lunar_contamination_estimator.ALGORITHM_VERSION,
+                        "notice": "Indices lunaires relatifs au milieu du créneau, sans seuil de qualité calibré. Le créneau météo et altitude utilise les critères communs ; ces indices ne prédisent ni le signal de la nébuleuse ni la durée nécessaire."}
                 suggestions.append({
                     "catalog_key": key, "display_name": template["display_name"],
                     "imaging_field_id": template["imaging_field_id"],
                     "acquisition_intent_id": intent["acquisition_intent_id"],
                     "filter": matches[0], "filter_type": intent["filter_type"],
                     "guidance": intent["guidance"], "image": TARGET_IMAGES[key],
+                    **({"lunar_assessment": lunar} if lunar is not None else {}),
                     "equipment_match": {"geometry": catalogue["geometry"],
                         "framing": material["framing"], "filter": optical_match,
                         "extent_arcmin": material["extent_arcmin"], "extent_scope": material["scope"]},
                     "window_start": window.window_start.isoformat(), "window_end": window.window_end.isoformat(),
                     "already_saved": existing_key is not None,
                     "existing_project_key": existing_key, "_score": score,
+                    "_lunar_estimate": estimate if lunar is not None else None,
                 })
-    suggestions.sort(key=lambda item: (-item["_score"], item["catalog_key"]))
+    # Compare only filters of the same field/window. No arbitrary weighting of
+    # the two lunar components and no comparison with other target signals.
+    from decision.services.lunar_contamination_comparison import compare_lunar_contamination
+    from decision.models.lunar_contamination_comparison import LunarContaminationComparisonStatus
+    def lunar_dominators(item):
+        estimate = item["_lunar_estimate"]
+        if estimate is None:
+            return 0
+        return sum(
+            compare_lunar_contamination(other["_lunar_estimate"], estimate).status
+            is LunarContaminationComparisonStatus.DOMINATES
+            for other in suggestions
+            if other["catalog_key"] == item["catalog_key"]
+            and other["window_start"] == item["window_start"]
+            and other["window_end"] == item["window_end"]
+            and other["_lunar_estimate"] is not None)
+    ranks = {id(item): lunar_dominators(item) for item in suggestions}
+    suggestions.sort(key=lambda item: (-item["_score"], item["catalog_key"], ranks[id(item)]))
     for item in suggestions:
         del item["_score"]
+        del item["_lunar_estimate"]
     return {"status": "suggestions" if suggestions else "no_suggestion", "suggestions": suggestions[:3],
+            "refusal_reason": ("clouds_no_productive_window"
+                               if not suggestions and cloud_refusals and all(cloud_refusals)
+                               else "clouds_humidity_no_productive_window"
+                               if not suggestions and cloud_humidity_refusals
+                               and all(cloud_humidity_refusals)
+                               else None),
+            "refusal_evidence": refusal_evidence if not suggestions else [],
+            "weather_context": {"provider": weather.provider, "timezone": weather.timezone,
+                                "retrieved_at_utc": weather.retrieved_at_utc.isoformat()},
             "catalogue": catalogue,
-            "scope": f"Catalogue étendu : {catalogue['extended_catalogue']['records']} fiches, dont {len(catalogue['targets'])} cibles étudiées. La présélection automatique de cette bêta couvre {sum(bool(t['discovery_supported']) for t in templates)} régions en Hα, avec cadrage et filtre vérifiés. Une fiche de référence ne constitue pas à elle seule une mission.",
+            "scope": f"Catalogue étendu : {catalogue['extended_catalogue']['records']} fiches, dont {len(catalogue['targets'])} cibles étudiées. La présélection automatique de cette bêta couvre {sum(bool(t['discovery_supported']) for t in templates)} régions en Hα et la Rosette en OIII/SII, avec cadrage et référence de filtre vérifiés. Les indices lunaires sont relatifs et ne fixent pas de durée de pose. Une fiche de référence ne constitue pas à elle seule une mission.",
             "notice": "Le créneau est une estimation selon les prévisions. Confirmez votre projet, puis relancez l’analyse avant de sortir. Aucun temps de pose n’est enregistré.",
             "weather_retrieved_at": weather.retrieved_at_utc.isoformat()}

@@ -17,7 +17,7 @@ def test_help_content_and_integration():
     short = source.split('  start: {', 1)[1].split('  understand: {', 1)[0]
     for term in ['UUID', 'provenance', 'Outcome', 'supersession']:
         assert term.lower() not in short.lower()
-    for text in ['Site → Matériel → Projet → Disponibilité → Préparer ma nuit', 'cible', 'filtre', 'créneau', 'risques', 's’abstenir', 'observation terrain', 'même moteur']:
+    for text in ['Vérifier mon projet', 'cible', 'filtre', 'créneau', 'risques', 's’abstenir', 'observation terrain', 'même moteur']:
         assert text in short
     assert len(short.split()) < 450
     for text in ['Fiabilité', 'prévision', 'recalibrage automatique', 'fenêtre productive', 'inconnues']:
@@ -64,13 +64,22 @@ class Event {constructor(type){this.type=type;}}
 globalMode.addEventListener('change',()=>{document.documentElement.dataset.uiMode=globalMode.value;observer();});
 '''
     checks = r'''
+function sectionText(id){return content.children.find(e=>e.id===id)?.children[1].textContent;}
 opener.listeners.click();
+assert(sectionText('help-start-first-night').includes('Aidez-moi à choisir une cible'));
+assert(sectionText('help-start-read-recommendation').includes('Voir mon plan de nuit'));
 assert(dialog.open);assert.equal(focused,close);assert.equal(buttons[0].attrs['aria-current'],'page');
 buttons[2].listeners.click();content.scrollTop=137;
+assert(sectionText('help-complete-history').includes('« Mon suivi » puis « Mes relevés sur place »'));
 const children=content.children;
 mode.value='pro';mode.listeners.change();
 assert.equal(document.documentElement.dataset.uiMode,'pro');assert.equal(content.children,children);assert.equal(content.scrollTop,137);
+assert(sectionText('help-complete-missions').includes('Photographier cette cible'));
+assert(sectionText('help-complete-tonight').includes('Préparer ma nuit'));
+assert(sectionText('help-complete-history').includes('« Mes observations »'));
 mode.value='simple';mode.listeners.change();
+assert(sectionText('help-complete-missions').includes('Voir mon plan de nuit'));
+assert(sectionText('help-complete-history').includes('« Mon suivi » puis « Mes relevés sur place »'));
 assert.equal(buttons[2].attrs['aria-current'],'page');assert.equal(content.scrollTop,137);
 close.listeners.click();assert(!dialog.open);assert.equal(focused,opener);
 opener.listeners.click();assert.equal(content.scrollTop,137);

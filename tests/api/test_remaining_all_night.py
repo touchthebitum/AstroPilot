@@ -1,3 +1,4 @@
+from test_target_discovery import assert_discovery_weather_only
 """Real calculation and archive with synthetic weather and isolated M42/Ou4 data."""
 from copy import deepcopy
 from datetime import datetime,timedelta,timezone
@@ -61,7 +62,8 @@ def test_real_saved_intent_future_bounds_acceptance_and_archive_are_durable(tmp_
                for p in (tmp_path/folder).glob('*.json')}
     protected=tmp_path/'user_profile.json'
     profile_before=protected.read_bytes()
-    request={'availability':{'mode':'all_night'},'selected_project_id':key}
+    # This persistence test reserves no operational overhead; dedicated plan tests cover 30/10 and 20/5.
+    request={'availability':{'mode':'all_night','preparation_minutes':0,'flats_minutes':0},'selected_project_id':key}
     result=client.post('/v1/tonight',json=request)
     assert result.status_code==200,result.text
     decision=result.json()
@@ -88,7 +90,7 @@ def test_real_saved_intent_future_bounds_acceptance_and_archive_are_durable(tmp_
     assert all((tmp_path/p).read_bytes()==raw for p,raw in preserved.items())
     assert not list((tmp_path/'execution_lineage').glob('*.json'))
     archived=history.load(decision['decision_id'])
-    assert archived['request']['availability']=={'mode':'all_night'}
+    assert archived['request']['availability']==request['availability']
     assert archived['result']['window_start']==decision['window_start']
     snapshot={p.relative_to(tmp_path).as_posix():p.read_bytes() for p in tmp_path.rglob('*.json')}
     def forbidden(*a,**kw):raise AssertionError('A reread must not calculate or load the profile')
@@ -146,4 +148,4 @@ def test_discovery_suggestions_also_use_remaining_night_without_writes(tmp_path,
     for suggestion in response.json()['suggestions']:
         assert datetime.fromisoformat(suggestion['window_start']).astimezone(timezone.utc)>=reference.astimezone(timezone.utc)
     assert profile==original
-    assert not list(tmp_path.rglob('*.json'))
+    assert_discovery_weather_only(tmp_path, response)

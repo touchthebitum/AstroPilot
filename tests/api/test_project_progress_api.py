@@ -1,6 +1,5 @@
 import json
 import math
-import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -364,10 +363,10 @@ def test_field_change_rejects_incoherent_retained_intents(client, monkeypatch):
     assert response.status_code == 200, response.text
 
 
-def test_historical_profile_get_does_not_migrate_or_write(tmp_path, monkeypatch):
+def test_historical_profile_get_does_not_migrate_or_write(tmp_path, monkeypatch, historical_profile):
     monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
     destination = tmp_path / "user_profile.json"
-    shutil.copyfile(Path(__file__).resolve().parents[2] / "data/user_profile.json", destination)
+    destination.write_text(json.dumps(historical_profile))
     before = destination.read_bytes()
     client = TestClient(create_app())
     response = client.get(path())

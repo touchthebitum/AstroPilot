@@ -463,7 +463,7 @@ def test_v10_candidate_document_contains_exact_additive_provenance_keys():
     )
     candidate_fields = candidate_field_documents(document)
 
-    assert document["schema_version"] == 13
+    assert document["schema_version"] == 14
     assert candidate_fields
     assert all(
         fields["imaging_field_id"] == "sh2-129_ou4"
@@ -1591,7 +1591,7 @@ def test_duplicate_identity_in_another_aggregate_fails_globally(
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda document: document.update(schema_version=14),
+        lambda document: document.update(schema_version=15),
         lambda document: document.pop("schema_version"),
         lambda document: document["context"].update(
             {"$type": "unsupported.DomainType"}
@@ -1692,7 +1692,7 @@ def test_concurrent_conflicting_commits_allow_exactly_one_success(tmp_path):
         outcomes = list(executor.map(commit, ("M31", "M42")))
 
     assert sorted(outcomes) == ["conflict", "saved"]
-    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 13
+    assert json.loads((tmp_path / "decision-1.json").read_text())["schema_version"] == 14
 
 
 def test_unique_temporary_files_are_cleaned(tmp_path, monkeypatch):
@@ -1715,6 +1715,9 @@ def test_unique_temporary_files_are_cleaned(tmp_path, monkeypatch):
 
 def remove_lunar_snapshot_fields(document):
     if isinstance(document, dict):
+        if document.get("class") == "decision.models.session_availability.SessionAvailability":
+            document["fields"].pop("preparation_minutes", None)
+            document["fields"].pop("flats_minutes", None)
         if document.get("class") == "decision.models.acquisition_intent_assessment.AcquisitionIntentAssessment":
             document["fields"].pop("actionability_refusal", None)
         if document.get("$type") == "dataclass" and document.get("class") in {
@@ -1948,3 +1951,24 @@ def test_guardian_session_http_snapshot_preserves_projection_and_refuses_changed
         before = len(calls)
         assert api.get('/v1/missions/mission-1/executions').status_code == 200
         assert len(calls) - before == 5
+
+
+def test_v13_availability_restores_historical_defaults_and_v14_retains_custom():
+    from dataclasses import replace
+    original = context()
+    aggregate = DecisionAcceptanceAggregate(context=original)
+    document = json.loads(serialize_decision_acceptance_aggregate(aggregate))
+    document["schema_version"] = 13
+    def strip(value):
+        if isinstance(value, dict):
+            if value.get("class") == "decision.models.session_availability.SessionAvailability":
+                value["fields"].pop("preparation_minutes")
+                value["fields"].pop("flats_minutes")
+            for child in value.values(): strip(child)
+        elif isinstance(value, list):
+            for child in value: strip(child)
+    strip(document)
+    restored = deserialize_decision_acceptance_aggregate(json.dumps(document))
+    assert restored.context == original
+    custom = replace(original, availability=replace(original.availability, preparation_minutes=20, flats_minutes=5))
+    assert_round_trip(custom, serialize_decision_acceptance_context, deserialize_decision_acceptance_context)

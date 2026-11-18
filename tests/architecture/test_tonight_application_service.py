@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -555,7 +556,8 @@ def test_mission_timing_uses_existing_availability_windowing(
 ):
     timing = mission_assembler_module._mission_timing_for_availability(
         _productive_assessment(),
-        availability,
+        # Isolate availability windowing from the separately tested operational reserve.
+        replace(availability, preparation_minutes=0, flats_minutes=0),
     )
 
     assert timing == (

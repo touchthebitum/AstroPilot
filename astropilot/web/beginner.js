@@ -18,6 +18,51 @@
     return button;
   };
 
+  // Offer the two paths before exposing the manual project form.
+  const discoverProject = $("#discover-from-projects");
+  const projectCreation = $("#project-create");
+  const discoveryEntry = discoverProject.closest(".discovery-entry");
+  const manualProject = action("Je connais déjà ma cible", async () => {
+    if (guardUnresolvedAcceptance() || state.savingConfiguration) return;
+    projectCreation.open = true;
+    manualProject.setAttribute("aria-expanded", "true");
+    if (!state.projectTemplates) await loadProjectTemplates();
+    else renderNewProjectIntents();
+    if (state.view === "projects" && projectCreation.open) $("#project-template").focus();
+  });
+  manualProject.id = "beginner-manual-project";
+  manualProject.setAttribute("aria-controls", "project-create");
+  manualProject.setAttribute("aria-expanded", "false");
+  discoveryEntry.append(manualProject);
+  projectCreation.addEventListener("toggle", () => {
+    manualProject.setAttribute("aria-expanded", String(projectCreation.open));
+  });
+
+  const demoBanner = make("aside", {id: "demo-banner", role: "note", hidden: ""});
+  demoBanner.textContent = "ESSAI FICTIF — MÉTÉO SIMULÉE. Ces conditions ne sont pas des prévisions réelles. Les projets et les poses saisis ici sont réservés à la démonstration.";
+  $("main.shell").before(demoBanner);
+  fetch("/v1/demo-context", {cache: "no-store"}).then(response => {
+    if (!response.ok) throw new Error("demo context unavailable");
+    return response.json();
+  }).then(context => {
+    demoBanner.hidden = !context.enabled;
+    if (globalThis.NightMeritPresentation) globalThis.NightMeritPresentation.demoEnabled = context.enabled === true;
+    if (context.enabled) {
+      const macTransfer = document.querySelector("#data-context-mac-transfer");
+      if (macTransfer) macTransfer.textContent = "GERER-DONNEES-FICTIVES.command";
+      for (const dialog of document.querySelectorAll("dialog")) {
+        dialog.prepend(make("p", {class: "demo-dialog-note"}, "ESSAI FICTIF — MÉTÉO SIMULÉE. Aucune prévision réelle."));
+      }
+      for (const link of document.querySelectorAll('a[href*="open-meteo"]')) {
+        link.textContent = "Météo simulée pour cet essai — aucune prévision réelle";
+        link.removeAttribute("href");
+      }
+    }
+  }).catch(() => {
+    demoBanner.hidden = false;
+    demoBanner.textContent = "Le mode météo ne peut pas être vérifié. Actualisez la page avant de poursuivre.";
+  });
+
   const guide = make("aside", {id: "beginner-guide", "aria-label": "Les étapes de ma séance"});
   guide.append(make("p", {class: "state-kicker"}, "Ma séance, pas à pas"));
   const list = make("ol");
@@ -36,10 +81,10 @@
   // Reuse the real discovery choice. No filter is inferred or confirmed here.
   const discovery = $("#discover-targets");
   const choice = make("fieldset", {id: "beginner-choice"});
-  choice.append(make("legend", {}, "Que souhaitez-vous photographier ?"));
+  choice.append(make("legend", {}, "Sur quel projet souhaitez-vous travailler ?"));
   const discoverValue = "__nightmerit_discover__";
   const projectWrap = make("label", {id: "beginner-project-wrap"}, "Choisir une option");
-  const projectSelect = make("select", {id: "beginner-project", "aria-label": "Projet ou aide au choix de la cible"});
+  const projectSelect = make("select", {id: "beginner-project", "aria-label": "Projet pour cette séance ou aide au choix de la cible"});
   projectWrap.append(projectSelect);
   choice.append(projectWrap);
   discovery.closest("label").after(choice);
@@ -71,7 +116,7 @@
 
   // Saved missions are an optional return path, not another primary form.
   const missionDetails = make("details", {id: "beginner-saved-missions"});
-  missionDetails.append(make("summary", {}, "Retrouver une séance préparée"));
+  missionDetails.append(make("summary", {}, "Retrouver un plan enregistré"));
   $("#saved-mission-entry").before(missionDetails);
   missionDetails.append($("#saved-mission-entry"));
 
@@ -165,6 +210,12 @@
       setText(select.querySelector('[value="simple"]'), "Débutant");
       setText(select.querySelector('[value="pro"]'), "Avancé");
     }
+    hide(manualProject, !beginner);
+    discoverProject.className = beginner ? "primary-button" : "secondary-button";
+    setText(discoverProject, beginner ? "Aidez-moi à choisir une cible" : "Je ne sais pas quoi photographier");
+    setText(discoveryEntry.querySelector("p"), beginner
+      ? "Selon mon matériel, mes horaires et les conditions du ciel."
+      : "NightMerit peut rechercher une cible parmi celles prises en charge, selon votre matériel et vos horaires.");
     hide(choice, !beginner);
     hide(discovery.closest("label"), beginner);
     hide(contextBlock, !beginner);
@@ -179,20 +230,20 @@
       projectSignature = signature;
       projectSelect.replaceChildren(make("option", {value: ""}, "Choisir une option"),
         make("option", {value: discoverValue}, "Aidez-moi à choisir une cible"));
-      keys.forEach(key => projectSelect.append(make("option", {value: key}, key)));
+      keys.forEach(key => projectSelect.append(make("option", {value: key}, readableTargetName(key))));
     }
     const busy = state.requestingRecommendation || state.savingConfiguration || hasUnresolvedAcceptance();
     projectSelect.disabled = busy;
     projectSelect.value = state.discoveryMode ? discoverValue : keys.includes(state.selectedProjectId) ? state.selectedProjectId : "";
     setText(context, [state.configuration?.site?.name, $("#review-equipment")?.textContent].filter(v => v && v !== "—").join(" · ") || "Votre configuration enregistrée sera utilisée.");
     if (beginner && configured && state.view === "availability") {
-      setText($("#availability-title"), state.missionRecheck ? "Vérifier ma séance" : "Préparer ma séance");
-      setText($("#availability-intro"), state.missionRecheck ? "Retrouvez ci-dessous les horaires de votre mission." : "Choisissez quoi préparer et vos horaires.");
+      setText($("#availability-title"), state.missionRecheck ? "Vérifier ma séance" : (document.documentElement.dataset.choicePhase === "filters" ? "Quel filtre utilisez-vous ?" : (document.documentElement.dataset.choicePhase === "hours" ? "Quand souhaitez-vous observer ?" : "Préparer ma séance")));
+      setText($("#availability-intro"), state.missionRecheck ? "Retrouvez ci-dessous les horaires de votre plan de séance." : "Choisissez un projet enregistré ou demandez une cible, puis indiquez vos horaires.");
       setText(ui.recommendationSubmit, state.discoveryMode ? "Chercher quoi photographier" : "Vérifier mon projet");
     }
     const session = currentSession();
     const finished = session?.execution.status === "completed";
-    hide(tri, !beginner || !finished || Boolean(session?.credit));
+    hide(tri, !beginner || !finished || Boolean(session?.credit) || noRetainedImages(session));
     add.disabled = state.sessionBusy || state.sessionWriteUncertain || !state.acceptedMission?.selectedCatalogKey;
     // Do not bypass an uncertain write or conceal the canonical error/status.
     $("#mission-dialog").classList.toggle("beginner-session", beginner);

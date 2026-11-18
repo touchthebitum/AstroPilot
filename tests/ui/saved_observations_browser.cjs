@@ -43,6 +43,9 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
    await page.waitForFunction(()=>document.querySelectorAll('.saved-observation-card').length===2);
    await page.locator('.saved-observation-card button').first().click();
    await page.waitForFunction(()=>document.querySelector('#outcome-result').textContent.includes('trop éloignée'));
+   assert.equal(await page.locator('#outcome-read').isVisible(),mode==='pro');
+   assert.equal(await page.locator('#outcome-compare').isVisible(),mode==='pro');
+   assert.match(await page.locator('#outcome-title').innerText(),mode==='simple'?/Prévision et conditions observées/:/Comparer une observation enregistrée/);
    assert.equal(await page.locator('#field-observation-form').isVisible(),false);
    assert.equal(await page.locator('#observation-save').isVisible(),false);
    assert.equal(await page.locator('#saved-observation-details').isVisible(),true);
@@ -58,10 +61,13 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
    await page.locator('.saved-observation-card').first().waitFor();
    await page.locator('#saved-observations-close').click();
   }
+  await page.evaluate(()=>applyUiMode('simple'));
   await page.locator('#saved-observations-open').click();await page.locator('.saved-observation-card').waitFor();
   await page.locator('#saved-observations-more').click();await page.waitForFunction(()=>document.querySelectorAll('.saved-observation-card').length===2);
   await page.locator('.saved-observation-card button').nth(1).click();
   await page.waitForFunction(()=>document.querySelector('#outcome-result').textContent.includes('Aucune comparaison'));
+  assert.equal(await page.locator('#outcome-read').isVisible(),true,'retry remains accessible when no comparison exists');
+  assert.equal(await page.locator('#outcome-compare').isVisible(),true);
   assert.equal(await page.locator('#outcome-compare').isEnabled(),true,'creation still requires its separate explicit action');
   assert.equal(traffic.some(([method])=>method!=='GET'),false,'consultation creates no comparison, observation, session or credit');
   assert.equal(traffic.some(([,url])=>/tonight|target-suggestions/.test(url)),false,'no forecast or target search required');

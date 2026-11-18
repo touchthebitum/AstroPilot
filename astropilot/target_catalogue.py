@@ -98,7 +98,7 @@ TARGETS = (
         "NGC 7000 seule ; Sh2-117 englobe une région plus large, incluant le Pélican.", ("Ha",), "Pour progresser",
         "Grande nébuleuse en Hα ; ne pas confondre sa taille avec le champ de la photographie de référence."),
     ImagingTarget("Rosette", "Nébuleuse de la Rosette", ("Sh2-275",), "hii_region", 100, "sharpless", "275",
-        "Région HII de Sharpless ; les enveloppes faibles peuvent dépasser deux degrés.", ("Ha",), "Pour progresser",
+        "Région HII de Sharpless ; les enveloppes faibles peuvent dépasser deux degrés.", ("Ha", "OIII", "SII"), "Pour progresser",
         "La couronne de gaz convient au grand champ ; laisser de la place autour des limites cataloguées.",
         supporting_sources=("rosette",)),
     ImagingTarget("IC1396", "Région IC 1396 · avec la Trompe d’Éléphant", ("Sh2-131",), "hii_region", 170, "sharpless", "131",

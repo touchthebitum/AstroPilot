@@ -4,6 +4,10 @@ Set NIGHTMERIT_BROWSER_EXECUTABLE to override the installed browser path.
 import os
 from pathlib import Path
 from playwright.sync_api import sync_playwright
+from decision.timezone_authority import bundle_json
+import json
+TIME_BUNDLE = bundle_json()
+TIME_ID = json.loads(TIME_BUNDLE)["id"]
 ROOT=Path(__file__).resolve().parents[2]
 with sync_playwright() as p:
     browser=p.chromium.launch(headless=True, executable_path=os.environ.get("NIGHTMERIT_BROWSER_EXECUTABLE", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
@@ -14,10 +18,12 @@ with sync_playwright() as p:
         def route(r):
             path=r.request.url.split('http://nightmerit.test',1)[1].split('?',1)[0]
             if path=='/': path='/ui/index.html'
-            if path.startswith('/ui/'):
+            if path == '/ui/timezone-data.js':
+                r.fulfill(content_type='application/javascript', body='globalThis.NightMeritTimeData=' + TIME_BUNDLE + ';')
+            elif path.startswith('/ui/'):
                 file=ROOT/'astropilot/web'/path.removeprefix('/ui/')
                 r.fulfill(path=str(file))
-            else: r.fulfill(status=503,content_type='application/json',body='{"detail":"offline smoke"}')
+            else: r.fulfill(status=503,headers={'X-NightMerit-Time-Authority': TIME_ID},content_type='application/json',body='{"detail":"offline smoke"}')
         page.route('**/*',route)
         page.goto('http://nightmerit.test/')
         page.wait_for_timeout(150)
@@ -31,13 +37,19 @@ with sync_playwright() as p:
           localStorage.setItem('astropilot.pendingSession','retained');
         }""")
         before=page.evaluate('JSON.stringify(state)')
+        page.locator('#header-options').evaluate('(e)=>e.open=true')
         page.locator('#help-open').click()
         assert page.locator('#help-dialog').is_visible()
         assert page.locator('#help-close').evaluate('(e)=>e===document.activeElement')
         assert page.locator('[data-help-guide=start]').get_attribute('aria-current')=='page'
+        assert 'Aidez-moi à choisir une cible' in page.locator('#help-start-first-night').inner_text()
+        assert 'Vérifier mon projet' in page.locator('#help-start-first-night').inner_text()
+        assert 'Voir mon plan de nuit' in page.locator('#help-start-read-recommendation').inner_text()
         widths=page.locator('.help-navigation button').evaluate_all('(es)=>es.map(e=>e.getBoundingClientRect().width)')
         assert widths[0]>widths[2],widths
         page.locator('[data-help-guide=complete]').click()
+        assert '« Mon suivi » puis « Mes relevés sur place »' in page.locator('#help-complete-history').inner_text()
+        assert 'Voir mon plan de nuit' in page.locator('#help-complete-missions').inner_text()
         page.locator('#help-content a').nth(10).click()
         assert page.evaluate('document.activeElement.id')=='help-complete-recovery'
         position=page.locator('#help-content').evaluate('(e)=>e.scrollTop')
@@ -46,6 +58,10 @@ with sync_playwright() as p:
         assert page.locator('html').get_attribute('data-ui-mode')=='pro'
         assert page.locator('#help-content').evaluate('(e)=>e.scrollTop')==position
         assert page.locator('[data-help-guide=complete]').get_attribute('aria-current')=='page'
+        assert 'Photographier cette cible' in page.locator('#help-complete-missions').inner_text()
+        assert 'Préparer ma nuit' in page.locator('#help-complete-tonight').inner_text()
+        assert '« Mes observations »' in page.locator('#help-complete-history').inner_text()
+        assert 'Mon suivi' not in page.locator('#help-complete-history').inner_text()
         for button in page.locator('.help-navigation button').all(): assert button.is_visible()
         for _ in range(20):
             page.keyboard.press('Tab')
@@ -63,10 +79,18 @@ with sync_playwright() as p:
         assert page.locator('#help-open').evaluate('(e)=>e===document.activeElement')
         assert page.evaluate('JSON.stringify(state)')==before
         assert page.locator('#ui-mode').input_value()=='pro'
+        page.locator('#header-options').evaluate('(e)=>e.open=true')
         page.locator('#help-open').click()
         assert page.locator('#help-content').evaluate('(e)=>e.scrollTop')==position
         page.select_option('#help-mode','simple')
         assert page.locator('#help-content').evaluate('(e)=>e.scrollTop')==position
+        assert 'Voir mon plan de nuit' in page.locator('#help-complete-missions').inner_text()
+        assert '« Mon suivi » puis « Mes relevés sur place »' in page.locator('#help-complete-history').inner_text()
+        page.locator('[data-help-guide=start]').click()
+        page.select_option('#help-mode','pro')
+        assert 'Me proposer une cible avec mon matériel' in page.locator('#help-start-first-night').inner_text()
+        assert 'Photographier cette cible' in page.locator('#help-start-read-recommendation').inner_text()
+        page.select_option('#help-mode','simple')
         page.locator('#help-close').click()
         assert page.evaluate('JSON.stringify(state)')==before
         assert not errors,errors

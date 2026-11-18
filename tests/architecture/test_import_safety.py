@@ -9,18 +9,12 @@ import tokenize
 
 def test_all_tracked_python_files_compile():
     repository = Path(__file__).resolve().parents[2]
-    result = subprocess.run(
-        ["git", "ls-files", "--", "*.py"],
-        cwd=repository,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-
-    python_files = [
-        repository / relative_path
-        for relative_path in result.stdout.splitlines()
-    ]
+    # Discover source Python files in both Git checkouts and audited source archives.
+    # Generated builds, environments and runtime data are not application source.
+    excluded = {".git", ".venv", "venv", "build", "dist", "__pycache__", ".pytest_cache"}
+    python_files = sorted(path for path in repository.rglob("*.py")
+                          if not any(part in excluded or part.startswith(".venv-")
+                                     for part in path.relative_to(repository).parts))
 
     assert python_files
 

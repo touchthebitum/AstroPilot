@@ -441,6 +441,23 @@ class FileDecisionAcceptanceLineageStore:
         )
         return canonical_selection, canonical_mission
 
+    def list_accepted_missions(self):
+        """Read validated saved plans, including old plans without executions."""
+        matches = []
+        mission_ids, selection_ids = set(), set()
+        for aggregate in self._load_all():
+            selections = {item.selection_id: item for item in aggregate.selections}
+            for mission in aggregate.missions:
+                selection = selections.get(mission.selection_id)
+                if selection is None:
+                    raise AcceptanceLineageCorruptionError("mission_selection_not_found")
+                if mission.mission_id in mission_ids or selection.selection_id in selection_ids:
+                    raise AcceptanceLineageConflictError("saved_mission_identity_conflict")
+                mission_ids.add(mission.mission_id)
+                selection_ids.add(selection.selection_id)
+                matches.append((selection, mission))
+        return sorted(matches, key=lambda pair: (pair[0].selected_at, pair[1].mission_id), reverse=True)
+
     def latest_accepted_mission(self, *, profile: dict, now):
         """Read a current, committed mission for the active site and equipment."""
         matches = [
