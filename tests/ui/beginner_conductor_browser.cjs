@@ -15,7 +15,7 @@ const path = require('node:path');
     await page.goto(origin);
     await page.locator('#nav-projects').waitFor({state:'visible'});
     await page.locator('#nav-projects').click();
-    await page.getByRole('button',{name:'Préparer une séance',exact:true}).click();
+    await page.getByRole('button',{name:'Préparer une séance sur ce projet',exact:true}).click();
     await page.locator('#beginner-choice').waitFor({state:'visible'});
     await page.waitForFunction(()=>document.querySelector('#beginner-project').value==='M42');
     // One choice selects the project and continuation path together, with no radio to confirm.
