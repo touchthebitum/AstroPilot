@@ -28,7 +28,7 @@ from decision.services.project_acquisition_intent_progress import (
     resolve_project_acquisition_intent_progress,
 )
 from decision.services.intent_progress_credit import (
-    IntentProgressCreditError, validate_credit_authority,
+    IntentProgressCreditError, validate_credit_authority, retained_projects,
 )
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -421,8 +421,12 @@ def validate_user_profile(profile, profile_path: Path):
                 f"dans {profile_path} : chaîne non vide attendue."
             )
 
+    try:
+        all_projects = retained_projects(profile)
+    except IntentProgressCreditError as exc:
+        raise UserProfileError(str(exc)) from exc
     imaging_field_resolver = None
-    for project_name, project in profile.get("projects", {}).items():
+    for project_name, project in all_projects.items():
         if not isinstance(project, dict):
             raise UserProfileError(
                 f"Entrée projects[{project_name!r}] invalide dans "

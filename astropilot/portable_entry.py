@@ -62,7 +62,7 @@ def main():
     if sys.argv[1:2] == ["--guardian"]:
         from astropilot.guardian_host import main as guardian_main
         return guardian_main(sys.argv[2:])
-    if sys.argv[1:] in (["--private-test-server-18831"], ["--private-test-server-18841"]):
+    if sys.argv[1:] in (["--private-test-server-18831"], ["--private-test-server-18841"], ["--private-test-server-18871"]):
         # Opt-in isolated native-kit checks; never probe or reuse port 8000.
         import os
         from pathlib import Path
@@ -74,7 +74,7 @@ def main():
         import uvicorn
         from astropilot.app import app
 
-        uvicorn.run(app, host="127.0.0.1", port=18841 if sys.argv[1:] == ["--private-test-server-18841"] else 18831)
+        uvicorn.run(app, host="127.0.0.1", port=int(sys.argv[1].rsplit("-", 1)[1]))
         return 0
     from astropilot.launcher import main as launcher_main
     launcher_main()

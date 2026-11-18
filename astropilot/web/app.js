@@ -5441,6 +5441,96 @@ function advancedProjectProgressText(data) {
   }).join(" ; ");
 }
 
+function projectRemovalNotice(message) {
+  const notice = document.querySelector("#project-removal-status");
+  if (notice) { notice.textContent = message; notice.hidden = !message; }
+}
+
+function projectRemovalButton(projectId, {restore = false, saved = true} = {}) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary-button";
+  button.textContent = restore ? "Remettre dans mes projets" : "Supprimer ce projet";
+  button.disabled = !saved || Boolean(state.changingProjectVisibility);
+  button.addEventListener("click", () => changeProjectVisibility(projectId, restore));
+  return button;
+}
+
+function renderArchivedProjects() {
+  const region = document.querySelector("#archived-projects");
+  const list = document.querySelector("#archived-project-list");
+  if (!region || !list) return;
+  const ids = state.configuration?.archived_project_ids || [];
+  region.hidden = !ids.length;
+  list.replaceChildren();
+  for (const id of ids) {
+    const item = document.createElement("p");
+    const name = document.createElement("span");
+    name.textContent = `${readableTargetName(id)} · `;
+    item.append(name, projectRemovalButton(id, {restore:true}));
+    list.append(item);
+  }
+}
+
+async function changeProjectVisibility(projectId, restore = false) {
+  if (state.changingProjectVisibility || state.savingConfiguration || state.savingProjectProgress
+      || guardUnresolvedAcceptance() || !confirmDiscardProjectProgress()) return;
+  if (!configurationDraftMatchesSaved()) {
+    projectRemovalNotice("Enregistrez d’abord vos modifications avant de supprimer ou de rétablir un projet.");
+    return;
+  }
+  const name = readableTargetName(projectId);
+  const question = restore
+    ? `Remettre « ${name} » dans vos projets avec son avancement conservé ?`
+    : `Supprimer « ${name} » de vos projets actifs ? Ses plans, séances et crédits restent conservés dans l’historique. Vous pourrez rétablir ce projet plus tard.`;
+  if (!window.confirm(question)) return;
+  state.changingProjectVisibility = true;
+  const generation = beginConfigurationOperation();
+  const revision = state.configuration.profile_revision;
+  projectRemovalNotice(restore ? "Rétablissement en cours…" : "Suppression en cours…");
+  try {
+    let response;
+    try {
+      response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}${restore ? "/restore" : ""}`, {
+        method: restore ? "POST" : "DELETE", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({expected_revision:revision, confirmed:true}),
+      });
+      const payload = await response.json();
+      if (!configurationOperationIsCurrent(generation)) return;
+      if (!response.ok) throw new Error(response.status === 409 ? "conflict" : "refused");
+      const ownsNavigation = configurationOwnsNavigation(generation);
+      installCurrentConfiguration(payload, generation);
+      if (ownsNavigation) {
+        renderProjects(); setView("projects");
+        projectRemovalNotice(restore ? "Projet rétabli avec son avancement conservé."
+          : "Projet supprimé de la liste active. Ses plans, séances et crédits sont conservés.");
+      }
+    } catch (error) {
+      if (!configurationOperationIsCurrent(generation) || !configurationOwnsNavigation(generation)) return;
+      // A lost reply is not proof of failure: read the authoritative configuration.
+      const read = await fetch("/v1/configuration");
+      if (!read.ok) throw new Error("unreadable");
+      const payload = await read.json();
+      if (!configurationOperationIsCurrent(generation) || !configurationOwnsNavigation(generation)) return;
+      installCurrentConfiguration(payload, generation);
+      renderProjects(); setView("projects");
+      const active = Object.hasOwn(payload.projects || {}, projectId);
+      const archived = (payload.archived_project_ids || []).includes(projectId);
+      const done = restore ? active && !archived : archived && !active;
+      projectRemovalNotice(done
+        ? (restore ? "Projet rétabli ; état confirmé après relecture." : "Projet supprimé de la liste active ; historique conservé, état confirmé après relecture.")
+        : "L’opération n’est pas confirmée. Les données ont été relues ; vérifiez le projet avant de réessayer.");
+    }
+  } catch (_error) {
+    if (configurationOperationIsCurrent(generation) && configurationOwnsNavigation(generation))
+      projectRemovalNotice("Impossible de confirmer l’état du projet. Rouvrez Mes projets après reconnexion avant de réessayer.");
+  } finally {
+    finishConfigurationOperation(generation);
+    state.changingProjectVisibility = false;
+    if (state.view === "projects") renderProjects();
+  }
+}
+
 function renderProjects() {
   if (!confirmDiscardProjectProgress()) return false;
   document.querySelector("#project-progress-editor").hidden = true;
@@ -5498,7 +5588,7 @@ function renderProjects() {
       addPhotos.type = "button"; addPhotos.className = "secondary-button";
       addPhotos.textContent = "Ajouter mes photos conservées"; addPhotos.disabled = !saved;
       addPhotos.addEventListener("click", () => openPhotoAddition(catalogKey));
-      item.append(label, button, addPhotos);
+      item.append(label, button, addPhotos, projectRemovalButton(catalogKey, {saved}));
       list.append(item);
     }
     summary.append(heading, explanation, list);
@@ -5509,6 +5599,7 @@ function renderProjects() {
     zeroProjects.disabled = true;
   }
   if (typeof renderSimpleProjects === "function") renderSimpleProjects(entries);
+  renderArchivedProjects();
   return true;
 }
 
@@ -6387,7 +6478,7 @@ function renderSimpleProjects(entries) {
     addPhotos.type = "button"; addPhotos.className = "secondary-button";
     addPhotos.textContent = "Ajouter mes photos conservées"; addPhotos.disabled = !saved;
     addPhotos.addEventListener("click", () => openPhotoAddition(key));
-    controls.append(addPhotos, modify, prepare);
+    controls.append(addPhotos, modify, prepare, projectRemovalButton(key, {saved}));
     card.append(heading, status, controls, more);
     region.append(card);
     if (!saved) continue;
@@ -6950,6 +7041,10 @@ async function saveConfiguration({ afterSave = null } = {}) {
       if (response.status === 409 && detail?.code === "configuration_revision_conflict") {
         await loadConfiguration({ afterConflict: true });
         return;
+      }
+      if (detail?.code === "project_archived_restore_required") {
+        projectRemovalNotice("Ce projet est conservé dans l’historique. Utilisez « Remettre dans mes projets » pour retrouver son avancement.");
+        setView("projects"); return;
       }
       const target = configurationErrorSteps[detail?.code];
       if (target) {

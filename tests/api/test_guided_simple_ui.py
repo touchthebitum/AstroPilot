@@ -68,6 +68,7 @@ def test_cards_use_canonical_effective_progress_and_ignore_superseded_reads():
     source=SOURCE.read_text()
     functions=source[source.index('function readableTargetName('):source.index('function savedMissionLabel(')]
     functions+=source[source.index('function progressDuration('):source.index('function progressInput(')]
+    functions+=source[source.index('function projectRemovalButton('):source.index('function renderArchivedProjects(')]
     functions+=source[source.index('function renderSimpleProjects('):source.index('function addSimpleDurationFields(')]
     run_js(DOM+r'''
 const region=new E('div');

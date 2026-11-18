@@ -190,7 +190,7 @@ def validate_documents(files):
         profile = validate_user_profile(_json(files["user_profile.json"]), Path("user_profile.json"))
     except Exception as exc:
         raise BackupError("backup_incompatible") from exc
-    return {"projects": len(profile.get("projects", {})),
+    return {"projects": len(profile.get("projects", {})) + len(profile.get("archived_projects", {})),
             "observations": sum(n.startswith("field_observations/") for n in files),
             "sessions": sum(n.startswith("execution_lineage/") for n in files),
             "comparisons": sum(n.startswith("outcome_evaluations/") for n in files)}

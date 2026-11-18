@@ -80,7 +80,7 @@ from decision.services.acquisition_intent_remaining_progress import (
     derive_acquisition_intent_remaining_progress, remaining_progress_projection,
 )
 from decision.services.intent_progress_credit import (
-    IntentProgressCreditError, base_seconds, credit_totals, duration_us, load_credits,
+    IntentProgressCreditError, base_seconds, credit_totals, duration_us, load_credits, retained_projects,
 )
 from decision.models.project_acquisition_intent_target import ProjectAcquisitionIntentTarget
 from decision.models.session_availability import (
@@ -406,6 +406,13 @@ class ConfigurationWriteRequest(BaseModel):
     expected_revision: int | None = Field(default=None, ge=0)
 
 
+class ProjectRemovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=0, strict=True)
+    confirmed: bool = Field(strict=True)
+
+
 class ProjectProgressWriteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -478,6 +485,7 @@ class ConfigurationResponse(BaseModel):
     available_equipment: list[EquipmentConfigurationModel]
     projects: dict[str, ProjectConfigurationModel]
     preset_equipment: list[EquipmentConfigurationModel]
+    archived_project_ids: list[str] = Field(default_factory=list)
 
 
 class SessionAvailabilityRequest(BaseModel):
@@ -1996,6 +2004,7 @@ def _configuration_projection(profile: dict | None) -> ConfigurationResponse:
             for equipment_id in available_ids
         ],
         projects=projects,
+        **({"archived_project_ids": sorted(profile["archived_projects"])} if profile.get("archived_projects") else {}),
         preset_equipment=presets,
     )
 
@@ -2022,6 +2031,8 @@ def _configuration_candidate(
     existing_projects = candidate.get("projects", {})
     projects = {}
     for project_id, project in request.projects.items():
+        if project_id in candidate.get("archived_projects", {}):
+            raise UserProfileError("project_archived_restore_required")
         persisted_project = project.model_dump(
             mode="json",
             exclude_none=True,
@@ -2056,6 +2067,8 @@ def _configuration_candidate(
 
 def _configuration_validation_code(exc: UserProfileError) -> str:
     message = str(exc).lower()
+    if message == "project_archived_restore_required":
+        return message
     if message.startswith("intent_progress_"):
         return message
     if "project" in message or "projet" in message:
@@ -2431,7 +2444,7 @@ def create_app(
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
     def project_progress_projection(profile: dict, project_id: str) -> dict:
-        project = profile.get("projects", {}).get(project_id)
+        project = retained_projects(profile).get(project_id)
         if project is None:
             raise HTTPException(status_code=404, detail={"code": "project_not_found"})
         field_id = project.get("imaging_field_id")
@@ -2533,6 +2546,38 @@ def create_app(
             raise read_unavailable(exc, operation="project_progress_read") from exc
         except UserProfileError as exc:
             raise HTTPException(status_code=503, detail={"code": "configuration_corrupt"}) from exc
+
+    def change_project_visibility(project_id: str, request: ProjectRemovalRequest, *, restore: bool):
+        if not request.confirmed:
+            raise HTTPException(status_code=422, detail={"code": "project_confirmation_required"})
+        try:
+            profile = load_user_profile()
+            if request.expected_revision != profile.get("profile_revision", 0):
+                raise ProfileRevisionConflictError("profile_revision_conflict")
+            source = profile.get("archived_projects" if restore else "projects", {})
+            if project_id not in source:
+                raise HTTPException(status_code=404, detail={"code": "project_not_found"})
+            validate_project_progress_credits(profile, project_id)
+            target = profile.setdefault("projects" if restore else "archived_projects", {})
+            target[project_id] = source.pop(project_id)
+            saved = save_user_profile(profile, expected_revision=request.expected_revision)
+            return _configuration_projection(saved)
+        except ProfileRevisionConflictError as exc:
+            raise HTTPException(status_code=409, detail={"code": "project_revision_conflict"}) from exc
+        except UserProfileError as exc:
+            raise HTTPException(status_code=503, detail={"code": "configuration_corrupt"}) from exc
+        except (OSError, UnicodeError) as exc:
+            raise read_unavailable(exc, operation="project_visibility_write") from exc
+
+    @application.delete("/v1/projects/{project_id}", response_model=ConfigurationResponse,
+                        response_model_exclude_unset=True)
+    def delete_project(project_id: str, request: ProjectRemovalRequest):
+        return change_project_visibility(project_id, request, restore=False)
+
+    @application.post("/v1/projects/{project_id}/restore", response_model=ConfigurationResponse,
+                      response_model_exclude_unset=True)
+    def restore_project(project_id: str, request: ProjectRemovalRequest):
+        return change_project_visibility(project_id, request, restore=True)
 
     @application.put("/v1/projects/{project_id}/progress")
     def put_project_progress(project_id: str, request: ProjectProgressWriteRequest):
@@ -4309,7 +4354,7 @@ def create_app(
             or selection.selected_acquisition_intent_id != mission.acquisition_intent_id):
             raise HTTPException(status_code=503, detail={"code": "mission_provenance_invalid"})
         project_id = selection.selected_catalog_key
-        project = profile.get("projects", {}).get(project_id)
+        project = retained_projects(profile).get(project_id)
         if project is None or project.get("imaging_field_id") != mission.imaging_field_id:
             raise HTTPException(status_code=503, detail={"code": "project_field_mismatch"})
         intent_id = mission.acquisition_intent_id
