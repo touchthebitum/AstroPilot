@@ -49,3 +49,22 @@ from astropilot.portable_entry import main
 assert main()==0
 """
     subprocess.run([sys.executable,'-c',script],cwd=root,check=True,timeout=10)
+
+
+def test_private_transfer_on_separate_test_port_never_falls_back_to_main_app():
+    root=Path(__file__).resolve().parents[2]
+    script="""
+import importlib.abc,sys,types,os
+class BlockWeb(importlib.abc.MetaPathFinder):
+ def find_spec(self,fullname,path=None,target=None):
+  if fullname in ('astropilot.launcher','astropilot.app'):raise AssertionError('Wrong web entry')
+sys.meta_path.insert(0,BlockWeb())
+os.environ['ASTROPILOT_DATA_DIR']='/tmp/nightmerit-synthetic-profile'
+fake=types.ModuleType('astropilot.profile_transfer_app')
+def transfer(**kwargs):assert kwargs=={'port':18871,'open_browser':False,'demo':False}
+fake.main=transfer;sys.modules[fake.__name__]=fake
+sys.argv=['AstroPilot','--private-data-transfer-18871']
+from astropilot.portable_entry import main
+assert main()==0
+"""
+    subprocess.run([sys.executable,'-c',script],cwd=root,check=True,timeout=10)

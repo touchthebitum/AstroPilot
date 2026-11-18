@@ -137,3 +137,9 @@ def test_declared_copy_type_is_passed_but_never_inherited(tmp_path,monkeypatch):
     for invalid in ['wrong',{},[],True]:
         with pytest.raises(LaunchError,match='type de cette copie'):
             KitManager(tmp_path,copy_kind=invalid)
+
+
+def test_separate_test_port_is_supported_without_enabling_default_port(tmp_path):
+    manager=KitManager(tmp_path,port=18871,copy_kind='fictitious')
+    assert manager.port==18871 and manager.base=='http://127.0.0.1:18871'
+    with pytest.raises(LaunchError):KitManager(tmp_path,port=8000)

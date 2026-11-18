@@ -19,14 +19,14 @@ def main():
         from astropilot.stable_beta_data import main as prepare_main
         prepare_main(sys.argv[2])
         return 0
-    if sys.argv[1:] in (["--demo-data-transfer-18841"], ["--private-data-transfer-18841"]):
+    if sys.argv[1:] in (["--demo-data-transfer-18841"], ["--private-data-transfer-18841"], ["--private-data-transfer-18871"]):
         import os
         from pathlib import Path
         data_dir = os.environ.get("ASTROPILOT_DATA_DIR")
         if not data_dir or not Path(data_dir).is_absolute():
             raise SystemExit("An explicit absolute isolated profile is required.")
         from astropilot.profile_transfer_app import main as transfer_main
-        transfer_main(port=18841, open_browser=False,
+        transfer_main(port=int(sys.argv[1].rsplit("-", 1)[1]), open_browser=False,
                       demo=sys.argv[1:] == ["--demo-data-transfer-18841"])
         return 0
     if sys.argv[1:] == ["--demo-data-transfer-18831"]:

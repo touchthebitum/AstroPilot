@@ -22,7 +22,7 @@ class LaunchError(RuntimeError):
 class KitManager:
     def __init__(self, root, port=18831, copy_kind=None):
         self.root = Path(root).resolve()
-        if type(port) is not int or port not in {18831, 18841}:
+        if type(port) is not int or port not in {18831, 18841, 18871}:
             raise LaunchError('Le port de cette copie n’est pas pris en charge.')
         if copy_kind is not None and (not isinstance(copy_kind, str) or copy_kind not in {'personal', 'fictitious'}):
             raise LaunchError('Le type de cette copie est invalide. Conservez le kit et vérifiez son fichier KIT.json.')

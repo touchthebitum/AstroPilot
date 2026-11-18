@@ -237,7 +237,7 @@ def main(*, port=8000, open_browser=True, demo=False):
     import uvicorn
     from astropilot.file_lock import exclusive_file_lock
     # Reserve before opening a browser. Never hand off to or stop another copy.
-    if port not in {8000, 18831, 18841}:
+    if port not in {8000, 18831, 18841, 18871}:
         raise ValueError("Unsupported transfer port")
     if demo and port not in {18831, 18841}:
         raise ValueError("Demo transfer requires an isolated demo port")
@@ -278,7 +278,7 @@ def main(*, port=8000, open_browser=True, demo=False):
         if demo:
             from astropilot.demo_mode import main as demo_main
             demo_main(port=port, open_browser=open_browser)
-        elif port in {18831, 18841}:
+        elif port in {18831, 18841, 18871}:
             from astropilot.app import app
             uvicorn.run(app, host="127.0.0.1", port=port)
         else:
