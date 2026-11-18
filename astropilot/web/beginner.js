@@ -243,7 +243,7 @@
     }
     const session = currentSession();
     const finished = session?.execution.status === "completed";
-    hide(tri, !beginner || !finished || Boolean(session?.credit));
+    hide(tri, !beginner || !finished || Boolean(session?.credit) || noRetainedImages(session));
     add.disabled = state.sessionBusy || state.sessionWriteUncertain || !state.acceptedMission?.selectedCatalogKey;
     // Do not bypass an uncertain write or conceal the canonical error/status.
     $("#mission-dialog").classList.toggle("beginner-session", beginner);

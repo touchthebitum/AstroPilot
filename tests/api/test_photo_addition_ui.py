@@ -25,6 +25,7 @@ const crypto={randomUUID:()=> 'stable-evidence'};
 const usableEvidence=s=>s?.evidence.find(e=>e.category==='acquisition'&&e.usable_integration_duration>0);
 const usablePoseDuration=s=>`${Math.floor(s/3600)} h ${String(Math.floor(s/60)%60).padStart(2,'0')}`;
 const missionTimezone=()=> 'Europe/Zurich',missionDateTimeLabel=d=>d,sessionStatus=s=>s;
+function readableTargetName(key) { return key; }
 let refreshed=0;function renderProjects(){refreshed++}
 async function guardianTransitionHeaders(){return {'X-Guardian-Owner-Instance-Id':'owner'}}
 const original={project_id:'Sh2-129',acquisition_intent_id:'ou4_oiii',mission_id:'m',profile_revision:7,

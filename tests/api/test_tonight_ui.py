@@ -204,7 +204,7 @@ def test_tonight_ui_assets_are_served():
     assert "await loadConfiguration({ afterConflict: true })" in script.text
     assert "retryConfigurationSave" not in script.text
     assert "navigator.geolocation.getCurrentPosition" in script.text
-    assert "La saisie manuelle reste disponible" in script.text
+    assert "saisissez les coordonnées manuellement" in script.text
     assert "choice.name" in script.text
     assert "choice.id" in script.text
     assert "renderReview" in script.text
@@ -404,16 +404,16 @@ def test_ui_cache_policy_is_explicit_and_does_not_affect_api():
     api = client.get("/v1/runtime-identity")
 
     assert page.headers["cache-control"] == "no-store"
-    assert stylesheet.headers["cache-control"] == "no-cache"
-    assert script.headers["cache-control"] == "no-cache"
+    assert stylesheet.headers["cache-control"] == "no-store"
+    assert script.headers["cache-control"] == "no-store"
     assert "cache-control" not in api.headers
     token = page.text.split('/ui/app.js?v=', 1)[1].split('"', 1)[0]
     versioned_script = client.get(f"/ui/app.js?v={token}")
     versioned_stylesheet = client.get(f"/ui/styles.css?v={token}")
     assert versioned_script.status_code == 200
     assert versioned_stylesheet.status_code == 200
-    assert versioned_script.headers["cache-control"] == "no-cache"
-    assert versioned_stylesheet.headers["cache-control"] == "no-cache"
+    assert versioned_script.headers["cache-control"] == "no-store"
+    assert versioned_stylesheet.headers["cache-control"] == "no-store"
 
 
 def test_acceptance_attempt_generates_identity_and_timestamp_once():
@@ -664,8 +664,8 @@ def test_availability_uses_read_only_site_timezone_and_local_wall_clock_transpor
     assert "new Date(" not in collector
     assert "end === start" in collector
     assert "!sameDate && end < start" in collector
-    assert 'return { mode: "all_night" }' in collector
-    assert 'const availability = { mode: "duration" }' in collector
+    assert 'return { mode: "all_night", ...extra }' in collector
+    assert 'mode: "duration"' in collector and '...extra' in collector
 
 
 def test_fixed_window_overnight_hint_and_payload_follow_the_civil_contract(tmp_path):
@@ -697,6 +697,8 @@ const document = {
     if (selector === "#availability-start") return {value: startValue};
     if (selector === "#availability-end") return {value: endValue};
     if (selector === "#availability-duration") return {value: "1.5"};
+    if (selector === "#availability-preparation-minutes") return {value: "30"};
+    if (selector === "#availability-flats-minutes") return {value: "10"};
     throw new Error(`Unexpected selector: ${selector}`);
   },
 };
@@ -784,7 +786,7 @@ def test_site_change_invalidates_only_stale_site_time_assumptions():
     assert "state.availability = null" in invalidation
     assert "if (sameSite) return" in invalidation
     assert script.count("invalidateAvailabilityForSiteChange(") >= 2
-    save = script.split("async function saveConfiguration()", 1)[1].split("const availabilityFieldsByMode", 1)[0]
+    save = script.split("async function saveConfiguration(", 1)[1].split("const availabilityFieldsByMode", 1)[0]
     assert "installCurrentConfiguration(payload, generation)" in save
 
 
@@ -959,7 +961,7 @@ def test_recovery_posts_once_and_prevents_duplicate_submission():
     recovery = script.split(
         "async function recoverConfiguration()",
         1,
-    )[1].split("async function saveConfiguration()", 1)[0]
+    )[1].split("async function saveConfiguration(", 1)[0]
 
     assert 'state.configurationErrorCode !== "configuration_corrupt"' in recovery
     assert "if (state.recoveringConfiguration) return" in recovery
@@ -977,7 +979,7 @@ def test_recovery_responses_preserve_authoritative_state_and_fail_closed():
     recovery = script.split(
         "async function recoverConfiguration()",
         1,
-    )[1].split("async function saveConfiguration()", 1)[0]
+    )[1].split("async function saveConfiguration(", 1)[0]
 
     assert "response.ok && payload.configured === false" in recovery
     assert "installCurrentConfiguration(payload, generation)" in recovery
@@ -1006,7 +1008,7 @@ def test_recovered_projection_reuses_first_run_initialization():
     recovery = script.split(
         "async function recoverConfiguration()",
         1,
-    )[1].split("async function saveConfiguration()", 1)[0]
+    )[1].split("async function saveConfiguration(", 1)[0]
 
     assert "state.configuration = payload" in initializer
     assert "setConfigurationDraft(draftFromConfiguration(payload))" in initializer
@@ -1310,7 +1312,9 @@ function intentReady() {return true;}
 function restoreAcceptanceControls() {}
 function show() {}
 '''
-    harness += render + confidence + '''
+    reason = script[script.index("function beginnerReason("):script.index("function reasonText(")]
+    readable = script[script.index("function readableTargetName("):script.index("function savedMissionLabel(")]
+    harness += readable + reason + render + confidence + '''
 function run() {
   const results = {};
   for (const status of ["insufficient_evidence", "not_recommended", "recommended"]) {

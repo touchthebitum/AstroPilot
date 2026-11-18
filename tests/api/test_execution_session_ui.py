@@ -343,7 +343,9 @@ class Element {
 }
 const ui = {savedMissionEntry: new Element(), savedMissionChoice: new Element(),
   savedMissionTarget: new Element(), openSavedMission: new Element(), mission: {showModal() { opened = true; }}};
-const document = {createElement() { return new Element(); }};
+const historyStatus = new Element();
+const document = {createElement() { return new Element(); }, querySelector() { return historyStatus; }};
+function savedMissionLabel(item) { return item.mission.target; }
 const state = {configuration: {}, acceptedMission: null, savedMissions: []};
 let opened = false, rendered = null;
 function renderMission(mission) { rendered = mission; }
@@ -355,6 +357,7 @@ async function fetch(url) {
   if (url === '/v1/accepted-mission/current') return {ok: true, json: async () => ({status: 'accepted',
     mission_id: recent.mission_id, selection_id: recent.selection_id, decision_id: recent.decision_id,
     catalog_key: 'Sh2-129', selected_acquisition_intent_id: 'ha', mission: recent})};
+  if (url === '/v1/accepted-missions') return {ok: true, json: async () => [recent, old].map(item => ({status:'accepted',mission_id:item.mission_id,selection_id:item.selection_id,decision_id:item.decision_id,catalog_key:'Sh2-129',selected_acquisition_intent_id:'ha',selected_at:'2026-09-01T00:00:00Z',mission:item}))};
   return {ok: true, json: async () => [recent, old].map((item) => ({mission_id: item.mission_id,
     mission: item, project_id: 'Sh2-129', acquisition_intent_id: 'ha'}))};
 }
@@ -363,6 +366,7 @@ async function fetch(url) {
 (async () => {
   await restoreSavedMission();
   assert.equal(state.savedMissions.length, 2);
+  assert.equal(historyStatus.hidden, true);
   assert.equal(ui.savedMissionChoice.children[0].value, 'recent');
   assert.equal(ui.savedMissionChoice.children[1].value, 'old');
   ui.savedMissionChoice.value = 'old';

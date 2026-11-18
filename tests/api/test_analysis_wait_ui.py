@@ -21,7 +21,7 @@ function fire(ms){const entry=[...timers].find(([,x])=>x.ms===ms);assert.ok(entr
 const message={hidden:true,textContent:''};
 const document={querySelector:()=>message};
 const ui={recommendationSubmit:{disabled:false},refresh:{disabled:false}};
-const state={configurationGeneration:1,decisionSiteGeneration:1,view:'availability',viewRevision:0};
+const state={discoveryMode:false,configurationGeneration:1,decisionSiteGeneration:1,view:'availability',viewRevision:0};
 let requests=0,rendered=[],clears=0,lastSignal,transport,lastBody;
 function guardUnresolvedAcceptance(){return false;}
 function decisionSiteFingerprint(){return 'retained';}
@@ -37,7 +37,7 @@ function fetch(_url,options){requests++;lastSignal=options.signal;lastBody=JSON.
 const flush=async()=>{for(let i=0;i<12;i++)await Promise.resolve();};
 const availability={mode:'fixed_window',start:'2026-10-19T21:00:00+02:00',end:'2026-10-19T23:00:00+02:00'};
 const response=id=>({ok:true,json:async()=>({status:'available',decision_id:id})});
-'''+function+r'''
+'''+source[source.index('function updateDiscoveryAvailability() {'):source.index('document.querySelector("#discovery-review-equipment").addEventListener')]+function+r'''
 (async()=>{
  // No fetch response at all; the mock deliberately ignores AbortSignal.
  let release;transport=()=>new Promise(resolve=>release=resolve);

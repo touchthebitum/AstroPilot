@@ -58,13 +58,15 @@ def simulated_weather(lat: float, lon: float, zone_name: str):
     return replace(snapshot, provider=PROVIDER)
 
 
-def main() -> None:
+def main(*, port: int = 18831, open_browser: bool = True) -> None:
     import os
     import socket
     import threading
     import webbrowser
     import uvicorn
 
+    if type(port) is not int or port not in (18831, 18837):
+        raise SystemExit('Port de démonstration non autorisé.')
     raw = os.environ.get('ASTROPILOT_DATA_DIR', '')
     if not raw or not Path(raw).is_absolute():
         raise SystemExit('Choisissez un dossier de démonstration absolu et séparé.')
@@ -76,21 +78,22 @@ def main() -> None:
         # Reserve the only allowed port before creating a profile or opening a browser.
         if os.name != 'nt':
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        listener.bind(('127.0.0.1', 18831))
+        listener.bind(('127.0.0.1', port))
         listener.listen(128)
         prepare_profile(Path(raw))
         from astropilot.app import app
-        server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=18831))
+        server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=port))
         def open_when_ready():
             import time as clock
             for _ in range(120):
                 if server.started:
-                    webbrowser.open('http://127.0.0.1:18831/')
+                    webbrowser.open(f'http://127.0.0.1:{port}/')
                     return
                 if server.should_exit:
                     return
                 clock.sleep(.25)
-        threading.Thread(target=open_when_ready, daemon=True).start()
+        if open_browser:
+            threading.Thread(target=open_when_ready, daemon=True).start()
         print('DEMONSTRATION : profil fictif et météo simulée. Ctrl+C pour arrêter.', flush=True)
         server.run(sockets=[listener])
     except (OSError, ValueError) as exc:

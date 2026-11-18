@@ -17,6 +17,7 @@
     <script src="/ui/timezone-authority.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
     <script src="/ui/problem-report.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
     <script src="/ui/demo-presentation.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
+    <script src="/ui/saved-plan-weather.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
     <script src="/ui/app.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
     <script src="/ui/beginner.js?v=__ASTROPILOT_ASSET_TOKEN__" defer></script>
   </head>
@@ -329,7 +330,8 @@
           <div id="saved-mission-entry" class="saved-mission-entry" hidden>
             <div><strong>Plans de séance enregistrés</strong><p id="saved-mission-target"></p>
               <label for="saved-mission-choice">Choisir un plan de séance</label>
-              <select id="saved-mission-choice"></select></div>
+              <select id="saved-mission-choice"></select>
+              <p id="saved-mission-history-status" role="status" hidden></p></div>
             <button class="mission-button" id="open-saved-mission" type="button" disabled>Ouvrir ce plan</button>
           </div>
           <fieldset class="availability-modes">
@@ -603,6 +605,8 @@
           </div>
 
           <section class="mission-section session-panel" aria-label="Vérifier les conditions">
+            <p id="mission-weather-status" role="status" aria-live="polite"></p>
+            <p id="mission-weather-collection" class="hint"></p>
             <button class="secondary-button" id="mission-check-conditions" type="button">Vérifier les conditions avant de commencer</button>
             <small>Relance une analyse pour ce projet et les horaires du plan de séance. Ne démarre aucune prise de vue.</small>
           </section>
@@ -650,6 +654,7 @@
               <button class="primary-button" id="session-complete" type="button">Terminer la séance photo</button>
               <button class="secondary-button" id="session-interrupt" type="button">Interrompre la session</button>
             </div>
+            <button class="secondary-button" id="session-no-images" type="button" hidden>Enregistrer : aucune image retenue</button>
             <div id="session-evidence" hidden>
               <p>Après avoir vérifié et trié vos clichés, indiquez le temps de pose total des images conservées de cette session uniquement. Excluez l’installation, les pauses, les images rejetées et les images de calibration (flats, darks et bias). N’indiquez pas le total de votre projet. Vous pouvez le faire le lendemain.</p>
               <label>Comment souhaitez-vous renseigner les images conservées ?

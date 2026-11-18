@@ -715,6 +715,10 @@ class UserSelectionResponse(BaseModel):
     mission: AcceptedMissionResponse | None = None
 
 
+class SavedMissionHistoryResponse(UserSelectionResponse):
+    selected_at: datetime
+
+
 class ExecutionCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -3575,6 +3579,26 @@ def create_app(
                 else None
             ),
         )
+
+    @application.get("/v1/accepted-missions", response_model=list[SavedMissionHistoryResponse])
+    def list_accepted_missions():
+        try:
+            if not isinstance(profile_provider(), dict):
+                return []
+            pairs = application_service().list_accepted_missions()
+        except (OSError, ValueError, UserProfileError) as exc:
+            raise HTTPException(status_code=503, detail={"code": "acceptance_lineage_unavailable"}) from exc
+        return JSONResponse([
+            SavedMissionHistoryResponse(
+                selected_at=selection.selected_at,
+                status="accepted", mission_id=mission.mission_id,
+                decision_id=selection.decision_id, selection_id=selection.selection_id,
+                catalog_key=selection.selected_catalog_key,
+                selected_imaging_field_id=selection.selected_imaging_field_id,
+                selected_acquisition_intent_id=selection.selected_acquisition_intent_id,
+                mission=_accepted_mission_response(mission),
+            ).model_dump(mode="json") for selection, mission in pairs
+        ], headers={"Cache-Control": "no-store"})
 
     @application.get(
         "/v1/accepted-mission/current",

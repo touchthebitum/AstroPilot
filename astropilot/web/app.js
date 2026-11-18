@@ -130,6 +130,8 @@ const state = {
   decisionSiteReloadRequired: false,
   acceptedMission: null,
   savedMissions: [],
+  missionWeatherChecks: {},
+  missionWeatherOrigins: {},
   pendingAcceptanceAttempt: null,
   pendingAcceptanceStorageInvalid: false,
   acceptingRecommendation: false,
@@ -322,6 +324,14 @@ function usableEvidence(session) {
     && Number(item.usable_integration_duration) > 0);
 }
 
+// An explicit zero is a supplied observation; null or a missing record is unknown.
+// A subsequent positive observation (revised sorting) takes precedence.
+function noRetainedImages(session) {
+  return session?.execution.status === "completed" && !session.credit && !usableEvidence(session)
+    && (session.evidence || []).some(item => item.category === "acquisition"
+      && item.source === "user" && item.usable_integration_duration === 0);
+}
+
 function sessionStatus(status) {
   return ({unconfirmed: "Session non confirmée", completed: "Terminée", interrupted: "Interrompue",
     in_progress: "En cours", not_started: "À démarrer"})[status] || status;
@@ -415,7 +425,7 @@ function renderSession() {
     const startLabel = item.execution.actual_start
       ? missionDateTimeLabel(item.execution.actual_start, missionTimezone(item.mission, context))
       : "À démarrer";
-    option.textContent = `${startLabel} · ${sessionStatus(item.execution.status)}`;
+    option.textContent = `${startLabel} · ${noRetainedImages(item) ? "Aucune image retenue" : sessionStatus(item.execution.status)}`;
     choice.append(option);
   }
   choice.hidden = !state.sessions.length;
@@ -431,7 +441,10 @@ function renderSession() {
   document.querySelector("#session-start").className = status === "completed" && !session.credit
     ? "secondary-button" : "primary-button";
   document.querySelector("#session-close-actions").hidden = status !== "in_progress";
-  document.querySelector("#session-evidence").hidden = status !== "completed" || Boolean(usableEvidence(session));
+  document.querySelector("#session-no-images").hidden = status !== "completed"
+    || Boolean(usableEvidence(session)) || Boolean(session?.credit) || noRetainedImages(session);
+  document.querySelector("#session-evidence").hidden = status !== "completed"
+    || Boolean(usableEvidence(session)) || noRetainedImages(session);
   const evidence = usableEvidence(session);
   const nextStep = !session
     ? "Démarrez une session uniquement lorsque vous commencez réellement vos prises de vue."
@@ -445,6 +458,8 @@ function renderSession() {
             ? "Après vos prises de vue, terminez la session. Vous pourrez ensuite renseigner le temps de pose des images utilisables."
             : session.credit
               ? "Cette durée a déjà été ajoutée au projet. Ne la recopiez pas dans votre temps de départ. Le total acquis et le temps restant sont affichés ci-dessous."
+              : noRetainedImages(session)
+                ? "Aucune image retenue : ce résultat est enregistré. Aucun temps n’a été ajouté au projet."
               : evidence
                 ? "La durée utilisable est enregistrée, mais pas encore ajoutée au projet. Vérifiez les valeurs, puis cliquez sur « Ajouter cette durée à mon avancement »."
                 : "Séance photo terminée : renseignez ci-dessous le temps de pose des images utilisables de cette séance. Si aucune image n’est utilisable, n’ajoutez aucune durée au projet.";
@@ -470,6 +485,7 @@ function renderSession() {
     sessionMessage(!knownStatus ? "État de session non reconnu. Actualisez ou resélectionnez la session."
       : status === "unconfirmed" ? "Session non confirmée : aucune action disponible."
       : status === "interrupted" ? "Session interrompue : aucun crédit."
+      : noRetainedImages(session) ? "Aucune image retenue : résultat enregistré, aucun crédit."
       : session.credit ? "Cette durée a été ajoutée à votre projet." : status === "completed" ? "Séance photo terminée."
       : status === "in_progress" ? "Session en cours." : "Session prête à démarrer.",
       {error: !knownStatus || status === "unconfirmed", success: Boolean(session.credit) || status === "completed"});
@@ -613,6 +629,22 @@ async function closeSession(missionId, status) {
     actual_start: session.execution.actual_start, actual_end: end.toISOString(),
     actual_duration: Math.max(0, (end.getTime() - start.getTime()) / 1000),
   }, await guardianTransitionHeaders(session.execution.execution_id));
+}
+
+async function recordSessionNoImages() {
+  const session = currentSession();
+  if (session?.execution.status !== "completed" || session.credit
+      || usableEvidence(session) || noRetainedImages(session)) return;
+  const key = `astropilot.pendingNoImages.${session.execution.execution_id}`;
+  // Keep the entire request stable if a response is lost and the user retries.
+  const payload = JSON.parse(localStorage.getItem(key) || "null") || {
+    evidence_id: crypto.randomUUID(), execution_id: session.execution.execution_id,
+    category: "acquisition", observed_at: new Date().toISOString(), source: "user",
+    usable_integration_duration: 0,
+  };
+  localStorage.setItem(key, JSON.stringify(payload));
+  await postSession("/v1/outcome-evidence", payload);
+  localStorage.removeItem(key);
 }
 
 async function recordSessionEvidence() {
@@ -4149,7 +4181,10 @@ function savedMissionLabel(item) {
   });
   const dateTime = value => value && Number.isFinite(Date.parse(value))
     ? formatter.format(new Date(value)) : "Non précisée";
-  return `${readableTargetName(mission.target)} · ${filter} · ${dateTime(mission.window_start)} → ${dateTime(mission.window_end)} · ${zone}`;
+  const savedAt = item.savedAt && Number.isFinite(Date.parse(item.savedAt))
+    ? new NightMeritTime.DateTimeFormat("fr-CH", {year:"numeric", month:"2-digit", day:"2-digit",
+      hour:"2-digit", minute:"2-digit", second:"2-digit", hour12:false, timeZone:zone, timeZoneName:"shortOffset"}).format(new Date(item.savedAt)) : null;
+  return `${readableTargetName(mission.target)} · ${filter} · ${dateTime(mission.window_start)} → ${dateTime(mission.window_end)} · ${zone}${savedAt ? ` · Enregistré le ${savedAt}` : ""}`;
 }
 
 function clock(value, timeZone) {
@@ -4310,6 +4345,8 @@ function missionTaskTitle(title) {
 
 function renderMission(mission) {
   state.missionConditionsReady = false;
+  renderSavedMissionWeather();
+  void loadSavedMissionWeatherOrigin(state.acceptedMission);
   state.sessions = [];
   state.activeSessionId = null;
   state.fieldObservationSelectedExecutionId = null;
@@ -4409,6 +4446,47 @@ function missionPlanWindow(mission) {
   return {start: shift(mission?.window_start, -(preparation || 0)), end: shift(mission?.window_end, flats || 0)};
 }
 
+function renderSavedMissionWeather() {
+  const accepted = state.acceptedMission;
+  if (!accepted?.mission) return;
+  const check = state.missionWeatherChecks[accepted.mission_id];
+  const trust = check?.trust || state.missionWeatherOrigins[accepted.mission_id];
+  const zone = missionTimezone(accepted.mission, accepted);
+  const expired = check?.trust && ["favorable", "simulated", "caution", "revise", "choice_required"].includes(check.status) && Number.isFinite(check.receivedAt)
+    && (performance.now() - check.receivedAt) / 60000 + (check.trust?.snapshot_age_minutes ?? Infinity)
+      > (check.trust?.maximum_age_minutes ?? 90);
+  const differentSite = check && check.siteFingerprint !== decisionSiteFingerprint();
+  text("#mission-weather-status", differentSite
+    ? "Le site a changé depuis la vérification : actualisez pour confirmer ce plan."
+    : expired ? "Cette vérification météo a vieilli : actualisez avant de commencer."
+    : check?.summary || "Plan enregistré : les conditions météo restent à revérifier avant de commencer.");
+  const date = trust?.retrieved_at_utc ? siteDateTime(trust.retrieved_at_utc, zone) : "Date de collecte non disponible";
+  text("#mission-weather-collection", `${/simul/i.test(trust?.provider || "") ? "Météo simulée" : "Prévisions"} : ${date} · ${zone}. ${check?.collection || ""} Le plan enregistré est conservé. Les vérifications affichées sont limitées à cette ouverture de NightMerit.`);
+}
+
+async function loadSavedMissionWeatherOrigin(accepted) {
+  if (!accepted?.decision_id || Object.hasOwn(state.missionWeatherOrigins, accepted.mission_id)) return;
+  state.missionWeatherOrigins[accepted.mission_id] = null;
+  try {
+    const response = await fetch(`/v1/analysis-history/${encodeURIComponent(accepted.decision_id)}`, {cache:"no-store"});
+    if (!response.ok) return;
+    const record = await response.json();
+    if (record.decision_id !== accepted.decision_id) return;
+    state.missionWeatherOrigins[accepted.mission_id] = record.result?.weather_trust || record.result?.refusal_weather || null;
+    if (state.acceptedMission?.mission_id === accepted.mission_id) renderSavedMissionWeather();
+  } catch (_) { /* An unavailable archive cannot validate today's weather. */ }
+}
+
+function saveMissionWeatherCheck(recheck, payload) {
+  if (!recheck?.accepted) return;
+  const accepted = recheck.accepted;
+  const previous = state.missionWeatherChecks[accepted.mission_id]?.trust || state.missionWeatherOrigins[accepted.mission_id];
+  state.missionWeatherChecks[accepted.mission_id] = {
+    ...NightMeritSavedPlanWeather.summarize(accepted, payload, previous),
+    siteFingerprint: recheck.siteFingerprint, receivedAt: performance.now(),
+  };
+}
+
 async function checkMissionConditions() {
   if (guardUnresolvedAcceptance() || state.requestingRecommendation || state.sessionBusy
       || !state.missionConditionsReady || state.sessionWriteUncertain || state.sessions.some(item =>
@@ -4463,6 +4541,7 @@ async function checkMissionConditions() {
   const localWindowNote = missionTimezone(mission, accepted) !== zone
     ? ` Horaires sur ce site : ${recheckFormatter.format(new Date(start))} → ${recheckFormatter.format(new Date(end))}.` : "";
   state.missionRecheck = {
+    accepted: structuredClone(accepted),
     projectId, start: planWindow.start, end: planWindow.end,
     startLocal, endLocal, siteFingerprint: decisionSiteFingerprint(),
     summary: `Mission enregistrée : ${savedMissionLabel(accepted)}. Site à vérifier : ${state.configuration.site.name} (${zone}).${localWindowNote} Durée réelle : ${usablePoseDuration((end - start) / 1000)}.${clockChangeNote} Confirmez ce créneau ou modifiez-le avant de lancer l’analyse.`,
@@ -6078,7 +6157,8 @@ function photoSeconds() {
     && Number.isFinite(total) && total <= Number.MAX_SAFE_INTEGER ? total : null;
 }
 function photoSessionChoiceStatus(session) {
-  return session.credit ? `Déjà ajouté : ${usablePoseDuration(session.session_credit_seconds)}`
+  return noRetainedImages(session) ? "Aucune image retenue"
+    : session.credit ? `Déjà ajouté : ${usablePoseDuration(session.session_credit_seconds)}`
     : session.execution.status === "completed" ? "Photos à renseigner" : sessionStatus(session.execution.status);
 }
 function rememberPhotoSession(session) {
@@ -6666,12 +6746,32 @@ async function restoreSavedMission() {
   } catch (_error) {
     // Availability remains usable if the persisted lineage is unavailable.
   }
+  let historyUnavailable = false;
+  try {
+    const response = await fetch("/v1/accepted-missions", {cache: "no-store"});
+    if (!response.ok) throw new Error("saved_mission_history_unavailable");
+    const history = await response.json();
+    if (!Array.isArray(history)) throw new Error("invalid_saved_mission_history");
+    if (!isCurrent()) return;
+    for (const payload of history) {
+      const mission = payload?.mission;
+      if (payload?.status !== "accepted" || !mission || payload.mission_id !== mission.mission_id
+          || payload.selection_id !== mission.selection_id || payload.decision_id !== mission.decision_id) {
+        throw new Error("invalid_saved_mission_history");
+      }
+      savedMissions.push({decision_id:payload.decision_id, selection_id:payload.selection_id,
+        mission_id:payload.mission_id, selectedCatalogKey:payload.catalog_key,
+        acquisitionIntentId:payload.selected_acquisition_intent_id, savedAt:payload.selected_at, source:"persisted", mission});
+    }
+  } catch (_) {
+    historyUnavailable = true;
+  }
   try {
     const response = await fetch("/v1/execution-sessions");
     if (response.ok && isCurrent()) {
       const sessions = await response.json();
       if (!isCurrent()) return;
-      const seen = new Set();
+      const seen = new Set(savedMissions.map(item => item.mission_id));
       for (const item of sessions) {
         if (seen.has(item.mission_id)) continue;
         seen.add(item.mission_id);
@@ -6691,11 +6791,20 @@ async function restoreSavedMission() {
     const known = knownMissions.find(previous => previous.mission_id === item.mission_id);
     item.windowTimezone = missionTimezone(item.mission, known || item);
   }
-  state.savedMissions = savedMissions;
+  state.savedMissions = [...new Map(savedMissions.map(item => [item.mission_id, item])).values()];
   if (current && !state.savedMissions.some((item) => item.mission_id === current.mission_id)) {
     state.savedMissions.unshift(current);
   }
   state.acceptedMission = current || state.savedMissions[0] || null;
+  const historyStatus = document.querySelector("#saved-mission-history-status");
+  historyStatus.hidden = !historyUnavailable;
+  historyStatus.textContent = historyUnavailable
+    ? "Certains plans enregistrés n’ont pas pu être chargés. Rechargez la page pour réessayer." : "";
+  renderSavedMissionChoices();
+  if (historyUnavailable) ui.savedMissionEntry.hidden = false;
+}
+
+function renderSavedMissionChoices() {
   ui.savedMissionChoice.replaceChildren();
   for (const item of state.savedMissions) {
     const option = document.createElement("option");
@@ -7896,6 +8005,7 @@ async function acceptRecommendation({
     clearPendingAcceptanceAttempt(attempt);
     state.acceptedMission = {
       acceptedSiteGeneration: siteGeneration,
+      savedAt: attempt.selected_at,
       acceptedSiteFingerprint: siteFingerprint,
       decision_id: payload.decision_id,
       selection_id: payload.selection_id,
@@ -7906,6 +8016,9 @@ async function acceptRecommendation({
       windowTimezone: windowTimezone(decision),
       mission,
     };
+    state.savedMissions = [{...state.acceptedMission, source:"persisted"},
+      ...state.savedMissions.filter(item => item.mission_id !== mission.mission_id)];
+    renderSavedMissionChoices();
     if (decision?.decision_id === expectedDecisionId) {
       show("decision");
       showAcceptanceStatus(
@@ -7958,6 +8071,16 @@ async function loadTonight(availability) {
   const discovery = Boolean(state.discoveryMode);
   const selectedProjectId = discovery ? null : state.selectedProjectId;
   const confirmedFilters = discovery ? discoveryConfirmedFilters() : [];
+  const candidateRecheck = state.missionRecheck;
+  const recheck = candidateRecheck?.accepted && !discovery
+    && candidateRecheck.projectId === selectedProjectId
+    && candidateRecheck.siteFingerprint === siteFingerprint
+    && availability.mode === "fixed_window"
+    && Date.parse(availability.start) === Date.parse(candidateRecheck.start)
+    && Date.parse(availability.end) === Date.parse(candidateRecheck.end)
+    && availability.preparation_minutes === missionOperationalMinutes(candidateRecheck.accepted.mission).preparation
+    && availability.flats_minutes === missionOperationalMinutes(candidateRecheck.accepted.mission).flats
+      ? structuredClone(candidateRecheck) : null;
   state.requestingRecommendation = true;
   state.availability = { ...availability };
   ui.recommendationSubmit.disabled = true;
@@ -8011,6 +8134,7 @@ async function loadTonight(availability) {
     if (!isCurrent()) return;
 
     if (!response.ok) {
+      saveMissionWeatherCheck(recheck, null);
       if (payload?.error === "user_profile_unavailable") {
         showConfigurationError("Votre configuration doit être rechargée avant de préparer la nuit.");
         return;
@@ -8052,6 +8176,7 @@ async function loadTonight(availability) {
       renderTargetSuggestions(payload);
       return;
     }
+    saveMissionWeatherCheck(recheck, payload);
     clearAcceptedMission();
     setCurrentFieldObservationDecision(payload);
     if (payload.status === "weather_refused") {
@@ -8067,6 +8192,7 @@ async function loadTonight(availability) {
     renderDecision(payload);
   } catch (_error) {
     if (!isCurrent()) return;
+    saveMissionWeatherCheck(recheck, null);
     showAvailabilityError(deadlineExceeded
       ? "L’analyse n’a pas répondu après 90 secondes. Vos horaires sont conservés ; réessayez dans un instant."
       : "Connexion impossible. Vos horaires sont conservés ; réessayez dans un instant.");
@@ -8436,6 +8562,7 @@ document.querySelector("#session-interrupt").addEventListener("click", () => ses
 for (const id of ["session-duration-method", "session-retained-frames", "session-frame-seconds", "session-hours", "session-minutes", "session-seconds"]) {
   document.getElementById(id).addEventListener("input", updateSessionDurationPreview);
 }
+document.querySelector("#session-no-images").addEventListener("click", () => sessionCommand(recordSessionNoImages));
 document.querySelector("#session-record-evidence").addEventListener("click", () => sessionCommand(recordSessionEvidence));
 document.querySelector("#session-apply-credit").addEventListener("click", () => sessionCommand(creditSession));
 document.querySelector("#observation-choose-decision").addEventListener("click", openRecentDecisions);
@@ -9185,3 +9312,6 @@ restoreFieldObservationLock();
 restorePendingFieldObservationInventory();
 if (restorePendingAcceptanceAttempt()) showUnresolvedAcceptance();
 else loadConfiguration();
+
+// Age a displayed verification without turning an old result into a fresh one.
+setInterval(() => { if (ui.mission.open) renderSavedMissionWeather(); }, 60000);

@@ -43,17 +43,34 @@ def test_invalid_marker_and_relative_path_refused(tmp_path):
     assert not demo_mode.context()['enabled']
 
 
-def test_occupied_port_does_not_create_profile_or_open_browser(tmp_path, monkeypatch):
+@pytest.mark.parametrize('port', [18831,18837])
+def test_occupied_port_does_not_create_profile_or_open_browser(tmp_path, monkeypatch,port):
     import socket
     root=tmp_path/'must-not-exist'
     monkeypatch.setenv('ASTROPILOT_DATA_DIR',str(root))
     class BusySocket:
         def setsockopt(self, *args): pass
         def bind(self, address):
-            assert address==('127.0.0.1',18831)
+            assert address==('127.0.0.1',port)
             raise OSError('occupied')
         def close(self): pass
     monkeypatch.setattr(socket,'socket',lambda *a,**k:BusySocket())
-    with pytest.raises(SystemExit, match='occupied'):demo_mode.main()
+    with pytest.raises(SystemExit, match='occupied'):demo_mode.main(port=port,open_browser=False)
     assert not root.exists()
     assert not demo_mode.context()['enabled']
+
+
+def test_isolated_test_mode_requires_an_explicit_flag(monkeypatch):
+    from astropilot import portable_entry
+    calls=[]
+    monkeypatch.setattr(demo_mode,'main',lambda **kw:calls.append(kw))
+    monkeypatch.setattr('sys.argv',['AstroPilot','--demo-isolated-test-18837'])
+    assert portable_entry.main()==0
+    assert calls==[{'port':18837,'open_browser':False}]
+
+
+def test_demo_refuses_other_ports_before_creating_profile(tmp_path,monkeypatch):
+    root=tmp_path/'must-not-exist'
+    monkeypatch.setenv('ASTROPILOT_DATA_DIR',str(root))
+    with pytest.raises(SystemExit,match='non autorisé'):demo_mode.main(port=8000)
+    assert not root.exists()

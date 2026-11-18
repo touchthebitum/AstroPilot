@@ -96,7 +96,9 @@ def test_orion_is_not_offered_when_conditions_do_not_allow_it(tmp_path, monkeypa
     response = client.post('/v1/target-suggestions', json=request(
         confirmed_filter_profile_ids=filters, availability=availability))
     assert response.status_code == 200, response.text
-    assert not response.json()['suggestions']
+    assert not any(item['catalog_key'] == 'M42' for item in response.json()['suggestions'])
+    if filters == [HA]:
+        assert not response.json()['suggestions']
     assert not list(tmp_path.rglob('*.json'))
 
 
@@ -113,4 +115,4 @@ def test_all_discovery_templates_have_licensed_images_and_exact_intent_help():
         assert template['guidance']['source_url'].startswith('https://')
         for intent in template['acquisition_intents']:
             assert all(intent['guidance'][key] for key in ('difficulty', 'purpose', 'advice'))
-            assert intent['filter_type'] == 'Ha'
+            assert intent['filter_type'] in ({'Ha', 'OIII', 'SII'} if template['catalog_key'] == 'Rosette' else {'Ha'})

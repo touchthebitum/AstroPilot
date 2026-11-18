@@ -63,6 +63,8 @@ const localStorage = {setItem(k,v) {storage.set(k,v);}, getItem(k) {return stora
 function fetch(url, options) { return new Promise((resolve, reject) => queue.push({url, options, resolve, reject})); }
 const reply = (request, payload, ok = true) => request.resolve({ok, status: ok ? 200 : 503, json: async () => payload});
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+// Discovery presentation is outside the configuration race scenarios.
+function updateDiscoveryAvailability() {}
 function text() {}
 function syncFieldObservationContext() {}
 function invalidateRecentDecisions() {}

@@ -21,7 +21,8 @@ def _run_javascript(source: str) -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js is required for the dynamic UI test")
-    source = (_javascript_between("function pendingIntentChoice(subject) {", "function chosenIntent(")
+    source = ("function updateDiscoveryAvailability() {}\n"
+              + _javascript_between("function pendingIntentChoice(subject) {", "function chosenIntent(")
               + _javascript_between("function siteTimezone()", "function decisionSiteFingerprint(")
               .split("function siteConfigurationIdentity", 1)[0]
               + _javascript_between("function windowTimezone(", "function clock(") + source)
@@ -197,7 +198,7 @@ async function fetch(url, options) {
 def test_configuration_changes_invalidate_restored_mission():
     initialize = _javascript_between("function setConfigurationDraft(", "function restoreNewProjectEmptyConfirmation(")
     initialize += _javascript_between("function initializeConfiguration(payload) {", "async function restoreSavedMission() {")
-    save = _javascript_between("async function saveConfiguration() {", "const availabilityFieldsByMode")
+    save = _javascript_between("async function saveConfiguration(", "const availabilityFieldsByMode")
     _run_javascript("""
 const assert = require('node:assert/strict');
 const entry = {hidden: false};
@@ -256,7 +257,7 @@ const entry = {hidden: false};
 const document = {querySelector: () => null};
 const ui = {savedMissionEntry: entry, recommendationSubmit: {disabled: false}, refresh: {disabled: false}};
 const saved = {mission_id: 'saved', source: 'persisted', mission: {target: 'M31'}};
-const state = {acceptedMission: saved, requestingRecommendation: false, currentDecision: null,
+const state = {acceptedMission: saved, savedMissions: [saved], requestingRecommendation: false, currentDecision: null,
   configuration: {site: {latitude: 1, longitude: 2, timezone: "UTC"}}};
 let response;
 let invalidations = 0;
@@ -264,12 +265,18 @@ function guardUnresolvedAcceptance() { return false; }
 function showAvailabilityError() {}
 function setView(view) { state.view = view; }
 function show(view) { state.view = view; }
-function clearAcceptedMission() { invalidations++; state.acceptedMission = null; entry.hidden = true; }
+ui.mission = {open: false};
+function showAcceptanceStatus() {}
+function resetMissionPresentation() {}
+function clearAlternatives() {}
 function setCurrentFieldObservationDecision(decision) { state.currentDecision = decision; }
 function syncFieldObservationContext() {}
 function normalizeError() { return ['Erreur', 'Réessayez.']; }
 function renderDecision(decision) { clearAcceptedMission(); state.currentDecision = decision; state.view = 'decision'; }
 async function fetch() { return response; }
+""" + _javascript_between("function clearAcceptedMission() {", "function renderDecision(") + """
+const clearCurrentAnalysis = clearAcceptedMission;
+clearAcceptedMission = () => {invalidations++; clearCurrentAnalysis();};
 """ + _javascript_between("function decisionSiteFingerprint(", "function currentDecisionMatchesSite(") + load + """
 (async () => {
   response = {ok: false, status: 503, json: async () => ({})};
@@ -283,7 +290,7 @@ async function fetch() { return response; }
   assert.equal(state.view, 'decision');
   assert.equal(state.currentDecision.decision_id, 'new');
   assert.equal(state.acceptedMission, null);
-  assert.equal(entry.hidden, true);
+  assert.equal(entry.hidden, false, 'Persisted plans stay accessible after a new analysis');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """)
 
@@ -483,7 +490,7 @@ function restoreAcceptanceControls() {}
 function show() {}
 function renderRecommendationConfidence() {}
 function intentReady() { return true; }
-""" + mode + render + """
+""" + _javascript_between("function beginnerReason(", "function reasonText(") + mode + render + """
 const base = {decision_id: 'decision-1', catalog_key: 'M31',
   target_decision_status: 'recommended', action: 'start_project'};
 renderDecision({...base, acquisition_intent_selection_status: 'no_eligible_intent',
@@ -627,7 +634,7 @@ async function exercise(source, localChoice, serverChoice) {
   assert.equal(state.acceptedMission.acquisitionIntentId, serverChoice);
   assert.equal(container.querySelector('select'), undefined);
   assert.match(container.textContent, new RegExp(serverChoice === 'A' ? 'Hα' : 'OIII'));
-  assert.equal(button.textContent, 'Ouvrir la mission');
+  assert.equal(button.textContent, 'Ouvrir ce plan');
   assert.equal(button.disabled, false);
   select.value = serverChoice === 'A' ? 'B' : 'A'; select.listeners.change();
   assert.equal(button.disabled, false);
@@ -664,7 +671,7 @@ async function exerciseUniqueAndLegacy() {
   await acceptRecommendation({source: 'alternative', selectedCatalogKey: 'M33',
     expectedDecisionId: 'decision-1', triggerButton: button, selectedTarget: 'Cible'});
   assert.equal(state.acceptedMission.acquisitionIntentId, null);
-  assert.equal(button.textContent, 'Ouvrir la mission');
+  assert.equal(button.textContent, 'Ouvrir ce plan');
 }
 (async () => {
   await exercise('primary_recommendation', 'A', 'A');

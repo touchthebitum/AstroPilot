@@ -253,7 +253,7 @@ def test_production_pipeline_M42_refusal_and_restart(tmp_path, monkeypatch, boun
     archived = reloaded.get("/v1/analysis-history/" + result["decision_id"])
     assert archived.status_code == 200, archived.text
     assert archived.json()["result"]["target_refusal"] == result["target_refusal"]
-    assert archived.json()["request"]["availability"] == {"mode": "fixed_window", **bounds}
+    assert archived.json()["request"]["availability"] == {"mode": "fixed_window", **bounds, "preparation_minutes": 30, "flats_minutes": 10}
     assert {p.name: p.read_bytes() for p in old.iterdir()} == before
     assert json.loads((tmp_path / "user_profile.json").read_text())["projects"]["M42"] == profile["projects"]["M42"]
 

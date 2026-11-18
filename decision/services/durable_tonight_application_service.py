@@ -168,6 +168,12 @@ class DurableTonightApplicationService:
         scoped._acceptance_service.context_store = snapshot
         return scoped
 
+    def list_accepted_missions(self):
+        store = self._decision_acceptance_service().context_store
+        if not hasattr(store, "list_accepted_missions"):
+            return []
+        return store.list_accepted_missions()
+
     def latest_accepted_mission(self, *, profile, now):
         store = self._decision_acceptance_service().context_store
         if not hasattr(store, "latest_accepted_mission"):

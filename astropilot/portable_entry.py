@@ -3,6 +3,10 @@ import sys
 
 
 def main():
+    if sys.argv[1:] == ["--demo-isolated-test-18837"]:
+        from astropilot.demo_mode import main as demo_main
+        demo_main(port=18837, open_browser=False)
+        return 0
     if sys.argv[1:] == ["--demo-18831"]:
         from astropilot.demo_mode import main as demo_main
         demo_main()

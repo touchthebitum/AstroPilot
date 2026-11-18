@@ -34,7 +34,7 @@ function duration() {return '';}
 function renderSession() {}
 function reloadSessions() {return Promise.resolve();}
 function sessionMessage() {throw Error('Unexpected session error');}
-const state={acceptedMission:null};
+const state={acceptedMission:null,missionWeatherChecks:{},missionWeatherOrigins:{}};
 const tasks=[{start:'T-30 min',end:'T-20 min',title:'Installer le matériel'},
  {start:'T-20 min',end:'T-10 min',title:'Mise en station'},
  {start:'T-10 min',end:'T',title:'Autofocus'},
