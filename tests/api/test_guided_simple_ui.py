@@ -101,12 +101,12 @@ const payload={acquisition_intent_targets:[{acquisition_intent_id:'ha',target_ho
  assert.equal(goal.textContent,'3 h 00');
  assert.equal(remaining.textContent,'1 h 15');
  assert.doesNotMatch(status.all().map(x=>x.textContent||'').join(' '),/99/,'legacy scalar must not override canonical credits');
- current.children[2].children.find(x=>x.textContent==='Préparer une séance').listeners.click();
+ current.children[2].children.find(x=>x.textContent==='Préparer une séance sur ce projet').listeners.click();
  assert.equal(preparation.projectId,'Sh2-129');
  renderSimpleProjects([['Sh2-129',configuration.projects['Sh2-129']]]);
  const failed=region.children[0];requests.shift().reject(new Error('offline'));await flush();
  assert.match(failed.children[1].textContent,/ne peut pas être relu/);
- assert.equal(failed.children[2].children.find(x=>x.textContent==='Préparer une séance').disabled,true);
+ assert.equal(failed.children[2].children.find(x=>x.textContent==='Préparer une séance sur ce projet').disabled,true);
 })().catch(e=>{console.error(e);process.exitCode=1;});
 ''')
 

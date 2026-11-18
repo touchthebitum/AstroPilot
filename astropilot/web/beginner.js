@@ -81,10 +81,10 @@
   // Reuse the real discovery choice. No filter is inferred or confirmed here.
   const discovery = $("#discover-targets");
   const choice = make("fieldset", {id: "beginner-choice"});
-  choice.append(make("legend", {}, "Que souhaitez-vous photographier ?"));
+  choice.append(make("legend", {}, "Sur quel projet souhaitez-vous travailler ?"));
   const discoverValue = "__nightmerit_discover__";
   const projectWrap = make("label", {id: "beginner-project-wrap"}, "Choisir une option");
-  const projectSelect = make("select", {id: "beginner-project", "aria-label": "Projet ou aide au choix de la cible"});
+  const projectSelect = make("select", {id: "beginner-project", "aria-label": "Projet pour cette séance ou aide au choix de la cible"});
   projectWrap.append(projectSelect);
   choice.append(projectWrap);
   discovery.closest("label").after(choice);
@@ -238,7 +238,7 @@
     setText(context, [state.configuration?.site?.name, $("#review-equipment")?.textContent].filter(v => v && v !== "—").join(" · ") || "Votre configuration enregistrée sera utilisée.");
     if (beginner && configured && state.view === "availability") {
       setText($("#availability-title"), state.missionRecheck ? "Vérifier ma séance" : (document.documentElement.dataset.choicePhase === "filters" ? "Quel filtre utilisez-vous ?" : (document.documentElement.dataset.choicePhase === "hours" ? "Quand souhaitez-vous observer ?" : "Préparer ma séance")));
-      setText($("#availability-intro"), state.missionRecheck ? "Retrouvez ci-dessous les horaires de votre plan de séance." : "Choisissez quoi préparer et vos horaires.");
+      setText($("#availability-intro"), state.missionRecheck ? "Retrouvez ci-dessous les horaires de votre plan de séance." : "Choisissez un projet enregistré ou demandez une cible, puis indiquez vos horaires.");
       setText(ui.recommendationSubmit, state.discoveryMode ? "Chercher quoi photographier" : "Vérifier mon projet");
     }
     const session = currentSession();

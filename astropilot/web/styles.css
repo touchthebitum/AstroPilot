@@ -1135,7 +1135,6 @@ html[data-ui-mode="simple"] body.beginner-layout .project-summary { display: non
  .beginner-help-button { min-width: 44px; min-height: 44px; }
 }
 /* Keep the optional context out of the main reading path. */
-html[data-ui-mode="simple"] body.beginner-layout #availability-selected-project,
 html[data-ui-mode="simple"] body.beginner-layout #availability-altitude-guidance,
 html[data-ui-mode="simple"] body.beginner-layout .page-footer [data-open-analysis-history] { display: none !important; }
 html[data-ui-mode="simple"] body.beginner-layout #beginner-choice { border: 0; padding: 0; }

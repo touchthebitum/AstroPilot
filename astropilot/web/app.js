@@ -4027,17 +4027,70 @@ const PENDING_ACCEPTANCE_STORAGE_VERSION = 2;
 
 const wizardStates = Object.freeze(["site", "equipment", "projects", "review"]);
 
+// Both preparation paths read the same effective per-filter totals. Never derive
+// acquired time from the legacy project scalar or from a requested objective.
+let selectedProjectContextRead = null;
+
+function projectSessionContextText(projectId, data) {
+  const prefix = `Projet existant : ${readableTargetName(projectId)}`;
+  const targets = new Map((data.acquisition_intent_targets || []).map(item => [item.acquisition_intent_id, item]));
+  const progress = new Map((data.intent_progress_breakdown || []).map(item => [item.acquisition_intent_id, item]));
+  const known = value => Number.isFinite(value) && value >= 0;
+  const duration = seconds => {
+    const rounded = Math.round(seconds);
+    return rounded % 3600 === 0 ? `${rounded / 3600} h` : progressDuration(rounded);
+  };
+  const rows = (data.acquisition_intents || []).filter(item => targets.has(item.acquisition_intent_id)).map(intent => {
+    const target = targets.get(intent.acquisition_intent_id), acquired = progress.get(intent.acquisition_intent_id);
+    const filter = intent.filter_type === "Ha" ? "Hα" : intent.filter_type || "Filtre à préciser";
+    const total = known(acquired?.effective_total_seconds) ? duration(acquired.effective_total_seconds) : "acquis non renseigné";
+    const goal = Number.isFinite(target.target_hours) && target.target_hours > 0 ? duration(target.target_hours * 3600) : "objectif à définir";
+    return {filter, detail: `${total} sur ${goal}`};
+  });
+  if (!rows.length) return `${prefix} · Objectif par filtre à renseigner.`;
+  return `${prefix} · ${rows.map(row => rows.length === 1 ? `${row.filter} · ${row.detail}` : `${row.filter} : ${row.detail}`).join(" · ")}.`;
+}
+
+function updateSelectedProjectContext() {
+  const notice = document.querySelector("#availability-selected-project");
+  if (!notice) return;
+  const projectId = state.selectedProjectId, configuration = state.configuration;
+  if (state.discoveryMode || !projectId || !Object.hasOwn(configuration?.projects || {}, projectId)) {
+    selectedProjectContextRead = null;
+    notice.hidden = true; notice.textContent = "";
+    return;
+  }
+  notice.hidden = false;
+  const revision = configuration.profile_revision;
+  if (selectedProjectContextRead?.projectId === projectId
+      && selectedProjectContextRead.configuration === configuration
+      && selectedProjectContextRead.revision === revision) return;
+  const owner = {projectId, configuration, revision};
+  selectedProjectContextRead = owner;
+  const current = () => selectedProjectContextRead === owner && !state.discoveryMode
+    && state.selectedProjectId === projectId && state.configuration === configuration
+    && configuration.profile_revision === revision;
+  notice.textContent = `Projet existant : ${readableTargetName(projectId)} · Lecture de l’avancement…`;
+  fetch(`/v1/projects/${encodeURIComponent(projectId)}/progress`).then(async response => {
+    if (!response.ok) throw new Error("project progress unavailable");
+    const data = await response.json();
+    if (!current()) return;
+    if (data.project_id !== projectId) throw new Error("project progress mismatch");
+    notice.textContent = projectSessionContextText(projectId, data);
+  }).catch(() => {
+    if (!current()) return;
+    // A later explicit return can retry; do not present unknown progress as zero.
+    selectedProjectContextRead = null;
+    notice.textContent = `Projet existant : ${readableTargetName(projectId)} · Avancement indisponible. Retrouvez-le dans Mes projets.`;
+  });
+}
+
 function setView(view) {
   const guidanceDialog = document.querySelector("#altitude-guidance-dialog");
   if (guidanceDialog?.open) guidanceDialog.close();
   const guidanceButton = document.querySelector("#availability-altitude-guidance");
   if (guidanceButton) guidanceButton.hidden = !state.selectedProjectId || state.discoveryMode;
-  const selectedNotice = document.querySelector("#availability-selected-project");
-  if (selectedNotice) {
-    selectedNotice.hidden = !state.selectedProjectId || state.discoveryMode;
-    selectedNotice.textContent = state.selectedProjectId
-      ? `Cible choisie : ${readableTargetName(state.selectedProjectId)}. L’analyse vérifiera ce projet avec vos horaires et la météo, sans le remplacer par une autre cible.` : "";
-  }
+  updateSelectedProjectContext();
   invalidateOutcomeHistory();
   state.viewRevision = (state.viewRevision || 0) + 1;
   state.view = view;
@@ -6013,7 +6066,7 @@ function renderProjectProgressEditor(message = "") {
   prepare.type = "button";
   prepare.className = "primary-button";
   prepare.dataset.simpleOnly = "true";
-  prepare.textContent = "Préparer une séance avec cette cible";
+  prepare.textContent = "Préparer une séance sur ce projet";
   prepare.hidden = !message;
   prepare.addEventListener("click", () => prepareGuidedSession({projectId: data.project_id}));
   // A new edit requires another successful save before offering the next step.
@@ -6136,6 +6189,7 @@ async function saveProjectProgress() {
 
 // Guided presentation uses the same live controls and canonical progress reads.
 function updateGuidedPresentation() {
+  updateSelectedProjectContext();
   const simple = appliedUiMode === "simple";
   const view = state.view;
   const configured = Boolean(state.configuration?.configured);
@@ -6436,7 +6490,7 @@ function renderSimpleProjects(entries) {
     controls.className = "simple-project-actions";
     const prepare = document.createElement("button");
     prepare.type = "button"; prepare.className = "primary-button";
-    prepare.textContent = configurationDraftMatchesSaved() ? "Préparer une séance" : "Enregistrer et préparer une séance";
+    prepare.textContent = configurationDraftMatchesSaved() ? "Préparer une séance sur ce projet" : "Enregistrer et préparer une séance sur ce projet";
     prepare.disabled = true;
     prepare.addEventListener("click", () => prepareGuidedSession({saveDraft:true, projectId:key}));
     const more = document.createElement("details");
