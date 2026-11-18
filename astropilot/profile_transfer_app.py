@@ -32,7 +32,7 @@ MESSAGES = {
 
 def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
                         exporter=create_backup, inspector=inspect_backup, restorer=restore_empty,
-                        open_application=None):
+                        open_application=None, demo=False):
     root = Path(directory) if directory is not None else get_user_data_dir()
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     token = secrets.token_urlsafe(32)
@@ -81,6 +81,8 @@ def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
                 "can_export": state == "profile", "can_restore": state == "empty",
                 "can_open": open_application is not None and state == "profile",
                 "open_supported": open_application is not None,
+                "can_continue": demo and state == "demo_started" and open_application is not None,
+                "demo": demo,
                 "platform": "windows" if os.name == "nt" else "other"}
 
     @app.post("/transfer/export")
@@ -133,7 +135,7 @@ def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
     async def open_restored_copy():
         nonlocal opening
         async with operations:
-            if open_application is None or profile_state(root) != "profile":
+            if open_application is None or profile_state(root) not in ({"profile", "demo_started"} if demo else {"profile"}):
                 return JSONResponse({"message": "Reprenez d’abord vos données dans cette copie avant de l’ouvrir."}, status_code=409)
             from astropilot.app import runtime_identity_payload
             payload = {"opening": True, "data_directory": os.path.abspath(root),
@@ -168,38 +170,52 @@ def reserve_listener(port=8000):
         raise
 
 
-def main():
+def main(*, port=8000, open_browser=True, demo=False):
     import uvicorn
     from astropilot.file_lock import exclusive_file_lock
     # Reserve before opening a browser. Never hand off to or stop another copy.
-    listener = reserve_listener()
+    if port not in {8000, 18831}:
+        raise ValueError("Unsupported transfer port")
+    if demo and port != 18831:
+        raise ValueError("Demo transfer requires port 18831")
+    origin = f"http://127.0.0.1:{port}"
+    listener = reserve_listener() if port == 8000 else reserve_listener(port=port)
     launch_requested = threading.Event()
     try:
         def open_application():
             launch_requested.set()
             server.should_exit = True
 
-        app = create_transfer_app(open_application=open_application)
-        server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=8000,
+        app = create_transfer_app(origin=origin, open_application=open_application, demo=demo)
+        server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port,
                                               log_config=None, access_log=False))
         finished = threading.Event()
         def open_when_ready():
             while not finished.wait(.1):
                 if server.started:
-                    webbrowser.open("http://127.0.0.1:8000/")
+                    webbrowser.open(origin)
                     return
         worker = threading.Thread(target=open_when_ready, daemon=True)
-        worker.start()
+        if open_browser:
+            worker.start()
         try:
             with exclusive_file_lock(get_user_data_dir().parent / ".nightmerit-profile-transfer.lock"):
                 server.run(sockets=[listener])
         finally:
             finished.set()
-            worker.join(timeout=2)
+            if open_browser:
+                worker.join(timeout=2)
     finally:
         listener.close()
     if launch_requested.is_set():
         # Keep the same process, executable and data environment, after both
         # the assistant listener and its exclusive profile lock are released.
-        from astropilot.launcher import main as launch_main
-        launch_main()
+        if demo:
+            from astropilot.demo_mode import main as demo_main
+            demo_main()
+        elif port == 18831:
+            from astropilot.app import app
+            uvicorn.run(app, host="127.0.0.1", port=18831)
+        else:
+            from astropilot.launcher import main as launch_main
+            launch_main()

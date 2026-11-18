@@ -364,6 +364,9 @@ def fetch_weather(lat: float, lon: float) -> WeatherSnapshot | None:
 
     location_time = LocationTimeResolver.resolve(lat, lon)
     timezone_name = location_time.timezone_name
+    from astropilot.demo_mode import context as demo_context, simulated_weather
+    if demo_context()["enabled"]:
+        return simulated_weather(lat, lon, timezone_name)
     params = {
         "latitude": lat,
         "longitude": lon,

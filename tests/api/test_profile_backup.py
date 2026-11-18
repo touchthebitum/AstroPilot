@@ -290,6 +290,7 @@ def test_complete_session_and_observation_graph_roundtrip(tmp_path, monkeypatch,
     assert compared.status_code == 201, compared.text
     applied = credit(client, 'execution-1', 'evidence-1', confirm=True)
     assert applied.status_code == 200, applied.text
+    (root / '.nightmerit-demo.json').write_text('{"schema":"nightmerit.demo.v1"}')
     before = snapshot(root)
     raw, summary = create_backup(root)
     assert summary['sessions'] == summary['observations'] == summary['comparisons'] == 1
@@ -614,3 +615,118 @@ def test_assistant_closes_listener_and_releases_lock_before_opening_same_process
     monkeypatch.setattr(launcher,'main',launch)
     transfer.main()
     assert events[-1] == 'normal-application'
+
+
+def test_private_transfer_handoff_stays_on_18831(tmp_path, monkeypatch):
+    import contextlib
+    import types
+    import sys
+    import astropilot.profile_transfer_app as transfer
+    import astropilot.file_lock as locking
+    root = tmp_path / 'profile'; root.mkdir()
+    (root / 'user_profile.json').write_text('{}')
+    events = []
+    class Listener:
+        def close(self): events.append('closed')
+    @contextlib.contextmanager
+    def lock(path):
+        events.append('locked')
+        try: yield
+        finally: events.append('unlocked')
+    def reserve(*, port):
+        assert port == 18831
+        return Listener()
+    def config(app, **kw):
+        assert kw['host'] == '127.0.0.1' and kw['port'] == 18831
+        return app
+    class Server:
+        should_exit = False
+        def __init__(self, app): self.app = app
+        def run(self, sockets):
+            client = TestClient(self.app, base_url='http://127.0.0.1:18831')
+            token = re.search(r'const token="([^"]+)"', client.get('/').text)[1]
+            assert client.post('/transfer/open', headers={'X-NightMerit-Transfer': token}).status_code == 202
+            assert self.should_exit
+    def run(app, **kw):
+        assert events == ['locked', 'unlocked', 'closed']
+        assert kw == {'host': '127.0.0.1', 'port': 18831}
+        events.append('native-port-handoff')
+    monkeypatch.setitem(sys.modules, 'uvicorn', types.SimpleNamespace(Config=config, Server=Server, run=run))
+    monkeypatch.setattr(transfer, 'reserve_listener', reserve)
+    monkeypatch.setattr(transfer, 'get_user_data_dir', lambda: root)
+    monkeypatch.setattr(locking, 'exclusive_file_lock', lock)
+    transfer.main(port=18831, open_browser=False)
+    assert events[-1] == 'native-port-handoff'
+
+
+def test_demo_backup_roundtrip_keeps_marker_and_refuses_repeat(source, tmp_path):
+    marker = source / '.nightmerit-demo.json'
+    marker.write_text('{"schema": "nightmerit.demo.v1"}')
+    before = snapshot(source)
+    raw, summary = create_backup(source)
+    files, preview = inspect_backup(raw)
+    assert files == before
+    target = tmp_path / 'restored-demo'
+    assert restore_empty(target, files) == summary
+    assert snapshot(target) == before == snapshot(source)
+    from astropilot import demo_mode
+    active = demo_mode._active
+    try:
+        demo_mode.prepare_profile(target)
+        assert demo_mode.context()['weather'] == 'simulated'
+    finally:
+        demo_mode._active = active
+    assert snapshot(target) == before
+    with pytest.raises(BackupError, match='backup_destination_not_empty'):
+        restore_empty(target, files)
+
+
+@pytest.mark.parametrize('marker', ['{}', '{"schema":"wrong"}', '{"schema":"nightmerit.demo.v1","extra":1}'])
+def test_invalid_demo_marker_is_not_exported(source, marker):
+    (source / '.nightmerit-demo.json').write_text(marker)
+    with pytest.raises(BackupError, match='backup_invalid'):
+        create_backup(source)
+
+
+@pytest.mark.parametrize('with_logs', [False, True])
+def test_opened_demo_without_configuration_is_clear_and_never_overwritten(tmp_path, with_logs):
+    root=tmp_path/'opened-demo';root.mkdir()
+    marker=root/'.nightmerit-demo.json'
+    marker.write_bytes(b'{"schema":"nightmerit.demo.v1"}')
+    if with_logs:
+        (root/'Logs').mkdir();(root/'Logs/start.log').write_bytes(b'keep')
+    before={str(p.relative_to(root)):p.read_bytes() for p in root.rglob('*') if p.is_file()}
+    client=TestClient(create_transfer_app(root,origin='http://testserver'))
+    state=client.get('/transfer/status').json()
+    assert state['state']=='demo_started'
+    assert state['can_export'] is state['can_restore'] is state['can_open'] is False
+    with pytest.raises(BackupError,match='backup_destination_not_empty'):
+        restore_empty(root,{},validator=lambda files:{})
+    assert before=={str(p.relative_to(root)):p.read_bytes() for p in root.rglob('*') if p.is_file()}
+
+
+@pytest.mark.parametrize('raw,unknown', [(b'{}',False),(b'{"schema":"nightmerit.demo.v1"}',True),(b'x'*257,False)])
+def test_ambiguous_demo_folder_stays_unrecognized(tmp_path,raw,unknown):
+    root=tmp_path/'unknown-demo';root.mkdir()
+    (root/'.nightmerit-demo.json').write_bytes(raw)
+    if unknown:(root/'future.json').write_bytes(b'keep')
+    state=TestClient(create_transfer_app(root,origin='http://testserver')).get('/transfer/status').json()
+    assert state['state']=='unrecognized'
+    assert state['has_data'] is True
+    assert state['can_restore'] is state['can_export'] is False
+
+
+@pytest.mark.parametrize("demo", [False, True])
+def test_continue_configuration_only_opens_known_demo(tmp_path, demo):
+    root=tmp_path/'virgin';root.mkdir()
+    marker=root/'.nightmerit-demo.json';marker.write_text('{"schema":"nightmerit.demo.v1"}')
+    before=marker.read_bytes();calls=[]
+    client=TestClient(create_transfer_app(root, origin='http://testserver', demo=demo, open_application=lambda:calls.append('open')))
+    import re
+    token=re.search(r'const token="([^"]+)"',client.get('/').text)[1]
+    assert client.get('/transfer/status').json()['can_continue'] is demo
+    response=client.post('/transfer/open',headers={'X-NightMerit-Transfer':token})
+    assert response.status_code==(202 if demo else 409)
+    assert calls==(['open'] if demo else [])
+    assert marker.read_bytes()==before
+    assert sorted(p.name for p in root.iterdir())==['.nightmerit-demo.json']

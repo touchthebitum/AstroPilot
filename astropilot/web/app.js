@@ -406,7 +406,7 @@ function renderSession() {
   choice.replaceChildren();
   const noSessionOption = document.createElement("option");
   noSessionOption.value = "";
-  noSessionOption.textContent = "Sans session";
+  noSessionOption.textContent = "Sans séance photo";
   choice.append(noSessionOption);
   for (const item of state.sessions) {
     const option = document.createElement("option");
@@ -422,9 +422,11 @@ function renderSession() {
   choice.value = session?.execution.execution_id || "";
   const intentId = session?.acquisition_intent_id || state.acceptedMission?.acquisitionIntentId;
   text("#session-intent", `Intent de la mission : ${intentId || "non défini"}`);
-  document.querySelector("#session-start").hidden = Boolean(session) && (!knownStatus || status === "in_progress" || status === "unconfirmed");
+  document.querySelector("#session-start").hidden = state.missionConditionsReady === false
+    || (!session && state.sessions.some(item => ["in_progress", "unconfirmed"].includes(item.execution.status)))
+    || Boolean(session) && (!knownStatus || status === "in_progress" || status === "unconfirmed");
   document.querySelector("#session-start").textContent = status === "not_started"
-    ? "Démarrer cette session" : "Démarrer une nouvelle session";
+    ? "Démarrer cette séance photo" : "Démarrer une nouvelle séance photo";
   // Presentation only: saving usable duration and then adding progress take precedence.
   document.querySelector("#session-start").className = status === "completed" && !session.credit
     ? "secondary-button" : "primary-button";
@@ -445,7 +447,7 @@ function renderSession() {
               ? "Cette durée a déjà été ajoutée au projet. Ne la recopiez pas dans votre temps de départ. Le total acquis et le temps restant sont affichés ci-dessous."
               : evidence
                 ? "La durée utilisable est enregistrée, mais pas encore ajoutée au projet. Vérifiez les valeurs, puis cliquez sur « Ajouter cette durée à mon avancement »."
-                : "Session terminée : renseignez ci-dessous le temps de pose des images utilisables de cette session. Si aucune image n’est utilisable, n’ajoutez aucune durée au projet.";
+                : "Séance photo terminée : renseignez ci-dessous le temps de pose des images utilisables de cette séance. Si aucune image n’est utilisable, n’ajoutez aucune durée au projet.";
   text("#session-next-step", nextStep);
   document.querySelector("#session-credit").hidden = status !== "completed" || !evidence || Boolean(session.credit);
   document.querySelector("#session-apply-credit").disabled = state.sessionBusy || status !== "completed";
@@ -468,15 +470,17 @@ function renderSession() {
     sessionMessage(!knownStatus ? "État de session non reconnu. Actualisez ou resélectionnez la session."
       : status === "unconfirmed" ? "Session non confirmée : aucune action disponible."
       : status === "interrupted" ? "Session interrompue : aucun crédit."
-      : session.credit ? "Cette durée a été ajoutée à votre projet." : status === "completed" ? "Session terminée."
+      : session.credit ? "Cette durée a été ajoutée à votre projet." : status === "completed" ? "Séance photo terminée."
       : status === "in_progress" ? "Session en cours." : "Session prête à démarrer.",
       {error: !knownStatus || status === "unconfirmed", success: Boolean(session.credit) || status === "completed"});
-  } else sessionMessage("Aucune session enregistrée pour cette mission.");
+  } else sessionMessage(!state.missionConditionsReady ? "Lecture des sessions enregistrées…"
+    : state.sessions.length ? "Choisissez une session enregistrée dans la liste pour la retrouver."
+    : "Aucune séance photo enregistrée pour ce plan.");
   renderObservationLinkage();
   renderGuardianRenewal();
 }
 
-async function reloadSessions({ selectId = null, readGuardian = true } = {}) {
+async function reloadSessions({ selectId = null, readGuardian = true, resumeExisting = false } = {}) {
   const missionId = state.acceptedMission?.mission_id;
   if (!missionId) return;
   const response = await sessionFetch(`/v1/missions/${encodeURIComponent(missionId)}/executions`);
@@ -488,9 +492,12 @@ async function reloadSessions({ selectId = null, readGuardian = true } = {}) {
   const pending = JSON.parse(localStorage.getItem(SESSION_PENDING_KEY) || "null");
   const candidate = selectId || (pending?.mission_id === missionId ? pending.execution_id : null);
   const explicitlySelectedExecutionId = state.fieldObservationSelectedExecutionId;
+  const unfinished = sessions.filter(item => ["in_progress", "unconfirmed"].includes(item.execution.status));
+  const resumed = resumeExisting ? (unfinished.length === 1 ? unfinished[0]
+    : unfinished.length === 0 && sessions.length === 1 ? sessions[0] : null) : null;
   state.activeSessionId = sessions.some((item) => item.execution.execution_id === candidate)
     ? candidate : sessions.some((item) => item.execution.execution_id === state.activeSessionId)
-      ? state.activeSessionId : null;
+      ? state.activeSessionId : resumed?.execution.execution_id || null;
   state.fieldObservationSelectedExecutionId = sessions.some(
     (item) => item.execution.execution_id === explicitlySelectedExecutionId,
   ) ? explicitlySelectedExecutionId : null;
@@ -2741,6 +2748,7 @@ function clearOutcomePresentation() {
   if (trace) trace.textContent = "";
   const result = document.querySelector("#outcome-result");
   if (result.dataset) {
+    delete result.dataset.comparisonState;
     delete result.dataset.simpleText;
     delete result.dataset.proText;
   }
@@ -2863,7 +2871,7 @@ async function openSavedObservationRecord(item) {
   document.querySelector("#observation-title").textContent = "Observation enregistrée";
   document.querySelector("#observation-time-summary").textContent = savedObservationTime(observation.observed_at_utc, context.timezone);
   document.querySelector("#observation-context-decision").textContent = "Consultation d’un relevé enregistré";
-  document.querySelector("#observation-linkage").textContent = observation.execution_id ? "Liée à une session" : "Sans session photo";
+  document.querySelector("#observation-linkage").textContent = observation.execution_id ? "Liée à une session" : "Sans séance photo photo";
   ui.observation.showModal();
   await loadSavedFieldObservations(context);
   if (!ui.observation.open || state.fieldObservationDraftContext !== context) return;
@@ -3124,6 +3132,7 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
   const resultElement = document.querySelector("#outcome-result");
   resultElement.textContent = lines.join("\n");
   if (resultElement.dataset) {
+    resultElement.dataset.comparisonState = "shown";
     resultElement.dataset.proText = resultElement.textContent;
     const simpleLines = [...warnings, knownStatus ? statuses[evaluation.status] : "Statut non reconnu"];
     if (knownStatus) {
@@ -4000,6 +4009,7 @@ function setView(view) {
   invalidateOutcomeHistory();
   state.viewRevision = (state.viewRevision || 0) + 1;
   state.view = view;
+  if (view === "equipment") { simpleEquipmentPhase = "optics"; updateEquipmentSearch(); renderSimpleEquipment(); }
   if (view === "recommendation") state.guidedInitialConfiguration = false;
   const wizardVisible = wizardStates.includes(view);
   document.documentElement.dataset.guidedView = view;
@@ -4011,7 +4021,7 @@ function setView(view) {
   document.querySelector("#review-step").hidden = !["review", "availability"].includes(view) || !state.configurationDraft?.site;
   document.querySelector("#review-configuration-actions").hidden = view !== "review";
   if (["review", "availability"].includes(view) && state.configurationDraft?.site) renderReview();
-  ui.recommendationSubmit.disabled = view === "review";
+  updateDiscoveryAvailability();
   document.querySelector("#configuration-projects").hidden = !state.configuration?.configured;
   document.querySelector("#open-observation-catalogue").hidden = view === "review";
   ui.availabilityTimezoneWarning.textContent = view === "review"
@@ -4125,6 +4135,10 @@ function missionDateTimeLabel(value, zone) {
 }
 
 // Describe persisted missions without consulting today's site or filter inventory.
+function readableTargetName(key) {
+  return key === "NorthAmerica" ? "Nébuleuse de l’Amérique du Nord (NGC 7000)" : key;
+}
+
 function savedMissionLabel(item) {
   const mission = item.mission;
   const zone = missionTimezone(mission, item);
@@ -4135,7 +4149,7 @@ function savedMissionLabel(item) {
   });
   const dateTime = value => value && Number.isFinite(Date.parse(value))
     ? formatter.format(new Date(value)) : "Non précisée";
-  return `${mission.target} · ${filter} · ${dateTime(mission.window_start)} → ${dateTime(mission.window_end)} · ${zone}`;
+  return `${readableTargetName(mission.target)} · ${filter} · ${dateTime(mission.window_start)} → ${dateTime(mission.window_end)} · ${zone}`;
 }
 
 function clock(value, timeZone) {
@@ -4183,6 +4197,12 @@ function siteDateTime(value, timeZone) {
 }
 
 function renderWeatherTrust(weatherTrust, weatherDecision, prefix) {
+  const presentationHelper = globalThis.NightMeritPresentation;
+  const simulated = presentationHelper?.simulatedWeather(weatherTrust) === true;
+  if (prefix === "classic") {
+    text("#weather-context-label", simulated ? "Conditions de démonstration" : "Confiance météo");
+  }
+
   const ingressValidated = weatherTrust?.validation_status === "validated"
     && weatherTrust?.freshness_status === "fresh";
   if (!ingressValidated) {
@@ -4222,11 +4242,23 @@ function renderWeatherTrust(weatherTrust, weatherDecision, prefix) {
   if (prefix === "classic") {
     text("#classic-weather-timezone", `Horaires affichés dans le fuseau du site : ${zone}.`);
   }
+  if (simulated) {
+    text(`#${prefix}-weather-status`, "Météo simulée");
+    text(`#${prefix}-weather-title`, presentationHelper.explanation);
+    text(`#${prefix}-weather-age`, "Conditions générées pour cet essai ; aucune prévision récupérée");
+  }
+}
+
+function beginnerReason(value) {
+  if (appliedUiMode !== "simple" || typeof value !== "string") return value;
+  return value.replace(/Sous-échantillonnage important\s*\([^)]*\)/g, "Les détails les plus fins seront limités avec ce matériel")
+    .replace(/Très bon seeing\s*\([^)]*\)/g, "Atmosphère très stable")
+    .replace(/seeing/gi, "stabilité de l’atmosphère");
 }
 
 function reasonText(reason) {
   if (!reason) return null;
-  const title = reason.title || "Information";
+  const title = beginnerReason(reason.title || "Information");
   return reason.value ? `${title} — ${reason.value}` : title;
 }
 
@@ -4285,8 +4317,8 @@ function renderMission(mission) {
   const zone = missionTimezone(mission, state.acceptedMission?.mission === mission ? state.acceptedMission : null);
   const start = clock(mission.window_start, zone);
   const end = clock(mission.window_end, zone);
-  text("#mission-title", mission.target || "Mission de cette nuit");
-  text("#mission-summary", `${mission.site_name ? `Mission acceptée · ${mission.site_name}` : "Mission acceptée"} · Horaires : ${zone}`);
+  text("#mission-title", readableTargetName(mission.target) || "Plan de cette nuit");
+  text("#mission-summary", `${mission.site_name ? `Plan de séance enregistré · ${mission.site_name}` : "Plan de séance enregistré"} · Horaires : ${zone}`);
   text("#mission-window", start && end ? `${start} — ${end}` : "À confirmer");
   text("#mission-duration", duration(mission.recommended_hours));
   text("#mission-gain", Number(mission.expected_gain) > 0 ? `+${Math.round(Number(mission.expected_gain))} %` : "Non estimé");
@@ -4342,14 +4374,33 @@ function renderMission(mission) {
   const reviewTitle = document.createElement("strong");
   reviewTitle.textContent = "Trier les images, puis enregistrer les poses utilisables dans mon projet";
   const reviewHelp = document.createElement("small");
-  reviewHelp.textContent = "Vérifiez vos clichés et comptez uniquement ceux que vous conservez. Dans la session d’imagerie, renseignez leur temps de pose total pour cette séance, sans les images rejetées ni les flats, darks et bias. Vous confirmerez ensuite son ajout à votre projet.";
+  reviewHelp.textContent = "Vérifiez vos clichés et comptez uniquement ceux que vous conservez. Dans la séance photo, renseignez leur temps de pose total pour cette séance, sans les images rejetées ni les flats, darks et bias. Vous confirmerez ensuite son ajout à votre projet.";
   reviewCopy.append(reviewTitle, reviewHelp);
   review.append(reviewWhen, reviewCopy);
   tasks.append(review);
 
   renderSession();
-  reloadSessions().catch(() => sessionMessage("Sessions momentanément indisponibles. Rechargez avant une action.", {error: true}));
+  reloadSessions({resumeExisting: true}).catch(() => sessionMessage("Sessions momentanément indisponibles. Rechargez avant une action.", {error: true}));
 
+}
+
+// Recheck the whole stored plan so setup/flats are not deducted again.
+// Historical plans keep their saved task offsets and are never rewritten.
+function missionPlanWindow(mission) {
+  let before = 0, after = 0;
+  for (const task of mission?.tasks || []) {
+    for (const value of [task.start, task.end]) {
+      const setup = /^T\s*[-−]\s*(\d+)\s*min$/.exec(String(value));
+      const flats = /^Fin\s*\+\s*(\d+)\s*min$/.exec(String(value));
+      if (setup) before = Math.max(before, Number(setup[1]));
+      if (flats) after = Math.max(after, Number(flats[1]));
+    }
+  }
+  const shift = (value, minutes) => {
+    if (!minutes || !Number.isFinite(Date.parse(value))) return value;
+    return new Date(Date.parse(value) + minutes * 60000).toISOString();
+  };
+  return {start: shift(mission?.window_start, -before), end: shift(mission?.window_end, after)};
 }
 
 async function checkMissionConditions() {
@@ -4359,8 +4410,9 @@ async function checkMissionConditions() {
   const accepted = state.acceptedMission;
   const mission = accepted?.mission;
   const projectId = accepted?.selectedCatalogKey;
-  const start = Date.parse(mission?.window_start);
-  const end = Date.parse(mission?.window_end);
+  const planWindow = missionPlanWindow(mission);
+  const start = Date.parse(planWindow.start);
+  const end = Date.parse(planWindow.end);
   if (ui.mission.open) ui.mission.close();
   if (!projectId || !Object.hasOwn(state.configuration?.projects || {}, projectId)) {
     navigateGuidedProjects();
@@ -4402,7 +4454,7 @@ async function checkMissionConditions() {
   const localWindowNote = missionTimezone(mission, accepted) !== zone
     ? ` Horaires sur ce site : ${recheckFormatter.format(new Date(start))} → ${recheckFormatter.format(new Date(end))}.` : "";
   state.missionRecheck = {
-    projectId, start: mission.window_start, end: mission.window_end,
+    projectId, start: planWindow.start, end: planWindow.end,
     startLocal, endLocal, siteFingerprint: decisionSiteFingerprint(),
     summary: `Mission enregistrée : ${savedMissionLabel(accepted)}. Site à vérifier : ${state.configuration.site.name} (${zone}).${localWindowNote} Durée réelle : ${usablePoseDuration((end - start) / 1000)}.${clockChangeNote} Confirmez ce créneau ou modifiez-le avant de lancer l’analyse.`,
   };
@@ -4535,7 +4587,7 @@ function filterCardCopy(decision) {
     const otherAssessments = assessments.filter(
       (assessment) => assessment?.acquisition_intent_id !== selectedIntentId,
     );
-    const detail = `${selectedIntent.label || selectedIntentId} recommandé${otherAssessments.length
+    const detail = `${(selectedIntent.label || selectedIntentId).replace(/NorthAmerica/g, readableTargetName("NorthAmerica"))} recommandé${otherAssessments.length
       ? ` ; ${joinedIntentLabels(otherAssessments)} également évalué${otherAssessments.length > 1 ? "s" : ""}`
       : ""}`;
     return {
@@ -4568,7 +4620,7 @@ function renderIntentChoice(container, subject, selectId) {
   container.hidden = mode === "legacy";
   if (mode === "legacy") return;
   if (mode === "unique") {
-    container.textContent = `Acquisition prévue : ${subject.acquisition_intent_options[0].label}`;
+    container.textContent = `Acquisition prévue : ${subject.acquisition_intent_options[0].label.replace(/NorthAmerica/g, readableTargetName("NorthAmerica"))}`;
     return;
   }
   if (mode === "none" || mode === "unavailable") {
@@ -4738,7 +4790,7 @@ function restoreAcceptanceControls() {
     ));
     if (selected) {
       selected.disabled = false;
-      selected.textContent = "Ouvrir la mission";
+      selected.textContent = "Ouvrir ce plan";
     }
   }
 }
@@ -4933,12 +4985,13 @@ function renderDecision(decision) {
     : recommended
     ? (labels.actions[decision.action] || "Session recommandée")
     : insufficient ? "Preuves insuffisantes" : "Cible non recommandée");
-  text("#target-name", decision.target || "Cible à confirmer");
+  text("#target-name", readableTargetName(decision.target) || "Cible à confirmer");
   text("#catalog-key", decision.target_common_name || (decision.catalog_key && decision.catalog_key !== decision.target ? decision.catalog_key : ""));
   text("#window-value", start && end ? `${start} — ${end}` : "À confirmer");
   text("#window-note", `Horaires : ${zone}${firstWindow?.reason ? " · Fenêtre productive principale" : ""}`);
   text("#duration-value", duration(actionableHours));
-  text("#duration-note", "Durée de mission exploitable");
+  text("#duration-title", appliedUiMode === "simple" ? "Temps disponible pour les photos" : "Durée productive");
+  text("#duration-note", appliedUiMode === "simple" ? "Estimation pour cette séance" : "Durée de mission exploitable");
   const filterCopy = filterCardCopy(decision);
   text("#filter-value", filterCopy.value);
   text("#filter-note", filterCopy.note);
@@ -4958,13 +5011,15 @@ function renderDecision(decision) {
   const positives = (decision.explanation?.positives || []).map(reasonText);
   const information = (decision.explanation?.information || []).map(reasonText);
   const warnings = (decision.explanation?.warnings || []).map(reasonText);
-  const risks = [...warnings];
+  const risks = [...warnings.map(beginnerReason)];
   if (decision.dew_risk && String(decision.dew_risk.level).toLowerCase() !== "low") {
     const level = String(decision.dew_risk.level).toLowerCase();
     risks.push(`Rosée : risque ${labels.riskLevels[level] || level}`);
   }
   if (decision.postponement_risk) {
-    risks.push(...(decision.postponement_risk.explanations || []));
+    risks.push(...(globalThis.NightMeritPresentation?.simulatedWeather(weatherTrust)
+      ? ["Cet essai utilise une météo simulée : il ne permet pas d’évaluer le risque réel de devoir reporter la séance."]
+      : (decision.postponement_risk.explanations || [])));
   }
 
   const evidenceMessage = insufficient
@@ -4975,8 +5030,8 @@ function renderDecision(decision) {
   const shortReason = [...(decision.explanation?.positives || []), ...(decision.explanation?.information || [])]
     .filter(reason => reason && (reason.title || reason.value))
     .map(reasonText).find(Boolean);
-  text("#decision-reason", shortReason ? `Pourquoi : ${shortReason}` : "Pourquoi : non précisé");
-  const warningCopy = [...warnings];
+  text("#decision-reason", shortReason ? `Pourquoi : ${beginnerReason(shortReason)}` : "Pourquoi : non précisé");
+  const warningCopy = [...warnings.map(beginnerReason)];
   if (weatherTrust?.freshness_status !== "fresh") warningCopy.unshift(
     weatherTrust?.freshness_status === "stale"
       ? "Données météo périmées : actualisez avant de démarrer."
@@ -4985,7 +5040,8 @@ function renderDecision(decision) {
   if (weatherTrust?.validation_status !== "validated" || !weatherDecision?.admissibility) {
     warningCopy.unshift("Confiance météo non confirmée : vérifiez les données avant de démarrer.");
   }
-  if (weatherDecision?.admissibility && weatherDecision.admissibility !== "admissible") {
+  if (!globalThis.NightMeritPresentation?.simulatedWeather(weatherTrust)
+      && weatherDecision?.admissibility && weatherDecision.admissibility !== "admissible") {
     warningCopy.unshift(weatherDecision.presentation?.summary || "Conditions météo à vérifier avant de démarrer.");
   }
   if (decision.dew_risk && String(decision.dew_risk.level).toLowerCase() === "high") {
@@ -5224,11 +5280,46 @@ function renderEquipmentReferences() {
   }
 }
 
+let simpleEquipmentPhase = "optics";
+function renderSimpleEquipment() {
+  const simple = appliedUiMode === "simple";
+  const camera = simple && simpleEquipmentPhase === "camera";
+  const step = document.querySelector("#equipment-step");
+  step.dataset.choicePage = simple ? simpleEquipmentPhase : "advanced";
+  text("#equipment-title", simple ? (camera ? "Quelle caméra utilisez-vous ?" : "Quel objectif ou télescope utilisez-vous ?") : "Avec quel matériel ?");
+  text("#equipment-next", simple ? (camera ? "Continuer vers les filtres" : "Continuer vers la caméra") : "Continuer vers mon projet");
+  text("#equipment-step .step-intro", simple ? (camera ? "Confirmez votre caméra. Seuls les ensembles pris en charge par cette bêta sont proposés." : "Choisissez votre optique. Vous choisirez la caméra sur l’écran suivant.") : "Retrouvez votre objectif ou télescope et votre caméra.");
+  if (!camera) updateEquipmentSearch();
+  const custom = document.querySelector('input[name="equipment-kind"]:checked')?.value === "custom";
+  for (const choice of step.querySelectorAll(".equipment-choice")) {
+    const id=choice.querySelector("input").value;
+    const preset=(state.configuration?.preset_equipment || []).find(item=>item.id===id);
+    if (!preset) continue;
+    choice.querySelector("strong").textContent = simple ? (camera ? `${preset.camera_manufacturer} ${preset.camera_model}` : `${preset.optics_manufacturer} ${preset.optics_model}`) : preset.name;
+    choice.querySelector("small").hidden = simple;
+    if (camera) choice.hidden = !choice.querySelector("input").checked;
+  }
+  for (const label of step.querySelectorAll("#custom-equipment label")) {
+    const input=label.querySelector("input");
+    const isCamera=input && /camera|pixel|sensor|monochrome/.test(input.id);
+    label.hidden=simple && (camera ? !isCamera : isCamera);
+  }
+  if (simple) {
+    document.querySelector("#equipment-search").placeholder="Ex. Samyang, FRA400, C8…";
+    text("#equipment-selection-summary", "");
+    text("#equipment-search-status", "Choisissez votre modèle, ou saisissez un autre matériel.");
+    step.querySelector(".eyebrow").textContent=camera ? "Configuration · 3/6 — Caméra" : "Configuration · 2/6 — Optique";
+  } else step.querySelector(".eyebrow").textContent="Configuration initiale · 2/4 — Matériel";
+  const back=step.querySelector("[data-back]");
+  back.textContent=camera ? "Retour à l’optique" : "Retour";
+}
+
 function toggleEquipmentKind() {
   const kind = document.querySelector('input[name="equipment-kind"]:checked')?.value;
   document.querySelector("#equipment-search-panel").hidden = kind !== "preset";
   document.querySelector("#preset-equipment").hidden = kind !== "preset";
   document.querySelector("#custom-equipment").hidden = kind !== "custom";
+  renderSimpleEquipment();
 }
 
 function progressEditorSnapshot(fieldOverride = null) {
@@ -5249,6 +5340,18 @@ function confirmDiscardProjectProgress() {
     || window.confirm("Des modifications de l’avancement ne sont pas enregistrées. Les abandonner ?");
 }
 
+function advancedProjectProgressText(data) {
+  const rows = data.intent_progress_breakdown || [];
+  if (!rows.length) return "Avancement par filtre non renseigné ; ouvrez le projet pour le vérifier.";
+  const duration = value => Number.isFinite(value) ? progressDuration(value) : "non renseigné";
+  return rows.map(row => {
+    const intent = (data.acquisition_intents || []).find(item => item.acquisition_intent_id === row.acquisition_intent_id);
+    const target = (data.acquisition_intent_targets || []).find(item => item.acquisition_intent_id === row.acquisition_intent_id);
+    const filter = intent?.filter_type === "Ha" ? "Hα" : intent?.filter_type || row.acquisition_intent_id;
+    return `${filter} · Base antérieure : ${duration(row.base_seconds)} · Séances créditées : ${duration(Number.isFinite(row.credits_us) ? row.credits_us / 1000000 : null)} · Total acquis : ${duration(row.effective_total_seconds)}${target?.target_hours != null ? ` / ${target.target_hours} h` : " (objectif non renseigné)"}`;
+  }).join(" ; ");
+}
+
 function renderProjects() {
   if (!confirmDiscardProjectProgress()) return false;
   document.querySelector("#project-progress-editor").hidden = true;
@@ -5256,6 +5359,9 @@ function renderProjects() {
   state.progressEditor = null;
   state.progressEditorBaseline = null;
   const projects = state.configurationDraft.projects || {};
+  const generation = (state.advancedProjectsGeneration || 0) + 1;
+  state.advancedProjectsGeneration = generation;
+  const configuration = state.configuration;
   const entries = Object.entries(projects);
   const summary = document.querySelector("#existing-projects");
   const zeroProjects = document.querySelector("#zero-projects");
@@ -5272,9 +5378,27 @@ function renderProjects() {
     const list = document.createElement("ul");
     for (const [catalogKey, project] of entries) {
       const item = document.createElement("li");
-      const label = document.createElement("span");
+      const label = document.createElement("div");
       const saved = Object.hasOwn(state.configuration?.projects || {}, catalogKey);
-      label.textContent = `${catalogKey} · ${project.hours} h sur ${project.target_hours} h${saved ? " (historique)" : " (brouillon à enregistrer)"} `;
+      const name = readableTargetName(catalogKey);
+      label.textContent = saved ? `${name} · Lecture de l’avancement enregistré… `
+        : `${name} · Base antérieure saisie : ${project.hours} h · Objectif : ${project.target_hours} h (brouillon à enregistrer) `;
+      if (saved) fetch(`/v1/projects/${encodeURIComponent(catalogKey)}/progress`).then(async response => {
+        if (!response.ok) throw new Error("progress unavailable");
+        const data = await response.json();
+        if (state.advancedProjectsGeneration !== generation || state.configuration !== configuration || !label.isConnected) return;
+        label.textContent = name;
+        const balance = createProjectBalance(data);
+        if (balance) label.append(balance);
+        const details = document.createElement("details");
+        const title = document.createElement("summary"); title.textContent = "Détail des temps acquis";
+        const breakdown = document.createElement("p"); breakdown.textContent = advancedProjectProgressText(data);
+        details.append(title, breakdown); label.append(details);
+      }).catch(() => {
+        if (state.advancedProjectsGeneration === generation && state.configuration === configuration && label.isConnected) {
+          label.textContent = `${name} · Avancement indisponible : ouvrez le projet ou réessayez. Vos données sont conservées. `;
+        }
+      });
       const button = document.createElement("button");
       button.type = "button";
       button.className = "secondary-button";
@@ -5323,7 +5447,7 @@ async function loadProjectTemplatesOnce() {
     const select = document.querySelector("#project-template");
     select.replaceChildren(new Option("Choisir une cible", ""));
     for (const template of templates) {
-      select.append(new Option(template.display_name, template.catalog_key));
+      select.append(new Option(template.catalog_key === "NorthAmerica" ? readableTargetName(template.catalog_key) : template.display_name, template.catalog_key));
     }
     document.querySelector("#project-create-fields").hidden = !templates.length;
     if (templates.length === 1) {
@@ -5441,16 +5565,18 @@ function renderNewProjectIntents() {
     check.addEventListener("change", () => {row.dataset.intentSelected = String(check.checked);});
     label.classList.add("new-intent-goal");
     row.append(confirmation, label);
+    if (typeof addProjectGoalGuidance === "function") addProjectGoalGuidance(row, intent, label, input);
     container.append(row);
   }
 }
 
-function newProjectFromInputs(template, entries, emptyConfirmed, existingProjects) {
+function newProjectFromInputs(template, entries, emptyConfirmed, existingProjects, initialImages = null) {
   if (!template) throw new Error("Choisissez une cible à photographier.");
   if (Object.hasOwn(existingProjects, template.catalog_key)) {
     throw new Error("Ce projet existe déjà. Ouvrez-le pour modifier son avancement ; il ne sera pas remplacé.");
   }
-  if (!emptyConfirmed) throw new Error("Confirmez que ce nouveau projet ne contient pas déjà des images acquises.");
+  if (!emptyConfirmed && !initialImages?.confirmed) throw new Error("Confirmez le départ sans images ou vérifiez vos images déjà acquises.");
+  if (emptyConfirmed && initialImages) throw new Error("Choisissez un seul état de départ pour ce projet.");
   const targets = [];
   for (const entry of entries.filter(item => item.selected)) {
     const hours = Number(entry.hours);
@@ -5465,9 +5591,22 @@ function newProjectFromInputs(template, entries, emptyConfirmed, existingProject
   if (!targets.length) throw new Error("Choisissez au moins une prise de vue avec un filtre que vous possédez.");
   const total = targets.reduce((sum, item) => sum + item.target_hours, 0);
   if (!Number.isFinite(total)) throw new Error("L’objectif total de pose est trop grand.");
-  return { hours: 0, target_hours: total, imaging_field_id: template.imaging_field_id,
-    acquisition_intent_targets: targets, acquisition_intent_progress: targets.map(item => ({
-      acquisition_intent_id: item.acquisition_intent_id, acquired_duration_manual: 0 })) };
+  let progress = targets.map(item => ({ acquisition_intent_id: item.acquisition_intent_id, acquired_duration_manual: 0 }));
+  let acquiredSeconds = 0;
+  if (initialImages) {
+    if (!initialImages.confirmed || !Array.isArray(initialImages.progress) || initialImages.progress.length !== targets.length) throw new Error("Vérifiez les images de chaque filtre choisi.");
+    const seen = new Set();
+    progress = initialImages.progress.map(item => {
+      const id = item.acquisition_intent_id, frames = item.acquired_frames, seconds = item.exposure_seconds;
+      if (!targets.some(target => target.acquisition_intent_id === id) || seen.has(id)) throw new Error("Les images ne correspondent pas aux filtres choisis.");
+      seen.add(id);
+      if (!Number.isSafeInteger(frames) || frames < 1 || !Number.isFinite(seconds) || seconds <= 0 || !Number.isFinite(frames * seconds) || frames * seconds > Number.MAX_SAFE_INTEGER / 1000000) throw new Error("Indiquez un nombre entier de clichés et une durée positive, dans les limites prises en charge.");
+      acquiredSeconds += frames * seconds;
+      return { acquisition_intent_id: id, acquired_frames: frames, exposure_seconds: seconds };
+    });
+  }
+  return { hours: acquiredSeconds / 3600, target_hours: total, imaging_field_id: template.imaging_field_id,
+    acquisition_intent_targets: targets, acquisition_intent_progress: progress };
 }
 
 function addNewProject() {
@@ -5484,13 +5623,16 @@ function addNewProject() {
     }));
     const projects = state.configurationDraft.projects || {};
     const project = newProjectFromInputs(template, entries,
-      document.querySelector("#project-new-empty").checked, projects);
+      document.querySelector("#project-new-empty").checked, projects,
+      typeof readInitialProjectImages === "function" ? readInitialProjectImages() : null);
     state.configurationDraft.projects = { ...projects, [key]: project };
     state.selectedProjectId = key;
     consumeNewProjectEmptyConfirmation(key);
     renderProjects();
     document.querySelector("#project-create").open = false;
-    feedback.textContent = "Projet ajouté au brouillon. Enregistrez pour conserver ce choix. Aucun temps de pose n’a été crédité.";
+    feedback.textContent = project.hours > 0
+      ? "Projet ajouté au brouillon avec vos images antérieures. Enregistrez pour conserver ce choix."
+      : "Projet ajouté au brouillon. Enregistrez pour conserver ce choix. Aucun temps de pose n’a été crédité.";
     if (appliedUiMode === "simple") saveConfiguration();
   } catch (error) {
     feedback.classList?.add("error");
@@ -5518,7 +5660,7 @@ function progressInput(label, value, field, type = "number") {
   return wrapper;
 }
 
-async function openProjectProgress(projectId, { discardConfirmed = false } = {}) {
+async function openProjectProgress(projectId, { discardConfirmed = false, discoveryIntentId = null } = {}) {
   if (!discardConfirmed && !confirmDiscardProjectProgress()) return;
   const editor = document.querySelector("#project-progress-editor");
   editor.hidden = false;
@@ -5536,7 +5678,12 @@ async function openProjectProgress(projectId, { discardConfirmed = false } = {})
     const data = await response.json();
     if (generation !== state.progressEditorGeneration || state.view !== "projects") return;
     state.progressEditor = data;
+    state.progressDiscoveryIntentId = discoveryIntentId;
     renderProjectProgressEditor();
+    if (discoveryIntentId) {
+      const row = [...editor.querySelectorAll("fieldset[data-intent-id]")].find(item => item.dataset.intentId === discoveryIntentId);
+      row?.querySelector('input[data-field="target_hours"]')?.focus();
+    }
   } catch (_error) {
     if (generation === state.progressEditorGeneration && state.view === "projects") editor.textContent = "Le projet ne peut pas être ouvert. Réessayez.";
   }
@@ -5547,7 +5694,7 @@ function renderProjectProgressEditor(message = "") {
   const editor = document.querySelector("#project-progress-editor");
   editor.replaceChildren();
   const heading = document.createElement("h3");
-  heading.textContent = `Modifier mon projet : ${data.project_id}`;
+  heading.textContent = `Modifier mon projet : ${readableTargetName(data.project_id)}`;
   const feedback = document.createElement("p");
   feedback.className = "project-progress-feedback feedback-message";
   feedback.classList?.toggle("confirmation-success", Boolean(message));
@@ -5596,7 +5743,12 @@ function renderProjectProgressEditor(message = "") {
       legend.dataset.simpleText = legend.textContent;
       legend.dataset.proText = `${id} · ${intent.filter_type}`;
       if (appliedUiMode === "pro") legend.textContent = legend.dataset.proText;
-      if (!target && !progress && data.acquisition_intent_targets?.length) section.dataset.proOnly = "true";
+      if (!target && !progress && data.acquisition_intent_targets?.length && id !== state.progressDiscoveryIntentId) section.dataset.proOnly = "true";
+      if (id === state.progressDiscoveryIntentId && !target) {
+        const note = document.createElement("p");
+        note.textContent = "Filtre choisi dans la recherche : indiquez son objectif et son avancement de départ, puis enregistrez. Les autres filtres du projet sont conservés.";
+        section.append(note);
+      }
       const mode = document.createElement("select");
       mode.dataset.field = "mode";
       for (const [value, label] of [["unknown", "non renseigné"], ["detailed", "Poses × secondes"], ["manual", "Durée manuelle (secondes)"]]) {
@@ -5676,9 +5828,25 @@ function renderProjectProgressEditor(message = "") {
   const back = document.createElement("button");
   back.type = "button"; back.className = "secondary-button"; back.textContent = "Retour à mes projets";
   back.addEventListener("click", () => { if (typeof navigateGuidedProjects === "function") navigateGuidedProjects(); });
-  editor.append(heading, feedback, baselineHelp, fieldLabel, intents, save, back);
+  const prepare = document.createElement("button");
+  prepare.type = "button";
+  prepare.className = "primary-button";
+  prepare.dataset.simpleOnly = "true";
+  prepare.textContent = "Préparer une séance avec cette cible";
+  prepare.hidden = !message;
+  prepare.addEventListener("click", () => prepareGuidedSession({projectId: data.project_id}));
+  // A new edit requires another successful save before offering the next step.
+  const invalidateNextStep = () => {
+    prepare.hidden = true;
+    save.className = "primary-button";
+  };
+  editor.oninput = invalidateNextStep;
+  editor.onchange = invalidateNextStep;
+  if (message && appliedUiMode === "simple") save.className = "secondary-button";
+  editor.append(heading, feedback, prepare, baselineHelp, fieldLabel, intents, save, back);
   renderIntents();
   state.progressEditorBaseline = progressEditorSnapshot();
+  if (message && appliedUiMode === "simple") prepare.focus();
 }
 
 async function saveProjectProgress() {
@@ -5810,13 +5978,14 @@ function updateGuidedPresentation() {
   ui.recommendationSubmit.textContent = state.discoveryMode ? "Chercher une cible pour mes horaires"
     : recheck ? "Vérifier les conditions sur ce créneau" : "Préparer ma nuit";
   const availabilityKicker = document.querySelector(".availability-heading .state-kicker");
-  if (availabilityKicker) availabilityKicker.textContent = state.guidedInitialConfiguration ? "Étape 4 sur 4 · Disponibilité" : "Préparer une séance";
+  if (availabilityKicker) availabilityKicker.textContent = state.guidedInitialConfiguration ? "Configuration initiale · Choix des horaires" : "Préparer une séance";
   const title = document.querySelector("#projects-title");
-  if (title) title.textContent = configured ? "Mes projets" : "Que souhaitez-vous photographier ?";
+  const hasSavedProjects = Object.keys(state.configurationDraft.projects || {}).length > 0;
+  if (title) title.textContent = configured && hasSavedProjects ? "Mes projets" : "Que souhaitez-vous photographier ?";
   const number = document.querySelector("#projects-step-number");
   if (number) number.hidden = configured;
   const intro = document.querySelector("#projects-intro");
-  if (intro) intro.textContent = configured
+  if (intro) intro.textContent = configured && hasSavedProjects
     ? "Retrouvez votre avancement et préparez une prochaine séance. Vos projets sont conservés d’une nuit à l’autre."
     : "Un projet décrit votre cible, votre filtre et le temps total à accumuler sur une ou plusieurs nuits.";
   const hasProjects = Object.keys(state.configurationDraft.projects || {}).length > 0;
@@ -5842,7 +6011,7 @@ function prepareGuidedProjectCreation() {
   const hasProjects = Object.keys(state.configurationDraft.projects || {}).length > 0;
   const creation = document.querySelector("#project-create");
   if (appliedUiMode === "simple" && !hasProjects && creation) {
-    creation.open = !state.discoveryMode;
+    if (!creation.open) return;
     if (!state.projectTemplates) loadProjectTemplates();
     else if (state.projectCreationEquipmentId !== state.configurationDraft.equipment?.preset_id) renderNewProjectIntents();
   }
@@ -5898,9 +6067,23 @@ function photoSeconds() {
   return Number.isSafeInteger(frames) && frames > 0 && Number.isFinite(seconds) && seconds >= .000001
     && Number.isFinite(total) && total <= Number.MAX_SAFE_INTEGER ? total : null;
 }
+function photoSessionChoiceStatus(session) {
+  return session.credit ? `Déjà ajouté : ${usablePoseDuration(session.session_credit_seconds)}`
+    : session.execution.status === "completed" ? "Photos à renseigner" : sessionStatus(session.execution.status);
+}
+function rememberPhotoSession(session) {
+  photoAddition.selected = session;
+  photoAddition.sessions = photoAddition.sessions.map(item =>
+    item.execution.execution_id === session.execution.execution_id ? session : item);
+}
 function renderPhotoAddition() {
   const session = photoAddition.selected, status = session?.execution.status;
   const saved = usableEvidence(session), duration = photoSeconds();
+  // Reconcile the displayed choice with the server-confirmed session, without reopening.
+  if (session) {
+    const option = Array.from(photoElement("choice").children).find(item => item.value === session.execution.execution_id);
+    if (option?.dataset.photoLabel) option.textContent = `${option.dataset.photoLabel} · ${photoSessionChoiceStatus(session)}`;
+  }
   const allowed = ["completed", "in_progress"].includes(status) && !session?.credit
     && Number.isFinite(session?.current_acquired_seconds);
   photoElement("inputs").hidden = !allowed || Boolean(saved);
@@ -5943,7 +6126,7 @@ async function openPhotoAddition(projectId, {executionId = null} = {}) {
   if (photoAddition.busy) return;
   const generation = ++photoAddition.generation;
   photoAddition.projectId = projectId; photoAddition.selected = null; photoAddition.sessions = [];
-  photoElement("title").textContent = `Ajouter mes photos conservées · ${projectId}`;
+  photoElement("title").textContent = `Ajouter mes photos conservées · ${readableTargetName(projectId)}`;
   photoElement("choice").replaceChildren();
   photoElement("frames").value = ""; photoElement("seconds").value = "";
   if (!photoElement("dialog").open) photoElement("dialog").showModal();
@@ -5969,9 +6152,8 @@ async function openPhotoAddition(projectId, {executionId = null} = {}) {
       const option = document.createElement("option"); option.value = item.execution.execution_id;
       const label = labels.get(item.execution.execution_id), sameTime = groups.get(label);
       const distinction = sameTime.length > 1 ? ` · Séance ${sameTime.indexOf(item.execution.execution_id) + 1} sur ${sameTime.length}` : "";
-      const status = item.credit ? `Déjà ajouté : ${usablePoseDuration(item.session_credit_seconds)}`
-        : item.execution.status === "completed" ? "Photos à renseigner" : sessionStatus(item.execution.status);
-      option.textContent = `${label}${distinction} · ${status}`;
+      option.dataset.photoLabel = `${label}${distinction}`;
+      option.textContent = `${option.dataset.photoLabel} · ${photoSessionChoiceStatus(item)}`;
       photoElement("choice").append(option);
     }
     // A known session is an explicit selection from the finished-session panel.
@@ -6026,13 +6208,13 @@ async function submitPhotoAddition() {
       confirm_historical_baseline: Number(canonical.historical_baseline_seconds) > 0 && !canonical.historical_baseline_confirmed});
     canonical = await photoRead(photoSessionUrl(executionId));
     if (!canonical.credit) throw new Error("unconfirmed");
-    photoAddition.selected = canonical; localStorage.removeItem(key);
+    rememberPhotoSession(canonical); localStorage.removeItem(key);
     photoMessage(`Photos ajoutées : ${usablePoseDuration(canonical.session_credit_seconds)}. Total : ${usablePoseDuration(canonical.current_acquired_seconds)}${canonical.remaining_hours == null ? "" : ` ; il reste ${usablePoseDuration(canonical.remaining_hours * 3600)}`}.`, "success");
     renderProjects();
   } catch (_) {
     try {
       const canonical = await photoRead(photoSessionUrl(executionId));
-      photoAddition.selected = canonical;
+      rememberPhotoSession(canonical);
       if (canonical.credit) {
         localStorage.removeItem(key);
         renderProjects();
@@ -6064,7 +6246,7 @@ function renderSimpleProjects(entries) {
     const card = document.createElement("article");
     card.className = "simple-project-card";
     const heading = document.createElement("h3");
-    heading.textContent = key;
+    heading.textContent = readableTargetName(key);
     const status = document.createElement("div");
     const saved = Object.hasOwn(configuration?.projects || {}, key);
     status.textContent = saved ? "Lecture de l’avancement enregistré…" : "Projet ajouté au brouillon ; l’enregistrement reste à confirmer.";
@@ -6077,14 +6259,14 @@ function renderSimpleProjects(entries) {
     prepare.addEventListener("click", () => prepareGuidedSession({saveDraft:true, projectId:key}));
     const more = document.createElement("details");
     const summary = document.createElement("summary");
-    summary.textContent = "Images antérieures et détails des sessions";
+    summary.textContent = "Images antérieures et détails des séances photo";
     const purpose = document.createElement("p");
     purpose.textContent = "Après chaque séance, vous pouvez ajouter son temps de pose utilisable au projet. NightMerit conserve le total, nuit après nuit, séparément pour chaque filtre. Chaque ajout doit être confirmé par vous.";
     const note = document.createElement("p");
     note.textContent = "Vous avez suivi cette séance dans NightMerit ? Retrouvez-la pour enregistrer le temps de pose des images que vous gardez, sans les pauses ni les images rejetées.";
     const sessions = document.createElement("button");
     sessions.type = "button"; sessions.className = "secondary-button";
-    sessions.textContent = "Retrouver mes sessions NightMerit";
+    sessions.textContent = "Retrouver mes séances photo NightMerit";
     sessions.disabled = !saved;
     sessions.addEventListener("click", () => {
       prepareGuidedSession();
@@ -6125,24 +6307,10 @@ function renderSimpleProjects(entries) {
       if (state.simpleProjectsGeneration !== generation || state.configuration !== configuration) return;
       status.replaceChildren();
       const targets = data.acquisition_intent_targets || [];
-      if (!targets.length) {
-        status.textContent = "L’objectif par filtre reste à renseigner. Votre projet historique est conservé.";
-        return;
-      }
-      prepare.disabled = false;
-      for (const target of targets) {
-        const intent = data.acquisition_intents.find(item => item.acquisition_intent_id === target.acquisition_intent_id);
-        const progress = data.intent_progress_breakdown.find(item => item.acquisition_intent_id === target.acquisition_intent_id);
-        const row = document.createElement("p");
-        const filter = intent?.filter_type === "Ha" ? "Hα" : intent?.filter_type || "à confirmer";
-        const known = progress?.effective_total_seconds != null;
-        row.textContent = `Filtre ${filter} · ${known ? progressDuration(progress.effective_total_seconds) : "Avancement non renseigné"} sur ${target.target_hours} h au total.`;
-        const remainder = document.createElement("small");
-        remainder.textContent = progress?.remaining_hours == null ? "Confirmez votre avancement pour calculer ce qu’il reste."
-          : progress.remaining_hours <= 0 ? "Objectif atteint pour ce filtre."
-          : `Il reste ${progressDuration(progress.remaining_hours * 3600)} à accumuler, sur une ou plusieurs nuits.`;
-        row.append(remainder); status.append(row);
-      }
+      prepare.disabled = !targets.length;
+      const balance = createProjectBalance(data);
+      if (balance) status.append(balance);
+      else status.textContent = "L’objectif par filtre reste à renseigner. Votre projet historique est conservé.";
     }).catch(() => {
       if (state.simpleProjectsGeneration === generation && state.configuration === configuration) {
         status.textContent = "L’avancement ne peut pas être relu. Vos données sont conservées ; rouvrez Mes projets pour réessayer.";
@@ -6150,6 +6318,64 @@ function renderSimpleProjects(entries) {
       }
     });
   }
+}
+
+// Read-only view of the server's effective totals, including prior images and
+// credited sessions. Missing goals/progress must never become invented zeros.
+function createProjectBalance(data) {
+  const intents = data.acquisition_intents || [];
+  if (!intents.length) return null;
+  const section = document.createElement("section");
+  section.className = "project-balance";
+  const table = document.createElement("table");
+  const caption = document.createElement("caption");
+  caption.textContent = "Bilan du projet par filtre";
+  const head = document.createElement("thead");
+  const headings = document.createElement("tr");
+  for (const label of ["Filtre", "Objectif", "Acquis", "Reste à faire"]) {
+    const cell = document.createElement("th"); cell.scope = "col";
+    cell.textContent = label; headings.append(cell);
+  }
+  head.append(headings);
+  const body = document.createElement("tbody");
+  const targets = new Map((data.acquisition_intent_targets || []).map(item => [item.acquisition_intent_id, item]));
+  const progress = new Map((data.intent_progress_breakdown || []).map(item => [item.acquisition_intent_id, item]));
+  const known = value => Number.isFinite(value) && value >= 0;
+  const time = seconds => progressDuration(Math.round(seconds));
+  let missingProgress = false;
+  for (const intent of intents) {
+    const id = intent.acquisition_intent_id;
+    const target = targets.get(id), acquired = progress.get(id);
+    const goalKnown = Number.isFinite(target?.target_hours) && target.target_hours > 0;
+    const acquiredKnown = known(acquired?.effective_total_seconds);
+    const remainingKnown = goalKnown && acquiredKnown && known(acquired?.remaining_hours);
+    missingProgress ||= !acquiredKnown;
+    const row = document.createElement("tr"); row.dataset.intentId = id;
+    const filter = document.createElement("th"); filter.scope = "row";
+    filter.textContent = intent.filter_type === "Ha" ? "Hα" : intent.filter_type || "À confirmer";
+    const goal = document.createElement("td"); goal.dataset.balanceField = "goal";
+    goal.textContent = goalKnown ? time(target.target_hours * 3600) : "Non défini";
+    const total = document.createElement("td"); total.dataset.balanceField = "acquired";
+    total.textContent = acquiredKnown ? time(acquired.effective_total_seconds) : "Non renseigné";
+    const remaining = document.createElement("td"); remaining.dataset.balanceField = "remaining";
+    remaining.textContent = remainingKnown ? time(acquired.remaining_hours * 3600)
+      : !goalKnown ? "Objectif à définir" : "À calculer";
+    if (remainingKnown && acquired.remaining_hours === 0) {
+      const reached = document.createElement("small"); reached.textContent = "Objectif atteint";
+      remaining.append(reached);
+    }
+    row.append(filter, goal, total, remaining); body.append(row);
+  }
+  table.append(caption, head, body); section.append(table);
+  const note = document.createElement("p"); note.className = "field-note";
+  note.textContent = "Acquis : temps de pose des images conservées, avec vos images antérieures et les séances déjà ajoutées. Installation et images de calibration exclues.";
+  section.append(note);
+  if (missingProgress) {
+    const unknown = document.createElement("p"); unknown.className = "field-note";
+    unknown.textContent = "Non renseigné ne signifie pas zéro. Renseignez votre temps de départ dans « Modifier mon projet » pour calculer le reste à faire.";
+    section.append(unknown);
+  }
+  return section;
 }
 
 function addSimpleDurationFields(section, mode, manual, update, locked, advanced = []) {
@@ -6256,6 +6482,9 @@ function readSite() {
     bortle: Number(bortleInput),
   };
   if (!site.name) return [null, "Donnez un nom à votre site."];
+  if (!latitudeInput || !longitudeInput) {
+    return [null, "Indiquez votre lieu d’observation : utilisez votre position ou saisissez les coordonnées."];
+  }
   if (!latitudeInput || !Number.isFinite(site.latitude) || site.latitude < -90 || site.latitude > 90) {
     return [null, "La latitude doit être comprise entre −90 et 90."];
   }
@@ -6581,7 +6810,7 @@ async function recoverConfiguration() {
   }
 }
 
-async function saveConfiguration() {
+async function saveConfiguration({ afterSave = null } = {}) {
   if (state.savingConfiguration) return;
   state.savingConfiguration = true;
   const button = document.querySelector("#save-configuration");
@@ -6624,9 +6853,15 @@ async function saveConfiguration() {
     const ownsNavigation = configurationOwnsNavigation(generation);
     installCurrentConfiguration(payload, generation);
     if (!ownsNavigation) return;
+    if (afterSave) { await afterSave(); return; }
     setView("availability");
     const savedNotice = document.querySelector("#availability-save-confirmation");
-    if (savedNotice) savedNotice.hidden = false;
+    if (savedNotice) {
+      savedNotice.textContent = Object.keys(state.configuration?.projects || {}).length
+        ? "Votre projet et votre configuration sont enregistrés. Choisissez maintenant votre disponibilité."
+        : "Votre site et votre matériel sont enregistrés. Choisissez vos horaires pour rechercher une cible.";
+      savedNotice.hidden = false;
+    }
   } catch (_error) {
     if (!configurationOperationIsCurrent(generation)) return;
     if (!configurationOwnsNavigation(generation)) return;
@@ -6935,6 +7170,13 @@ function simpleProductivityRefusal(payload) {
     return ["Aucun créneau dans vos horaires", "La fenêtre trouvée est en dehors de votre disponibilité."];
   }
   if (refusal.refusal_stage === "no_productive_slice") {
+    const forecast = refusalForecastMessage(payload);
+    const losses = refusal.productivity_breakdown?.losses;
+    if (appliedUiMode === "simple" && forecast?.overcast && Number.isFinite(losses?.cloud) && losses.cloud > 0
+        && !globalThis.NightMeritPresentation?.simulatedWeather(payload.refusal_weather)) {
+      return ["Trop de nuages sur le créneau évalué",
+        "Les prévisions annoncent un ciel entièrement couvert sur la plage évaluée. Les nuages limitent les conditions pour photographier cette cible : aucun créneau exploitable n’a été trouvé. Réessayez lorsque les prévisions évoluent. Aucune séance photo ni aucun temps de pose n’a été ajouté."];
+    }
     return ["Pas de séance photo recommandée", "Aucun moment assez favorable n’a été retenu sur la plage évaluée."];
   }
   if (refusal.refusal_stage === "continuous_window_too_short"
@@ -6971,6 +7213,10 @@ function refusalForecastMessage(payload, timeZone = null) {
       : "la fenêtre météo archivée, dont le périmètre par rapport à votre disponibilité n’est pas enregistré";
   const sampling = forecast.sample_times?.length
     ? ` Échantillons horaires utilisés : ${forecast.sample_times.map(value => refusalTimeLabel(value, timeZone)).join(" ; ")}. Une heure partielle conserve la prévision horaire d’origine, sans interpolation.` : "";
+  if (globalThis.NightMeritPresentation?.simulatedWeather(forecast)) {
+    return {title:"Contexte météo simulé du refus", body:`Nuages simulés : ${clouds} sur ${perimeter} ${range}.`,
+      details:globalThis.NightMeritPresentation.explanation, overcast};
+  }
   return {
     title: overcast ? "Ciel couvert prévu sur le créneau évalué" : "Créneau insuffisant pour ce projet",
     body: `Nuages prévus : ${clouds} sur ${perimeter} ${range}. Prévisions récupérées le ${stamp(retrieved)}. Actualisez-les avant une nouvelle séance.`,
@@ -7221,6 +7467,9 @@ function showTonightUnavailable(payload) {
   showMessage(appliedUiMode === "simple" && concise ? concise[0] : simpleTitle, conciseBody || (chosen
     ? `Cible choisie : ${chosen}. ${body} Votre projet est conservé.${offerAlternatives ? " Vous pouvez modifier vos horaires ou chercher une autre cible, sans garantie de créneau disponible." : " Votre choix est conservé ; aucune autre cible ne le remplace."}`
     : body), { kicker: "Analyse terminée" });
+  if (globalThis.NightMeritPresentation?.demoEnabled) {
+    showMessage(simpleTitle, "Aucune mission n’a été autorisée avec les conditions simulées. Vérifiez les contraintes indiquées dans les détails, vos horaires et votre matériel. Aucune séance ni pose n’a été ajoutée.", {kicker:"Analyse de démonstration terminée"});
+  }
   const range = document.querySelector("#message-window");
   if (range) {
     range.textContent = refusalEvaluatedRange(payload, timeZone);
@@ -7723,7 +7972,7 @@ async function loadTonight(availability) {
     clearTimeout(slowTimer);
     clearTimeout(deadlineTimer);
     state.requestingRecommendation = false;
-    ui.recommendationSubmit.disabled = false;
+    updateDiscoveryAvailability();
     ui.refresh.disabled = false;
   }
 }
@@ -7732,6 +7981,13 @@ document.querySelector("#site-next").addEventListener("click", () => {
   const [site, error] = readSite();
   if (error) {
     showFormError(error);
+    const latitude = document.querySelector("#site-latitude");
+    const longitude = document.querySelector("#site-longitude");
+    if (!latitude.value.trim() || !longitude.value.trim()
+        || error.includes("latitude") || error.includes("longitude")) {
+      latitude.closest("details").open = true;
+      (!latitude.value.trim() || error.includes("latitude") ? latitude : longitude).focus();
+    }
     return;
   }
   state.configurationDraft.site = site;
@@ -7739,7 +7995,13 @@ document.querySelector("#site-next").addEventListener("click", () => {
   setView("equipment");
 });
 
-document.querySelector("#equipment-next").addEventListener("click", () => {
+document.querySelector("#equipment-next").addEventListener("click", async () => {
+  if (appliedUiMode === "simple" && simpleEquipmentPhase === "optics") {
+    const custom=document.querySelector('input[name="equipment-kind"]:checked')?.value === "custom";
+    if (!custom && !document.querySelector('input[name="preset-equipment"]:checked')) { showFormError("Choisissez votre objectif ou télescope."); return; }
+    if (custom && !document.querySelector("#custom-optics-model").value.trim()) { showFormError("Indiquez le modèle de votre optique."); return; }
+    showFormError(""); simpleEquipmentPhase="camera"; renderSimpleEquipment(); document.querySelector("#equipment-title").focus(); return;
+  }
   const [equipment, error] = readEquipment();
   if (error) {
     showFormError(error);
@@ -7747,6 +8009,16 @@ document.querySelector("#equipment-next").addEventListener("click", () => {
   }
   state.configurationDraft.equipment = equipment;
   showFormError("");
+  if (appliedUiMode === "simple" && typeof window.configureInitialFilters === "function") {
+    const next = document.querySelector("#equipment-next");
+    next.disabled = true;
+    try {
+      const proceed = () => window.configureInitialFilters();
+      if (state.configuration?.configured && configurationDraftMatchesSaved()) await proceed();
+      else await saveConfiguration({afterSave: proceed});
+    } finally { next.disabled = false; }
+    return;
+  }
   if (renderProjects()) setView("projects");
 });
 
@@ -7765,6 +8037,7 @@ document.querySelector("#projects-next").addEventListener("click", () => {
 
 for (const button of document.querySelectorAll("[data-back]")) {
   button.addEventListener("click", () => {
+    if (state.view === "equipment" && appliedUiMode === "simple" && simpleEquipmentPhase === "camera") { simpleEquipmentPhase="optics"; updateEquipmentSearch(); renderSimpleEquipment(); return; }
     if (state.view === "projects" && button.dataset.back !== "projects" && !confirmDiscardProjectProgress()) return;
     showFormError("");
     setView(button.dataset.back);
@@ -7984,7 +8257,9 @@ ui.availabilityForm.addEventListener("submit", (event) => {
     const availability = collectAvailabilityPayload();
     showAvailabilityError("");
     if (state.discoveryMode && !discoveryConfirmedFilters().length) {
-      showAvailabilityError("Cochez un filtre que vous possédez avant de chercher une cible.");
+      showAvailabilityError(document.querySelector("#discovery-filter-choices input")
+        ? "Cochez un filtre que vous possédez avant de chercher une cible."
+        : "La recherche automatique n’est pas encore disponible avec cet ensemble dans cette bêta. Revoir mon matériel permet de corriger votre sélection.");
       return;
     }
     loadTonight(availability);
@@ -8003,7 +8278,7 @@ for (const selector of ["#site-name", "#site-latitude", "#site-longitude", "#sit
 document.querySelector("#use-geolocation").addEventListener("click", () => {
   const message = document.querySelector("#geolocation-message");
   if (!navigator.geolocation) {
-    message.textContent = "La géolocalisation n’est pas disponible. La saisie manuelle reste disponible.";
+    message.textContent = "La localisation n’est pas disponible dans ce navigateur. Recherchez votre localité ci-dessus.";
     return;
   }
   message.textContent = "Recherche de votre position…";
@@ -8014,8 +8289,9 @@ document.querySelector("#use-geolocation").addEventListener("click", () => {
       renderSiteSummary();
       message.textContent = "Coordonnées ajoutées. Vous pouvez les corriger manuellement.";
     },
-    () => {
-      message.textContent = "Position non disponible. La saisie manuelle reste disponible.";
+    (error) => {
+      const reasons = {1: "L’accès à votre position a été refusé par le navigateur ou macOS.", 2: "Votre appareil ne parvient pas à déterminer votre position.", 3: "La recherche de position a pris trop de temps."};
+      message.textContent = `${reasons[error.code] || "Position non disponible."} Recherchez votre localité ci-dessus ou saisissez les coordonnées manuellement.`;
     },
     { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 },
   );
@@ -8322,6 +8598,17 @@ document.querySelector("#history-current-site").addEventListener("click", () => 
 });
 
 
+function updateDiscoveryAvailability() {
+  const unavailable = state.discoveryMode && !document.querySelector("#discovery-filter-choices input");
+  ui.recommendationSubmit.disabled = state.view === "review" || state.requestingRecommendation || unavailable;
+  document.querySelector("#discovery-review-equipment").hidden = !unavailable;
+}
+
+document.querySelector("#discovery-review-equipment").addEventListener("click", () => {
+  if (guardUnresolvedAcceptance()) return;
+  setView("equipment");
+});
+
 function discoveryConfirmedFilters() {
   return [...document.querySelectorAll("#discovery-filter-choices input:checked")].map(input => input.value);
 }
@@ -8340,14 +8627,18 @@ async function setDiscoveryMode(enabled) {
   document.querySelector("#discovery-filters").hidden = !enabled;
   ui.recommendationSubmit.textContent = enabled ? "Chercher une cible pour mes horaires" : "Préparer ma nuit";
   updateGuidedPresentation();
+  updateDiscoveryAvailability();
   if (!enabled) return;
   const feedback = document.querySelector("#discovery-filter-feedback");
   feedback.textContent = "Chargement des filtres pris en charge…";
   const equipment = state.configurationDraft.equipment?.preset_id;
+  const previouslyConfirmed = equipment === state.discoveryEquipment ? new Set(discoveryConfirmedFilters()) : new Set();
+  document.querySelector("#discovery-filter-choices").replaceChildren();
+  updateDiscoveryAvailability();
+  if (typeof loadFilterInventoryForDiscovery === "function") await loadFilterInventoryForDiscovery(equipment);
   await loadProjectTemplates();
   if (!state.discoveryMode || generation !== state.discoveryGeneration || equipment !== state.configurationDraft.equipment?.preset_id) return;
   const choices = document.querySelector("#discovery-filter-choices");
-  const previouslyConfirmed = equipment === state.discoveryEquipment ? new Set(discoveryConfirmedFilters()) : new Set();
   choices.replaceChildren();
   state.discoveryEquipment = equipment;
   const filters = new Map();
@@ -8359,12 +8650,16 @@ async function setDiscoveryMode(enabled) {
   for (const filter of filters.values()) {
     const label = document.createElement("label"); label.className = "check-field";
     const input = document.createElement("input"); input.type = "checkbox"; input.value = filter.filter_profile_id;
-    input.checked = previouslyConfirmed.has(input.value);
+    const installed = window.nightMeritInstalledFilters;
+    if (installed && installed.equipment === equipment && installed.ids !== null && !installed.ids.includes(input.value)) continue;
+    input.checked = previouslyConfirmed.has(input.value) || Boolean(installed && installed.equipment === equipment && installed.ids?.includes(input.value));
     const text = document.createElement("span"); text.textContent = `${filter.label} (${filter.fwhm_nm} nm)`;
     label.append(input, text); choices.append(label);
   }
-  feedback.textContent = filters.size ? "La recherche retient jusqu’à trois cibles parmi les nébuleuses prises en charge en Hα, si les conditions le permettent."
-    : "Aucun filtre précisément compatible n’est disponible pour ce matériel dans cette bêta. Vos réglages sont conservés.";
+  feedback.textContent = filters.size ? "La recherche retient jusqu’à trois choix parmi les nébuleuses prises en charge en Hα et la Rosette en OIII/SII, si les conditions le permettent."
+    : "La recherche automatique n’est pas encore disponible avec cet ensemble dans cette bêta. Vos réglages sont conservés.";
+  if (window.nightMeritInstalledFilters?.equipment === equipment && window.nightMeritInstalledFilters.ids !== null && !choices.querySelector('input')) feedback.textContent = window.nightMeritInstalledFilters.noFilter ? "Vous avez choisi de continuer sans filtre. Cette recherche nécessite un filtre compatible. Pour en ajouter un, ouvrez « Déclarer ou modifier mes filtres »." : "Aucun de vos filtres déclarés n’est compatible avec cette recherche. Une référence non prise en charge reste mémorisée, mais ne peut pas servir aux calculs. Vérifiez les références dans « Déclarer ou modifier mes filtres ».";
+  updateDiscoveryAvailability();
 }
 
 document.querySelector("#discover-targets").addEventListener("change", event => setDiscoveryMode(event.target.checked));
@@ -8404,13 +8699,23 @@ function renderTargetSuggestions(payload) {
     ? "Que pourriez-vous photographier ?" : "Aucune cible proposée pour vos horaires";
   document.querySelector("#discovery-refresh").hidden = hasSuggestions;
   const cards = document.querySelector("#target-suggestion-cards"); cards.replaceChildren();
-  document.querySelector("#target-suggestions-status").textContent = hasSuggestions
+  const status = document.querySelector("#target-suggestions-status");
+  status.dataset.proText = hasSuggestions
     ? payload.notice : "La recherche n’a retenu aucune cible parmi celles prises en charge avec vos horaires, votre matériel, vos filtres confirmés et les conditions prévues. Vos réglages et vos projets sont conservés. Vous pouvez réessayer lorsque les prévisions évoluent, sans refaire la configuration.";
+  status.dataset.simpleText = !hasSuggestions && payload.refusal_reason === "clouds_no_productive_window"
+    ? "Les prévisions annoncent trop de nuages pour photographier les cibles évaluées. Aucun créneau exploitable n’a été trouvé pour vos horaires. Réessayez lorsque les prévisions évoluent. Vos réglages et vos projets sont conservés. Aucune photo ni séance n’a été ajoutée."
+    : !hasSuggestions && payload.refusal_reason === "clouds_humidity_no_productive_window"
+      ? "Les nuages prévus et la forte humidité ne permettent pas de trouver un créneau exploitable pour les cibles évaluées avec vos horaires. Réessayez lorsque les prévisions évoluent. Vos réglages et vos projets sont conservés. Aucune photo ni séance n’a été ajoutée."
+      : status.dataset.proText;
+  if (globalThis.NightMeritPresentation?.demoEnabled) {
+    status.dataset.proText = status.dataset.simpleText = globalThis.NightMeritPresentation.discoveryCopy(hasSuggestions);
+  }
+  status.textContent = status.dataset[appliedUiMode === "pro" ? "proText" : "simpleText"];
   document.querySelector("#target-suggestions-scope").textContent = payload.scope || "";
   renderEquipmentCatalogue(payload.catalogue);
   for (const suggestion of payload.suggestions || []) {
     const card = document.createElement("article"); card.className = "target-suggestion-card";
-    const title = document.createElement("h3"); title.textContent = suggestion.display_name;
+    const title = document.createElement("h3"); title.textContent = `${suggestion.display_name} · ${suggestion.filter_type === "Ha" ? "Hα" : suggestion.filter_type}`;
     const figure = document.createElement("figure");
     const image = document.createElement("img"); image.src = suggestion.image.src; image.alt = suggestion.image.alt || `Image de référence de ${suggestion.display_name}`;
     image.width = 160; image.height = 140;
@@ -8422,7 +8727,7 @@ function renderTargetSuggestions(payload) {
     caption.append(source, document.createTextNode(" · "), license);
     figure.append(image, caption);
     const reference = document.createElement("p"); reference.className = "field-note";
-    reference.textContent = suggestion.image.note || "Image de référence en couleur. En Hα, votre image sera monochrome ; son cadrage et ses détails dépendront de votre matériel et de vos poses.";
+    reference.textContent = suggestion.image.note || "Image de référence en couleur. Avec un seul filtre Hα, OIII ou SII, votre image sera monochrome ; son cadrage et ses détails dépendront de votre matériel et de vos poses.";
     const timing = document.createElement("p"); timing.textContent = `Créneau estimé : ${missionDateTimeLabel(suggestion.window_start, currentSiteTimezone())} → ${missionDateTimeLabel(suggestion.window_end, currentSiteTimezone())}.`;
     const filter = document.createElement("p"); filter.textContent = `Filtre confirmé : ${suggestion.filter.label} (${suggestion.filter.fwhm_nm} nm).`;
     const why = document.createElement("p"); why.textContent = suggestion.guidance.purpose;
@@ -8436,7 +8741,7 @@ function renderTargetSuggestions(payload) {
       state.selectedProjectId = suggestion.existing_project_key || suggestion.catalog_key;
       setView("projects");
       const existingKey = suggestion.existing_project_key || suggestion.catalog_key;
-      if (Object.hasOwn(state.configuration?.projects || {}, existingKey)) { openProjectProgress(existingKey); return; }
+      if (Object.hasOwn(state.configuration?.projects || {}, existingKey)) { await openProjectProgress(existingKey, { discoveryIntentId: suggestion.acquisition_intent_id }); return; }
       if (!state.projectTemplates?.length) await loadProjectTemplates();
       document.querySelector("#project-create").open = true;
       document.querySelector("#project-template").value = suggestion.catalog_key;
@@ -8456,6 +8761,15 @@ function renderTargetSuggestions(payload) {
       const match = document.createElement("p");
       match.textContent = `${material.framing.label} ${material.extent_scope}`;
       details.append(match);
+    }
+    if (suggestion.lunar_assessment) {
+      const lunar = document.createElement("p");
+      lunar.textContent = suggestion.lunar_assessment.notice;
+      details.append(lunar);
+      const values = document.createElement("p");
+      values.dataset.proOnly = "true";
+      values.textContent = `Lune · ${suggestion.lunar_assessment.central_wavelength_nm} nm / ${suggestion.lunar_assessment.fwhm_nm} nm : Rayleigh ${suggestion.lunar_assessment.rayleigh_relative_index.toPrecision(3)}, Mie ${suggestion.lunar_assessment.mie_relative_index.toPrecision(3)}.`;
+      details.append(values);
     }
     card.append(title, figure, reference, timing, filter, why, difficulty, choose, details); cards.append(card);
   }
@@ -8647,7 +8961,7 @@ async function loadAnalysisHistory(more = false) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "secondary-button";
-      button.textContent = savedObservationTime(record.created_at_utc, record.result.weather_trust?.timezone || "UTC")+" — "+(record.request.selected_project_id || record.result.target || "Analyse de nuit");
+      button.textContent = "Calcul du " + savedObservationTime(record.created_at_utc, refusalSiteTimezone(record.result, {archived:true, request:record.request}))+" — "+(record.request.selected_project_id || record.result.target || "Analyse de nuit");
       button.addEventListener("click", () => renderArchivedAnalysis(record));
       list.append(button);
     }
@@ -8658,6 +8972,37 @@ async function loadAnalysisHistory(more = false) {
     if (current()) message.textContent = "Les analyses enregistrées ne peuvent pas être lues. Aucun enregistrement existant n’a été modifié.";
   }
 }
+function archivedRequestedRange(record, timeZone) {
+  const availability = record.request?.availability;
+  let start = availability?.start, end = availability?.end;
+  // Local form values must use the archived site zone, never the computer's zone.
+  if (!start && !end && availability?.mode === "fixed_window"
+      && availability.start_local && availability.end_local) {
+    const historicalZone = record.result?.weather_trust?.timezone || record.request?.location?.timezone;
+    if (!historicalZone) return "";
+    try {
+      const startWall = availability.start_local, endWall = availability.end_local;
+      localDateTimeParts(startWall); localDateTimeParts(endWall);
+      let normalizedEnd = endWall;
+      // Match the server's overnight rule for an end earlier on the same date.
+      if (startWall.slice(0, 10) === endWall.slice(0, 10) && endWall < startWall) {
+        const parts = localDateTimeParts(endWall);
+        normalizedEnd = new Date(utcMilliseconds(parts.year, parts.month, parts.day + 1,
+          parts.hour, parts.minute)).toISOString().slice(0, 16);
+      }
+      const nominal = Date.parse(normalizedEnd + "Z") - Date.parse(startWall + "Z");
+      if (nominal <= 0 || nominal > 86400000) return "";
+      start = localDateTimeToUtc(startWall, historicalZone);
+      end = localDateTimeToUtc(normalizedEnd, historicalZone);
+    } catch (_) { return ""; }
+  }
+  // Only explicit archived bounds are evidence; never reconstruct a former night.
+  const aware = value => typeof value === "string" && /(?:Z|[+-]\d{2}:\d{2})$/.test(value);
+  if (!aware(start) || !aware(end) || !Number.isFinite(Date.parse(start))
+      || !Number.isFinite(Date.parse(end)) || Date.parse(end) <= Date.parse(start)) return "";
+  return `Vos horaires demandés : ${refusalTimeLabel(start, timeZone)} → ${refusalTimeLabel(end, timeZone)} · ${timeZone}.`;
+}
+
 function renderArchivedAnalysis(record) {
   const root = document.querySelector("#analysis-history-detail");
   root.replaceChildren();
@@ -8678,7 +9023,7 @@ function renderArchivedAnalysis(record) {
   const concise = simpleProductivityRefusal(payload);
   const title = appliedUiMode === "simple" && concise ? concise[0] : message[0];
   const body = concise ? `${concise[1]} Votre projet est conservé.` : message[1];
-  for (const [tag, value] of [["h3", title], ["p", body], ["p", refusalEvaluatedRange(payload, timeZone)]]) {
+  for (const [tag, value] of [["h3", title], ["p", body], ["p", archivedRequestedRange(record, timeZone)], ["p", refusalEvaluatedRange(payload, timeZone)]]) {
     if (!value) continue;
     const node = document.createElement(tag);
     node.textContent = value;
@@ -8691,7 +9036,7 @@ function renderArchivedAnalysis(record) {
   details.open = appliedUiMode === "pro";
   const explanation = document.createElement("p");
   explanation.className = "refusal-evidence";
-  explanation.textContent = [message[1], message[2]].filter(Boolean).join("\n\n");
+  explanation.textContent = [message[1], message[2]].filter(value => value && value !== body).join("\n\n");
   const raw = document.createElement("details");
   const rawSummary = document.createElement("summary");
   rawSummary.textContent = "Données brutes archivées (horaires ISO d’origine)";

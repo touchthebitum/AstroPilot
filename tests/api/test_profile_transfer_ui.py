@@ -28,6 +28,7 @@ async function flush(){for(let i=0;i<20;i++)await Promise.resolve();}
  await flush();assert.equal(el('#restore-section').hidden,true);assert.equal(el('#export-section').hidden,true);
  assert.equal(el('#fresh-copy-section').hidden,false);assert.equal(el('#next-section').hidden,true);
  assert.match(el('#message').textContent,/traces techniques/);
+ statusState='demo_started';await vm.runInContext('status()',context);assert.match(el('#message').textContent,/configuration n’est pas terminée/);assert.equal(el('#continue-demo-section').hidden,false);assert.equal(el('#restore-section').hidden,true);assert.equal(el('#export-section').hidden,true);
  statusState='unrecognized';await vm.runInContext('status()',context);assert.match(el('#message').textContent,/aucun profil/);
  statusState='profile';await vm.runInContext('status()',context);assert.equal(el('#export-section').hidden,false);
  statusState='empty';await vm.runInContext('status()',context);assert.equal(el('#restore-section').hidden,false);assert.equal(el('#windows-note').hidden,false);
@@ -40,7 +41,7 @@ async function flush(){for(let i=0;i<20;i++)await Promise.resolve();}
  fail=false;await el('#archive').listeners.change();await el('#restore').listeners.click();
  const restored=requests.filter(r=>r.url.endsWith('restore'));assert.equal(restored.length,1);
  assert.deepEqual(JSON.parse(restored[0].opts.body),{confirmation:'nonce',confirm:true});
- assert.equal(el('#restore-section').hidden,true);assert.match(el('#message').textContent,/reprises/);assert.match(el('#restored-summary').textContent,/1 projet, 2 sessions, 3 observations, 1 comparaison/);assert.equal(el('#open-profile').hidden,false);assert.match(el('#stage').textContent,/Données reprises/);
+ assert.equal(el('#restore-section').hidden,true);assert.match(el('#message').textContent,/reprises/);assert.match(el('#restored-summary').textContent,/1 projet, 2 séances photo, 3 observations, 1 comparaison/);assert.equal(el('#open-profile').hidden,false);assert.match(el('#stage').textContent,/Données reprises/);
  await el('#restore').listeners.click();assert.equal(requests.filter(r=>r.url.endsWith('restore')).length,1);
  wrongCopy=true;await el('#open-profile').listeners.click();assert.deepEqual(navigations,[]);assert.match(el('#message').textContent,/autre copie/);wrongCopy=false;await el('#open-profile').listeners.click();assert.deepEqual(navigations,['/']);assert.equal(aborts,0);
 })().catch(e=>{console.error(e);process.exitCode=1;});

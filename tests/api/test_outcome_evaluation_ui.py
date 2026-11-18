@@ -56,6 +56,7 @@ for (const mode of ['simple','pro']) {
   assert.doesNotMatch(text,/-7 %/);
   assert.equal(JSON.stringify(evaluation),original,'rendering never changes persisted precision');
   assert.equal(output.dataset[mode==='pro'?'proText':'simpleText'],text);
+  assert.equal(output.dataset.comparisonState,'shown');
   const tiny = {...evaluation,results:[numeric('temperature_c',0,0.0001,'°C')]};
   renderOutcomeEvaluation(tiny);
   assert.doesNotMatch(output.textContent,/-0(?:[ ,]|°C)/,'rounded zero has no negative sign');

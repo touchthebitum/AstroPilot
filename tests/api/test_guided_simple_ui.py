@@ -66,7 +66,8 @@ assert.equal(unknown.mode.value,'manual');assert.equal(unknown.manual.value,'','
 
 def test_cards_use_canonical_effective_progress_and_ignore_superseded_reads():
     source=SOURCE.read_text()
-    functions=source[source.index('function progressDuration('):source.index('function progressInput(')]
+    functions=source[source.index('function readableTargetName('):source.index('function savedMissionLabel(')]
+    functions+=source[source.index('function progressDuration('):source.index('function progressInput(')]
     functions+=source[source.index('function renderSimpleProjects('):source.index('function addSimpleDurationFields(')]
     run_js(DOM+r'''
 const region=new E('div');
@@ -92,9 +93,13 @@ const payload={acquisition_intent_targets:[{acquisition_intent_id:'ha',target_ho
  requests.shift().resolve({ok:true,json:async()=>payload});await flush();
  assert.equal(old.children.length,0,'superseded read cannot update previous cards');
  requests.shift().resolve({ok:true,json:async()=>payload});await flush();
- const text=status.children[0].textContent;
- assert.match(text,/1 h 45 sur 3 h/);assert.doesNotMatch(text,/99/,'legacy scalar must not override canonical credits');
- assert.match(status.children[0].children[0].textContent,/1 h 15/);
+ const acquired=status.all().find(x=>x.dataset?.balanceField==='acquired');
+ const goal=status.all().find(x=>x.dataset?.balanceField==='goal');
+ const remaining=status.all().find(x=>x.dataset?.balanceField==='remaining');
+ assert.equal(acquired.textContent,'1 h 45','canonical effective total includes prior images and credits');
+ assert.equal(goal.textContent,'3 h 00');
+ assert.equal(remaining.textContent,'1 h 15');
+ assert.doesNotMatch(status.all().map(x=>x.textContent||'').join(' '),/99/,'legacy scalar must not override canonical credits');
  current.children[2].children.find(x=>x.textContent==='Préparer une séance').listeners.click();
  assert.equal(preparation.projectId,'Sh2-129');
  renderSimpleProjects([['Sh2-129',configuration.projects['Sh2-129']]]);

@@ -247,7 +247,7 @@ async function fetch(url, options) {
   assert.equal(document.querySelector('#session-start').hidden, true);
   assert.equal(document.querySelector('#session-credit').hidden, true);
   assert.match(document.querySelector('#session-status').textContent, /Session non confirmée/);
-  assert.equal(document.querySelector('#session-choice').children[0].textContent, 'Sans session');
+  assert.equal(document.querySelector('#session-choice').children[0].textContent, 'Sans séance photo');
   assert.match(document.querySelector('#session-choice').children[1].textContent, /Session non confirmée/);
   for (const invalidStatus of ['interrupted', 'unknown', null]) {
     canonical.execution.status = invalidStatus;
@@ -679,3 +679,48 @@ async function fetch(url, options) {
                                     capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
     assert {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+def test_reopening_resumes_unambiguous_session_without_writes():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required")
+    source = SCRIPT.read_text(encoding="utf-8")
+    helper = source[source.index("async function reloadSessions"):source.index("async function sessionCommand")]
+    harness = r'''
+const assert = require('node:assert/strict');
+const SESSION_PENDING_KEY = 'test.pending';
+let sessions = [], reads = 0;
+const state = {acceptedMission:{mission_id:'mission'},activeSessionId:null};
+const localStorage = {getItem:()=>null};
+async function sessionFetch(url, options) {
+  assert.equal(options, undefined, 'reopening must only read');
+  reads++; return {ok:true,json:async()=>sessions};
+}
+function renderSession() {}
+function syncFieldObservationContext() {}
+async function readGuardianRenewal() {}
+const item = (id,status)=>({execution:{execution_id:id,status}});
+async function reopen(values) {
+  sessions=values;state.activeSessionId=null;state.fieldObservationSelectedExecutionId=null;
+  await reloadSessions({resumeExisting:true});
+  assert.equal(state.fieldObservationSelectedExecutionId,null,'resume must not auto-link observations');
+  return state.activeSessionId;
+}
+(async()=>{
+ assert.equal(await reopen([]),null);
+ assert.equal(await reopen([item('live','in_progress')]),'live');
+ assert.equal(await reopen([item('done','completed')]),'done');
+ assert.equal(await reopen([item('old','completed'),item('live','in_progress')]),'live');
+ assert.equal(await reopen([item('one','in_progress'),item('two','unconfirmed')]),null);
+ assert.equal(await reopen([item('one','completed'),item('two','completed')]),null);
+ sessions=[item('chosen','completed'),item('live','in_progress')];
+ await reloadSessions({selectId:'chosen',resumeExisting:true});assert.equal(state.activeSessionId,'chosen');
+ await reloadSessions({resumeExisting:true});assert.equal(state.activeSessionId,'chosen');
+ state.activeSessionId=null;await reloadSessions();assert.equal(state.activeSessionId,null,'preserve deliberate no selection');
+ assert.equal(reads,9);
+})().catch(e=>{console.error(e);process.exitCode=1;});
+'''
+    result = run_with_time_authority([node, "-"], input=harness + helper,
+                                    capture_output=True, text=True, encoding="utf-8")
+    assert result.returncode == 0, result.stderr

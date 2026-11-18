@@ -266,6 +266,9 @@ class LocationRequest(BaseModel):
     longitude: float = Field(ge=-180.0, le=180.0)
 
 
+from astropilot.filter_inventory import FilterInventoryWrite, filter_references
+
+
 class ConfigurationSiteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -2214,8 +2217,8 @@ def create_app(
             response.headers["Cache-Control"] = "no-store"
         if request.url.path == "/":
             response.headers["Cache-Control"] = "no-store"
-        elif request.url.path in {"/ui/app.js", "/ui/alert-status.js", "/ui/styles.css", "/ui/timezone-authority.js"}:
-            response.headers["Cache-Control"] = "no-cache"
+        elif request.url.path.startswith("/ui/"):
+            response.headers["Cache-Control"] = "no-store"
         return response
 
     @application.middleware("http")
@@ -2237,6 +2240,38 @@ def create_app(
         # Include early protocol errors too: they are not a rules-version mismatch.
         response.headers['X-NightMerit-Time-Authority'] = authority
         return response
+
+    @application.get("/v1/filter-inventory")
+    def get_filter_inventory():
+        profile=load_user_profile() or {}
+        return {"profile_revision":profile.get("profile_revision",0),
+                "active_equipment_id":profile.get("active_equipment"),
+                "inventories":profile.get("filter_inventories",{}),
+                "mount_inventories":profile.get("filter_mount_inventories",{}),
+                "references":filter_references()}
+
+    @application.put("/v1/filter-inventory")
+    def put_filter_inventory(request: FilterInventoryWrite):
+        profile=load_user_profile()
+        if request.equipment_id not in profile.get("available_equipment",[]):
+            raise HTTPException(status_code=422,detail={"code":"inventory_equipment_unknown"})
+        inventories=copy.deepcopy(profile.get("filter_inventories",{}))
+        from astropilot.filter_inventory import inventory_mounting
+        mounts=copy.deepcopy(profile.get("filter_mount_inventories",{}))
+        saved_mounts=mounts.setdefault(request.equipment_id,{})
+        previous=inventories.get(request.equipment_id)
+        if previous is not None:
+            saved_mounts[inventory_mounting(previous)]=copy.deepcopy(previous)
+        inventory=request.inventory.model_dump(mode="json",exclude_none=True)
+        saved_mounts[inventory_mounting(inventory)]=copy.deepcopy(inventory)
+        inventories[request.equipment_id]=inventory
+        profile["filter_mount_inventories"]=mounts
+        profile["filter_inventories"]=inventories
+        try:
+            saved=save_user_profile(profile,expected_revision=request.expected_revision)
+        except ProfileRevisionConflictError as exc:
+            raise HTTPException(status_code=409,detail={"code":"inventory_revision_conflict"}) from exc
+        return {"profile_revision":saved["profile_revision"],"inventory":inventories[request.equipment_id]}
 
     @application.get('/ui/timezone-data.js', include_in_schema=False)
     def timezone_data():
@@ -2342,6 +2377,28 @@ def create_app(
     @application.get("/v1/runtime-identity", include_in_schema=False)
     def runtime_identity():
         return runtime_identity_payload()
+
+    @application.get("/v1/demo-context", include_in_schema=False)
+    def demo_context():
+        from astropilot.demo_mode import context
+        return JSONResponse(context(), headers={"Cache-Control": "no-store"})
+
+    @application.get("/v1/problem-report", include_in_schema=False)
+    def problem_report():
+        # Explicit allowlist only: never read profile documents, logs or paths.
+        from astropilot.demo_mode import context
+        identity = runtime_identity_payload()
+        payload = {
+            "schema": "nightmerit.problem_report.v1",
+            "version": identity["version"],
+            "build": identity["build"],
+            "architecture": identity["architecture"] if identity["architecture"] in
+                {"x86_64", "arm64", "aarch64", "AMD64", "i386"} else "other",
+            "system": platform.system() if platform.system() in {"Windows", "Darwin", "Linux"} else "other",
+            "weather_mode": context()["weather"],
+            "scope": "metadata_only_no_profile_or_logs",
+        }
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
     @application.get("/v1/data-context", include_in_schema=False)
     def data_context():
@@ -2550,6 +2607,14 @@ def create_app(
                 else:
                     raise HTTPException(status_code=409, headers=headers, detail={"code": code}) from exc
             raise HTTPException(status_code=503, headers=headers, detail={"code": "configuration_corrupt"}) from exc
+
+    @application.get("/v1/locations", summary="Search a locality without saving a profile")
+    def search_locations(name: str = Query(min_length=2, max_length=100)):
+        from astropilot.location_search import find_locations
+        try:
+            return {"results": find_locations(name), "provider": "Open-Meteo / GeoNames"}
+        except (OSError, ValueError):
+            raise HTTPException(status_code=503, detail={"code": "location_search_unavailable"})
 
     @application.get("/v1/equipment-references", summary="Read manufacturer component references")
     def get_equipment_references():

@@ -1148,3 +1148,37 @@ body.beginner-layout h2[tabindex="-1"]:focus { outline: none; }
 #beginner-follow::backdrop { background: rgba(1, 6, 12, .82); }
 #beginner-follow .help-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 #beginner-follow h2 { margin: 0; }
+
+/* A saved comparison is read automatically. Keep explicit actions for missing
+   comparisons or a retry, and keep all controls in Advanced presentation. */
+html[data-ui-mode="simple"] .outcome-panel:has(#outcome-result[data-comparison-state="shown"]) > #outcome-read,
+html[data-ui-mode="simple"] .outcome-panel:has(#outcome-result[data-comparison-state="shown"]) > #outcome-compare {
+  display: none;
+}
+
+/* Put discovery first; the manual form opens only after an explicit choice. */
+html[data-ui-mode="simple"] .discovery-entry { display: grid; gap: 12px; margin: 24px 0; padding: 20px; border: 1px solid var(--line-bright); border-radius: 12px; }
+html[data-ui-mode="simple"] .discovery-entry > button { width: 100%; min-height: 48px; }
+html[data-ui-mode="simple"] .discovery-entry > p { margin: 0 0 8px; }
+html[data-ui-mode="simple"] #project-create:not([open]) { display: none; }
+
+#demo-banner { max-width: 1200px; margin: 16px auto; padding: 16px 20px; border: 2px solid #e6b75d; border-radius: 10px; background: #332b18; color: #fff2cd; font-weight: 600; }
+#demo-banner[hidden] { display: none; }
+
+.demo-dialog-note { margin: 12px 20px; padding: 12px; border: 1px solid #e6b75d; border-radius: 8px; background: #332b18; color: #fff2cd; font-weight: 600; }
+
+/* Project balance stays readable without changing saved goals or credits. */
+.project-balance { margin: 16px 0; min-width: 0; }
+.project-balance table { width: 100%; table-layout: fixed; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.project-balance caption { text-align: left; font-weight: 650; padding: 0 0 12px; }
+.project-balance th, .project-balance td { text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); padding: 12px 8px; overflow-wrap: anywhere; }
+.project-balance thead th { color: var(--muted); font-size: .86rem; font-weight: 500; }
+.project-balance tbody th { color: var(--cyan); }
+.project-balance th:first-child { width: 16%; }
+.project-balance td small { display: block; font-size: .78rem; margin-top: 5px; }
+.project-balance .field-note { font-size: .85rem; line-height: 1.5; color: var(--muted); }
+@media (max-width: 600px) {
+  .project-balance th, .project-balance td { padding: 10px 4px; font-size: .8rem; }
+  .project-balance thead th { font-size: .76rem; }
+  .project-balance .field-note { font-size: .78rem; }
+}

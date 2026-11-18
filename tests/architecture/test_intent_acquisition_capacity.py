@@ -83,7 +83,7 @@ def test_selected_intent_only_and_user_duration_prorate_gain(monkeypatch):
     assert result.acquisition_capacity.remaining_hours == 10
     assert result.recommended_hours == 4
     assert result.expected_gain == 40
-    assert timing(result, duration=1.25)[2:] == (1.25, 12.5)
+    assert timing(result, duration=1.25 + 2/3)[2:] == (1.25, 12.5)
 
 
 def test_legacy_reads_and_profile_unchanged(monkeypatch):

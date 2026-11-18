@@ -15,7 +15,7 @@ def test_photo_addition_reconciles_each_partial_commit(tmp_path):
     prelude = r'''
 const assert = require('node:assert/strict');
 class Element {
- constructor(){this.value='';this.open=true;this.children=[];this.classList={toggle(){}};}
+ constructor(){this.value='';this.open=true;this.children=[];this.dataset={};this.classList={toggle(){}};}
  append(x){this.children.push(x)} replaceChildren(){this.children=[]} showModal(){this.open=true} scrollIntoView(){}
 }
 const elements=new Map();
@@ -54,6 +54,10 @@ async function sessionHttpError(r){const e=Error('http');e.status=r.status;retur
 for(const status of ['completed','in_progress'])for(const failure of [null,'evidence-http','evidence-lost','credit-http','credit-lost','transition-lost']){
  refreshed=0;canonical=structuredClone(original);canonical.execution.status=status;
  fault=failure;faultUsed=false;writes=[];storage.clear();photoAddition.projectId='Sh2-129';photoAddition.selected=structuredClone(canonical);
+ const other={...structuredClone(original),execution:{...original.execution,execution_id:'other'}};
+ photoAddition.sessions=[photoAddition.selected,other];
+ const choice=new Element();choice.value='e';choice.dataset.photoLabel='Date · Filtre OIII · Séance 2 sur 2';
+ photoElement('choice').replaceChildren();photoElement('choice').append(choice);
  photoElement('frames').value='8';photoElement('seconds').value='300';renderPhotoAddition();
  assert.match(photoElement('preview').textContent,/13 h 35.*14 h 15/);
  assert.match(photoElement('baseline').textContent,/ne sont pas déjà comptés/);
@@ -62,11 +66,23 @@ for(const status of ['completed','in_progress'])for(const failure of [null,'evid
  assert.equal(canonical.current_acquired_seconds,51300);assert.equal(canonical.remaining_hours,5.75);
  assert.equal(canonical.evidence.length,1);const count=writes.length;await submitPhotoAddition();assert.equal(writes.length,count);
  assert.equal(photoElement('submit').hidden,true);
+ assert.equal(choice.textContent,'Date · Filtre OIII · Séance 2 sur 2 · Déjà ajouté : 0 h 40','update immediately, preserving date/filter/distinction, including credit response loss');
  assert.equal(refreshed,1,'refresh project cards exactly once after confirmed credit, including lost responses');
  assert.equal(storage.size,0,'clear pending evidence after confirmed credit');
+ // Switch to a different session and back using the actual selection handler.
+ selectPhotoChoice({target:{value:'other'}});
+ assert.equal(photoAddition.selected,other);assert.equal(photoElement('submit').hidden,false);
+ selectPhotoChoice({target:{value:'e'}});
+ assert.ok(photoAddition.selected.credit,'the menu must retain the confirmed credit after reselection');
+ assert.equal(photoElement('submit').hidden,true);
+ assert.match(choice.textContent,/Déjà ajouté : 0 h 40/);
+ assert.match(photoElement('preview').textContent,/Déjà ajouté : 0 h 40.*14 h 15/);
+ await submitPhotoAddition();assert.equal(writes.length,count,'reselection cannot send another addition');
+ assert.equal(other.credit,null,'another session is not credited by updating this one');
 }
 // Freeze the POST while a second click and close are attempted.
 canonical=structuredClone(original);fault=null;writes=[];photoAddition.selected=structuredClone(canonical);
+photoElement('frames').value='8';photoElement('seconds').value='300';
 let release;gate=new Promise(r=>release=r);const saving=submitPhotoAddition();await new Promise(r=>setImmediate(r));
 assert.equal(photoElement('close').disabled,true);await submitPhotoAddition();assert.equal(writes.length,1);
 release();gate=null;await saving;assert.equal(canonical.evidence.length,1);
@@ -103,7 +119,11 @@ console.log('PASS: one confirmation, exact baseline+credit, lost responses at ea
 })().catch(e=>{console.error(e);process.exit(1)});
 '''
     script=tmp_path/'photos.cjs'
-    script.write_text(prelude+helpers+checks)
+    selection_start = source.index('photoElement("choice").addEventListener("change", event => {')
+    selection_end = source.index('\n});', selection_start)
+    selection_body = source[selection_start:selection_end].split('event => {', 1)[1]
+    selection = '\nfunction selectPhotoChoice(event) {' + selection_body + '\n}\n'
+    script.write_text(prelude+helpers+selection+checks)
     result=subprocess.run([node,str(script)],capture_output=True,text=True,timeout=30)
     assert result.returncode == 0, result.stdout+result.stderr
 

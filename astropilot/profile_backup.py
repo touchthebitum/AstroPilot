@@ -46,7 +46,7 @@ class BackupError(ValueError):
 
 
 def profile_state(root):
-    """Metadata only: startup traces are not an exportable user profile.
+    """Identify startup state without initializing or changing a user profile.
 
     Existing traces still block restoration. Never remove them to make a copy
     appear empty; guide the operator to a fresh kit instead.
@@ -64,6 +64,18 @@ def profile_state(root):
     if all(p.name in LOCAL_ONLY or (p.name.startswith(".") and p.name.endswith(".lock"))
            for p in entries):
         return "runtime_only"
+    marker = root / ".nightmerit-demo.json"
+    if all(p.name == marker.name or p.name in LOCAL_ONLY or
+           (p.name.startswith(".") and p.name.endswith(".lock")) for p in entries):
+        info = marker.lstat() if marker.exists() else None
+        if info and stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_size <= 256:
+            try:
+                with marker.open("rb") as stream:
+                    raw = stream.read(257)
+                if len(raw) <= 256 and _json(raw) == {"schema": "nightmerit.demo.v1"}:
+                    return "demo_started"
+            except (OSError, BackupError):
+                pass
     return "unrecognized"
 
 
@@ -85,7 +97,7 @@ def _json(raw):
 def _allowed(name):
     if not isinstance(name, str) or PurePosixPath(name).as_posix() != name:
         return False
-    if name in {"user_profile.json", "user_filters.json"}:
+    if name in {"user_profile.json", "user_filters.json", ".nightmerit-demo.json"}:
         return True
     parts = PurePosixPath(name).parts
     return (len(parts) == 2 and parts[0] in STORES
@@ -169,6 +181,9 @@ def validate_documents(files):
             raise BackupError("backup_invalid")
         seen.add(name.casefold())
         if not isinstance(_json(raw), dict):
+            raise BackupError("backup_invalid")
+    if ".nightmerit-demo.json" in files:
+        if _json(files[".nightmerit-demo.json"]) != {"schema": "nightmerit.demo.v1"}:
             raise BackupError("backup_invalid")
     try:
         profile = validate_user_profile(_json(files["user_profile.json"]), Path("user_profile.json"))

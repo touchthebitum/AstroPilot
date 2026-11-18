@@ -62,9 +62,12 @@ IMAGING_FIELD_DEFINITIONS += tuple(
     ImagingFieldDefinition(
         imaging_field_id=identity, display_name=name,
         components=(ImagingFieldComponent(celestial_object_id=identity),),
-        acquisition_intents=(AcquisitionIntent(
-            acquisition_intent_id=identity + "_ha", filter_type="Ha",
-            primary_component_ids=(identity,), label="Hα · " + name),),
+        acquisition_intents=tuple(AcquisitionIntent(
+            acquisition_intent_id=identity + "_" + suffix, filter_type=filter_type,
+            primary_component_ids=(identity,), label=label + " · " + name)
+            for suffix, filter_type, label in (
+                (("ha", "Ha", "Hα"), ("oiii", "OIII", "OIII"), ("sii", "SII", "SII"))
+                if identity == "rosette" else (("ha", "Ha", "Hα"),))),
     )
     for identity, name in (("ngc7000", "North America · NGC 7000"),
                            ("rosette", "Nébuleuse de la Rosette"),
