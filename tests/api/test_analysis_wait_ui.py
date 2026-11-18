@@ -23,6 +23,8 @@ const document={querySelector:()=>message};
 const ui={recommendationSubmit:{disabled:false},refresh:{disabled:false}};
 const state={discoveryMode:false,configurationGeneration:1,decisionSiteGeneration:1,view:'availability',viewRevision:0};
 let requests=0,rendered=[],clears=0,lastSignal,transport,lastBody;
+// Weather rendering is exercised by saved-plan weather tests.
+function saveMissionWeatherCheck() {}
 function guardUnresolvedAcceptance(){return false;}
 function decisionSiteFingerprint(){return 'retained';}
 function showAvailabilityError(value){state.error=value;}

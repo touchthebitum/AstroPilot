@@ -1952,6 +1952,16 @@ def evaluate_object(
             lat, lon, bortle, target, obj_name, profile)
         windows = [best] if best is not None else []
     else:
+        from decision.mission.night_planner import acquisition_availability
+        try:
+            # Match mission assembly's capture bounds when judging a candidate.
+            # Keep the original availability for assembly; do not reserve twice.
+            preselection_availability = acquisition_availability(availability)
+        except ValueError as error:
+            if str(error) != "session_too_short_for_operational_tasks":
+                raise
+            # Retain ordinary evidence so assembly can explain the refusal.
+            preselection_availability = None
         windows = compute_windows_for_object(sky, hours, illumination, city_info,
             lat, lon, bortle, target, obj_name, profile, limit=None)
         from decision.models.session_availability import SessionAvailabilityMode
@@ -2041,7 +2051,8 @@ def evaluate_object(
         mission_input = build_mission_input(evaluation, profile=profile, for_intent_selection=True)
         assessment = ProductiveWindowAssessment.build(target=obj_name,
             context=decision_context, mission_input=mission_input)
-        if select_physical_productive_window(assessment, availability) is not None:
+        if (preselection_availability is not None
+                and select_physical_productive_window(assessment, preselection_availability) is not None):
             return evaluation
     # Keep the best overlapping evidence so ordinary guards can explain a refusal.
     return first_evaluation

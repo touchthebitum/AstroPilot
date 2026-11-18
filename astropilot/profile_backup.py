@@ -12,6 +12,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
+import shutil
 import struct
 import subprocess
 import sys
@@ -362,7 +363,107 @@ def inspect_backup(raw, *, validator=validate_graph):
                    "application_version": manifest["application_version"]}
 
 
+RESTORE_OWNER = "restore-owner.json"
+
+
+def _restore_lock(root):
+    from astropilot.file_lock import exclusive_file_lock
+    root.parent.mkdir(parents=True, exist_ok=True)
+    lock = root.parent / ".nightmerit-restoration.lock"
+    if lock.exists() or lock.is_symlink():
+        info = lock.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise BackupError("backup_unsafe_path")
+    return exclusive_file_lock(lock)
+
+
+def _mark_restore_stage(temporary, root, files):
+    stage = temporary / "profile"
+    info = stage.lstat()
+    record = {"schema": "nightmerit.restore_stage.v1", "target": str(root),
+              "directory": temporary.name, "device": info.st_dev, "inode": info.st_ino,
+              "files": {name: len(raw) for name, raw in files.items()}}
+    with (temporary / RESTORE_OWNER).open("x", encoding="utf-8") as stream:
+        json.dump(record, stream)
+        stream.flush()
+        os.fsync(stream.fileno())
+    fsync_directory(temporary)
+
+
+def _cleanup_restore_stages_locked(root):
+    # Do not fall back to unsafe path-based recursive deletion on other platforms.
+    if not getattr(shutil.rmtree, "avoids_symlink_attacks", False):
+        return []
+    removed = []
+    for temporary in root.parent.glob(".nightmerit-restore-*"):
+        try:
+            info = temporary.lstat()
+            if not stat.S_ISDIR(info.st_mode):
+                continue
+            owner = temporary / RESTORE_OWNER
+            owner_info = owner.lstat()
+            if not stat.S_ISREG(owner_info.st_mode) or owner_info.st_nlink != 1 or owner_info.st_size > MAX_MANIFEST:
+                continue
+            record = _json(owner.read_bytes())
+            if (record.get("schema") != "nightmerit.restore_stage.v1" or record.get("target") != str(root)
+                    or record.get("directory") != temporary.name or not isinstance(record.get("files"), dict)):
+                continue
+            files = record["files"]
+            if (not 1 <= len(files) <= MAX_FILES or any(not _allowed(n) or type(size) is not int
+                    or not 0 <= size <= MAX_FILE for n, size in files.items())):
+                continue
+            entries = {p.name for p in temporary.iterdir()}
+            if not entries <= {RESTORE_OWNER, "profile"}:
+                continue
+            stage = temporary / "profile"
+            if "profile" in entries:
+                stage_info = stage.lstat()
+                if (not stat.S_ISDIR(stage_info.st_mode) or stage_info.st_dev != record.get("device")
+                        or stage_info.st_ino != record.get("inode")):
+                    continue
+                valid = True
+                for path in stage.iterdir():
+                    path_info = path.lstat()
+                    if stat.S_ISDIR(path_info.st_mode) and path.name in STORES:
+                        children = list(path.iterdir())
+                    else:
+                        children = [path]
+                    for child in children:
+                        child_info = child.lstat()
+                        name = child.relative_to(stage).as_posix()
+                        if (not stat.S_ISREG(child_info.st_mode) or child_info.st_nlink != 1
+                                or name not in files or child_info.st_size > files[name]):
+                            valid = False
+                            break
+                    if not valid:
+                        break
+                if not valid:
+                    continue
+            # The common lock excludes every current restorer using this parent.
+            # rmtree uses file descriptors and never follows a replaced symlink.
+            shutil.rmtree(temporary)
+            fsync_directory(root.parent)
+            removed.append(temporary.name)
+        except (OSError, BackupError, AttributeError, TypeError):
+            # Unknown, unreadable or altered directories are preserved, never guessed.
+            continue
+    return removed
+
+
+def cleanup_interrupted_restores(root):
+    root = _safe_root(root)
+    with _restore_lock(root):
+        return _cleanup_restore_stages_locked(root)
+
+
 def restore_empty(root, files, *, validator=validate_graph):
+    root = _safe_root(root)
+    with _restore_lock(root):
+        _cleanup_restore_stages_locked(root)
+        return _restore_empty_locked(root, files, validator=validator)
+
+
+def _restore_empty_locked(root, files, *, validator=validate_graph):
     root = _safe_root(root)
     # Even unknown, hidden or unreadable data blocks replacement. No merge.
     if root.exists() and any(root.iterdir()):
@@ -372,6 +473,7 @@ def restore_empty(root, files, *, validator=validate_graph):
     with tempfile.TemporaryDirectory(prefix=".nightmerit-restore-", dir=root.parent) as temporary:
         stage = Path(temporary) / "profile"
         stage.mkdir(mode=0o700)
+        _mark_restore_stage(Path(temporary), root, files)
         _write_files(stage, files)
         for directory in [p for p in stage.iterdir() if p.is_dir()] + [stage]:
             fsync_directory(directory)

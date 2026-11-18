@@ -163,3 +163,17 @@ def selected_modern_ranking_intent(monkeypatch):
             "sh2-129_ha", ("sh2-129_ha",),
             AcquisitionIntentSelectionStatus.SINGLE_ELIGIBLE_INTENT,
             ("ONLY_ELIGIBLE_INTENT",)))
+
+
+@pytest.fixture
+def historical_profile():
+    """Entirely synthetic legacy schema, without inferred Bortle or modern intent fields."""
+    return {
+        "location": {"name": "Buttes", "latitude": 46.9, "longitude": 6.6},
+        "preferences": {"min_altitude_deg": 30},
+        "active_equipment": "samyang_183", "available_equipment": ["samyang_183"],
+        "projects": {key: {"hours": 1, "target_hours": 3, "importance": 5}
+                     for key in ["M31", "Rosette", "IC1396", "Sh2-129"]},
+        "setups": {"legacy": {"note": "synthetic preserved setup"}},
+        "sessions": [], "decision_weights": {"altitude": 1},
+    }

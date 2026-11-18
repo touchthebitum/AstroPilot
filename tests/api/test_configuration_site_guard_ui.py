@@ -65,6 +65,7 @@ const reply = (request, payload, ok = true) => request.resolve({ok, status: ok ?
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 // Discovery presentation is outside the configuration race scenarios.
 function updateDiscoveryAvailability() {}
+function saveMissionWeatherCheck() {}
 function text() {}
 function syncFieldObservationContext() {}
 function invalidateRecentDecisions() {}
@@ -127,7 +128,7 @@ function showMessage() {}
     reply(staleReload, B); await firstEvent;
     assert.equal(state.configuration, null); assert.equal(state.decisionSiteReloadRequired, true);
     reply(currentReload, final); await flush();
-    reply(queue.shift(), {}); await flush(); reply(queue.shift(), []); await lastEvent;
+    reply(queue.shift(), {}); await flush(); reply(queue.shift(), []); await flush(); reply(queue.shift(), []); await lastEvent;
     assert.equal(state.configuration, final); assert.equal(state.view, 'availability');
   }
   // Storage takes ownership of loading; stale success cannot navigate, errors allow retry.
@@ -137,13 +138,13 @@ function showMessage() {}
     const reload = handleDecisionSiteStorageEvent({key: DECISION_SITE_STORAGE_KEY, newValue: decisionSiteFingerprint(B.site)});
     const latest = queue.shift();
     if (fail) latest.reject(new Error('offline'));
-    else {reply(latest, B); await flush(); reply(queue.shift(), {}); await flush(); reply(queue.shift(), []);}
+    else {reply(latest, B); await flush(); reply(queue.shift(), {}); await flush(); reply(queue.shift(), []); await flush(); reply(queue.shift(), []);}
     await reload; reply(stale, A); await old;
     assert.equal(state.view, fail ? 'configuration_error' : 'availability');
     assert.equal(state.decisionSiteReloadRequired, fail);
     if (fail) {
       const retry = loadConfiguration(); reply(queue.shift(), B); await flush();
-      reply(queue.shift(), {}); await flush(); reply(queue.shift(), []); await retry;
+      reply(queue.shift(), {}); await flush(); reply(queue.shift(), []); await flush(); reply(queue.shift(), []); await retry;
       assert.equal(state.view, 'availability');
     }
   }
@@ -184,7 +185,7 @@ function showMessage() {}
 
   // Nominal load/save/recovery and stale write/recovery guards.
   const normalLoad = loadConfiguration(); reply(queue.shift(), A); await flush();
-  reply(queue.shift(), {}); await flush(); reply(queue.shift(), []); await normalLoad;
+  reply(queue.shift(), {}); await flush(); reply(queue.shift(), []); await flush(); reply(queue.shift(), []); await normalLoad;
   assert.equal(state.view, 'availability');
   state.configurationDraft = B;
   const save = saveConfiguration(); reply(queue.shift(), B); await save;
@@ -205,7 +206,9 @@ function showMessage() {}
   // Mission restore rejects a configuration change even during response.json().
   installCurrentConfiguration(A, beginConfigurationOperation());
   const restore = restoreSavedMission(); const currentRequest = queue.shift();
-  reply(currentRequest, {}); await flush(); const sessionsRequest = queue.shift();
+  reply(currentRequest, {}); await flush(); const historyRequest = queue.shift();
+  assert.equal(historyRequest.url, "/v1/accepted-missions"); reply(historyRequest, []); await flush();
+  const sessionsRequest = queue.shift();
   let releaseJSON;
   sessionsRequest.resolve({ok: true, json: () => new Promise(resolve => { releaseJSON = resolve; })});
   await flush(); installCurrentConfiguration(B, beginConfigurationOperation());
@@ -302,7 +305,7 @@ function showMessage() {}
     if (['reopen', 'site'].includes(outcome)) {
       assert.equal(state.view, 'loading_configuration');
       const config = queue.shift(); assert.equal(config.url, '/v1/configuration'); reply(config, B); await flush();
-      reply(queue.shift(), {}); await flush(); reply(queue.shift(), []);
+      reply(queue.shift(), {}); await flush(); reply(queue.shift(), []); await flush(); reply(queue.shift(), []);
     }
     await recovery;
     assert.equal(state.acceptedMission, null);
@@ -367,7 +370,7 @@ function showMessage() {}
       const configurationRequest = queue.shift();
       assert.equal(configurationRequest.url, '/v1/configuration');
       reply(configurationRequest, B); await flush();
-      reply(queue.shift(), {}); await flush(); reply(queue.shift(), []);
+      reply(queue.shift(), {}); await flush(); reply(queue.shift(), []); await flush(); reply(queue.shift(), []);
     }
     await recovery;
     assert.equal(state.acceptedMission, null);

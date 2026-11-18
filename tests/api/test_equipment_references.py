@@ -63,11 +63,11 @@ def test_invalid_catalogue_fails_closed(change):
         EquipmentReferences.model_validate(data)
 
 
-def test_get_is_offline_and_preserves_profile(monkeypatch, tmp_path):
+def test_get_is_offline_and_preserves_profile(monkeypatch, tmp_path, historical_profile):
     monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
     marker = tmp_path / "personal-do-not-touch.json"
     marker.write_bytes(b'{"preserved":true}\n')
-    (tmp_path / "user_profile.json").write_bytes((ROOT / "data/user_profile.json").read_bytes())
+    (tmp_path / "user_profile.json").write_text(json.dumps(historical_profile))
     from astropilot.app import create_app
     client = TestClient(create_app())
     before = {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}

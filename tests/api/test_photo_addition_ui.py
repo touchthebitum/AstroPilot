@@ -11,7 +11,8 @@ def test_photo_addition_reconciles_each_partial_commit(tmp_path):
     if not node:
         pytest.skip("Node required")
     source = (Path(__file__).parents[2] / "astropilot/web/app.js").read_text()
-    helpers = source[source.index("// One explicit user confirmation;"):source.index("function renderSimpleProjects(entries)")]
+    retained = source[source.index("function noRetainedImages("):source.index("function sessionStatus(")]
+    helpers = retained + source[source.index("// One explicit user confirmation;"):source.index("function renderSimpleProjects(entries)")]
     prelude = r'''
 const assert = require('node:assert/strict');
 class Element {

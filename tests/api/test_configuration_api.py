@@ -1,5 +1,4 @@
 import json
-import shutil
 from pathlib import Path
 
 import pytest
@@ -69,11 +68,10 @@ def test_missing_profile_reports_first_run_without_filesystem_details(client):
 
 
 def test_tracked_historical_profile_requires_confirmation_without_mutation(
-    client, tmp_path,
+    client, tmp_path, historical_profile,
 ):
-    source = Path(__file__).resolve().parents[2] / "data/user_profile.json"
     destination = tmp_path / "user_profile.json"
-    shutil.copyfile(source, destination)
+    destination.write_text(json.dumps(historical_profile))
     original = destination.read_bytes()
 
     response = client.get("/v1/configuration")
@@ -118,8 +116,8 @@ def test_tracked_historical_profile_requires_confirmation_without_mutation(
     assert persisted["available_equipment"] == historical["available_equipment"]
 
 
-def test_historical_missing_bortle_is_not_an_invalid_bortle(client, tmp_path):
-    profile = json.loads((Path(__file__).resolve().parents[2] / "data/user_profile.json").read_text())
+def test_historical_missing_bortle_is_not_an_invalid_bortle(client, tmp_path, historical_profile):
+    profile = historical_profile
     for invalid in (None, True, "4", 10):
         profile["preferences"]["bortle"] = invalid
         (tmp_path / "user_profile.json").write_text(json.dumps(profile))
@@ -128,9 +126,8 @@ def test_historical_missing_bortle_is_not_an_invalid_bortle(client, tmp_path):
         assert response.json()["detail"]["code"] == "configuration_corrupt"
 
 
-def test_legacy_custom_setup_and_unknown_fields_survive_confirmation(client, tmp_path):
-    source = Path(__file__).resolve().parents[2] / "data/user_profile.json"
-    profile = json.loads(source.read_text(encoding="utf-8"))
+def test_legacy_custom_setup_and_unknown_fields_survive_confirmation(client, tmp_path, historical_profile):
+    profile = historical_profile
     profile["equipment_definitions"] = {"custom": custom_equipment_payload()}
     profile["available_equipment"].append("custom")
     profile["projects"]["M31"]["legacy_note"] = "keep me"

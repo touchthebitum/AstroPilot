@@ -22,6 +22,8 @@ def _run_javascript(source: str) -> None:
     if node is None:
         pytest.skip("Node.js is required for the dynamic UI test")
     source = ("function updateDiscoveryAvailability() {}\n"
+              "function saveMissionWeatherCheck() {}\n"
+              "function renderSavedMissionChoices() {}\n"
               + _javascript_between("function pendingIntentChoice(subject) {", "function chosenIntent(")
               + _javascript_between("function siteTimezone()", "function decisionSiteFingerprint(")
               .split("function siteConfigurationIdentity", 1)[0]
@@ -163,7 +165,7 @@ const entry = {hidden: true};
 const choice = {value: '', children: [], replaceChildren() { this.children = []; },
   append(item) { this.children.push(item); }};
 const ui = {savedMissionEntry: entry, savedMissionTarget: {textContent: ''}, savedMissionChoice: choice};
-const document = {createElement() { return {value: '', textContent: ''}; }};
+const document = {querySelector() { return {hidden: true, textContent: ''}; }, createElement() { return {value: '', textContent: ''}; }};
 let calls = [];
 let changeConfiguration = false;
 let payload = {status: 'accepted', mission_id: 'mission-1', selection_id: 'selection-1',
@@ -172,7 +174,7 @@ let payload = {status: 'accepted', mission_id: 'mission-1', selection_id: 'selec
 async function fetch(url, options) {
   calls.push([url, options]);
   if (changeConfiguration) state.configuration = {profile_revision: 2};
-  return {ok: true, json: async () => url === '/v1/execution-sessions' ? [] : payload};
+  return {ok: true, json: async () => url === '/v1/execution-sessions' || url === '/v1/accepted-missions' ? [] : payload};
 }
 """ + helpers + """
 (async () => {
@@ -180,7 +182,7 @@ async function fetch(url, options) {
   assert.equal(entry.hidden, false);
   assert.equal(state.acceptedMission.mission, payload.mission);
   assert.deepEqual(calls, [['/v1/accepted-mission/current', undefined],
-    ['/v1/execution-sessions', undefined]]);
+    ['/v1/accepted-missions', {cache: 'no-store'}], ['/v1/execution-sessions', undefined]]);
   payload = {...payload, selection_id: 'wrong'};
   await restoreSavedMission();
   assert.equal(entry.hidden, true);
@@ -397,7 +399,7 @@ let sent = [];
 const decision = {decision_id: 'decision-1', catalog_key: 'M31',
   target_decision_status: 'recommended', alternatives: []};
 const state = {currentDecision: decision, acceptingRecommendation: false,
-  acceptedMission: null, acceptanceBlocked: false};
+  acceptedMission: null, savedMissions: [], acceptanceBlocked: false};
 const ui = {openMission: {dataset: {acceptanceSource: 'primary_recommendation', catalogKey: 'M31'}},
   primaryIntentChoice: {}, mission: {showModal() {}}};
 function chosenIntent() { return chosen; }
@@ -577,7 +579,7 @@ const multi = {acquisition_intent_selection_status: 'no_clear_preference',
 const ui = {openMission: new Element('button'), primaryIntentChoice: new Element(),
   alternativesList: new Element(), mission: {showModal() { opened++; }}};
 const state = {decisionSiteGeneration: 0, configuration: {site: {latitude: 47.1, longitude: 6.8, timezone: 'Europe/Zurich'}}, currentDecision: null, acceptedMission: null, acceptingRecommendation: false,
-  acceptanceBlocked: false, pendingAcceptanceAttempt: null};
+  acceptanceBlocked: false, savedMissions: [], pendingAcceptanceAttempt: null};
 let sent = [], canonical = 'A', opened = 0, status = '';
 function showAcceptanceStatus(message) { status = message; }
 function acceptanceAttempt(intent) { return {...intent, acceptance_request_id: 'request-1'}; }

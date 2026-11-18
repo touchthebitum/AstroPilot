@@ -163,7 +163,8 @@ def test_tonight_ui_assets_are_served():
     assert 'fetch("/v1/configuration/recover"' in script.text
     assert script.text.count("fetch(") >= 8
     assert 'fetch("/v1/execution-sessions"' in script.text
-    assert script.text.rstrip().endswith("loadConfiguration();")
+    assert "else loadConfiguration();\n\n// Age a displayed verification" in script.text
+    assert "setInterval(() => { if (ui.mission.open) renderSavedMissionWeather(); }, 60000);" in script.text
     assert "body: JSON.stringify({})," not in script.text
     assert "collectAvailabilityPayload" in script.text
     assert "hoursToIsoDuration" in script.text

@@ -21,6 +21,7 @@ from astropilot.user_profile import get_user_data_dir
 MESSAGES = {
     "backup_no_user_data": "Cette copie ne contient aucun profil enregistré à sauvegarder. Pour reprendre vos essais, ouvrez l’assistant dans une nouvelle copie vierge, avant de lancer l’application.",
     "backup_destination_not_empty": "Cette copie contient déjà des données. Elles restent intactes. Ouvrez une nouvelle copie vierge pour reprendre une sauvegarde.",
+    "backup_confirmation_unavailable": "Cette confirmation de restauration n’est plus valable (déjà utilisée, expirée ou remplacée). Aucune donnée n’a été modifiée par cette tentative. Si les données ont déjà été reprises, ouvrez cette copie ; sinon, sélectionnez à nouveau la sauvegarde dans une copie vierge.",
     "backup_invalid": "Cette sauvegarde est incomplète ou endommagée. Aucune donnée n’a été reprise.",
     "backup_incompatible": "Cette sauvegarde ne peut pas être validée par cette version. Conservez l’ancienne copie ; aucune donnée n’a été reprise.",
     "backup_unsupported_file": "Ce dossier contient des fichiers non pris en charge. Aucune sauvegarde partielle n’a été créée.",
@@ -125,7 +126,7 @@ def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
                 raise BackupError("backup_invalid") from None
             if (not isinstance(choice, dict) or choice.get("confirm") is not True or pending is None
                     or choice.get("confirmation") != pending[0] or time.monotonic() - pending[1] > 600):
-                raise BackupError("backup_invalid")
+                raise BackupError("backup_confirmation_unavailable")
             files = pending[2]
             pending = None
             summary = await asyncio.to_thread(restorer, root, files)
@@ -200,6 +201,8 @@ def main(*, port=8000, open_browser=True, demo=False):
             worker.start()
         try:
             with exclusive_file_lock(get_user_data_dir().parent / ".nightmerit-profile-transfer.lock"):
+                from astropilot.profile_backup import cleanup_interrupted_restores
+                cleanup_interrupted_restores(get_user_data_dir())
                 server.run(sockets=[listener])
         finally:
             finished.set()

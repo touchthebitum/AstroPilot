@@ -95,7 +95,7 @@ def test_productive_window_beyond_top_three_is_not_discarded(monkeypatch):
     SessionAvailability(SessionAvailabilityMode.FIXED_WINDOW, start=stamp(16, 2), end=stamp(16, 4)),
     SessionAvailability(SessionAvailabilityMode.START_AND_DURATION, start=stamp(16, 2), duration=timedelta(minutes=90)),
     SessionAvailability(SessionAvailabilityMode.UNTIL, end=stamp(16, 4)),
-    SessionAvailability(SessionAvailabilityMode.DURATION, duration=timedelta(hours=2)),
+    SessionAvailability(SessionAvailabilityMode.DURATION, duration=timedelta(hours=2), preparation_minutes=0, flats_minutes=0),
 ])
 def test_all_dated_and_duration_bounds_use_normal_physical_guards(monkeypatch, availability):
     result, physical, _ = evaluate(monkeypatch,
@@ -149,7 +149,8 @@ def test_ambiguous_duration_ranking_is_not_silently_authorized(monkeypatch):
 
 
 def test_duration_continues_past_an_ambiguous_higher_ranked_window(monkeypatch):
-    availability = SessionAvailability(SessionAvailabilityMode.DURATION, duration=timedelta(hours=1))
+    # This test isolates duration ambiguity; operational reservations are covered separately.
+    availability = SessionAvailability(SessionAvailabilityMode.DURATION, duration=timedelta(hours=1), preparation_minutes=0, flats_minutes=0)
     unique = window(stamp(16, 4), 80, 0)
     unique['end'] = unique['start'] + timedelta(hours=1)
     unique['hourly_lunar_evidence'] = unique['hourly_lunar_evidence'][:1]

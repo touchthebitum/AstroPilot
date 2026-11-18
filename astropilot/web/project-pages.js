@@ -82,7 +82,7 @@
  html[data-ui-mode="simple"] #project-create-fields>label[for="project-template"],
  html[data-ui-mode="simple"] #project-create-fields>#project-template{display:none!important}
  html[data-ui-mode="simple"][data-project-page="target"] #project-create-fields>label[for="project-template"],
- html[data-ui-mode="simple"][data-project-page="target"] #project-template{display:block!important}
+ html[data-ui-mode="simple"][data-project-page="target"] #project-create-fields>#project-template{display:block!important}
  html[data-ui-mode="simple"][data-project-page="target"] #project-new-intents,
  html[data-ui-mode="simple"][data-project-page="target"] #project-new-empty-wrap,
  html[data-ui-mode="simple"][data-project-page="target"] #project-existing-images,

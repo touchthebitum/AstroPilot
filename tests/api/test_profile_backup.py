@@ -599,7 +599,7 @@ def test_assistant_closes_listener_and_releases_lock_before_opening_same_process
         should_exit = False
         def __init__(self, app):self.app=app
         def run(self, sockets):
-            assert events == ['lock-held']
+            assert events == ['lock-held', 'lock-held', 'lock-released']
             client=TestClient(self.app, base_url="http://127.0.0.1:8000")
             token=re.search(r'const token="([^"]+)"', client.get('/').text)[1]
             assert client.post('/transfer/open', headers={'X-NightMerit-Transfer':token}).status_code==202
@@ -610,7 +610,7 @@ def test_assistant_closes_listener_and_releases_lock_before_opening_same_process
     monkeypatch.setattr(transfer,'get_user_data_dir',lambda:root)
     monkeypatch.setattr(locking,'exclusive_file_lock',lock)
     def launch():
-        assert events == ['lock-held','lock-released','listener-closed']
+        assert events == ['lock-held','lock-held','lock-released','lock-released','listener-closed']
         events.append('normal-application')
     monkeypatch.setattr(launcher,'main',launch)
     transfer.main()
@@ -648,7 +648,7 @@ def test_private_transfer_handoff_stays_on_18831(tmp_path, monkeypatch):
             assert client.post('/transfer/open', headers={'X-NightMerit-Transfer': token}).status_code == 202
             assert self.should_exit
     def run(app, **kw):
-        assert events == ['locked', 'unlocked', 'closed']
+        assert events == ['locked', 'locked', 'unlocked', 'unlocked', 'closed']
         assert kw == {'host': '127.0.0.1', 'port': 18831}
         events.append('native-port-handoff')
     monkeypatch.setitem(sys.modules, 'uvicorn', types.SimpleNamespace(Config=config, Server=Server, run=run))
@@ -730,3 +730,111 @@ def test_continue_configuration_only_opens_known_demo(tmp_path, demo):
     assert calls==(['open'] if demo else [])
     assert marker.read_bytes()==before
     assert sorted(p.name for p in root.iterdir())==['.nightmerit-demo.json']
+
+
+@pytest.mark.parametrize("case", ["used", "expired", "replaced", "revoked"])
+def test_unavailable_restore_confirmation_has_specific_message_and_preserves_data(source, tmp_path, monkeypatch, case):
+    import types
+    import astropilot.profile_transfer_app as transfer
+    clock = [100.0]
+    monkeypatch.setattr(transfer, "time", types.SimpleNamespace(monotonic=lambda: clock[0]))
+    raw, _ = create_backup(source, validator=validate_documents)
+    target = tmp_path / "restored"
+    client = TestClient(create_transfer_app(target, origin="http://testserver",
+        inspector=lambda raw: inspect_backup(raw, validator=validate_documents),
+        restorer=lambda root, files: restore_empty(root, files, validator=validate_documents)))
+    token = re.search(r'const token="([^"]+)"', client.get("/").text)[1]
+    headers = {"X-NightMerit-Transfer": token}
+    confirmation = client.post("/transfer/preview", content=raw, headers=headers).json()["confirmation"]
+    body = {"confirmation": confirmation, "confirm": True}
+    original = {str(p.relative_to(source)): p.read_bytes() for p in source.rglob("*") if p.is_file()}
+    if case == "used":
+        assert client.post("/transfer/restore", json=body, headers=headers).status_code == 200
+    elif case == "expired":
+        clock[0] += 601
+    elif case == "replaced":
+        assert client.post("/transfer/preview", content=raw, headers=headers).status_code == 200
+    else:
+        invalid = client.post("/transfer/preview", content=b"bad zip", headers=headers)
+        assert invalid.status_code == 409
+        assert "incomplète ou endommagée" in invalid.json()["message"]
+    before = {str(p.relative_to(target)): p.read_bytes() for p in target.rglob("*") if p.is_file()}
+    response = client.post("/transfer/restore", json=body, headers=headers)
+    assert response.status_code == 409
+    assert response.json()["message"] == transfer.MESSAGES["backup_confirmation_unavailable"]
+    assert "incomplète ou endommagée" not in response.json()["message"]
+    assert {str(p.relative_to(target)): p.read_bytes() for p in target.rglob("*") if p.is_file()} == before
+    assert {str(p.relative_to(source)): p.read_bytes() for p in source.rglob("*") if p.is_file()} == original
+    if case == "used":
+        assert snapshot(target) == snapshot(source)
+    else:
+        assert not target.exists()
+
+
+def _marked_restore_stage(tmp_path, target, *, contents=b'{"partial":true}'):
+    import astropilot.profile_backup as backup
+    import tempfile
+    parent = Path(tempfile.mkdtemp(prefix='.nightmerit-restore-', dir=tmp_path))
+    stage = parent / 'profile'; stage.mkdir()
+    backup._mark_restore_stage(parent, target.absolute(), {'user_profile.json': contents})
+    (stage / 'user_profile.json').write_bytes(contents)
+    return parent
+
+
+@pytest.mark.parametrize('partial', [False, True])
+def test_cleanup_removes_only_owned_interrupted_stage(tmp_path, partial):
+    import astropilot.profile_backup as backup
+    if not backup.shutil.rmtree.avoids_symlink_attacks: pytest.skip('Safe descriptor cleanup unavailable')
+    target = tmp_path / 'target'; target.mkdir()
+    orphan = _marked_restore_stage(tmp_path, target)
+    if partial: (orphan/'profile/user_profile.json').write_bytes(b'{')
+    unknown = tmp_path/'.nightmerit-restore-legacy'; unknown.mkdir(); (unknown/'keep').write_text('untouched')
+    assert backup.cleanup_interrupted_restores(target) == [orphan.name]
+    assert not orphan.exists() and (unknown/'keep').read_text() == 'untouched'
+    assert list(target.iterdir()) == []
+    assert backup.cleanup_interrupted_restores(target) == []
+
+
+@pytest.mark.parametrize('change', ['other_target', 'wrong_inode', 'unknown_file', 'symlink', 'hardlink', 'invalid_marker', 'oversize', 'unknown_directory'])
+def test_cleanup_preserves_unknown_or_unsafe_stage(tmp_path, change):
+    import astropilot.profile_backup as backup
+    target = tmp_path/'target'; target.mkdir(); orphan = _marked_restore_stage(tmp_path, target)
+    file = orphan/'profile/user_profile.json'; outside = tmp_path/'keep'; outside.write_text('sentinel')
+    marker = orphan/backup.RESTORE_OWNER; record = json.loads(marker.read_text())
+    if change == 'other_target': record['target'] = str(tmp_path/'other'); marker.write_text(json.dumps(record))
+    elif change == 'wrong_inode': record['inode'] += 1; marker.write_text(json.dumps(record))
+    elif change == 'unknown_file': (orphan/'profile/personal.txt').write_text('keep')
+    elif change == 'unknown_directory': (orphan/'profile/unknown').mkdir()
+    elif change == 'symlink': file.unlink(); file.symlink_to(outside)
+    elif change == 'hardlink': file.unlink(); __import__('os').link(outside, file)
+    elif change == 'invalid_marker': marker.write_text('not json')
+    else: file.write_bytes(b'x'*100)
+    assert backup.cleanup_interrupted_restores(target) == []
+    assert orphan.exists() and outside.read_text() == 'sentinel' and list(target.iterdir()) == []
+
+
+def test_cleanup_waits_for_active_restore_lock(tmp_path):
+    import astropilot.profile_backup as backup
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    if not backup.shutil.rmtree.avoids_symlink_attacks: pytest.skip('Safe descriptor cleanup unavailable')
+    target = tmp_path/'target'; target.mkdir(); orphan = _marked_restore_stage(tmp_path, target)
+    attempted = threading.Event()
+    def clean():
+        attempted.set(); return backup.cleanup_interrupted_restores(target)
+    with ThreadPoolExecutor() as pool:
+        with backup._restore_lock(target):
+            future = pool.submit(clean); assert attempted.wait(2)
+            with pytest.raises(__import__('concurrent.futures', fromlist=['TimeoutError']).TimeoutError):future.result(timeout=.1)
+            assert orphan.exists()
+        assert future.result(timeout=5) == [orphan.name]
+
+
+def test_restore_cleans_owned_orphan_and_preserves_published_profile(source, tmp_path):
+    import astropilot.profile_backup as backup
+    target = tmp_path/'target'; target.mkdir(); orphan = _marked_restore_stage(tmp_path, target)
+    files = snapshot(source)
+    restore_empty(target, files, validator=validate_documents)
+    assert not orphan.exists() and snapshot(target) == files
+    assert backup.cleanup_interrupted_restores(target) == []
+    assert snapshot(target) == files
