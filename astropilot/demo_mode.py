@@ -65,7 +65,7 @@ def main(*, port: int = 18831, open_browser: bool = True) -> None:
     import webbrowser
     import uvicorn
 
-    if type(port) is not int or port not in (18831, 18837):
+    if type(port) is not int or port not in (18831, 18837, 18841):
         raise SystemExit('Port de démonstration non autorisé.')
     raw = os.environ.get('ASTROPILOT_DATA_DIR', '')
     if not raw or not Path(raw).is_absolute():

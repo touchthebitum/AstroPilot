@@ -13,6 +13,25 @@ REF = datetime(2026, 8, 29, 18, tzinfo=timezone.utc)
 HA = "baader_ha_highspeed_6_5nm"
 
 
+def assert_discovery_weather_only(directory, response):
+    """Discovery persists its weather evidence, never a profile/mission/credit."""
+    import json
+    search_id = response.headers["X-NightMerit-Search-Id"]
+    expected = directory / "search_forecast_history" / (search_id + ".json")
+    assert list(directory.rglob("*.json")) == [expected]
+    record = json.loads(expected.read_text(encoding="utf-8"))
+    assert record["search_id"] == search_id
+    assert record["request"]["kind"] == "target-suggestions"
+    context = response.json()["weather_context"]
+    trust = record["weather"]["trust"]
+    for key in ("provider", "timezone", "retrieved_at_utc"):
+        assert trust[key] == context[key]
+    hourly = record["weather"]["payload"]["hourly"]
+    assert len(hourly["time"]) == trust["hour_count"]
+    for layer in ("cloud_cover", "cloud_cover_low", "cloud_cover_mid", "cloud_cover_high"):
+        assert len(hourly[layer]) == len(hourly["time"])
+
+
 def profile():
     return {"location": {"name": "Buttes", "latitude": 46.888, "longitude": 6.55,
                          "timezone": "Europe/Zurich"},
@@ -51,7 +70,7 @@ def test_real_preselection_preserves_profile_and_requires_explicit_project(tmp_p
     assert not {"mission", "decision_id", "target_hours", "hours", "expected_gain"} & proposal.keys()
     assert saved == before
     assert not list(tmp_path.rglob("user_profile.json"))
-    assert not list(tmp_path.rglob("*.json"))  # no durable decision/mission/credit
+    assert {p.parent.name for p in tmp_path.rglob("*.json")} == {"search_forecast_history"}  # evidence only
     image = client.get(proposal["image"]["src"])
     assert image.status_code == 200 and image.headers["content-type"] == "image/jpeg"
 
@@ -194,7 +213,7 @@ def test_rosette_november_exact_filter_readonly(tmp_path, monkeypatch, filter_ty
     assert item["already_saved"] and item["existing_project_key"] == "Rosette"
     assert "exposure_guidance" not in item
     assert saved == before
-    assert not list(tmp_path.rglob("*.json"))
+    assert {p.parent.name for p in tmp_path.rglob("*.json")} == {"search_forecast_history"}
     template = next(t for t in project_templates() if t["catalog_key"] == "Rosette")
     intent = next(i for i in template["acquisition_intents"] if i["filter_type"] == filter_type)
     assert "exposure_guidance" not in intent
@@ -329,4 +348,4 @@ def test_weather_refusal_exposes_exact_scoped_evidence_and_collection_time(tmp_p
     assert datetime.fromisoformat(evidence[0]['evaluated_end'])<=datetime.fromisoformat('2026-11-14T05:00:00+01:00')
     assert evidence[0]['losses']['cloud']>0
     assert evidence[0]['refusal_stage']=='no_productive_slice'
-    assert not list(tmp_path.rglob('*.json'))
+    assert {p.parent.name for p in tmp_path.rglob('*.json')} == {'search_forecast_history'}

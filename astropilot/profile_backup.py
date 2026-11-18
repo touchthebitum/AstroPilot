@@ -37,7 +37,7 @@ MAX_FILES = 5000
 MAX_MANIFEST = 2 * 1024 * 1024
 ZIP_CHUNK = 64 * 1024
 STORES = frozenset({"analysis_history", "decision_lineage", "execution_lineage", "decision_forecast_evidence",
-                    "field_observations", "outcome_evaluations"})
+                    "field_observations", "outcome_evaluations", "search_forecast_history"})
 LOCAL_ONLY = frozenset({"Logs", "guardian", "guardian_scheduler", ".DS_Store",
                         ".outcome_history_cursor.key", ".outcome_history_cursor.key.lock"})
 
@@ -540,4 +540,6 @@ def validate_profile_child(report):
         FileDecisionForecastEvidenceStore(root / "decision_forecast_evidence").load(decision_id=path.stem)
     from astropilot.analysis_history import FileAnalysisHistory
     FileAnalysisHistory(root / "analysis_history").list_records(limit=1)
+    from astropilot.search_forecast_history import FileSearchForecastHistory
+    FileSearchForecastHistory(root / "search_forecast_history").list_records(limit=1)
     Path(report).write_text(json.dumps({"validated": True}))

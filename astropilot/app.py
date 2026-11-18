@@ -2129,6 +2129,10 @@ def create_app(
             return analysis_store_factory()
         return FileAnalysisHistory(get_user_data_dir() / "analysis_history")
 
+    def search_forecast_store():
+        from astropilot.search_forecast_history import FileSearchForecastHistory
+        return FileSearchForecastHistory(get_user_data_dir() / "search_forecast_history")
+
     application = FastAPI(title="AstroPilot API", version=application_version, lifespan=lifespan)
 
     @application.exception_handler(RequestValidationError)
@@ -3080,6 +3084,24 @@ def create_app(
         log_weather("tonight_weather_available", category="available", started=weather_started,
                     diagnostic_id=weather_diagnostic_id)
 
+        # Preserve the exact already-fetched snapshot before either search calculation.
+        # This is evidence only: it creates no project, mission, session or credit.
+        from uuid import uuid4
+        search_id = uuid4().hex
+        try:
+            search_forecast_store().save(key=search_id, created_at=reference_time_utc,
+                request={"kind": "target-suggestions" if isinstance(request, TargetSuggestionsRequest) else "tonight",
+                         "site": inputs.location, "equipment": inputs.equipment,
+                         "bortle": inputs.bortle,
+                         "parameters": request.model_dump(mode="json", exclude_none=True)},
+                weather={"trust": weather.trust_transport(), "payload": weather.payload})
+        except (OSError, ValueError) as error:
+            raise HTTPException(status_code=503,
+                detail={"code": "search_forecast_history_unavailable"},
+                headers={"Cache-Control": "no-store", **diagnostic_headers}) from error
+        response.headers["X-NightMerit-Search-Id"] = search_id
+        diagnostic_headers["X-NightMerit-Search-Id"] = search_id
+
         if isinstance(request, TargetSuggestionsRequest):
             from astropilot.target_discovery import discover_targets
             try:
@@ -3486,6 +3508,39 @@ def create_app(
                 ledger=alert_ledger_factory(), logical_time=reference_time_utc,
             )
         return payload
+
+    @application.get("/v1/search-forecasts")
+    def list_search_forecasts(before: str | None = None, limit: int = Query(default=20, ge=1, le=50)):
+        from astropilot.search_forecast_history import identity
+        try:
+            if before is not None:
+                identity(before)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail={"code": "invalid_search_identity"}) from error
+        try:
+            page = search_forecast_store().list_records(before=before, limit=limit)
+            # List summaries; the complete received hourly values are read by ID.
+            page["items"] = [{"search_id": d["search_id"], "created_at_utc": d["created_at_utc"],
+                              "site": d["request"]["site"], "kind": d["request"]["kind"],
+                              "weather_trust": d["weather"]["trust"]} for d in page["items"]]
+            return JSONResponse(page, headers={"Cache-Control": "no-store"})
+        except (OSError, ValueError) as error:
+            raise HTTPException(status_code=503, detail={"code": "search_forecast_history_unavailable"}) from error
+
+    @application.get("/v1/search-forecasts/{search_id}")
+    def read_search_forecast(search_id: str):
+        from astropilot.search_forecast_history import identity
+        try:
+            identity(search_id)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail={"code": "invalid_search_identity"}) from error
+        try:
+            record = search_forecast_store().load(search_id)
+        except (OSError, ValueError) as error:
+            raise HTTPException(status_code=503, detail={"code": "search_forecast_history_unavailable"}) from error
+        if record is None:
+            raise HTTPException(status_code=404, detail={"code": "search_forecast_not_archived"})
+        return JSONResponse(record, headers={"Cache-Control": "no-store"})
 
     @application.get("/v1/analysis-history")
     def list_analysis_history(before: str | None = None, limit: int = Query(default=20, ge=1, le=50)):

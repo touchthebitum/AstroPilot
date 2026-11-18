@@ -1,3 +1,4 @@
+from test_target_discovery import assert_discovery_weather_only
 """Real calculation and archive with synthetic weather and isolated M42/Ou4 data."""
 from copy import deepcopy
 from datetime import datetime,timedelta,timezone
@@ -147,4 +148,4 @@ def test_discovery_suggestions_also_use_remaining_night_without_writes(tmp_path,
     for suggestion in response.json()['suggestions']:
         assert datetime.fromisoformat(suggestion['window_start']).astimezone(timezone.utc)>=reference.astimezone(timezone.utc)
     assert profile==original
-    assert not list(tmp_path.rglob('*.json'))
+    assert_discovery_weather_only(tmp_path, response)

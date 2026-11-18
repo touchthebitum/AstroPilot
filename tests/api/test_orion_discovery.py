@@ -1,3 +1,4 @@
+from test_target_discovery import assert_discovery_weather_only
 """Real synthetic-weather Orion preselection through explicit mission acceptance."""
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -44,7 +45,7 @@ def test_orion_discovery_to_accepted_mission_does_not_invent_progress(tmp_path, 
     assert 'saturé' in proposal['guidance']['advice']
     assert 'plus serrée' in proposal['image']['note']
     assert saved == before
-    assert not list(tmp_path.rglob('*.json'))
+    assert_discovery_weather_only(tmp_path, response)
     image = discovery.get(proposal['image']['src'])
     assert image.status_code == 200
     assert image.headers['content-type'] == 'image/jpeg'
@@ -99,7 +100,7 @@ def test_orion_is_not_offered_when_conditions_do_not_allow_it(tmp_path, monkeypa
     assert not any(item['catalog_key'] == 'M42' for item in response.json()['suggestions'])
     if filters == [HA]:
         assert not response.json()['suggestions']
-    assert not list(tmp_path.rglob('*.json'))
+    assert_discovery_weather_only(tmp_path, response)
 
 
 def test_all_discovery_templates_have_licensed_images_and_exact_intent_help():

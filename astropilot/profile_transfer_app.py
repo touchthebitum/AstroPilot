@@ -175,10 +175,10 @@ def main(*, port=8000, open_browser=True, demo=False):
     import uvicorn
     from astropilot.file_lock import exclusive_file_lock
     # Reserve before opening a browser. Never hand off to or stop another copy.
-    if port not in {8000, 18831}:
+    if port not in {8000, 18831, 18841}:
         raise ValueError("Unsupported transfer port")
-    if demo and port != 18831:
-        raise ValueError("Demo transfer requires port 18831")
+    if demo and port not in {18831, 18841}:
+        raise ValueError("Demo transfer requires an isolated demo port")
     origin = f"http://127.0.0.1:{port}"
     listener = reserve_listener() if port == 8000 else reserve_listener(port=port)
     launch_requested = threading.Event()
@@ -215,10 +215,10 @@ def main(*, port=8000, open_browser=True, demo=False):
         # the assistant listener and its exclusive profile lock are released.
         if demo:
             from astropilot.demo_mode import main as demo_main
-            demo_main()
-        elif port == 18831:
+            demo_main(port=port, open_browser=open_browser)
+        elif port in {18831, 18841}:
             from astropilot.app import app
-            uvicorn.run(app, host="127.0.0.1", port=18831)
+            uvicorn.run(app, host="127.0.0.1", port=port)
         else:
             from astropilot.launcher import main as launch_main
             launch_main()

@@ -7740,6 +7740,9 @@ function normalizeError(response, payload) {
     return ["Configuration requise", "NightMerit doit relire votre configuration avant de préparer la nuit."];
   }
   if (response.status === 503) {
+    if (detail?.code === "search_forecast_history_unavailable") {
+      return ["Prévisions non conservées", "L’archivage des prévisions utilisées n’a pas abouti. Vérifiez l’accès au dossier, l’espace disponible et la limite des archives (512 recherches, 32 Mio). Aucune recommandation n’est validée par cette recherche."];
+    }
     if (detail?.code === "analysis_history_unavailable") {
       return ["Analyse non conservée", "L’enregistrement de cette analyse n’a pas abouti. Vos relevés restent intacts. Vérifiez l’espace disponible ou l’accès au dossier de données avant de réessayer."];
     }
