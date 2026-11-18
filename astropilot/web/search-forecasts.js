@@ -3,9 +3,9 @@
   const detail = document.querySelector('#forecast-detail');
   const message = document.querySelector('#forecast-message');
   const next = document.querySelector('#forecast-next');
-  let cursor = null;
+  let cursor = null, readGeneration = 0;
   const node = (tag, text) => { const e = document.createElement(tag); e.textContent = text; return e; };
-  const date = (value, zone) => new Intl.DateTimeFormat('fr-CH', {
+  const date = (value, zone) => new NightMeritTime.DateTimeFormat('fr-CH', {
     timeZone: zone, dateStyle: 'short', timeStyle: 'short'
   }).format(new Date(value));
   async function get(path) {
@@ -14,9 +14,12 @@
     return r.json();
   }
   async function read(id) {
+    const generation = ++readGeneration;
     detail.replaceChildren();
+    message.textContent = "Lecture des prévisions conservées…";
     try {
       const d = await get('/v1/search-forecasts/' + encodeURIComponent(id));
+      if (generation !== readGeneration) return;
       const t = d.weather.trust, h = d.weather.payload.hourly;
       detail.append(node('h2', d.request.site.name),
         node('p', `Collecte : ${date(t.retrieved_at_utc, t.timezone)} · ${t.timezone} · ${t.provider}`),
@@ -46,7 +49,11 @@
       });
       table.append(body); detail.append(table);
       message.textContent = 'Prévisions archivées relues. Aucune actualisation météo.';
-    } catch (_) { message.textContent = 'Impossible de relire ces prévisions conservées. Aucune nouvelle météo n’a été demandée.'; }
+    } catch (_) {
+      if (generation !== readGeneration) return;
+      detail.replaceChildren();
+      message.textContent = 'Impossible de relire ces prévisions conservées. Aucune nouvelle météo n’a été demandée.';
+    }
   }
   async function load() {
     next.disabled = true;
