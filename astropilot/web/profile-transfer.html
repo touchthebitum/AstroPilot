@@ -94,7 +94,8 @@ function projectDetails(s){
  if(!Array.isArray(s?.project_details))return 'Détails par projet non disponibles dans ce contrôle.';
  if(!s.project_details.length)return 'Aucun projet dans cette sauvegarde.';
  return s.project_details.map(p=>{
-  const lines=[p.project_id+(p.archived?' — retiré, historique conservé':'')];
+  const displayName=p.project_id==='Sh2-129'?'Sh2-129 + Ou4':p.project_id;
+  const lines=[displayName+(p.archived?' — retiré, historique conservé':'')];
   if(p.filters?.length)for(const f of p.filters)lines.push('  '+(f.filter_type||'Filtre non précisé')+' : '+(typeof f.acquired_seconds==='number'?durationText(f.acquired_seconds)+' acquises':'temps acquis non renseigné')+(typeof f.target_hours==='number'?' · objectif '+durationText(f.target_hours*3600):''));
   else lines.push('  Temps global enregistré : '+durationText(p.recorded_total_seconds)+' (filtre non précisé).');
   return lines.join('\n');

@@ -32,7 +32,7 @@
         </span>
         <span>NightMerit</span>
       </a>
-      <nav id="main-navigation" class="main-navigation" aria-label="Navigation principale" hidden><button class="secondary-button" id="nav-tonight" type="button">Préparer ma séance</button><button class="secondary-button" id="nav-projects" type="button">Mes projets</button><button class="secondary-button" id="saved-observations-open" type="button" aria-haspopup="dialog" hidden>Mes observations</button></nav>
+      <nav id="main-navigation" class="main-navigation" aria-label="Navigation principale" hidden><button class="secondary-button" id="nav-tonight" type="button">Préparer ma séance</button><button class="secondary-button" id="nav-projects" type="button">Mes projets</button><button class="secondary-button" id="backup-guide-open" type="button" aria-haspopup="dialog">Sauvegarder mes données</button><button class="secondary-button" id="saved-observations-open" type="button" aria-haspopup="dialog" hidden>Mes observations</button></nav>
       <div class="night-context" data-pro-only>
         <span class="context-label">Ce soir</span>
         <time id="night-date">—</time>
@@ -964,6 +964,25 @@
       <textarea id="problem-report-preview" rows="14" readonly style="width:100%"></textarea>
       <button class="primary-button" id="problem-report-download" type="button" disabled>Télécharger ce rapport</button>
     </dialog>
+    <dialog id="backup-guide-dialog" aria-labelledby="backup-guide-title">
+      <header class="help-heading">
+        <h2 id="backup-guide-title">Sauvegarder mes données</h2>
+        <button class="secondary-button" id="backup-guide-close" type="button" autofocus>Fermer</button>
+      </header>
+      <p id="backup-guide-copy"></p>
+      <p>La sauvegarde conserve vos réglages, projets, plans, séances photo et relevés dans un fichier ZIP. Consulter ce guide ne télécharge rien et ne modifie aucune donnée.</p>
+      <ol>
+        <li>Terminez toute séance en cours, puis fermez cette copie avec <strong>ARRETER-MES-PROJETS.command</strong> sur Mac (ou son lanceur d’arrêt sur Windows).</li>
+        <li>Dans le même dossier de kit, ouvrez <strong>GERER-MES-DONNEES.command</strong> sur Mac ou <strong>GERER-MES-DONNEES.cmd</strong> sur Windows. L’assistant de sauvegarde fonctionne séparément de l’application.</li>
+        <li>Choisissez <strong>Télécharger ma sauvegarde</strong>. Retrouvez le ZIP dans les <strong>téléchargements de votre navigateur</strong>.</li>
+        <li>Dans l’assistant, utilisez <strong>Contrôler le fichier téléchargé</strong> et sélectionnez ce ZIP pour vérifier son intégrité et son contenu. Ce contrôle ne restaure aucune donnée.</li>
+      </ol>
+      <details><summary>Reprendre une sauvegarde dans une copie vide</summary>
+        <p>Conservez votre copie actuelle et votre ZIP. Utilisez un kit vierge : avant son premier lancement, ouvrez son assistant, sélectionnez la sauvegarde, relisez son contenu et confirmez la reprise. Un kit dont les projets sont déjà incorporés n’est pas vide ; l’assistant ne remplace et ne fusionne aucune donnée existante.</p>
+      </details>
+      <button class="secondary-button" id="backup-guide-context" type="button">Vérifier la copie utilisée</button>
+    </dialog>
+
     <dialog id="data-context-dialog" aria-labelledby="data-context-title">
       <header class="help-heading">
         <h2 id="data-context-title">Version et données</h2>

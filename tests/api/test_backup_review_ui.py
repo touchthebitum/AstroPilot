@@ -23,6 +23,15 @@ const context={document:{querySelector:el,querySelectorAll:()=>[],createElement:
  }};vm.createContext(context);vm.runInContext(code,context);
 (async()=>{await vm.runInContext('status()',context);await el('#export').listeners.click();assert.deepEqual(downloads,['NightMerit-example.zip']);assert.match(el('#export-receipt').textContent,/Téléchargement demandé/);assert.match(el('#export-receipt').textContent,/pas encore été confirmé/);assert.equal(calls.includes('/transfer/check'),false);
  el('#check-archive').files=[{name:'choisi.zip',size:200}];await el('#check-archive').listeners.change();assert.match(el('#check-result').textContent,/Fichier sélectionné contrôlé/);assert.match(el('#export-receipt').textContent,/correspond à cette demande/);assert.match(el('#checked-details').textContent,/Hα : temps acquis non renseigné/);assert.match(el('#checked-details').textContent,/OIII : 40 min acquises/);assert.match(el('#checked-details').textContent,/SII : 25 min acquises/);assert.match(el('#checked-details').textContent,/Rosette <img/);assert.equal(el('#checked-details').innerHTML,undefined);assert.equal(calls.includes('/transfer/restore'),false);
+ const originalId=summary.project_details[0].project_id;
+ summary.project_details[0].project_id='Sh2-129';
+ await el('#check-archive').listeners.change();
+ assert.match(el('#checked-details').textContent,/Sh2-129 \+ Ou4/);
+ assert.equal(summary.project_details[0].project_id,'Sh2-129');
+ summary.project_details[0].archived=true;
+ await el('#check-archive').listeners.change();
+ assert.match(el('#checked-details').textContent,/Sh2-129 \+ Ou4 — retiré, historique conservé/);
+ summary.project_details[0].archived=false;summary.project_details[0].project_id=originalId;
  matches=false;await el('#check-archive').listeners.change();assert.match(el('#check-result').textContent,/différent/);assert.match(el('#export-receipt').textContent,/pas encore été confirmé/);
  invalid=true;await el('#check-archive').listeners.change();assert.equal(el('#checked-details').hidden,true);assert.doesNotMatch(el('#export-receipt').textContent,/correspond à cette demande/);assert.match(el('#message').textContent,/endommagé/);
  invalid=false;mode='empty';await vm.runInContext('status()',context);el('#archive').files=[{name:'Rosette.zip',size:200}];await el('#archive').listeners.change();assert.match(el('#preview-details').textContent,/Rosette.zip/);assert.match(el('#preview-details').textContent,/SII : 25 min/);assert.equal(calls.includes('/transfer/restore'),false);

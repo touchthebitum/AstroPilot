@@ -1514,6 +1514,7 @@ def test_unavailable_tonight_guidance_preserves_technical_evidence_and_availabil
         pytest.skip("Node.js is required for the renderer test")
     source = make_client().get("/ui/app.js").text
     functions = source[source.index("const partialMessages ="):source.index("function showMessage(")]
+    functions += source[source.index("function readableTargetName("):source.index("function savedMissionLabel(")]
     harness = r'''
 const assert = require('node:assert/strict');
 const elements = {};

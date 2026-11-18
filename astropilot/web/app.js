@@ -4036,7 +4036,7 @@ function setView(view) {
   if (selectedNotice) {
     selectedNotice.hidden = !state.selectedProjectId || state.discoveryMode;
     selectedNotice.textContent = state.selectedProjectId
-      ? `Cible choisie : ${state.selectedProjectId}. L’analyse vérifiera ce projet avec vos horaires et la météo, sans le remplacer par une autre cible.` : "";
+      ? `Cible choisie : ${readableTargetName(state.selectedProjectId)}. L’analyse vérifiera ce projet avec vos horaires et la météo, sans le remplacer par une autre cible.` : "";
   }
   invalidateOutcomeHistory();
   state.viewRevision = (state.viewRevision || 0) + 1;
@@ -4168,6 +4168,7 @@ function missionDateTimeLabel(value, zone) {
 
 // Describe persisted missions without consulting today's site or filter inventory.
 function readableTargetName(key) {
+  if (key === "Sh2-129") return "Sh2-129 + Ou4";
   return key === "NorthAmerica" ? "Nébuleuse de l’Amérique du Nord (NGC 7000)" : key;
 }
 
@@ -7765,9 +7766,9 @@ function showTonightUnavailable(payload) {
     ? (shortWindow ? "Le créneau disponible est trop court" : "Aucun créneau adapté à vos horaires")
     : title;
   const concise = simpleProductivityRefusal(payload);
-  const conciseBody = concise ? `${chosen ? `Cible choisie : ${chosen}. ` : ""}${concise[1]} Votre projet est conservé.${offerAlternatives ? " Vous pouvez modifier vos horaires ou chercher une autre cible." : " Réessayez plus tard si les conditions évoluent."}` : null;
+  const conciseBody = concise ? `${chosen ? `Cible choisie : ${readableTargetName(chosen)}. ` : ""}${concise[1]} Votre projet est conservé.${offerAlternatives ? " Vous pouvez modifier vos horaires ou chercher une autre cible." : " Réessayez plus tard si les conditions évoluent."}` : null;
   showMessage(appliedUiMode === "simple" && concise ? concise[0] : simpleTitle, conciseBody || (chosen
-    ? `Cible choisie : ${chosen}. ${body} Votre projet est conservé.${offerAlternatives ? " Vous pouvez modifier vos horaires ou chercher une autre cible, sans garantie de créneau disponible." : " Votre choix est conservé ; aucune autre cible ne le remplace."}`
+    ? `Cible choisie : ${readableTargetName(chosen)}. ${body} Votre projet est conservé.${offerAlternatives ? " Vous pouvez modifier vos horaires ou chercher une autre cible, sans garantie de créneau disponible." : " Votre choix est conservé ; aucune autre cible ne le remplace."}`
     : body), { kicker: "Analyse terminée" });
   if (globalThis.NightMeritPresentation?.demoEnabled) {
     showMessage(simpleTitle, "Aucune mission n’a été autorisée avec les conditions simulées. Vérifiez les contraintes indiquées dans les détails, vos horaires et votre matériel. Aucune séance ni pose n’a été ajoutée.", {kicker:"Analyse de démonstration terminée"});
@@ -9221,6 +9222,23 @@ async function loadDataContext() {
     retry.hidden = false;
   } finally { clearTimeout(timer); }
 }
+// This entry is a read-only guide. Starting the assistant remains an explicit
+// action in the kit folder after the observing application has been closed.
+function openBackupGuide() {
+  const dialog = document.querySelector('#backup-guide-dialog');
+  if (dialog.open) return;
+  const copyName = document.querySelector('#copy-identity-banner .copy-name')?.textContent?.trim();
+  document.querySelector('#backup-guide-copy').textContent = copyName
+    ? `Copie à sauvegarder : ${copyName}` : 'Utilisez l’assistant du même dossier que cette application.';
+  dialog.showModal();
+}
+document.querySelector('#backup-guide-open').addEventListener('click', openBackupGuide);
+document.querySelector('#backup-guide-close').addEventListener('click', () => document.querySelector('#backup-guide-dialog').close());
+document.querySelector('#backup-guide-context').addEventListener('click', () => {
+  document.querySelector('#backup-guide-dialog').close();
+  openDataContext();
+});
+
 document.querySelector('#data-context-open').addEventListener('click', () => openDataContext());
 document.querySelector('#data-context-footer').addEventListener('click', () => openDataContext());
 document.querySelector('#saved-observations-data-context').addEventListener('click', () => openDataContext(true));
@@ -9295,7 +9313,7 @@ async function loadAnalysisHistory(more = false) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "secondary-button";
-      button.textContent = "Calcul du " + savedObservationTime(record.created_at_utc, refusalSiteTimezone(record.result, {archived:true, request:record.request}))+" — "+(record.request.selected_project_id || record.result.target || "Analyse de nuit");
+      button.textContent = "Calcul du " + savedObservationTime(record.created_at_utc, refusalSiteTimezone(record.result, {archived:true, request:record.request}))+" — "+readableTargetName(record.request.selected_project_id || record.result.target || "Analyse de nuit");
       button.addEventListener("click", () => renderArchivedAnalysis(record));
       list.append(button);
     }

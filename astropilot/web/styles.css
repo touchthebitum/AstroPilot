@@ -790,12 +790,12 @@ html[data-ui-mode="pro"][data-guided-view="availability"]:not([data-guided-initi
 #saved-observation-back { display: none; }
 #field-observation-dialog[data-read-only="true"] #saved-observation-back { display: inline-flex; margin-top: 16px; }
 
-#data-context-dialog { width: min(720px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; border: 1px solid var(--line); border-radius: 20px; background: var(--panel, #101e30); color: var(--ink); }
-#data-context-dialog::backdrop { background: rgba(0, 7, 14, .8); backdrop-filter: blur(6px); }
-#data-context-dialog .help-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-#data-context-dialog h2 { margin-top: 0; }
+:is(#data-context-dialog, #backup-guide-dialog) { width: min(720px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; border: 1px solid var(--line); border-radius: 20px; background: var(--panel, #101e30); color: var(--ink); }
+:is(#data-context-dialog, #backup-guide-dialog)::backdrop { background: rgba(0, 7, 14, .8); backdrop-filter: blur(6px); }
+:is(#data-context-dialog, #backup-guide-dialog) .help-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+:is(#data-context-dialog, #backup-guide-dialog) h2 { margin-top: 0; }
 #data-context-dialog dd { margin: 6px 0 18px; overflow-wrap: anywhere; }
-#data-context-dialog summary { padding: 12px 0; cursor: pointer; }
+:is(#data-context-dialog, #backup-guide-dialog) summary { padding: 12px 0; cursor: pointer; }
 #data-context-executable { overflow-wrap: anywhere; }
 .page-footer { flex-wrap: wrap; align-items: center; }
 
@@ -1194,3 +1194,7 @@ html[data-ui-mode="simple"] #project-create:not([open]) { display: none; }
 .refusal-summary details { margin-top: 12px; }
 .refusal-summary summary { cursor: pointer; color: var(--cyan); }
 .refusal-summary-row { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+
+/* Long kit names remain readable in the backup guide on narrow screens. */
+#backup-guide-copy { overflow-wrap: anywhere; }
+#backup-guide-dialog li { margin-block: .7em; }
