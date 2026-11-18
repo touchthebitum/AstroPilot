@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 import importlib.metadata
@@ -251,10 +252,10 @@ def runtime_architecture() -> str:
     return normalize_runtime_architecture(platform.machine())
 
 
-def runtime_identity_payload() -> dict[str, str]:
+def runtime_identity_payload(*, version: str | None = None) -> dict[str, str]:
     return {
         "application": "astropilot",
-        "version": canonical_version(),
+        "version": version if version is not None else canonical_version(),
         "build": build_identifier(),
         "architecture": runtime_architecture(),
     }
@@ -2110,6 +2111,10 @@ def create_app(
     from decision.timezone_authority import bundle_json, identity as time_authority_id
 
     application_version = canonical_version()
+    from astropilot.launcher_context import LaunchSession, DIAGNOSTIC_ROUTES, blocked_response
+    launch_session = LaunchSession.from_environment()
+    from astropilot.copy_identity import capture_copy_identity, identity_script
+    copy_identity = capture_copy_identity(launch_session)
     resolved_service = None
     guardian_adapter = None
     renewal_enabled = (os.environ.get("ASTROPILOT_GUARDIAN_EXPLICIT_RENEWAL") == "1"
@@ -2248,6 +2253,15 @@ def create_app(
 
     @application.middleware("http")
     async def timezone_authority_policy(request: Request, call_next):
+        if request.url.path in DIAGNOSTIC_ROUTES:
+            response = await call_next(request)
+            # Keep the browser protocol intact while diagnostics remain available
+            # even when bundle files or time metadata cannot be read.
+            try:
+                response.headers['X-NightMerit-Time-Authority'] = time_authority_id()
+            except (ValueError, OSError, RuntimeError):
+                pass
+            return response
         if not request.url.path.startswith('/v1/'):
             return await call_next(request)
         try:
@@ -2265,6 +2279,31 @@ def create_app(
         # Include early protocol errors too: they are not a rules-version mismatch.
         response.headers['X-NightMerit-Time-Authority'] = authority
         return response
+
+    @application.middleware("http")
+    async def managed_copy_location(request: Request, call_next):
+        if (launch_session and request.url.path not in DIAGNOSTIC_ROUTES
+                and launch_session.location_status() != 'available'):
+            return blocked_response(request)
+        if launch_session and request.url.path.startswith('/v1/') and request.url.path not in DIAGNOSTIC_ROUTES:
+            supplied = request.headers.get('X-NightMerit-Session')
+            browser_request = bool(request.headers.get('sec-fetch-mode') or request.headers.get('origin'))
+            mutating = request.method not in {'GET', 'HEAD', 'OPTIONS'}
+            if ((supplied is not None and supplied != launch_session.session_id)
+                or ((browser_request or mutating) and supplied != launch_session.session_id)):
+                return JSONResponse({'detail': {'code': 'kit_session_changed',
+                    'message': 'Cette page appartient à une autre session. Rouvrez la bonne copie avec son lanceur.'}},
+                    status_code=409, headers={'Cache-Control': 'no-store', 'X-NightMerit-Session': launch_session.session_id})
+        response = await call_next(request)
+        if launch_session:
+            response.headers['X-NightMerit-Session'] = launch_session.session_id
+        return response
+
+    @application.get("/v1/launcher-context", include_in_schema=False)
+    def launcher_context():
+        payload = (launch_session.payload('application') if launch_session
+                   else {'status': 'unmanaged'})
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
     @application.get("/v1/filter-inventory")
     def get_filter_inventory():
@@ -2297,6 +2336,19 @@ def create_app(
         except ProfileRevisionConflictError as exc:
             raise HTTPException(status_code=409,detail={"code":"inventory_revision_conflict"}) from exc
         return {"profile_revision":saved["profile_revision"],"inventory":inventories[request.equipment_id]}
+
+    @application.get('/ui/copy-identity.js', include_in_schema=False)
+    def copy_identity_script():
+        return Response(identity_script(copy_identity), media_type='application/javascript',
+                        headers={'Cache-Control': 'no-store'})
+
+    @application.get('/ui/session-context.js', include_in_schema=False)
+    def session_context_script():
+        binding = ({'session_id': launch_session.session_id, 'storage_scope': launch_session.storage_scope()}
+                   if launch_session else None)
+        body = 'globalThis.NightMeritSessionBinding=' + json.dumps(binding) + ';\n'
+        body += (web_root / 'session-context.js').read_text(encoding='utf-8')
+        return Response(body, media_type='application/javascript', headers={'Cache-Control': 'no-store'})
 
     @application.get('/ui/timezone-data.js', include_in_schema=False)
     def timezone_data():
@@ -2401,7 +2453,7 @@ def create_app(
 
     @application.get("/v1/runtime-identity", include_in_schema=False)
     def runtime_identity():
-        return runtime_identity_payload()
+        return runtime_identity_payload(version=application_version)
 
     @application.get("/v1/demo-context", include_in_schema=False)
     def demo_context():
@@ -2412,7 +2464,7 @@ def create_app(
     def problem_report():
         # Explicit allowlist only: never read profile documents, logs or paths.
         from astropilot.demo_mode import context
-        identity = runtime_identity_payload()
+        identity = runtime_identity_payload(version=application_version)
         payload = {
             "schema": "nightmerit.problem_report.v1",
             "version": identity["version"],
@@ -2431,10 +2483,13 @@ def create_app(
         # import or count profile records, or infer that this profile is empty.
         try:
             payload = {
-                "runtime": runtime_identity_payload(),
+                "runtime": runtime_identity_payload(version=application_version),
                 "data_directory": os.path.abspath(get_user_data_dir()),
                 "application_executable": os.path.abspath(sys.executable),
             }
+            if launch_session:
+                payload["launcher"] = launch_session.payload('application')
+            payload["copy_identity"] = copy_identity
             payload["private_copy"] = private_kit_context(
                 os.environ.get(PRIVATE_COPY_CONTEXT_ENV),
                 build=payload["runtime"]["build"], data_directory=payload["data_directory"],

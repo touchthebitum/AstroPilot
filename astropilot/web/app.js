@@ -9212,7 +9212,9 @@ async function loadDataContext() {
       if (/^C:\\NightMeritData\\profil\\?$/i.test(data.data_directory)) hostNote.textContent = 'Le dossier de vos données bêta sur le PC n’a pas pu être identifié. Aucun emplacement sur votre PC n’a été deviné.';
     }
     details.hidden = technical.hidden = false;
-    status.textContent = 'L’application actuellement ouverte utilise le dossier indiqué ci-dessous.';
+    status.textContent = data.launcher?.location_status === 'moved_or_unavailable'
+      ? 'Cette copie a été déplacée. Le dossier indiqué est celui du démarrage. Fermez cette copie avec son lanceur d’arrêt, puis rouvrez-la depuis son dossier actuel.'
+      : 'L’application actuellement ouverte utilise le dossier indiqué ci-dessous.';
   } catch (_) {
     if (!current()) return;
     status.textContent = 'Impossible d’identifier le dossier pour le moment. Cela ne signifie pas que vos données sont absentes. Réessayez la lecture.';

@@ -34,6 +34,12 @@ MESSAGES = {
 def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
                         exporter=create_backup, inspector=inspect_backup, restorer=restore_empty,
                         open_application=None, demo=False):
+    from astropilot.launcher_context import LaunchSession, DIAGNOSTIC_ROUTES, blocked_response
+    from astropilot.app import canonical_version
+    initial_version = canonical_version()
+    launch_session = LaunchSession.from_environment()
+    from astropilot.copy_identity import capture_copy_identity, identity_script
+    copy_identity = capture_copy_identity(launch_session)
     root = Path(directory) if directory is not None else get_user_data_dir()
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     token = secrets.token_urlsafe(32)
@@ -48,6 +54,9 @@ def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
         if request.method != "GET" and (request.headers.get("X-NightMerit-Transfer") != token
                 or request.headers.get("origin", origin) != origin):
             return Response(status_code=403)
+        if (launch_session and request.url.path not in DIAGNOSTIC_ROUTES
+                and launch_session.location_status() != 'available'):
+            return blocked_response(request)
         response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -64,6 +73,10 @@ def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
     async def io_error(_request, _error):
         return JSONResponse({"message": "La lecture ou l’enregistrement n’a pas abouti. Conservez l’ancienne copie et vérifiez les données avant de réessayer."}, status_code=503)
 
+    @app.get('/ui/copy-identity.js')
+    def copy_identity_script():
+        return Response(identity_script(copy_identity), media_type='application/javascript')
+
     @app.get("/")
     def page():
         source = (Path(__file__).with_name("web") / "profile-transfer.html").read_text(encoding="utf-8")
@@ -72,7 +85,12 @@ def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
     @app.get("/v1/runtime-identity")
     def identity():
         from astropilot.app import runtime_identity_payload
-        return runtime_identity_payload()
+        return runtime_identity_payload(version=initial_version)
+
+    @app.get("/v1/launcher-context")
+    def launcher_context():
+        return JSONResponse(launch_session.payload('assistant') if launch_session
+                            else {'status': 'unmanaged'}, headers={'Cache-Control': 'no-store'})
 
     @app.get("/transfer/status")
     def status():
