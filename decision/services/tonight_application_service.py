@@ -204,10 +204,14 @@ class TonightApplicationService:
         bortle,
         availability: SessionAvailability | None = None,
         selected_project_id: str | None = None,
+        comparison_project_ids: tuple[str, ...] | None = None,
     ) -> TonightResult:
         if (selected_project_id is not None
                 and selected_project_id not in profile.get("projects", {})):
             raise ValueError("selected_project_unavailable")
+        if comparison_project_ids is not None:
+            if selected_project_id is not None or any(key not in profile.get("projects", {}) for key in comparison_project_ids):
+                raise ValueError("invalid_project_comparison_scope")
         inputs = resolve_tonight_inputs(
             profile,
             equipment=equipment,
@@ -272,6 +276,13 @@ class TonightApplicationService:
                 forecast_evidence=forecast_evidence,
             )
         top_objects = night.get("top_objects") or []
+        if comparison_project_ids is not None:
+            allowed = set(comparison_project_ids)
+            top_objects = [obj for obj in top_objects
+                           if obj.get("catalog_key", obj.get("name")) in allowed]
+            night = {**night, "top_objects": top_objects,
+                     "object_evaluations": {key: value for key, value in
+                         night.get("object_evaluations", {}).items() if key in allowed}}
         if selected_project_id is not None:
             # Scope candidates and durable acceptance evidence, never the saved
             # portfolio or its credits. An unsuitable choice cannot fall back
