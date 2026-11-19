@@ -1197,3 +1197,6 @@ html[data-ui-mode="simple"] #project-create:not([open]) { display: none; }
 /* Long kit names remain readable in the backup guide on narrow screens. */
 #backup-guide-copy { overflow-wrap: anywhere; }
 #backup-guide-dialog li { margin-block: .7em; }
+
+.project-comparison { margin: 24px 0; padding: 18px; border: 1px solid var(--line); border-radius: 12px; min-width: 0; overflow-wrap: anywhere; }
+.project-comparison h4 { margin-bottom: 8px; }

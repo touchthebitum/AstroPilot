@@ -83,6 +83,8 @@
   const choice = make("fieldset", {id: "beginner-choice"});
   choice.append(make("legend", {}, "Sur quel projet souhaitez-vous travailler ?"));
   const discoverValue = "__nightmerit_discover__";
+  const compareValue = "__nightmerit_compare_projects__";
+
   const projectWrap = make("label", {id: "beginner-project-wrap"}, "Choisir une option");
   const projectSelect = make("select", {id: "beginner-project", "aria-label": "Projet pour cette séance ou aide au choix de la cible"});
   projectWrap.append(projectSelect);
@@ -97,6 +99,7 @@
     if (state.requestingRecommendation || state.savingConfiguration || guardUnresolvedAcceptance()) { refresh(); return; }
     const selected = projectSelect.value;
     if (selected === discoverValue) { void selectPath(true); return; }
+    if (selected === compareValue) { void setProjectComparisonMode(); return; }
     if (!Object.hasOwn(state.configuration?.projects || {}, selected)) { refresh(); return; }
     state.selectedProjectId = selected;
     void selectPath(false);
@@ -107,9 +110,9 @@
   contextBlock.append(make("summary", {}, "Mon site et mon matériel"), context, contextEdit);
   $("#availability-form").prepend(contextBlock);
   $("#availability-form").addEventListener("submit", event => {
-    if (simple() && !state.discoveryMode && !state.selectedProjectId) {
+    if (simple() && !state.discoveryMode && !state.compareProjects && !state.selectedProjectId) {
       event.preventDefault(); event.stopImmediatePropagation();
-      showAvailabilityError("Choisissez votre projet ou « Aidez-moi à choisir une cible » dans la liste.");
+      showAvailabilityError("Choisissez un projet, « Quel projet avancer ce soir ? » ou « Aidez-moi à choisir une cible » dans la liste.");
       projectSelect.focus();
     }
   }, true);
@@ -217,6 +220,7 @@
       ? "Selon mon matériel, mes horaires et les conditions du ciel."
       : "NightMerit peut rechercher une cible parmi celles prises en charge, selon votre matériel et vos horaires.");
     hide(choice, !beginner);
+    hide($("#compare-projects").closest("label"), beginner);
     hide(discovery.closest("label"), beginner);
     hide(contextBlock, !beginner);
     hide(followButton, !beginner);
@@ -229,17 +233,18 @@
     if (signature !== projectSignature) {
       projectSignature = signature;
       projectSelect.replaceChildren(make("option", {value: ""}, "Choisir une option"),
-        make("option", {value: discoverValue}, "Aidez-moi à choisir une cible"));
+        make("option", {value: discoverValue}, "Aidez-moi à choisir une cible"),
+        ...(keys.length ? [make("option", {value: compareValue}, "Quel projet avancer ce soir ?")] : []));
       keys.forEach(key => projectSelect.append(make("option", {value: key}, readableTargetName(key))));
     }
     const busy = state.requestingRecommendation || state.savingConfiguration || hasUnresolvedAcceptance();
     projectSelect.disabled = busy;
-    projectSelect.value = state.discoveryMode ? discoverValue : keys.includes(state.selectedProjectId) ? state.selectedProjectId : "";
+    projectSelect.value = state.compareProjects ? compareValue : state.discoveryMode ? discoverValue : keys.includes(state.selectedProjectId) ? state.selectedProjectId : "";
     setText(context, [state.configuration?.site?.name, $("#review-equipment")?.textContent].filter(v => v && v !== "—").join(" · ") || "Votre configuration enregistrée sera utilisée.");
     if (beginner && configured && state.view === "availability") {
       setText($("#availability-title"), state.missionRecheck ? "Vérifier ma séance" : (document.documentElement.dataset.choicePhase === "filters" ? "Quel filtre utilisez-vous ?" : (document.documentElement.dataset.choicePhase === "hours" ? "Quand souhaitez-vous observer ?" : "Préparer ma séance")));
-      setText($("#availability-intro"), state.missionRecheck ? "Retrouvez ci-dessous les horaires de votre plan de séance." : "Choisissez un projet enregistré ou demandez une cible, puis indiquez vos horaires.");
-      setText(ui.recommendationSubmit, state.discoveryMode ? "Chercher quoi photographier" : "Vérifier mon projet");
+      setText($("#availability-intro"), state.missionRecheck ? "Retrouvez ci-dessous les horaires de votre plan de séance." : "Choisissez un projet, comparez vos projets en cours ou demandez une cible, puis indiquez vos horaires.");
+      setText(ui.recommendationSubmit, state.compareProjects ? "Quel projet avancer ce soir ?" : state.discoveryMode ? "Chercher quoi photographier" : "Vérifier mon projet");
     }
     const session = currentSession();
     const finished = session?.execution.status === "completed";

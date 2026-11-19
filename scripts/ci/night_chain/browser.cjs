@@ -119,12 +119,20 @@ async function journey() {
   // The beginner journey now requires an explicit project choice. Use its real
   // change handler before submitting; never bypass the selection guard.
   await waitFor(() => evaluate(`Boolean(Array.from(document.querySelector('#beginner-project')?.options || []).find(o => o.value === 'Sh2-129'))`), 'beginner project option');
+  await waitFor(() => evaluate(`Boolean(Array.from(document.querySelector('#beginner-project')?.options || [])
+    .find(o => o.value === '__nightmerit_compare_projects__'))`), 'existing-project comparison choice');
+  await evaluate(`
+    const choice = document.querySelector('#beginner-project');
+    choice.value = '__nightmerit_compare_projects__';
+    choice.dispatchEvent(new Event('change', {bubbles:true})); true;
+  `);
+  await waitFor(() => evaluate(`state.compareProjects && !state.discoveryMode && state.selectedProjectId === null`), 'project comparison mode');
   await evaluate(`
     const project = document.querySelector('#beginner-project');
     project.value = 'Sh2-129';
     project.dispatchEvent(new Event('change', {bubbles: true})); true;
   `);
-  await waitFor(() => evaluate(`state.selectedProjectId === 'Sh2-129' && !state.discoveryMode`), 'explicit project selected');
+  await waitFor(() => evaluate(`state.selectedProjectId === 'Sh2-129' && !state.discoveryMode && !state.compareProjects`), 'explicit project selected');
   await evaluate(`
     document.querySelector('input[name="availability-mode"][value="fixed_window"]').click();
     document.querySelector('#availability-start').value = '2026-10-16T00:30';
@@ -286,7 +294,7 @@ async function journey() {
   fs.writeFileSync(path.join(proof, 'ui.png'), Buffer.from(screenshot.data, 'base64'));
   fs.writeFileSync(path.join(proof, 'ui.txt'), await evaluate('document.body.innerText'));
   fs.writeFileSync(path.join(proof, 'browser-result.json'), JSON.stringify({
-    ...record, result: 'PASS', intent, requested_night_text: nightText,
+    ...record, project_comparison_choice_verified: true, result: 'PASS', intent, requested_night_text: nightText,
     real_dom_interaction: true, backend_response_replaced: false,
     clock_fixture: '2026-10-14T12:00:00Z', timezone: 'Europe/Zurich',
   }, null, 2));

@@ -5095,7 +5095,46 @@ function clearAcceptedMission() {
   clearAlternatives();
 }
 
+function comparisonDuration(hours) {
+  if (!Number.isFinite(hours) || hours < 0) return 'non renseigné';
+  if (hours === 0) return '0 min';
+  const value = hours * 60;
+  if (!Number.isFinite(value)) return `${hours} h`;
+  // Suppress floating-point noise at exact minute boundaries without rounding
+  // genuine seconds into the next minute or hiding a positive remainder.
+  const minutes = Math.floor(value + Number.EPSILON * Math.max(1, value) * 4);
+  if (minutes === 0) return '< 1 min';
+  const wholeHours = Math.floor(minutes / 60), rest = minutes % 60;
+  if (!wholeHours) return `${rest} min`;
+  return rest ? `${wholeHours} h ${String(rest).padStart(2, '0')}` : `${wholeHours} h`;
+}
+
+function renderProjectComparison(payload, parent) {
+  parent.querySelector('.project-comparison')?.remove();
+  if (!payload.project_comparison) return;
+  const section = document.createElement('section'); section.className = 'project-comparison';
+  const heading = document.createElement('h3'); heading.textContent = 'Quel projet avancer ce soir ?';
+  const note = document.createElement('p'); note.textContent = 'Projets enregistrés uniquement. Les conditions du ciel, le matériel et vos horaires restent déterminants. Aucun plan ni crédit ajouté par cette recherche.';
+  section.append(heading, note);
+  for (const project of payload.project_comparison) {
+    const title = document.createElement('h4'); title.textContent = readableTargetName(project.project_id);
+    section.append(title);
+    if (!project.filters.length) {
+      const p = document.createElement('p'); p.textContent = 'Objectifs et avancement par filtre à renseigner avant comparaison.'; section.append(p);
+    }
+    for (const row of project.filters) {
+      const format = comparisonDuration;
+      const p = document.createElement('p');
+      p.textContent = `${row.filter_type === 'Ha' ? 'Hα' : row.filter_type} : objectif ${format(row.target_hours)} · acquis ${format(row.acquired_hours)} · restant ${format(row.remaining_hours)}${row.status === 'completed' ? ' · Objectif atteint' : row.status === 'incomplete_data' ? ' · Données à compléter' : ''}`;
+      section.append(p);
+    }
+  }
+  parent.append(section);
+}
+
 function renderDecision(decision) {
+  if (decision.project_comparison) renderProjectComparison(decision, document.querySelector('#decision'));
+  else document.querySelector('#decision .project-comparison')?.remove?.();
   clearAcceptedMission();
   setCurrentFieldObservationDecision(decision);
 
@@ -6210,7 +6249,7 @@ function updateGuidedPresentation() {
   const recheckSummary = document.querySelector("#mission-recheck-summary");
   recheckSummary.hidden = !recheck;
   recheckSummary.textContent = recheck ? state.missionRecheck.summary : "";
-  ui.recommendationSubmit.textContent = state.discoveryMode ? "Chercher une cible pour mes horaires"
+  ui.recommendationSubmit.textContent = state.compareProjects ? "Quel projet avancer ce soir ?" : state.discoveryMode ? "Chercher une cible pour mes horaires"
     : recheck ? "Vérifier les conditions sur ce créneau" : "Préparer ma nuit";
   const availabilityKicker = document.querySelector(".availability-heading .state-kicker");
   if (availabilityKicker) availabilityKicker.textContent = state.guidedInitialConfiguration ? "Configuration initiale · Choix des horaires" : "Préparer une séance";
@@ -7817,6 +7856,15 @@ function canEditRefusedAvailability(payload) {
 }
 
 function showTonightUnavailable(payload) {
+  if (payload.project_comparison) renderProjectComparison(payload, document.querySelector('#message-state'));
+  else document.querySelector('#message-state .project-comparison')?.remove?.();
+  if (payload.status === 'no_candidate' && payload.project_comparison &&
+      !payload.project_comparison.some(project => project.filters.some(row => row.status === 'to_complete'))) {
+    showMessage('Aucun projet à avancer avec les données actuelles',
+      'Les objectifs renseignés sont atteints ou les objectifs et temps acquis par filtre restent à compléter dans Mes projets.',
+      {kicker: 'Bilan des projets', retry: false});
+    return;
+  }
   const timeZone = refusalSiteTimezone(payload);
   const candidateMessage = payload.status === "no_candidate" ? noCandidateMessage(payload, timeZone) : null;
   const productiveRefusal = payload.status === "no_productive_window";
@@ -8244,11 +8292,14 @@ async function loadTonight(availability) {
     return;
   }
   if (state.requestingRecommendation) return;
+  document.querySelector('#decision .project-comparison')?.remove?.();
+  document.querySelector('#message-state .project-comparison')?.remove?.();
   const configurationGeneration = state.configurationGeneration;
   const siteGeneration = state.decisionSiteGeneration;
   const siteFingerprint = decisionSiteFingerprint();
   const discovery = Boolean(state.discoveryMode);
-  const selectedProjectId = discovery ? null : state.selectedProjectId;
+  const compareProjects = Boolean(state.compareProjects);
+  const selectedProjectId = discovery || compareProjects ? null : state.selectedProjectId;
   const confirmedFilters = discovery ? discoveryConfirmedFilters() : [];
   const candidateRecheck = state.missionRecheck;
   const recheck = candidateRecheck?.accepted && !discovery
@@ -8267,7 +8318,8 @@ async function loadTonight(availability) {
   show("loading");
   const navigationOwner = {view: state.view, revision: state.viewRevision || 0};
   const isCurrent = () => configurationGeneration === state.configurationGeneration
-    && selectedProjectId === (state.discoveryMode ? null : state.selectedProjectId)
+    && compareProjects === Boolean(state.compareProjects)
+    && selectedProjectId === (state.discoveryMode || state.compareProjects ? null : state.selectedProjectId)
     && discovery === Boolean(state.discoveryMode)
     && siteGeneration === state.decisionSiteGeneration
     && siteFingerprint === decisionSiteFingerprint() && !state.decisionSiteReloadRequired
@@ -8301,7 +8353,7 @@ async function loadTonight(availability) {
       const options = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: discovery ? JSON.stringify({availability, confirmed_filter_profile_ids: confirmedFilters}) : JSON.stringify({ availability, ...(selectedProjectId ? {selected_project_id: selectedProjectId} : {}) }),
+        body: discovery ? JSON.stringify({availability, confirmed_filter_profile_ids: confirmedFilters}) : JSON.stringify({ availability, ...(compareProjects ? {compare_projects: true} : {}), ...(selectedProjectId ? {selected_project_id: selectedProjectId} : {}) }),
         signal: controller.signal,
       };
       const response = await (discovery
@@ -8334,7 +8386,7 @@ async function loadTonight(availability) {
         return;
       }
       if (response.status === 422) {
-        if (payload?.detail?.code === "selected_project_unavailable") {
+        if (["selected_project_unavailable", "project_comparison_empty"].includes(payload?.detail?.code)) {
           showAvailabilityError(payload.detail.message);
           setView("availability");
           return;
@@ -9022,8 +9074,31 @@ function discoveryConfirmedFilters() {
   return [...document.querySelectorAll("#discovery-filter-choices input:checked")].map(input => input.value);
 }
 
+async function setProjectComparisonMode() {
+  if (state.requestingRecommendation || state.savingConfiguration || guardUnresolvedAcceptance()) return;
+  const transition = setDiscoveryMode(false);
+  const generation = state.discoveryGeneration;
+  await transition;
+  if (generation !== state.discoveryGeneration || state.requestingRecommendation || state.savingConfiguration || guardUnresolvedAcceptance()) return;
+  state.selectedProjectId = null;
+  state.compareProjects = true;
+  document.querySelector('#compare-projects').checked = true;
+  document.querySelector('#availability-selected-project').hidden = true;
+  document.querySelector('#availability-altitude-guidance').hidden = true;
+  updateGuidedPresentation();
+}
+document.querySelector('#compare-projects').addEventListener('change', event => {
+  if (state.requestingRecommendation || state.savingConfiguration || guardUnresolvedAcceptance()) {
+    event.target.checked = Boolean(state.compareProjects); return;
+  }
+  if (event.target.checked) void setProjectComparisonMode();
+  else void setDiscoveryMode(false);
+});
+
 async function setDiscoveryMode(enabled) {
   state.missionRecheck = null;
+  state.compareProjects = false;
+  document.querySelector('#compare-projects').checked = false;
   const generation = (state.discoveryGeneration || 0) + 1;
   state.discoveryGeneration = generation;
   state.discoveryMode = enabled;

@@ -594,6 +594,14 @@ class SessionAvailabilityRequest(BaseModel):
 
 
 class TonightRequest(BaseModel):
+    compare_projects: bool = Field(default=False, strict=True)
+
+    @model_validator(mode="after")
+    def validate_project_choice(self):
+        if self.compare_projects and self.selected_project_id is not None:
+            raise ValueError("project_comparison_conflicts_with_selected_project")
+        return self
+
     selected_project_id: str | None = Field(default=None, strict=True, min_length=1, max_length=200)
     claim_opportunity_alert: bool = Field(default=False, strict=True, description="Explicitly evaluate and durably claim an alert from this live Tonight result.")
     model_config = ConfigDict(
@@ -1472,7 +1480,23 @@ class TargetVisibilityRefusalModel(BaseModel):
         return self
 
 
+class ProjectFilterProgressModel(BaseModel):
+    acquisition_intent_id: str
+    filter_type: str
+    target_hours: float | None
+    acquired_hours: float | None
+    remaining_hours: float | None
+    status: Literal["to_complete", "completed", "incomplete_data"]
+
+
+class ProjectComparisonModel(BaseModel):
+    project_id: str
+    filters: list[ProjectFilterProgressModel]
+
+
 class TonightResponseModel(BaseModel):
+    project_comparison: list[ProjectComparisonModel] | None = Field(default=None, exclude_if=lambda value: value is None)
+
     preselection_window_refusals: list[ActionabilityRefusalModel] = Field(default_factory=list,
         exclude_if=lambda value: not value)
 
@@ -3042,6 +3066,36 @@ def create_app(
                     "code": "selected_project_unavailable",
                     "message": "Le projet choisi n’est plus enregistré. Retrouvez-le dans Mes projets ou choisissez une autre cible.",
                 })
+            comparison = None
+            comparison_project_ids = None
+            if getattr(request, "compare_projects", False):
+                if not profile.get("projects"):
+                    raise HTTPException(status_code=422, detail={
+                        "code": "project_comparison_empty",
+                        "message": "Aucun projet en cours. Créez un projet ou demandez une nouvelle cible.",
+                    })
+                comparison = []
+                for project_id in profile["projects"]:
+                    validate_project_progress_credits(profile, project_id)
+                    projection = project_progress_projection(profile, project_id)
+                    filters = {item["acquisition_intent_id"]: item["filter_type"]
+                               for item in projection["acquisition_intents"]}
+                    targeted = {item["acquisition_intent_id"]
+                                for item in projection["acquisition_intent_targets"]}
+                    rows = []
+                    for row in projection["acquisition_intent_remaining_progress"]:
+                        if row["acquisition_intent_id"] not in targeted:
+                            continue
+                        remaining = row["remaining_hours"]
+                        rows.append({"acquisition_intent_id": row["acquisition_intent_id"],
+                            "filter_type": filters[row["acquisition_intent_id"]],
+                            "target_hours": row["target_hours"], "acquired_hours": row["acquired_hours"],
+                            "remaining_hours": remaining,
+                            "status": "incomplete_data" if remaining is None else
+                                      "completed" if remaining == 0 else "to_complete"})
+                    comparison.append({"project_id": project_id, "filters": rows})
+                comparison_project_ids = tuple(item["project_id"] for item in comparison
+                    if any(row["status"] == "to_complete" for row in item["filters"]))
             requested_location = (
                 request.location.model_dump()
                 if request.location is not None
@@ -3236,6 +3290,8 @@ def create_app(
                     target=request.target,
                     bortle=effective_bortle,
                     availability=inputs.availability,
+                    **({"comparison_project_ids": comparison_project_ids}
+                       if comparison_project_ids is not None else {}),
                     **({"selected_project_id": selected_project_id}
                        if selected_project_id is not None else {}),
                 )
@@ -3526,6 +3582,8 @@ def create_app(
             primary_reasons=primary_reason_entries,
             target_explanations=target_explanations,
         ).to_dict()
+        if comparison is not None:
+            payload["project_comparison"] = comparison
         if opportunity is not None:
             payload["acquisition_intent_options"] = _intent_options(
                 opportunity.candidate

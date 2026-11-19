@@ -58,7 +58,14 @@ const response=id=>({ok:true,json:async()=>({status:'available',decision_id:id})
  transport=async()=>response('new');await loadTonight(availability);
  assert.equal(lastBody.selected_project_id,'M42');
  assert.deepEqual(rendered,['new']);assert.equal(timers.size,0);
- release(response('late'));await flush();assert.deepEqual(rendered,['new']);assert.equal(clears,1);
+ // The portfolio choice uses the same guarded request and never selects one project implicitly.
+ state.compareProjects=true;state.selectedProjectId=null;
+ transport=async()=>response('comparison');await loadTonight(availability);
+ assert.equal(lastBody.compare_projects,true);assert(!('selected_project_id' in lastBody));
+ assert.deepEqual(lastBody.availability,availability);
+ state.compareProjects=false;
+ rendered.pop(); // Remaining timeout assertions still refer to the preceding explicit choice.
+ release(response('late'));await flush();assert.deepEqual(rendered,['new']);assert.equal(clears,2);
  // The same deadline includes a body that never finishes decoding.
  let releaseBody;transport=async()=>({ok:true,json:()=>new Promise(r=>releaseBody=r)});
  const body=loadTonight(availability);await flush();fire(90000);await body;
