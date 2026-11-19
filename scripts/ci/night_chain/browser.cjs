@@ -215,7 +215,22 @@ async function journey() {
         .find(o => o.value === ${JSON.stringify(accepted.body.mission_id)});
       return option ? {value: option.value, label: option.textContent} : null;
     })()`), 'persisted mission label after reload');
-    await evaluate(`document.querySelector('#beginner-saved-missions').open = true; true;`);
+    // Loading the options precedes the beginner MutationObserver's next frame.
+    // Wait for the actual return path before interacting or measuring its layout.
+    await waitFor(() => evaluate(`(() => {
+      const details = document.querySelector('#beginner-saved-missions');
+      return details && !details.hidden && details.getBoundingClientRect().width > 0;
+    })()`), 'visible saved mission return path');
+    await evaluate(`(() => {
+      const details = document.querySelector('#beginner-saved-missions');
+      if (!details.open) details.querySelector('summary').click();
+      return true;
+    })()`);
+    await waitFor(() => evaluate(`(() => {
+      const entry = document.querySelector('#saved-mission-entry');
+      const summary = document.querySelector('#saved-mission-target');
+      return entry.getBoundingClientRect().width > 0 && summary.clientWidth > 0;
+    })()`), 'rendered saved mission description');
     const formatSavedInstant = instant => new Intl.DateTimeFormat('fr-CH', {
       timeZone: accepted.body.mission.site_timezone, year:'numeric', month:'2-digit', day:'2-digit',
       hour:'2-digit', minute:'2-digit', hour12:false,
@@ -236,14 +251,20 @@ async function journey() {
     }).format(new Date(savedRecord.selected_at));
     assert(savedOption.label.endsWith(`${accepted.body.mission.site_timezone} · Enregistré le ${savedAt}`));
     assert.equal(await evaluate("document.querySelector('#saved-mission-target').textContent"), savedOption.label);
-    const summaryFits = await evaluate(`(() => {
+    const savedLayout = await evaluate(`(() => {
       const entry = document.querySelector('#saved-mission-entry');
       const summary = document.querySelector('#saved-mission-target');
+      const choice = document.querySelector('#saved-mission-choice');
       const box = entry.getBoundingClientRect();
-      return box.width > 0 && box.left >= 0 && box.right <= window.innerWidth &&
-        summary.scrollWidth <= summary.clientWidth + 1;
+      return {viewport:window.innerWidth, left:box.left, right:box.right, width:box.width,
+        summaryWidth:summary.clientWidth, summaryScrollWidth:summary.scrollWidth,
+        choiceWidth:choice.clientWidth, choiceScrollWidth:choice.scrollWidth};
     })()`);
-    assert(summaryFits, 'Full saved mission description must fit at 390px');
+    fs.writeFileSync(path.join(proof, 'saved-mission-layout.json'), JSON.stringify(savedLayout, null, 2));
+    const summaryFits = savedLayout.width > 0 && savedLayout.left >= 0 &&
+      savedLayout.right <= savedLayout.viewport && savedLayout.summaryWidth > 0 &&
+      savedLayout.summaryScrollWidth <= savedLayout.summaryWidth + 1;
+    assert(summaryFits, `Full saved mission description must fit at 390px: ${JSON.stringify(savedLayout)}`);
     await evaluate("document.querySelector('#saved-mission-entry').scrollIntoView({block:'center'}); true;");
     const savedShot = await send('Page.captureScreenshot', {format:'png', captureBeyondViewport:true});
     fs.writeFileSync(path.join(proof,'saved-mission-mobile.png'), Buffer.from(savedShot.data,'base64'));
