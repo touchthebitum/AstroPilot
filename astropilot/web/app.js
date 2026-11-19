@@ -5095,6 +5095,20 @@ function clearAcceptedMission() {
   clearAlternatives();
 }
 
+function comparisonDuration(hours) {
+  if (!Number.isFinite(hours) || hours < 0) return 'non renseigné';
+  if (hours === 0) return '0 min';
+  const value = hours * 60;
+  if (!Number.isFinite(value)) return `${hours} h`;
+  // Suppress floating-point noise at exact minute boundaries without rounding
+  // genuine seconds into the next minute or hiding a positive remainder.
+  const minutes = Math.floor(value + Number.EPSILON * Math.max(1, value) * 4);
+  if (minutes === 0) return '< 1 min';
+  const wholeHours = Math.floor(minutes / 60), rest = minutes % 60;
+  if (!wholeHours) return `${rest} min`;
+  return rest ? `${wholeHours} h ${String(rest).padStart(2, '0')}` : `${wholeHours} h`;
+}
+
 function renderProjectComparison(payload, parent) {
   parent.querySelector('.project-comparison')?.remove();
   if (!payload.project_comparison) return;
@@ -5109,7 +5123,7 @@ function renderProjectComparison(payload, parent) {
       const p = document.createElement('p'); p.textContent = 'Objectifs et avancement par filtre à renseigner avant comparaison.'; section.append(p);
     }
     for (const row of project.filters) {
-      const format = hours => hours == null ? 'non renseigné' : hours === 0 ? '0 min' : duration(hours);
+      const format = comparisonDuration;
       const p = document.createElement('p');
       p.textContent = `${row.filter_type === 'Ha' ? 'Hα' : row.filter_type} : objectif ${format(row.target_hours)} · acquis ${format(row.acquired_hours)} · restant ${format(row.remaining_hours)}${row.status === 'completed' ? ' · Objectif atteint' : row.status === 'incomplete_data' ? ' · Données à compléter' : ''}`;
       section.append(p);

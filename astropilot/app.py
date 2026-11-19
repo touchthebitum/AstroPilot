@@ -3080,8 +3080,12 @@ def create_app(
                     projection = project_progress_projection(profile, project_id)
                     filters = {item["acquisition_intent_id"]: item["filter_type"]
                                for item in projection["acquisition_intents"]}
+                    targeted = {item["acquisition_intent_id"]
+                                for item in projection["acquisition_intent_targets"]}
                     rows = []
                     for row in projection["acquisition_intent_remaining_progress"]:
+                        if row["acquisition_intent_id"] not in targeted:
+                            continue
                         remaining = row["remaining_hours"]
                         rows.append({"acquisition_intent_id": row["acquisition_intent_id"],
                             "filter_type": filters[row["acquisition_intent_id"]],

@@ -123,3 +123,28 @@ def test_comparison_refuses_broken_credit_lineage(tmp_path,monkeypatch):
     r=compare(fresh())
     assert r.status_code==503 and r.json()['detail']['code']=='project_credit_inconsistent'
     assert path.read_bytes()==before
+
+
+@pytest.mark.parametrize('seconds', [None, 0, 3600, 10800])
+def test_only_targeted_filters_are_present_even_when_unknown_or_complete(portfolio, seconds):
+    client, _ = portfolio
+    cfg = client.get('/v1/configuration').json()
+    rosette = {'hours':0, 'target_hours':3, 'imaging_field_id':'rosette',
+        'acquisition_intent_targets':[{'acquisition_intent_id':'rosette_ha','target_hours':3}],
+        'acquisition_intent_progress':[] if seconds is None else
+            [{'acquisition_intent_id':'rosette_ha','acquired_duration_manual':seconds}]}
+    r = client.put('/v1/configuration', json={'expected_revision':cfg['profile_revision'],
+        'site':{'name':'Synthetic','latitude':46.888,'longitude':6.55,'bortle':4},
+        'equipment':{'preset_id':'samyang_183'},'projects':{'Rosette':rosette}})
+    assert r.status_code == 200, r.text
+    before = client.get('/v1/projects/Rosette/progress').json()
+    r = compare(client)
+    assert r.status_code == 200, r.text
+    rows = r.json()['project_comparison'][0]['filters']
+    assert [row['acquisition_intent_id'] for row in rows] == ['rosette_ha']
+    assert rows[0]['acquired_hours'] == (None if seconds is None else seconds / 3600)
+    assert rows[0]['status'] == ('incomplete_data' if seconds is None else
+        'completed' if seconds == 10800 else 'to_complete')
+    assert client.get('/v1/projects/Rosette/progress').json() == before
+    assert client.get('/v1/accepted-mission/current').json() is None
+    assert client.get('/v1/execution-sessions').json() == []
