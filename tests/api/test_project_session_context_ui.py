@@ -30,6 +30,7 @@ const document={querySelector:()=>notice};
 const state={selectedProjectId:null,discoveryMode:false,configuration:{profile_revision:4,projects:{'Sh2-129':{hours:999}}}};
 const projectSelect={value:'Sh2-129',addEventListener:(name,fn)=>projectSelect[name]=fn};
 const discoverValue='discover';
+const compareValue='__nightmerit_compare_projects__';
 let requests=[];function fetch(url,options){requests.push({url,options});return Promise.resolve({ok:true,json:async()=>data});}
 function guardUnresolvedAcceptance(){return false;}function confirmDiscardProjectProgress(){return true;}
 function configurationDraftMatchesSaved(){return true;}function showFormError(){}
