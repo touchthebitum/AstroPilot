@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 import importlib.metadata
@@ -80,7 +81,7 @@ from decision.services.acquisition_intent_remaining_progress import (
     derive_acquisition_intent_remaining_progress, remaining_progress_projection,
 )
 from decision.services.intent_progress_credit import (
-    IntentProgressCreditError, base_seconds, credit_totals, duration_us, load_credits,
+    IntentProgressCreditError, base_seconds, credit_totals, duration_us, load_credits, retained_projects,
 )
 from decision.models.project_acquisition_intent_target import ProjectAcquisitionIntentTarget
 from decision.models.session_availability import (
@@ -251,10 +252,10 @@ def runtime_architecture() -> str:
     return normalize_runtime_architecture(platform.machine())
 
 
-def runtime_identity_payload() -> dict[str, str]:
+def runtime_identity_payload(*, version: str | None = None) -> dict[str, str]:
     return {
         "application": "astropilot",
-        "version": canonical_version(),
+        "version": version if version is not None else canonical_version(),
         "build": build_identifier(),
         "architecture": runtime_architecture(),
     }
@@ -264,6 +265,9 @@ class LocationRequest(BaseModel):
     name: str
     latitude: float = Field(ge=-90.0, le=90.0)
     longitude: float = Field(ge=-180.0, le=180.0)
+
+
+from astropilot.filter_inventory import FilterInventoryWrite, filter_references
 
 
 class ConfigurationSiteRequest(BaseModel):
@@ -403,6 +407,13 @@ class ConfigurationWriteRequest(BaseModel):
     expected_revision: int | None = Field(default=None, ge=0)
 
 
+class ProjectRemovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=0, strict=True)
+    confirmed: bool = Field(strict=True)
+
+
 class ProjectProgressWriteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -475,6 +486,7 @@ class ConfigurationResponse(BaseModel):
     available_equipment: list[EquipmentConfigurationModel]
     projects: dict[str, ProjectConfigurationModel]
     preset_equipment: list[EquipmentConfigurationModel]
+    archived_project_ids: list[str] = Field(default_factory=list)
 
 
 class SessionAvailabilityRequest(BaseModel):
@@ -486,6 +498,8 @@ class SessionAvailabilityRequest(BaseModel):
     start_local: str | None = None
     end_local: str | None = None
     duration: timedelta | None = None
+    preparation_minutes: int = Field(default=30, ge=0, le=240, strict=True)
+    flats_minutes: int = Field(default=10, ge=0, le=240, strict=True)
 
     @property
     def has_local_wall_time(self) -> bool:
@@ -552,6 +566,8 @@ class SessionAvailabilityRequest(BaseModel):
             start=start,
             end=end,
             duration=self.duration,
+            preparation_minutes=self.preparation_minutes,
+            flats_minutes=self.flats_minutes,
         )
         if (
             not self.has_local_wall_time
@@ -706,6 +722,10 @@ class UserSelectionResponse(BaseModel):
     selected_imaging_field_id: str | None = None
     selected_acquisition_intent_id: str | None = None
     mission: AcceptedMissionResponse | None = None
+
+
+class SavedMissionHistoryResponse(UserSelectionResponse):
+    selected_at: datetime
 
 
 class ExecutionCreateRequest(BaseModel):
@@ -1453,6 +1473,15 @@ class TargetVisibilityRefusalModel(BaseModel):
 
 
 class TonightResponseModel(BaseModel):
+    preselection_window_refusals: list[ActionabilityRefusalModel] = Field(default_factory=list,
+        exclude_if=lambda value: not value)
+
+    @model_validator(mode="after")
+    def validate_preselection_window_refusals(self):
+        if self.preselection_window_refusals and self.status != "no_mission":
+            raise ValueError("preselection_refusals_require_no_mission")
+        return self
+
     target_refusal: TargetVisibilityRefusalModel | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
@@ -1985,6 +2014,7 @@ def _configuration_projection(profile: dict | None) -> ConfigurationResponse:
             for equipment_id in available_ids
         ],
         projects=projects,
+        **({"archived_project_ids": sorted(profile["archived_projects"])} if profile.get("archived_projects") else {}),
         preset_equipment=presets,
     )
 
@@ -2011,6 +2041,8 @@ def _configuration_candidate(
     existing_projects = candidate.get("projects", {})
     projects = {}
     for project_id, project in request.projects.items():
+        if project_id in candidate.get("archived_projects", {}):
+            raise UserProfileError("project_archived_restore_required")
         persisted_project = project.model_dump(
             mode="json",
             exclude_none=True,
@@ -2045,6 +2077,8 @@ def _configuration_candidate(
 
 def _configuration_validation_code(exc: UserProfileError) -> str:
     message = str(exc).lower()
+    if message == "project_archived_restore_required":
+        return message
     if message.startswith("intent_progress_"):
         return message
     if "project" in message or "projet" in message:
@@ -2086,6 +2120,10 @@ def create_app(
     from decision.timezone_authority import bundle_json, identity as time_authority_id
 
     application_version = canonical_version()
+    from astropilot.launcher_context import LaunchSession, DIAGNOSTIC_ROUTES, blocked_response
+    launch_session = LaunchSession.from_environment()
+    from astropilot.copy_identity import capture_copy_identity, identity_script
+    copy_identity = capture_copy_identity(launch_session)
     resolved_service = None
     guardian_adapter = None
     renewal_enabled = (os.environ.get("ASTROPILOT_GUARDIAN_EXPLICIT_RENEWAL") == "1"
@@ -2117,6 +2155,10 @@ def create_app(
         if analysis_store_factory is not None:
             return analysis_store_factory()
         return FileAnalysisHistory(get_user_data_dir() / "analysis_history")
+
+    def search_forecast_store():
+        from astropilot.search_forecast_history import FileSearchForecastHistory
+        return FileSearchForecastHistory(get_user_data_dir() / "search_forecast_history")
 
     application = FastAPI(title="AstroPilot API", version=application_version, lifespan=lifespan)
 
@@ -2214,12 +2256,21 @@ def create_app(
             response.headers["Cache-Control"] = "no-store"
         if request.url.path == "/":
             response.headers["Cache-Control"] = "no-store"
-        elif request.url.path in {"/ui/app.js", "/ui/alert-status.js", "/ui/styles.css", "/ui/timezone-authority.js"}:
-            response.headers["Cache-Control"] = "no-cache"
+        elif request.url.path.startswith("/ui/"):
+            response.headers["Cache-Control"] = "no-store"
         return response
 
     @application.middleware("http")
     async def timezone_authority_policy(request: Request, call_next):
+        if request.url.path in DIAGNOSTIC_ROUTES:
+            response = await call_next(request)
+            # Keep the browser protocol intact while diagnostics remain available
+            # even when bundle files or time metadata cannot be read.
+            try:
+                response.headers['X-NightMerit-Time-Authority'] = time_authority_id()
+            except (ValueError, OSError, RuntimeError):
+                pass
+            return response
         if not request.url.path.startswith('/v1/'):
             return await call_next(request)
         try:
@@ -2237,6 +2288,76 @@ def create_app(
         # Include early protocol errors too: they are not a rules-version mismatch.
         response.headers['X-NightMerit-Time-Authority'] = authority
         return response
+
+    @application.middleware("http")
+    async def managed_copy_location(request: Request, call_next):
+        if (launch_session and request.url.path not in DIAGNOSTIC_ROUTES
+                and launch_session.location_status() != 'available'):
+            return blocked_response(request)
+        if launch_session and request.url.path.startswith('/v1/') and request.url.path not in DIAGNOSTIC_ROUTES:
+            supplied = request.headers.get('X-NightMerit-Session')
+            browser_request = bool(request.headers.get('sec-fetch-mode') or request.headers.get('origin'))
+            mutating = request.method not in {'GET', 'HEAD', 'OPTIONS'}
+            if ((supplied is not None and supplied != launch_session.session_id)
+                or ((browser_request or mutating) and supplied != launch_session.session_id)):
+                return JSONResponse({'detail': {'code': 'kit_session_changed',
+                    'message': 'Cette page appartient à une autre session. Rouvrez la bonne copie avec son lanceur.'}},
+                    status_code=409, headers={'Cache-Control': 'no-store', 'X-NightMerit-Session': launch_session.session_id})
+        response = await call_next(request)
+        if launch_session:
+            response.headers['X-NightMerit-Session'] = launch_session.session_id
+        return response
+
+    @application.get("/v1/launcher-context", include_in_schema=False)
+    def launcher_context():
+        payload = (launch_session.payload('application') if launch_session
+                   else {'status': 'unmanaged'})
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @application.get("/v1/filter-inventory")
+    def get_filter_inventory():
+        profile=load_user_profile() or {}
+        return {"profile_revision":profile.get("profile_revision",0),
+                "active_equipment_id":profile.get("active_equipment"),
+                "inventories":profile.get("filter_inventories",{}),
+                "mount_inventories":profile.get("filter_mount_inventories",{}),
+                "references":filter_references()}
+
+    @application.put("/v1/filter-inventory")
+    def put_filter_inventory(request: FilterInventoryWrite):
+        profile=load_user_profile()
+        if request.equipment_id not in profile.get("available_equipment",[]):
+            raise HTTPException(status_code=422,detail={"code":"inventory_equipment_unknown"})
+        inventories=copy.deepcopy(profile.get("filter_inventories",{}))
+        from astropilot.filter_inventory import inventory_mounting
+        mounts=copy.deepcopy(profile.get("filter_mount_inventories",{}))
+        saved_mounts=mounts.setdefault(request.equipment_id,{})
+        previous=inventories.get(request.equipment_id)
+        if previous is not None:
+            saved_mounts[inventory_mounting(previous)]=copy.deepcopy(previous)
+        inventory=request.inventory.model_dump(mode="json",exclude_none=True)
+        saved_mounts[inventory_mounting(inventory)]=copy.deepcopy(inventory)
+        inventories[request.equipment_id]=inventory
+        profile["filter_mount_inventories"]=mounts
+        profile["filter_inventories"]=inventories
+        try:
+            saved=save_user_profile(profile,expected_revision=request.expected_revision)
+        except ProfileRevisionConflictError as exc:
+            raise HTTPException(status_code=409,detail={"code":"inventory_revision_conflict"}) from exc
+        return {"profile_revision":saved["profile_revision"],"inventory":inventories[request.equipment_id]}
+
+    @application.get('/ui/copy-identity.js', include_in_schema=False)
+    def copy_identity_script():
+        return Response(identity_script(copy_identity), media_type='application/javascript',
+                        headers={'Cache-Control': 'no-store'})
+
+    @application.get('/ui/session-context.js', include_in_schema=False)
+    def session_context_script():
+        binding = ({'session_id': launch_session.session_id, 'storage_scope': launch_session.storage_scope()}
+                   if launch_session else None)
+        body = 'globalThis.NightMeritSessionBinding=' + json.dumps(binding) + ';\n'
+        body += (web_root / 'session-context.js').read_text(encoding='utf-8')
+        return Response(body, media_type='application/javascript', headers={'Cache-Control': 'no-store'})
 
     @application.get('/ui/timezone-data.js', include_in_schema=False)
     def timezone_data():
@@ -2341,7 +2462,29 @@ def create_app(
 
     @application.get("/v1/runtime-identity", include_in_schema=False)
     def runtime_identity():
-        return runtime_identity_payload()
+        return runtime_identity_payload(version=application_version)
+
+    @application.get("/v1/demo-context", include_in_schema=False)
+    def demo_context():
+        from astropilot.demo_mode import context
+        return JSONResponse(context(), headers={"Cache-Control": "no-store"})
+
+    @application.get("/v1/problem-report", include_in_schema=False)
+    def problem_report():
+        # Explicit allowlist only: never read profile documents, logs or paths.
+        from astropilot.demo_mode import context
+        identity = runtime_identity_payload(version=application_version)
+        payload = {
+            "schema": "nightmerit.problem_report.v1",
+            "version": identity["version"],
+            "build": identity["build"],
+            "architecture": identity["architecture"] if identity["architecture"] in
+                {"x86_64", "arm64", "aarch64", "AMD64", "i386"} else "other",
+            "system": platform.system() if platform.system() in {"Windows", "Darwin", "Linux"} else "other",
+            "weather_mode": context()["weather"],
+            "scope": "metadata_only_no_profile_or_logs",
+        }
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
     @application.get("/v1/data-context", include_in_schema=False)
     def data_context():
@@ -2349,10 +2492,13 @@ def create_app(
         # import or count profile records, or infer that this profile is empty.
         try:
             payload = {
-                "runtime": runtime_identity_payload(),
+                "runtime": runtime_identity_payload(version=application_version),
                 "data_directory": os.path.abspath(get_user_data_dir()),
                 "application_executable": os.path.abspath(sys.executable),
             }
+            if launch_session:
+                payload["launcher"] = launch_session.payload('application')
+            payload["copy_identity"] = copy_identity
             payload["private_copy"] = private_kit_context(
                 os.environ.get(PRIVATE_COPY_CONTEXT_ENV),
                 build=payload["runtime"]["build"], data_directory=payload["data_directory"],
@@ -2362,7 +2508,7 @@ def create_app(
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
     def project_progress_projection(profile: dict, project_id: str) -> dict:
-        project = profile.get("projects", {}).get(project_id)
+        project = retained_projects(profile).get(project_id)
         if project is None:
             raise HTTPException(status_code=404, detail={"code": "project_not_found"})
         field_id = project.get("imaging_field_id")
@@ -2465,6 +2611,38 @@ def create_app(
         except UserProfileError as exc:
             raise HTTPException(status_code=503, detail={"code": "configuration_corrupt"}) from exc
 
+    def change_project_visibility(project_id: str, request: ProjectRemovalRequest, *, restore: bool):
+        if not request.confirmed:
+            raise HTTPException(status_code=422, detail={"code": "project_confirmation_required"})
+        try:
+            profile = load_user_profile()
+            if request.expected_revision != profile.get("profile_revision", 0):
+                raise ProfileRevisionConflictError("profile_revision_conflict")
+            source = profile.get("archived_projects" if restore else "projects", {})
+            if project_id not in source:
+                raise HTTPException(status_code=404, detail={"code": "project_not_found"})
+            validate_project_progress_credits(profile, project_id)
+            target = profile.setdefault("projects" if restore else "archived_projects", {})
+            target[project_id] = source.pop(project_id)
+            saved = save_user_profile(profile, expected_revision=request.expected_revision)
+            return _configuration_projection(saved)
+        except ProfileRevisionConflictError as exc:
+            raise HTTPException(status_code=409, detail={"code": "project_revision_conflict"}) from exc
+        except UserProfileError as exc:
+            raise HTTPException(status_code=503, detail={"code": "configuration_corrupt"}) from exc
+        except (OSError, UnicodeError) as exc:
+            raise read_unavailable(exc, operation="project_visibility_write") from exc
+
+    @application.delete("/v1/projects/{project_id}", response_model=ConfigurationResponse,
+                        response_model_exclude_unset=True)
+    def delete_project(project_id: str, request: ProjectRemovalRequest):
+        return change_project_visibility(project_id, request, restore=False)
+
+    @application.post("/v1/projects/{project_id}/restore", response_model=ConfigurationResponse,
+                      response_model_exclude_unset=True)
+    def restore_project(project_id: str, request: ProjectRemovalRequest):
+        return change_project_visibility(project_id, request, restore=True)
+
     @application.put("/v1/projects/{project_id}/progress")
     def put_project_progress(project_id: str, request: ProjectProgressWriteRequest):
         try:
@@ -2550,6 +2728,14 @@ def create_app(
                 else:
                     raise HTTPException(status_code=409, headers=headers, detail={"code": code}) from exc
             raise HTTPException(status_code=503, headers=headers, detail={"code": "configuration_corrupt"}) from exc
+
+    @application.get("/v1/locations", summary="Search a locality without saving a profile")
+    def search_locations(name: str = Query(min_length=2, max_length=100)):
+        from astropilot.location_search import find_locations
+        try:
+            return {"results": find_locations(name), "provider": "Open-Meteo / GeoNames"}
+        except (OSError, ValueError):
+            raise HTTPException(status_code=503, detail={"code": "location_search_unavailable"})
 
     @application.get("/v1/equipment-references", summary="Read manufacturer component references")
     def get_equipment_references():
@@ -2879,6 +3065,17 @@ def create_app(
                 availability = request.availability.to_domain(
                     site_zone=site_zone
                 )
+                if availability.mode is SessionAvailabilityMode.ALL_NIGHT:
+                    from decision.services.remaining_night_availability import remaining_night_availability
+                    site_zone = LocationTimeResolver.resolve(
+                        preliminary_inputs.location["latitude"],
+                        preliminary_inputs.location["longitude"],
+                    ).zone
+                    availability = remaining_night_availability(
+                        availability, reference_time_utc=reference_time_utc,
+                        latitude=preliminary_inputs.location["latitude"],
+                        longitude=preliminary_inputs.location["longitude"], zone=site_zone,
+                    )
             inputs = resolve_tonight_inputs(
                 profile,
                 location=requested_location,
@@ -2995,6 +3192,24 @@ def create_app(
 
         log_weather("tonight_weather_available", category="available", started=weather_started,
                     diagnostic_id=weather_diagnostic_id)
+
+        # Preserve the exact already-fetched snapshot before either search calculation.
+        # This is evidence only: it creates no project, mission, session or credit.
+        from uuid import uuid4
+        search_id = uuid4().hex
+        try:
+            search_forecast_store().save(key=search_id, created_at=reference_time_utc,
+                request={"kind": "target-suggestions" if isinstance(request, TargetSuggestionsRequest) else "tonight",
+                         "site": inputs.location, "equipment": inputs.equipment,
+                         "bortle": inputs.bortle,
+                         "parameters": request.model_dump(mode="json", exclude_none=True)},
+                weather={"trust": weather.trust_transport(), "payload": weather.payload})
+        except (OSError, ValueError) as error:
+            raise HTTPException(status_code=503,
+                detail={"code": "search_forecast_history_unavailable"},
+                headers={"Cache-Control": "no-store", **diagnostic_headers}) from error
+        response.headers["X-NightMerit-Search-Id"] = search_id
+        diagnostic_headers["X-NightMerit-Search-Id"] = search_id
 
         if isinstance(request, TargetSuggestionsRequest):
             from astropilot.target_discovery import discover_targets
@@ -3380,6 +3595,15 @@ def create_app(
             refusal = result.night.get("target_refusals", {}).get(selected_project_id)
             if refusal is not None:
                 payload["target_refusal"] = TargetVisibilityRefusalModel.model_validate(refusal).model_dump(mode="json")
+        # Explain all failed physical candidates without attributing them to a filter.
+        if payload["status"] == "no_mission" and result.night:
+            primary_evaluation = (result.night.get("object_evaluations") or {}).get(payload.get("catalog_key"), {})
+            window_refusals = primary_evaluation.get("preselection_window_refusals", [])
+            if window_refusals:
+                payload["preselection_window_refusals"] = [
+                    ActionabilityRefusalModel.model_validate(item).model_dump(mode="json")
+                    for item in window_refusals
+                ]
         # Fake application services have no durable store unless explicitly injected.
         # Production always archives the validated display transport before success.
         if payload.get("decision_id") and (service_factory is _production_service_factory or analysis_store_factory is not None):
@@ -3402,6 +3626,39 @@ def create_app(
                 ledger=alert_ledger_factory(), logical_time=reference_time_utc,
             )
         return payload
+
+    @application.get("/v1/search-forecasts")
+    def list_search_forecasts(before: str | None = None, limit: int = Query(default=20, ge=1, le=50)):
+        from astropilot.search_forecast_history import identity
+        try:
+            if before is not None:
+                identity(before)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail={"code": "invalid_search_identity"}) from error
+        try:
+            page = search_forecast_store().list_records(before=before, limit=limit)
+            # List summaries; the complete received hourly values are read by ID.
+            page["items"] = [{"search_id": d["search_id"], "created_at_utc": d["created_at_utc"],
+                              "site": d["request"]["site"], "kind": d["request"]["kind"],
+                              "weather_trust": d["weather"]["trust"]} for d in page["items"]]
+            return JSONResponse(page, headers={"Cache-Control": "no-store"})
+        except (OSError, ValueError) as error:
+            raise HTTPException(status_code=503, detail={"code": "search_forecast_history_unavailable"}) from error
+
+    @application.get("/v1/search-forecasts/{search_id}")
+    def read_search_forecast(search_id: str):
+        from astropilot.search_forecast_history import identity
+        try:
+            identity(search_id)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail={"code": "invalid_search_identity"}) from error
+        try:
+            record = search_forecast_store().load(search_id)
+        except (OSError, ValueError) as error:
+            raise HTTPException(status_code=503, detail={"code": "search_forecast_history_unavailable"}) from error
+        if record is None:
+            raise HTTPException(status_code=404, detail={"code": "search_forecast_not_archived"})
+        return JSONResponse(record, headers={"Cache-Control": "no-store"})
 
     @application.get("/v1/analysis-history")
     def list_analysis_history(before: str | None = None, limit: int = Query(default=20, ge=1, le=50)):
@@ -3495,6 +3752,26 @@ def create_app(
                 else None
             ),
         )
+
+    @application.get("/v1/accepted-missions", response_model=list[SavedMissionHistoryResponse])
+    def list_accepted_missions():
+        try:
+            if not isinstance(profile_provider(), dict):
+                return []
+            pairs = application_service().list_accepted_missions()
+        except (OSError, ValueError, UserProfileError) as exc:
+            raise HTTPException(status_code=503, detail={"code": "acceptance_lineage_unavailable"}) from exc
+        return JSONResponse([
+            SavedMissionHistoryResponse(
+                selected_at=selection.selected_at,
+                status="accepted", mission_id=mission.mission_id,
+                decision_id=selection.decision_id, selection_id=selection.selection_id,
+                catalog_key=selection.selected_catalog_key,
+                selected_imaging_field_id=selection.selected_imaging_field_id,
+                selected_acquisition_intent_id=selection.selected_acquisition_intent_id,
+                mission=_accepted_mission_response(mission),
+            ).model_dump(mode="json") for selection, mission in pairs
+        ], headers={"Cache-Control": "no-store"})
 
     @application.get(
         "/v1/accepted-mission/current",
@@ -4150,7 +4427,7 @@ def create_app(
             or selection.selected_acquisition_intent_id != mission.acquisition_intent_id):
             raise HTTPException(status_code=503, detail={"code": "mission_provenance_invalid"})
         project_id = selection.selected_catalog_key
-        project = profile.get("projects", {}).get(project_id)
+        project = retained_projects(profile).get(project_id)
         if project is None or project.get("imaging_field_id") != mission.imaging_field_id:
             raise HTTPException(status_code=503, detail={"code": "project_field_mismatch"})
         intent_id = mission.acquisition_intent_id

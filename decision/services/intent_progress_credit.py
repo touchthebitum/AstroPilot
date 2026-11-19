@@ -48,11 +48,23 @@ def base_seconds(entry):
     return calculated_duration_seconds(entry["acquired_frames"], entry["exposure_seconds"])
 
 
+def retained_projects(profile: Mapping) -> dict:
+    """All project definitions needed to read immutable historical credits."""
+    active = profile.get("projects", {})
+    archived = profile.get("archived_projects", {})
+    if (type(active) is not dict or type(archived) is not dict
+        or active.keys() & archived.keys()
+        or any(type(key) is not str or not key.strip() or type(value) is not dict
+               for key, value in archived.items())):
+        raise IntentProgressCreditError("project_archive_invalid")
+    return {**archived, **active}
+
+
 def load_credits(profile: Mapping) -> dict:
     ledger = profile.get("intent_progress_credits", {})
     if type(ledger) is not dict:
         raise IntentProgressCreditError("intent_progress_ledger_invalid")
-    projects = profile.get("projects", {})
+    projects = retained_projects(profile)
     if type(projects) is not dict:
         raise IntentProgressCreditError("intent_progress_ledger_invalid")
     resolver = build_production_imaging_field_resolver()
@@ -98,9 +110,9 @@ def validate_credit_authority(profile: Mapping, previous: Mapping | None = None)
     if type(markers) is not dict:
         raise IntentProgressCreditError("intent_progress_baseline_invalid")
     for project_id, intents in markers.items():
-        if type(intents) is not dict or project_id not in profile["projects"]:
+        if type(intents) is not dict or project_id not in retained_projects(profile):
             raise IntentProgressCreditError("intent_progress_baseline_invalid")
-        project = profile["projects"][project_id]
+        project = retained_projects(profile)[project_id]
         entries = {e["acquisition_intent_id"]: e for e in resolve_project_acquisition_intent_progress(project, build_production_imaging_field_resolver())}
         for intent_id, marker in intents.items():
             if (type(marker) is not dict or set(marker) != {"confirmed_at", "base_progress"}
@@ -113,7 +125,7 @@ def validate_credit_authority(profile: Mapping, previous: Mapping | None = None)
             if at.tzinfo is None or at.utcoffset() is None or base_seconds(marker["base_progress"]) is None or base_seconds(marker["base_progress"]) <= 0:
                 raise IntentProgressCreditError("intent_progress_baseline_invalid")
     for entry in ledger.values():
-        project = profile["projects"][entry["project_id"]]
+        project = retained_projects(profile)[entry["project_id"]]
         entries = {e["acquisition_intent_id"]: e for e in resolve_project_acquisition_intent_progress(project, build_production_imaging_field_resolver())}
         base = base_seconds(entries.get(entry["acquisition_intent_id"]))
         if base is not None and base > 0 and entry["acquisition_intent_id"] not in markers.get(entry["project_id"], {}):
@@ -127,7 +139,7 @@ def validate_credit_authority(profile: Mapping, previous: Mapping | None = None)
             raise IntentProgressCreditError("intent_progress_baseline_immutable")
         credited = {(e["project_id"], e["acquisition_intent_id"]) for e in old_ledger.values()}
         for project_id, intent_id in credited:
-            old_project, new_project = previous["projects"][project_id], profile["projects"].get(project_id)
+            old_project, new_project = retained_projects(previous)[project_id], retained_projects(profile).get(project_id)
             if new_project is None or old_project.get("imaging_field_id") != new_project.get("imaging_field_id"):
                 raise IntentProgressCreditError("intent_progress_field_locked")
             def source(project):
@@ -173,7 +185,7 @@ def apply_execution_credit(*, profile, execution_id, evidence_ids, expected_revi
         or mission.acquisition_intent_id is None or mission.acquisition_intent_id != selection.selected_acquisition_intent_id):
         raise IntentProgressCreditError("mission_provenance_invalid")
     project_id = selection.selected_catalog_key
-    project = profile.get("projects", {}).get(project_id)
+    project = retained_projects(profile).get(project_id)
     if project is None or project.get("imaging_field_id") != mission.imaging_field_id:
         raise IntentProgressCreditError("project_field_mismatch")
     try:
@@ -182,6 +194,8 @@ def apply_execution_credit(*, profile, execution_id, evidence_ids, expected_revi
         raise IntentProgressCreditError("intent_unknown") from None
     if mission.acquisition_intent_id not in {i.acquisition_intent_id for i in field.acquisition_intents}:
         raise IntentProgressCreditError("intent_unknown")
+    if project_id not in profile.get("projects", {}) and prior is None:
+        raise IntentProgressCreditError("project_archived")
     observed = []
     for evidence_id in sorted(evidence_ids):
         evidence = load_evidence(evidence_id)

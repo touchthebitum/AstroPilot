@@ -19,10 +19,16 @@ class SessionAvailability:
     start: datetime | None = None
     end: datetime | None = None
     duration: timedelta | None = None
+    preparation_minutes: int = 30
+    flats_minutes: int = 10
 
     def __post_init__(self):
         if not isinstance(self.mode, SessionAvailabilityMode):
             raise TypeError("Expected SessionAvailabilityMode")
+
+        for value in (self.preparation_minutes, self.flats_minutes):
+            if type(value) is not int or not 0 <= value <= 240:
+                raise ValueError("operational_durations_invalid")
 
         supplied_fields = {
             name

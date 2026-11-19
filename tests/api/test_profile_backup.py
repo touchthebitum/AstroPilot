@@ -290,6 +290,7 @@ def test_complete_session_and_observation_graph_roundtrip(tmp_path, monkeypatch,
     assert compared.status_code == 201, compared.text
     applied = credit(client, 'execution-1', 'evidence-1', confirm=True)
     assert applied.status_code == 200, applied.text
+    (root / '.nightmerit-demo.json').write_text('{"schema":"nightmerit.demo.v1"}')
     before = snapshot(root)
     raw, summary = create_backup(root)
     assert summary['sessions'] == summary['observations'] == summary['comparisons'] == 1
@@ -598,7 +599,7 @@ def test_assistant_closes_listener_and_releases_lock_before_opening_same_process
         should_exit = False
         def __init__(self, app):self.app=app
         def run(self, sockets):
-            assert events == ['lock-held']
+            assert events == ['lock-held', 'lock-held', 'lock-released']
             client=TestClient(self.app, base_url="http://127.0.0.1:8000")
             token=re.search(r'const token="([^"]+)"', client.get('/').text)[1]
             assert client.post('/transfer/open', headers={'X-NightMerit-Transfer':token}).status_code==202
@@ -609,8 +610,242 @@ def test_assistant_closes_listener_and_releases_lock_before_opening_same_process
     monkeypatch.setattr(transfer,'get_user_data_dir',lambda:root)
     monkeypatch.setattr(locking,'exclusive_file_lock',lock)
     def launch():
-        assert events == ['lock-held','lock-released','listener-closed']
+        assert events == ['lock-held','lock-held','lock-released','lock-released','listener-closed']
         events.append('normal-application')
     monkeypatch.setattr(launcher,'main',launch)
     transfer.main()
     assert events[-1] == 'normal-application'
+
+
+def test_private_transfer_handoff_stays_on_18831(tmp_path, monkeypatch):
+    import contextlib
+    import types
+    import sys
+    import astropilot.profile_transfer_app as transfer
+    import astropilot.file_lock as locking
+    root = tmp_path / 'profile'; root.mkdir()
+    (root / 'user_profile.json').write_text('{}')
+    events = []
+    class Listener:
+        def close(self): events.append('closed')
+    @contextlib.contextmanager
+    def lock(path):
+        events.append('locked')
+        try: yield
+        finally: events.append('unlocked')
+    def reserve(*, port):
+        assert port == 18831
+        return Listener()
+    def config(app, **kw):
+        assert kw['host'] == '127.0.0.1' and kw['port'] == 18831
+        return app
+    class Server:
+        should_exit = False
+        def __init__(self, app): self.app = app
+        def run(self, sockets):
+            client = TestClient(self.app, base_url='http://127.0.0.1:18831')
+            token = re.search(r'const token="([^"]+)"', client.get('/').text)[1]
+            assert client.post('/transfer/open', headers={'X-NightMerit-Transfer': token}).status_code == 202
+            assert self.should_exit
+    def run(app, **kw):
+        assert events == ['locked', 'locked', 'unlocked', 'unlocked', 'closed']
+        assert kw == {'host': '127.0.0.1', 'port': 18831}
+        events.append('native-port-handoff')
+    monkeypatch.setitem(sys.modules, 'uvicorn', types.SimpleNamespace(Config=config, Server=Server, run=run))
+    monkeypatch.setattr(transfer, 'reserve_listener', reserve)
+    monkeypatch.setattr(transfer, 'get_user_data_dir', lambda: root)
+    monkeypatch.setattr(locking, 'exclusive_file_lock', lock)
+    transfer.main(port=18831, open_browser=False)
+    assert events[-1] == 'native-port-handoff'
+
+
+def test_demo_backup_roundtrip_keeps_marker_and_refuses_repeat(source, tmp_path):
+    marker = source / '.nightmerit-demo.json'
+    marker.write_text('{"schema": "nightmerit.demo.v1"}')
+    before = snapshot(source)
+    raw, summary = create_backup(source)
+    files, preview = inspect_backup(raw)
+    assert files == before
+    target = tmp_path / 'restored-demo'
+    assert restore_empty(target, files) == summary
+    assert snapshot(target) == before == snapshot(source)
+    from astropilot import demo_mode
+    active = demo_mode._active
+    try:
+        demo_mode.prepare_profile(target)
+        assert demo_mode.context()['weather'] == 'simulated'
+    finally:
+        demo_mode._active = active
+    assert snapshot(target) == before
+    with pytest.raises(BackupError, match='backup_destination_not_empty'):
+        restore_empty(target, files)
+
+
+@pytest.mark.parametrize('marker', ['{}', '{"schema":"wrong"}', '{"schema":"nightmerit.demo.v1","extra":1}'])
+def test_invalid_demo_marker_is_not_exported(source, marker):
+    (source / '.nightmerit-demo.json').write_text(marker)
+    with pytest.raises(BackupError, match='backup_invalid'):
+        create_backup(source)
+
+
+@pytest.mark.parametrize('with_logs', [False, True])
+def test_opened_demo_without_configuration_is_clear_and_never_overwritten(tmp_path, with_logs):
+    root=tmp_path/'opened-demo';root.mkdir()
+    marker=root/'.nightmerit-demo.json'
+    marker.write_bytes(b'{"schema":"nightmerit.demo.v1"}')
+    if with_logs:
+        (root/'Logs').mkdir();(root/'Logs/start.log').write_bytes(b'keep')
+    before={str(p.relative_to(root)):p.read_bytes() for p in root.rglob('*') if p.is_file()}
+    client=TestClient(create_transfer_app(root,origin='http://testserver'))
+    state=client.get('/transfer/status').json()
+    assert state['state']=='demo_started'
+    assert state['can_export'] is state['can_restore'] is state['can_open'] is False
+    with pytest.raises(BackupError,match='backup_destination_not_empty'):
+        restore_empty(root,{},validator=lambda files:{})
+    assert before=={str(p.relative_to(root)):p.read_bytes() for p in root.rglob('*') if p.is_file()}
+
+
+@pytest.mark.parametrize('raw,unknown', [(b'{}',False),(b'{"schema":"nightmerit.demo.v1"}',True),(b'x'*257,False)])
+def test_ambiguous_demo_folder_stays_unrecognized(tmp_path,raw,unknown):
+    root=tmp_path/'unknown-demo';root.mkdir()
+    (root/'.nightmerit-demo.json').write_bytes(raw)
+    if unknown:(root/'future.json').write_bytes(b'keep')
+    state=TestClient(create_transfer_app(root,origin='http://testserver')).get('/transfer/status').json()
+    assert state['state']=='unrecognized'
+    assert state['has_data'] is True
+    assert state['can_restore'] is state['can_export'] is False
+
+
+@pytest.mark.parametrize("demo", [False, True])
+def test_continue_configuration_only_opens_known_demo(tmp_path, demo):
+    root=tmp_path/'virgin';root.mkdir()
+    marker=root/'.nightmerit-demo.json';marker.write_text('{"schema":"nightmerit.demo.v1"}')
+    before=marker.read_bytes();calls=[]
+    client=TestClient(create_transfer_app(root, origin='http://testserver', demo=demo, open_application=lambda:calls.append('open')))
+    import re
+    token=re.search(r'const token="([^"]+)"',client.get('/').text)[1]
+    assert client.get('/transfer/status').json()['can_continue'] is demo
+    response=client.post('/transfer/open',headers={'X-NightMerit-Transfer':token})
+    assert response.status_code==(202 if demo else 409)
+    assert calls==(['open'] if demo else [])
+    assert marker.read_bytes()==before
+    assert sorted(p.name for p in root.iterdir())==['.nightmerit-demo.json']
+
+
+@pytest.mark.parametrize("case", ["used", "expired", "replaced", "revoked"])
+def test_unavailable_restore_confirmation_has_specific_message_and_preserves_data(source, tmp_path, monkeypatch, case):
+    import types
+    import astropilot.profile_transfer_app as transfer
+    clock = [100.0]
+    monkeypatch.setattr(transfer, "time", types.SimpleNamespace(monotonic=lambda: clock[0]))
+    raw, _ = create_backup(source, validator=validate_documents)
+    target = tmp_path / "restored"
+    client = TestClient(create_transfer_app(target, origin="http://testserver",
+        inspector=lambda raw: inspect_backup(raw, validator=validate_documents),
+        restorer=lambda root, files: restore_empty(root, files, validator=validate_documents)))
+    token = re.search(r'const token="([^"]+)"', client.get("/").text)[1]
+    headers = {"X-NightMerit-Transfer": token}
+    confirmation = client.post("/transfer/preview", content=raw, headers=headers).json()["confirmation"]
+    body = {"confirmation": confirmation, "confirm": True}
+    original = {str(p.relative_to(source)): p.read_bytes() for p in source.rglob("*") if p.is_file()}
+    if case == "used":
+        assert client.post("/transfer/restore", json=body, headers=headers).status_code == 200
+    elif case == "expired":
+        clock[0] += 601
+    elif case == "replaced":
+        assert client.post("/transfer/preview", content=raw, headers=headers).status_code == 200
+    else:
+        invalid = client.post("/transfer/preview", content=b"bad zip", headers=headers)
+        assert invalid.status_code == 409
+        assert "incomplète ou endommagée" in invalid.json()["message"]
+    before = {str(p.relative_to(target)): p.read_bytes() for p in target.rglob("*") if p.is_file()}
+    response = client.post("/transfer/restore", json=body, headers=headers)
+    assert response.status_code == 409
+    assert response.json()["message"] == transfer.MESSAGES["backup_confirmation_unavailable"]
+    assert "incomplète ou endommagée" not in response.json()["message"]
+    assert {str(p.relative_to(target)): p.read_bytes() for p in target.rglob("*") if p.is_file()} == before
+    assert {str(p.relative_to(source)): p.read_bytes() for p in source.rglob("*") if p.is_file()} == original
+    if case == "used":
+        assert snapshot(target) == snapshot(source)
+    else:
+        assert not target.exists()
+
+
+def _marked_restore_stage(tmp_path, target, *, contents=b'{"partial":true}'):
+    import astropilot.profile_backup as backup
+    import tempfile
+    parent = Path(tempfile.mkdtemp(prefix='.nightmerit-restore-', dir=tmp_path))
+    stage = parent / 'profile'; stage.mkdir()
+    backup._mark_restore_stage(parent, target.absolute(), {'user_profile.json': contents})
+    (stage / 'user_profile.json').write_bytes(contents)
+    return parent
+
+
+@pytest.mark.parametrize('partial', [False, True])
+def test_cleanup_removes_only_owned_interrupted_stage(tmp_path, partial):
+    import astropilot.profile_backup as backup
+    if not backup.shutil.rmtree.avoids_symlink_attacks: pytest.skip('Safe descriptor cleanup unavailable')
+    target = tmp_path / 'target'; target.mkdir()
+    orphan = _marked_restore_stage(tmp_path, target)
+    if partial: (orphan/'profile/user_profile.json').write_bytes(b'{')
+    unknown = tmp_path/'.nightmerit-restore-legacy'; unknown.mkdir(); (unknown/'keep').write_text('untouched')
+    assert backup.cleanup_interrupted_restores(target) == [orphan.name]
+    assert not orphan.exists() and (unknown/'keep').read_text() == 'untouched'
+    assert list(target.iterdir()) == []
+    assert backup.cleanup_interrupted_restores(target) == []
+
+
+@pytest.mark.parametrize('change', ['other_target', 'wrong_inode', 'unknown_file', 'symlink', 'hardlink', 'invalid_marker', 'oversize', 'unknown_directory'])
+def test_cleanup_preserves_unknown_or_unsafe_stage(tmp_path, change):
+    import astropilot.profile_backup as backup
+    target = tmp_path/'target'; target.mkdir(); orphan = _marked_restore_stage(tmp_path, target)
+    file = orphan/'profile/user_profile.json'; outside = tmp_path/'keep'; outside.write_text('sentinel')
+    marker = orphan/backup.RESTORE_OWNER; record = json.loads(marker.read_text())
+    if change == 'other_target': record['target'] = str(tmp_path/'other'); marker.write_text(json.dumps(record))
+    elif change == 'wrong_inode': record['inode'] += 1; marker.write_text(json.dumps(record))
+    elif change == 'unknown_file': (orphan/'profile/personal.txt').write_text('keep')
+    elif change == 'unknown_directory': (orphan/'profile/unknown').mkdir()
+    elif change == 'symlink': file.unlink(); file.symlink_to(outside)
+    elif change == 'hardlink': file.unlink(); __import__('os').link(outside, file)
+    elif change == 'invalid_marker': marker.write_text('not json')
+    else: file.write_bytes(b'x'*100)
+    assert backup.cleanup_interrupted_restores(target) == []
+    assert orphan.exists() and outside.read_text() == 'sentinel' and list(target.iterdir()) == []
+
+
+def test_cleanup_waits_for_active_restore_lock(tmp_path):
+    import astropilot.profile_backup as backup
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    if not backup.shutil.rmtree.avoids_symlink_attacks: pytest.skip('Safe descriptor cleanup unavailable')
+    target = tmp_path/'target'; target.mkdir(); orphan = _marked_restore_stage(tmp_path, target)
+    attempted = threading.Event()
+    def clean():
+        attempted.set(); return backup.cleanup_interrupted_restores(target)
+    with ThreadPoolExecutor() as pool:
+        with backup._restore_lock(target):
+            future = pool.submit(clean); assert attempted.wait(2)
+            with pytest.raises(__import__('concurrent.futures', fromlist=['TimeoutError']).TimeoutError):future.result(timeout=.1)
+            assert orphan.exists()
+        assert future.result(timeout=5) == [orphan.name]
+
+
+@pytest.mark.parametrize('cleanup_capability', ['native', 'unavailable'])
+def test_restore_cleans_owned_orphan_and_preserves_published_profile(source, tmp_path, monkeypatch, cleanup_capability):
+    import astropilot.profile_backup as backup
+    if cleanup_capability == 'unavailable':
+        monkeypatch.setattr(backup.shutil.rmtree, 'avoids_symlink_attacks', False)
+    safe_cleanup = getattr(backup.shutil.rmtree, 'avoids_symlink_attacks', False)
+    target = tmp_path/'target'; target.mkdir(); orphan = _marked_restore_stage(tmp_path, target)
+    orphan_before = {str(p.relative_to(orphan)): p.read_bytes() for p in orphan.rglob('*') if p.is_file()}
+    files = snapshot(source)
+    restore_empty(target, files, validator=validate_documents)
+    assert snapshot(target) == files
+    if safe_cleanup:
+        assert not orphan.exists()
+    else:
+        # A platform without descriptor-safe removal must preserve the orphan.
+        assert orphan.exists()
+        assert {str(p.relative_to(orphan)): p.read_bytes() for p in orphan.rglob('*') if p.is_file()} == orphan_before
+    assert backup.cleanup_interrupted_restores(target) == []
+    assert snapshot(target) == files

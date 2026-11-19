@@ -116,6 +116,15 @@ async function journey() {
   `});
   await send('Page.navigate', {url});
   await waitFor(() => evaluate(`Boolean(document.querySelector('#availability-step') && !document.querySelector('#availability-step').hidden)`), 'availability UI');
+  // The beginner journey now requires an explicit project choice. Use its real
+  // change handler before submitting; never bypass the selection guard.
+  await waitFor(() => evaluate(`Boolean(Array.from(document.querySelector('#beginner-project')?.options || []).find(o => o.value === 'Sh2-129'))`), 'beginner project option');
+  await evaluate(`
+    const project = document.querySelector('#beginner-project');
+    project.value = 'Sh2-129';
+    project.dispatchEvent(new Event('change', {bubbles: true})); true;
+  `);
+  await waitFor(() => evaluate(`state.selectedProjectId === 'Sh2-129' && !state.discoveryMode`), 'explicit project selected');
   await evaluate(`
     document.querySelector('input[name="availability-mode"][value="fixed_window"]').click();
     document.querySelector('#availability-start').value = '2026-10-16T00:30';
@@ -206,14 +215,26 @@ async function journey() {
         .find(o => o.value === ${JSON.stringify(accepted.body.mission_id)});
       return option ? {value: option.value, label: option.textContent} : null;
     })()`), 'persisted mission label after reload');
+    await evaluate(`document.querySelector('#beginner-saved-missions').open = true; true;`);
     const formatSavedInstant = instant => new Intl.DateTimeFormat('fr-CH', {
       timeZone: accepted.body.mission.site_timezone, year:'numeric', month:'2-digit', day:'2-digit',
       hour:'2-digit', minute:'2-digit', hour12:false,
     }).format(new Date(instant));
-    assert(savedOption.label.includes(`${accepted.body.mission.target} · ${filter.name} · `));
+    assert.equal(accepted.body.mission.target, 'Sh2-129');
+    assert(savedOption.label.includes(`Sh2-129 + Ou4 · ${filter.name} · `));
     assert(savedOption.label.includes(formatSavedInstant(start)));
     assert(savedOption.label.includes(formatSavedInstant(end)));
-    assert(savedOption.label.endsWith(accepted.body.mission.site_timezone));
+    const savedRecord = await evaluate(`(async () => {
+      const response = await fetch('/v1/accepted-missions', {cache:'no-store'});
+      if (!response.ok) throw Error('Saved mission history unavailable');
+      return (await response.json()).find(item => item.mission_id === ${JSON.stringify(accepted.body.mission_id)});
+    })()`);
+    assert(savedRecord?.selected_at, 'Persisted plan must retain its save timestamp');
+    const savedAt = new Intl.DateTimeFormat('fr-CH', {
+      timeZone: accepted.body.mission.site_timezone, year:'numeric', month:'2-digit', day:'2-digit',
+      hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false, timeZoneName:'shortOffset',
+    }).format(new Date(savedRecord.selected_at));
+    assert(savedOption.label.endsWith(`${accepted.body.mission.site_timezone} · Enregistré le ${savedAt}`));
     assert.equal(await evaluate("document.querySelector('#saved-mission-target').textContent"), savedOption.label);
     const summaryFits = await evaluate(`(() => {
       const entry = document.querySelector('#saved-mission-entry');

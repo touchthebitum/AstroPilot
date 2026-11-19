@@ -103,8 +103,12 @@ def test_availability_and_project_cap_apply_the_strictest_duration():
 
     timing = _mission_timing_for_availability(source, availability)
 
-    assert timing[2] == 1.25
-    assert timing[3] == 3.75
+    # A 75-minute total availability leaves only 35 minutes of poses: below the minimum.
+    assert timing is None
+    from dataclasses import replace
+    timing = _mission_timing_for_availability(source, replace(availability, end=START + timedelta(hours=2, minutes=25)))
+    assert timing[2] == 1.5  # Project cap remains stricter than the usable availability.
+    assert timing[3] == 4.5
 
 
 def test_duration_selects_the_more_productive_final_hour():

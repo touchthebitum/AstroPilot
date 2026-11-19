@@ -75,9 +75,12 @@ const back = element('back'); back.dataset.back = 'equipment';
 const document = {querySelector: element, querySelectorAll: selector => selector === '[data-back]' ? [back] : []};
 const projects = {existing: {intent: 'must survive'}};
 const state = {configurationDraft: {site: {}, equipment: {}, projects}};
+// Exercise the complete equipment form in Advanced mode; Beginner has two phases.
+const appliedUiMode = 'pro';
 const screens = [];
 function setView(view) {state.view = view; screens.push(view);}
 function text(selector, value) {element(selector).textContent = value;}
+function renderSimpleEquipment() {}
 function renderPresetChoices() {}
 function updateEquipmentSearch() {}
 function renderProjects() {return true;}

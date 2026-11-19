@@ -312,7 +312,11 @@ def test_http_request_runs_real_application_composition_once(
             },
             "equipment": "fra400_2600",
             "goal": "galaxies",
-            **({"availability": {"mode": "all_night"}} if commitment == "explicit"
+            # This composition fixture plans a future dated session. all_night
+            # now means the remaining current night, not an arbitrary forecast.
+            **({"availability": {"mode": "fixed_window",
+                                  "start": mission.window_start.isoformat(),
+                                  "end": mission.window_end.isoformat()}} if commitment == "explicit"
                else {"availability": None} if commitment == "null" else {}),
             "bortle": 4,
             "claim_opportunity_alert": claim_alert,
@@ -434,7 +438,7 @@ def test_http_request_runs_real_application_composition_once(
 def test_tonight_exposes_modern_ou4_acquisition_intent_candidate(
     monkeypatch, legacy_remaining,
 ):
-    reference_time = datetime(2026, 8, 30, 18, tzinfo=timezone.utc)
+    reference_time = datetime(2026, 9, 1, 18, tzinfo=timezone.utc)
     window_start = datetime(2026, 9, 1, 22, tzinfo=timezone.utc)
     window_end = datetime(2026, 9, 2, 2, tzinfo=timezone.utc)
     weather = WeatherSnapshot(

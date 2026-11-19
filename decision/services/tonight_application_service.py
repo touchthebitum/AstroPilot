@@ -20,9 +20,11 @@ from decision.models.candidate_rejection import (
     CandidateRejection,
 )
 from decision.models.acquisition_intent_selection import AcquisitionIntentSelectionStatus
-from decision.models.session_availability import SessionAvailability, requested_evening
+from decision.models.session_availability import SessionAvailability, SessionAvailabilityMode, requested_evening
 from decision.recommendation.recommendation import Recommendation
 from decision.services.session_availability_windowing import ActionabilityRefusal
+from decision.services.remaining_night_availability import remaining_night_availability
+from decision.location.location_time import LocationTimeResolver
 from decision.validation.decision_consistency import DecisionConsistencyGate
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 from decision.weather.provider_reliability import WeatherLocation
@@ -212,6 +214,14 @@ class TonightApplicationService:
             bortle=bortle,
             availability=availability,
         )
+        if inputs.availability is not None and inputs.availability.mode is SessionAvailabilityMode.ALL_NIGHT:
+            inputs = replace(inputs, availability=remaining_night_availability(
+                inputs.availability, reference_time_utc=reference_time_utc,
+                latitude=inputs.location["latitude"], longitude=inputs.location["longitude"],
+                zone=(ZoneInfo(weather.timezone) if isinstance(weather, WeatherSnapshot)
+                      else LocationTimeResolver.resolve(
+                          inputs.location["latitude"], inputs.location["longitude"]).zone),
+            ))
         selected_equipment = inputs.equipment
         effective_profile = {
             **profile,

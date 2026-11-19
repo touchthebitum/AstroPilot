@@ -149,7 +149,7 @@ async function fetch() { return {ok: true, json: async () => clone(serverSession
   await reloadSessions();
   assert.equal(choice.children.length, 2);
   assert.equal(choice.children[0].value, '');
-  assert.equal(choice.children[0].textContent, 'Sans session');
+  assert.equal(choice.children[0].textContent, 'Sans séance photo');
   assert.equal(choice.value, '');
   assert.equal(state.activeSessionId, null);
   assert.equal(state.fieldObservationSelectedExecutionId, null);
@@ -2669,6 +2669,7 @@ function draftFromConfiguration(payload) { return structuredClone(payload); }
 function hideRecoveryConfirmation() {}
 function prefillConfiguration() {}
 function renderAvailabilityTimezone() {}
+function updateDiscoveryAvailability() {}
 function guardUnresolvedAcceptance() { return false; }
 function showAvailabilityError(message) { state.error = message; }
 function setView(view) { state.view = view; }

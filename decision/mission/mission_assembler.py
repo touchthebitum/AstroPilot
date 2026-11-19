@@ -21,7 +21,7 @@ from decision.night_productivity.productivity_diagnostics import (
     ProductivityBreakdown,
     SliceProductivityEvaluation,
 )
-from decision.mission.night_planner import NightPlanner
+from decision.mission.night_planner import NightPlanner, acquisition_availability
 from decision.intelligence.season_analysis import SeasonAnalysis
 from decision.intelligence.analysis_context import AnalysisContext
 from decision.season.dynamic_season_engine import DynamicSeasonEngine
@@ -291,9 +291,23 @@ def _mission_timing_assessment(
         evaluate_authorized_session_window,
     )
 
+    try:
+        capture_availability = acquisition_availability(availability)
+    except ValueError as error:
+        if str(error) != "session_too_short_for_operational_tasks":
+            raise
+        from decision.models.actionability_refusal import (
+            ActionabilityRefusal, ActionabilityRefusalConclusion,
+            ActionabilityRefusalStatus,
+        )
+        return None, ActionabilityRefusal(
+            ActionabilityRefusalConclusion.NO_PRODUCTIVE_WINDOW,
+            ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL,
+            "insufficient_actionable_productive_window", 0.0, 60,
+        )
     selection = evaluate_authorized_session_window(
         assessment,
-        availability,
+        capture_availability,
     )
     constrained = selection.window
     if constrained is None:
@@ -521,7 +535,12 @@ class MissionAssembler:
         )
 
         risk = RiskEngine.evaluate(risk_context)
-        tasks = NightPlanner.build(productivity)
+        availability = mission_input.availability if mission_input is not None else None
+        if availability is not None and (availability.preparation_minutes, availability.flats_minutes) != (30, 10):
+            tasks = NightPlanner.build(productivity,
+                preparation_minutes=availability.preparation_minutes, flats_minutes=availability.flats_minutes)
+        else:
+            tasks = NightPlanner.build(productivity)
 
         analysis_context = AnalysisContext(
             target=target,

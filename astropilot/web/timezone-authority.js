@@ -82,6 +82,19 @@
       const headers = new Headers(init.headers || (typeof input === 'object' ? input.headers : undefined));
       headers.set('X-NightMerit-Time-Authority', data.id);
       const response = await original(input, {...init, headers});
+      if (response.status === 409 && typeof response.clone === 'function') {
+        let detail;
+        try { detail = (await response.clone().json()).detail; } catch (_) {}
+        if (detail?.code === 'kit_moved_or_unavailable') {
+          let notice = document.querySelector('#kit-moved-notice');
+          if (!notice) {
+            notice = document.createElement('p'); notice.id = 'kit-moved-notice';
+            notice.setAttribute('role', 'alert'); document.body.prepend(notice);
+          }
+          notice.textContent = 'Cette copie a été déplacée. Fermez-la avec ARRETER-MES-PROJETS.command dans son dossier actuel, puis rouvrez-la. Aucune donnée ne sera recréée à l’ancien emplacement.';
+          return response;
+        }
+      }
       if (response.headers.get('X-NightMerit-Time-Authority') !== data.id) {
         stop('Les règles d’heure ont changé ou sont indisponibles. Rechargez avant de continuer.');
         throw Error('time_authority_changed');

@@ -12,6 +12,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
+import shutil
 import struct
 import subprocess
 import sys
@@ -36,7 +37,7 @@ MAX_FILES = 5000
 MAX_MANIFEST = 2 * 1024 * 1024
 ZIP_CHUNK = 64 * 1024
 STORES = frozenset({"analysis_history", "decision_lineage", "execution_lineage", "decision_forecast_evidence",
-                    "field_observations", "outcome_evaluations"})
+                    "field_observations", "outcome_evaluations", "search_forecast_history"})
 LOCAL_ONLY = frozenset({"Logs", "guardian", "guardian_scheduler", ".DS_Store",
                         ".outcome_history_cursor.key", ".outcome_history_cursor.key.lock"})
 
@@ -46,7 +47,7 @@ class BackupError(ValueError):
 
 
 def profile_state(root):
-    """Metadata only: startup traces are not an exportable user profile.
+    """Identify startup state without initializing or changing a user profile.
 
     Existing traces still block restoration. Never remove them to make a copy
     appear empty; guide the operator to a fresh kit instead.
@@ -64,6 +65,18 @@ def profile_state(root):
     if all(p.name in LOCAL_ONLY or (p.name.startswith(".") and p.name.endswith(".lock"))
            for p in entries):
         return "runtime_only"
+    marker = root / ".nightmerit-demo.json"
+    if all(p.name == marker.name or p.name in LOCAL_ONLY or
+           (p.name.startswith(".") and p.name.endswith(".lock")) for p in entries):
+        info = marker.lstat() if marker.exists() else None
+        if info and stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_size <= 256:
+            try:
+                with marker.open("rb") as stream:
+                    raw = stream.read(257)
+                if len(raw) <= 256 and _json(raw) == {"schema": "nightmerit.demo.v1"}:
+                    return "demo_started"
+            except (OSError, BackupError):
+                pass
     return "unrecognized"
 
 
@@ -85,7 +98,7 @@ def _json(raw):
 def _allowed(name):
     if not isinstance(name, str) or PurePosixPath(name).as_posix() != name:
         return False
-    if name in {"user_profile.json", "user_filters.json"}:
+    if name in {"user_profile.json", "user_filters.json", ".nightmerit-demo.json"}:
         return True
     parts = PurePosixPath(name).parts
     return (len(parts) == 2 and parts[0] in STORES
@@ -170,11 +183,14 @@ def validate_documents(files):
         seen.add(name.casefold())
         if not isinstance(_json(raw), dict):
             raise BackupError("backup_invalid")
+    if ".nightmerit-demo.json" in files:
+        if _json(files[".nightmerit-demo.json"]) != {"schema": "nightmerit.demo.v1"}:
+            raise BackupError("backup_invalid")
     try:
         profile = validate_user_profile(_json(files["user_profile.json"]), Path("user_profile.json"))
     except Exception as exc:
         raise BackupError("backup_incompatible") from exc
-    return {"projects": len(profile.get("projects", {})),
+    return {"projects": len(profile.get("projects", {})) + len(profile.get("archived_projects", {})),
             "observations": sum(n.startswith("field_observations/") for n in files),
             "sessions": sum(n.startswith("execution_lineage/") for n in files),
             "comparisons": sum(n.startswith("outcome_evaluations/") for n in files)}
@@ -191,7 +207,7 @@ def _write_files(folder, files):
         target.chmod(0o600)
 
 
-def validate_graph(files):
+def validate_graph(files, *, review=False):
     """Use production read gates in a disposable child, never the active profile."""
     summary = validate_documents(files)
     with tempfile.TemporaryDirectory(prefix="nightmerit-backup-check-") as temporary:
@@ -210,11 +226,20 @@ def validate_graph(files):
         try:
             run = subprocess.run(args + ["--validate-data-backup", str(report)], env=env,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90)
-            if run.returncode or _json(report.read_bytes()) != {"validated": True}:
+            result = _json(report.read_bytes())
+            if run.returncode or not isinstance(result, dict) or result.get("validated") is not True:
                 raise BackupError("backup_incompatible")
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise BackupError("backup_incompatible") from exc
+    if review:
+        if not isinstance(result.get('project_details'), list):
+            raise BackupError('backup_incompatible')
+        return {**summary, 'project_details': result['project_details']}
     return summary
+
+
+def inspect_backup_for_review(raw):
+    return inspect_backup(raw, validator=lambda files: validate_graph(files, review=True))
 
 
 def create_backup(root, *, validator=validate_graph):
@@ -347,7 +372,107 @@ def inspect_backup(raw, *, validator=validate_graph):
                    "application_version": manifest["application_version"]}
 
 
+RESTORE_OWNER = "restore-owner.json"
+
+
+def _restore_lock(root):
+    from astropilot.file_lock import exclusive_file_lock
+    root.parent.mkdir(parents=True, exist_ok=True)
+    lock = root.parent / ".nightmerit-restoration.lock"
+    if lock.exists() or lock.is_symlink():
+        info = lock.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise BackupError("backup_unsafe_path")
+    return exclusive_file_lock(lock)
+
+
+def _mark_restore_stage(temporary, root, files):
+    stage = temporary / "profile"
+    info = stage.lstat()
+    record = {"schema": "nightmerit.restore_stage.v1", "target": str(root),
+              "directory": temporary.name, "device": info.st_dev, "inode": info.st_ino,
+              "files": {name: len(raw) for name, raw in files.items()}}
+    with (temporary / RESTORE_OWNER).open("x", encoding="utf-8") as stream:
+        json.dump(record, stream)
+        stream.flush()
+        os.fsync(stream.fileno())
+    fsync_directory(temporary)
+
+
+def _cleanup_restore_stages_locked(root):
+    # Do not fall back to unsafe path-based recursive deletion on other platforms.
+    if not getattr(shutil.rmtree, "avoids_symlink_attacks", False):
+        return []
+    removed = []
+    for temporary in root.parent.glob(".nightmerit-restore-*"):
+        try:
+            info = temporary.lstat()
+            if not stat.S_ISDIR(info.st_mode):
+                continue
+            owner = temporary / RESTORE_OWNER
+            owner_info = owner.lstat()
+            if not stat.S_ISREG(owner_info.st_mode) or owner_info.st_nlink != 1 or owner_info.st_size > MAX_MANIFEST:
+                continue
+            record = _json(owner.read_bytes())
+            if (record.get("schema") != "nightmerit.restore_stage.v1" or record.get("target") != str(root)
+                    or record.get("directory") != temporary.name or not isinstance(record.get("files"), dict)):
+                continue
+            files = record["files"]
+            if (not 1 <= len(files) <= MAX_FILES or any(not _allowed(n) or type(size) is not int
+                    or not 0 <= size <= MAX_FILE for n, size in files.items())):
+                continue
+            entries = {p.name for p in temporary.iterdir()}
+            if not entries <= {RESTORE_OWNER, "profile"}:
+                continue
+            stage = temporary / "profile"
+            if "profile" in entries:
+                stage_info = stage.lstat()
+                if (not stat.S_ISDIR(stage_info.st_mode) or stage_info.st_dev != record.get("device")
+                        or stage_info.st_ino != record.get("inode")):
+                    continue
+                valid = True
+                for path in stage.iterdir():
+                    path_info = path.lstat()
+                    if stat.S_ISDIR(path_info.st_mode) and path.name in STORES:
+                        children = list(path.iterdir())
+                    else:
+                        children = [path]
+                    for child in children:
+                        child_info = child.lstat()
+                        name = child.relative_to(stage).as_posix()
+                        if (not stat.S_ISREG(child_info.st_mode) or child_info.st_nlink != 1
+                                or name not in files or child_info.st_size > files[name]):
+                            valid = False
+                            break
+                    if not valid:
+                        break
+                if not valid:
+                    continue
+            # The common lock excludes every current restorer using this parent.
+            # rmtree uses file descriptors and never follows a replaced symlink.
+            shutil.rmtree(temporary)
+            fsync_directory(root.parent)
+            removed.append(temporary.name)
+        except (OSError, BackupError, AttributeError, TypeError):
+            # Unknown, unreadable or altered directories are preserved, never guessed.
+            continue
+    return removed
+
+
+def cleanup_interrupted_restores(root):
+    root = _safe_root(root)
+    with _restore_lock(root):
+        return _cleanup_restore_stages_locked(root)
+
+
 def restore_empty(root, files, *, validator=validate_graph):
+    root = _safe_root(root)
+    with _restore_lock(root):
+        _cleanup_restore_stages_locked(root)
+        return _restore_empty_locked(root, files, validator=validator)
+
+
+def _restore_empty_locked(root, files, *, validator=validate_graph):
     root = _safe_root(root)
     # Even unknown, hidden or unreadable data blocks replacement. No merge.
     if root.exists() and any(root.iterdir()):
@@ -357,6 +482,7 @@ def restore_empty(root, files, *, validator=validate_graph):
     with tempfile.TemporaryDirectory(prefix=".nightmerit-restore-", dir=root.parent) as temporary:
         stage = Path(temporary) / "profile"
         stage.mkdir(mode=0o700)
+        _mark_restore_stage(Path(temporary), root, files)
         _write_files(stage, files)
         for directory in [p for p in stage.iterdir() if p.is_dir()] + [stage]:
             fsync_directory(directory)
@@ -398,8 +524,20 @@ def validate_profile_child(report):
                      guardian_renewal_enabled=False)
     routes = {r.path: r.endpoint for r in app.routes
               if hasattr(r, "endpoint") and "GET" in getattr(r, "methods", ())}
-    for project_id in profile.get("projects", {}):
-        routes["/v1/projects/{project_id}/progress"](project_id)
+    from decision.services.intent_progress_credit import retained_projects
+    project_details = []
+    for project_id, project in retained_projects(profile).items():
+        progress = routes["/v1/projects/{project_id}/progress"](project_id)
+        filters = {item['acquisition_intent_id']: item['filter_type'] for item in progress['acquisition_intents']}
+        targets = {item['acquisition_intent_id']: item['target_hours'] for item in progress['acquisition_intent_targets']}
+        project_details.append({'project_id': project_id,
+            'archived': project_id in profile.get('archived_projects', {}),
+            'filters': [{'acquisition_intent_id': item['acquisition_intent_id'],
+                         'filter_type': filters.get(item['acquisition_intent_id']),
+                         'acquired_seconds': item['effective_total_seconds'],
+                         'target_hours': targets.get(item['acquisition_intent_id'])}
+                        for item in progress['intent_progress_breakdown']],
+            'recorded_total_seconds': float(project.get('hours', 0)) * 3600})
     root = Path(os.environ["ASTROPILOT_DATA_DIR"])
     from astropilot.field_observation_store import FileFieldObservationStore
     FileFieldObservationStore(root / "field_observations").list_page(limit=1)
@@ -423,4 +561,6 @@ def validate_profile_child(report):
         FileDecisionForecastEvidenceStore(root / "decision_forecast_evidence").load(decision_id=path.stem)
     from astropilot.analysis_history import FileAnalysisHistory
     FileAnalysisHistory(root / "analysis_history").list_records(limit=1)
-    Path(report).write_text(json.dumps({"validated": True}))
+    from astropilot.search_forecast_history import FileSearchForecastHistory
+    FileSearchForecastHistory(root / "search_forecast_history").list_records(limit=1)
+    Path(report).write_text(json.dumps({"validated": True, "project_details": project_details}))

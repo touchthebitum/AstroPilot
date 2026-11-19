@@ -122,14 +122,19 @@ def test_windows_native_script_parse_and_struct_without_notification():
     source = _WINDOWS_SCRIPT.split("@'\n", 1)[1].split("\n'@", 1)[0]
     validation = r'''$ErrorActionPreference = 'Stop'
 try {
+    $stage = 'read_input'
     $doc = ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd())
+    $stage = 'parse_script'
     $tokens = $null
     $errors = $null
     [void][Management.Automation.Language.Parser]::ParseInput([string]$doc[0], [ref]$tokens, [ref]$errors)
     if ($errors.Count -ne 0) { throw 'invalid_script' }
+    $stage = 'load_framework'
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
+    $stage = 'compile_native_structure'
     Add-Type -TypeDefinition ([string]$doc[1])
+    $stage = 'validate_native_structure'
     $data = New-Object LocalBalloon+Data
     $size = [Runtime.InteropServices.Marshal]::SizeOf($data)
     $expected = if ([IntPtr]::Size -eq 8) { 976 } else { 956 }
@@ -137,14 +142,21 @@ try {
     $method = [LocalBalloon].GetMethod('Shell_NotifyIconW')
     if ($null -eq $method) { throw 'missing_native_method' }
     exit 0
-} catch { exit 1 }
+} catch {
+    [Console]::Error.WriteLine(('Validation failed at {0}: {1}' -f $stage, $_.Exception.Message))
+    exit 1
+}
 '''
     executable = ntpath.join(os.environ['SystemRoot'], 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    # This is a compiler/framework validation, not a notification delivery.
+    # Allow cold Windows CI startup while keeping a bounded, fail-closed check.
     result = subprocess.run([executable, '-NoProfile', '-NonInteractive', '-Sta',
         '-EncodedCommand', base64.b64encode(validation.encode('utf-16-le')).decode('ascii')],
         input=json.dumps([_WINDOWS_SCRIPT, source], ensure_ascii=True), encoding='ascii',
-        shell=False, timeout=20, capture_output=True, check=False)
-    assert result.returncode == 0, 'Windows script parse/framework/native structure check failed'
+        shell=False, timeout=60, capture_output=True, check=False)
+    assert result.returncode == 0, (
+        'Windows script parse/framework/native structure check failed: ' + result.stderr
+    )
 
 
 @pytest.mark.parametrize('doc', [None, [], {'enabled':1}, {'min_level':'bogus'},

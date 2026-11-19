@@ -14,7 +14,7 @@ from astropilot.engines.sky_engine import SkyEngine
 from decision.forecast.forecast_run import ForecastRun
 from decision.services.tonight_application_service import TonightApplicationService
 from decision.validation.decision_consistency import DecisionConsistencyError
-from decision.weather.weather_ingress import REQUIRED_HOURLY_UNITS
+from decision.weather.weather_ingress import REQUIRED_HOURLY_UNITS, validate_weather_payload
 from decision.mission.mission_assembler import ProductiveWindowAssessment
 from decision.models.session_availability import SessionAvailability, SessionAvailabilityMode
 from decision.night_productivity.night_productivity_result import NightProductivityResult
@@ -97,11 +97,16 @@ def test_real_tonight_service_unknown_future_does_not_award_opportunity_bonus(mo
         tonight_mission_service=astro_score.tonight_mission_service,
         build_mission_input=astro_score.build_mission_input,
     )
-    monkeypatch.setattr(astro_score.requests, "get", lambda *args, **kwargs: SimpleNamespace(
-        raise_for_status=lambda: None, json=payload,
-    ))
+    reference = datetime(2026, 10, 6, 18, tzinfo=timezone.utc)
+    weather = validate_weather_payload(
+        payload(), requested_latitude=46.7508, requested_longitude=6.5495,
+        requested_timezone="Europe/Zurich", retrieved_at_utc=reference,
+    )
     response = TestClient(create_app(
         profile_provider=profile, service_factory=lambda: service,
+        # Keep the request inside the fixture's night, independently of the
+        # machine date: all_night now excludes nights that have already passed.
+        clock=lambda: reference, weather_provider=lambda *args: weather,
     )).post("/v1/tonight", json={"availability": {"mode": "all_night"}})
     assert response.status_code == 200, response.json()
     assert response.json()["status"] == "no_recommendation"

@@ -1,3 +1,4 @@
+from test_target_discovery import assert_discovery_weather_only
 """Whole H II fields keep separate intents and preserve historical project aliases."""
 from copy import deepcopy
 from pathlib import Path
@@ -45,7 +46,7 @@ def test_whole_region_discovery_to_explicit_mission(tmp_path, monkeypatch, key, 
     assert image.status_code == 200 and image.headers['content-type'] == 'image/jpeg'
     assert image.content == (Path(__file__).parents[2] / 'astropilot/web/target-heart-soul-ha.jpg').read_bytes()
     assert saved == before
-    assert not list(tmp_path.rglob('*.json'))
+    assert_discovery_weather_only(tmp_path, response)
 
     def factory():
         service = build_durable_tonight_application_service()
@@ -99,7 +100,7 @@ def test_existing_alias_is_retrieved_without_migrating_or_overwriting(tmp_path, 
     assert proposal['already_saved']
     assert proposal['existing_project_key'] == alias
     assert saved == before
-    assert not list(tmp_path.rglob('*.json'))
+    assert_discovery_weather_only(tmp_path, response)
 
 
 def test_ambiguous_saved_aliases_are_not_guessed(tmp_path, monkeypatch):

@@ -1,3 +1,4 @@
+/* The beginner flow shares the canonical controls and data with Advanced. */
 :root {
   color-scheme: dark;
   --ink: #f4f7fb;
@@ -789,12 +790,12 @@ html[data-ui-mode="pro"][data-guided-view="availability"]:not([data-guided-initi
 #saved-observation-back { display: none; }
 #field-observation-dialog[data-read-only="true"] #saved-observation-back { display: inline-flex; margin-top: 16px; }
 
-#data-context-dialog { width: min(720px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; border: 1px solid var(--line); border-radius: 20px; background: var(--panel, #101e30); color: var(--ink); }
-#data-context-dialog::backdrop { background: rgba(0, 7, 14, .8); backdrop-filter: blur(6px); }
-#data-context-dialog .help-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-#data-context-dialog h2 { margin-top: 0; }
+:is(#data-context-dialog, #backup-guide-dialog) { width: min(720px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; border: 1px solid var(--line); border-radius: 20px; background: var(--panel, #101e30); color: var(--ink); }
+:is(#data-context-dialog, #backup-guide-dialog)::backdrop { background: rgba(0, 7, 14, .8); backdrop-filter: blur(6px); }
+:is(#data-context-dialog, #backup-guide-dialog) .help-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+:is(#data-context-dialog, #backup-guide-dialog) h2 { margin-top: 0; }
 #data-context-dialog dd { margin: 6px 0 18px; overflow-wrap: anywhere; }
-#data-context-dialog summary { padding: 12px 0; cursor: pointer; }
+:is(#data-context-dialog, #backup-guide-dialog) summary { padding: 12px 0; cursor: pointer; }
 #data-context-executable { overflow-wrap: anywhere; }
 .page-footer { flex-wrap: wrap; align-items: center; }
 
@@ -1050,3 +1051,149 @@ body.layout-nightline .page-footer { color: var(--muted); }
 @media (forced-colors: active) {
   .feedback-message:not(:empty) { border: 2px solid CanvasText; }
 }
+
+#photos-dialog { width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; padding: 24px; overflow: auto; color: var(--ink); background: var(--night-soft); border: 1px solid var(--line-bright); border-radius: var(--radius); }
+#photos-dialog::backdrop { background: rgba(1, 6, 12, .82); }
+#photos-dialog > *, #photos-dialog label { min-width: 0; overflow-wrap: anywhere; }
+#photos-dialog select, #photos-dialog input { width: 100%; box-sizing: border-box; }
+#photos-dialog .observation-heading { flex-wrap: wrap; }
+#photos-dialog #photos-status:empty, #photos-dialog #photos-baseline:empty, #photos-dialog #photos-finish:empty { display: none; }
+
+#photos-dialog h2 { margin: 0; font-family: inherit; font-size: clamp(22px, 3vw, 28px); line-height: 1.25; }
+#photos-dialog label { display: grid; gap: 8px; margin: 16px 0; }
+#photos-dialog select, #photos-dialog input { padding: 12px; color: var(--ink); background: var(--panel-strong); border: 1px solid var(--line-bright); border-radius: 9px; font: inherit; min-height: 44px; }
+#photos-dialog #photos-inputs small { grid-column: 1 / -1; }
+#photos-dialog .observation-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+#photos-dialog #photos-close { flex: 0 0 auto; }
+#photos-dialog input:focus-visible, #photos-dialog select:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+@media (max-width: 600px) { #photos-dialog .form-grid.two-columns { grid-template-columns: 1fr; } #photos-dialog { padding: 20px; } }
+
+/* Fil conducteur: four stable stages, without a parallel application state. */
+#beginner-guide { grid-column: 1; grid-row: 1 / span 3; align-self: start; padding: 24px 12px; }
+#beginner-guide ol { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 28px; }
+#beginner-guide li { display: grid; grid-template-columns: 32px 1fr; column-gap: 10px; color: var(--muted); }
+#beginner-guide li small { grid-column: 2; }
+#beginner-guide .beginner-number { grid-row: span 2; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: var(--night-soft); }
+#beginner-guide li.active { color: var(--ink); }
+#beginner-guide li.active .beginner-number { background: var(--cyan); color: var(--night); }
+body.beginner-layout main.shell { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 24px; max-width: 1280px; align-items: start; }
+body.beginner-layout main.shell > :not(#beginner-guide) { grid-column: 2; min-width: 0; width: 100%; margin-left: 0; margin-right: 0; }
+body.beginner-layout .availability-panel, body.beginner-layout .onboarding { max-width: none; }
+#beginner-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 22px 0; }
+#beginner-choice > label:not(#beginner-project-wrap) { display: flex; align-items: center; gap: 10px; padding: 16px; border: 1px solid var(--line-bright); border-radius: 12px; }
+#beginner-project-wrap { grid-column: 1 / -1; }
+#beginner-choice input { width: 24px; height: 24px; flex-shrink: 0; accent-color: var(--cyan); }
+#beginner-choice select { width: 100%; margin-top: 8px; min-height: 44px; padding: 12px; background: var(--panel-strong); color: var(--ink); border: 1px solid var(--line-bright); border-radius: 9px; font: inherit; }
+#beginner-context-details { margin-bottom: 20px; }
+#beginner-saved-missions { margin: 22px 0; }
+#beginner-tri { display: grid; gap: 16px; }
+#beginner-tri h3, #beginner-tri p { margin: 0; }
+#beginner-follow { width: min(520px, calc(100% - 24px)); }
+.beginner-follow-actions { display: grid; gap: 16px; }
+.beginner-help-button { display: inline-grid; place-items: center; border: 1px solid var(--line-bright); color: var(--ink); background: var(--night-soft); border-radius: 50%; min-width: 32px; min-height: 32px; margin: 4px 8px; }
+#beginner-help { position: fixed; z-index: 10000; max-width: min(320px, calc(100vw - 16px)); background: var(--panel-strong); color: var(--ink); border: 1px solid var(--line-bright); border-radius: 10px; padding: 14px; box-shadow: var(--shadow); }
+html[data-ui-mode="simple"] body.beginner-layout #message-details,
+html[data-ui-mode="simple"] body.beginner-layout #decision-metrics,
+html[data-ui-mode="simple"] body.beginner-layout .insights,
+html[data-ui-mode="simple"] body.beginner-layout #equipment-catalogue,
+html[data-ui-mode="simple"] body.beginner-layout #target-suggestions > details,
+html[data-ui-mode="simple"] body.beginner-layout #session-intent,
+html[data-ui-mode="simple"] body.beginner-layout #session-progress,
+html[data-ui-mode="simple"] body.beginner-layout #session-evidence,
+html[data-ui-mode="simple"] body.beginner-layout #session-credit,
+html[data-ui-mode="simple"] body.beginner-layout #session-next-step,
+html[data-ui-mode="simple"] body.beginner-layout #saved-observations-open,
+html[data-ui-mode="simple"] body.beginner-layout #configuration-projects,
+html[data-ui-mode="simple"] body.beginner-layout #availability-edit-configuration,
+html[data-ui-mode="simple"] body.beginner-layout #open-observation-catalogue,
+html[data-ui-mode="simple"] body.beginner-layout .observation-diagnostics,
+html[data-ui-mode="simple"] body.beginner-layout #outcome-trace,
+html[data-ui-mode="simple"] body.beginner-layout #history-section,
+html[data-ui-mode="simple"] body.beginner-layout .tonight-section-title,
+html[data-ui-mode="simple"] body.beginner-layout .mission-overview > :last-child { display: none !important; }
+html[data-ui-mode="simple"] body.beginner-layout .observation-advanced-grid > label:has(#observation-hfr),
+html[data-ui-mode="simple"] body.beginner-layout .observation-advanced-grid > label:has(#observation-hfr-unit),
+html[data-ui-mode="simple"] body.beginner-layout .observation-advanced-grid > label:has(#observation-guiding-rms) { display: none; }
+html[data-ui-mode="pro"] #beginner-tri, html[data-ui-mode="pro"] #beginner-guide,
+html[data-ui-mode="pro"] #beginner-choice, html[data-ui-mode="pro"] .beginner-help-button { display: none; }
+html[data-ui-mode="simple"] body.beginner-layout .mission-overview { grid-template-columns: 1fr 1fr; }
+html[data-ui-mode="simple"] body.beginner-layout #session-start.secondary-button { display: none; }
+html[data-ui-mode="simple"] body.beginner-layout #session-close-actions .primary-button { width: 100%; }
+html[data-ui-mode="simple"] body.beginner-layout #session-interrupt { margin-top: 12px; }
+html[data-ui-mode="simple"] body.beginner-layout .insight-grid { grid-template-columns: 1fr; }
+html[data-ui-mode="simple"] body.beginner-layout .project-summary { display: none; }
+@media (max-width: 760px) {
+ body.beginner-layout main.shell { grid-template-columns: minmax(0,1fr); gap: 18px; }
+ body.beginner-layout main.shell > :not(#beginner-guide) { grid-column: 1; }
+ #beginner-guide { grid-column: 1; grid-row: auto; padding: 12px 0; }
+ #beginner-guide > p { display: none; }
+ #beginner-guide ol { grid-template-columns: repeat(4,minmax(0,1fr)); gap: 4px; margin: 0; }
+ #beginner-guide li { display: flex; flex-direction: column; align-items: center; gap: 5px; text-align: center; }
+ #beginner-guide li small { display: none; }
+ #beginner-guide li strong { font-size: 11px; font-weight: 500; }
+ #beginner-choice { grid-template-columns: 1fr; }
+ .beginner-help-button { min-width: 44px; min-height: 44px; }
+}
+/* Keep the optional context out of the main reading path. */
+html[data-ui-mode="simple"] body.beginner-layout #availability-altitude-guidance,
+html[data-ui-mode="simple"] body.beginner-layout .page-footer [data-open-analysis-history] { display: none !important; }
+html[data-ui-mode="simple"] body.beginner-layout #beginner-choice { border: 0; padding: 0; }
+body .beginner-help-button { display: inline-grid; width: 32px; height: 32px; padding: 0; vertical-align: middle; }
+body .availability-modes legend:has(.beginner-help-button) { display: flex; align-items: center; }
+@media (pointer: coarse) { body .beginner-help-button { width: 44px; height: 44px; } }
+/* Headings receive programmatic focus for navigation, without an input-like frame. */
+body.beginner-layout h2[tabindex="-1"]:focus { outline: none; }
+#beginner-follow { max-height: calc(100dvh - 24px); box-sizing: border-box; overflow: auto; padding: 24px; color: var(--ink); background: var(--night-soft); border: 1px solid var(--line-bright); border-radius: var(--radius); }
+#beginner-follow::backdrop { background: rgba(1, 6, 12, .82); }
+#beginner-follow .help-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+#beginner-follow h2 { margin: 0; }
+
+/* A saved comparison is read automatically. Keep explicit actions for missing
+   comparisons or a retry, and keep all controls in Advanced presentation. */
+html[data-ui-mode="simple"] .outcome-panel:has(#outcome-result[data-comparison-state="shown"]) > #outcome-read,
+html[data-ui-mode="simple"] .outcome-panel:has(#outcome-result[data-comparison-state="shown"]) > #outcome-compare {
+  display: none;
+}
+
+/* Put discovery first; the manual form opens only after an explicit choice. */
+html[data-ui-mode="simple"] .discovery-entry { display: grid; gap: 12px; margin: 24px 0; padding: 20px; border: 1px solid var(--line-bright); border-radius: 12px; }
+html[data-ui-mode="simple"] .discovery-entry > button { width: 100%; min-height: 48px; }
+html[data-ui-mode="simple"] .discovery-entry > p { margin: 0 0 8px; }
+html[data-ui-mode="simple"] #project-create:not([open]) { display: none; }
+
+#demo-banner { max-width: 1200px; margin: 16px auto; padding: 16px 20px; border: 2px solid #e6b75d; border-radius: 10px; background: #332b18; color: #fff2cd; font-weight: 600; }
+#demo-banner[hidden] { display: none; }
+
+.demo-dialog-note { margin: 12px 20px; padding: 12px; border: 1px solid #e6b75d; border-radius: 8px; background: #332b18; color: #fff2cd; font-weight: 600; }
+
+/* Project balance stays readable without changing saved goals or credits. */
+.project-balance { margin: 16px 0; min-width: 0; }
+.project-balance table { width: 100%; table-layout: fixed; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.project-balance caption { text-align: left; font-weight: 650; padding: 0 0 12px; }
+.project-balance th, .project-balance td { text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); padding: 12px 8px; overflow-wrap: anywhere; }
+.project-balance thead th { color: var(--muted); font-size: .86rem; font-weight: 500; }
+.project-balance tbody th { color: var(--cyan); }
+.project-balance th:first-child { width: 16%; }
+.project-balance td small { display: block; font-size: .78rem; margin-top: 5px; }
+.project-balance .field-note { font-size: .85rem; line-height: 1.5; color: var(--muted); }
+@media (max-width: 600px) {
+  .project-balance th, .project-balance td { padding: 10px 4px; font-size: .8rem; }
+  .project-balance thead th { font-size: .76rem; }
+  .project-balance .field-note { font-size: .78rem; }
+}
+
+.operational-timing { grid-column: 1 / -1; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+.operational-timing summary { cursor: pointer; color: var(--cyan); }
+.operational-timing p { color: var(--muted); font-size: .9rem; line-height: 1.5; }
+
+.refusal-summary { margin: 18px 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; min-width: 0; overflow-wrap: anywhere; }
+.refusal-summary h3 { margin: 0 0 10px; font-size: 1rem; }
+.refusal-summary p { margin: 10px 0; line-height: 1.5; }
+.refusal-summary .field-note { font-size: .85rem; color: var(--muted); }
+.refusal-summary details { margin-top: 12px; }
+.refusal-summary summary { cursor: pointer; color: var(--cyan); }
+.refusal-summary-row { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+
+/* Long kit names remain readable in the backup guide on narrow screens. */
+#backup-guide-copy { overflow-wrap: anywhere; }
+#backup-guide-dialog li { margin-block: .7em; }

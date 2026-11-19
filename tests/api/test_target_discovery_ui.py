@@ -54,9 +54,12 @@ def test_reference_license_and_retrieve_saved_alias_use_the_actual_renderer():
     } for key, alias in [('IC1805', 'Heart'), ('IC1848', 'Soul')]], 'notice': 'Prévisions fictives'}
     program = r'''
 const assert=require('node:assert/strict');
-class E {constructor(tag='node'){this.tag=tag;this.children=[];this.handlers={};this.textContent='';}append(...nodes){this.children.push(...nodes);}replaceChildren(...nodes){this.children=[...nodes];}addEventListener(type,fn){this.handlers[type]=fn;}focus(){}}
+class E {constructor(tag='node'){this.tag=tag;this.children=[];this.dataset={};this.handlers={};this.textContent='';}append(...nodes){this.children.push(...nodes);}replaceChildren(...nodes){this.children=[...nodes];}addEventListener(type,fn){this.handlers[type]=fn;}focus(){}}
 const nodes={};const document={querySelector:key=>nodes[key] ||= new E(),createElement:tag=>new E(tag),createTextNode:text=>({textContent:text,children:[]})};
 const state={configuration:{projects:{Heart:{hours:7},Soul:{hours:2}}}};
+const appliedUiMode="pro";
+function renderRefusalEvidence() {}
+function refusalSiteTimezone() {return "Europe/Zurich";}
 let opened=[],locked=false;
 function setView(){} function renderEquipmentCatalogue(){}
 function currentSiteTimezone(){return 'Europe/Zurich';}function missionDateTimeLabel(value){return value;}

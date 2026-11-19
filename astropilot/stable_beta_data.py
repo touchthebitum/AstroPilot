@@ -14,7 +14,7 @@ from astropilot.durable_file_publication import fsync_directory
 
 SCHEMA = 'nightmerit.stable_private_beta.v1'
 MARKER = 'stockage-beta.json'
-RESERVED = {MARKER, 'profil', 'SAUVEGARDES-AUTO', '.publication', '.nightmerit-session.lock',
+RESERVED = {'.nightmerit-restoration.lock', MARKER, 'profil', 'SAUVEGARDES-AUTO', '.publication', '.nightmerit-session.lock',
             '.nightmerit-profile-transfer.lock'}
 
 
