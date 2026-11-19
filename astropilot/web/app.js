@@ -130,6 +130,8 @@ const state = {
   decisionSiteReloadRequired: false,
   acceptedMission: null,
   savedMissions: [],
+  missionWeatherChecks: {},
+  missionWeatherOrigins: {},
   pendingAcceptanceAttempt: null,
   pendingAcceptanceStorageInvalid: false,
   acceptingRecommendation: false,
@@ -300,8 +302,11 @@ async function guardianTransitionHeaders(executionId) {
     "X-Guardian-Owner-Instance-Id": value.owner_instance_id} : {};
 }
 
-function sessionMessage(message) {
+function sessionMessage(message, {error = false, success = false} = {}) {
   text("#session-status", message);
+  const element = document.querySelector("#session-status");
+  element.classList?.toggle("error", error);
+  element.classList?.toggle("confirmation-success", success && !error);
 }
 
 function sessionHours(seconds) {
@@ -319,28 +324,85 @@ function usableEvidence(session) {
     && Number(item.usable_integration_duration) > 0);
 }
 
+// An explicit zero is a supplied observation; null or a missing record is unknown.
+// A subsequent positive observation (revised sorting) takes precedence.
+function noRetainedImages(session) {
+  return session?.execution.status === "completed" && !session.credit && !usableEvidence(session)
+    && (session.evidence || []).some(item => item.category === "acquisition"
+      && item.source === "user" && item.usable_integration_duration === 0);
+}
+
 function sessionStatus(status) {
   return ({unconfirmed: "Session non confirmée", completed: "Terminée", interrupted: "Interrompue",
     in_progress: "En cours", not_started: "À démarrer"})[status] || status;
+}
+
+function sessionEvidenceDuration() {
+  const method = document.querySelector("#session-duration-method").value;
+  if (method === "frames") {
+    const frames = Number(document.querySelector("#session-retained-frames").value);
+    const seconds = Number(document.querySelector("#session-frame-seconds").value);
+    const total = frames * seconds;
+    return Number.isSafeInteger(frames) && frames > 0 && Number.isFinite(seconds) && seconds >= 0.000001
+      && Number.isFinite(total) && total <= Number.MAX_SAFE_INTEGER ? total : null;
+  }
+  const hours = Number(document.querySelector("#session-hours").value);
+  const minutes = Number(document.querySelector("#session-minutes").value);
+  const seconds = Number(document.querySelector("#session-seconds").value);
+  const total = (hours * 60 + minutes) * 60 + seconds;
+  return Number.isInteger(hours) && hours >= 0 && Number.isInteger(minutes) && minutes >= 0
+    && minutes <= 59 && Number.isFinite(seconds) && seconds >= 0 && seconds < 60
+    && Number.isFinite(total) && total >= 0.000001 && total <= Number.MAX_SAFE_INTEGER ? total : null;
+}
+
+function usablePoseDuration(seconds) {
+  if (seconds == null) return "inconnu";
+  seconds = Math.round(seconds * 1000000) / 1000000;
+  const whole = Math.floor(seconds);
+  const remainder = Math.round((seconds - whole) * 1000000) / 1000000;
+  const trailing = (whole % 60) + remainder;
+  return `${Math.floor(whole / 3600)} h ${String(Math.floor(whole / 60) % 60).padStart(2, "0")}`
+    + (trailing ? ` ${String(trailing).replace(".", ",")} s` : "");
+}
+
+function updateSessionDurationPreview() {
+  const frames = document.querySelector("#session-duration-method").value === "frames";
+  document.querySelector("#session-frames-inputs").hidden = !frames;
+  document.querySelector("#session-duration-inputs").hidden = frames;
+  const seconds = sessionEvidenceDuration();
+  if (seconds != null) sessionMessage("Vérifiez le total ci-dessous, puis enregistrez la durée.");
+  text("#session-duration-preview", seconds == null
+    ? (frames ? "Renseignez les clichés conservés et leur durée pour calculer le total." : "Indiquez le temps de pose total des images conservées.")
+    : `Temps de pose à enregistrer pour cette session : ${usablePoseDuration(seconds)}.`);
 }
 
 function restoreSessionEvidenceInputs(session) {
   const executionId = session?.execution.execution_id || null;
   if (executionId === state.sessionEvidenceInputExecutionId) return;
   state.sessionEvidenceInputExecutionId = executionId;
-  let minutes = 0;
   const evidence = usableEvidence(session);
-  if (evidence) {
-    minutes = Math.round(Number(evidence.usable_integration_duration) / 60);
-  } else if (executionId) {
-    const saved = JSON.parse(localStorage.getItem(`astropilot.pendingEvidence.${executionId}`) || "null");
-    if (Number.isInteger(saved?.minutes) && saved.minutes > 0) minutes = saved.minutes;
-  }
-  document.querySelector("#session-hours").value = String(Math.floor(minutes / 60));
-  document.querySelector("#session-minutes").value = String(minutes % 60);
+  const pending = executionId ? JSON.parse(localStorage.getItem(`astropilot.pendingEvidence.${executionId}`) || "null") : null;
+  const savedSeconds = Number.isFinite(pending?.seconds) ? pending.seconds
+    : Number.isFinite(pending?.minutes) ? pending.minutes * 60 : 0;
+  const total = evidence ? Number(evidence.usable_integration_duration) : Math.max(0, savedSeconds);
+  document.querySelector("#session-duration-method").value = evidence || total > 0 ? "duration" : "frames";
+  document.querySelector("#session-retained-frames").value = pending?.frames ?? "";
+  document.querySelector("#session-frame-seconds").value = pending?.frame_seconds ?? "";
+  if (!evidence && pending?.method === "frames") document.querySelector("#session-duration-method").value = "frames";
+  document.querySelector("#session-hours").value = String(Math.floor(total / 3600));
+  document.querySelector("#session-minutes").value = String(Math.floor(total / 60) % 60);
+  document.querySelector("#session-seconds").value = String(Math.round((total % 60) * 1000000) / 1000000);
+  updateSessionDurationPreview();
+}
+
+function updateMissionConditionsControl() {
+  document.querySelector("#mission-check-conditions").disabled = !state.missionConditionsReady
+    || state.requestingRecommendation || state.sessionBusy || state.sessionWriteUncertain
+    || state.sessions.some(item => ["in_progress", "unconfirmed"].includes(item.execution?.status));
 }
 
 function renderSession() {
+  updateMissionConditionsControl();
   const session = currentSession();
   restoreSessionEvidenceInputs(session);
   const status = session?.execution.status;
@@ -354,7 +416,7 @@ function renderSession() {
   choice.replaceChildren();
   const noSessionOption = document.createElement("option");
   noSessionOption.value = "";
-  noSessionOption.textContent = "Sans session";
+  noSessionOption.textContent = "Sans séance photo";
   choice.append(noSessionOption);
   for (const item of state.sessions) {
     const option = document.createElement("option");
@@ -363,21 +425,26 @@ function renderSession() {
     const startLabel = item.execution.actual_start
       ? missionDateTimeLabel(item.execution.actual_start, missionTimezone(item.mission, context))
       : "À démarrer";
-    option.textContent = `${startLabel} · ${sessionStatus(item.execution.status)}`;
+    option.textContent = `${startLabel} · ${noRetainedImages(item) ? "Aucune image retenue" : sessionStatus(item.execution.status)}`;
     choice.append(option);
   }
   choice.hidden = !state.sessions.length;
   choice.value = session?.execution.execution_id || "";
   const intentId = session?.acquisition_intent_id || state.acceptedMission?.acquisitionIntentId;
   text("#session-intent", `Intent de la mission : ${intentId || "non défini"}`);
-  document.querySelector("#session-start").hidden = Boolean(session) && (!knownStatus || status === "in_progress" || status === "unconfirmed");
+  document.querySelector("#session-start").hidden = state.missionConditionsReady === false
+    || (!session && state.sessions.some(item => ["in_progress", "unconfirmed"].includes(item.execution.status)))
+    || Boolean(session) && (!knownStatus || status === "in_progress" || status === "unconfirmed");
   document.querySelector("#session-start").textContent = status === "not_started"
-    ? "Démarrer cette session" : "Démarrer une nouvelle session";
+    ? "Démarrer cette séance photo" : "Démarrer une nouvelle séance photo";
   // Presentation only: saving usable duration and then adding progress take precedence.
   document.querySelector("#session-start").className = status === "completed" && !session.credit
     ? "secondary-button" : "primary-button";
   document.querySelector("#session-close-actions").hidden = status !== "in_progress";
-  document.querySelector("#session-evidence").hidden = status !== "completed" || Boolean(usableEvidence(session));
+  document.querySelector("#session-no-images").hidden = status !== "completed"
+    || Boolean(usableEvidence(session)) || Boolean(session?.credit) || noRetainedImages(session);
+  document.querySelector("#session-evidence").hidden = status !== "completed"
+    || Boolean(usableEvidence(session)) || noRetainedImages(session);
   const evidence = usableEvidence(session);
   const nextStep = !session
     ? "Démarrez une session uniquement lorsque vous commencez réellement vos prises de vue."
@@ -391,14 +458,16 @@ function renderSession() {
             ? "Après vos prises de vue, terminez la session. Vous pourrez ensuite renseigner le temps de pose des images utilisables."
             : session.credit
               ? "Cette durée a déjà été ajoutée au projet. Ne la recopiez pas dans votre temps de départ. Le total acquis et le temps restant sont affichés ci-dessous."
+              : noRetainedImages(session)
+                ? "Aucune image retenue : ce résultat est enregistré. Aucun temps n’a été ajouté au projet."
               : evidence
                 ? "La durée utilisable est enregistrée, mais pas encore ajoutée au projet. Vérifiez les valeurs, puis cliquez sur « Ajouter cette durée à mon avancement »."
-                : "Session terminée : renseignez ci-dessous le temps de pose des images utilisables de cette session. Si aucune image n’est utilisable, n’ajoutez aucune durée au projet.";
+                : "Séance photo terminée : renseignez ci-dessous le temps de pose des images utilisables de cette séance. Si aucune image n’est utilisable, n’ajoutez aucune durée au projet.";
   text("#session-next-step", nextStep);
   document.querySelector("#session-credit").hidden = status !== "completed" || !evidence || Boolean(session.credit);
   document.querySelector("#session-apply-credit").disabled = state.sessionBusy || status !== "completed";
   if (status === "completed" && evidence && !session.credit) {
-    text("#session-credit-preview", `Base historique : ${sessionHours(session.historical_baseline_seconds)} · crédit proposé : ${sessionHours(Number(evidence.usable_integration_duration))}`);
+    text("#session-credit-preview", (Number(session.historical_baseline_seconds) > 0 ? `Temps déjà acquis avant vos sessions NightMerit : ${usablePoseDuration(session.historical_baseline_seconds)}. ` : "") + `Temps à ajouter pour cette session : ${usablePoseDuration(Number(evidence.usable_integration_duration))}.`);
     text("#session-credit-intent", `Intent : ${session.acquisition_intent_id}`);
     const mustConfirm = Number(session.historical_baseline_seconds) > 0 && !session.historical_baseline_confirmed;
     document.querySelector("#session-baseline-confirm-wrap").hidden = !mustConfirm;
@@ -406,24 +475,28 @@ function renderSession() {
   }
   document.querySelector("#session-progress").hidden = !session;
   if (session) {
-    text("#session-before-label", session.credit ? "Acquis avant ce crédit" : "Acquis actuel (avant crédit)");
-    text("#session-after-label", session.credit ? "Acquis après ce crédit" : "Acquis projeté sans crédit");
-    text("#session-before", sessionHours(session.acquired_before_seconds));
-    text("#session-added", sessionHours(session.session_credit_seconds));
-    text("#session-after", sessionHours(session.acquired_after_seconds));
-    text("#session-current", sessionHours(session.current_acquired_seconds));
-    text("#session-remaining", session.target_hours == null ? "objectif non défini" : sessionHours(session.remaining_hours * 3600));
+    text("#session-before-label", session.credit ? "Acquis avant cette session" : "Acquis actuel (avant ajout)");
+    text("#session-after-label", session.credit ? "Acquis après cette session" : "Acquis actuel (durée pas encore ajoutée)");
+    text("#session-before", usablePoseDuration(session.acquired_before_seconds));
+    text("#session-added", usablePoseDuration(session.session_credit_seconds));
+    text("#session-after", usablePoseDuration(session.acquired_after_seconds));
+    text("#session-current", usablePoseDuration(session.current_acquired_seconds));
+    text("#session-remaining", session.target_hours == null ? "objectif non défini" : usablePoseDuration(session.remaining_hours * 3600));
     sessionMessage(!knownStatus ? "État de session non reconnu. Actualisez ou resélectionnez la session."
       : status === "unconfirmed" ? "Session non confirmée : aucune action disponible."
       : status === "interrupted" ? "Session interrompue : aucun crédit."
-      : session.credit ? "Crédit enregistré." : status === "completed" ? "Session terminée."
-      : status === "in_progress" ? "Session en cours." : "Session prête à démarrer.");
-  } else sessionMessage("Aucune session enregistrée pour cette mission.");
+      : noRetainedImages(session) ? "Aucune image retenue : résultat enregistré, aucun crédit."
+      : session.credit ? "Cette durée a été ajoutée à votre projet." : status === "completed" ? "Séance photo terminée."
+      : status === "in_progress" ? "Session en cours." : "Session prête à démarrer.",
+      {error: !knownStatus || status === "unconfirmed", success: Boolean(session.credit) || status === "completed"});
+  } else sessionMessage(!state.missionConditionsReady ? "Lecture des sessions enregistrées…"
+    : state.sessions.length ? "Choisissez une session enregistrée dans la liste pour la retrouver."
+    : "Aucune séance photo enregistrée pour ce plan.");
   renderObservationLinkage();
   renderGuardianRenewal();
 }
 
-async function reloadSessions({ selectId = null, readGuardian = true } = {}) {
+async function reloadSessions({ selectId = null, readGuardian = true, resumeExisting = false } = {}) {
   const missionId = state.acceptedMission?.mission_id;
   if (!missionId) return;
   const response = await sessionFetch(`/v1/missions/${encodeURIComponent(missionId)}/executions`);
@@ -431,12 +504,16 @@ async function reloadSessions({ selectId = null, readGuardian = true } = {}) {
   const sessions = await response.json();
   if (state.acceptedMission?.mission_id !== missionId) return;
   state.sessions = sessions;
+  state.missionConditionsReady = true;
   const pending = JSON.parse(localStorage.getItem(SESSION_PENDING_KEY) || "null");
   const candidate = selectId || (pending?.mission_id === missionId ? pending.execution_id : null);
   const explicitlySelectedExecutionId = state.fieldObservationSelectedExecutionId;
+  const unfinished = sessions.filter(item => ["in_progress", "unconfirmed"].includes(item.execution.status));
+  const resumed = resumeExisting ? (unfinished.length === 1 ? unfinished[0]
+    : unfinished.length === 0 && sessions.length === 1 ? sessions[0] : null) : null;
   state.activeSessionId = sessions.some((item) => item.execution.execution_id === candidate)
     ? candidate : sessions.some((item) => item.execution.execution_id === state.activeSessionId)
-      ? state.activeSessionId : null;
+      ? state.activeSessionId : resumed?.execution.execution_id || null;
   state.fieldObservationSelectedExecutionId = sessions.some(
     (item) => item.execution.execution_id === explicitlySelectedExecutionId,
   ) ? explicitlySelectedExecutionId : null;
@@ -470,11 +547,11 @@ async function sessionCommand(command, { transition = false } = {}) {
       sessionMessage(state.sessionWriteUncertain
         ? "État relu après une réponse incertaine. Vérifiez la session avant de poursuivre."
         : state.sessionWriteAttempted && error?.status ? sessionRefusalMessage(error)
-        : "Lecture ou reprise échouée. État actuel relu ; vérifiez avant de poursuivre.");
+        : "Lecture ou reprise échouée. État actuel relu ; vérifiez avant de poursuivre.", {error: true});
     } catch (_readError) {
       sessionMessage(state.sessionWriteAttempted && error?.status
         ? `${sessionRefusalMessage(error)} Lecture impossible ; rechargez la page.`
-        : "Lecture impossible. Rechargez la page avant une nouvelle action.");
+        : "Lecture impossible. Rechargez la page avant une nouvelle action.", {error: true});
     }
   } finally {
     state.sessionBusy = false;
@@ -482,6 +559,7 @@ async function sessionCommand(command, { transition = false } = {}) {
     state.sessionWriteUncertain = false;
     document.querySelectorAll(".session-panel button").forEach((button) => { button.disabled = false; });
     document.querySelector("#session-apply-credit").disabled = currentSession()?.execution.status !== "completed";
+    updateMissionConditionsControl();
     renderGuardianRenewal();
   }
 }
@@ -553,19 +631,36 @@ async function closeSession(missionId, status) {
   }, await guardianTransitionHeaders(session.execution.execution_id));
 }
 
+async function recordSessionNoImages() {
+  const session = currentSession();
+  if (session?.execution.status !== "completed" || session.credit
+      || usableEvidence(session) || noRetainedImages(session)) return;
+  const key = `astropilot.pendingNoImages.${session.execution.execution_id}`;
+  // Keep the entire request stable if a response is lost and the user retries.
+  const payload = JSON.parse(localStorage.getItem(key) || "null") || {
+    evidence_id: crypto.randomUUID(), execution_id: session.execution.execution_id,
+    category: "acquisition", observed_at: new Date().toISOString(), source: "user",
+    usable_integration_duration: 0,
+  };
+  localStorage.setItem(key, JSON.stringify(payload));
+  await postSession("/v1/outcome-evidence", payload);
+  localStorage.removeItem(key);
+}
+
 async function recordSessionEvidence() {
   const session = currentSession();
   if (session?.execution.status !== "completed" || usableEvidence(session)) return;
-  const hours = Number(document.querySelector("#session-hours").value);
-  const minutes = Number(document.querySelector("#session-minutes").value);
-  if (!Number.isInteger(hours) || hours < 0 || !Number.isInteger(minutes) || minutes < 0 || minutes > 59 || hours * 60 + minutes <= 0) {
-    sessionMessage("Saisissez une durée utilisable positive en heures et minutes.");
+  const seconds = sessionEvidenceDuration();
+  if (seconds == null) {
+    sessionMessage(document.querySelector("#session-duration-method").value === "frames"
+      ? "Indiquez un nombre entier de clichés conservés supérieur à zéro et une durée par cliché supérieure à zéro."
+      : "Saisissez une durée utilisable positive en heures, minutes et secondes (minutes de 0 à 59 ; secondes de 0 à moins de 60).", {error: true});
     return;
   }
   const key = `astropilot.pendingEvidence.${session.execution.execution_id}`;
   const saved = JSON.parse(localStorage.getItem(key) || "null");
   const evidenceId = saved?.evidence_id || crypto.randomUUID();
-  localStorage.setItem(key, JSON.stringify({ evidence_id: evidenceId, minutes: hours * 60 + minutes }));
+  localStorage.setItem(key, JSON.stringify({ evidence_id: evidenceId, minutes: seconds / 60, seconds, method: document.querySelector("#session-duration-method").value, frames: document.querySelector("#session-retained-frames").value, frame_seconds: document.querySelector("#session-frame-seconds").value }));
   const lookup = await fetch(`/v1/executions/${encodeURIComponent(session.execution.execution_id)}/session`);
   if (!lookup.ok) throw await sessionHttpError(lookup);
   const canonical = await lookup.json();
@@ -573,21 +668,21 @@ async function recordSessionEvidence() {
   await postSession("/v1/outcome-evidence", {
     evidence_id: evidenceId, execution_id: session.execution.execution_id,
     category: "acquisition", observed_at: new Date().toISOString(), source: "user",
-    usable_integration_duration: (hours * 60 + minutes) * 60,
+    usable_integration_duration: seconds,
   });
 }
 
 async function creditSession(_missionId, confirmed) {
   const session = currentSession();
   if (session?.execution.status !== "completed") {
-    sessionMessage("Seule une session terminée peut ajouter une durée à votre avancement : aucun crédit pour cette session.");
+    sessionMessage("Seule une session terminée peut ajouter une durée à votre avancement : aucun crédit pour cette session.", {error: true});
     return;
   }
   const evidence = usableEvidence(session);
   if (!evidence || session.credit) return;
   const mustConfirm = Number(session.historical_baseline_seconds) > 0 && !session.historical_baseline_confirmed;
   if (mustConfirm && !confirmed) {
-    sessionMessage("Confirmez la valeur historique affichée avant de créditer.");
+    sessionMessage("Confirmez la valeur historique affichée avant de créditer.", {error: true});
     return;
   }
   await postSession(`/v1/executions/${encodeURIComponent(session.execution.execution_id)}/intent-progress-credit`, {
@@ -600,6 +695,8 @@ const OBSERVATION_CHOICES = Object.freeze({
   clouds: Object.freeze(["clear", "few", "partly_cloudy", "mostly_cloudy", "overcast"]),
   transparency: Object.freeze(["poor", "fair", "good", "excellent"]),
 });
+const OBSERVATION_WIND_STRENGTH = Object.freeze({none:"Aucun", light:"Faible", moderate:"Modéré", strong:"Fort", unknown:"Je ne sais pas"});
+const OBSERVATION_WIND_IMPACT = Object.freeze({none:"Aucune gêne constatée", vibrations:"Vibrations du matériel", elongated_stars:"Étoiles déformées", impossible:"Séance impossible", unknown:"Je ne sais pas"});
 const OBSERVATION_SEEING_CHOICES = Object.freeze(["poor", "fair", "good", "excellent"]);
 const OBSERVATION_STOP_REASONS = Object.freeze([
   "completed", "clouds", "dew", "wind", "technical", "target_lost", "user", "daylight", "not_started", "other",
@@ -791,8 +888,20 @@ function renderObservationLinkage() {
   const element = document.querySelector("#observation-linkage");
   if (!element) return;
   const context = state.fieldObservationDraftContext;
-  element.textContent = context?.execution_id
-    ? "Session liée" : "Sans session";
+  const session = currentSession();
+  const mission = state.acceptedMission?.mission;
+  if (context?.execution_id && session?.execution.execution_id === context.execution_id
+      && session.mission_id === context.mission_id) {
+    const target = mission?.target || "ce projet";
+    const filter = mission?.selected_filter?.name || mission?.selected_filter?.filter_type;
+    const started = session.execution.actual_start
+      ? ` · démarrée le ${missionDateTimeLabel(session.execution.actual_start, context.timezone)}` : "";
+    element.textContent = `Ce relevé sera lié à la session de ${target}${filter ? ` · ${filter}` : ""}${started}.`;
+  } else {
+    element.textContent = context?.execution_id
+      ? "Ce relevé sera lié à la session choisie."
+      : "Relevé météo indépendant · aucune session photo associée.";
+  }
   const night = context?.night_date ? ` · nuit du ${context.night_date}` : "";
   text("#observation-context-decision", context
     ? `Décision associée${night}` : "Décision indisponible");
@@ -867,6 +976,16 @@ function acceptedMissionMatchesSite() {
     && mission.acceptedSiteGeneration === state.decisionSiteGeneration
     && mission?.acceptedSiteFingerprint === decisionSiteFingerprint();
 }
+// A restored mission can authorize observation capture only after its archived
+// requested site was checked. This does not authorize a new mission or analysis.
+function restoredMissionObservationMatchesSite() {
+  const mission = state.acceptedMission;
+  const proof = mission?.observationSiteProof;
+  return mission?.source === "persisted" && !state.decisionSiteReloadRequired
+    && !!decisionSiteFingerprint() && proof?.fingerprint === decisionSiteFingerprint()
+    && proof?.siteGeneration === state.decisionSiteGeneration
+    && proof?.configurationGeneration === state.configurationGeneration;
+}
 function currentDecisionMatchesSite() {
   const fingerprint = decisionSiteFingerprint();
   if (state.decisionSiteReloadRequired || !fingerprint || state.currentDecisionSiteFingerprint !== fingerprint) return false;
@@ -924,7 +1043,9 @@ function observationContext(source) {
   if (state.decisionSiteReloadRequired) return null;
   if (source === "catalogue") return {decision_id: null, execution_id: null, night_date: null,
     source, timezone: siteTimezone(), site_identity: siteConfigurationIdentity(), mission_id: null};
-  if (source === "mission" ? !acceptedMissionMatchesSite() : !currentDecisionMatchesSite()) return null;
+  if (source === "mission"
+      ? !(acceptedMissionMatchesSite() || restoredMissionObservationMatchesSite())
+      : !currentDecisionMatchesSite()) return null;
   const decision = source === "mission" ? state.acceptedMission : state.currentDecision;
   const decisionId = decision?.decision_id;
   if (!decisionId) return null;
@@ -1067,6 +1188,61 @@ function fieldObservationConflictMessage() {
   return "Conflit d’observation : le relevé précédent doit être résolu avant tout nouvel envoi. Le brouillon et son identifiant d’origine sont conservés ; utilisez « Réconcilier l’observation précédente ».";
 }
 
+// Clicking the session's own observation action is an explicit choice of context.
+// Do not infer this association for the general decision-screen action.
+async function openSessionFieldObservation() {
+  if (state.sessionBusy || state.sessionWriteUncertain || state.observationBusy) return;
+  const session = currentSession();
+  const missionId = state.acceptedMission?.mission_id;
+  if (session && session.mission_id !== missionId) {
+    sessionMessage("La session affichée ne correspond plus à cette mission. Rouvrez la mission avant de noter les conditions.", {error: true});
+    return;
+  }
+  if (session && !["not_started", "in_progress", "completed", "interrupted"].includes(session.execution.status)) {
+    sessionMessage("Vérifiez l’état de cette session avant de lui associer un relevé.", {error: true});
+    return;
+  }
+  const mission = state.acceptedMission;
+  if (mission?.source === "persisted" && !acceptedMissionMatchesSite()) {
+    const configuration = state.configuration;
+    const generation = state.configurationGeneration;
+    const siteGeneration = state.decisionSiteGeneration;
+    const revision = state.viewRevision;
+    const fingerprint = decisionSiteFingerprint();
+    const request = (state.observationSiteCheckSequence || 0) + 1;
+    state.observationSiteCheckSequence = request;
+    delete mission.observationSiteProof;
+    const stillCurrent = () => state.observationSiteCheckSequence === request
+      && state.acceptedMission === mission && currentSession() === session
+      && ui.mission.open && !state.sessionBusy && !state.observationBusy
+      && state.configuration === configuration && state.configurationGeneration === generation
+      && state.decisionSiteGeneration === siteGeneration && state.viewRevision === revision
+      && !state.decisionSiteReloadRequired && decisionSiteFingerprint() === fingerprint;
+    try {
+      sessionMessage("Vérification du site enregistré pour cette session…");
+      const canonical = await fieldObservationNetworkRequest(
+        `/v1/decisions/${encodeURIComponent(mission.decision_id)}/context`, {},
+        async response => response.ok ? response.json() : null);
+      if (!stillCurrent()) return;
+      const location = canonical?.requested_site;
+      if (!fingerprint || canonical?.decision_id !== mission.decision_id
+          || !Number.isFinite(location?.latitude) || !Number.isFinite(location?.longitude)
+          || location.latitude !== configuration.site.latitude
+          || location.longitude !== configuration.site.longitude
+          || mission.mission?.site_timezone !== siteTimezone()) {
+        sessionMessage("Le site enregistré de cette mission ne correspond pas au site actuel, ou ne peut pas être vérifié. Aucun relevé n’a été créé.", {error: true});
+        return;
+      }
+      mission.observationSiteProof = {fingerprint, siteGeneration, configurationGeneration: generation};
+    } catch (_) {
+      if (stillCurrent()) sessionMessage("Impossible de vérifier le site enregistré. Réessayez ; aucun relevé n’a été créé.", {error: true});
+      return;
+    }
+  }
+  state.fieldObservationSelectedExecutionId = session?.execution.execution_id || null;
+  openFieldObservation("mission");
+}
+
 function openFieldObservation(source) {
   const context = observationContext(source);
   if (!context || (!context.decision_id && source !== "catalogue")) {
@@ -1139,10 +1315,12 @@ function openFieldObservation(source) {
   }
 }
 
-function observationMessage(message, { error = false } = {}) {
+function observationMessage(message, { error = false, success = false } = {}) {
   const element = document.querySelector("#observation-status");
   element.textContent = message;
   element.classList.toggle("observation-error", error);
+  element.classList.toggle("confirmation-success", success && !error);
+  if (success && !error) element.scrollIntoView?.({block: "nearest"});
 }
 
 function optionalObservationNumber(selector) {
@@ -1271,6 +1449,12 @@ function fieldObservationDraftForContext(context) {
     surface_condition: surface,
     moon_halo: moonHalo === "" ? null : moonHalo === "true",
   };
+  const windStrength = document.querySelector("#observation-wind-strength")?.value || null;
+  const windImpact = document.querySelector("#observation-wind-impact")?.value || null;
+  if (windStrength !== null || windImpact !== null) {
+    conditions.wind_strength = windStrength;
+    conditions.wind_impact = windImpact;
+  }
   const acquisition = {
     attempted_frames: optionalObservationNumber("#observation-attempted-frames"),
     usable_frames: optionalObservationNumber("#observation-usable-frames"),
@@ -1393,10 +1577,12 @@ function validPendingFieldObservationPayload(payload, expectedContext) {
     || payload.quality_flags[1] !== "partial") return false;
 
   const conditions = payload.conditions;
-  if (!exactObservationKeys(conditions, [
-    "temperature_c", "relative_humidity_percent", "cloud_state", "transparency", "seeing",
-    "wind_speed_kmh", "surface_condition", "moon_halo",
-  ])) return false;
+  const conditionKeys = ["temperature_c", "relative_humidity_percent", "cloud_state", "transparency", "seeing",
+    "wind_speed_kmh", "surface_condition", "moon_halo"];
+  if (!exactObservationKeys(conditions, conditionKeys)
+      && !exactObservationKeys(conditions, [...conditionKeys, "wind_strength", "wind_impact"])) return false;
+  if (!validOptionalObservationChoice(conditions.wind_strength ?? null, Object.keys(OBSERVATION_WIND_STRENGTH))
+      || !validOptionalObservationChoice(conditions.wind_impact ?? null, Object.keys(OBSERVATION_WIND_IMPACT))) return false;
   if (!validOptionalObservationNumber(conditions.temperature_c)
     || !validOptionalObservationNumber(conditions.relative_humidity_percent, {minimum: 0, maximum: 100})
     || !validOptionalObservationChoice(conditions.cloud_state, OBSERVATION_CHOICES.clouds)
@@ -2400,6 +2586,8 @@ function restorePendingFieldObservation() {
   document.querySelector("#observation-clouds").value = payload.conditions?.cloud_state || "";
   document.querySelector("#observation-transparency").value = payload.conditions?.transparency || "";
   setOptionalObservationValue("#observation-wind", payload.conditions?.wind_speed_kmh);
+  setOptionalObservationValue("#observation-wind-strength", payload.conditions?.wind_strength);
+  setOptionalObservationValue("#observation-wind-impact", payload.conditions?.wind_impact);
   setOptionalObservationValue("#observation-temperature", payload.conditions?.temperature_c);
   setOptionalObservationValue("#observation-humidity", payload.conditions?.relative_humidity_percent);
   document.querySelector("#observation-seeing").value = payload.conditions?.seeing || "";
@@ -2592,6 +2780,7 @@ function clearOutcomePresentation() {
   if (trace) trace.textContent = "";
   const result = document.querySelector("#outcome-result");
   if (result.dataset) {
+    delete result.dataset.comparisonState;
     delete result.dataset.simpleText;
     delete result.dataset.proText;
   }
@@ -2714,7 +2903,7 @@ async function openSavedObservationRecord(item) {
   document.querySelector("#observation-title").textContent = "Observation enregistrée";
   document.querySelector("#observation-time-summary").textContent = savedObservationTime(observation.observed_at_utc, context.timezone);
   document.querySelector("#observation-context-decision").textContent = "Consultation d’un relevé enregistré";
-  document.querySelector("#observation-linkage").textContent = observation.execution_id ? "Liée à une session" : "Sans session photo";
+  document.querySelector("#observation-linkage").textContent = observation.execution_id ? "Liée à une session" : "Sans séance photo photo";
   ui.observation.showModal();
   await loadSavedFieldObservations(context);
   if (!ui.observation.open || state.fieldObservationDraftContext !== context) return;
@@ -2741,6 +2930,8 @@ function renderSavedObservationDetails() {
   const labels = {clear: "Dégagé", few: "Quelques nuages", partly_cloudy: "Partiellement couvert", mostly_cloudy: "Très nuageux", overcast: "Couvert", dry: "Sèche", damp: "Humide", dew_present: "Rosée"};
   const lines = [];
   if (conditions.cloud_state) lines.push(`Nuages : ${labels[conditions.cloud_state] || conditions.cloud_state}`);
+  if (conditions.wind_strength) lines.push(`Vent ressenti : ${OBSERVATION_WIND_STRENGTH[conditions.wind_strength] || conditions.wind_strength}`);
+  if (conditions.wind_impact) lines.push(`Effet du vent sur la prise de vue : ${OBSERVATION_WIND_IMPACT[conditions.wind_impact] || conditions.wind_impact}`);
   if (conditions.surface_condition) lines.push(`Surface : ${labels[conditions.surface_condition] || conditions.surface_condition}`);
   for (const [key, label, unit] of [["temperature_c", "Température", "°C"], ["relative_humidity_percent", "Humidité", "%"], ["wind_speed_kmh", "Vent", "km/h"]]) {
     if (Number.isFinite(conditions[key])) lines.push(`${label} : ${conditions[key]} ${unit}`);
@@ -2888,6 +3079,19 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
     const rounded = Number(value.toFixed(2));
     return numberFormat.format(Object.is(rounded, -0) ? 0 : rounded);
   };
+  const simpleNumericLine = (item, name) => {
+    const unit = item.variable === "relative_humidity_percent"
+      ? (Number(item.absolute_error.toFixed(2)) === 1 ? "point de pourcentage" : "points de pourcentage") : item.unit;
+    const values = `prévu ${displayNumber(item.forecast)} ${item.unit}, relevé ${displayNumber(item.observed)} ${item.unit}`;
+    if (item.signed_error === 0) return `${name} : valeur identique à la prévision (${values}).`;
+    const magnitude = Number(item.absolute_error.toFixed(2)) === 0
+      ? "moins de 0,01" : displayNumber(item.absolute_error);
+    const higher = item.signed_error < 0; // Canonical convention: forecast minus observed.
+    const direction = item.variable === "wind_speed_kmh"
+      ? (higher ? "plus fort" : "plus faible")
+      : (higher ? "plus élevée" : item.variable === "temperature_c" ? "plus basse" : "plus faible");
+    return `${name} : ${magnitude} ${unit} ${direction} que prévu (${values}).`;
+  };
   const labels = {temperature_c: "Température", relative_humidity_percent: "Humidité relative",
     wind_speed_kmh: "Vent", cloud_cover_percent: "Nuages"};
   const statuses = {comparable: "Comparable", partial: "Partiellement comparable", not_comparable: "Non comparable"};
@@ -2903,13 +3107,17 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
     const name = labels[item.variable] || "Variable";
     if (item.status !== "comparable") {
       lines.push(`${name} : non comparable. ${item.reasons.map(reasonText).join(" ")}`);
+      comparableLines.push(`${name} : comparaison indisponible.`);
     } else if (item.variable === "cloud_cover_percent") {
       const line = `${name} : Prévu ${cloud[item.forecast] || item.forecast}, Observé ${cloud[item.observed] || item.observed} — ${item.outcome === "match" ? "catégories identiques" : "catégories différentes"}.`;
-      lines.push(line); comparableLines.push(line);
+      lines.push(line);
+      comparableLines.push(item.outcome === "match"
+        ? `${name} : ${String(cloud[item.forecast] || item.forecast).toLocaleLowerCase("fr")} prévu et observé.`
+        : `${name} : ${String(cloud[item.forecast] || item.forecast).toLocaleLowerCase("fr")} prévu, ${String(cloud[item.observed] || item.observed).toLocaleLowerCase("fr")} observé.`);
     } else {
       const errorUnit = item.variable === "relative_humidity_percent" ? "points de pourcentage" : item.unit;
       const line = `${name} : Prévu ${displayNumber(item.forecast)} ${item.unit}, Observé ${displayNumber(item.observed)} ${item.unit} ; erreur signée (prévision − observation) ${displayNumber(item.signed_error)} ${errorUnit} ; erreur absolue ${displayNumber(item.absolute_error)} ${errorUnit}.`;
-      lines.push(line); comparableLines.push(line);
+      lines.push(line); comparableLines.push(simpleNumericLine(item, name));
     }
   }
   lines.push(...evaluation.reasons.map(reasonText));
@@ -2943,7 +3151,7 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
       const coordinates = value => value ? `${value.latitude}, ${value.longitude}` : unavailable;
       technicalLines.push(`Coordonnées demandées : ${coordinates(point.requested_location)} · grille : ${coordinates(point.grid_location)} · altitude grille : ${point.grid_location?.altitude_m == null ? unavailable : `${point.grid_location.altitude_m} m`}.`);
     }
-    technicalLines.push(`Récupération : ${dateText(point.retrieved_at_utc ?? evaluation.weather_traceability?.retrieved_at_utc)} · provider : ${point.provider_id || evaluation.weather_traceability?.provider_id || unavailable} · modèle : ${point.model_id || evaluation.weather_traceability?.model_id || unavailable}.`);
+    technicalLines.push(`Récupération : ${dateText(point.retrieved_at_utc ?? evaluation.weather_traceability?.retrieved_at_utc)} · provider : ${point.provider_id || evaluation.weather_traceability?.provider_id || unavailable} · Modèle météo précis : ${point.model_id || evaluation.weather_traceability?.model_id || "non renseigné dans les données enregistrées"}.`);
   }
   const coords = value => value ? `${value.latitude}, ${value.longitude}` : unavailable;
   const trace = evaluation.weather_traceability;
@@ -2956,6 +3164,7 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
   const resultElement = document.querySelector("#outcome-result");
   resultElement.textContent = lines.join("\n");
   if (resultElement.dataset) {
+    resultElement.dataset.comparisonState = "shown";
     resultElement.dataset.proText = resultElement.textContent;
     const simpleLines = [...warnings, knownStatus ? statuses[evaluation.status] : "Statut non reconnu"];
     if (knownStatus) {
@@ -2974,6 +3183,19 @@ function renderOutcomeEvaluation(evaluation, warnings = []) {
       }
       for (const [time, variables] of forecastTimes) simpleLines.push(`Prévision utilisée (${variables.join(", ")}) : ${dateText(time, true)}.`);
       simpleLines.push(...comparableLines);
+      // Only describe conditions actually present on this confirmed observation.
+      const extraLabels = {temperature_c: "Température", relative_humidity_percent: "Humidité",
+        wind_speed_kmh: "Vent", cloud_state: "Nuages", seeing: "Seeing", transparency: "Transparence",
+        surface_condition: "État de la surface", moon_halo: "Halo lunaire",
+        wind_strength: "Vent ressenti", wind_impact: "Effet du vent sur la prise de vue"};
+      const evaluated = new Set(evaluation.results.map(item =>
+        item.variable === "cloud_cover_percent" ? "cloud_state" : item.variable));
+      const notCompared = Object.entries(extraLabels).filter(([key]) => {
+        const value = observation?.conditions?.[key];
+        return value !== null && value !== undefined && value !== "" && value !== "unknown" && !evaluated.has(key);
+      }).map(([, label]) => label);
+      if (notCompared.length) simpleLines.push(`Conditions renseignées mais non comparées ici : ${notCompared.join(", ")}.`);
+
       const reasons = new Map();
       for (const item of evaluation.results) {
         for (const reason of item.reasons) {
@@ -3133,7 +3355,7 @@ async function finishFieldObservationSubmission(key, submittedSnapshot, message,
   if (fieldObservationSnapshot() === submittedSnapshot) resetFieldObservationForm();
   else message += " Vos modifications en cours sont conservées.";
   if (!removed) message += " Le brouillon local n’a pas pu être nettoyé.";
-  observationMessage(message);
+  observationMessage(message, {success: removed});
   return removed;
 }
 
@@ -3170,7 +3392,7 @@ function finishFieldObservationSubmissionUnlocked(lock, submittedSnapshot, messa
   if (fieldObservationSnapshot() === submittedSnapshot) resetFieldObservationForm();
   else message += " Vos modifications en cours sont conservées.";
   if (!removed) message += " Le brouillon local n’a pas pu être nettoyé.";
-  observationMessage(message, {error: !removed});
+  observationMessage(message, {error: !removed, success: removed});
   return removed;
 }
 
@@ -3805,16 +4027,74 @@ const PENDING_ACCEPTANCE_STORAGE_VERSION = 2;
 
 const wizardStates = Object.freeze(["site", "equipment", "projects", "review"]);
 
-function setView(view) {
-  const selectedNotice = document.querySelector("#availability-selected-project");
-  if (selectedNotice) {
-    selectedNotice.hidden = !state.selectedProjectId || state.discoveryMode;
-    selectedNotice.textContent = state.selectedProjectId
-      ? `Cible choisie : ${state.selectedProjectId}. L’analyse vérifiera ce projet avec vos horaires et la météo, sans le remplacer par une autre cible.` : "";
+// Both preparation paths read the same effective per-filter totals. Never derive
+// acquired time from the legacy project scalar or from a requested objective.
+let selectedProjectContextRead = null;
+
+function projectSessionContextText(projectId, data) {
+  const prefix = `Projet existant : ${readableTargetName(projectId)}`;
+  const targets = new Map((data.acquisition_intent_targets || []).map(item => [item.acquisition_intent_id, item]));
+  const progress = new Map((data.intent_progress_breakdown || []).map(item => [item.acquisition_intent_id, item]));
+  const known = value => Number.isFinite(value) && value >= 0;
+  const duration = seconds => {
+    const rounded = Math.round(seconds);
+    return rounded % 3600 === 0 ? `${rounded / 3600} h` : progressDuration(rounded);
+  };
+  const rows = (data.acquisition_intents || []).filter(item => targets.has(item.acquisition_intent_id)).map(intent => {
+    const target = targets.get(intent.acquisition_intent_id), acquired = progress.get(intent.acquisition_intent_id);
+    const filter = intent.filter_type === "Ha" ? "Hα" : intent.filter_type || "Filtre à préciser";
+    const total = known(acquired?.effective_total_seconds) ? duration(acquired.effective_total_seconds) : "acquis non renseigné";
+    const goal = Number.isFinite(target.target_hours) && target.target_hours > 0 ? duration(target.target_hours * 3600) : "objectif à définir";
+    return {filter, detail: `${total} sur ${goal}`};
+  });
+  if (!rows.length) return `${prefix} · Objectif par filtre à renseigner.`;
+  return `${prefix} · ${rows.map(row => rows.length === 1 ? `${row.filter} · ${row.detail}` : `${row.filter} : ${row.detail}`).join(" · ")}.`;
+}
+
+function updateSelectedProjectContext() {
+  const notice = document.querySelector("#availability-selected-project");
+  if (!notice) return;
+  const projectId = state.selectedProjectId, configuration = state.configuration;
+  if (state.discoveryMode || !projectId || !Object.hasOwn(configuration?.projects || {}, projectId)) {
+    selectedProjectContextRead = null;
+    notice.hidden = true; notice.textContent = "";
+    return;
   }
+  notice.hidden = false;
+  const revision = configuration.profile_revision;
+  if (selectedProjectContextRead?.projectId === projectId
+      && selectedProjectContextRead.configuration === configuration
+      && selectedProjectContextRead.revision === revision) return;
+  const owner = {projectId, configuration, revision};
+  selectedProjectContextRead = owner;
+  const current = () => selectedProjectContextRead === owner && !state.discoveryMode
+    && state.selectedProjectId === projectId && state.configuration === configuration
+    && configuration.profile_revision === revision;
+  notice.textContent = `Projet existant : ${readableTargetName(projectId)} · Lecture de l’avancement…`;
+  fetch(`/v1/projects/${encodeURIComponent(projectId)}/progress`).then(async response => {
+    if (!response.ok) throw new Error("project progress unavailable");
+    const data = await response.json();
+    if (!current()) return;
+    if (data.project_id !== projectId) throw new Error("project progress mismatch");
+    notice.textContent = projectSessionContextText(projectId, data);
+  }).catch(() => {
+    if (!current()) return;
+    // A later explicit return can retry; do not present unknown progress as zero.
+    selectedProjectContextRead = null;
+    notice.textContent = `Projet existant : ${readableTargetName(projectId)} · Avancement indisponible. Retrouvez-le dans Mes projets.`;
+  });
+}
+
+function setView(view) {
+  const guidanceDialog = document.querySelector("#altitude-guidance-dialog");
+  if (guidanceDialog?.open) guidanceDialog.close();
+  const guidanceButton = document.querySelector("#availability-altitude-guidance");
+  if (guidanceButton) guidanceButton.hidden = !state.selectedProjectId || state.discoveryMode;
+  updateSelectedProjectContext();
   invalidateOutcomeHistory();
   state.viewRevision = (state.viewRevision || 0) + 1;
   state.view = view;
+  if (view === "equipment") { simpleEquipmentPhase = "optics"; updateEquipmentSearch(); renderSimpleEquipment(); }
   if (view === "recommendation") state.guidedInitialConfiguration = false;
   const wizardVisible = wizardStates.includes(view);
   document.documentElement.dataset.guidedView = view;
@@ -3826,7 +4106,7 @@ function setView(view) {
   document.querySelector("#review-step").hidden = !["review", "availability"].includes(view) || !state.configurationDraft?.site;
   document.querySelector("#review-configuration-actions").hidden = view !== "review";
   if (["review", "availability"].includes(view) && state.configurationDraft?.site) renderReview();
-  ui.recommendationSubmit.disabled = view === "review";
+  updateDiscoveryAvailability();
   document.querySelector("#configuration-projects").hidden = !state.configuration?.configured;
   document.querySelector("#open-observation-catalogue").hidden = view === "review";
   ui.availabilityTimezoneWarning.textContent = view === "review"
@@ -3940,17 +4220,25 @@ function missionDateTimeLabel(value, zone) {
 }
 
 // Describe persisted missions without consulting today's site or filter inventory.
+function readableTargetName(key) {
+  if (key === "Sh2-129") return "Sh2-129 + Ou4";
+  return key === "NorthAmerica" ? "Nébuleuse de l’Amérique du Nord (NGC 7000)" : key;
+}
+
 function savedMissionLabel(item) {
   const mission = item.mission;
   const zone = missionTimezone(mission, item);
   const filter = mission.selected_filter?.name || mission.selected_filter?.filter_type || "Filtre non précisé";
   const formatter = new NightMeritTime.DateTimeFormat("fr-CH", {
     year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hour12: false, timeZone: zone,
+    hour: "2-digit", minute: "2-digit", hour12: false, timeZone: zone, timeZoneName: "shortOffset",
   });
   const dateTime = value => value && Number.isFinite(Date.parse(value))
     ? formatter.format(new Date(value)) : "Non précisée";
-  return `${mission.target} · ${filter} · ${dateTime(mission.window_start)} → ${dateTime(mission.window_end)} · ${zone}`;
+  const savedAt = item.savedAt && Number.isFinite(Date.parse(item.savedAt))
+    ? new NightMeritTime.DateTimeFormat("fr-CH", {year:"numeric", month:"2-digit", day:"2-digit",
+      hour:"2-digit", minute:"2-digit", second:"2-digit", hour12:false, timeZone:zone, timeZoneName:"shortOffset"}).format(new Date(item.savedAt)) : null;
+  return `${readableTargetName(mission.target)} · ${filter} · ${dateTime(mission.window_start)} → ${dateTime(mission.window_end)} · ${zone}${savedAt ? ` · Enregistré le ${savedAt}` : ""}`;
 }
 
 function clock(value, timeZone) {
@@ -3998,6 +4286,12 @@ function siteDateTime(value, timeZone) {
 }
 
 function renderWeatherTrust(weatherTrust, weatherDecision, prefix) {
+  const presentationHelper = globalThis.NightMeritPresentation;
+  const simulated = presentationHelper?.simulatedWeather(weatherTrust) === true;
+  if (prefix === "classic") {
+    text("#weather-context-label", simulated ? "Conditions de démonstration" : "Confiance météo");
+  }
+
   const ingressValidated = weatherTrust?.validation_status === "validated"
     && weatherTrust?.freshness_status === "fresh";
   if (!ingressValidated) {
@@ -4037,11 +4331,23 @@ function renderWeatherTrust(weatherTrust, weatherDecision, prefix) {
   if (prefix === "classic") {
     text("#classic-weather-timezone", `Horaires affichés dans le fuseau du site : ${zone}.`);
   }
+  if (simulated) {
+    text(`#${prefix}-weather-status`, "Météo simulée");
+    text(`#${prefix}-weather-title`, presentationHelper.explanation);
+    text(`#${prefix}-weather-age`, "Conditions générées pour cet essai ; aucune prévision récupérée");
+  }
+}
+
+function beginnerReason(value) {
+  if (appliedUiMode !== "simple" || typeof value !== "string") return value;
+  return value.replace(/Sous-échantillonnage important\s*\([^)]*\)/g, "Les détails les plus fins seront limités avec ce matériel")
+    .replace(/Très bon seeing\s*\([^)]*\)/g, "Atmosphère très stable")
+    .replace(/seeing/gi, "stabilité de l’atmosphère");
 }
 
 function reasonText(reason) {
   if (!reason) return null;
-  const title = reason.title || "Information";
+  const title = beginnerReason(reason.title || "Information");
   return reason.value ? `${title} — ${reason.value}` : title;
 }
 
@@ -4092,6 +4398,9 @@ function missionTaskTitle(title) {
 }
 
 function renderMission(mission) {
+  state.missionConditionsReady = false;
+  renderSavedMissionWeather();
+  void loadSavedMissionWeatherOrigin(state.acceptedMission);
   state.sessions = [];
   state.activeSessionId = null;
   state.fieldObservationSelectedExecutionId = null;
@@ -4099,8 +4408,8 @@ function renderMission(mission) {
   const zone = missionTimezone(mission, state.acceptedMission?.mission === mission ? state.acceptedMission : null);
   const start = clock(mission.window_start, zone);
   const end = clock(mission.window_end, zone);
-  text("#mission-title", mission.target || "Mission de cette nuit");
-  text("#mission-summary", `${mission.site_name ? `Mission acceptée · ${mission.site_name}` : "Mission acceptée"} · Horaires : ${zone}`);
+  text("#mission-title", readableTargetName(mission.target) || "Plan de cette nuit");
+  text("#mission-summary", `${mission.site_name ? `Plan de séance enregistré · ${mission.site_name}` : "Plan de séance enregistré"} · Horaires : ${zone}`);
   text("#mission-window", start && end ? `${start} — ${end}` : "À confirmer");
   text("#mission-duration", duration(mission.recommended_hours));
   text("#mission-gain", Number(mission.expected_gain) > 0 ? `+${Math.round(Number(mission.expected_gain))} %` : "Non estimé");
@@ -4150,20 +4459,149 @@ function renderMission(mission) {
   const review = document.createElement("li");
   const reviewWhen = document.createElement("span");
   reviewWhen.className = "task-time";
-  reviewWhen.textContent = "Après les flats · le lendemain si besoin";
+  reviewWhen.textContent = missionOperationalMinutes(mission).flats === 0
+    ? "Après la séance · le lendemain si besoin" : "Après les flats · le lendemain si besoin";
   const reviewCopy = document.createElement("div");
   reviewCopy.className = "task-copy";
   const reviewTitle = document.createElement("strong");
   reviewTitle.textContent = "Trier les images, puis enregistrer les poses utilisables dans mon projet";
   const reviewHelp = document.createElement("small");
-  reviewHelp.textContent = "Vérifiez vos clichés et comptez uniquement ceux que vous conservez. Dans la session d’imagerie, renseignez leur temps de pose total pour cette séance, sans les images rejetées ni les flats, darks et bias. Vous confirmerez ensuite son ajout à votre projet.";
+  reviewHelp.textContent = "Vérifiez vos clichés et comptez uniquement ceux que vous conservez. Dans la séance photo, renseignez leur temps de pose total pour cette séance, sans les images rejetées ni les flats, darks et bias. Vous confirmerez ensuite son ajout à votre projet.";
   reviewCopy.append(reviewTitle, reviewHelp);
   review.append(reviewWhen, reviewCopy);
   tasks.append(review);
 
   renderSession();
-  reloadSessions().catch(() => sessionMessage("Sessions momentanément indisponibles. Rechargez avant une action."));
+  reloadSessions({resumeExisting: true}).catch(() => sessionMessage("Sessions momentanément indisponibles. Rechargez avant une action.", {error: true}));
 
+}
+
+// Recheck the whole stored plan so setup/flats are not deducted again.
+// Historical plans keep their saved task offsets and are never rewritten.
+function missionOperationalMinutes(mission) {
+  let preparation = null, flats = null;
+  for (const task of mission?.tasks || []) {
+    for (const value of [task.start, task.end]) {
+      const setup = /^T(?:\s*[-−]\s*(\d+)\s*min)?$/.exec(String(value));
+      const calibration = /^Fin(?:\s*\+\s*(\d+)\s*min)?$/.exec(String(value));
+      if (setup) preparation = Math.max(preparation ?? 0, Number(setup[1] || 0));
+      if (calibration) flats = Math.max(flats ?? 0, Number(calibration[1] || 0));
+    }
+  }
+  return {preparation, flats};
+}
+
+function missionPlanWindow(mission) {
+  const {preparation, flats} = missionOperationalMinutes(mission);
+  const shift = (value, minutes) => {
+    if (!minutes || !Number.isFinite(Date.parse(value))) return value;
+    return new Date(Date.parse(value) + minutes * 60000).toISOString();
+  };
+  return {start: shift(mission?.window_start, -(preparation || 0)), end: shift(mission?.window_end, flats || 0)};
+}
+
+function renderSavedMissionWeather() {
+  const accepted = state.acceptedMission;
+  if (!accepted?.mission) return;
+  const check = state.missionWeatherChecks[accepted.mission_id];
+  const trust = check?.trust || state.missionWeatherOrigins[accepted.mission_id];
+  const zone = missionTimezone(accepted.mission, accepted);
+  const expired = check?.trust && ["favorable", "simulated", "caution", "revise", "choice_required"].includes(check.status) && Number.isFinite(check.receivedAt)
+    && (performance.now() - check.receivedAt) / 60000 + (check.trust?.snapshot_age_minutes ?? Infinity)
+      > (check.trust?.maximum_age_minutes ?? 90);
+  const differentSite = check && check.siteFingerprint !== decisionSiteFingerprint();
+  text("#mission-weather-status", differentSite
+    ? "Le site a changé depuis la vérification : actualisez pour confirmer ce plan."
+    : expired ? "Cette vérification météo a vieilli : actualisez avant de commencer."
+    : check?.summary || "Plan enregistré : les conditions météo restent à revérifier avant de commencer.");
+  const date = trust?.retrieved_at_utc ? siteDateTime(trust.retrieved_at_utc, zone) : "Date de collecte non disponible";
+  text("#mission-weather-collection", `${/simul/i.test(trust?.provider || "") ? "Météo simulée" : "Prévisions"} : ${date} · ${zone}. ${check?.collection || ""} Le plan enregistré est conservé. Les vérifications affichées sont limitées à cette ouverture de NightMerit.`);
+}
+
+async function loadSavedMissionWeatherOrigin(accepted) {
+  if (!accepted?.decision_id || Object.hasOwn(state.missionWeatherOrigins, accepted.mission_id)) return;
+  state.missionWeatherOrigins[accepted.mission_id] = null;
+  try {
+    const response = await fetch(`/v1/analysis-history/${encodeURIComponent(accepted.decision_id)}`, {cache:"no-store"});
+    if (!response.ok) return;
+    const record = await response.json();
+    if (record.decision_id !== accepted.decision_id) return;
+    state.missionWeatherOrigins[accepted.mission_id] = record.result?.weather_trust || record.result?.refusal_weather || null;
+    if (state.acceptedMission?.mission_id === accepted.mission_id) renderSavedMissionWeather();
+  } catch (_) { /* An unavailable archive cannot validate today's weather. */ }
+}
+
+function saveMissionWeatherCheck(recheck, payload) {
+  if (!recheck?.accepted) return;
+  const accepted = recheck.accepted;
+  const previous = state.missionWeatherChecks[accepted.mission_id]?.trust || state.missionWeatherOrigins[accepted.mission_id];
+  state.missionWeatherChecks[accepted.mission_id] = {
+    ...NightMeritSavedPlanWeather.summarize(accepted, payload, previous),
+    siteFingerprint: recheck.siteFingerprint, receivedAt: performance.now(),
+  };
+}
+
+async function checkMissionConditions() {
+  if (guardUnresolvedAcceptance() || state.requestingRecommendation || state.sessionBusy
+      || !state.missionConditionsReady || state.sessionWriteUncertain || state.sessions.some(item =>
+        ["in_progress", "unconfirmed"].includes(item.execution?.status))) return;
+  const accepted = state.acceptedMission;
+  const mission = accepted?.mission;
+  const projectId = accepted?.selectedCatalogKey;
+  const planWindow = missionPlanWindow(mission);
+  const start = Date.parse(planWindow.start);
+  const end = Date.parse(planWindow.end);
+  if (ui.mission.open) ui.mission.close();
+  if (!projectId || !Object.hasOwn(state.configuration?.projects || {}, projectId)) {
+    navigateGuidedProjects();
+    showFormError("Le projet de cette mission n’est plus disponible. Choisissez un projet enregistré avant une nouvelle analyse.");
+    return;
+  }
+  prepareGuidedSession({projectId});
+  if (state.view !== "availability" || state.selectedProjectId !== projectId) return;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) {
+    showAvailabilityError("Les horaires de cette mission sont incomplets. Indiquez le créneau à vérifier. La mission enregistrée est conservée.");
+    return;
+  }
+  const zone = currentSiteTimezone();
+  if (!zone) {
+    showAvailabilityError("Vérifiez le fuseau horaire de votre site avant de reprendre les horaires de cette mission. La mission enregistrée est conservée.");
+    return;
+  }
+  document.querySelector('input[name="availability-mode"][value="fixed_window"]').checked = true;
+  let startLocal, endLocal;
+  try {
+    startLocal = formatDateTimeLocalInZone(new Date(start), zone);
+    endLocal = formatDateTimeLocalInZone(new Date(end), zone);
+  } catch (_) {
+    showAvailabilityError("Le fuseau horaire du site n’est pas utilisable. Vérifiez votre site avant de relancer l’analyse.");
+    return;
+  }
+  const operational = missionOperationalMinutes(mission);
+  if (operational.preparation !== null) document.querySelector("#availability-preparation-minutes").value = operational.preparation;
+  if (operational.flats !== null) document.querySelector("#availability-flats-minutes").value = operational.flats;
+  document.querySelector("#availability-start").value = startLocal;
+  document.querySelector("#availability-end").value = endLocal;
+  // Keep the original instants, including repeated local times at a clock change.
+  // A persisted mission need not have an in-memory acceptance fingerprint.
+  const recheckFormatter = new NightMeritTime.DateTimeFormat("fr-CH", {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+    hour12: false, timeZone: zone, timeZoneName: "shortOffset",
+  });
+  const offsetAt = instant => recheckFormatter.formatToParts(new Date(instant))
+    .find(part => part.type === "timeZoneName")?.value;
+  const clockChangeNote = offsetAt(start) !== offsetAt(end)
+    ? " Le décalage horaire change pendant ce créneau : les heures locales peuvent se répéter ou être sautées." : "";
+  const localWindowNote = missionTimezone(mission, accepted) !== zone
+    ? ` Horaires sur ce site : ${recheckFormatter.format(new Date(start))} → ${recheckFormatter.format(new Date(end))}.` : "";
+  state.missionRecheck = {
+    accepted: structuredClone(accepted),
+    projectId, start: planWindow.start, end: planWindow.end,
+    startLocal, endLocal, siteFingerprint: decisionSiteFingerprint(),
+    summary: `Mission enregistrée : ${savedMissionLabel(accepted)}. Site à vérifier : ${state.configuration.site.name} (${zone}).${localWindowNote} Durée réelle : ${usablePoseDuration((end - start) / 1000)}.${clockChangeNote} Confirmez ce créneau ou modifiez-le avant de lancer l’analyse.`,
+  };
+  updateAvailabilityFields();
+  updateGuidedPresentation();
 }
 
 function showAcceptanceStatus(message, { error = false } = {}) {
@@ -4291,7 +4729,7 @@ function filterCardCopy(decision) {
     const otherAssessments = assessments.filter(
       (assessment) => assessment?.acquisition_intent_id !== selectedIntentId,
     );
-    const detail = `${selectedIntent.label || selectedIntentId} recommandé${otherAssessments.length
+    const detail = `${(selectedIntent.label || selectedIntentId).replace(/NorthAmerica/g, readableTargetName("NorthAmerica"))} recommandé${otherAssessments.length
       ? ` ; ${joinedIntentLabels(otherAssessments)} également évalué${otherAssessments.length > 1 ? "s" : ""}`
       : ""}`;
     return {
@@ -4324,7 +4762,7 @@ function renderIntentChoice(container, subject, selectId) {
   container.hidden = mode === "legacy";
   if (mode === "legacy") return;
   if (mode === "unique") {
-    container.textContent = `Acquisition prévue : ${subject.acquisition_intent_options[0].label}`;
+    container.textContent = `Acquisition prévue : ${subject.acquisition_intent_options[0].label.replace(/NorthAmerica/g, readableTargetName("NorthAmerica"))}`;
     return;
   }
   if (mode === "none" || mode === "unavailable") {
@@ -4494,7 +4932,7 @@ function restoreAcceptanceControls() {
     ));
     if (selected) {
       selected.disabled = false;
-      selected.textContent = "Ouvrir la mission";
+      selected.textContent = "Ouvrir ce plan";
     }
   }
 }
@@ -4646,7 +5084,8 @@ function resetMissionPresentation() {
 
 function clearAcceptedMission() {
   state.acceptedMission = null;
-  ui.savedMissionEntry.hidden = true;
+  // Clearing the current analysis must preserve access to persisted plans.
+  ui.savedMissionEntry.hidden = !(state.savedMissions || []).some(item => item?.mission && item.source === "persisted");
   state.acceptingRecommendation = false;
   state.acceptanceRequestOwner = null;
   state.acceptanceBlocked = false;
@@ -4689,12 +5128,13 @@ function renderDecision(decision) {
     : recommended
     ? (labels.actions[decision.action] || "Session recommandée")
     : insufficient ? "Preuves insuffisantes" : "Cible non recommandée");
-  text("#target-name", decision.target || "Cible à confirmer");
+  text("#target-name", readableTargetName(decision.target) || "Cible à confirmer");
   text("#catalog-key", decision.target_common_name || (decision.catalog_key && decision.catalog_key !== decision.target ? decision.catalog_key : ""));
   text("#window-value", start && end ? `${start} — ${end}` : "À confirmer");
   text("#window-note", `Horaires : ${zone}${firstWindow?.reason ? " · Fenêtre productive principale" : ""}`);
   text("#duration-value", duration(actionableHours));
-  text("#duration-note", "Durée de mission exploitable");
+  text("#duration-title", appliedUiMode === "simple" ? "Temps disponible pour les photos" : "Durée productive");
+  text("#duration-note", appliedUiMode === "simple" ? "Estimation pour cette séance" : "Durée de mission exploitable");
   const filterCopy = filterCardCopy(decision);
   text("#filter-value", filterCopy.value);
   text("#filter-note", filterCopy.note);
@@ -4714,13 +5154,15 @@ function renderDecision(decision) {
   const positives = (decision.explanation?.positives || []).map(reasonText);
   const information = (decision.explanation?.information || []).map(reasonText);
   const warnings = (decision.explanation?.warnings || []).map(reasonText);
-  const risks = [...warnings];
+  const risks = [...warnings.map(beginnerReason)];
   if (decision.dew_risk && String(decision.dew_risk.level).toLowerCase() !== "low") {
     const level = String(decision.dew_risk.level).toLowerCase();
     risks.push(`Rosée : risque ${labels.riskLevels[level] || level}`);
   }
   if (decision.postponement_risk) {
-    risks.push(...(decision.postponement_risk.explanations || []));
+    risks.push(...(globalThis.NightMeritPresentation?.simulatedWeather(weatherTrust)
+      ? ["Cet essai utilise une météo simulée : il ne permet pas d’évaluer le risque réel de devoir reporter la séance."]
+      : (decision.postponement_risk.explanations || [])));
   }
 
   const evidenceMessage = insufficient
@@ -4731,8 +5173,8 @@ function renderDecision(decision) {
   const shortReason = [...(decision.explanation?.positives || []), ...(decision.explanation?.information || [])]
     .filter(reason => reason && (reason.title || reason.value))
     .map(reasonText).find(Boolean);
-  text("#decision-reason", shortReason ? `Pourquoi : ${shortReason}` : "Pourquoi : non précisé");
-  const warningCopy = [...warnings];
+  text("#decision-reason", shortReason ? `Pourquoi : ${beginnerReason(shortReason)}` : "Pourquoi : non précisé");
+  const warningCopy = [...warnings.map(beginnerReason)];
   if (weatherTrust?.freshness_status !== "fresh") warningCopy.unshift(
     weatherTrust?.freshness_status === "stale"
       ? "Données météo périmées : actualisez avant de démarrer."
@@ -4741,11 +5183,12 @@ function renderDecision(decision) {
   if (weatherTrust?.validation_status !== "validated" || !weatherDecision?.admissibility) {
     warningCopy.unshift("Confiance météo non confirmée : vérifiez les données avant de démarrer.");
   }
-  if (weatherDecision?.admissibility && weatherDecision.admissibility !== "admissible") {
+  if (!globalThis.NightMeritPresentation?.simulatedWeather(weatherTrust)
+      && weatherDecision?.admissibility && weatherDecision.admissibility !== "admissible") {
     warningCopy.unshift(weatherDecision.presentation?.summary || "Conditions météo à vérifier avant de démarrer.");
   }
   if (decision.dew_risk && String(decision.dew_risk.level).toLowerCase() === "high") {
-    warningCopy.push("Rosée : risque élevé.");
+    warningCopy.push("Rosée : risque élevé. Si vous disposez d’un chauffage antibuée, activez-le et vérifiez l’absence de condensation sur l’optique avant les poses.");
   }
   if (insufficient) warningCopy.unshift(evidenceMessage);
   const warningElement = document.querySelector("#decision-warning");
@@ -4812,8 +5255,6 @@ function draftFromConfiguration(configuration) {
     };
   } else if (active) {
     equipment = { preset_id: active.id };
-  } else if (configuration.preset_equipment?.length) {
-    equipment = { preset_id: configuration.preset_equipment[0].id };
   }
   return {
     site: configuration.site ? { ...configuration.site } : null,
@@ -4830,6 +5271,7 @@ function showFormError(message) {
 function renderPresetChoices() {
   const container = document.querySelector("#preset-equipment");
   container.replaceChildren();
+  document.querySelector("#equipment-search").value = "";
   for (const choice of state.configuration?.preset_equipment || []) {
     const label = document.createElement("label");
     const radio = document.createElement("input");
@@ -4840,18 +5282,187 @@ function renderPresetChoices() {
     radio.type = "radio";
     radio.name = "preset-equipment";
     radio.value = choice.id;
+    radio.addEventListener("change", () => { showFormError(""); updateEquipmentSearch(); });
     name.textContent = choice.name;
     details.textContent = `${choice.optics_manufacturer} ${choice.optics_model} · ${choice.camera_manufacturer} ${choice.camera_model}`;
     copy.append(name, details);
     label.append(radio, copy);
     container.append(label);
   }
+  updateEquipmentSearch();
+}
+
+function updateEquipmentSearch() {
+  const normalize = value => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const terms = normalize(document.querySelector("#equipment-search").value).split(/\s+/).filter(Boolean);
+  document.querySelector("#equipment-clear-search").hidden = document.querySelector("#equipment-search").value.length === 0;
+  const choices = [...document.querySelectorAll("#preset-equipment .equipment-choice")];
+  let visible = 0;
+  for (const choice of choices) {
+    const searchable = normalize(choice.textContent);
+    choice.hidden = !terms.every(term => searchable.includes(term));
+    if (!choice.hidden) visible++;
+  }
+  document.querySelector("#equipment-search-status").textContent = terms.length
+    ? `${visible} ensemble${visible === 1 ? "" : "s"} trouvé${visible === 1 ? "" : "s"} dans les ${choices.length} configurations proposées par cette bêta.`
+    : `${choices.length} ensembles proposés par cette bêta. Votre modèle peut être saisi séparément s’il n’est pas dans la liste.`;
+  document.querySelector("#equipment-no-results").hidden = visible !== 0;
+  const selected = choices.find(choice => choice.querySelector("input").checked);
+  document.querySelector("#equipment-selection-summary").textContent = selected
+    ? `Votre choix : ${selected.querySelector("strong").textContent}.${selected.hidden ? " Effacez la recherche pour le revoir ou choisissez un autre matériel." : ""}`
+    : "Choisissez l’ensemble qui correspond à votre matériel pour continuer.";
+}
+
+// References only fill the local custom editor. They never select a preset or confirm filters.
+let equipmentReferenceEntries = null;
+let equipmentReferenceLoading = false;
+const normalizeEquipmentReference = value => String(value).replace(/[αΑ]/g, "alpha").normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+async function loadEquipmentReferences() {
+  if (equipmentReferenceEntries) return renderEquipmentReferences();
+  if (equipmentReferenceLoading) return;
+  equipmentReferenceLoading = true;
+  const status = document.querySelector("#equipment-reference-status");
+  status.textContent = "Chargement du catalogue…";
+  document.querySelector("#equipment-reference-retry").hidden = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch("/v1/equipment-references", {signal: controller.signal});
+    if (!response.ok) throw new Error("catalogue_unavailable");
+    const data = await response.json();
+    if (data.schema_version !== 1 || !Array.isArray(data.entries)) throw new Error("invalid_catalogue");
+    equipmentReferenceEntries = data.entries;
+    renderEquipmentReferences();
+  } catch (_) {
+    status.textContent = "Le catalogue est indisponible. Votre saisie est conservée. Réessayez ou saisissez les références du fabricant dans « Saisir un autre matériel ».";
+    document.querySelector("#equipment-reference-retry").hidden = false;
+  } finally {
+    clearTimeout(timeout);
+    equipmentReferenceLoading = false;
+  }
+}
+
+function renderEquipmentReferences() {
+  if (!equipmentReferenceEntries) return;
+  const category = document.querySelector("#equipment-reference-category").value;
+  const terms = normalizeEquipmentReference(document.querySelector("#equipment-reference-query").value).trim().split(/\s+/).filter(Boolean);
+  const entries = equipmentReferenceEntries.filter(entry => (category === "all" || entry.category === category)
+    && terms.every(term => {
+      const searchable = normalizeEquipmentReference([entry.manufacturer, entry.model, entry.variant, ...entry.aliases].join(" "));
+      return searchable.includes(term) || searchable.replaceAll(" ", "").includes(term);
+    }));
+  const status = document.querySelector("#equipment-reference-status");
+  status.textContent = `${entries.length} référence(s) trouvée(s) dans ce premier catalogue de ${equipmentReferenceEntries.length} références. `
+    + (terms.includes("newton") ? "Newton désigne un type de télescope : vérifiez le modèle, le diamètre et le correcteur. " : "")
+    + (entries.length ? "Ouvrez une fiche pour vérifier sa variante." : "Essayez la marque ou le modèle inscrit sur votre matériel, puis la saisie manuelle si nécessaire. Aucun modèle voisin n’est sélectionné.");
+  const container = document.querySelector("#equipment-reference-results");
+  container.replaceChildren();
+  const labels = {focal_length_mm: "Focale (mm)", aperture_mm: "Ouverture (mm)", f_ratio: "Rapport focal",
+    pixel_size_um: "Pixels (µm)", sensor_width_px: "Largeur (px)", sensor_height_px: "Hauteur (px)",
+    monochrome: "Caméra monochrome", filter_type: "Type", format: "Format", fwhm_nm: "Largeur (nm)"};
+  for (const entry of entries) {
+    const card = document.createElement("details");
+    card.className = "equipment-reference-card";
+    card.dataset.referenceId = entry.id;
+    const summary = document.createElement("summary");
+    summary.textContent = `${entry.manufacturer} ${entry.model} · ${entry.variant}`;
+    const badge = document.createElement("p");
+    badge.className = "field-note";
+    badge.textContent = "Référence documentée · Compatibilité pour une mission non vérifiée";
+    const specs = document.createElement("p");
+    specs.textContent = Object.entries(entry.specs).map(([key, value]) => `${labels[key]} : ${typeof value === "boolean" ? (value ? "oui" : "non") : String(value).replace(".", ",")}`).join(" · ");
+    const notes = document.createElement("p");
+    notes.textContent = entry.notes;
+    const source = document.createElement("a");
+    // Only HTTPS links from the validated local catalogue; no HTML from references.
+    if (entry.source.url.startsWith("https://")) source.href = entry.source.url;
+    source.target = "_blank";
+    source.rel = "noopener noreferrer";
+    source.textContent = `${entry.source.title} (vérifié le ${entry.source.checked_on})`;
+    card.append(summary, badge, specs, notes, source);
+    if (entry.can_copy && entry.category !== "filter") {
+      const label = document.createElement("label");
+      label.className = "check-field equipment-reference-confirm";
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      const copy = document.createElement("span");
+      copy.textContent = "Je confirme ce modèle exact et cette variante. Le report remplacera les champs de ce composant dans ma saisie personnalisée.";
+      label.append(check, copy);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button";
+      button.textContent = entry.category === "optics" ? "Reporter cette optique dans ma saisie" : "Reporter cette caméra dans ma saisie";
+      button.disabled = true;
+      check.addEventListener("change", () => { button.disabled = !check.checked; });
+      button.addEventListener("click", () => {
+        if (!check.checked) return;
+        const component = entry.category === "optics" ? "optics" : "camera";
+        document.querySelector(`#custom-${component}-manufacturer`).value = entry.manufacturer;
+        document.querySelector(`#custom-${component}-model`).value = entry.model + (component === "optics" ? ` — ${entry.variant}` : "");
+        for (const [key, value] of Object.entries(entry.specs)) {
+          const input = document.querySelector(`#custom-${key.replaceAll("_", "-")}`);
+          if (input) { if (typeof value === "boolean") input.checked = value; else input.value = value; }
+        }
+        document.querySelector('input[name="equipment-kind"][value="custom"]').checked = true;
+        toggleEquipmentKind();
+        document.querySelector("#equipment-reference-applied").textContent = `${entry.manufacturer} ${entry.model} reporté dans votre saisie, sans enregistrement. Vérifiez l’autre composant ci-dessous. Aucun filtre n’a été confirmé ; ce montage personnalisé n’est pas validé pour les missions de cette bêta.`;
+        document.querySelector(`#custom-${component}-model`).focus();
+      });
+      card.append(label, button);
+    } else {
+      const explanation = document.createElement("p");
+      explanation.className = "field-note";
+      explanation.textContent = entry.category === "filter"
+        ? "Cette fiche sert à identifier votre filtre. Rien n’est activé ici : confirmez sa référence exacte au choix du projet si elle est prise en charge."
+        : "Données à vérifier : aucun report automatique. Utilisez la fiche du fabricant et la saisie manuelle.";
+      card.append(explanation);
+    }
+    container.append(card);
+  }
+}
+
+let simpleEquipmentPhase = "optics";
+function renderSimpleEquipment() {
+  const simple = appliedUiMode === "simple";
+  const camera = simple && simpleEquipmentPhase === "camera";
+  const step = document.querySelector("#equipment-step");
+  step.dataset.choicePage = simple ? simpleEquipmentPhase : "advanced";
+  text("#equipment-title", simple ? (camera ? "Quelle caméra utilisez-vous ?" : "Quel objectif ou télescope utilisez-vous ?") : "Avec quel matériel ?");
+  text("#equipment-next", simple ? (camera ? "Continuer vers les filtres" : "Continuer vers la caméra") : "Continuer vers mon projet");
+  text("#equipment-step .step-intro", simple ? (camera ? "Confirmez votre caméra. Seuls les ensembles pris en charge par cette bêta sont proposés." : "Choisissez votre optique. Vous choisirez la caméra sur l’écran suivant.") : "Retrouvez votre objectif ou télescope et votre caméra.");
+  if (!camera) updateEquipmentSearch();
+  const custom = document.querySelector('input[name="equipment-kind"]:checked')?.value === "custom";
+  for (const choice of step.querySelectorAll(".equipment-choice")) {
+    const id=choice.querySelector("input").value;
+    const preset=(state.configuration?.preset_equipment || []).find(item=>item.id===id);
+    if (!preset) continue;
+    choice.querySelector("strong").textContent = simple ? (camera ? `${preset.camera_manufacturer} ${preset.camera_model}` : `${preset.optics_manufacturer} ${preset.optics_model}`) : preset.name;
+    choice.querySelector("small").hidden = simple;
+    if (camera) choice.hidden = !choice.querySelector("input").checked;
+  }
+  for (const label of step.querySelectorAll("#custom-equipment label")) {
+    const input=label.querySelector("input");
+    const isCamera=input && /camera|pixel|sensor|monochrome/.test(input.id);
+    label.hidden=simple && (camera ? !isCamera : isCamera);
+  }
+  if (simple) {
+    document.querySelector("#equipment-search").placeholder="Ex. Samyang, FRA400, C8…";
+    text("#equipment-selection-summary", "");
+    text("#equipment-search-status", "Choisissez votre modèle, ou saisissez un autre matériel.");
+    step.querySelector(".eyebrow").textContent=camera ? "Configuration · 3/6 — Caméra" : "Configuration · 2/6 — Optique";
+  } else step.querySelector(".eyebrow").textContent="Configuration initiale · 2/4 — Matériel";
+  const back=step.querySelector("[data-back]");
+  back.textContent=camera ? "Retour à l’optique" : "Retour";
 }
 
 function toggleEquipmentKind() {
   const kind = document.querySelector('input[name="equipment-kind"]:checked')?.value;
+  document.querySelector("#equipment-search-panel").hidden = kind !== "preset";
   document.querySelector("#preset-equipment").hidden = kind !== "preset";
   document.querySelector("#custom-equipment").hidden = kind !== "custom";
+  renderSimpleEquipment();
 }
 
 function progressEditorSnapshot(fieldOverride = null) {
@@ -4872,6 +5483,108 @@ function confirmDiscardProjectProgress() {
     || window.confirm("Des modifications de l’avancement ne sont pas enregistrées. Les abandonner ?");
 }
 
+function advancedProjectProgressText(data) {
+  const rows = data.intent_progress_breakdown || [];
+  if (!rows.length) return "Avancement par filtre non renseigné ; ouvrez le projet pour le vérifier.";
+  const duration = value => Number.isFinite(value) ? progressDuration(value) : "non renseigné";
+  return rows.map(row => {
+    const intent = (data.acquisition_intents || []).find(item => item.acquisition_intent_id === row.acquisition_intent_id);
+    const target = (data.acquisition_intent_targets || []).find(item => item.acquisition_intent_id === row.acquisition_intent_id);
+    const filter = intent?.filter_type === "Ha" ? "Hα" : intent?.filter_type || row.acquisition_intent_id;
+    return `${filter} · Base antérieure : ${duration(row.base_seconds)} · Séances créditées : ${duration(Number.isFinite(row.credits_us) ? row.credits_us / 1000000 : null)} · Total acquis : ${duration(row.effective_total_seconds)}${target?.target_hours != null ? ` / ${target.target_hours} h` : " (objectif non renseigné)"}`;
+  }).join(" ; ");
+}
+
+function projectRemovalNotice(message) {
+  const notice = document.querySelector("#project-removal-status");
+  if (notice) { notice.textContent = message; notice.hidden = !message; }
+}
+
+function projectRemovalButton(projectId, {restore = false, saved = true} = {}) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary-button";
+  button.textContent = restore ? "Remettre dans mes projets" : "Supprimer ce projet";
+  button.disabled = !saved || Boolean(state.changingProjectVisibility);
+  button.addEventListener("click", () => changeProjectVisibility(projectId, restore));
+  return button;
+}
+
+function renderArchivedProjects() {
+  const region = document.querySelector("#archived-projects");
+  const list = document.querySelector("#archived-project-list");
+  if (!region || !list) return;
+  const ids = state.configuration?.archived_project_ids || [];
+  region.hidden = !ids.length;
+  list.replaceChildren();
+  for (const id of ids) {
+    const item = document.createElement("p");
+    const name = document.createElement("span");
+    name.textContent = `${readableTargetName(id)} · `;
+    item.append(name, projectRemovalButton(id, {restore:true}));
+    list.append(item);
+  }
+}
+
+async function changeProjectVisibility(projectId, restore = false) {
+  if (state.changingProjectVisibility || state.savingConfiguration || state.savingProjectProgress
+      || guardUnresolvedAcceptance() || !confirmDiscardProjectProgress()) return;
+  if (!configurationDraftMatchesSaved()) {
+    projectRemovalNotice("Enregistrez d’abord vos modifications avant de supprimer ou de rétablir un projet.");
+    return;
+  }
+  const name = readableTargetName(projectId);
+  const question = restore
+    ? `Remettre « ${name} » dans vos projets avec son avancement conservé ?`
+    : `Supprimer « ${name} » de vos projets actifs ? Ses plans, séances et crédits restent conservés dans l’historique. Vous pourrez rétablir ce projet plus tard.`;
+  if (!window.confirm(question)) return;
+  state.changingProjectVisibility = true;
+  const generation = beginConfigurationOperation();
+  const revision = state.configuration.profile_revision;
+  projectRemovalNotice(restore ? "Rétablissement en cours…" : "Suppression en cours…");
+  try {
+    let response;
+    try {
+      response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}${restore ? "/restore" : ""}`, {
+        method: restore ? "POST" : "DELETE", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({expected_revision:revision, confirmed:true}),
+      });
+      const payload = await response.json();
+      if (!configurationOperationIsCurrent(generation)) return;
+      if (!response.ok) throw new Error(response.status === 409 ? "conflict" : "refused");
+      const ownsNavigation = configurationOwnsNavigation(generation);
+      installCurrentConfiguration(payload, generation);
+      if (ownsNavigation) {
+        renderProjects(); setView("projects");
+        projectRemovalNotice(restore ? "Projet rétabli avec son avancement conservé."
+          : "Projet supprimé de la liste active. Ses plans, séances et crédits sont conservés.");
+      }
+    } catch (error) {
+      if (!configurationOperationIsCurrent(generation) || !configurationOwnsNavigation(generation)) return;
+      // A lost reply is not proof of failure: read the authoritative configuration.
+      const read = await fetch("/v1/configuration");
+      if (!read.ok) throw new Error("unreadable");
+      const payload = await read.json();
+      if (!configurationOperationIsCurrent(generation) || !configurationOwnsNavigation(generation)) return;
+      installCurrentConfiguration(payload, generation);
+      renderProjects(); setView("projects");
+      const active = Object.hasOwn(payload.projects || {}, projectId);
+      const archived = (payload.archived_project_ids || []).includes(projectId);
+      const done = restore ? active && !archived : archived && !active;
+      projectRemovalNotice(done
+        ? (restore ? "Projet rétabli ; état confirmé après relecture." : "Projet supprimé de la liste active ; historique conservé, état confirmé après relecture.")
+        : "L’opération n’est pas confirmée. Les données ont été relues ; vérifiez le projet avant de réessayer.");
+    }
+  } catch (_error) {
+    if (configurationOperationIsCurrent(generation) && configurationOwnsNavigation(generation))
+      projectRemovalNotice("Impossible de confirmer l’état du projet. Rouvrez Mes projets après reconnexion avant de réessayer.");
+  } finally {
+    finishConfigurationOperation(generation);
+    state.changingProjectVisibility = false;
+    if (state.view === "projects") renderProjects();
+  }
+}
+
 function renderProjects() {
   if (!confirmDiscardProjectProgress()) return false;
   document.querySelector("#project-progress-editor").hidden = true;
@@ -4879,6 +5592,9 @@ function renderProjects() {
   state.progressEditor = null;
   state.progressEditorBaseline = null;
   const projects = state.configurationDraft.projects || {};
+  const generation = (state.advancedProjectsGeneration || 0) + 1;
+  state.advancedProjectsGeneration = generation;
+  const configuration = state.configuration;
   const entries = Object.entries(projects);
   const summary = document.querySelector("#existing-projects");
   const zeroProjects = document.querySelector("#zero-projects");
@@ -4895,16 +5611,38 @@ function renderProjects() {
     const list = document.createElement("ul");
     for (const [catalogKey, project] of entries) {
       const item = document.createElement("li");
-      const label = document.createElement("span");
+      const label = document.createElement("div");
       const saved = Object.hasOwn(state.configuration?.projects || {}, catalogKey);
-      label.textContent = `${catalogKey} · ${project.hours} h sur ${project.target_hours} h${saved ? " (historique)" : " (brouillon à enregistrer)"} `;
+      const name = readableTargetName(catalogKey);
+      label.textContent = saved ? `${name} · Lecture de l’avancement enregistré… `
+        : `${name} · Base antérieure saisie : ${project.hours} h · Objectif : ${project.target_hours} h (brouillon à enregistrer) `;
+      if (saved) fetch(`/v1/projects/${encodeURIComponent(catalogKey)}/progress`).then(async response => {
+        if (!response.ok) throw new Error("progress unavailable");
+        const data = await response.json();
+        if (state.advancedProjectsGeneration !== generation || state.configuration !== configuration || !label.isConnected) return;
+        label.textContent = name;
+        const balance = createProjectBalance(data);
+        if (balance) label.append(balance);
+        const details = document.createElement("details");
+        const title = document.createElement("summary"); title.textContent = "Détail des temps acquis";
+        const breakdown = document.createElement("p"); breakdown.textContent = advancedProjectProgressText(data);
+        details.append(title, breakdown); label.append(details);
+      }).catch(() => {
+        if (state.advancedProjectsGeneration === generation && state.configuration === configuration && label.isConnected) {
+          label.textContent = `${name} · Avancement indisponible : ouvrez le projet ou réessayez. Vos données sont conservées. `;
+        }
+      });
       const button = document.createElement("button");
       button.type = "button";
       button.className = "secondary-button";
       button.textContent = saved ? "Ouvrir" : "Enregistrer d’abord";
       button.disabled = !saved;
       button.addEventListener("click", () => openProjectProgress(catalogKey));
-      item.append(label, button);
+      const addPhotos = document.createElement("button");
+      addPhotos.type = "button"; addPhotos.className = "secondary-button";
+      addPhotos.textContent = "Ajouter mes photos conservées"; addPhotos.disabled = !saved;
+      addPhotos.addEventListener("click", () => openPhotoAddition(catalogKey));
+      item.append(label, button, addPhotos, projectRemovalButton(catalogKey, {saved}));
       list.append(item);
     }
     summary.append(heading, explanation, list);
@@ -4915,6 +5653,7 @@ function renderProjects() {
     zeroProjects.disabled = true;
   }
   if (typeof renderSimpleProjects === "function") renderSimpleProjects(entries);
+  renderArchivedProjects();
   return true;
 }
 
@@ -4931,6 +5670,7 @@ async function loadProjectTemplatesOnce() {
   const button = document.querySelector("#project-templates-load");
   const feedback = document.querySelector("#project-create-feedback");
   button.disabled = true;
+  feedback.classList?.remove("error", "confirmation-success");
   feedback.textContent = "Chargement des cibles prises en charge…";
   try {
     const response = await fetch("/v1/project-templates");
@@ -4941,7 +5681,7 @@ async function loadProjectTemplatesOnce() {
     const select = document.querySelector("#project-template");
     select.replaceChildren(new Option("Choisir une cible", ""));
     for (const template of templates) {
-      select.append(new Option(template.display_name, template.catalog_key));
+      select.append(new Option(template.catalog_key === "NorthAmerica" ? readableTargetName(template.catalog_key) : template.display_name, template.catalog_key));
     }
     document.querySelector("#project-create-fields").hidden = !templates.length;
     if (templates.length === 1) {
@@ -4953,6 +5693,7 @@ async function loadProjectTemplatesOnce() {
       ? "Seules les cibles disposant de données de mission complètes sont proposées dans cette bêta."
       : "Aucune cible ne dispose encore des données nécessaires dans cette version.";
   } catch (_error) {
+    feedback.classList?.add("error");
     feedback.textContent = "Les cibles ne peuvent pas être chargées. Vos réglages sont conservés ; réessayez.";
   } finally {
     state.projectTemplatesLoading = false;
@@ -5058,16 +5799,18 @@ function renderNewProjectIntents() {
     check.addEventListener("change", () => {row.dataset.intentSelected = String(check.checked);});
     label.classList.add("new-intent-goal");
     row.append(confirmation, label);
+    if (typeof addProjectGoalGuidance === "function") addProjectGoalGuidance(row, intent, label, input);
     container.append(row);
   }
 }
 
-function newProjectFromInputs(template, entries, emptyConfirmed, existingProjects) {
+function newProjectFromInputs(template, entries, emptyConfirmed, existingProjects, initialImages = null) {
   if (!template) throw new Error("Choisissez une cible à photographier.");
   if (Object.hasOwn(existingProjects, template.catalog_key)) {
     throw new Error("Ce projet existe déjà. Ouvrez-le pour modifier son avancement ; il ne sera pas remplacé.");
   }
-  if (!emptyConfirmed) throw new Error("Confirmez que ce nouveau projet ne contient pas déjà des images acquises.");
+  if (!emptyConfirmed && !initialImages?.confirmed) throw new Error("Confirmez le départ sans images ou vérifiez vos images déjà acquises.");
+  if (emptyConfirmed && initialImages) throw new Error("Choisissez un seul état de départ pour ce projet.");
   const targets = [];
   for (const entry of entries.filter(item => item.selected)) {
     const hours = Number(entry.hours);
@@ -5082,14 +5825,28 @@ function newProjectFromInputs(template, entries, emptyConfirmed, existingProject
   if (!targets.length) throw new Error("Choisissez au moins une prise de vue avec un filtre que vous possédez.");
   const total = targets.reduce((sum, item) => sum + item.target_hours, 0);
   if (!Number.isFinite(total)) throw new Error("L’objectif total de pose est trop grand.");
-  return { hours: 0, target_hours: total, imaging_field_id: template.imaging_field_id,
-    acquisition_intent_targets: targets, acquisition_intent_progress: targets.map(item => ({
-      acquisition_intent_id: item.acquisition_intent_id, acquired_duration_manual: 0 })) };
+  let progress = targets.map(item => ({ acquisition_intent_id: item.acquisition_intent_id, acquired_duration_manual: 0 }));
+  let acquiredSeconds = 0;
+  if (initialImages) {
+    if (!initialImages.confirmed || !Array.isArray(initialImages.progress) || initialImages.progress.length !== targets.length) throw new Error("Vérifiez les images de chaque filtre choisi.");
+    const seen = new Set();
+    progress = initialImages.progress.map(item => {
+      const id = item.acquisition_intent_id, frames = item.acquired_frames, seconds = item.exposure_seconds;
+      if (!targets.some(target => target.acquisition_intent_id === id) || seen.has(id)) throw new Error("Les images ne correspondent pas aux filtres choisis.");
+      seen.add(id);
+      if (!Number.isSafeInteger(frames) || frames < 1 || !Number.isFinite(seconds) || seconds <= 0 || !Number.isFinite(frames * seconds) || frames * seconds > Number.MAX_SAFE_INTEGER / 1000000) throw new Error("Indiquez un nombre entier de clichés et une durée positive, dans les limites prises en charge.");
+      acquiredSeconds += frames * seconds;
+      return { acquisition_intent_id: id, acquired_frames: frames, exposure_seconds: seconds };
+    });
+  }
+  return { hours: acquiredSeconds / 3600, target_hours: total, imaging_field_id: template.imaging_field_id,
+    acquisition_intent_targets: targets, acquisition_intent_progress: progress };
 }
 
 function addNewProject() {
   if (state.savingConfiguration) return;
   const feedback = document.querySelector("#project-create-feedback");
+  feedback.classList?.remove("error", "confirmation-success");
   try {
     if (!confirmDiscardProjectProgress()) return;
     const key = document.querySelector("#project-template").value;
@@ -5100,15 +5857,19 @@ function addNewProject() {
     }));
     const projects = state.configurationDraft.projects || {};
     const project = newProjectFromInputs(template, entries,
-      document.querySelector("#project-new-empty").checked, projects);
+      document.querySelector("#project-new-empty").checked, projects,
+      typeof readInitialProjectImages === "function" ? readInitialProjectImages() : null);
     state.configurationDraft.projects = { ...projects, [key]: project };
     state.selectedProjectId = key;
     consumeNewProjectEmptyConfirmation(key);
     renderProjects();
     document.querySelector("#project-create").open = false;
-    feedback.textContent = "Projet ajouté au brouillon. Enregistrez pour conserver ce choix. Aucun temps de pose n’a été crédité.";
+    feedback.textContent = project.hours > 0
+      ? "Projet ajouté au brouillon avec vos images antérieures. Enregistrez pour conserver ce choix."
+      : "Projet ajouté au brouillon. Enregistrez pour conserver ce choix. Aucun temps de pose n’a été crédité.";
     if (appliedUiMode === "simple") saveConfiguration();
   } catch (error) {
+    feedback.classList?.add("error");
     feedback.textContent = error.message;
   }
 }
@@ -5133,7 +5894,7 @@ function progressInput(label, value, field, type = "number") {
   return wrapper;
 }
 
-async function openProjectProgress(projectId, { discardConfirmed = false } = {}) {
+async function openProjectProgress(projectId, { discardConfirmed = false, discoveryIntentId = null } = {}) {
   if (!discardConfirmed && !confirmDiscardProjectProgress()) return;
   const editor = document.querySelector("#project-progress-editor");
   editor.hidden = false;
@@ -5151,7 +5912,12 @@ async function openProjectProgress(projectId, { discardConfirmed = false } = {})
     const data = await response.json();
     if (generation !== state.progressEditorGeneration || state.view !== "projects") return;
     state.progressEditor = data;
+    state.progressDiscoveryIntentId = discoveryIntentId;
     renderProjectProgressEditor();
+    if (discoveryIntentId) {
+      const row = [...editor.querySelectorAll("fieldset[data-intent-id]")].find(item => item.dataset.intentId === discoveryIntentId);
+      row?.querySelector('input[data-field="target_hours"]')?.focus();
+    }
   } catch (_error) {
     if (generation === state.progressEditorGeneration && state.view === "projects") editor.textContent = "Le projet ne peut pas être ouvert. Réessayez.";
   }
@@ -5162,9 +5928,10 @@ function renderProjectProgressEditor(message = "") {
   const editor = document.querySelector("#project-progress-editor");
   editor.replaceChildren();
   const heading = document.createElement("h3");
-  heading.textContent = `Modifier mon projet : ${data.project_id}`;
+  heading.textContent = `Modifier mon projet : ${readableTargetName(data.project_id)}`;
   const feedback = document.createElement("p");
-  feedback.className = "project-progress-feedback";
+  feedback.className = "project-progress-feedback feedback-message";
+  feedback.classList?.toggle("confirmation-success", Boolean(message));
   feedback.textContent = message;
   const fieldLabel = document.createElement("label");
   fieldLabel.textContent = "Champ d’imagerie ";
@@ -5210,7 +5977,12 @@ function renderProjectProgressEditor(message = "") {
       legend.dataset.simpleText = legend.textContent;
       legend.dataset.proText = `${id} · ${intent.filter_type}`;
       if (appliedUiMode === "pro") legend.textContent = legend.dataset.proText;
-      if (!target && !progress && data.acquisition_intent_targets?.length) section.dataset.proOnly = "true";
+      if (!target && !progress && data.acquisition_intent_targets?.length && id !== state.progressDiscoveryIntentId) section.dataset.proOnly = "true";
+      if (id === state.progressDiscoveryIntentId && !target) {
+        const note = document.createElement("p");
+        note.textContent = "Filtre choisi dans la recherche : indiquez son objectif et son avancement de départ, puis enregistrez. Les autres filtres du projet sont conservés.";
+        section.append(note);
+      }
       const mode = document.createElement("select");
       mode.dataset.field = "mode";
       for (const [value, label] of [["unknown", "non renseigné"], ["detailed", "Poses × secondes"], ["manual", "Durée manuelle (secondes)"]]) {
@@ -5290,9 +6062,25 @@ function renderProjectProgressEditor(message = "") {
   const back = document.createElement("button");
   back.type = "button"; back.className = "secondary-button"; back.textContent = "Retour à mes projets";
   back.addEventListener("click", () => { if (typeof navigateGuidedProjects === "function") navigateGuidedProjects(); });
-  editor.append(heading, feedback, baselineHelp, fieldLabel, intents, save, back);
+  const prepare = document.createElement("button");
+  prepare.type = "button";
+  prepare.className = "primary-button";
+  prepare.dataset.simpleOnly = "true";
+  prepare.textContent = "Préparer une séance sur ce projet";
+  prepare.hidden = !message;
+  prepare.addEventListener("click", () => prepareGuidedSession({projectId: data.project_id}));
+  // A new edit requires another successful save before offering the next step.
+  const invalidateNextStep = () => {
+    prepare.hidden = true;
+    save.className = "primary-button";
+  };
+  editor.oninput = invalidateNextStep;
+  editor.onchange = invalidateNextStep;
+  if (message && appliedUiMode === "simple") save.className = "secondary-button";
+  editor.append(heading, feedback, prepare, baselineHelp, fieldLabel, intents, save, back);
   renderIntents();
   state.progressEditorBaseline = progressEditorSnapshot();
+  if (message && appliedUiMode === "simple") prepare.focus();
 }
 
 async function saveProjectProgress() {
@@ -5301,6 +6089,8 @@ async function saveProjectProgress() {
   const editor = document.querySelector("#project-progress-editor");
   const feedback = editor.querySelector(".project-progress-feedback");
   const configuration = state.configuration;
+  feedback.classList?.remove("confirmation-success");
+  feedback.classList?.add("error");
   if (!data || data.profile_revision !== configuration?.profile_revision) {
     feedback.textContent = "La configuration a changé. Rechargez la page avant d’enregistrer ; votre saisie n’a pas été envoyée.";
     return;
@@ -5351,6 +6141,8 @@ async function saveProjectProgress() {
   }
   const body = { expected_revision: data.profile_revision, imaging_field_id: field,
     acquisition_intent_progress: progress, acquisition_intent_targets: targets };
+  feedback.classList?.remove("error", "confirmation-success");
+  feedback.textContent = "Enregistrement des modifications en cours…";
   state.savingProjectProgress = true;
   const controlsBeforeSave = [...editor.querySelectorAll("input, select, button")].map(control => [control, control.disabled]);
   controlsBeforeSave.forEach(([control]) => {control.disabled = true;});
@@ -5360,6 +6152,7 @@ async function saveProjectProgress() {
     });
     if (response.status === 409) {
       const detail = (await response.json()).detail || {};
+      feedback.classList?.add("error");
       if (String(detail.code || "").startsWith("intent_progress_")) {
         feedback.textContent = "Crédit d’exécution présent : cette base ou ce champ ne peut plus être modifié. Rechargez le projet pour voir les dernières valeurs.";
         return;
@@ -5386,6 +6179,7 @@ async function saveProjectProgress() {
     renderProjectProgressEditor("Modifications du projet enregistrées.");
 
   } catch (_error) {
+    feedback.classList?.add("error");
     feedback.textContent = "L’avancement n’a pas pu être enregistré. Vérifiez les valeurs et réessayez.";
   } finally {
     state.savingProjectProgress = false;
@@ -5395,6 +6189,7 @@ async function saveProjectProgress() {
 
 // Guided presentation uses the same live controls and canonical progress reads.
 function updateGuidedPresentation() {
+  updateSelectedProjectContext();
   const simple = appliedUiMode === "simple";
   const view = state.view;
   const configured = Boolean(state.configuration?.configured);
@@ -5406,14 +6201,26 @@ function updateGuidedPresentation() {
   document.querySelector("#nav-projects")?.setAttribute("aria-current", view === "projects" ? "page" : "false");
   document.documentElement.dataset.guidedView = view;
   document.documentElement.dataset.guidedInitial = String(Boolean(state.guidedInitialConfiguration));
+  const recheck = state.missionRecheck && state.missionRecheck.projectId === state.selectedProjectId && !state.discoveryMode;
+  document.querySelector("#availability-title").textContent = recheck
+    ? "Vérifier les conditions de ma mission" : "Quand êtes-vous disponible ce soir ?";
+  document.querySelector("#availability-intro").textContent = recheck
+    ? "Les horaires de votre mission sont déjà renseignés ci-dessous."
+    : "NightMerit utilisera uniquement la plage que vous indiquez pour cette recommandation.";
+  const recheckSummary = document.querySelector("#mission-recheck-summary");
+  recheckSummary.hidden = !recheck;
+  recheckSummary.textContent = recheck ? state.missionRecheck.summary : "";
+  ui.recommendationSubmit.textContent = state.discoveryMode ? "Chercher une cible pour mes horaires"
+    : recheck ? "Vérifier les conditions sur ce créneau" : "Préparer ma nuit";
   const availabilityKicker = document.querySelector(".availability-heading .state-kicker");
-  if (availabilityKicker) availabilityKicker.textContent = state.guidedInitialConfiguration ? "Étape 4 sur 4 · Disponibilité" : "Préparer une séance";
+  if (availabilityKicker) availabilityKicker.textContent = state.guidedInitialConfiguration ? "Configuration initiale · Choix des horaires" : "Préparer une séance";
   const title = document.querySelector("#projects-title");
-  if (title) title.textContent = configured ? "Mes projets" : "Que souhaitez-vous photographier ?";
+  const hasSavedProjects = Object.keys(state.configurationDraft.projects || {}).length > 0;
+  if (title) title.textContent = configured && hasSavedProjects ? "Mes projets" : "Que souhaitez-vous photographier ?";
   const number = document.querySelector("#projects-step-number");
   if (number) number.hidden = configured;
   const intro = document.querySelector("#projects-intro");
-  if (intro) intro.textContent = configured
+  if (intro) intro.textContent = configured && hasSavedProjects
     ? "Retrouvez votre avancement et préparez une prochaine séance. Vos projets sont conservés d’une nuit à l’autre."
     : "Un projet décrit votre cible, votre filtre et le temps total à accumuler sur une ou plusieurs nuits.";
   const hasProjects = Object.keys(state.configurationDraft.projects || {}).length > 0;
@@ -5439,7 +6246,7 @@ function prepareGuidedProjectCreation() {
   const hasProjects = Object.keys(state.configurationDraft.projects || {}).length > 0;
   const creation = document.querySelector("#project-create");
   if (appliedUiMode === "simple" && !hasProjects && creation) {
-    creation.open = !state.discoveryMode;
+    if (!creation.open) return;
     if (!state.projectTemplates) loadProjectTemplates();
     else if (state.projectCreationEquipmentId !== state.configurationDraft.equipment?.preset_id) renderNewProjectIntents();
   }
@@ -5462,7 +6269,12 @@ function configurationDraftMatchesSaved() {
 
 function prepareGuidedSession({saveDraft = false, projectId} = {}) {
   if (guardUnresolvedAcceptance() || state.savingProjectProgress || !confirmDiscardProjectProgress()) return;
-  if (projectId !== undefined) state.selectedProjectId = projectId;
+  if (projectId !== undefined) {
+    // An explicit saved-project choice supersedes any previous alternative search.
+    setDiscoveryMode(false);
+    state.selectedProjectId = projectId;
+  }
+  state.missionRecheck = null;
   const unchanged = configurationDraftMatchesSaved();
   if (!unchanged) {
     if (saveDraft) {saveConfiguration(); return;}
@@ -5472,6 +6284,188 @@ function prepareGuidedSession({saveDraft = false, projectId} = {}) {
   }
   showFormError("");
   setView("availability");
+}
+
+// One explicit user confirmation; the existing durable evidence/credit APIs remain authoritative.
+const photoAddition = {projectId: null, sessions: [], selected: null, busy: false, generation: 0};
+function photoElement(id) { return document.getElementById(`photos-${id}`); }
+function photoMessage(message, kind = "") {
+  const el = photoElement("status"); el.textContent = message;
+  el.classList.toggle("error", kind === "error");
+  el.classList.toggle("confirmation-success", kind === "success");
+}
+function photoSeconds() {
+  const saved = usableEvidence(photoAddition.selected);
+  if (saved) return Number(saved.usable_integration_duration);
+  const frames = Number(photoElement("frames").value), seconds = Number(photoElement("seconds").value);
+  const total = frames * seconds;
+  return Number.isSafeInteger(frames) && frames > 0 && Number.isFinite(seconds) && seconds >= .000001
+    && Number.isFinite(total) && total <= Number.MAX_SAFE_INTEGER ? total : null;
+}
+function photoSessionChoiceStatus(session) {
+  return noRetainedImages(session) ? "Aucune image retenue"
+    : session.credit ? `Déjà ajouté : ${usablePoseDuration(session.session_credit_seconds)}`
+    : session.execution.status === "completed" ? "Photos à renseigner" : sessionStatus(session.execution.status);
+}
+function rememberPhotoSession(session) {
+  photoAddition.selected = session;
+  photoAddition.sessions = photoAddition.sessions.map(item =>
+    item.execution.execution_id === session.execution.execution_id ? session : item);
+}
+function renderPhotoAddition() {
+  const session = photoAddition.selected, status = session?.execution.status;
+  const saved = usableEvidence(session), duration = photoSeconds();
+  // Reconcile the displayed choice with the server-confirmed session, without reopening.
+  if (session) {
+    const option = Array.from(photoElement("choice").children).find(item => item.value === session.execution.execution_id);
+    if (option?.dataset.photoLabel) option.textContent = `${option.dataset.photoLabel} · ${photoSessionChoiceStatus(session)}`;
+  }
+  const allowed = ["completed", "in_progress"].includes(status) && !session?.credit
+    && Number.isFinite(session?.current_acquired_seconds);
+  photoElement("inputs").hidden = !allowed || Boolean(saved);
+  photoElement("frames").disabled = photoAddition.busy;
+  photoElement("seconds").disabled = photoAddition.busy;
+  photoElement("choice").disabled = photoAddition.busy;
+  photoElement("close").disabled = photoAddition.busy;
+  photoElement("submit").disabled = photoAddition.busy || !allowed || duration == null;
+  photoElement("submit").hidden = !allowed;
+  const before = session?.current_acquired_seconds;
+  photoElement("preview").textContent = session?.credit
+    ? `Déjà ajouté : ${usablePoseDuration(session.session_credit_seconds)}. Total actuel : ${usablePoseDuration(before)}.`
+    : allowed && duration != null
+      ? `À ajouter : ${usablePoseDuration(duration)}. Votre total passera de ${usablePoseDuration(before)} à ${usablePoseDuration(before + duration)}${session.target_hours == null ? "" : ` sur ${session.target_hours} h`}.`
+      : allowed ? "Indiquez uniquement les nouveaux clichés conservés de cette séance, après le tri."
+        : status === "interrupted" ? "Cette séance est interrompue. L’ajout de photos n’est pas disponible pour cet état ; votre avancement reste inchangé."
+        : "Choisissez la séance correspondant à vos nouveaux clichés. Aucune séance ne sera créée ici.";
+  photoElement("baseline").textContent = allowed && Number(session.historical_baseline_seconds) > 0 && !session.historical_baseline_confirmed
+    ? `Votre total de départ de ${usablePoseDuration(session.historical_baseline_seconds)} sera conservé. En confirmant l’ajout, vous confirmez que les nouveaux clichés ne sont pas déjà comptés dans ce total.` : "";
+  photoElement("finish").textContent = allowed && status === "in_progress"
+    ? "Cette séance est encore ouverte. Le bouton ci-dessous confirme que vos prises de vue sont finies : il terminera cette séance puis ajoutera uniquement la durée des clichés indiqués." : "";
+  photoElement("submit").textContent = photoAddition.busy ? "Enregistrement en cours…"
+    : `${status === "in_progress" ? "Terminer la séance et ajouter" : "Ajouter"} ${duration == null ? "mes photos conservées" : `${usablePoseDuration(duration)} à mon projet`}`;
+}
+async function photoRequest(url, options) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await sessionFetch(url, {...options, signal: controller.signal});
+    if (!response.ok) throw await sessionHttpError(response);
+    return await response.json();
+  }
+  finally { clearTimeout(timeout); }
+}
+async function photoRead(url) {
+  return photoRequest(url, {cache: "no-store"});
+}
+function photoSessionUrl(id) { return `/v1/executions/${encodeURIComponent(id)}/session`; }
+async function openPhotoAddition(projectId, {executionId = null} = {}) {
+  if (photoAddition.busy) return;
+  const generation = ++photoAddition.generation;
+  photoAddition.projectId = projectId; photoAddition.selected = null; photoAddition.sessions = [];
+  photoElement("title").textContent = `Ajouter mes photos conservées · ${readableTargetName(projectId)}`;
+  photoElement("choice").replaceChildren();
+  photoElement("frames").value = ""; photoElement("seconds").value = "";
+  if (!photoElement("dialog").open) photoElement("dialog").showModal();
+  photoMessage("Lecture des séances enregistrées…"); renderPhotoAddition();
+  try {
+    const [sessions, progress] = await Promise.all([photoRead("/v1/execution-sessions"), photoRead(`/v1/projects/${encodeURIComponent(projectId)}/progress`)]);
+    if (generation !== photoAddition.generation || !photoElement("dialog").open) return;
+    photoAddition.sessions = sessions.filter(item => item.project_id === projectId);
+    const placeholder = document.createElement("option"); placeholder.value = "";
+    placeholder.textContent = "Choisir la date et le filtre de mes photos"; photoElement("choice").append(placeholder);
+    const labels = new Map(photoAddition.sessions.map(item => {
+      const zone = missionTimezone(item.mission, item);
+      const filter = progress.acquisition_intents?.find(intent => intent.acquisition_intent_id === item.acquisition_intent_id)?.filter_type;
+      return [item.execution.execution_id, `${missionDateTimeLabel(item.execution.actual_start || item.chronology_at, zone)} · Filtre ${filter === "Ha" ? "Hα" : filter || "à vérifier"}`];
+    }));
+    const groups = new Map();
+    for (const [id, label] of labels) {
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push(id);
+    }
+    for (const ids of groups.values()) ids.sort();
+    for (const item of photoAddition.sessions) {
+      const option = document.createElement("option"); option.value = item.execution.execution_id;
+      const label = labels.get(item.execution.execution_id), sameTime = groups.get(label);
+      const distinction = sameTime.length > 1 ? ` · Séance ${sameTime.indexOf(item.execution.execution_id) + 1} sur ${sameTime.length}` : "";
+      option.dataset.photoLabel = `${label}${distinction}`;
+      option.textContent = `${option.dataset.photoLabel} · ${photoSessionChoiceStatus(item)}`;
+      photoElement("choice").append(option);
+    }
+    // A known session is an explicit selection from the finished-session panel.
+    const explicitSession = executionId && photoAddition.sessions.find(item => item.execution.execution_id === executionId);
+    if (explicitSession || photoAddition.sessions.length === 1) {
+      photoAddition.selected = explicitSession || photoAddition.sessions[0];
+      photoElement("choice").value = photoAddition.selected.execution.execution_id;
+    }
+    photoMessage(photoAddition.sessions.length ? "" : "Aucune séance enregistrée pour ce projet. Les images acquises avant le suivi restent accessibles dans Modifier mon projet.");
+    renderPhotoAddition();
+  } catch (_) { photoMessage("Impossible de lire les séances. Fermez puis rouvrez cet écran pour réessayer. Aucune durée ajoutée.", "error"); }
+}
+async function submitPhotoAddition() {
+  if (photoAddition.busy || !photoAddition.selected) return;
+  const snapshot = photoAddition.selected, executionId = snapshot.execution.execution_id;
+  const seconds = photoSeconds();
+  if (seconds == null || !Number.isFinite(snapshot.current_acquired_seconds) || snapshot.credit || !["completed", "in_progress"].includes(snapshot.execution.status)) return;
+  photoAddition.busy = true; photoMessage("Enregistrement en cours…"); renderPhotoAddition();
+  const key = `astropilot.quickPhotos.${executionId}`;
+  try {
+    let canonical = await photoRead(photoSessionUrl(executionId));
+    const changed = canonical.project_id !== photoAddition.projectId || canonical.acquisition_intent_id !== snapshot.acquisition_intent_id
+      || canonical.profile_revision !== snapshot.profile_revision || canonical.execution.status !== snapshot.execution.status
+      || JSON.stringify(canonical.evidence) !== JSON.stringify(snapshot.evidence);
+    if (changed || canonical.credit) throw new Error("changed");
+    const post = async (url, body, headers = {}) => {
+      return photoRequest(url, {method: "POST", headers: {"Content-Type": "application/json", ...headers}, body: JSON.stringify(body)});
+    };
+    if (canonical.execution.status === "in_progress") {
+      const end = new Date(), start = new Date(canonical.execution.actual_start);
+      if (!Number.isFinite(start.getTime()) || end < start) throw new Error("invalid_start");
+      await post("/v1/execution-transitions", {execution_id: executionId, mission_id: canonical.mission_id,
+        status: "completed", actual_start: canonical.execution.actual_start, actual_end: end.toISOString(),
+        actual_duration: (end - start) / 1000}, await guardianTransitionHeaders(executionId));
+      canonical = await photoRead(photoSessionUrl(executionId));
+    }
+    if (canonical.execution.status !== "completed") throw new Error("not_completed");
+    let evidence = usableEvidence(canonical);
+    if (!evidence) {
+      const pending = JSON.parse(localStorage.getItem(key) || "null");
+      const evidenceId = pending?.evidence_id || crypto.randomUUID();
+      localStorage.setItem(key, JSON.stringify({evidence_id: evidenceId}));
+      await post("/v1/outcome-evidence", {evidence_id: evidenceId, execution_id: executionId,
+        category: "acquisition", source: "user", observed_at: new Date().toISOString(), usable_integration_duration: seconds});
+      canonical = await photoRead(photoSessionUrl(executionId)); evidence = usableEvidence(canonical);
+    }
+    if (!evidence || Number(evidence.usable_integration_duration) !== seconds || canonical.credit) throw new Error("changed");
+    // Do not acknowledge a changed historical baseline or other credit unseen in the preview.
+    if (canonical.profile_revision !== snapshot.profile_revision) throw new Error("changed");
+    await post(`/v1/executions/${encodeURIComponent(executionId)}/intent-progress-credit`, {
+      expected_revision: canonical.profile_revision, evidence_ids: [evidence.evidence_id],
+      confirm_historical_baseline: Number(canonical.historical_baseline_seconds) > 0 && !canonical.historical_baseline_confirmed});
+    canonical = await photoRead(photoSessionUrl(executionId));
+    if (!canonical.credit) throw new Error("unconfirmed");
+    rememberPhotoSession(canonical); localStorage.removeItem(key);
+    photoMessage(`Photos ajoutées : ${usablePoseDuration(canonical.session_credit_seconds)}. Total : ${usablePoseDuration(canonical.current_acquired_seconds)}${canonical.remaining_hours == null ? "" : ` ; il reste ${usablePoseDuration(canonical.remaining_hours * 3600)}`}.`, "success");
+    renderProjects();
+  } catch (_) {
+    try {
+      const canonical = await photoRead(photoSessionUrl(executionId));
+      rememberPhotoSession(canonical);
+      if (canonical.credit) {
+        localStorage.removeItem(key);
+        renderProjects();
+      }
+      photoMessage(canonical.credit ? "Cet ajout est déjà enregistré. Le total relu ci-dessous est conservé ; aucun second ajout n’est nécessaire."
+        : usableEvidence(canonical) ? "La durée est enregistrée mais pas encore ajoutée. Vérifiez le total relu, puis confirmez à nouveau l’ajout."
+        : "L’ajout n’est pas confirmé. Vérifiez la séance et les valeurs relues avant de réessayer.", canonical.credit ? "success" : "error");
+    } catch (_) {
+      photoAddition.selected = null;
+      photoMessage("Résultat non confirmé et relecture impossible. Fermez puis rouvrez cet écran avant de réessayer. Ne créez pas une nouvelle séance.", "error");
+    }
+  } finally {
+    photoAddition.busy = false; renderPhotoAddition();
+    photoElement("status").scrollIntoView({block: "nearest"});
+  }
 }
 
 function renderSimpleProjects(entries) {
@@ -5488,7 +6482,7 @@ function renderSimpleProjects(entries) {
     const card = document.createElement("article");
     card.className = "simple-project-card";
     const heading = document.createElement("h3");
-    heading.textContent = key;
+    heading.textContent = readableTargetName(key);
     const status = document.createElement("div");
     const saved = Object.hasOwn(configuration?.projects || {}, key);
     status.textContent = saved ? "Lecture de l’avancement enregistré…" : "Projet ajouté au brouillon ; l’enregistrement reste à confirmer.";
@@ -5496,19 +6490,19 @@ function renderSimpleProjects(entries) {
     controls.className = "simple-project-actions";
     const prepare = document.createElement("button");
     prepare.type = "button"; prepare.className = "primary-button";
-    prepare.textContent = configurationDraftMatchesSaved() ? "Préparer une séance" : "Enregistrer et préparer une séance";
+    prepare.textContent = configurationDraftMatchesSaved() ? "Préparer une séance sur ce projet" : "Enregistrer et préparer une séance sur ce projet";
     prepare.disabled = true;
     prepare.addEventListener("click", () => prepareGuidedSession({saveDraft:true, projectId:key}));
     const more = document.createElement("details");
     const summary = document.createElement("summary");
-    summary.textContent = "J’ai pris des photos : renseigner mon temps de pose";
+    summary.textContent = "Images antérieures et détails des séances photo";
     const purpose = document.createElement("p");
     purpose.textContent = "Après chaque séance, vous pouvez ajouter son temps de pose utilisable au projet. NightMerit conserve le total, nuit après nuit, séparément pour chaque filtre. Chaque ajout doit être confirmé par vous.";
     const note = document.createElement("p");
     note.textContent = "Vous avez suivi cette séance dans NightMerit ? Retrouvez-la pour enregistrer le temps de pose des images que vous gardez, sans les pauses ni les images rejetées.";
     const sessions = document.createElement("button");
     sessions.type = "button"; sessions.className = "secondary-button";
-    sessions.textContent = "Retrouver mes sessions NightMerit";
+    sessions.textContent = "Retrouver mes séances photo NightMerit";
     sessions.disabled = !saved;
     sessions.addEventListener("click", () => {
       prepareGuidedSession();
@@ -5535,7 +6529,11 @@ function renderSimpleProjects(entries) {
     modify.type = "button"; modify.className = "secondary-button";
     modify.textContent = "Modifier mon projet"; modify.disabled = !saved;
     modify.addEventListener("click", () => openProjectProgress(key));
-    controls.append(modify, prepare);
+    const addPhotos = document.createElement("button");
+    addPhotos.type = "button"; addPhotos.className = "secondary-button";
+    addPhotos.textContent = "Ajouter mes photos conservées"; addPhotos.disabled = !saved;
+    addPhotos.addEventListener("click", () => openPhotoAddition(key));
+    controls.append(addPhotos, modify, prepare, projectRemovalButton(key, {saved}));
     card.append(heading, status, controls, more);
     region.append(card);
     if (!saved) continue;
@@ -5545,24 +6543,10 @@ function renderSimpleProjects(entries) {
       if (state.simpleProjectsGeneration !== generation || state.configuration !== configuration) return;
       status.replaceChildren();
       const targets = data.acquisition_intent_targets || [];
-      if (!targets.length) {
-        status.textContent = "L’objectif par filtre reste à renseigner. Votre projet historique est conservé.";
-        return;
-      }
-      prepare.disabled = false;
-      for (const target of targets) {
-        const intent = data.acquisition_intents.find(item => item.acquisition_intent_id === target.acquisition_intent_id);
-        const progress = data.intent_progress_breakdown.find(item => item.acquisition_intent_id === target.acquisition_intent_id);
-        const row = document.createElement("p");
-        const filter = intent?.filter_type === "Ha" ? "Hα" : intent?.filter_type || "à confirmer";
-        const known = progress?.effective_total_seconds != null;
-        row.textContent = `Filtre ${filter} · ${known ? progressDuration(progress.effective_total_seconds) : "Avancement non renseigné"} sur ${target.target_hours} h au total.`;
-        const remainder = document.createElement("small");
-        remainder.textContent = progress?.remaining_hours == null ? "Confirmez votre avancement pour calculer ce qu’il reste."
-          : progress.remaining_hours <= 0 ? "Objectif atteint pour ce filtre."
-          : `Il reste ${progressDuration(progress.remaining_hours * 3600)} à accumuler, sur une ou plusieurs nuits.`;
-        row.append(remainder); status.append(row);
-      }
+      prepare.disabled = !targets.length;
+      const balance = createProjectBalance(data);
+      if (balance) status.append(balance);
+      else status.textContent = "L’objectif par filtre reste à renseigner. Votre projet historique est conservé.";
     }).catch(() => {
       if (state.simpleProjectsGeneration === generation && state.configuration === configuration) {
         status.textContent = "L’avancement ne peut pas être relu. Vos données sont conservées ; rouvrez Mes projets pour réessayer.";
@@ -5570,6 +6554,64 @@ function renderSimpleProjects(entries) {
       }
     });
   }
+}
+
+// Read-only view of the server's effective totals, including prior images and
+// credited sessions. Missing goals/progress must never become invented zeros.
+function createProjectBalance(data) {
+  const intents = data.acquisition_intents || [];
+  if (!intents.length) return null;
+  const section = document.createElement("section");
+  section.className = "project-balance";
+  const table = document.createElement("table");
+  const caption = document.createElement("caption");
+  caption.textContent = "Bilan du projet par filtre";
+  const head = document.createElement("thead");
+  const headings = document.createElement("tr");
+  for (const label of ["Filtre", "Objectif", "Acquis", "Reste à faire"]) {
+    const cell = document.createElement("th"); cell.scope = "col";
+    cell.textContent = label; headings.append(cell);
+  }
+  head.append(headings);
+  const body = document.createElement("tbody");
+  const targets = new Map((data.acquisition_intent_targets || []).map(item => [item.acquisition_intent_id, item]));
+  const progress = new Map((data.intent_progress_breakdown || []).map(item => [item.acquisition_intent_id, item]));
+  const known = value => Number.isFinite(value) && value >= 0;
+  const time = seconds => progressDuration(Math.round(seconds));
+  let missingProgress = false;
+  for (const intent of intents) {
+    const id = intent.acquisition_intent_id;
+    const target = targets.get(id), acquired = progress.get(id);
+    const goalKnown = Number.isFinite(target?.target_hours) && target.target_hours > 0;
+    const acquiredKnown = known(acquired?.effective_total_seconds);
+    const remainingKnown = goalKnown && acquiredKnown && known(acquired?.remaining_hours);
+    missingProgress ||= !acquiredKnown;
+    const row = document.createElement("tr"); row.dataset.intentId = id;
+    const filter = document.createElement("th"); filter.scope = "row";
+    filter.textContent = intent.filter_type === "Ha" ? "Hα" : intent.filter_type || "À confirmer";
+    const goal = document.createElement("td"); goal.dataset.balanceField = "goal";
+    goal.textContent = goalKnown ? time(target.target_hours * 3600) : "Non défini";
+    const total = document.createElement("td"); total.dataset.balanceField = "acquired";
+    total.textContent = acquiredKnown ? time(acquired.effective_total_seconds) : "Non renseigné";
+    const remaining = document.createElement("td"); remaining.dataset.balanceField = "remaining";
+    remaining.textContent = remainingKnown ? time(acquired.remaining_hours * 3600)
+      : !goalKnown ? "Objectif à définir" : "À calculer";
+    if (remainingKnown && acquired.remaining_hours === 0) {
+      const reached = document.createElement("small"); reached.textContent = "Objectif atteint";
+      remaining.append(reached);
+    }
+    row.append(filter, goal, total, remaining); body.append(row);
+  }
+  table.append(caption, head, body); section.append(table);
+  const note = document.createElement("p"); note.className = "field-note";
+  note.textContent = "Acquis : temps de pose des images conservées, avec vos images antérieures et les séances déjà ajoutées. Installation et images de calibration exclues.";
+  section.append(note);
+  if (missingProgress) {
+    const unknown = document.createElement("p"); unknown.className = "field-note";
+    unknown.textContent = "Non renseigné ne signifie pas zéro. Renseignez votre temps de départ dans « Modifier mon projet » pour calculer le reste à faire.";
+    section.append(unknown);
+  }
+  return section;
 }
 
 function addSimpleDurationFields(section, mode, manual, update, locked, advanced = []) {
@@ -5628,6 +6670,13 @@ function addSimpleDurationFields(section, mode, manual, update, locked, advanced
 
 function prefillConfiguration() {
   renderPresetChoices();
+  document.querySelector("#equipment-reference-applied").textContent = "";
+  for (const card of document.querySelectorAll(".equipment-reference-card")) {
+    const check = card.querySelector("input[type=checkbox]");
+    if (check) check.checked = false;
+    const button = card.querySelector("button");
+    if (button) button.disabled = true;
+  }
   const site = state.configurationDraft.site || {};
   document.querySelector("#site-name").value = site.name?.trim() ? site.name : "Mon site";
   document.querySelector("#site-latitude").value = site.latitude ?? "";
@@ -5641,6 +6690,7 @@ function prefillConfiguration() {
   const preset = [...document.querySelectorAll('input[name="preset-equipment"]')]
     .find((input) => input.value === presetId);
   if (preset) preset.checked = true;
+  updateEquipmentSearch();
   for (const [name, selector, type] of customEquipmentFields) {
     const input = document.querySelector(selector);
     if (type === "boolean") input.checked = Boolean(custom?.[name]);
@@ -5668,6 +6718,9 @@ function readSite() {
     bortle: Number(bortleInput),
   };
   if (!site.name) return [null, "Donnez un nom à votre site."];
+  if (!latitudeInput || !longitudeInput) {
+    return [null, "Indiquez votre lieu d’observation : utilisez votre position ou saisissez les coordonnées."];
+  }
   if (!latitudeInput || !Number.isFinite(site.latitude) || site.latitude < -90 || site.latitude > 90) {
     return [null, "La latitude doit être comprise entre −90 et 90."];
   }
@@ -5709,6 +6762,9 @@ function readEquipment() {
   }
   const selected = document.querySelector('input[name="preset-equipment"]:checked');
   if (!selected) return [null, "Choisissez une configuration matérielle."];
+  if (selected.closest(".equipment-choice").hidden) {
+    return [null, "Votre configuration sélectionnée est masquée par la recherche. Cliquez sur « Revoir toute la liste » ou choisissez un autre matériel."];
+  }
   return [{ preset_id: selected.value }, null];
 }
 
@@ -5836,12 +6892,32 @@ async function restoreSavedMission() {
   } catch (_error) {
     // Availability remains usable if the persisted lineage is unavailable.
   }
+  let historyUnavailable = false;
+  try {
+    const response = await fetch("/v1/accepted-missions", {cache: "no-store"});
+    if (!response.ok) throw new Error("saved_mission_history_unavailable");
+    const history = await response.json();
+    if (!Array.isArray(history)) throw new Error("invalid_saved_mission_history");
+    if (!isCurrent()) return;
+    for (const payload of history) {
+      const mission = payload?.mission;
+      if (payload?.status !== "accepted" || !mission || payload.mission_id !== mission.mission_id
+          || payload.selection_id !== mission.selection_id || payload.decision_id !== mission.decision_id) {
+        throw new Error("invalid_saved_mission_history");
+      }
+      savedMissions.push({decision_id:payload.decision_id, selection_id:payload.selection_id,
+        mission_id:payload.mission_id, selectedCatalogKey:payload.catalog_key,
+        acquisitionIntentId:payload.selected_acquisition_intent_id, savedAt:payload.selected_at, source:"persisted", mission});
+    }
+  } catch (_) {
+    historyUnavailable = true;
+  }
   try {
     const response = await fetch("/v1/execution-sessions");
     if (response.ok && isCurrent()) {
       const sessions = await response.json();
       if (!isCurrent()) return;
-      const seen = new Set();
+      const seen = new Set(savedMissions.map(item => item.mission_id));
       for (const item of sessions) {
         if (seen.has(item.mission_id)) continue;
         seen.add(item.mission_id);
@@ -5861,11 +6937,20 @@ async function restoreSavedMission() {
     const known = knownMissions.find(previous => previous.mission_id === item.mission_id);
     item.windowTimezone = missionTimezone(item.mission, known || item);
   }
-  state.savedMissions = savedMissions;
+  state.savedMissions = [...new Map(savedMissions.map(item => [item.mission_id, item])).values()];
   if (current && !state.savedMissions.some((item) => item.mission_id === current.mission_id)) {
     state.savedMissions.unshift(current);
   }
   state.acceptedMission = current || state.savedMissions[0] || null;
+  const historyStatus = document.querySelector("#saved-mission-history-status");
+  historyStatus.hidden = !historyUnavailable;
+  historyStatus.textContent = historyUnavailable
+    ? "Certains plans enregistrés n’ont pas pu être chargés. Rechargez la page pour réessayer." : "";
+  renderSavedMissionChoices();
+  if (historyUnavailable) ui.savedMissionEntry.hidden = false;
+}
+
+function renderSavedMissionChoices() {
   ui.savedMissionChoice.replaceChildren();
   for (const item of state.savedMissions) {
     const option = document.createElement("option");
@@ -5990,7 +7075,7 @@ async function recoverConfiguration() {
   }
 }
 
-async function saveConfiguration() {
+async function saveConfiguration({ afterSave = null } = {}) {
   if (state.savingConfiguration) return;
   state.savingConfiguration = true;
   const button = document.querySelector("#save-configuration");
@@ -6011,6 +7096,10 @@ async function saveConfiguration() {
       if (response.status === 409 && detail?.code === "configuration_revision_conflict") {
         await loadConfiguration({ afterConflict: true });
         return;
+      }
+      if (detail?.code === "project_archived_restore_required") {
+        projectRemovalNotice("Ce projet est conservé dans l’historique. Utilisez « Remettre dans mes projets » pour retrouver son avancement.");
+        setView("projects"); return;
       }
       const target = configurationErrorSteps[detail?.code];
       if (target) {
@@ -6033,9 +7122,15 @@ async function saveConfiguration() {
     const ownsNavigation = configurationOwnsNavigation(generation);
     installCurrentConfiguration(payload, generation);
     if (!ownsNavigation) return;
+    if (afterSave) { await afterSave(); return; }
     setView("availability");
     const savedNotice = document.querySelector("#availability-save-confirmation");
-    if (savedNotice) savedNotice.hidden = false;
+    if (savedNotice) {
+      savedNotice.textContent = Object.keys(state.configuration?.projects || {}).length
+        ? "Votre projet et votre configuration sont enregistrés. Choisissez maintenant votre disponibilité."
+        : "Votre site et votre matériel sont enregistrés. Choisissez vos horaires pour rechercher une cible.";
+      savedNotice.hidden = false;
+    }
   } catch (_error) {
     if (!configurationOperationIsCurrent(generation)) return;
     if (!configurationOwnsNavigation(generation)) return;
@@ -6057,6 +7152,7 @@ const availabilityFieldsByMode = Object.freeze({
 });
 
 const availabilityValidationMessages = Object.freeze({
+  operational_durations_invalid: "Indiquez des durées entières entre 0 et 240 minutes pour la préparation et les flats.",
   availability_mode_required: "Choisissez votre disponibilité pour cette nuit.",
   availability_duration_required: "Indiquez une durée positive en heures.",
   availability_start_required: "Indiquez une heure de début valide.",
@@ -6160,7 +7256,16 @@ function collectAvailabilityPayload() {
   const mode = document.querySelector('input[name="availability-mode"]:checked')?.value;
   if (!mode) throw availabilityInputError("availability_mode_required");
 
-  if (mode === "all_night") return { mode: "all_night" };
+  const extra = {};
+  const preparation = document.querySelector("#availability-preparation-minutes");
+  const flats = document.querySelector("#availability-flats-minutes");
+  if (preparation?.type === "number" && flats?.type === "number") {
+    const prep = Number(preparation.value), calibration = Number(flats.value);
+    if (preparation.value === "" || flats.value === "" || !Number.isInteger(prep) || !Number.isInteger(calibration)
+        || prep < 0 || prep > 240 || calibration < 0 || calibration > 240) throw availabilityInputError("operational_durations_invalid");
+    if (prep !== 30 || calibration !== 10) Object.assign(extra, {preparation_minutes: prep, flats_minutes: calibration});
+  }
+  if (mode === "all_night") return { mode: "all_night", ...extra };
   if (wallClockAvailabilityModes.includes(mode) && !currentSiteTimezone()) {
     throw availabilityInputError("availability_timezone_unresolved");
   }
@@ -6177,7 +7282,7 @@ function collectAvailabilityPayload() {
     if (!duration) throw availabilityInputError("availability_duration_required");
     const availability = { mode: "duration" };
     availability.duration = duration;
-    return availability;
+    return {...availability, ...extra};
   }
   if (mode === "start_and_duration") {
     if (!start) throw availabilityInputError("availability_start_required");
@@ -6185,15 +7290,21 @@ function collectAvailabilityPayload() {
     const availability = { mode: "start_and_duration" };
     availability.start_local = start;
     availability.duration = duration;
-    return availability;
+    return {...availability, ...extra};
   }
   if (mode === "until") {
     if (!end) throw availabilityInputError("availability_end_required");
     const availability = { mode: "until" };
     availability.end_local = end;
-    return availability;
+    return {...availability, ...extra};
   }
   if (mode === "fixed_window") {
+    const recheck = state.missionRecheck;
+    if (recheck && !state.discoveryMode && recheck.projectId === state.selectedProjectId
+        && recheck.siteFingerprint === decisionSiteFingerprint()
+        && startValue === recheck.startLocal && endValue === recheck.endLocal) {
+      return {mode: "fixed_window", start: recheck.start, end: recheck.end, ...extra};
+    }
     if (!start) throw availabilityInputError("availability_start_required");
     if (!end) throw availabilityInputError("availability_end_required");
     const sameDate = start.slice(0, 10) === end.slice(0, 10);
@@ -6203,7 +7314,7 @@ function collectAvailabilityPayload() {
     const availability = { mode: "fixed_window" };
     availability.start_local = start;
     availability.end_local = end;
-    return availability;
+    return {...availability, ...extra};
   }
   throw availabilityInputError("availability_mode_required");
 }
@@ -6292,7 +7403,174 @@ function intentsRefusedForProductiveWindow(payload) {
       && item.reason_codes[0] === "insufficient_actionable_productive_window");
 }
 
-function refusalForecastMessage(payload) {
+// Read a historical zone only from the archived response/request, never today's site.
+function refusalSiteTimezone(payload, {archived = false, request = null} = {}) {
+  const candidate = payload?.weather_trust?.timezone || payload?.weather_context?.timezone || request?.location?.timezone
+    || (!archived && typeof currentSiteTimezone === "function" ? currentSiteTimezone() : null);
+  if (candidate) {
+    try { return new NightMeritTime.DateTimeFormat("fr-CH", {timeZone: candidate}).resolvedOptions().timeZone; }
+    catch (_) { /* Unknown zones retain an explicit UTC fallback. */ }
+  }
+  return "UTC";
+}
+
+function refusalTimeLabel(value, timeZone) {
+  if (!value || !Number.isFinite(Date.parse(value))) return "non précisé";
+  if (!timeZone) return analysisTimeLabel(value);
+  return new NightMeritTime.DateTimeFormat("fr-CH", {timeZone, year:"numeric", month:"2-digit",
+    day:"2-digit", hour:"2-digit", minute:"2-digit", hour12:false,
+    timeZoneName:"shortOffset"}).format(new Date(value));
+}
+
+function refusalRangeLabel(start, end, timeZone) {
+  if (![start, end].every(value => value && Number.isFinite(Date.parse(value)))) return "";
+  const day = new NightMeritTime.DateTimeFormat("fr-CH", {timeZone, year:"numeric", month:"2-digit", day:"2-digit"});
+  const hour = new NightMeritTime.DateTimeFormat("fr-CH", {timeZone, hour:"2-digit", minute:"2-digit", hour12:false});
+  const a = new Date(start), b = new Date(end);
+  const from = `${day.format(a)}, ${hour.format(a)}`;
+  const until = day.format(a) === day.format(b) ? hour.format(b) : `${day.format(b)}, ${hour.format(b)}`;
+  return `${from} → ${until} · ${timeZone}`;
+}
+
+function refusalEvaluatedRange(payload, timeZone) {
+  const diagnosed = targetedIntentAssessments(payload).map(item => item.actionability_refusal).filter(Boolean);
+  const refusal = diagnosed.length === 1 ? diagnosed[0] : !diagnosed.length ? payload.actionability_refusal : null;
+  const scope = refusal?.evidence_scope;
+  if (!scope?.evaluated_start || !scope?.evaluated_end) return "";
+  const label = payload.preselection_window_refusals?.length
+    ? "Fenêtre de référence du diagnostic" : "Plage évaluée";
+  return `${label} : ${refusalRangeLabel(scope.evaluated_start, scope.evaluated_end, timeZone)}.`;
+}
+
+// Display stored evidence only: a missing scope is never replaced by requested
+// hours, and a missing collection timestamp is never replaced by the current time.
+function refusalEvidenceSummary(payload, timeZone) {
+  const aware = value => typeof value === "string" && /(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
+  const weather = {...(payload.refusal_weather || {}), ...(payload.weather_trust || {}), ...(payload.weather_context || {})};
+  const simulated = globalThis.NightMeritPresentation?.simulatedWeather(weather);
+  const retrieved = weather.retrieved_at_utc || payload.refusal_weather?.retrieved_at_utc || payload.weather_retrieved_at;
+  const collected = aware(retrieved)
+    ? `${simulated ? "Données météo simulées datées du" : "Prévisions collectées le"} ${refusalTimeLabel(retrieved, timeZone)}${weather.provider ? ` · ${weather.provider}` : ""}.`
+    : "Heure de collecte des prévisions non disponible dans cette analyse.";
+  const assessments = targetedIntentAssessments(payload);
+  const diagnosed = assessments.filter(item => item.actionability_refusal);
+  const entries = payload.refusal_evidence || (diagnosed.length ? diagnosed.map(item => {
+    const refusal = item.actionability_refusal;
+    return {display_name: item.label || item.filter_type, filter_type: null,
+      evaluated_start: refusal.evidence_scope?.evaluated_start, evaluated_end: refusal.evidence_scope?.evaluated_end,
+      refusal_stage: refusal.refusal_stage, best_productive_window_minutes: refusal.best_productive_window_minutes,
+      required_continuous_minutes: refusal.required_continuous_minutes, losses: refusal.productivity_breakdown?.losses};
+  }) : payload.actionability_refusal ? [{
+    evaluated_start: payload.actionability_refusal.evidence_scope?.evaluated_start,
+    evaluated_end: payload.actionability_refusal.evidence_scope?.evaluated_end,
+    refusal_stage: payload.actionability_refusal.refusal_stage,
+    best_productive_window_minutes: payload.actionability_refusal.best_productive_window_minutes,
+    required_continuous_minutes: payload.actionability_refusal.required_continuous_minutes,
+    losses: payload.actionability_refusal.productivity_breakdown?.losses,
+  }] : []);
+  const names = {cloud:"nuages",humidity:"humidité",wind:"vent",moon:"lumière de la Lune",altitude:"faible hauteur de la cible"};
+  const rows = entries.map(item => {
+    const bounded = aware(item.evaluated_start) && aware(item.evaluated_end)
+      && Date.parse(item.evaluated_end) > Date.parse(item.evaluated_start);
+    const range = bounded ? `Horaires évalués : ${refusalRangeLabel(item.evaluated_start, item.evaluated_end, timeZone)}.`
+      : "Horaires évalués non disponibles : aucune cause météo n’est déduite pour vos horaires.";
+    let factors;
+    if (!bounded) factors = "Le diagnostic ne conserve aucune plage évaluée dans votre disponibilité.";
+    else if (item.refusal_stage === "continuous_window_too_short" && Number.isFinite(item.best_productive_window_minutes) && Number.isFinite(item.required_continuous_minutes)) {
+      factors = `Créneau favorable trop court : ${Math.floor(item.best_productive_window_minutes)} min continues, pour un minimum de ${Math.ceil(item.required_continuous_minutes)} min. Ce refus n’est pas attribué aux seuls facteurs météo.`;
+    } else if (item.refusal_stage === "no_productive_slice") {
+      const limiting = Object.entries(item.losses || {}).filter(([key,value]) => names[key] && Number.isFinite(value) && value > 0)
+        .sort((a,b)=>b[1]-a[1]).map(([key])=>names[key]);
+      factors = limiting.length ? `Facteurs limitants dans le calcul : ${limiting.join(", ")}.`
+        : "Facteurs limitants non conservés dans ce diagnostic.";
+    } else factors = "La cause précise ne peut pas être attribuée à la météo avec ce diagnostic.";
+    const factorNames = bounded && item.refusal_stage === "no_productive_slice"
+      ? Object.entries(item.losses || {}).filter(([key,value])=>names[key] && Number.isFinite(value) && value > 0).map(([key])=>names[key]) : [];
+    return {label:[item.display_name, item.filter_type === "Ha" ? "Hα" : item.filter_type].filter(Boolean).join(" · "),range,factors,factorNames};
+  });
+  return {collected,rows};
+}
+
+function preselectionRefusalSummary(payload, timeZone) {
+  const refusals = Array.isArray(payload.preselection_window_refusals) ? payload.preselection_window_refusals : [];
+  return refusals.flatMap(refusal => refusalEvidenceSummary({
+    actionability_refusal: refusal,
+  }, timeZone).rows);
+}
+
+function renderRefusalEvidence(container, payload, timeZone, {includeRange = true} = {}) {
+  if (!container?.replaceChildren) return;
+  container.replaceChildren(); container.hidden = false;
+  const evidence = refusalEvidenceSummary(payload, timeZone);
+  const heading = document.createElement("h3"); heading.textContent = "Bilan du refus"; container.append(heading);
+  const collected = document.createElement("p"); collected.className = "field-note"; collected.textContent = evidence.collected; container.append(collected);
+  const appendRow = (parent,row) => {
+    if (row.label) {const title=document.createElement("strong");title.textContent=row.label;parent.append(title);}
+    if (includeRange) {const range=document.createElement("p");range.textContent=row.range;parent.append(range);}
+    const factors=document.createElement("p");factors.textContent=row.factors;parent.append(factors);
+  };
+  if (evidence.rows.length > 1) {
+    const common = [...new Set(evidence.rows.map(row=>row.range))];
+    if (includeRange) {const range=document.createElement("p");range.textContent=common.length===1 ? common[0] : "Horaires évalués : plusieurs plages distinctes, à consulter par cible et filtre ci-dessous.";container.append(range);}
+    const factors=[...new Set(evidence.rows.flatMap(row=>row.factorNames))];
+    const explanation=document.createElement("p");explanation.textContent=factors.length
+      ? `Facteurs limitants rencontrés selon les prises de vue : ${factors.join(", ")}.`
+      : "Les contraintes sont détaillées pour chaque prise de vue ci-dessous.";container.append(explanation);
+    const details=document.createElement("details"), summary=document.createElement("summary");
+    summary.textContent=`Voir les horaires et facteurs par cible et filtre (${evidence.rows.length})`;
+    details.append(summary); for (const row of evidence.rows) {const group=document.createElement("div");group.className="refusal-summary-row";appendRow(group,row);details.append(group);} container.append(details);
+  } else if (evidence.rows.length) appendRow(container,evidence.rows[0]);
+  else {const note=document.createElement("p");note.textContent="Aucun diagnostic météo précis n’est disponible pour expliquer ce refus.";container.append(note);}
+  const windows = preselectionRefusalSummary(payload, timeZone);
+  if (windows.length) {
+    const note=document.createElement("p");
+    note.textContent=`${windows.length} fenêtre${windows.length > 1 ? "s" : ""} examinée${windows.length > 1 ? "s" : ""} dans vos horaires, après réservation de la préparation et des flats. Le diagnostic du filtre ci-dessus conserve une fenêtre de référence ; il ne décrit pas à lui seul toute la recherche.`;
+    container.append(note);
+    const details=document.createElement("details"), summary=document.createElement("summary");
+    summary.textContent=`Voir les plages examinées avant le choix du filtre (${windows.length})`;
+    details.append(summary);
+    for (const row of windows) {
+      const group=document.createElement("div");group.className="refusal-summary-row";
+      // Show the recorded range even in views that hide the main diagnostic range.
+      const range=document.createElement("p");range.textContent=row.range;group.append(range);
+      const factors=document.createElement("p");factors.textContent=row.factors;group.append(factors);
+      details.append(group);
+    }
+    container.append(details);
+  }
+  const help=document.createElement("details"), summary=document.createElement("summary"), note=document.createElement("p");
+  summary.textContent="Comment lire ces informations ?";
+  note.textContent="Les facteurs décrivent la meilleure portion du calcul, sans désigner une cause physique unique. La collecte indique quand les données ont été récupérées, pas une mesure du ciel sur place. Une information non conservée n’est pas reconstituée. Les détails et seuils du calcul restent dans « Comprendre le résultat ».";
+  help.append(summary,note);container.append(help);
+}
+
+function simpleProductivityRefusal(payload) {
+  const assessments = targetedIntentAssessments(payload);
+  const refusal = assessments.length === 1 ? assessments[0].actionability_refusal
+    : !assessments.length ? payload.actionability_refusal : null;
+  if (!refusal || refusal.status !== "constraints_refusal" || refusal.conclusion !== "no_productive_window") return null;
+  if (refusal.evidence_scope && !refusal.evidence_scope.evaluated_start) {
+    return ["Aucun créneau dans vos horaires", "La fenêtre trouvée est en dehors de votre disponibilité."];
+  }
+  if (refusal.refusal_stage === "no_productive_slice") {
+    const forecast = refusalForecastMessage(payload);
+    const losses = refusal.productivity_breakdown?.losses;
+    if (appliedUiMode === "simple" && forecast?.overcast && Number.isFinite(losses?.cloud) && losses.cloud > 0
+        && !globalThis.NightMeritPresentation?.simulatedWeather(payload.refusal_weather)) {
+      return ["Trop de nuages sur le créneau évalué",
+        "Les prévisions annoncent un ciel entièrement couvert sur la plage évaluée. Les nuages limitent les conditions pour photographier cette cible : aucun créneau exploitable n’a été trouvé. Réessayez lorsque les prévisions évoluent. Aucune séance photo ni aucun temps de pose n’a été ajouté."];
+    }
+    return ["Pas de séance photo recommandée", "Aucun moment assez favorable n’a été retenu sur la plage évaluée."];
+  }
+  if (refusal.refusal_stage === "continuous_window_too_short"
+      && Number.isFinite(refusal.best_productive_window_minutes) && Number.isFinite(refusal.required_continuous_minutes)) {
+    return ["Le créneau favorable est trop court",
+      `${Math.floor(refusal.best_productive_window_minutes)} minutes favorables d’affilée ont été trouvées. Il en faut au moins ${Math.ceil(refusal.required_continuous_minutes)} minutes pour proposer une séance.`];
+  }
+  return null;
+}
+
+function refusalForecastMessage(payload, timeZone = null) {
   if (!intentsRefusedForProductiveWindow(payload)) return null;
   const forecast = payload.refusal_weather;
   if (!forecast || !Number.isFinite(forecast.cloud_cover_min)
@@ -6304,30 +7582,64 @@ function refusalForecastMessage(payload) {
   const end = iso.exec(forecast.window_end || "");
   const retrieved = iso.exec(forecast.retrieved_at_utc || "");
   if (!start || !end || !retrieved || !forecast.provider) return null;
-  const stamp = match => `${match[3]}.${match[2]}.${match[1]} à ${match[4]} UTC${match[5] === "Z" ? "" : match[5]}`;
+  const stamp = match => refusalTimeLabel(match[0], timeZone);
   const sameDay = start[1] === end[1] && start[2] === end[2] && start[3] === end[3] && start[5] === end[5];
-  const range = sameDay
+  const range = timeZone ? `du ${stamp(start)} au ${stamp(end)} · ${timeZone}` : sameDay
     ? `le ${start[3]}.${start[2]}.${start[1]}, de ${start[4]} à ${end[4]} (UTC${start[5] === "Z" ? "" : start[5]})`
     : `du ${stamp(start)} au ${stamp(end)}`;
   const low = Math.round(forecast.cloud_cover_min), high = Math.round(forecast.cloud_cover_max);
   const clouds = low === high ? `${low} %` : `${low} à ${high} %`;
   const overcast = forecast.cloud_cover_min === 100 && forecast.cloud_cover_max === 100;
+  const perimeter = forecast.window_kind === "availability_intersection"
+    ? "la portion de la fenêtre candidate comprise dans votre disponibilité"
+    : forecast.window_kind === "candidate_window" ? "la fenêtre candidate, qui peut dépasser votre disponibilité"
+      : "la fenêtre météo archivée, dont le périmètre par rapport à votre disponibilité n’est pas enregistré";
+  const sampling = forecast.sample_times?.length
+    ? ` Échantillons horaires utilisés : ${forecast.sample_times.map(value => refusalTimeLabel(value, timeZone)).join(" ; ")}. Une heure partielle conserve la prévision horaire d’origine, sans interpolation.` : "";
+  if (globalThis.NightMeritPresentation?.simulatedWeather(forecast)) {
+    return {title:"Contexte météo simulé du refus", body:`Nuages simulés : ${clouds} sur ${perimeter} ${range}.`,
+      details:globalThis.NightMeritPresentation.explanation, overcast};
+  }
   return {
     title: overcast ? "Ciel couvert prévu sur le créneau évalué" : "Créneau insuffisant pour ce projet",
-    body: `Votre projet est bien enregistré. Couverture nuageuse prévue : ${clouds} sur le créneau évalué ${range}. ${overcast ? "NightMerit ne recommande pas de séance photo pour ce projet dans ces conditions. " : "Aucun créneau suffisamment productif n’a été retenu pour ce projet. "}Votre projet est conservé. Prévisions récupérées le ${stamp(retrieved)}. Actualisez les prévisions avant de décider de sortir.`,
-    details: `Source : ${forecast.provider}. Il s’agit de prévisions, pas d’une mesure du ciel sur place. Le créneau évalué peut être plus court que votre disponibilité.`,
+    body: `Nuages prévus : ${clouds} sur ${perimeter} ${range}. Prévisions récupérées le ${stamp(retrieved)}. Actualisez-les avant une nouvelle séance.`,
+    details: `Source : ${forecast.provider}. Il s’agit de prévisions, pas d’une mesure du ciel sur place. Ce contexte météo ne désigne pas la cause physique du refus.${sampling}`,
     overcast,
   };
 }
 
-function intentEligibilityRefusalMessage(payload) {
+function intentEligibilityRefusalMessage(payload, timeZone = null) {
   const assessments = targetedIntentAssessments(payload);
-  const forecast = refusalForecastMessage(payload);
-  if (forecast) return [forecast.title, forecast.body];
+  const forecast = refusalForecastMessage(payload, timeZone);
+  const diagnosed = assessments.filter(item => item.actionability_refusal);
+  if (diagnosed.length) {
+    const summaries = diagnosed.map(item => {
+      const refusal = item.actionability_refusal;
+      const [title, detail, breakdown] = actionabilityRefusalMessage(refusal, timeZone);
+      const label = item.label || item.filter_type || item.acquisition_intent_id;
+      const summary = refusal.evidence_scope && !refusal.evidence_scope.evaluated_start ? detail
+        : refusal.refusal_stage === "no_productive_slice"
+        ? `Aucune tranche évaluée dans votre disponibilité n’atteint le seuil de productivité. Une mission exige au moins ${Math.ceil(refusal.required_continuous_minutes)} minutes productives continues.`
+        : refusal.refusal_stage === "continuous_window_too_short"
+          ? `Des tranches sont productives, mais la meilleure durée continue est de ${Math.floor(refusal.best_productive_window_minutes)} min ; il faut au moins ${Math.ceil(refusal.required_continuous_minutes)} min.`
+          : detail;
+      return {title, summary: `${label} : ${summary}`, detail: `${label} : ${detail}${breakdown ? `\n${breakdown}` : ""}`};
+    });
+    const undiagnosed = assessments.filter(item => !item.actionability_refusal);
+    return [
+      assessments.length === 1 ? summaries[0].title : "Aucune prise de vue réalisable pour ce projet",
+      `Votre projet est conservé. ${summaries.map(item => item.summary).join(" ")}${undiagnosed.length ? " D’autres prises de vue ont des motifs distincts ; consultez les détails." : ""}`,
+      summaries.map(item => item.detail).join("\n")
+        + undiagnosed.map(item => `\n${item.label || item.acquisition_intent_id} : ${(item.reason_codes || []).join(", ")}. Diagnostic détaillé non disponible.`).join("")
+        + (forecast ? `\n\nContexte des prévisions, sans attribution de la cause : ${forecast.body} ${forecast.details}` : ""),
+    ];
+  }
+  const missingDiagnostic = "La durée productive calculée, l’étape du refus et le bilan des facteurs n’ont pas été conservés dans cette analyse. Les prévisions seules ne permettent pas d’établir la cause physique du refus.";
+  if (forecast) return [forecast.title, forecast.body, `${missingDiagnostic} ${forecast.details}`];
   if (intentsRefusedForProductiveWindow(payload)) {
     const names = assessments.map(item => item.label || item.filter_type).filter(Boolean).join(", ");
     return ["Créneau insuffisant pour ce projet",
-      `Votre projet est bien enregistré. Sur la plage choisie, NightMerit ne trouve pas de créneau suffisamment productif${names ? ` pour ${names}` : ""}. Vous pouvez revoir vos horaires ou refaire l’analyse lorsque les conditions évoluent, sans garantie de trouver un créneau adapté. Votre projet est conservé.`];
+      `Votre projet est bien enregistré. Sur la plage choisie, NightMerit ne trouve pas de créneau suffisamment productif${names ? ` pour ${names}` : ""}. Vous pouvez revoir vos horaires ou refaire l’analyse lorsque les conditions évoluent, sans garantie de trouver un créneau adapté. Votre projet est conservé.`, missingDiagnostic];
   }
   const reasons = {
     intent_target_completed: "l’objectif de pose est déjà atteint",
@@ -6350,8 +7662,8 @@ function intentEligibilityRefusalMessage(payload) {
     `Votre projet est conservé. ${descriptions.join(" ") || "Aucune prise de vue ne peut être confirmée avec les données actuelles."}`];
 }
 
-function creationRefusalMessage(payload) {
-  if (payload.creation_refusal === "no_eligible_acquisition_intent") return intentEligibilityRefusalMessage(payload);
+function creationRefusalMessage(payload, timeZone = null) {
+  if (payload.creation_refusal === "no_eligible_acquisition_intent") return intentEligibilityRefusalMessage(payload, timeZone);
   if (payload.creation_refusal === "modern_mission_authorization_required" && payload.provenance === "discovery") {
     return ["Préparons votre premier projet", "Une cible a été repérée, mais aucune mission n’est encore prête. Un projet indique ce que vous souhaitez photographier, avec quel filtre et pendant combien de temps au total. Créez un projet pour une cible prise en charge par cette bêta, puis relancez l’analyse avec vos horaires conservés."];
   }
@@ -6364,14 +7676,50 @@ const actionabilityCauseLabels = Object.freeze({
   productive_window_evidence_missing: "les preuves temporelles de fenêtre productive sont manquantes ou invalides",
 });
 
-function actionabilityRefusalMessage(refusal) {
+function actionabilityRefusalMessage(refusal, timeZone = null) {
+  const message = rawActionabilityRefusalMessage(refusal);
+  if (refusal?.status !== "constraints_refusal") return message;
+  const scope = refusal.evidence_scope;
+  if (!scope) {
+    if (!refusal.productivity_breakdown && !refusal.refusal_stage) return message;
+    message[2] = `${message[2] || message[1] || ""} Périmètre du bilan non enregistré dans cette ancienne analyse : les tranches peuvent dépasser votre disponibilité. Ce bilan historique n’a pas été recalculé.`;
+    return message;
+  }
+  const stamp = value => value ? refusalTimeLabel(value, timeZone) : "non précisé";
+  const requested = scope.availability_start || scope.availability_end
+    ? `Disponibilité demandée : ${scope.availability_start ? stamp(scope.availability_start) : "début sans borne imposée"} → ${scope.availability_end ? stamp(scope.availability_end) : "fin sans borne imposée"}.`
+    : "Disponibilité sans bornes horaires imposées.";
+  const bounds = `${requested}\nFenêtre candidate : ${stamp(scope.candidate_start)} → ${stamp(scope.candidate_end)}.`;
+  if (!scope.evaluated_start || !scope.evaluated_end) {
+    return ["Fenêtre hors de votre disponibilité", "La fenêtre candidate ne chevauche pas votre disponibilité. Aucune portion ne peut être utilisée pour cette mission.", bounds];
+  }
+  let detail = `${bounds}\nPortion évaluée dans votre disponibilité : ${stamp(scope.evaluated_start)} → ${stamp(scope.evaluated_end)}.`;
+  if (scope.partial_slice_count > 0) {
+    detail += ` ${scope.partial_slice_count} portion(s) raccourcie(s) aux bornes de votre disponibilité : score et bilan repris de leur tranche d’origine, sans nouveau calcul à la minute.`;
+    detail += ` Tranche d’origine du meilleur score : ${stamp(scope.best_source_slice_start)} → ${stamp(scope.best_source_slice_end)}.`;
+    for (let i = 1; i < message.length; i++) message[i] = message[i].replaceAll("tranches de 15 min", "portions de 15 min maximum");
+  }
+  message[2] = `${message[2] || ""}\n\n${detail}`.trim();
+  return message;
+}
+
+function rawActionabilityRefusalMessage(refusal) {
   const title = "Aucun créneau suffisamment productif";
   if (!refusal || refusal.conclusion !== "no_productive_window") {
     return [title, partialMessages.no_productive_window[1]];
   }
+  if (refusal.status === "constraints_refusal" && refusal.cause_code === "ambiguous_best_duration_window") {
+    return ["Plusieurs créneaux à départager", "Plusieurs créneaux de même durée restent à départager. Précisez vos horaires pour poursuivre."];
+  }
   const cause = actionabilityCauseLabels[refusal.cause_code]
     || (refusal.cause_code ? `cause moteur : ${refusal.cause_code}` : null);
   const breakdown = refusal.productivity_breakdown;
+  if (refusal.status === "constraints_refusal" && refusal.refusal_stage === "no_productive_slice" && breakdown?.evaluated_slice_count === 0) {
+    return ["Aucune tranche productive", "Le calcul ne contient aucune tranche évaluée. Aucun bilan chiffré des facteurs limitants n’est disponible."];
+  }
+  if (refusal.status === "constraints_refusal" && refusal.refusal_stage === "no_productive_slice" && !breakdown) {
+    return ["Aucune tranche productive", "Aucune tranche évaluée n’atteint le seuil de productivité. Le bilan détaillé des facteurs n’est pas disponible."];
+  }
   if (
     refusal.status === "constraints_refusal"
     && refusal.refusal_stage === "no_productive_slice"
@@ -6397,7 +7745,7 @@ function actionabilityRefusalMessage(refusal) {
     const lossText = losses.length ? ` ${losses.join(" · ")}.` : "";
     return [
       "Aucune tranche productive",
-      `${bestLabel} : ${score} % — seuil requis : ${threshold} %.${lossText} Aucune des ${breakdown.evaluated_slice_count} tranches de 15 min n’atteint le seuil.`,
+      `${bestLabel} : ${score} % — seuil requis : ${threshold} %.${lossText} Aucune des ${breakdown.evaluated_slice_count} tranches de 15 min n’atteint le seuil. Ce bilan décrit le calcul pour cette tranche, pas une cause physique unique du refus.`,
     ];
   }
   if (
@@ -6408,10 +7756,19 @@ function actionabilityRefusalMessage(refusal) {
   ) {
     const foundMinutes = Math.max(0, Math.floor(refusal.best_productive_window_minutes));
     const requiredMinutes = Math.max(0, Math.ceil(refusal.required_continuous_minutes));
-    return [
+    const message = [
       "Fenêtre productive trop courte",
       `Des tranches productives existent, mais la meilleure fenêtre continue après vos contraintes dure ${foundMinutes} min. Seuil requis : ${requiredMinutes} min.`,
     ];
+    if (breakdown) {
+      const names = {cloud:"Nuages",moon:"Lune",altitude:"Altitude",humidity:"Humidité",wind:"Vent"};
+      const losses = Object.entries(breakdown.losses || {}).filter(([name, value]) => names[name] && Number.isFinite(value) && value > 0)
+        .map(([name, value]) => `${names[name]} : −${Math.round(value * 100)} points`).join(" · ");
+      message.push(`${breakdown.productive_slice_count} tranches productives sur ${breakdown.evaluated_slice_count} évaluées. Meilleure tranche : ${Math.round(breakdown.best_slice_score * 100)} % ; seuil : ${Math.round(breakdown.productive_slice_threshold * 100)} %.${losses ? ` Bilan calculé pour cette tranche : ${losses}.` : ""} Ce bilan ne désigne pas une cause physique unique du refus.`);
+    } else {
+      message.push("Le bilan détaillé des facteurs n’est pas disponible.");
+    }
+    return message;
   }
   if (
     refusal.status === "constraints_refusal"
@@ -6460,19 +7817,24 @@ function canEditRefusedAvailability(payload) {
 }
 
 function showTonightUnavailable(payload) {
-  const candidateMessage = payload.status === "no_candidate" ? noCandidateMessage(payload) : null;
+  const timeZone = refusalSiteTimezone(payload);
+  const candidateMessage = payload.status === "no_candidate" ? noCandidateMessage(payload, timeZone) : null;
   const productiveRefusal = payload.status === "no_productive_window";
   const creationRefused = payload.status === "no_mission" && Boolean(payload.creation_refusal);
-  const [title, technical] = candidateMessage || (payload.status === "weather_refused"
+  const [title, technical, detailed] = candidateMessage || (payload.status === "weather_refused"
     ? [payload.weather_decision.presentation.label, payload.weather_decision.presentation.summary]
     : productiveRefusal
-    ? actionabilityRefusalMessage(payload.actionability_refusal)
+    ? actionabilityRefusalMessage(payload.actionability_refusal, timeZone)
     : creationRefused
-    ? creationRefusalMessage(payload)
+    ? creationRefusalMessage(payload, timeZone)
     : partialMessages[payload.status] || ["Décision indisponible", "Aucune recommandation exploitable."]);
-  const forecast = refusalForecastMessage(payload);
+  const forecast = refusalForecastMessage(payload, timeZone);
   const shortWindow = payload.actionability_refusal?.refusal_stage === "continuous_window_too_short";
-  const editAvailability = canEditRefusedAvailability(payload) || (intentsRefusedForProductiveWindow(payload) && !forecast?.overcast);
+  // Navigation choices do not imply that different hours or a target will succeed.
+  const chosen = state.selectedProjectId;
+  const offerAlternatives = Boolean(chosen) && (["no_candidate", "no_productive_window", "weather_refused"].includes(payload.status)
+    || intentsRefusedForProductiveWindow(payload));
+  const editAvailability = offerAlternatives || canEditRefusedAvailability(payload) || (intentsRefusedForProductiveWindow(payload) && !forecast?.overcast);
   const body = creationRefused
     ? technical
     : productiveRefusal
@@ -6480,14 +7842,26 @@ function showTonightUnavailable(payload) {
       ? `Le créneau utilisable est trop court pour lancer une mission. Réessayez plus tard si les conditions évoluent.${editAvailability ? " Vous pouvez revoir votre disponibilité, sans garantie de trouver un créneau suffisant." : ""}`
       : "Aucun créneau ne permet de lancer une mission dans les conditions évaluées. Réessayez plus tard lorsque les prévisions évoluent."
     : `${technical} Réessayez plus tard lorsque les données ou les conditions évoluent.`;
-  const chosen = state.selectedProjectId;
   const simpleTitle = appliedUiMode === "simple" && productiveRefusal
     ? (shortWindow ? "Le créneau disponible est trop court" : "Aucun créneau adapté à vos horaires")
     : title;
-  showMessage(simpleTitle, chosen
-    ? `Cible choisie : ${chosen}. ${body} Votre choix est conservé ; aucune autre cible ne le remplace.${forecast?.overcast ? " Vous pourrez reprendre ce projet lorsque les prévisions évolueront." : " Pour chercher une alternative, cochez « Me proposer une cible avec mon matériel » dans la préparation de séance."}`
-    : body, { kicker: "Analyse terminée" });
-  text("#message-technical", candidateMessage?.[2] || forecast?.details || technical);
+  const concise = simpleProductivityRefusal(payload);
+  const conciseBody = concise ? `${chosen ? `Cible choisie : ${readableTargetName(chosen)}. ` : ""}${concise[1]} Votre projet est conservé.${offerAlternatives ? " Vous pouvez modifier vos horaires ou chercher une autre cible." : " Réessayez plus tard si les conditions évoluent."}` : null;
+  showMessage(appliedUiMode === "simple" && concise ? concise[0] : simpleTitle, conciseBody || (chosen
+    ? `Cible choisie : ${readableTargetName(chosen)}. ${body} Votre projet est conservé.${offerAlternatives ? " Vous pouvez modifier vos horaires ou chercher une autre cible, sans garantie de créneau disponible." : " Votre choix est conservé ; aucune autre cible ne le remplace."}`
+    : body), { kicker: "Analyse terminée" });
+  if (globalThis.NightMeritPresentation?.demoEnabled) {
+    showMessage(simpleTitle, "Aucune mission n’a été autorisée avec les conditions simulées. Vérifiez les contraintes indiquées dans les détails, vos horaires et votre matériel. Aucune séance ni pose n’a été ajoutée.", {kicker:"Analyse de démonstration terminée"});
+  }
+  const range = document.querySelector("#message-window");
+  if (range) {
+    range.textContent = refusalEvaluatedRange(payload, timeZone);
+    range.hidden = !range.textContent;
+  }
+  if (typeof renderRefusalEvidence === "function" && (payload.actionability_refusal || payload.refusal_weather || targetedIntentAssessments(payload).some(item => item.actionability_refusal))) {
+    renderRefusalEvidence(document.querySelector("#message-refusal-evidence"), payload, timeZone, {includeRange: !range?.textContent});
+  }
+  text("#message-technical", candidateMessage?.[2] || detailed || forecast?.details || technical);
   const details = document.querySelector("#message-details");
   details.hidden = false;
   details.open = appliedUiMode === "pro";
@@ -6498,15 +7872,26 @@ function showTonightUnavailable(payload) {
   ui.retry.textContent = payload.creation_refusal === "no_eligible_acquisition_intent"
     ? "Actualiser les prévisions" : "Réessayer plus tard";
   document.querySelector("#message-edit-availability").hidden = !editAvailability;
+  document.querySelector("#message-discover-targets").hidden = !offerAlternatives;
+  document.querySelector("#message-altitude-guidance").hidden = !chosen || payload.target_refusal?.code !== "target_below_minimum_altitude";
+  if (offerAlternatives) ui.retry.textContent = "Actualiser l’analyse";
 }
 
 function showMessage(title, body, { kicker = "Décision indisponible", retry = true } = {}) {
+  const range = document.querySelector("#message-window");
+  if (range) range.hidden = true;
+  const evidence = document.querySelector("#message-refusal-evidence");
+  if (evidence) {evidence.hidden = true; evidence.replaceChildren?.();}
+  const altitudeButton = document.querySelector("#message-altitude-guidance");
+  if (altitudeButton) altitudeButton.hidden = true;
   const details = document.querySelector("#message-details");
   const createProject = document.querySelector("#message-create-project");
   if (createProject) createProject.hidden = true;
   if (details) details.hidden = true;
   const editAvailability = document.querySelector("#message-edit-availability");
   if (editAvailability) editAvailability.hidden = true;
+  const discoverTargets = document.querySelector("#message-discover-targets");
+  if (discoverTargets) discoverTargets.hidden = true;
   ui.retry.textContent = "Réessayer";
   text("#message-kicker", kicker);
   text("#message-title", title);
@@ -6531,6 +7916,9 @@ function normalizeError(response, payload) {
     return ["Configuration requise", "NightMerit doit relire votre configuration avant de préparer la nuit."];
   }
   if (response.status === 503) {
+    if (detail?.code === "search_forecast_history_unavailable") {
+      return ["Prévisions non conservées", "L’archivage des prévisions utilisées n’a pas abouti. Vérifiez l’accès au dossier, l’espace disponible et la limite des archives (512 recherches, 32 Mio). Aucune recommandation n’est validée par cette recherche."];
+    }
     if (detail?.code === "analysis_history_unavailable") {
       return ["Analyse non conservée", "L’enregistrement de cette analyse n’a pas abouti. Vos relevés restent intacts. Vérifiez l’espace disponible ou l’accès au dossier de données avant de réessayer."];
     }
@@ -6796,6 +8184,7 @@ async function acceptRecommendation({
     clearPendingAcceptanceAttempt(attempt);
     state.acceptedMission = {
       acceptedSiteGeneration: siteGeneration,
+      savedAt: attempt.selected_at,
       acceptedSiteFingerprint: siteFingerprint,
       decision_id: payload.decision_id,
       selection_id: payload.selection_id,
@@ -6806,6 +8195,9 @@ async function acceptRecommendation({
       windowTimezone: windowTimezone(decision),
       mission,
     };
+    state.savedMissions = [{...state.acceptedMission, source:"persisted"},
+      ...state.savedMissions.filter(item => item.mission_id !== mission.mission_id)];
+    renderSavedMissionChoices();
     if (decision?.decision_id === expectedDecisionId) {
       show("decision");
       showAcceptanceStatus(
@@ -6858,6 +8250,16 @@ async function loadTonight(availability) {
   const discovery = Boolean(state.discoveryMode);
   const selectedProjectId = discovery ? null : state.selectedProjectId;
   const confirmedFilters = discovery ? discoveryConfirmedFilters() : [];
+  const candidateRecheck = state.missionRecheck;
+  const recheck = candidateRecheck?.accepted && !discovery
+    && candidateRecheck.projectId === selectedProjectId
+    && candidateRecheck.siteFingerprint === siteFingerprint
+    && availability.mode === "fixed_window"
+    && Date.parse(availability.start) === Date.parse(candidateRecheck.start)
+    && Date.parse(availability.end) === Date.parse(candidateRecheck.end)
+    && availability.preparation_minutes === missionOperationalMinutes(candidateRecheck.accepted.mission).preparation
+    && availability.flats_minutes === missionOperationalMinutes(candidateRecheck.accepted.mission).flats
+      ? structuredClone(candidateRecheck) : null;
   state.requestingRecommendation = true;
   state.availability = { ...availability };
   ui.recommendationSubmit.disabled = true;
@@ -6911,6 +8313,7 @@ async function loadTonight(availability) {
     if (!isCurrent()) return;
 
     if (!response.ok) {
+      saveMissionWeatherCheck(recheck, null);
       if (payload?.error === "user_profile_unavailable") {
         showConfigurationError("Votre configuration doit être rechargée avant de préparer la nuit.");
         return;
@@ -6952,6 +8355,7 @@ async function loadTonight(availability) {
       renderTargetSuggestions(payload);
       return;
     }
+    saveMissionWeatherCheck(recheck, payload);
     clearAcceptedMission();
     setCurrentFieldObservationDecision(payload);
     if (payload.status === "weather_refused") {
@@ -6967,6 +8371,7 @@ async function loadTonight(availability) {
     renderDecision(payload);
   } catch (_error) {
     if (!isCurrent()) return;
+    saveMissionWeatherCheck(recheck, null);
     showAvailabilityError(deadlineExceeded
       ? "L’analyse n’a pas répondu après 90 secondes. Vos horaires sont conservés ; réessayez dans un instant."
       : "Connexion impossible. Vos horaires sont conservés ; réessayez dans un instant.");
@@ -6975,7 +8380,7 @@ async function loadTonight(availability) {
     clearTimeout(slowTimer);
     clearTimeout(deadlineTimer);
     state.requestingRecommendation = false;
-    ui.recommendationSubmit.disabled = false;
+    updateDiscoveryAvailability();
     ui.refresh.disabled = false;
   }
 }
@@ -6984,6 +8389,13 @@ document.querySelector("#site-next").addEventListener("click", () => {
   const [site, error] = readSite();
   if (error) {
     showFormError(error);
+    const latitude = document.querySelector("#site-latitude");
+    const longitude = document.querySelector("#site-longitude");
+    if (!latitude.value.trim() || !longitude.value.trim()
+        || error.includes("latitude") || error.includes("longitude")) {
+      latitude.closest("details").open = true;
+      (!latitude.value.trim() || error.includes("latitude") ? latitude : longitude).focus();
+    }
     return;
   }
   state.configurationDraft.site = site;
@@ -6991,7 +8403,13 @@ document.querySelector("#site-next").addEventListener("click", () => {
   setView("equipment");
 });
 
-document.querySelector("#equipment-next").addEventListener("click", () => {
+document.querySelector("#equipment-next").addEventListener("click", async () => {
+  if (appliedUiMode === "simple" && simpleEquipmentPhase === "optics") {
+    const custom=document.querySelector('input[name="equipment-kind"]:checked')?.value === "custom";
+    if (!custom && !document.querySelector('input[name="preset-equipment"]:checked')) { showFormError("Choisissez votre objectif ou télescope."); return; }
+    if (custom && !document.querySelector("#custom-optics-model").value.trim()) { showFormError("Indiquez le modèle de votre optique."); return; }
+    showFormError(""); simpleEquipmentPhase="camera"; renderSimpleEquipment(); document.querySelector("#equipment-title").focus(); return;
+  }
   const [equipment, error] = readEquipment();
   if (error) {
     showFormError(error);
@@ -6999,6 +8417,16 @@ document.querySelector("#equipment-next").addEventListener("click", () => {
   }
   state.configurationDraft.equipment = equipment;
   showFormError("");
+  if (appliedUiMode === "simple" && typeof window.configureInitialFilters === "function") {
+    const next = document.querySelector("#equipment-next");
+    next.disabled = true;
+    try {
+      const proceed = () => window.configureInitialFilters();
+      if (state.configuration?.configured && configurationDraftMatchesSaved()) await proceed();
+      else await saveConfiguration({afterSave: proceed});
+    } finally { next.disabled = false; }
+    return;
+  }
   if (renderProjects()) setView("projects");
 });
 
@@ -7017,6 +8445,7 @@ document.querySelector("#projects-next").addEventListener("click", () => {
 
 for (const button of document.querySelectorAll("[data-back]")) {
   button.addEventListener("click", () => {
+    if (state.view === "equipment" && appliedUiMode === "simple" && simpleEquipmentPhase === "camera") { simpleEquipmentPhase="optics"; updateEquipmentSearch(); renderSimpleEquipment(); return; }
     if (state.view === "projects" && button.dataset.back !== "projects" && !confirmDiscardProjectProgress()) return;
     showFormError("");
     setView(button.dataset.back);
@@ -7024,8 +8453,35 @@ for (const button of document.querySelectorAll("[data-back]")) {
 }
 
 for (const input of document.querySelectorAll('input[name="equipment-kind"]')) {
-  input.addEventListener("change", toggleEquipmentKind);
+  input.addEventListener("change", () => { showFormError(""); toggleEquipmentKind(); });
 }
+document.querySelector("#equipment-reference-panel").addEventListener("toggle", event => {
+  if (event.target.open) loadEquipmentReferences();
+});
+document.querySelector("#equipment-reference-retry").addEventListener("click", loadEquipmentReferences);
+for (const selector of ["#equipment-reference-category", "#equipment-reference-query"]) {
+  document.querySelector(selector).addEventListener(selector.endsWith("query") ? "input" : "change", renderEquipmentReferences);
+}
+document.querySelector("#equipment-find-component").addEventListener("click", () => {
+  document.querySelector("#equipment-reference-query").value = document.querySelector("#equipment-search").value;
+  document.querySelector("#equipment-reference-category").value = "all";
+  document.querySelector("#equipment-reference-panel").open = true;
+  loadEquipmentReferences();
+  document.querySelector("#equipment-reference-query").focus();
+});
+document.querySelector("#equipment-search").addEventListener("input", () => { showFormError(""); updateEquipmentSearch(); });
+document.querySelector("#equipment-clear-search").addEventListener("click", () => {
+  showFormError("");
+  document.querySelector("#equipment-search").value = "";
+  updateEquipmentSearch();
+  document.querySelector("#equipment-search").focus();
+});
+document.querySelector("#equipment-enter-custom").addEventListener("click", () => {
+  showFormError("");
+  document.querySelector('input[name="equipment-kind"][value="custom"]').checked = true;
+  toggleEquipmentKind();
+  document.querySelector("#custom-optics-manufacturer").focus();
+});
 
 function editConfiguration() {
   if (guardUnresolvedAcceptance()) return;
@@ -7075,6 +8531,116 @@ ui.retry.addEventListener("click", () => {
   if (state.availability) loadTonight(state.availability);
   else setView("availability");
 });
+// Geometry is an explicit read-only aid, never a cached decision or mission.
+let altitudeGuidanceRequest = null;
+function altitudeGuidanceIsCurrent(owner) {
+  return altitudeGuidanceRequest === owner && owner.project === state.selectedProjectId
+    && !state.discoveryMode && owner.generation === state.configurationGeneration
+    && owner.site === decisionSiteFingerprint() && owner.revision === state.viewRevision
+    && document.querySelector("#altitude-guidance-dialog").open;
+}
+function renderAltitudeCurve(data) {
+  const svg = document.querySelector("#altitude-guidance-chart");
+  svg.querySelectorAll("g").forEach(node => node.remove());
+  const ns = "http://www.w3.org/2000/svg", group = document.createElementNS(ns, "g");
+  svg.append(group);
+  const add = (tag, attributes, label) => {
+    const node = document.createElementNS(ns, tag);
+    for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
+    if (label !== undefined) node.textContent = label;
+    group.append(node);return node;
+  };
+  const from = Date.parse(data.night_start), to = Date.parse(data.night_end);
+  const x = time => 48 + (Date.parse(time) - from) / (to - from) * 560;
+  const y = altitude => 190 - (altitude + 90) / 180 * 164;
+  for (const angle of new Set([0, data.minimum_altitude_deg, 90])) {
+    add("line", {x1:48, x2:608, y1:y(angle), y2:y(angle), stroke:"currentColor", opacity:.4,
+      "stroke-dasharray": angle === data.minimum_altitude_deg ? "6 4" : "none"});
+    add("text", {x:42, y:y(angle)+4, "text-anchor":"end", fill:"currentColor", "font-size":12}, `${angle}°`);
+  }
+  add("polyline", {points:data.points.map(point => `${x(point.time)},${y(point.altitude_deg)}`).join(" "),
+    fill:"none", stroke:"var(--accent, #8bdccf)", "stroke-width":3});
+  for (const [time, anchor] of [[data.night_start,"start"],[data.points[Math.floor(data.points.length/2)].time,"middle"],[data.night_end,"end"]]) {
+    const label = new NightMeritTime.DateTimeFormat("fr-CH", {timeZone:data.timezone,hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(time));
+    add("text", {x:x(time),y:218,"text-anchor":anchor,fill:"currentColor","font-size":13},label);
+  }
+  text("#altitude-curve-description", `${data.project_id}, seuil ${data.minimum_altitude_deg}°. ${siteDateTime(data.night_start,data.timezone)} à ${siteDateTime(data.night_end,data.timezone)}. Les horaires au-dessus du seuil sont listés sous la courbe.`);
+}
+async function openAltitudeGuidance({keepDate = false} = {}) {
+  if (guardUnresolvedAcceptance() || !state.selectedProjectId || state.discoveryMode) return;
+  const dialog = document.querySelector("#altitude-guidance-dialog");
+  altitudeGuidanceRequest?.controller.abort();
+  const owner = {project:state.selectedProjectId,generation:state.configurationGeneration,
+    site:decisionSiteFingerprint(),revision:state.viewRevision,startedAt:performance.now(),controller:new AbortController()};
+  altitudeGuidanceRequest = owner;
+  const dateInput = document.querySelector("#altitude-guidance-date");
+  if (!keepDate) {
+    const mode = document.querySelector('input[name="availability-mode"]:checked')?.value;
+    const start = mode === "fixed_window" || mode === "start_and_duration" ? document.querySelector("#availability-start").value : "";
+    dateInput.value = start ? start.slice(0,10) : "";
+    if (start && Number(start.slice(11,13)) < 12) {
+      const day = new Date(`${start.slice(0,10)}T12:00:00Z`); day.setUTCDate(day.getUTCDate()-1);
+      dateInput.value = day.toISOString().slice(0,10);
+    }
+  }
+  text("#altitude-guidance-title", `Hauteur de ${owner.project} pendant la nuit`);
+  text("#altitude-guidance-status", "Calcul de la hauteur, sans récupération météo…");
+  document.querySelector("#altitude-guidance-result").hidden = true;
+  document.querySelector("#altitude-guidance-intervals").replaceChildren();
+  if (!dialog.open) dialog.showModal();
+  const timer = setTimeout(() => owner.controller.abort(),10000);
+  try {
+    const query = dateInput.value ? `?night_date=${encodeURIComponent(dateInput.value)}` : "";
+    const response = await fetch(`/v1/projects/${encodeURIComponent(owner.project)}/altitude-guidance${query}`,{cache:"no-store",signal:owner.controller.signal});
+    const data = await response.json();
+    if (!altitudeGuidanceIsCurrent(owner)) return;
+    if (!response.ok) throw new Error(data?.detail?.code || "guidance_unavailable");
+    const site = state.configuration?.site;
+    if (data.project_id !== owner.project || data.latitude !== site?.latitude || data.longitude !== site?.longitude || data.timezone !== currentSiteTimezone()) throw new Error("guidance_site_changed");
+    dateInput.value = data.night_date;
+    if (data.status === "astronomical_night_unavailable") {
+      text("#altitude-guidance-status", "La nuit astronomique ne peut pas être délimitée pour ce site et cette date. Aucun horaire n’est proposé.");return;
+    }
+    const nightLabel = new NightMeritTime.DateTimeFormat("fr-CH",{timeZone:"UTC",day:"numeric",month:"long",year:"numeric"}).format(new Date(`${data.night_date}T12:00:00Z`));
+    text("#altitude-guidance-status", `Site : ${data.site_name} · horaires ${data.timezone} · nuit du ${nightLabel}`);
+    text("#altitude-guidance-summary", `Seuil configuré : ${data.minimum_altitude_deg}°. Hauteur maximale sur la courbe : ${Math.max(...data.points.map(point=>point.altitude_deg)).toLocaleString("fr-CH",{maximumFractionDigits:1})}°. Ce calcul ne garantit pas un créneau productif.`);
+    renderAltitudeCurve(data);
+    const container = document.querySelector("#altitude-guidance-intervals");
+    if (!data.intervals.length) {
+      const p = document.createElement("p");p.textContent = "Aucun intervalle encore à venir au-dessus du seuil n’est trouvé pour cette nuit. Choisissez une autre date ou une autre cible.";container.append(p);
+    }
+    for (const interval of data.intervals) {
+      const card=document.createElement("article"),p=document.createElement("p");
+      p.textContent=`${siteDateTime(interval.start,data.timezone)} → ${siteDateTime(interval.end,data.timezone)} · ${interval.duration_minutes} min au-dessus du seuil.`;card.append(p);
+      if (interval.can_analyze) {
+        const button=document.createElement("button");button.type="button";button.className="primary-button";button.textContent="Analyser ce créneau";
+        button.addEventListener("click",()=>{
+          if (!altitudeGuidanceIsCurrent(owner) || guardUnresolvedAcceptance()) return;
+          if (Date.parse(interval.start) <= Date.parse(data.computed_at) + performance.now() - owner.startedAt) { text("#altitude-guidance-status","Cet horaire de début est déjà passé. Choisissez à nouveau la date pour actualiser les horaires.");return; }
+          const availability={mode:"fixed_window",start:interval.start,end:interval.end};
+          document.querySelector('input[name="availability-mode"][value="fixed_window"]').checked=true;
+          document.querySelector("#availability-start").value=formatDateTimeLocalInZone(new Date(interval.start),data.timezone);
+          document.querySelector("#availability-end").value=formatDateTimeLocalInZone(new Date(interval.end),data.timezone);
+          updateAvailabilityFields();dialog.close();loadTonight(availability);
+        });card.append(button);
+      } else {
+        const note=document.createElement("p");note.className="field-note";note.textContent=`Trop court : une mission exige au moins ${data.required_continuous_minutes} minutes productives continues.`;card.append(note);
+      }
+      container.append(card);
+    }
+    document.querySelector("#altitude-guidance-result").hidden=false;
+  } catch (error) {
+    if (altitudeGuidanceIsCurrent(owner)) text("#altitude-guidance-status",error.message==="guidance_site_changed"
+      ? "La configuration du site a changé. Fermez cette aide et rechargez votre configuration."
+      : "Impossible de calculer ces horaires. Vérifiez la date (hier à dans 14 jours) et votre configuration, puis réessayez. Vos données sont conservées.");
+  } finally {clearTimeout(timer);}
+}
+for (const id of ["availability-altitude-guidance","message-altitude-guidance"]) document.querySelector(`#${id}`).addEventListener("click",()=>openAltitudeGuidance());
+document.querySelector("#altitude-guidance-close").addEventListener("click",()=>document.querySelector("#altitude-guidance-dialog").close());
+document.querySelector("#altitude-guidance-dialog").addEventListener("close",()=>{altitudeGuidanceRequest?.controller.abort();altitudeGuidanceRequest=null;});
+document.querySelector("#altitude-guidance-date").addEventListener("change",()=>openAltitudeGuidance({keepDate:true}));
+document.querySelector("#altitude-guidance-refresh").addEventListener("click",()=>openAltitudeGuidance({keepDate:true}));
+
 document.querySelector("#message-edit-availability").addEventListener("click", () => {
   if (guardUnresolvedAcceptance()) return;
   setView("availability");
@@ -7099,7 +8665,9 @@ ui.availabilityForm.addEventListener("submit", (event) => {
     const availability = collectAvailabilityPayload();
     showAvailabilityError("");
     if (state.discoveryMode && !discoveryConfirmedFilters().length) {
-      showAvailabilityError("Cochez un filtre que vous possédez avant de chercher une cible.");
+      showAvailabilityError(document.querySelector("#discovery-filter-choices input")
+        ? "Cochez un filtre que vous possédez avant de chercher une cible."
+        : "La recherche automatique n’est pas encore disponible avec cet ensemble dans cette bêta. Revoir mon matériel permet de corriger votre sélection.");
       return;
     }
     loadTonight(availability);
@@ -7118,7 +8686,7 @@ for (const selector of ["#site-name", "#site-latitude", "#site-longitude", "#sit
 document.querySelector("#use-geolocation").addEventListener("click", () => {
   const message = document.querySelector("#geolocation-message");
   if (!navigator.geolocation) {
-    message.textContent = "La géolocalisation n’est pas disponible. La saisie manuelle reste disponible.";
+    message.textContent = "La localisation n’est pas disponible dans ce navigateur. Recherchez votre localité ci-dessus.";
     return;
   }
   message.textContent = "Recherche de votre position…";
@@ -7129,8 +8697,9 @@ document.querySelector("#use-geolocation").addEventListener("click", () => {
       renderSiteSummary();
       message.textContent = "Coordonnées ajoutées. Vous pouvez les corriger manuellement.";
     },
-    () => {
-      message.textContent = "Position non disponible. La saisie manuelle reste disponible.";
+    (error) => {
+      const reasons = {1: "L’accès à votre position a été refusé par le navigateur ou macOS.", 2: "Votre appareil ne parvient pas à déterminer votre position.", 3: "La recherche de position a pris trop de temps."};
+      message.textContent = `${reasons[error.code] || "Position non disponible."} Recherchez votre localité ci-dessus ou saisissez les coordonnées manuellement.`;
     },
     { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 },
   );
@@ -7169,6 +8738,10 @@ guardianVisualTimer?.unref?.();
 document.querySelector("#session-start").addEventListener("click", () => sessionCommand(startSession, {transition: true}));
 document.querySelector("#session-complete").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "completed"), {transition: true}));
 document.querySelector("#session-interrupt").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "interrupted"), {transition: true}));
+for (const id of ["session-duration-method", "session-retained-frames", "session-frame-seconds", "session-hours", "session-minutes", "session-seconds"]) {
+  document.getElementById(id).addEventListener("input", updateSessionDurationPreview);
+}
+document.querySelector("#session-no-images").addEventListener("click", () => sessionCommand(recordSessionNoImages));
 document.querySelector("#session-record-evidence").addEventListener("click", () => sessionCommand(recordSessionEvidence));
 document.querySelector("#session-apply-credit").addEventListener("click", () => sessionCommand(creditSession));
 document.querySelector("#observation-choose-decision").addEventListener("click", openRecentDecisions);
@@ -7191,7 +8764,7 @@ document.querySelector("#open-observation-catalogue").addEventListener("click", 
 window.addEventListener("pageshow", handleFieldObservationPageShow);
 ui.addObservationMessage.addEventListener("click", () => openFieldObservation("decision"));
 ui.addObservationDecision.addEventListener("click", () => openFieldObservation("decision"));
-ui.addObservationMission.addEventListener("click", () => openFieldObservation("mission"));
+ui.addObservationMission.addEventListener("click", openSessionFieldObservation);
   ui.closeObservation.addEventListener("click", () => {
     invalidateFieldObservationOperation();
     ui.observation.close();
@@ -7204,6 +8777,7 @@ ui.observation.addEventListener("click", (event) => {
   });
 ui.closeMission.addEventListener("click", () => ui.mission.close());
 ui.missionBack.addEventListener("click", () => ui.mission.close());
+document.querySelector("#mission-check-conditions").addEventListener("click", checkMissionConditions);
 ui.mission.addEventListener("click", (event) => {
   if (event.target === ui.mission) ui.mission.close();
 });
@@ -7433,28 +9007,47 @@ document.querySelector("#history-current-site").addEventListener("click", () => 
 });
 
 
+function updateDiscoveryAvailability() {
+  const unavailable = state.discoveryMode && !document.querySelector("#discovery-filter-choices input");
+  ui.recommendationSubmit.disabled = state.view === "review" || state.requestingRecommendation || unavailable;
+  document.querySelector("#discovery-review-equipment").hidden = !unavailable;
+}
+
+document.querySelector("#discovery-review-equipment").addEventListener("click", () => {
+  if (guardUnresolvedAcceptance()) return;
+  setView("equipment");
+});
+
 function discoveryConfirmedFilters() {
   return [...document.querySelectorAll("#discovery-filter-choices input:checked")].map(input => input.value);
 }
 
 async function setDiscoveryMode(enabled) {
+  state.missionRecheck = null;
   const generation = (state.discoveryGeneration || 0) + 1;
   state.discoveryGeneration = generation;
   state.discoveryMode = enabled;
   if (enabled) state.selectedProjectId = null;
+  document.querySelector("#availability-altitude-guidance").hidden = enabled || !state.selectedProjectId;
+  if (document.querySelector("#altitude-guidance-dialog").open) document.querySelector("#altitude-guidance-dialog").close();
   const chosenNotice = document.querySelector("#availability-selected-project");
   if (enabled && chosenNotice) chosenNotice.hidden = true;
   document.querySelector("#discover-targets").checked = enabled;
   document.querySelector("#discovery-filters").hidden = !enabled;
   ui.recommendationSubmit.textContent = enabled ? "Chercher une cible pour mes horaires" : "Préparer ma nuit";
+  updateGuidedPresentation();
+  updateDiscoveryAvailability();
   if (!enabled) return;
   const feedback = document.querySelector("#discovery-filter-feedback");
   feedback.textContent = "Chargement des filtres pris en charge…";
   const equipment = state.configurationDraft.equipment?.preset_id;
+  const previouslyConfirmed = equipment === state.discoveryEquipment ? new Set(discoveryConfirmedFilters()) : new Set();
+  document.querySelector("#discovery-filter-choices").replaceChildren();
+  updateDiscoveryAvailability();
+  if (typeof loadFilterInventoryForDiscovery === "function") await loadFilterInventoryForDiscovery(equipment);
   await loadProjectTemplates();
   if (!state.discoveryMode || generation !== state.discoveryGeneration || equipment !== state.configurationDraft.equipment?.preset_id) return;
   const choices = document.querySelector("#discovery-filter-choices");
-  const previouslyConfirmed = equipment === state.discoveryEquipment ? new Set(discoveryConfirmedFilters()) : new Set();
   choices.replaceChildren();
   state.discoveryEquipment = equipment;
   const filters = new Map();
@@ -7466,12 +9059,16 @@ async function setDiscoveryMode(enabled) {
   for (const filter of filters.values()) {
     const label = document.createElement("label"); label.className = "check-field";
     const input = document.createElement("input"); input.type = "checkbox"; input.value = filter.filter_profile_id;
-    input.checked = previouslyConfirmed.has(input.value);
+    const installed = window.nightMeritInstalledFilters;
+    if (installed && installed.equipment === equipment && installed.ids !== null && !installed.ids.includes(input.value)) continue;
+    input.checked = previouslyConfirmed.has(input.value) || Boolean(installed && installed.equipment === equipment && installed.ids?.includes(input.value));
     const text = document.createElement("span"); text.textContent = `${filter.label} (${filter.fwhm_nm} nm)`;
     label.append(input, text); choices.append(label);
   }
-  feedback.textContent = filters.size ? "La recherche retient jusqu’à trois cibles parmi les nébuleuses prises en charge en Hα, si les conditions le permettent."
-    : "Aucun filtre précisément compatible n’est disponible pour ce matériel dans cette bêta. Vos réglages sont conservés.";
+  feedback.textContent = filters.size ? "La recherche retient jusqu’à trois choix parmi les nébuleuses prises en charge en Hα et la Rosette en OIII/SII, si les conditions le permettent."
+    : "La recherche automatique n’est pas encore disponible avec cet ensemble dans cette bêta. Vos réglages sont conservés.";
+  if (window.nightMeritInstalledFilters?.equipment === equipment && window.nightMeritInstalledFilters.ids !== null && !choices.querySelector('input')) feedback.textContent = window.nightMeritInstalledFilters.noFilter ? "Vous avez choisi de continuer sans filtre. Cette recherche nécessite un filtre compatible. Pour en ajouter un, ouvrez « Déclarer ou modifier mes filtres »." : "Aucun de vos filtres déclarés n’est compatible avec cette recherche. Une référence non prise en charge reste mémorisée, mais ne peut pas servir aux calculs. Vérifiez les références dans « Déclarer ou modifier mes filtres ».";
+  updateDiscoveryAvailability();
 }
 
 document.querySelector("#discover-targets").addEventListener("change", event => setDiscoveryMode(event.target.checked));
@@ -7483,6 +9080,16 @@ document.querySelector("#discover-from-projects").addEventListener("click", asyn
   if (revision !== state.viewRevision || configurationGeneration !== state.configurationGeneration || !state.discoveryMode) return;
   if (state.configuration?.configured && configurationDraftMatchesSaved()) setView("availability");
   else await saveConfiguration();
+});
+document.querySelector("#message-discover-targets").addEventListener("click", () => {
+  if (guardUnresolvedAcceptance() || !confirmDiscardProjectProgress()) return;
+  if (!state.configuration?.configured || !configurationDraftMatchesSaved()) {
+    showFormError("Enregistrez vos réglages avant de chercher une autre cible.");
+    setView("projects");
+    return;
+  }
+  setView("availability");
+  setDiscoveryMode(true);
 });
 document.querySelector("#discovery-back").addEventListener("click", () => { if (!guardUnresolvedAcceptance()) setView("availability"); });
 document.querySelector("#discovery-refresh").addEventListener("click", () => {
@@ -7501,13 +9108,27 @@ function renderTargetSuggestions(payload) {
     ? "Que pourriez-vous photographier ?" : "Aucune cible proposée pour vos horaires";
   document.querySelector("#discovery-refresh").hidden = hasSuggestions;
   const cards = document.querySelector("#target-suggestion-cards"); cards.replaceChildren();
-  document.querySelector("#target-suggestions-status").textContent = hasSuggestions
+  const status = document.querySelector("#target-suggestions-status");
+  status.dataset.proText = hasSuggestions
     ? payload.notice : "La recherche n’a retenu aucune cible parmi celles prises en charge avec vos horaires, votre matériel, vos filtres confirmés et les conditions prévues. Vos réglages et vos projets sont conservés. Vous pouvez réessayer lorsque les prévisions évoluent, sans refaire la configuration.";
+  status.dataset.simpleText = !hasSuggestions && payload.refusal_reason === "clouds_no_productive_window"
+    ? "Les prévisions annoncent trop de nuages pour photographier les cibles évaluées. Aucun créneau exploitable n’a été trouvé pour vos horaires. Réessayez lorsque les prévisions évoluent. Vos réglages et vos projets sont conservés. Aucune photo ni séance n’a été ajoutée."
+    : !hasSuggestions && payload.refusal_reason === "clouds_humidity_no_productive_window"
+      ? "Les nuages prévus et la forte humidité ne permettent pas de trouver un créneau exploitable pour les cibles évaluées avec vos horaires. Réessayez lorsque les prévisions évoluent. Vos réglages et vos projets sont conservés. Aucune photo ni séance n’a été ajoutée."
+      : status.dataset.proText;
+  if (globalThis.NightMeritPresentation?.demoEnabled) {
+    status.dataset.proText = status.dataset.simpleText = globalThis.NightMeritPresentation.discoveryCopy(hasSuggestions);
+  }
+  status.textContent = status.dataset[appliedUiMode === "pro" ? "proText" : "simpleText"];
   document.querySelector("#target-suggestions-scope").textContent = payload.scope || "";
   renderEquipmentCatalogue(payload.catalogue);
+  let refusalEvidence = document.querySelector("#discovery-refusal-evidence");
+  if (!refusalEvidence) {refusalEvidence = document.createElement("div");refusalEvidence.id="discovery-refusal-evidence";refusalEvidence.className="refusal-summary";document.querySelector("#target-suggestions-status").after(refusalEvidence);}
+  refusalEvidence.replaceChildren(); refusalEvidence.hidden = hasSuggestions;
+  if (!hasSuggestions) renderRefusalEvidence(refusalEvidence,payload,refusalSiteTimezone(payload));
   for (const suggestion of payload.suggestions || []) {
     const card = document.createElement("article"); card.className = "target-suggestion-card";
-    const title = document.createElement("h3"); title.textContent = suggestion.display_name;
+    const title = document.createElement("h3"); title.textContent = `${suggestion.display_name} · ${suggestion.filter_type === "Ha" ? "Hα" : suggestion.filter_type}`;
     const figure = document.createElement("figure");
     const image = document.createElement("img"); image.src = suggestion.image.src; image.alt = suggestion.image.alt || `Image de référence de ${suggestion.display_name}`;
     image.width = 160; image.height = 140;
@@ -7519,7 +9140,7 @@ function renderTargetSuggestions(payload) {
     caption.append(source, document.createTextNode(" · "), license);
     figure.append(image, caption);
     const reference = document.createElement("p"); reference.className = "field-note";
-    reference.textContent = suggestion.image.note || "Image de référence en couleur. En Hα, votre image sera monochrome ; son cadrage et ses détails dépendront de votre matériel et de vos poses.";
+    reference.textContent = suggestion.image.note || "Image de référence en couleur. Avec un seul filtre Hα, OIII ou SII, votre image sera monochrome ; son cadrage et ses détails dépendront de votre matériel et de vos poses.";
     const timing = document.createElement("p"); timing.textContent = `Créneau estimé : ${missionDateTimeLabel(suggestion.window_start, currentSiteTimezone())} → ${missionDateTimeLabel(suggestion.window_end, currentSiteTimezone())}.`;
     const filter = document.createElement("p"); filter.textContent = `Filtre confirmé : ${suggestion.filter.label} (${suggestion.filter.fwhm_nm} nm).`;
     const why = document.createElement("p"); why.textContent = suggestion.guidance.purpose;
@@ -7533,7 +9154,7 @@ function renderTargetSuggestions(payload) {
       state.selectedProjectId = suggestion.existing_project_key || suggestion.catalog_key;
       setView("projects");
       const existingKey = suggestion.existing_project_key || suggestion.catalog_key;
-      if (Object.hasOwn(state.configuration?.projects || {}, existingKey)) { openProjectProgress(existingKey); return; }
+      if (Object.hasOwn(state.configuration?.projects || {}, existingKey)) { await openProjectProgress(existingKey, { discoveryIntentId: suggestion.acquisition_intent_id }); return; }
       if (!state.projectTemplates?.length) await loadProjectTemplates();
       document.querySelector("#project-create").open = true;
       document.querySelector("#project-template").value = suggestion.catalog_key;
@@ -7547,14 +9168,23 @@ function renderTargetSuggestions(payload) {
     });
     const details = document.createElement("details");
     const summary = document.createElement("summary"); summary.textContent = "Pourquoi cette cible et ce filtre ?";
-    details.append(summary, why, advice);
+    details.append(summary, advice);
     if (suggestion.equipment_match) {
       const material = suggestion.equipment_match;
       const match = document.createElement("p");
       match.textContent = `${material.framing.label} ${material.extent_scope}`;
       details.append(match);
     }
-    card.append(title, figure, reference, timing, filter, difficulty, choose, details); cards.append(card);
+    if (suggestion.lunar_assessment) {
+      const lunar = document.createElement("p");
+      lunar.textContent = suggestion.lunar_assessment.notice;
+      details.append(lunar);
+      const values = document.createElement("p");
+      values.dataset.proOnly = "true";
+      values.textContent = `Lune · ${suggestion.lunar_assessment.central_wavelength_nm} nm / ${suggestion.lunar_assessment.fwhm_nm} nm : Rayleigh ${suggestion.lunar_assessment.rayleigh_relative_index.toPrecision(3)}, Mie ${suggestion.lunar_assessment.mie_relative_index.toPrecision(3)}.`;
+      details.append(values);
+    }
+    card.append(title, figure, reference, timing, filter, why, difficulty, choose, details); cards.append(card);
   }
   document.querySelector("#target-suggestions-title").focus();
 }
@@ -7663,13 +9293,32 @@ async function loadDataContext() {
       if (/^C:\\NightMeritData\\profil\\?$/i.test(data.data_directory)) hostNote.textContent = 'Le dossier de vos données bêta sur le PC n’a pas pu être identifié. Aucun emplacement sur votre PC n’a été deviné.';
     }
     details.hidden = technical.hidden = false;
-    status.textContent = 'L’application actuellement ouverte utilise le dossier indiqué ci-dessous.';
+    status.textContent = data.launcher?.location_status === 'moved_or_unavailable'
+      ? 'Cette copie a été déplacée. Le dossier indiqué est celui du démarrage. Fermez cette copie avec son lanceur d’arrêt, puis rouvrez-la depuis son dossier actuel.'
+      : 'L’application actuellement ouverte utilise le dossier indiqué ci-dessous.';
   } catch (_) {
     if (!current()) return;
     status.textContent = 'Impossible d’identifier le dossier pour le moment. Cela ne signifie pas que vos données sont absentes. Réessayez la lecture.';
     retry.hidden = false;
   } finally { clearTimeout(timer); }
 }
+// This entry is a read-only guide. Starting the assistant remains an explicit
+// action in the kit folder after the observing application has been closed.
+function openBackupGuide() {
+  const dialog = document.querySelector('#backup-guide-dialog');
+  if (dialog.open) return;
+  const copyName = document.querySelector('#copy-identity-banner .copy-name')?.textContent?.trim();
+  document.querySelector('#backup-guide-copy').textContent = copyName
+    ? `Copie à sauvegarder : ${copyName}` : 'Utilisez l’assistant du même dossier que cette application.';
+  dialog.showModal();
+}
+document.querySelector('#backup-guide-open').addEventListener('click', openBackupGuide);
+document.querySelector('#backup-guide-close').addEventListener('click', () => document.querySelector('#backup-guide-dialog').close());
+document.querySelector('#backup-guide-context').addEventListener('click', () => {
+  document.querySelector('#backup-guide-dialog').close();
+  openDataContext();
+});
+
 document.querySelector('#data-context-open').addEventListener('click', () => openDataContext());
 document.querySelector('#data-context-footer').addEventListener('click', () => openDataContext());
 document.querySelector('#saved-observations-data-context').addEventListener('click', () => openDataContext(true));
@@ -7693,11 +9342,11 @@ function analysisTimeLabel(value) {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2}):\d{2}(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/.exec(value);
   return m ? m[3]+"."+m[2]+"."+m[1]+" à "+m[4]+" UTC"+(m[5] === "Z" ? "" : m[5]) : "";
 }
-function noCandidateMessage(payload) {
+function noCandidateMessage(payload, timeZone = null) {
   const refusal = payload.target_refusal;
   if (refusal?.code === "target_below_minimum_altitude"
       && Number.isFinite(refusal.minimum_altitude_deg) && refusal.sample_count > 0) {
-    const range = [analysisTimeLabel(refusal.window_start), analysisTimeLabel(refusal.window_end)].filter(Boolean).join(" → ");
+    const range = [refusalTimeLabel(refusal.window_start, timeZone), refusalTimeLabel(refusal.window_end, timeZone)].filter(Boolean).join(" → ");
     return ["Cible trop basse sur ce créneau",
       refusal.catalog_key+" est trop basse sur le créneau choisi. NightMerit exige une hauteur d’au moins "+refusal.minimum_altitude_deg+"°.",
       (range ? "Créneau demandé : "+range+". " : "")+"Aucun échantillon des fenêtres évaluées n’atteint le seuil d’altitude. Ce motif ne conclut pas à la qualité de la météo."];
@@ -7744,7 +9393,7 @@ async function loadAnalysisHistory(more = false) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "secondary-button";
-      button.textContent = savedObservationTime(record.created_at_utc, record.result.weather_trust?.timezone || "UTC")+" — "+(record.request.selected_project_id || record.result.target || "Analyse de nuit");
+      button.textContent = "Calcul du " + savedObservationTime(record.created_at_utc, refusalSiteTimezone(record.result, {archived:true, request:record.request}))+" — "+readableTargetName(record.request.selected_project_id || record.result.target || "Analyse de nuit");
       button.addEventListener("click", () => renderArchivedAnalysis(record));
       list.append(button);
     }
@@ -7755,29 +9404,85 @@ async function loadAnalysisHistory(more = false) {
     if (current()) message.textContent = "Les analyses enregistrées ne peuvent pas être lues. Aucun enregistrement existant n’a été modifié.";
   }
 }
+function archivedRequestedRange(record, timeZone) {
+  const availability = record.request?.availability;
+  let start = availability?.start, end = availability?.end;
+  // Local form values must use the archived site zone, never the computer's zone.
+  if (!start && !end && availability?.mode === "fixed_window"
+      && availability.start_local && availability.end_local) {
+    const historicalZone = record.result?.weather_trust?.timezone || record.request?.location?.timezone;
+    if (!historicalZone) return "";
+    try {
+      const startWall = availability.start_local, endWall = availability.end_local;
+      localDateTimeParts(startWall); localDateTimeParts(endWall);
+      let normalizedEnd = endWall;
+      // Match the server's overnight rule for an end earlier on the same date.
+      if (startWall.slice(0, 10) === endWall.slice(0, 10) && endWall < startWall) {
+        const parts = localDateTimeParts(endWall);
+        normalizedEnd = new Date(utcMilliseconds(parts.year, parts.month, parts.day + 1,
+          parts.hour, parts.minute)).toISOString().slice(0, 16);
+      }
+      const nominal = Date.parse(normalizedEnd + "Z") - Date.parse(startWall + "Z");
+      if (nominal <= 0 || nominal > 86400000) return "";
+      start = localDateTimeToUtc(startWall, historicalZone);
+      end = localDateTimeToUtc(normalizedEnd, historicalZone);
+    } catch (_) { return ""; }
+  }
+  // Only explicit archived bounds are evidence; never reconstruct a former night.
+  const aware = value => typeof value === "string" && /(?:Z|[+-]\d{2}:\d{2})$/.test(value);
+  if (!aware(start) || !aware(end) || !Number.isFinite(Date.parse(start))
+      || !Number.isFinite(Date.parse(end)) || Date.parse(end) <= Date.parse(start)) return "";
+  return `Vos horaires demandés : ${refusalTimeLabel(start, timeZone)} → ${refusalTimeLabel(end, timeZone)} · ${timeZone}.`;
+}
+
 function renderArchivedAnalysis(record) {
   const root = document.querySelector("#analysis-history-detail");
   root.replaceChildren();
   const payload = record.result;
-  const message = payload.status === "no_candidate" ? noCandidateMessage(payload)
-    : payload.status === "no_productive_window" ? actionabilityRefusalMessage(payload.actionability_refusal)
+  const timeZone = refusalSiteTimezone(payload, {archived:true, request:record.request});
+  const message = payload.status === "no_candidate" ? noCandidateMessage(payload, timeZone)
+    : payload.status === "no_productive_window" ? actionabilityRefusalMessage(payload.actionability_refusal, timeZone)
+    : payload.status === "no_mission" && payload.creation_refusal ? creationRefusalMessage(payload, timeZone)
     : payload.status === "weather_refused"
       ? [payload.weather_decision?.presentation?.label, payload.weather_decision?.presentation?.summary]
       : partialMessages[payload.status] || ["Résultat enregistré", "Consultez les détails de cette analyse archivée."];
-  for (const [tag, value] of [["h3", message[0]], ["p", message[1]], ["p", message[2]]]) {
+  if (!payload.weather_trust?.timezone && !record.request?.location?.timezone) {
+    const note = document.createElement("p");
+    note.className = "refusal-window";
+    note.textContent = "Fuseau historique non enregistré : horaires affichés en UTC.";
+    root.append(note);
+  }
+  const concise = simpleProductivityRefusal(payload);
+  const title = appliedUiMode === "simple" && concise ? concise[0] : message[0];
+  const body = concise ? `${concise[1]} Votre projet est conservé.` : message[1];
+  for (const [tag, value] of [["h3", title], ["p", body], ["p", archivedRequestedRange(record, timeZone)], ["p", refusalEvaluatedRange(payload, timeZone)]]) {
     if (!value) continue;
     const node = document.createElement(tag);
     node.textContent = value;
     root.append(node);
   }
+  if (typeof renderRefusalEvidence === "function" && (payload.actionability_refusal || payload.refusal_weather || targetedIntentAssessments(payload).some(item=>item.actionability_refusal))) {
+    const evidence = document.createElement("div"); evidence.className="refusal-summary";
+    renderRefusalEvidence(evidence,payload,timeZone,{includeRange: !refusalEvaluatedRange(payload,timeZone)});root.append(evidence);
+  }
   const details = document.createElement("details");
   const summary = document.createElement("summary");
-  summary.textContent = "Détails enregistrés de l’analyse";
+  summary.textContent = "Comprendre le résultat";
+  details.setAttribute("data-mode-disclosure", "");
+  details.open = appliedUiMode === "pro";
+  const explanation = document.createElement("p");
+  explanation.className = "refusal-evidence";
+  explanation.textContent = [message[1], message[2]].filter(value => value && value !== body).join("\n\n");
+  const raw = document.createElement("details");
+  const rawSummary = document.createElement("summary");
+  rawSummary.textContent = "Données brutes archivées (horaires ISO d’origine)";
+  raw.append(rawSummary);
   const content = document.createElement("pre");
   content.style.whiteSpace = "pre-wrap";
   content.style.overflowWrap = "anywhere";
   content.textContent = JSON.stringify({horaires_et_configuration: record.request, resultat: record.result}, null, 2);
-  details.append(summary, content);
+  raw.append(content);
+  details.append(summary, explanation, raw);
   root.append(details);
 }
 document.querySelectorAll("[data-open-analysis-history]").forEach(button => button.addEventListener("click", () => {
@@ -7785,10 +9490,26 @@ document.querySelectorAll("[data-open-analysis-history]").forEach(button => butt
   loadAnalysisHistory();
 }));
 document.querySelector("#analysis-history-close").addEventListener("click", () => document.querySelector("#analysis-history-dialog").close());
-document.querySelector("#analysis-history-dialog").addEventListener("close", () => { analysisHistoryState.generation += 1; });
+document.querySelector("#analysis-history-dialog").addEventListener("close", () => {
+  // A queued close event from the previous opening must not cancel a new read.
+  if (!document.querySelector("#analysis-history-dialog").open) analysisHistoryState.generation += 1;
+});
 document.querySelector("#analysis-history-next").addEventListener("click", () => loadAnalysisHistory(true));
+
+photoElement("choice").addEventListener("change", event => {
+  photoAddition.selected = photoAddition.sessions.find(item => item.execution.execution_id === event.target.value) || null;
+  photoElement("frames").value = ""; photoElement("seconds").value = "";
+  photoMessage(""); renderPhotoAddition();
+});
+for (const id of ["frames", "seconds"]) photoElement(id).addEventListener("input", () => {photoMessage(""); renderPhotoAddition();});
+photoElement("submit").addEventListener("click", submitPhotoAddition);
+photoElement("close").addEventListener("click", () => { if (!photoAddition.busy) photoElement("dialog").close(); });
+photoElement("dialog").addEventListener("cancel", event => { if (photoAddition.busy) event.preventDefault(); });
 
 restoreFieldObservationLock();
 restorePendingFieldObservationInventory();
 if (restorePendingAcceptanceAttempt()) showUnresolvedAcceptance();
 else loadConfiguration();
+
+// Age a displayed verification without turning an old result into a fresh one.
+setInterval(() => { if (ui.mission.open) renderSavedMissionWeather(); }, 60000);

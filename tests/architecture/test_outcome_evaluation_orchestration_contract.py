@@ -893,3 +893,17 @@ def test_orchestrator_has_no_forbidden_architecture_imports():
         any(part in module.lower() for part in forbidden)
         for module in imported_modules
     )
+
+
+def test_subjective_wind_never_generates_numeric_wind_comparison(tmp_path):
+    from decision.field_observation import WindStrength, WindImpact
+    source = observation(execution_id=None, conditions=ObservedConditions(
+        wind_strength=WindStrength.STRONG, wind_impact=WindImpact.IMPOSSIBLE))
+    orchestration = service(tmp_path, source,
+        MutableEvidenceStore(evidence(WeatherVariable.WIND_SPEED_KMH)))
+    first = orchestration.evaluate(source.observation_id)
+    assert first.evaluation.comparison.status is ForecastObservationComparisonStatus.NOT_COMPARABLE
+    assert source.conditions.wind_speed_kmh is None
+    replay = orchestration.evaluate(source.observation_id)
+    assert replay.created is False
+    assert replay.evaluation == first.evaluation

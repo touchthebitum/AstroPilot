@@ -26,6 +26,8 @@ from decision.field_observation import (
     StopReason,
     SurfaceCondition,
     Transparency,
+    WindStrength,
+    WindImpact,
 )
 from decision.models.forecast_observation_comparison import (
     ALGORITHM_VERSION,
@@ -1468,6 +1470,8 @@ def _validated_field_observation(value: object) -> FieldObservation:
         transparency = conditions.transparency
         seeing = conditions.seeing
         wind_speed_kmh = conditions.wind_speed_kmh
+        wind_strength = conditions.wind_strength
+        wind_impact = conditions.wind_impact
         surface_condition = conditions.surface_condition
         moon_halo = conditions.moon_halo
 
@@ -1511,6 +1515,8 @@ def _validated_field_observation(value: object) -> FieldObservation:
             (transparency, Transparency),
             (seeing, SeeingCondition),
             (surface_condition, SurfaceCondition),
+            (wind_strength, WindStrength),
+            (wind_impact, WindImpact),
             (stop_reason, StopReason),
             (hfr_unit, HfrUnit),
         )
@@ -1577,6 +1583,8 @@ def _validated_field_observation(value: object) -> FieldObservation:
             transparency=transparency,
             seeing=seeing,
             wind_speed_kmh=wind_speed_kmh,
+            wind_strength=wind_strength,
+            wind_impact=wind_impact,
             surface_condition=surface_condition,
             moon_halo=moon_halo,
         )
@@ -1625,6 +1633,11 @@ def _validated_field_observation(value: object) -> FieldObservation:
 
 
 def _canonical_observation(observation: FieldObservation) -> dict:
+    conditions = asdict(observation.conditions)
+    # Preserve the canonical identity of observations recorded before schema v3.
+    if conditions["wind_strength"] is None and conditions["wind_impact"] is None:
+        conditions.pop("wind_strength")
+        conditions.pop("wind_impact")
     return {
         "observation_id": observation.observation_id,
         "decision_id": observation.decision_id,
@@ -1632,7 +1645,7 @@ def _canonical_observation(observation: FieldObservation) -> dict:
         "observed_at_utc": observation.observed_at_utc,
         "recorded_at_utc": observation.recorded_at_utc,
         "supersedes_observation_id": observation.supersedes_observation_id,
-        "conditions": asdict(observation.conditions),
+        "conditions": conditions,
         "acquisition": asdict(observation.acquisition),
         "technical": asdict(observation.technical),
         "provenance": asdict(observation.provenance),

@@ -364,6 +364,9 @@ def fetch_weather(lat: float, lon: float) -> WeatherSnapshot | None:
 
     location_time = LocationTimeResolver.resolve(lat, lon)
     timezone_name = location_time.timezone_name
+    from astropilot.demo_mode import context as demo_context, simulated_weather
+    if demo_context()["enabled"]:
+        return simulated_weather(lat, lon, timezone_name)
     params = {
         "latitude": lat,
         "longitude": lon,
@@ -1949,6 +1952,16 @@ def evaluate_object(
             lat, lon, bortle, target, obj_name, profile)
         windows = [best] if best is not None else []
     else:
+        from decision.mission.night_planner import acquisition_availability
+        try:
+            # Match mission assembly's capture bounds when judging a candidate.
+            # Keep the original availability for assembly; do not reserve twice.
+            preselection_availability = acquisition_availability(availability)
+        except ValueError as error:
+            if str(error) != "session_too_short_for_operational_tasks":
+                raise
+            # Retain ordinary evidence so assembly can explain the refusal.
+            preselection_availability = None
         windows = compute_windows_for_object(sky, hours, illumination, city_info,
             lat, lon, bortle, target, obj_name, profile, limit=None)
         from decision.models.session_availability import SessionAvailabilityMode
@@ -1986,6 +1999,7 @@ def evaluate_object(
     decision_engine = build_decision_engine()
 
     first_evaluation = None
+    window_refusals = []
     for best in windows:
         best = dict(best)
         best["best_setup"] = best_setup
@@ -2034,13 +2048,21 @@ def evaluate_object(
         if first_evaluation is None:
             first_evaluation = evaluation
         from decision.mission.mission_assembler import ProductiveWindowAssessment
-        from decision.services.session_availability_windowing import select_physical_productive_window
+        from decision.services.session_availability_windowing import evaluate_physical_productive_window
         mission_input = build_mission_input(evaluation, profile=profile, for_intent_selection=True)
         assessment = ProductiveWindowAssessment.build(target=obj_name,
             context=decision_context, mission_input=mission_input)
-        if select_physical_productive_window(assessment, availability) is not None:
-            return evaluation
-    # Keep the best overlapping evidence so ordinary guards can explain a refusal.
+        if preselection_availability is not None:
+            selection = evaluate_physical_productive_window(assessment, preselection_availability)
+            if selection.window is not None:
+                return evaluation
+            if selection.refusal is not None:
+                from dataclasses import asdict
+                window_refusals.append(asdict(selection.refusal))
+    # Preserve every failed physical check, separately from the filter diagnostic.
+    # These records explain the search; they never authorize a mission.
+    if first_evaluation is not None and window_refusals:
+        first_evaluation["preselection_window_refusals"] = window_refusals
     return first_evaluation
 
 
@@ -2259,10 +2281,21 @@ def forecast_astro(
         )
     )
     today = normalized_reference_time.astimezone(resolved_zone).date()
+    from decision.services.remaining_night_availability import remaining_night_availability
+    availability = remaining_night_availability(
+        availability, reference_time_utc=normalized_reference_time,
+        latitude=lat, longitude=lon, zone=resolved_zone,
+    )
     from decision.models.session_availability import requested_evening
     requested_date = requested_evening(availability, resolved_zone)
+    # Before dawn the current astronomical night began on the previous civil day.
+    first_date = today
+    if (requested_date == today - timedelta(days=1)
+            and availability.end is not None
+            and availability.end.astimezone(timezone.utc) > normalized_reference_time):
+        first_date = requested_date
     for d in range(7):
-        night_date = today + timedelta(days=d)
+        night_date = first_date + timedelta(days=d)
         if requested_date is not None and night_date != requested_date:
             continue
 

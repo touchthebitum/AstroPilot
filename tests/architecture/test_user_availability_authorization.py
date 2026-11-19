@@ -22,15 +22,15 @@ def test_missing_availability_cannot_authorize_mission_timing():
 
 @pytest.mark.parametrize('availability,hours', [
     (SessionAvailability(mode=SessionAvailabilityMode.ALL_NIGHT), 4),
-    (SessionAvailability(mode=SessionAvailabilityMode.UNTIL, end=START + timedelta(hours=2)), 2),
-    (SessionAvailability(mode=SessionAvailabilityMode.START_AND_DURATION, start=START + timedelta(hours=1), duration=timedelta(hours=2)), 2),
+    (SessionAvailability(mode=SessionAvailabilityMode.UNTIL, end=START + timedelta(hours=2)), 1.83),
+    (SessionAvailability(mode=SessionAvailabilityMode.START_AND_DURATION, start=START + timedelta(hours=1), duration=timedelta(hours=2)), 1.33),
 ])
 def test_explicit_availability_authorizes_only_bounded_time(availability, hours):
     source = assessment([1.0] * 16, expected_gain=20)
     timing, refusal = _mission_timing_assessment(source, availability)
     assert refusal is None
     assert timing[2] == hours
-    assert timing[1] - timing[0] == timedelta(hours=hours)
+    assert round((timing[1] - timing[0]).total_seconds() / 3600, 2) == hours
     assert timing[3] <= 20
     assert _mission_timing_assessment(source, None)[0] is None
 

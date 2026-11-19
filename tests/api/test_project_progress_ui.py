@@ -16,7 +16,8 @@ def test_field_transition_and_unsaved_editor_guards(tmp_path, ui_mode):
     if not engine:
         pytest.skip("JavaScript runtime unavailable")
     source = SCRIPT.read_text(encoding="utf-8")
-    functions = source[source.index("function progressEditorSnapshot("):
+    functions = source[source.index("function readableTargetName("):source.index("function savedMissionLabel(")]
+    functions += source[source.index("function progressEditorSnapshot("):
                        source.index("function prefillConfiguration()")]
     harness = r'''
 const assert = (condition, message) => { if (!condition) throw new Error(message); };

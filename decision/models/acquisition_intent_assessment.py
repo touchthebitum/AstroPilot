@@ -1,6 +1,7 @@
 """Public transport assessment for one evaluated acquisition intent."""
 
 from dataclasses import dataclass
+from decision.models.actionability_refusal import ActionabilityRefusal
 
 from decision.models.acquisition_intent_eligibility import (
     AcquisitionIntentEligibilityReason,
@@ -16,6 +17,7 @@ class AcquisitionIntentAssessment:
     label: str
     status: AcquisitionIntentEligibilityStatus
     reason_codes: tuple[str, ...]
+    actionability_refusal: ActionabilityRefusal | None = None
 
     def __post_init__(self) -> None:
         for name in ("acquisition_intent_id", "filter_type", "label"):
@@ -30,6 +32,16 @@ class AcquisitionIntentAssessment:
             raise TypeError("reason_codes_must_contain_strings")
         if len(set(self.reason_codes)) != len(self.reason_codes):
             raise ValueError("duplicate_reason_code")
+
+        if self.actionability_refusal is not None:
+            if not isinstance(self.actionability_refusal, ActionabilityRefusal):
+                raise TypeError("Expected ActionabilityRefusal")
+            expected_status = (
+                "not_eligible" if self.actionability_refusal.status.value == "constraints_refusal"
+                else "insufficient_evidence"
+            )
+            if self.status.value != expected_status or self.actionability_refusal.cause_code not in self.reason_codes:
+                raise ValueError("intent_refusal_evidence_mismatch")
 
         if self.status is AcquisitionIntentEligibilityStatus.ELIGIBLE:
             if self.reason_codes:

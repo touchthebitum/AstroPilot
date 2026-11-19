@@ -1,6 +1,7 @@
 """Pure V1 eligibility evaluator for a resolved acquisition intent."""
 
 from dataclasses import replace
+from decision.models.actionability_refusal import ActionabilityRefusal
 
 from decision.mission.mission_assembler import ProductiveWindowAssessment
 from decision.models.acquisition_intent_eligibility import (
@@ -35,12 +36,15 @@ from decision.weather.weather_trust_decision import (
 def _not_eligible(
     acquisition_intent_id: str,
     reason: AcquisitionIntentEligibilityReason,
+    *,
+    actionability_refusal: ActionabilityRefusal | None = None,
 ) -> AcquisitionIntentEligibilityAssessment:
     return AcquisitionIntentEligibilityAssessment(
         acquisition_intent_id=acquisition_intent_id,
         status=AcquisitionIntentEligibilityStatus.NOT_ELIGIBLE,
         blocking_reasons=(reason,),
         evidence_gaps=(),
+        actionability_refusal=actionability_refusal,
     )
 
 
@@ -154,6 +158,7 @@ def evaluate_acquisition_intent_eligibility(
             AcquisitionIntentEligibilityReason.REQUIRED_FILTER_UNAVAILABLE,
         )
 
+    actionability_refusal = None
     if productive_window is None:
         evidence_gaps.append(
             AcquisitionIntentEvidenceGap.PRODUCTIVE_WINDOW_EVIDENCE_MISSING
@@ -174,6 +179,7 @@ def evaluate_acquisition_intent_eligibility(
             session_availability,
         )
         if window_selection.refusal is not None:
+            actionability_refusal = window_selection.refusal
             if (
                 window_selection.refusal.status
                 is ActionabilityRefusalStatus.INSUFFICIENT_EVIDENCE
@@ -189,6 +195,7 @@ def evaluate_acquisition_intent_eligibility(
                     AcquisitionIntentEligibilityReason(
                         window_selection.refusal.cause_code
                     ),
+                    actionability_refusal=window_selection.refusal,
                 )
 
     if remaining_progress is None or remaining_progress.remaining_hours is None:
@@ -207,6 +214,7 @@ def evaluate_acquisition_intent_eligibility(
             status=AcquisitionIntentEligibilityStatus.INSUFFICIENT_EVIDENCE,
             blocking_reasons=(),
             evidence_gaps=tuple(evidence_gaps),
+            actionability_refusal=actionability_refusal,
         )
     return AcquisitionIntentEligibilityAssessment(
         acquisition_intent_id=intent_id,

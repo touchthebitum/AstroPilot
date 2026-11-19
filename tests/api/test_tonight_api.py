@@ -218,6 +218,7 @@ def test_tonight_exposes_sh2_129_refusals_when_viable_options_are_empty():
             "label": "Hα · Sh2-129",
             "status": "insufficient_evidence",
             "reason_codes": ["weather_evidence_insufficient"],
+            "actionability_refusal": None,
         },
         {
             "acquisition_intent_id": "ou4_oiii",
@@ -225,6 +226,7 @@ def test_tonight_exposes_sh2_129_refusals_when_viable_options_are_empty():
             "label": "OIII · Ou4",
             "status": "insufficient_evidence",
             "reason_codes": ["weather_evidence_insufficient"],
+            "actionability_refusal": None,
         },
     ]
 
@@ -455,8 +457,22 @@ def test_tonight_maps_explicit_availability_to_domain(payload, expected):
     )
 
     assert response.status_code == 200
-    assert evaluation_calls[0]["availability"] == expected
-    assert isinstance(evaluation_calls[0]["availability"], SessionAvailability)
+    actual = evaluation_calls[0]["availability"]
+    if expected.mode is SessionAvailabilityMode.ALL_NIGHT:
+        # The transport remains all_night, but calculation/acceptance must use
+        # an explicit current-night interval rather than an unbounded authority.
+        from astropilot.engines.sky_engine import SkyEngine
+        from zoneinfo import ZoneInfo
+        zone = ZoneInfo("Europe/Zurich")
+        reference = DEFAULT_WEATHER_REFERENCE_TIME.astimezone(timezone.utc)
+        dusk, dawn = SkyEngine.astronomical_night_window(
+            reference.astimezone(zone).date(), 46.7508, 6.5495, zone)
+        assert actual.mode is SessionAvailabilityMode.FIXED_WINDOW
+        assert actual.start.astimezone(timezone.utc) == max(reference, dusk.astimezone(timezone.utc))
+        assert actual.end == dawn
+    else:
+        assert actual == expected
+    assert isinstance(actual, SessionAvailability)
 
 
 @pytest.mark.parametrize(
@@ -1344,6 +1360,7 @@ def test_tonight_api_serializes_actionability_refusal_without_recalculation():
         "limiting_factors": [],
         "refusal_stage": None,
         "productivity_breakdown": None,
+        "evidence_scope": None,
     }
     assert payload["target_decision_status"] == "not_recommended"
 
@@ -2191,6 +2208,7 @@ def test_openapi_schema_exposes_decision_intelligence_contracts():
         "label",
         "status",
         "reason_codes",
+        "actionability_refusal",
     }
     assert assessment_schema["properties"]["status"]["$ref"].endswith(
         "AcquisitionIntentEligibilityStatus"
@@ -2451,7 +2469,8 @@ def test_target_insufficiency_api_binds_each_decision_to_its_own_candidate(monke
         for candidate, decision in zip(candidates, decisions)
     }
     monkeypatch.setattr(app_module, "_assess_shortlist_candidates", lambda *a, **kw: assessments)
-    reference = datetime(2026, 8, 29, 20, tzinfo=timezone.utc)
+    # These synthetic candidates belong to this same requested night.
+    reference = result.mission.window_start - timedelta(hours=2)
     weather = make_weather_snapshot(
         reference - timedelta(minutes=5),
         valid_until=datetime(2026, 9, 1, 23, tzinfo=timezone.utc) if primary_refused else None,

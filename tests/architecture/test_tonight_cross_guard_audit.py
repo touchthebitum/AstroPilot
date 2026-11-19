@@ -54,7 +54,8 @@ def source(value, intent, mode):
         "selected_acquisition_intent_id": intent,
         "selected_window_weather": weather(),
         "window": {"start": START, "end": START + timedelta(hours=4)}},
-        profile={"projects": {"M31": value}}), availability=availability(mode))
+        profile={"projects": {"M31": value}}), availability=(replace(availability(mode), preparation_minutes=0, flats_minutes=0)
+            if availability(mode) is not None else None))
 
 
 def assess(value):

@@ -64,6 +64,28 @@ renderSession();
 assert.equal(document.querySelector('#session-hours').value, '0');
 assert.equal(document.querySelector('#session-minutes').value, '30');
 assert.equal(observationLinkageRenderCount, 3);
+// Mixed exposures: 5 × 45 s + 5 × 60 s = 8 min 45 s.
+localStorage.setItem('astropilot.pendingEvidence.execution-1', JSON.stringify({
+  evidence_id: 'mixed', seconds: 525, minutes: 8.75, method: 'duration',
+}));
+state.sessionEvidenceInputExecutionId = null;
+renderSession();
+assert.equal(document.querySelector('#session-minutes').value, '8');
+assert.equal(document.querySelector('#session-seconds').value, '45');
+assert.equal(sessionEvidenceDuration(), 525);
+assert.match(document.querySelector('#session-duration-preview').textContent, /8 45 s/);
+for (const invalid of ['-1', '60', 'Infinity']) {
+  document.querySelector('#session-seconds').value = invalid;
+  assert.equal(sessionEvidenceDuration(), null);
+}
+document.querySelector('#session-hours').value = '0';
+document.querySelector('#session-minutes').value = '0';
+document.querySelector('#session-seconds').value = '1.5';
+assert.equal(sessionEvidenceDuration(), 1.5);
+state.activeSessionId = 'execution-2';
+renderSession();
+assert.equal(document.querySelector('#session-seconds').value, '0');
+
 '''
     result = run_with_time_authority([node, "-"], input=source[source.index("function missionTimezone("):source.index("function clock(")] + harness + helpers + checks, capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
@@ -135,7 +157,7 @@ async function fetch(url, options) {
   assert.equal(document.querySelector('#session-before').textContent, '1 h 00');
   assert.equal(document.querySelector('#session-added').textContent, '0 h 30');
   assert.equal(document.querySelector('#session-after').textContent, '1 h 30');
-  assert.equal(document.querySelector('#session-after-label').textContent, 'Acquis après ce crédit');
+  assert.equal(document.querySelector('#session-after-label').textContent, 'Acquis après cette session');
   canonical.current_acquired_seconds = 6300;
   canonical.remaining_hours = .25;
   await reloadSessions();
@@ -225,7 +247,7 @@ async function fetch(url, options) {
   assert.equal(document.querySelector('#session-start').hidden, true);
   assert.equal(document.querySelector('#session-credit').hidden, true);
   assert.match(document.querySelector('#session-status').textContent, /Session non confirmée/);
-  assert.equal(document.querySelector('#session-choice').children[0].textContent, 'Sans session');
+  assert.equal(document.querySelector('#session-choice').children[0].textContent, 'Sans séance photo');
   assert.match(document.querySelector('#session-choice').children[1].textContent, /Session non confirmée/);
   for (const invalidStatus of ['interrupted', 'unknown', null]) {
     canonical.execution.status = invalidStatus;
@@ -321,7 +343,9 @@ class Element {
 }
 const ui = {savedMissionEntry: new Element(), savedMissionChoice: new Element(),
   savedMissionTarget: new Element(), openSavedMission: new Element(), mission: {showModal() { opened = true; }}};
-const document = {createElement() { return new Element(); }};
+const historyStatus = new Element();
+const document = {createElement() { return new Element(); }, querySelector() { return historyStatus; }};
+function savedMissionLabel(item) { return item.mission.target; }
 const state = {configuration: {}, acceptedMission: null, savedMissions: []};
 let opened = false, rendered = null;
 function renderMission(mission) { rendered = mission; }
@@ -333,6 +357,7 @@ async function fetch(url) {
   if (url === '/v1/accepted-mission/current') return {ok: true, json: async () => ({status: 'accepted',
     mission_id: recent.mission_id, selection_id: recent.selection_id, decision_id: recent.decision_id,
     catalog_key: 'Sh2-129', selected_acquisition_intent_id: 'ha', mission: recent})};
+  if (url === '/v1/accepted-missions') return {ok: true, json: async () => [recent, old].map(item => ({status:'accepted',mission_id:item.mission_id,selection_id:item.selection_id,decision_id:item.decision_id,catalog_key:'Sh2-129',selected_acquisition_intent_id:'ha',selected_at:'2026-09-01T00:00:00Z',mission:item}))};
   return {ok: true, json: async () => [recent, old].map((item) => ({mission_id: item.mission_id,
     mission: item, project_id: 'Sh2-129', acquisition_intent_id: 'ha'}))};
 }
@@ -341,6 +366,7 @@ async function fetch(url) {
 (async () => {
   await restoreSavedMission();
   assert.equal(state.savedMissions.length, 2);
+  assert.equal(historyStatus.hidden, true);
   assert.equal(ui.savedMissionChoice.children[0].value, 'recent');
   assert.equal(ui.savedMissionChoice.children[1].value, 'old');
   ui.savedMissionChoice.value = 'old';
@@ -632,7 +658,7 @@ async function fetch(url, options) {
     assert.notEqual(labels[0], labels[1]);
     for (const [kind, display, amount] of [['ha', 'Ha 6.5 nm', '1 h 30'], ['oiii', 'OIII 6.5 nm', '0 h 15']]) {
       const option = ui.savedMissionChoice.children.find(o => o.value === `mission-${kind}`);
-      assert(option.textContent.includes(`Sh2-129 · ${display} · `));
+      assert(option.textContent.includes(`Sh2-129 + Ou4 · ${display} · `));
       for (const date of expected) assert(option.textContent.includes(date), option.textContent);
       assert(option.textContent.endsWith(zone));
       ui.savedMissionChoice.value = option.value;
@@ -641,8 +667,9 @@ async function fetch(url, options) {
       ui.openSavedMission.handler();
       assert.equal(state.acceptedMission.mission_id, `mission-${kind}`);
       assert.equal(state.acceptedMission.mission.selected_filter.name, display);
+      assert.equal(state.acceptedMission.mission.target, 'Sh2-129', 'display alias must not rename stored targets');
       assert.equal(document.querySelector('#session-current').textContent, amount);
-      assert.equal(document.querySelector('#session-status').textContent, 'Crédit enregistré.');
+      assert.equal(document.querySelector('#session-status').textContent, 'Cette durée a été ajoutée à votre projet.');
     }
   }
   assert.equal(opened, 4);
@@ -657,3 +684,48 @@ async function fetch(url, options) {
                                     capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
     assert {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+def test_reopening_resumes_unambiguous_session_without_writes():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required")
+    source = SCRIPT.read_text(encoding="utf-8")
+    helper = source[source.index("async function reloadSessions"):source.index("async function sessionCommand")]
+    harness = r'''
+const assert = require('node:assert/strict');
+const SESSION_PENDING_KEY = 'test.pending';
+let sessions = [], reads = 0;
+const state = {acceptedMission:{mission_id:'mission'},activeSessionId:null};
+const localStorage = {getItem:()=>null};
+async function sessionFetch(url, options) {
+  assert.equal(options, undefined, 'reopening must only read');
+  reads++; return {ok:true,json:async()=>sessions};
+}
+function renderSession() {}
+function syncFieldObservationContext() {}
+async function readGuardianRenewal() {}
+const item = (id,status)=>({execution:{execution_id:id,status}});
+async function reopen(values) {
+  sessions=values;state.activeSessionId=null;state.fieldObservationSelectedExecutionId=null;
+  await reloadSessions({resumeExisting:true});
+  assert.equal(state.fieldObservationSelectedExecutionId,null,'resume must not auto-link observations');
+  return state.activeSessionId;
+}
+(async()=>{
+ assert.equal(await reopen([]),null);
+ assert.equal(await reopen([item('live','in_progress')]),'live');
+ assert.equal(await reopen([item('done','completed')]),'done');
+ assert.equal(await reopen([item('old','completed'),item('live','in_progress')]),'live');
+ assert.equal(await reopen([item('one','in_progress'),item('two','unconfirmed')]),null);
+ assert.equal(await reopen([item('one','completed'),item('two','completed')]),null);
+ sessions=[item('chosen','completed'),item('live','in_progress')];
+ await reloadSessions({selectId:'chosen',resumeExisting:true});assert.equal(state.activeSessionId,'chosen');
+ await reloadSessions({resumeExisting:true});assert.equal(state.activeSessionId,'chosen');
+ state.activeSessionId=null;await reloadSessions();assert.equal(state.activeSessionId,null,'preserve deliberate no selection');
+ assert.equal(reads,9);
+})().catch(e=>{console.error(e);process.exitCode=1;});
+'''
+    result = run_with_time_authority([node, "-"], input=harness + helper,
+                                    capture_output=True, text=True, encoding="utf-8")
+    assert result.returncode == 0, result.stderr

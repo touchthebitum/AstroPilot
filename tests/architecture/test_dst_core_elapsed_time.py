@@ -190,13 +190,15 @@ def test_sky_window_end_adds_one_real_hour_across_fall_fold(monkeypatch):
 
 
 def test_productive_assessment_derives_elapsed_astronomical_hours(monkeypatch):
+    from decision.night_productivity.night_productivity_engine import NightProductivityEvaluation
+
     start = datetime(2026, 10, 24, 22, tzinfo=ZONE)
     end = datetime(2026, 10, 25, 3, tzinfo=ZONE)
     captured = {}
 
     def evaluate(context):
         captured["context"] = context
-        return SimpleNamespace(
+        return NightProductivityEvaluation(
             result=SimpleNamespace(
                 productive_hours=0.0,
                 windows=[],

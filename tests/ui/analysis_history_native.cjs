@@ -10,7 +10,7 @@ const web=path.resolve(__dirname,'../../astropilot/web');
 const traffic=[],errors=[];let broken=false,empty=false,hold=false,release;
 const record={schema:'nightmerit.analysis_history.v1',decision_id:'synthetic-refused-M42',
  created_at_utc:'2026-10-25T19:50:00+00:00',
- request:{selected_project_id:'M42',availability:{mode:'fixed_window',start:'2026-10-25T21:00:00+01:00',end:'2026-10-25T22:30:00+01:00'}},
+ request:{selected_project_id:'M42',availability:{mode:'fixed_window',start_local:'2026-10-25T21:00',end_local:'2026-10-25T22:30'}},
  result:{status:'no_candidate',decision_id:'synthetic-refused-M42',weather_trust:{timezone:'Europe/Zurich'},
  target_refusal:{catalog_key:'M42',code:'target_below_minimum_altitude',minimum_altitude_deg:30,sample_count:3,
  window_start:'2026-10-25T21:00:00+01:00',window_end:'2026-10-25T22:30:00+01:00'}}};
@@ -62,11 +62,13 @@ const deadline=setTimeout(()=>{console.error('Analysis browser deadline');stop()
    await evaluate(()=>{window.__analysisBeforeReload=true;});
    await send('Page.reload');
    await waitFor(()=>evaluate(()=>!window.__analysisBeforeReload&&typeof state!=='undefined'&&state.view==='configuration_error'),'reload ready');
-   await evaluate(()=>{state.currentDecision={decision_id:'live-sentinel'};state.selectedProjectId='live-project';});
+   await evaluate(mode=>{applyUiMode(mode);state.currentDecision={decision_id:'live-sentinel'};state.selectedProjectId='live-project';},mode);
    await click('footer [data-open-analysis-history]');
    await waitFor(()=>evaluate(()=>document.querySelector('#analysis-history-list button')!==null),'archive list');
    await click('#analysis-history-list button');
+   assert.match(await evaluate(()=>document.querySelector('#analysis-history-list button').textContent),/^Calcul du /);
    assert.match(await evaluate(()=>document.querySelector('#analysis-history-detail').textContent),/M42.*trop basse/);
+   assert.match(await evaluate(()=>[...document.querySelector('#analysis-history-detail').children].filter(n=>n.tagName==='P').map(n=>n.textContent).join(' ')),/Vos horaires demandés.*21:00.*22:30/);
    assert.deepEqual(await evaluate(()=>[state.currentDecision.decision_id,state.selectedProjectId]),['live-sentinel','live-project']);
    assert(await evaluate(()=>{const d=document.querySelector('#analysis-history-dialog');return d.scrollWidth<=d.clientWidth;}),'narrow dialog must fit');
    if(mode==='simple'&&width===1280){const png=await send('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(proof,'ui.png'),Buffer.from(png.data,'base64'));}

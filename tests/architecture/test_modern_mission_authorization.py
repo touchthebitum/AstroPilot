@@ -40,7 +40,7 @@ def weather():
 
 def availability(mode):
     return {"all": A(M.ALL_NIGHT), "until": A(M.UNTIL, end=START + timedelta(hours=1.25)),
-        "duration": A(M.DURATION, duration=timedelta(hours=1.25)), "missing": None}[mode]
+        "duration": A(M.DURATION, duration=timedelta(hours=1.25, minutes=40)), "missing": None}[mode]
 
 
 @pytest.fixture(autouse=True)

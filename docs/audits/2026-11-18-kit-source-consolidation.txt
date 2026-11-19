@@ -1,0 +1,86 @@
+NightMerit beta 8 — source consolidation, 18 November 2026
+
+Purpose
+Restore normal Git review and delivery provenance for changes developed in
+retained source copies after PR #422. This is a draft integration candidate,
+not a new frozen reference, release, tag or Field Lab verdict.
+
+Base: main at 5c3c8ce077057c07d2864cd52bf08b3c0772d97c (PR #422, 3 November 2026).
+Delivered kit source SHA-256: 6775c320601134653b85b5287113f19a28c9c572e873351b798b6e0ea6f01ca1.
+The source fingerprint is not a Git commit. Historical manifest base IDs
+that cannot be resolved on GitHub are not used as ancestry. The branch is
+reconstructed from individually hash-verified retained snapshots.
+
+Scope
+52 new files and 71 modified files compared with main. Before review
+housekeeping, all 968 files present in the final audited kit source match
+byte for byte at restoration commit 2d1f1b73506f475b40c548c002f15c764da2e5b2.
+
+Six tracked main files omitted from source packages are preserved unchanged:
+- .github/dependabot.yml
+- .github/workflows/beta8-windows-manual.yml
+- .github/workflows/tests.yml
+- astropilot/.gitignore
+- data/user_profile.json
+- user_profile.json
+Their absence from a kit source manifest is not treated as a deletion request.
+No personal profile, backup ZIP, compiled kit, runtime, weather collection
+payload or scientific corpus is introduced by this pull request. Application
+catalogue definitions and synthetic test fixtures remain normal source files.
+
+Restoration commits
+4244618220faa790c71cff32bac30a9c6562aa66 feat: consolidate project setup and per-filter balance baseline
+4b42ce88f6fc71122c3b0b59d3d235a7c234e59f feat: reserve session tasks and explain weather refusals
+517b0d38c873ee3237341e3da96139b435e05227 feat: refresh saved plans and preserve image selection outcomes
+4c23cf99cceee9f2e0f8b41ea510734cad203688 fix: harden restore recovery and capture window preselection
+be8f3230f5a11f8e1bcc8c8f1d49d1fc076416cc feat: preserve hourly weather archives through backup and restore
+7b157df2eceb300492a746c5ee2c015330ab9081 feat: remove and restore projects while retaining their history
+1ab8f6cbd61f7c1daf0b8b62a83e358d0a90f132 fix: isolate Mac copies and guard moved or mismatched sessions
+897b247241cd25be2ea83f718d00a6531cf591ee feat: verify backup exports and retain local check receipts
+714781e7b4b068737005303ca56db65f16c276df ux: expose backup guidance and use consistent Ou4 labels
+764d06149831d168d36fe8fb215465ed2ce5497e fix: retain all failed physical windows in refusal history
+180f6b5b4cb1e2eac3905982fdbdc2641b4bc0db ux: clarify both entry paths to an existing project session
+2d1f1b73506f475b40c548c002f15c764da2e5b2 fix: support a dedicated Mac test port across launch and recovery
+
+Review notes
+The packaged sources normalized line endings in app.js, index.html and
+styles.css. Reviewers can use git diff --ignore-space-at-eol for the semantic
+delta. This normalization is retained to preserve the delivered source bytes.
+Any final review-only cleanup, regression harness adaptation and documentation
+are described in a separate review commits after the exact restoration point.
+
+Validation
+- Full Python suite on native macOS / Python 3.13 at 3239afc0928880b1a97ae76c7ccc50c4c692f7f1:
+  12,494 passed, 12 skipped, zero failures. Skips are native Windows cases
+  and a case-sensitive-volume case on the case-insensitive Mac volume.
+- 35 targeted regressions passed after adapting an isolated UI harness and
+  three parameterized assertions to the new project context / Ou4 label.
+  The raw stored target remains asserted unchanged.
+- Initial full run: 12,485 passed, eight failed, 13 skipped. Four stale UI
+  harness cases were corrected in tests, not by weakening production guards.
+  Four native socket / AppleScript compilation checks required local Mac
+  permissions; all passed when rerun with those permissions. No notification
+  was sent. IPv6 loopback then ran rather than being skipped.
+- The beginner conductor browser selector was updated after the full suite
+  to match the validated action label; Node syntax check passes. This manual
+  journey is not represented as a new local browser run.
+- Wheel built and installed outside the checkout; module ownership, imports,
+  --help and the installed CLI smoke passed using synthetic profiles.
+  Existing test dependencies were reused; no fresh dependency installation
+  or new Windows binary qualification is claimed.
+- Main CI workflows are preserved. PR CI validates the final Git branch.
+- Application behavior is unchanged from the restored kit source. Review
+  cleanup removes only one trailing-space-only line in choice-pages.js.
+  Other changes after the exact restoration point are tests and docs.
+
+The earlier local kit checks qualify their own source snapshots. They are
+historical evidence and are not added to the new full-suite count. Previous
+Windows operator reports are not represented as a new Windows run here.
+The PR CI will independently qualify the Git branch on supported platforms.
+
+Delivery rule
+Develop in the Git branch, commit code/tests/docs, validate that commit, then
+build a kit from that checkout. Record git rev-parse HEAD and the dirty state
+with the kit's source checksum. Do not use a source checksum as a Git SHA.
+Keep profiles, archives, runtime logs and personal ZIPs outside source commits.
+The frozen beta 8 reference and the Field Lab decision gate remain unchanged.

@@ -68,17 +68,21 @@ const assert = require('node:assert/strict');
 const elements = new Map();
 function element(selector) {
   if (!elements.has(selector)) elements.set(selector, {value: '', checked: false, hidden: false,
-    dataset: {}, addEventListener(name, handler) {this[name] = handler;}});
+    dataset: {}, closest() {return {hidden: false};}, addEventListener(name, handler) {this[name] = handler;}});
   return elements.get(selector);
 }
 const back = element('back'); back.dataset.back = 'equipment';
 const document = {querySelector: element, querySelectorAll: selector => selector === '[data-back]' ? [back] : []};
 const projects = {existing: {intent: 'must survive'}};
 const state = {configurationDraft: {site: {}, equipment: {}, projects}};
+// Exercise the complete equipment form in Advanced mode; Beginner has two phases.
+const appliedUiMode = 'pro';
 const screens = [];
 function setView(view) {state.view = view; screens.push(view);}
 function text(selector, value) {element(selector).textContent = value;}
+function renderSimpleEquipment() {}
 function renderPresetChoices() {}
+function updateEquipmentSearch() {}
 function renderProjects() {return true;}
 function renderReview() {}
 function showFormError(message) {state.error = message;}

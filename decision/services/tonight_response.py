@@ -519,7 +519,13 @@ class TonightResponse:
             self.actionability_refusal is not None
             and self.status != "no_productive_window"
         ):
-            raise ValueError("actionability_refusal_transport_status_mismatch")
+            targeted = tuple(item for item in self.acquisition_intent_assessments
+                             if "intent_not_targeted_by_project" not in item.reason_codes)
+            if not (self.status == "no_mission"
+                    and self.creation_refusal == "no_eligible_acquisition_intent"
+                    and len(targeted) == 1
+                    and targeted[0].actionability_refusal == self.actionability_refusal):
+                raise ValueError("actionability_refusal_transport_status_mismatch")
         if (
             self.status == "no_productive_window"
             and self.actionability_refusal is None

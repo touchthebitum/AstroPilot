@@ -179,3 +179,16 @@ def test_technical_units_and_compatibility_read_properties():
     assert source.cloud_condition is CloudState.CLEAR
     assert source.transparency is Transparency.GOOD
     assert source.dew_detected is False
+
+
+def test_subjective_wind_is_a_fact_without_numeric_conversion():
+    from decision.field_observation import WindStrength, WindImpact
+    for strength in WindStrength:
+        for impact in WindImpact:
+            conditions = ObservedConditions(wind_strength=strength, wind_impact=impact)
+            assert conditions.has_fact()
+            assert conditions.wind_speed_kmh is None
+    with pytest.raises(ValueError, match='invalid_wind_strength'):
+        ObservedConditions(wind_strength='strong')
+    with pytest.raises(ValueError, match='invalid_wind_impact'):
+        ObservedConditions(wind_impact=50)

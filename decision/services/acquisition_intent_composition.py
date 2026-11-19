@@ -90,6 +90,7 @@ def _select(
             filter_type=definitions[assessment.acquisition_intent_id].filter_type,
             label=definitions[assessment.acquisition_intent_id].label,
             status=assessment.status,
+            actionability_refusal=assessment.actionability_refusal,
             reason_codes=(
                 tuple(reason.value for reason in assessment.blocking_reasons)
                 if assessment.status

@@ -26,9 +26,9 @@ class SliceProductivityEvaluation:
 class ProductivityBreakdown:
     evaluated_slice_count: int
     productive_slice_count: int
-    best_slice_start: datetime
-    best_slice_end: datetime
-    best_slice_score: float
-    best_slice_tie_count: int
+    best_slice_start: datetime | None
+    best_slice_end: datetime | None
+    best_slice_score: float | None
+    best_slice_tie_count: int | None
     productive_slice_threshold: float
-    losses: ProductivityLosses
+    losses: ProductivityLosses | None

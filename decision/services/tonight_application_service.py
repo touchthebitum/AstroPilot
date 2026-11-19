@@ -20,9 +20,11 @@ from decision.models.candidate_rejection import (
     CandidateRejection,
 )
 from decision.models.acquisition_intent_selection import AcquisitionIntentSelectionStatus
-from decision.models.session_availability import SessionAvailability, requested_evening
+from decision.models.session_availability import SessionAvailability, SessionAvailabilityMode, requested_evening
 from decision.recommendation.recommendation import Recommendation
 from decision.services.session_availability_windowing import ActionabilityRefusal
+from decision.services.remaining_night_availability import remaining_night_availability
+from decision.location.location_time import LocationTimeResolver
 from decision.validation.decision_consistency import DecisionConsistencyGate
 from decision.weather.decision_forecast_evidence import DecisionForecastEvidence
 from decision.weather.provider_reliability import WeatherLocation
@@ -212,6 +214,14 @@ class TonightApplicationService:
             bortle=bortle,
             availability=availability,
         )
+        if inputs.availability is not None and inputs.availability.mode is SessionAvailabilityMode.ALL_NIGHT:
+            inputs = replace(inputs, availability=remaining_night_availability(
+                inputs.availability, reference_time_utc=reference_time_utc,
+                latitude=inputs.location["latitude"], longitude=inputs.location["longitude"],
+                zone=(ZoneInfo(weather.timezone) if isinstance(weather, WeatherSnapshot)
+                      else LocationTimeResolver.resolve(
+                          inputs.location["latitude"], inputs.location["longitude"]).zone),
+            ))
         selected_equipment = inputs.equipment
         effective_profile = {
             **profile,
@@ -355,12 +365,21 @@ class TonightApplicationService:
         # configuration error. Never select an intent or bypass the refusal.
         if (getattr(candidate, "acquisition_intent_selection_status", None)
                 is AcquisitionIntentSelectionStatus.NO_ELIGIBLE_INTENT):
+            targeted_assessments = tuple(
+                item for item in candidate.acquisition_intent_assessments
+                if "intent_not_targeted_by_project" not in item.reason_codes
+            )
+            # A global diagnostic is unambiguous only for a sole targeted intent.
+            # All per-intent diagnostics remain available on the candidate.
+            refusal = (targeted_assessments[0].actionability_refusal
+                       if len(targeted_assessments) == 1 else None)
             return TonightResult(
                 night, recommendation, None,
                 status=TonightStatus.NO_MISSION,
                 forecast_evidence=forecast_evidence,
                 candidate_rejections=candidate_rejections,
                 creation_refusal="no_eligible_acquisition_intent",
+                actionability_refusal=refusal,
             )
 
         # Comparative lunar evidence belongs to the candidate until an intent

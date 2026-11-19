@@ -90,6 +90,7 @@ def test_wheel_includes_only_immutable_product_assets():
     assert "user_filters.json" not in declared_patterns
     assert {item.name for item in (ROOT / "astropilot/catalogue_data").iterdir() if item.is_file()} == {
         "NGC.csv", "addendum.csv", "NGC_guide.txt", "AUTHORS", "CC-BY-SA-4.0.txt", "README.md", "manifest.json", "UPSTREAM-COPYRIGHT.txt",
+        "equipment_references_v1.json",
     }
 
 
@@ -111,7 +112,7 @@ def test_native_specs_include_every_immutable_catalogue_file(spec_name):
                 for origin, destination in context["datas"]
                 if destination == "astropilot/catalogue_data"}
     expected = {p.name: p for p in (ROOT / "astropilot/catalogue_data").iterdir() if p.is_file()}
-    assert len(expected) == 8
+    assert len(expected) == 9
     assert packaged == expected
 
 

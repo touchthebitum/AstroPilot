@@ -28,7 +28,7 @@ from decision.services.project_acquisition_intent_progress import (
     resolve_project_acquisition_intent_progress,
 )
 from decision.services.intent_progress_credit import (
-    IntentProgressCreditError, validate_credit_authority,
+    IntentProgressCreditError, validate_credit_authority, retained_projects,
 )
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -220,6 +220,34 @@ def validate_user_profile(profile, profile_path: Path):
         )
 
     _profile_revision(profile, profile_path)
+    if "filter_inventories" in profile:
+        from astropilot.filter_inventory import FilterInventory
+        inventories=profile["filter_inventories"]
+        if not isinstance(inventories, dict) or len(inventories)>100:
+            raise UserProfileError("filter_inventory_invalid")
+        try:
+            for key, value in inventories.items():
+                if not isinstance(key,str) or not key or len(key)>120:
+                    raise ValueError("equipment_id_invalid")
+                FilterInventory.model_validate(value)
+        except (ValueError,TypeError) as exc:
+            raise UserProfileError("filter_inventory_invalid") from exc
+
+    if "filter_mount_inventories" in profile:
+        from astropilot.filter_inventory import FilterInventory, inventory_mounting
+        mounts=profile["filter_mount_inventories"]
+        try:
+            if not isinstance(mounts,dict) or len(mounts)>100:
+                raise ValueError("mounts_invalid")
+            for equipment, variants in mounts.items():
+                if not isinstance(equipment,str) or not equipment or len(equipment)>120 or not isinstance(variants,dict):
+                    raise ValueError("mounts_invalid")
+                for mode, inventory in variants.items():
+                    if mode not in ("wheel","single","none") or inventory_mounting(inventory)!=mode:
+                        raise ValueError("mounts_invalid")
+                    FilterInventory.model_validate(inventory)
+        except (ValueError,TypeError,AttributeError) as exc:
+            raise UserProfileError("filter_mount_inventory_invalid") from exc
 
     for field_name, (
         expected_type,
@@ -393,8 +421,12 @@ def validate_user_profile(profile, profile_path: Path):
                 f"dans {profile_path} : chaîne non vide attendue."
             )
 
+    try:
+        all_projects = retained_projects(profile)
+    except IntentProgressCreditError as exc:
+        raise UserProfileError(str(exc)) from exc
     imaging_field_resolver = None
-    for project_name, project in profile.get("projects", {}).items():
+    for project_name, project in all_projects.items():
         if not isinstance(project, dict):
             raise UserProfileError(
                 f"Entrée projects[{project_name!r}] invalide dans "

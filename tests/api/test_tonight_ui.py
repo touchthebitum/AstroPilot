@@ -163,7 +163,8 @@ def test_tonight_ui_assets_are_served():
     assert 'fetch("/v1/configuration/recover"' in script.text
     assert script.text.count("fetch(") >= 8
     assert 'fetch("/v1/execution-sessions"' in script.text
-    assert script.text.rstrip().endswith("loadConfiguration();")
+    assert "else loadConfiguration();\n\n// Age a displayed verification" in script.text
+    assert "setInterval(() => { if (ui.mission.open) renderSavedMissionWeather(); }, 60000);" in script.text
     assert "body: JSON.stringify({})," not in script.text
     assert "collectAvailabilityPayload" in script.text
     assert "hoursToIsoDuration" in script.text
@@ -204,7 +205,7 @@ def test_tonight_ui_assets_are_served():
     assert "await loadConfiguration({ afterConflict: true })" in script.text
     assert "retryConfigurationSave" not in script.text
     assert "navigator.geolocation.getCurrentPosition" in script.text
-    assert "La saisie manuelle reste disponible" in script.text
+    assert "saisissez les coordonnées manuellement" in script.text
     assert "choice.name" in script.text
     assert "choice.id" in script.text
     assert "renderReview" in script.text
@@ -261,14 +262,14 @@ def test_tonight_ui_assets_are_served():
     assert "Date.now(" not in script.text
     assert "Récupérées il y a" in script.text
     assert "no_productive_window" in script.text
-    assert "actionabilityRefusalMessage(payload.actionability_refusal)" in script.text
+    assert "actionabilityRefusalMessage(payload.actionability_refusal, timeZone)" in script.text
     assert "Meilleure fenêtre trouvée : ${foundMinutes} min" in script.text
     assert "Seuil requis : ${requiredMinutes} min" in script.text
     assert "La cause précise n’est pas établie" in script.text
     assert "insufficient_actionable_productive_window" in script.text
     assert "productive_window_evidence_missing" in script.text
     refusal_renderer = script.text.split(
-        "function actionabilityRefusalMessage(refusal)",
+        "function actionabilityRefusalMessage(refusal,",
         1,
     )[1].split("function showMessage", 1)[0]
     assert "cloud_loss" not in refusal_renderer
@@ -404,16 +405,16 @@ def test_ui_cache_policy_is_explicit_and_does_not_affect_api():
     api = client.get("/v1/runtime-identity")
 
     assert page.headers["cache-control"] == "no-store"
-    assert stylesheet.headers["cache-control"] == "no-cache"
-    assert script.headers["cache-control"] == "no-cache"
+    assert stylesheet.headers["cache-control"] == "no-store"
+    assert script.headers["cache-control"] == "no-store"
     assert "cache-control" not in api.headers
     token = page.text.split('/ui/app.js?v=', 1)[1].split('"', 1)[0]
     versioned_script = client.get(f"/ui/app.js?v={token}")
     versioned_stylesheet = client.get(f"/ui/styles.css?v={token}")
     assert versioned_script.status_code == 200
     assert versioned_stylesheet.status_code == 200
-    assert versioned_script.headers["cache-control"] == "no-cache"
-    assert versioned_stylesheet.headers["cache-control"] == "no-cache"
+    assert versioned_script.headers["cache-control"] == "no-store"
+    assert versioned_stylesheet.headers["cache-control"] == "no-store"
 
 
 def test_acceptance_attempt_generates_identity_and_timestamp_once():
@@ -664,8 +665,8 @@ def test_availability_uses_read_only_site_timezone_and_local_wall_clock_transpor
     assert "new Date(" not in collector
     assert "end === start" in collector
     assert "!sameDate && end < start" in collector
-    assert 'return { mode: "all_night" }' in collector
-    assert 'const availability = { mode: "duration" }' in collector
+    assert 'return { mode: "all_night", ...extra }' in collector
+    assert 'mode: "duration"' in collector and '...extra' in collector
 
 
 def test_fixed_window_overnight_hint_and_payload_follow_the_civil_contract(tmp_path):
@@ -688,6 +689,7 @@ let startValue = "";
 let endValue = "";
 const hint = {hidden: true, textContent: ""};
 const ui = {availabilityOvernightHint: hint};
+const state = {};
 const wallClockAvailabilityModes = Object.freeze(["start_and_duration", "until", "fixed_window"]);
 function currentSiteTimezone() { return "Europe/Zurich"; }
 const document = {
@@ -696,6 +698,8 @@ const document = {
     if (selector === "#availability-start") return {value: startValue};
     if (selector === "#availability-end") return {value: endValue};
     if (selector === "#availability-duration") return {value: "1.5"};
+    if (selector === "#availability-preparation-minutes") return {value: "30"};
+    if (selector === "#availability-flats-minutes") return {value: "10"};
     throw new Error(`Unexpected selector: ${selector}`);
   },
 };
@@ -783,7 +787,7 @@ def test_site_change_invalidates_only_stale_site_time_assumptions():
     assert "state.availability = null" in invalidation
     assert "if (sameSite) return" in invalidation
     assert script.count("invalidateAvailabilityForSiteChange(") >= 2
-    save = script.split("async function saveConfiguration()", 1)[1].split("const availabilityFieldsByMode", 1)[0]
+    save = script.split("async function saveConfiguration(", 1)[1].split("const availabilityFieldsByMode", 1)[0]
     assert "installCurrentConfiguration(payload, generation)" in save
 
 
@@ -958,7 +962,7 @@ def test_recovery_posts_once_and_prevents_duplicate_submission():
     recovery = script.split(
         "async function recoverConfiguration()",
         1,
-    )[1].split("async function saveConfiguration()", 1)[0]
+    )[1].split("async function saveConfiguration(", 1)[0]
 
     assert 'state.configurationErrorCode !== "configuration_corrupt"' in recovery
     assert "if (state.recoveringConfiguration) return" in recovery
@@ -976,7 +980,7 @@ def test_recovery_responses_preserve_authoritative_state_and_fail_closed():
     recovery = script.split(
         "async function recoverConfiguration()",
         1,
-    )[1].split("async function saveConfiguration()", 1)[0]
+    )[1].split("async function saveConfiguration(", 1)[0]
 
     assert "response.ok && payload.configured === false" in recovery
     assert "installCurrentConfiguration(payload, generation)" in recovery
@@ -1005,7 +1009,7 @@ def test_recovered_projection_reuses_first_run_initialization():
     recovery = script.split(
         "async function recoverConfiguration()",
         1,
-    )[1].split("async function saveConfiguration()", 1)[0]
+    )[1].split("async function saveConfiguration(", 1)[0]
 
     assert "state.configuration = payload" in initializer
     assert "setConfigurationDraft(draftFromConfiguration(payload))" in initializer
@@ -1309,7 +1313,9 @@ function intentReady() {return true;}
 function restoreAcceptanceControls() {}
 function show() {}
 '''
-    harness += render + confidence + '''
+    reason = script[script.index("function beginnerReason("):script.index("function reasonText(")]
+    readable = script[script.index("function readableTargetName("):script.index("function savedMissionLabel(")]
+    harness += readable + reason + render + confidence + '''
 function run() {
   const results = {};
   for (const status of ["insufficient_evidence", "not_recommended", "recommended"]) {
@@ -1508,6 +1514,7 @@ def test_unavailable_tonight_guidance_preserves_technical_evidence_and_availabil
         pytest.skip("Node.js is required for the renderer test")
     source = make_client().get("/ui/app.js").text
     functions = source[source.index("const partialMessages ="):source.index("function showMessage(")]
+    functions += source[source.index("function readableTargetName("):source.index("function savedMissionLabel(")]
     harness = r'''
 const assert = require('node:assert/strict');
 const elements = {};
@@ -1528,7 +1535,7 @@ for (const stage of ['no_productive_slice','continuous_window_too_short']) {
  for (const mode of ['simple','pro']) {
   appliedUiMode=mode;showTonightUnavailable(payload);
   assert.equal(shown.title,mode==='simple'
-    ? (stage==='continuous_window_too_short'?'Le créneau disponible est trop court':'Aucun créneau adapté à vos horaires')
+    ? (stage==='continuous_window_too_short'?'Le créneau favorable est trop court':'Pas de séance photo recommandée')
     : (stage==='continuous_window_too_short'?'Fenêtre productive trop courte':'Aucune tranche productive'));
   assert.match(shown.body,/Réessayez plus tard/);
   assert.doesNotMatch(shown.body,/seuil|points/i);
@@ -1588,14 +1595,14 @@ for (const mode of ['simple','pro']) {
  assert.equal(document.querySelector('#message-create-project').hidden,true);
  assert.equal(ui.retry.textContent,'Actualiser les prévisions');
 }
-const overcast = {...noIntent,refusal_weather:{window_start:'2026-10-18T21:00:00+02:00',window_end:'2026-10-18T23:00:00+02:00',cloud_cover_min:100,cloud_cover_max:100,retrieved_at_utc:'2026-10-18T11:25:00+00:00',provider:'fixture'}};
+const overcast = {...noIntent,weather_trust:{timezone:'Europe/Zurich'},refusal_weather:{window_start:'2026-10-18T21:00:00+02:00',window_end:'2026-10-18T23:00:00+02:00',cloud_cover_min:100,cloud_cover_max:100,retrieved_at_utc:'2026-10-18T11:25:00+00:00',provider:'fixture'}};
 for (const mode of ['simple','pro']) {
  appliedUiMode=mode;showTonightUnavailable(overcast);
  assert.equal(shown.title,'Ciel couvert prévu sur le créneau évalué');
  assert.match(shown.body,/100 %/);
- assert.match(shown.body,/de 21:00 à 23:00 \(UTC\+02:00\)/);
+ assert.match(shown.body,/21:00 UTC\+2.*23:00 UTC\+2.*Europe\/Zurich/);
  assert.match(shown.body,/18.10.2026/);
- assert.match(shown.body,/11:25 UTC\+00:00/);
+ assert.match(shown.body,/13:25 UTC\+2/);
  assert.doesNotMatch(document.querySelector('#message-technical').textContent,/Votre projet est bien enregistré/);
  assert.equal(document.querySelector('#message-edit-availability').hidden,true);
 }

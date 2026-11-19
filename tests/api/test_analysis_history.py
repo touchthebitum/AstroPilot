@@ -209,7 +209,11 @@ def test_visibility_does_not_guess_altitude_when_samples_are_high():
     assert result["code"] == "target_window_unavailable"
 
 
-def test_production_pipeline_M42_refusal_and_restart(tmp_path, monkeypatch):
+@pytest.mark.parametrize("bounds", [
+    {"start": "2026-10-25T21:00:00+01:00", "end": "2026-10-25T22:30:00+01:00"},
+    {"start_local": "2026-10-25T21:00", "end_local": "2026-10-25T22:30"},
+])
+def test_production_pipeline_M42_refusal_and_restart(tmp_path, monkeypatch, bounds):
     from dataclasses import replace
     from astropilot.user_profile import save_user_profile
     monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path))
@@ -236,7 +240,7 @@ def test_production_pipeline_M42_refusal_and_restart(tmp_path, monkeypatch):
                       valid_from=start, valid_until=times[-1], hour_count=len(times))
     with TestClient(create_app(weather_provider=lambda *a: weather, clock=lambda: reference)) as client:
         response = client.post("/v1/tonight", json={"selected_project_id": "M42", "availability": {
-            "mode": "fixed_window", "start": "2026-10-25T21:00:00+01:00", "end": "2026-10-25T22:30:00+01:00"}})
+            "mode": "fixed_window", **bounds}})
         assert response.status_code == 200, response.text
         result = response.json()
         assert result["status"] == "no_candidate"
@@ -249,7 +253,7 @@ def test_production_pipeline_M42_refusal_and_restart(tmp_path, monkeypatch):
     archived = reloaded.get("/v1/analysis-history/" + result["decision_id"])
     assert archived.status_code == 200, archived.text
     assert archived.json()["result"]["target_refusal"] == result["target_refusal"]
-    assert archived.json()["request"]["availability"]["start"].startswith("2026-10-25T21:00")
+    assert archived.json()["request"]["availability"] == {"mode": "fixed_window", **bounds, "preparation_minutes": 30, "flats_minutes": 10}
     assert {p.name: p.read_bytes() for p in old.iterdir()} == before
     assert json.loads((tmp_path / "user_profile.json").read_text())["projects"]["M42"] == profile["projects"]["M42"]
 
@@ -315,3 +319,30 @@ def test_fold_samples_remain_distinct_and_missing_geometry_does_not_blame_altitu
     assert missing_target_refusal(**args)["sample_count"] == 2
     monkeypatch.setattr(sky, "target_altitude", lambda *args: float("nan"))
     assert missing_target_refusal(**args)["code"] == "target_window_unavailable"
+
+
+def test_late_dialog_close_event_does_not_invalidate_reopened_history():
+    """The native dialog close event is queued and can arrive after reopening."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node required for the actual close handler")
+    source = (Path(__file__).parents[2] / "astropilot/web/app.js").read_text()
+    start = source.index('document.querySelector("#analysis-history-dialog").addEventListener("close",')
+    end = source.index('document.querySelector("#analysis-history-next")', start)
+    handler = source[start:end]
+    program = r'''
+const assert = require('node:assert/strict');
+let close;
+const analysisHistoryState = {generation: 7};
+const dialog = {open: true, addEventListener: (event, fn) => {assert.equal(event, 'close');close = fn;}};
+const document = {querySelector: selector => {assert.equal(selector, '#analysis-history-dialog');return dialog;}};
+''' + handler + r'''
+// Read generation 7 belongs to a reopened dialog: an old queued event is harmless.
+close();assert.equal(analysisHistoryState.generation, 7);
+// A current closing still invalidates pending reads.
+dialog.open = false;close();assert.equal(analysisHistoryState.generation, 8);
+'''
+    result = subprocess.run([node, "-e", program], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

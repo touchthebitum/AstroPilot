@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from enum import Enum
 from math import isfinite
 
 from decision.mission.mission_assembler import ProductiveWindowAssessment
+from decision.night_productivity.refusal_evidence_scope import ProductivityEvidenceScope, scoped_refusal_breakdown
 from decision.models.session_availability import (
     SessionAvailability,
     SessionAvailabilityMode,
@@ -17,99 +17,16 @@ from decision.night_productivity.productivity_diagnostics import (
 )
 
 
+# Re-export the historical import path for existing callers.
+from decision.models.actionability_refusal import (
+    ActionabilityRefusal,
+    ActionabilityRefusalConclusion,
+    ActionabilityRefusalStatus,
+    ProductivityRefusalStage,
+)
+
+
 MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW = timedelta(hours=1)
-
-
-class ActionabilityRefusalConclusion(str, Enum):
-    NO_PRODUCTIVE_WINDOW = "no_productive_window"
-    USER_AVAILABILITY_REQUIRED = "user_availability_required"
-
-
-class ActionabilityRefusalStatus(str, Enum):
-    CONSTRAINTS_REFUSAL = "constraints_refusal"
-    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
-
-
-class ProductivityRefusalStage(str, Enum):
-    NO_PRODUCTIVE_SLICE = "no_productive_slice"
-    CONTINUOUS_WINDOW_TOO_SHORT = "continuous_window_too_short"
-
-
-@dataclass(frozen=True, slots=True)
-class ActionabilityRefusal:
-    conclusion: ActionabilityRefusalConclusion
-    status: ActionabilityRefusalStatus
-    cause_code: str | None
-    best_productive_window_minutes: float | None
-    required_continuous_minutes: int
-    limiting_factors: tuple[dict[str, str], ...] = ()
-    refusal_stage: ProductivityRefusalStage | None = None
-    productivity_breakdown: ProductivityBreakdown | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.conclusion, ActionabilityRefusalConclusion):
-            raise TypeError("Expected ActionabilityRefusalConclusion")
-        if not isinstance(self.status, ActionabilityRefusalStatus):
-            raise TypeError("Expected ActionabilityRefusalStatus")
-        if self.cause_code is not None and not isinstance(self.cause_code, str):
-            raise TypeError("actionability_refusal_cause_code_must_be_string")
-        if (
-            self.best_productive_window_minutes is not None
-            and (
-                not isinstance(self.best_productive_window_minutes, (int, float))
-                or isinstance(self.best_productive_window_minutes, bool)
-                or not isfinite(self.best_productive_window_minutes)
-                or self.best_productive_window_minutes < 0
-            )
-        ):
-            raise ValueError("best_productive_window_minutes_invalid")
-        if (
-            not isinstance(self.required_continuous_minutes, int)
-            or isinstance(self.required_continuous_minutes, bool)
-            or self.required_continuous_minutes <= 0
-        ):
-            raise ValueError("required_continuous_minutes_invalid")
-        if not isinstance(self.limiting_factors, tuple):
-            raise TypeError("limiting_factors_must_be_tuple")
-        if (
-            self.refusal_stage is not None
-            and not isinstance(self.refusal_stage, ProductivityRefusalStage)
-        ):
-            raise TypeError("Expected ProductivityRefusalStage or None")
-        if (
-            self.productivity_breakdown is not None
-            and not isinstance(
-                self.productivity_breakdown,
-                ProductivityBreakdown,
-            )
-        ):
-            raise TypeError("Expected ProductivityBreakdown or None")
-        if (
-            self.status is ActionabilityRefusalStatus.CONSTRAINTS_REFUSAL
-            and self.best_productive_window_minutes is None
-        ):
-            raise ValueError("constraint_refusal_requires_known_duration")
-        if (
-            self.status is ActionabilityRefusalStatus.INSUFFICIENT_EVIDENCE
-            and self.best_productive_window_minutes is not None
-        ):
-            raise ValueError("insufficient_evidence_requires_unknown_duration")
-        if (
-            self.status is ActionabilityRefusalStatus.INSUFFICIENT_EVIDENCE
-            and (
-                self.refusal_stage is not None
-                or self.productivity_breakdown is not None
-            )
-        ):
-            raise ValueError("insufficient_evidence_forbids_productivity_breakdown")
-        if self.productivity_breakdown is not None:
-            expected_stage = (
-                ProductivityRefusalStage.NO_PRODUCTIVE_SLICE
-                if self.productivity_breakdown.productive_slice_count == 0
-                else ProductivityRefusalStage.CONTINUOUS_WINDOW_TOO_SHORT
-            )
-            if self.refusal_stage is not expected_stage:
-                raise ValueError("productivity_breakdown_stage_mismatch")
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +79,7 @@ def _refusal(
     best_minutes: float | None,
     refusal_stage: ProductivityRefusalStage | None = None,
     productivity_breakdown: ProductivityBreakdown | None = None,
+    evidence_scope: ProductivityEvidenceScope | None = None,
 ) -> ActionableProductiveWindowSelection:
     return ActionableProductiveWindowSelection(
         window=None,
@@ -173,6 +91,7 @@ def _refusal(
             required_continuous_minutes=_required_continuous_minutes(),
             refusal_stage=refusal_stage,
             productivity_breakdown=productivity_breakdown,
+            evidence_scope=evidence_scope,
         ),
     )
 
@@ -260,6 +179,7 @@ def evaluate_physical_productive_window(
     analysis_hours = _elapsed_hours(analysis_start, analysis_end)
     candidates = []
     best_rejected_duration = timedelta(0)
+    has_usable_productive_portion = False
     for window in productive_windows:
         values = (
             getattr(window, "start_hour", None),
@@ -305,6 +225,7 @@ def evaluate_physical_productive_window(
             if duration_cap is not None
             else available_duration,
         )
+        has_usable_productive_portion |= available_duration > timedelta(0)
         best_rejected_duration = max(best_rejected_duration, duration)
         if duration < MINIMUM_ACTIONABLE_PRODUCTIVE_WINDOW:
             continue
@@ -338,12 +259,8 @@ def evaluate_physical_productive_window(
         candidates.append((duration, candidate_productivity, start, end))
 
     if not candidates:
-        breakdown = assessment.productivity_breakdown
-        has_productive_slice = (
-            breakdown.productive_slice_count > 0
-            if breakdown is not None
-            else bool(productive_windows)
-        )
+        breakdown, scope = scoped_refusal_breakdown(assessment, lower_bound, upper_bound)
+        has_productive_slice = has_usable_productive_portion
         refusal_stage = (
             ProductivityRefusalStage.CONTINUOUS_WINDOW_TOO_SHORT
             if has_productive_slice
@@ -358,6 +275,7 @@ def evaluate_physical_productive_window(
             best_minutes=best_rejected_duration.total_seconds() / 60,
             refusal_stage=refusal_stage,
             productivity_breakdown=breakdown,
+            evidence_scope=scope,
         )
     if (
         availability is not None

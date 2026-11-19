@@ -622,6 +622,9 @@ def test_v9_snapshot_absence_is_explicit_and_never_recomputed(model):
     }
     document = _encode(values[model])
     document["fields"].pop("lunar_evidence_snapshot")
+    if model == "candidate":
+        for item in document["fields"]["acquisition_intent_assessments"]["items"]:
+            item["fields"].pop("actionability_refusal")
     if model == "mission":
         document["fields"].pop("site_timezone")
     assert _decode(document, schema_version=9).lunar_evidence_snapshot is None

@@ -45,3 +45,20 @@ def test_uncertain_evidence_never_becomes_weather_explanation(defect):
     elif defect == 'other_refusal': result.creation_refusal = 'modern_mission_authorization_required'
     elif defect == 'other_reason': result.recommendation.opportunity.candidate.acquisition_intent_assessments[0].reason_codes = ('required_filter_unavailable',)
     assert refusal_weather_summary(result) is None
+
+
+def test_scoped_weather_reports_intersection_and_original_hourly_sample_times():
+    from decision.night_productivity.refusal_evidence_scope import ProductivityEvidenceScope
+    result=fixture()
+    start=result.night['object_evaluations']['fixture']['window']['start']
+    end=start+timedelta(minutes=87)
+    scope=ProductivityEvidenceScope(start,start+timedelta(hours=2),start,end,start,end)
+    result.recommendation.opportunity.candidate.acquisition_intent_assessments[0].actionability_refusal=NS(evidence_scope=scope)
+    summary=refusal_weather_summary(result)
+    assert summary.window_end == end.isoformat()
+    assert summary.window_kind == 'availability_intersection'
+    assert summary.sample_times == tuple(p.forecast_for_utc.astimezone(timezone.utc).isoformat() for p in result.forecast_evidence.forecast_points)
+    # A disjoint availability must not borrow the candidate's cloud summary.
+    result.recommendation.opportunity.candidate.acquisition_intent_assessments[0].actionability_refusal.evidence_scope=ProductivityEvidenceScope(
+        start,start+timedelta(hours=2),None,start-timedelta(minutes=1),None,None)
+    assert refusal_weather_summary(result) is None
