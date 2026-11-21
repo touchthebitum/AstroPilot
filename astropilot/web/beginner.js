@@ -246,6 +246,7 @@
       setText($("#availability-intro"), state.missionRecheck ? "Retrouvez ci-dessous les horaires de votre plan de séance." : "Choisissez un projet, comparez vos projets en cours ou demandez une cible, puis indiquez vos horaires.");
       setText(ui.recommendationSubmit, state.compareProjects ? "Quel projet avancer ce soir ?" : state.discoveryMode ? "Chercher quoi photographier" : "Vérifier mon projet");
     }
+    refreshSearchResumeAction();
     const session = currentSession();
     const finished = session?.execution.status === "completed";
     hide(tri, !beginner || !finished || Boolean(session?.credit) || noRetainedImages(session));

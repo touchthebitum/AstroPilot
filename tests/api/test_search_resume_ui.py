@@ -16,10 +16,12 @@ def run(checks):
     guard = source[source.index('async function loadTonight('):source.index('  if (!availability)', source.index('async function loadTonight('))] + "}\n"
     program = r"""
 const assert=require('node:assert/strict');
-class E{constructor(value=''){this.value=value;this.textContent='';this.children=[];this.hidden=true}append(...e){this.children.push(...e)}replaceChildren(){this.children=[]}}
-const nodes={'#search-resume':new E(),'#availability-start':new E('2026-11-21T20:00'),'#availability-end':new E('2026-11-21T23:30'),'#availability-duration':new E('2'),'#availability-preparation-minutes':new E('20'),'#availability-flats-minutes':new E('5')};
+class E{constructor(value=''){this.value=value;this.textContent='';this.children=[];this.hidden=true;this.listeners={}}addEventListener(name,fn){this.listeners[name]=fn}append(...e){this.children.push(...e)}replaceChildren(){this.children=[]}}
+const nodes={'#request-recommendation':new E(),'#search-resume':new E(),'#availability-start':new E('2026-11-21T20:00'),'#availability-end':new E('2026-11-21T23:30'),'#availability-duration':new E('2'),'#availability-preparation-minutes':new E('20'),'#availability-flats-minutes':new E('5')};
 const choice=new E('fixed_window');
-const document={createElement:()=>new E(),querySelector:s=>s.startsWith('input[')?choice:nodes[s]||null};
+const find=(e,id)=>e.id===id?e:e.children.map(c=>find(c,id)).find(Boolean);
+const document={createElement:()=>new E(),querySelector:s=>s.startsWith('input[')?choice:nodes[s]||find(nodes['#search-resume'],s.slice(1))||null};
+nodes['#request-recommendation'].textContent='Vérifier mon projet';
 const site={name:'Buttes fictif',latitude:46.889,longitude:6.55,timezone:'Europe/Zurich'};
 const state={view:'availability',configuration:{site},configurationDraft:{site:{...site}},compareProjects:true};
 function currentSiteTimezone(){return state.configuration.site.timezone}
@@ -102,4 +104,24 @@ renderSearchResume();assert.match(content(nodes['#search-resume']),/matériel et
 state.dirty=true;renderSearchResume();assert(!content(nodes['#search-resume']).includes('matériel et vos choix de filtres sont enregistrés'));
 state.dirty=false;state.configuration.profile_revision=3;renderSearchResume();assert(!content(nodes['#search-resume']).includes('matériel et vos choix de filtres sont enregistrés'));
 state.configuration={...state.configuration,profile_revision:2};renderSearchResume();assert(!content(nodes['#search-resume']).includes('matériel et vos choix de filtres sont enregistrés'));
+""")
+
+
+def test_weather_guidance_uses_live_button_label_without_submitting():
+    run(r"""
+returnToRefusedSearch('availability');
+assert.match(content(nodes['#search-resume']),/« Vérifier mon projet ».*réévaluer les conditions météo/);
+nodes['#request-recommendation'].textContent='Quel projet avancer ce soir ?';
+refreshSearchResumeAction();
+assert.match(content(nodes['#search-resume']),/« Quel projet avancer ce soir \? »/);
+const link=nodes['#search-resume'].children.find(e=>e.href==='#request-recommendation');
+assert(link);assert.equal(link.textContent,'Aller au bouton de recherche');
+const button=nodes['#request-recommendation'],events=[];
+link.isConnected=true;button.getClientRects=()=>[{}];
+button.scrollIntoView=()=>events.push('scroll');button.focus=()=>events.push('focus');
+const event={preventDefault(){events.push('prevent')}};
+const before=JSON.stringify(state);link.listeners.click(event);
+assert.deepEqual(events,['prevent','scroll','focus']);assert.equal(JSON.stringify(state),before);
+events.length=0;state.view='equipment';link.listeners.click(event);assert.deepEqual(events,['prevent']);
+state.view='availability';link.isConnected=false;link.listeners.click(event);assert.deepEqual(events,['prevent','prevent']);
 """)
