@@ -5136,7 +5136,7 @@ function renderProjectComparison(payload, parent) {
   parent.append(section);
 }
 
-function projectTonightSummary(decision) {
+function projectTonightSummary(decision, confirmedIntentId = null) {
   if (!Array.isArray(decision?.project_comparison)) return null;
   const pending = pendingIntentChoice(decision);
   if (!pending && (decision.status !== "available" || decision.target_decision_status !== "recommended")) return null;
@@ -5145,26 +5145,29 @@ function projectTonightSummary(decision) {
   const project = projects[0];
   const mode = intentMode(decision);
   if (!["unique", "multiple"].includes(mode)) return null;
-  const rows = mode === "unique" && Array.isArray(project.filters)
-    ? project.filters.filter(row => row.acquisition_intent_id === decision.selected_acquisition_intent_id) : [];
+  if (confirmedIntentId !== null && !decision.viable_acquisition_intent_ids.includes(confirmedIntentId)) return null;
+  const selected = confirmedIntentId ?? decision.selected_acquisition_intent_id;
+  const resolved = mode === "unique" || confirmedIntentId !== null;
+  const rows = resolved && Array.isArray(project.filters)
+    ? project.filters.filter(row => row.acquisition_intent_id === selected) : [];
   // Join by project and exact intent, never by filter label or global progress.
   const row = rows.length === 1 ? rows[0] : null;
   const filter = row?.filter_type === "Ha" ? "Hα" : row?.filter_type;
   return {
-    heading: `Pour ce soir : ${readableTargetName(project.project_id)} — ${mode === "unique" ? filter || "Filtre non renseigné" : "Filtre à confirmer"}`,
+    heading: `Pour ce soir : ${readableTargetName(project.project_id)} — ${resolved ? filter || "Filtre non renseigné" : "Filtre à confirmer"}`,
     progress: row
       ? `Objectif ${comparisonDuration(row.target_hours)} · Déjà acquis ${comparisonDuration(row.acquired_hours)} · Reste à faire ${comparisonDuration(row.remaining_hours)}`
-      : mode === "unique" ? "Avancement de cette prise de vue non renseigné."
+      : resolved ? "Avancement de cette prise de vue non renseigné."
         : "Confirmez la prise de vue pour identifier l’avancement correspondant.",
     note: "Le reste concerne votre projet sur plusieurs séances. Cette proposition n’ajoute aucune image à votre avancement.",
   };
 }
 
-function renderProjectTonightSummary(decision) {
+function renderProjectTonightSummary(decision, confirmedIntentId = null) {
   const container = document.querySelector("#project-tonight-summary");
   if (!container) return;
   container.replaceChildren();
-  const summary = projectTonightSummary(decision);
+  const summary = projectTonightSummary(decision, confirmedIntentId);
   container.hidden = !summary;
   if (!summary) return;
   for (const [tag, value] of [["h3", summary.heading], ["p", summary.progress], ["p", summary.note]]) {
@@ -8342,6 +8345,10 @@ async function acceptRecommendation({
       ...state.savedMissions.filter(item => item.mission_id !== mission.mission_id)];
     renderSavedMissionChoices();
     if (decision?.decision_id === expectedDecisionId) {
+      // Confirmation has passed the current-site and exact-mission guards above.
+      // Another chosen target must not retain the primary project's summary.
+      renderProjectTonightSummary(source === "primary_recommendation" ? decision : null,
+        payload.selected_acquisition_intent_id);
       show("decision");
       showAcceptanceStatus(
         source === "alternative"

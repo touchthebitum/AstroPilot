@@ -24,6 +24,7 @@ def _run_javascript(source: str) -> None:
     source = ("function updateDiscoveryAvailability() {}\n"
               "function saveMissionWeatherCheck() {}\n"
               "function renderSavedMissionChoices() {}\n"
+              "function renderProjectTonightSummary() {}\n"
               + _javascript_between("function pendingIntentChoice(subject) {", "function chosenIntent(")
               + _javascript_between("function siteTimezone()", "function decisionSiteFingerprint(")
               .split("function siteConfigurationIdentity", 1)[0]
@@ -583,6 +584,8 @@ const ui = {openMission: new Element('button'), primaryIntentChoice: new Element
 const state = {decisionSiteGeneration: 0, configuration: {site: {latitude: 47.1, longitude: 6.8, timezone: 'Europe/Zurich'}}, currentDecision: null, acceptedMission: null, acceptingRecommendation: false,
   acceptanceBlocked: false, savedMissions: [], pendingAcceptanceAttempt: null};
 let sent = [], canonical = 'A', opened = 0, status = '';
+let summaryCalls = [];
+function renderProjectTonightSummary(subject, confirmed) { summaryCalls.push({subject, confirmed}); }
 function showAcceptanceStatus(message) { status = message; }
 function acceptanceAttempt(intent) { return {...intent, acceptance_request_id: 'request-1'}; }
 function clearPendingAcceptanceAttempt() {}
@@ -636,6 +639,8 @@ async function exercise(source, localChoice, serverChoice) {
   assert.equal(sent.length, before + 1);
   assert.equal(sent.at(-1).acquisition_intent_id, localChoice);
   assert.equal(state.acceptedMission.acquisitionIntentId, serverChoice);
+  assert.equal(summaryCalls.at(-1).subject, source === 'primary_recommendation' ? state.currentDecision : null);
+  assert.equal(summaryCalls.at(-1).confirmed, serverChoice, 'Use canonical server choice, never the local dropdown');
   assert.equal(container.querySelector('select'), undefined);
   assert.match(container.textContent, new RegExp(serverChoice === 'A' ? 'Hα' : 'OIII'));
   assert.equal(button.textContent, 'Ouvrir ce plan');

@@ -47,6 +47,16 @@ const pending={...base,status:'no_mission',acquisition_intent_choice_available:t
  acquisition_intent_options:[{acquisition_intent_id:'rosette_oiii',label:'OIII'},{acquisition_intent_id:'rosette_sii',label:'SII'}]};
 assert.match(projectTonightSummary(pending).heading,/Filtre à confirmer$/);
 assert.doesNotMatch(projectTonightSummary(pending).progress,/40 min|25 min|0 min/);
+const pendingBefore=JSON.stringify(pending);
+const confirmed=projectTonightSummary(pending,'rosette_sii');
+assert.match(confirmed.heading,/SII$/);assert.match(confirmed.progress,/Déjà acquis 25 min/);
+assert.doesNotMatch(confirmed.progress,/40 min/);
+assert.equal(JSON.stringify(pending),pendingBefore,'Confirmation display must not change the original decision');
+assert.equal(projectTonightSummary(pending,'m42_oiii'),null,'No foreign confirmed intent');
+renderProjectTonightSummary(pending,'rosette_sii');assert.match(container.children[0].textContent,/SII$/);
+renderProjectTonightSummary(null,'rosette_sii');assert.equal(container.hidden,true);
+renderProjectTonightSummary(pending);assert.match(container.children[0].textContent,/Filtre à confirmer$/);
+
 for(const change of [{status:'no_candidate'},{status:'no_mission'},{target_decision_status:'not_recommended'},
  {project_comparison:undefined},{catalog_key:'Unknown'},
  {acquisition_intent_selection_status:'no_eligible_intent'},

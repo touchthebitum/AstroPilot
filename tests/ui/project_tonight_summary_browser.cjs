@@ -50,6 +50,20 @@ const decision={status:'available',decision_id:'fictitious-summary',catalog_key:
    const bounds=await block.evaluate(e=>({left:e.getBoundingClientRect().left,right:e.getBoundingClientRect().right,overflow:e.scrollWidth>e.clientWidth}));
    assert.ok(bounds.left>=0&&bounds.right<=width&&!bounds.overflow,JSON.stringify(bounds));
    if(process.env.NIGHTMERIT_PROOF_DIR){fs.mkdirSync(process.env.NIGHTMERIT_PROOF_DIR,{recursive:true});await block.screenshot({path:path.join(process.env.NIGHTMERIT_PROOF_DIR,`resume-${mode}-${width}.png`)});}
+   await page.evaluate(d=>{
+    const pending={...d,status:'no_mission',creation_refusal:'preselection_evidence_cannot_authorize_mission',acquisition_intent_choice_available:true,
+     acquisition_intent_selection_status:'no_clear_preference',selected_acquisition_intent_id:null,
+     viable_acquisition_intent_ids:['rosette_oiii','rosette_sii'],acquisition_intent_options:[{acquisition_intent_id:'rosette_oiii',label:'OIII'},{acquisition_intent_id:'rosette_sii',label:'SII'}]};
+    pending.project_comparison[1].filters.push({acquisition_intent_id:'rosette_sii',filter_type:'SII',target_hours:3,acquired_hours:25/60,remaining_hours:3-25/60,status:'to_complete'});
+    window.pendingSummary=pending;renderDecision(pending);
+   },decision);
+   assert.match(await block.innerText(),/Filtre à confirmer/);assert.doesNotMatch(await block.innerText(),/Déjà acquis/);
+   // The acceptance handler is covered separately; exercise its display with the canonical reply.
+   await page.evaluate(()=>renderProjectTonightSummary(window.pendingSummary,'rosette_sii'));
+   assert.match(await block.locator('h3').innerText(),/SII$/);assert.match(await block.innerText(),/Déjà acquis 25 min/);
+   assert.doesNotMatch(await block.innerText(),/Filtre à confirmer|40 min/);
+   await page.evaluate(()=>renderProjectTonightSummary(null,'other_intent'));
+   assert.equal(await block.isVisible(),false);
    await page.evaluate(d=>renderDecision({...d,explanation:undefined}),decision);
    assert.equal(await page.locator('#decision-reason').innerText(),'Pourquoi : non précisé');
    await page.evaluate(d=>renderDecision({...d,status:'no_mission',target_decision_status:'not_recommended'}),decision);
