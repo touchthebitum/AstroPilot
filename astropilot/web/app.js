@@ -8005,14 +8005,102 @@ function canEditRefusedAvailability(payload) {
     && minutes < refusal.required_continuous_minutes;
 }
 
+// Presentation only: use recorded statuses and diagnostics, never infer a score or cause.
+function projectContinuationAdvice(payload) {
+  if (!Array.isArray(payload.project_comparison) || payload.status === "available"
+      || pendingIntentChoice(payload)) return null;
+  const projects = payload.project_comparison;
+  const rows = projects.flatMap(project => project.filters || []);
+  const missing = !projects.length || projects.some(project => !project.filters?.length)
+    || rows.some(row => !["completed", "to_complete"].includes(row.status));
+  const completed = rows.some(row => row.status === "completed");
+  if (payload.status === "no_candidate" && !rows.some(row => row.status === "to_complete")) {
+    const lines = [];
+    if (completed) lines.push(missing
+      ? "Certains objectifs sont atteints ; d’autres prises de vue ont des données à compléter."
+      : "Tous les objectifs renseignés des projets comparés sont atteints.");
+    if (missing) lines.push("Vérifiez les objectifs et le temps acquis par filtre dans Mes projets. Une valeur manquante ne signifie pas zéro.");
+    return {lines, actions: ["projects"], projectLabel: missing ? "Compléter mes projets" : "Voir mes projets"};
+  }
+  if (payload.status === "weather_refused") return {
+    lines: ["La décision météo refuse cette recherche. Consultez les horaires et les facteurs évalués ci-dessous. Vous pourrez actualiser les prévisions lorsqu’elles évoluent, sans garantie de créneau favorable."],
+    actions: ["refresh", "projects"],
+  };
+  const assessments = targetedIntentAssessments(payload);
+  const codes = new Set(assessments.flatMap(item => item.reason_codes || []));
+  const lines = [], actions = [];
+  if (payload.status === "no_productive_window" || codes.has("insufficient_actionable_productive_window")) {
+    const refusal = payload.actionability_refusal;
+    const short = refusal?.refusal_stage === "continuous_window_too_short"
+      && Number.isFinite(refusal.best_productive_window_minutes)
+      && Number.isFinite(refusal.required_continuous_minutes);
+    lines.push(short
+      ? `La meilleure durée productive continue est de ${Math.floor(refusal.best_productive_window_minutes)} min ; le minimum requis est de ${Math.ceil(refusal.required_continuous_minutes)} min.`
+      : "Aucun créneau suffisamment productif n’a été retenu dans les conditions évaluées. Ce résultat ne désigne pas à lui seul une cause météo.");
+    lines.push("Vous pouvez revoir vos horaires, sans garantie de trouver un créneau adapté. Aucun horaire ne sera modifié automatiquement.");
+    actions.push("hours", "refresh");
+  }
+  if (codes.has("required_filter_unavailable") || codes.has("setup_capabilities_missing")) {
+    if (codes.has("required_filter_unavailable")) lines.push("Le filtre requis n’est pas disponible pour le matériel déclaré. Vérifiez votre matériel avant de relancer l’analyse.");
+    if (codes.has("setup_capabilities_missing")) lines.push("Les capacités du matériel ne sont pas renseignées. Vérifiez votre matériel avant de relancer l’analyse.");
+    actions.push("equipment");
+  }
+  if (codes.has("intent_progress_evidence_insufficient")) {
+    lines.push("Le temps acquis de certaines prises de vue doit être renseigné dans Mes projets.");
+    actions.push("projects");
+  }
+  if (!lines.length) lines.push("Aucun projet n’a pu être proposé avec les données actuelles. Le motif peut varier selon le projet et le filtre : consultez « Comprendre le résultat » avant de modifier vos réglages.");
+  else lines.push("Ces indications concernent les motifs enregistrés ; d’autres prises de vue peuvent avoir des motifs différents. Consultez les détails par projet et filtre.");
+  if (!actions.includes("projects")) actions.push("projects");
+  return {lines, actions: [...new Set(actions)]};
+}
+
+function renderProjectContinuation(payload) {
+  const container = document.querySelector("#message-continuation");
+  if (!container) return;
+  container.replaceChildren(); container.hidden = true;
+  const advice = projectContinuationAdvice(payload);
+  if (!advice) return;
+  const heading = document.createElement("h3"); heading.textContent = "Comment continuer ?";
+  container.append(heading);
+  for (const line of advice.lines) {
+    const p = document.createElement("p"); p.textContent = line; container.append(p);
+  }
+  const actions = document.createElement("div"); actions.className = "message-actions";
+  const labels = {projects: advice.projectLabel || "Voir mes projets", hours: "Revoir mes horaires",
+    equipment: "Vérifier mon matériel", refresh: "Actualiser l’analyse"};
+  for (const action of advice.actions) {
+    const button = document.createElement("button"); button.type = "button";
+    button.className = "secondary-button"; button.dataset.continuationAction = action;
+    button.textContent = labels[action];
+    button.addEventListener("click", () => {
+      if (guardUnresolvedAcceptance()) return;
+      if (action === "projects") navigateGuidedProjects();
+      else if (action === "hours") setView("availability");
+      else if (action === "equipment") setView("equipment");
+      else ui.retry.click();
+    });
+    actions.append(button);
+  }
+  container.append(actions);
+  const note = document.createElement("p"); note.className = "field-note";
+  note.textContent = "Vos projets sont conservés. Cette recherche n’ajoute aucun plan, séance ni crédit.";
+  container.append(note); container.hidden = false;
+  // Only hide the existing retry when this panel supplies its replacement.
+  // Otherwise preserve the caller’s choice (including completed-project refusals).
+  if (advice.actions.includes("refresh")) ui.retry.hidden = true;
+  if (advice.actions.includes("hours")) document.querySelector("#message-edit-availability").hidden = true;
+}
+
 function showTonightUnavailable(payload) {
   if (payload.project_comparison) renderProjectComparison(payload, document.querySelector('#message-state'));
   else document.querySelector('#message-state .project-comparison')?.remove?.();
   if (payload.status === 'no_candidate' && payload.project_comparison &&
       !payload.project_comparison.some(project => project.filters.some(row => row.status === 'to_complete'))) {
+    const advice = projectContinuationAdvice(payload);
     showMessage('Aucun projet à avancer avec les données actuelles',
-      'Les objectifs renseignés sont atteints ou les objectifs et temps acquis par filtre restent à compléter dans Mes projets.',
-      {kicker: 'Bilan des projets', retry: false});
+      advice.lines.join(' '), {kicker: 'Bilan des projets', retry: false});
+    renderProjectContinuation(payload);
     return;
   }
   const timeZone = refusalSiteTimezone(payload);
@@ -8073,9 +8161,12 @@ function showTonightUnavailable(payload) {
   document.querySelector("#message-discover-targets").hidden = !offerAlternatives;
   document.querySelector("#message-altitude-guidance").hidden = !chosen || payload.target_refusal?.code !== "target_below_minimum_altitude";
   if (offerAlternatives) ui.retry.textContent = "Actualiser l’analyse";
+  renderProjectContinuation(payload);
 }
 
 function showMessage(title, body, { kicker = "Décision indisponible", retry = true } = {}) {
+  const continuation = document.querySelector("#message-continuation");
+  if (continuation) {continuation.hidden = true; continuation.replaceChildren();}
   const range = document.querySelector("#message-window");
   if (range) range.hidden = true;
   const evidence = document.querySelector("#message-refusal-evidence");
