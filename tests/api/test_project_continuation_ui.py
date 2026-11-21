@@ -20,6 +20,7 @@ function targetedIntentAssessments(p){return (p.acquisition_intent_assessments||
 function guardUnresolvedAcceptance(){return !!state.blocked}
 function navigateGuidedProjects(){calls.push('projects')}
 function setView(view){calls.push(view)}
+function decisionSiteFingerprint(){return "fixture-site"}
 class E {
  constructor(){this.children=[];this.dataset={};this.hidden=false;this.textContent='';}
  append(...items){this.children.push(...items)}

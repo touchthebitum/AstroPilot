@@ -6377,6 +6377,7 @@ function updateGuidedPresentation() {
     if (view === "availability") review.dataset.proOnly = "true";
     else delete review.dataset.proOnly;
   }
+  if (typeof renderSearchResume === "function") renderSearchResume();
 }
 
 function prepareGuidedProjectCreation() {
@@ -8055,6 +8056,58 @@ function projectContinuationAdvice(payload) {
   return {lines, actions: [...new Set(actions)]};
 }
 
+// A refusal return is a transient UI context, never an archived/new decision.
+function returnToRefusedSearch(view) {
+  state.refusedSearchResume ||= {siteFingerprint: decisionSiteFingerprint()};
+  setView(view);
+}
+
+function renderSearchResume() {
+  const box = document.querySelector("#search-resume");
+  if (!box) return;
+  box.replaceChildren(); box.hidden = true;
+  if (!state.refusedSearchResume || state.view !== "availability") return;
+  const value = id => document.querySelector(`#${id}`)?.value || "";
+  const stamp = raw => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})/.exec(raw);
+    return match ? `${match[3]}.${match[2]}.${match[1]} à ${match[4]}` : "à renseigner";
+  };
+  const mode = document.querySelector('input[name="availability-mode"]:checked')?.value;
+  const start = value("availability-start"), end = value("availability-end");
+  const rollover = mode === "fixed_window" ? fixedWindowRolloverDate(start, end) : null;
+  const endLabel = rollover ? `${rollover.slice(8, 10)}.${rollover.slice(5, 7)}.${rollover.slice(0, 4)} à ${end.slice(11, 16)}` : stamp(end);
+  const durationInput = value("availability-duration");
+  const durationLabel = hoursToIsoDuration(durationInput) ? `${durationInput} h` : "à renseigner";
+  const hours = {all_night: "Toute la nuit", duration: `Durée souhaitée : ${durationLabel}`,
+    start_and_duration: `Début : ${stamp(start)} · Durée souhaitée : ${durationLabel}`,
+    until: `Fin : ${stamp(end)}`, fixed_window: `Du ${stamp(start)} au ${endLabel}`};
+  const minutes = id => {
+    const raw = value(id), n = Number(raw);
+    return raw !== "" && Number.isInteger(n) && n >= 0 && n <= 240 ? `${n} min` : "à corriger";
+  };
+  const site = state.configurationDraft?.site;
+  const sameSavedSite = site?.latitude === state.configuration?.site?.latitude
+    && site?.longitude === state.configuration?.site?.longitude;
+  const zone = sameSavedSite ? currentSiteTimezone() : null;
+  const choice = state.compareProjects ? "Comparaison de mes projets"
+    : state.discoveryMode ? "Recherche d’une nouvelle cible"
+      : state.selectedProjectId ? `Projet : ${readableTargetName(state.selectedProjectId)}` : "Projet ou recherche à choisir";
+  const heading = document.createElement("h3"); heading.textContent = "Reprendre ma recherche";
+  box.append(heading);
+  const lines = [choice, `Site : ${site?.name || "à confirmer"}${zone ? ` · ${zone}` : " · fuseau à confirmer"}`,
+    `Horaires saisis : ${hours[mode] || "à renseigner"}${zone && mode !== "all_night" && mode !== "duration" ? ` (${zone})` : ""}`,
+    `Préparation : ${minutes("availability-preparation-minutes")} · Flats : ${minutes("availability-flats-minutes")}`];
+  if (state.refusedSearchResume.siteFingerprint !== decisionSiteFingerprint()) {
+    lines.push("Le site ou son fuseau a changé. Renseignez ou vérifiez vos horaires pour ce site.");
+  }
+  if (!configurationDraftMatchesSaved()) lines.push("Configuration modifiée : enregistrez vos réglages avant de relancer l’analyse.");
+  lines.push("Vérifiez vos réglages, puis relancez l’analyse avec le bouton de recherche. Le précédent refus n’a pas été réévalué.");
+  for (const line of lines) {
+    const p = document.createElement("p"); p.textContent = line; box.append(p);
+  }
+  box.hidden = false;
+}
+
 function renderProjectContinuation(payload) {
   const container = document.querySelector("#message-continuation");
   if (!container) return;
@@ -8076,8 +8129,8 @@ function renderProjectContinuation(payload) {
     button.addEventListener("click", () => {
       if (guardUnresolvedAcceptance()) return;
       if (action === "projects") navigateGuidedProjects();
-      else if (action === "hours") setView("availability");
-      else if (action === "equipment") setView("equipment");
+      else if (action === "hours") returnToRefusedSearch("availability");
+      else if (action === "equipment") returnToRefusedSearch("equipment");
       else ui.retry.click();
     });
     actions.append(button);
@@ -8530,6 +8583,11 @@ async function loadTonight(availability) {
     setView("availability");
     return;
   }
+  if (state.refusedSearchResume && !configurationDraftMatchesSaved()) {
+    showFormError("Enregistrez vos réglages modifiés avant de relancer l’analyse.");
+    setView("review");
+    return;
+  }
   if (!availability) {
     showAvailabilityError("Choisissez votre disponibilité avant de préparer la nuit.");
     setView("availability");
@@ -8556,6 +8614,7 @@ async function loadTonight(availability) {
     && availability.flats_minutes === missionOperationalMinutes(candidateRecheck.accepted.mission).flats
       ? structuredClone(candidateRecheck) : null;
   state.requestingRecommendation = true;
+  state.refusedSearchResume = null;
   state.availability = { ...availability };
   ui.recommendationSubmit.disabled = true;
   showAvailabilityError("");
@@ -8939,7 +8998,7 @@ document.querySelector("#altitude-guidance-refresh").addEventListener("click",()
 
 document.querySelector("#message-edit-availability").addEventListener("click", () => {
   if (guardUnresolvedAcceptance()) return;
-  setView("availability");
+  returnToRefusedSearch("availability");
 });
 ui.retryPendingAcceptance.addEventListener("click", retryPendingAcceptance);
 
@@ -8948,6 +9007,9 @@ for (const input of document.querySelectorAll('input[name="availability-mode"]')
 }
 document.querySelector("#availability-start").addEventListener("input", updateAvailabilityOvernightHint);
 document.querySelector("#availability-end").addEventListener("input", updateAvailabilityOvernightHint);
+
+ui.availabilityForm.addEventListener("input", renderSearchResume);
+ui.availabilityForm.addEventListener("change", renderSearchResume);
 
 ui.availabilityForm.addEventListener("submit", (event) => {
   event.preventDefault();
