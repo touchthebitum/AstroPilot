@@ -1519,7 +1519,9 @@ def test_unavailable_tonight_guidance_preserves_technical_evidence_and_availabil
     harness = r'''
 const assert = require('node:assert/strict');
 const elements = {};
-const document = {querySelector: key => elements[key] ||= {hidden:true,open:false}};
+// This harness exercises the existing refusal panel; the new continuation panel
+// has its own DOM and browser coverage.
+const document = {querySelector: key => key === '#message-continuation' ? null : (elements[key] ||= {hidden:true,open:false})};
 const state = {availability:{mode:'full_night'}};
 const ui = {retry:{}};
 let appliedUiMode = 'simple';

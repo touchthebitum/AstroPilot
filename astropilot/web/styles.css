@@ -1214,3 +1214,8 @@ html[data-ui-mode="simple"] #project-create:not([open]) { display: none; }
 .project-comparison summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; border-radius: 4px; }
 .project-tonight-reasons { margin: 12px 0; }
 .project-tonight-reasons ul { padding-inline-start: 22px; }
+
+.project-continuation { margin-block: 20px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; }
+.project-continuation h3 { margin-top: 0; }
+.project-continuation p { line-height: 1.6; }
+.project-continuation button { min-height: 44px; white-space: normal; }
