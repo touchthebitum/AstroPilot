@@ -8100,6 +8100,10 @@ function renderSearchResume() {
   if (state.refusedSearchResume.siteFingerprint !== decisionSiteFingerprint()) {
     lines.push("Le site ou son fuseau a changé. Renseignez ou vérifiez vos horaires pour ce site.");
   }
+  const filterConfirmation = state.refusedSearchResume.filterSaveConfirmation;
+  if (filterConfirmation && filterConfirmation.configuration === state.configuration
+      && filterConfirmation.revision === state.configuration.profile_revision
+      && configurationDraftMatchesSaved()) lines.push("Votre matériel et vos choix de filtres sont enregistrés. Votre recherche n’a pas été relancée.");
   if (!configurationDraftMatchesSaved()) lines.push("Configuration modifiée : enregistrez vos réglages avant de relancer l’analyse.");
   lines.push("Vérifiez vos réglages, puis relancez l’analyse avec le bouton de recherche. Le précédent refus n’a pas été réévalué.");
   for (const line of lines) {
