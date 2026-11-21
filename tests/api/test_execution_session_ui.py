@@ -344,11 +344,12 @@ class Element {
 const ui = {savedMissionEntry: new Element(), savedMissionChoice: new Element(),
   savedMissionTarget: new Element(), openSavedMission: new Element(), mission: {showModal() { opened = true; }}};
 const historyStatus = new Element();
-const document = {createElement() { return new Element(); }, querySelector() { return historyStatus; }};
+const document = {getElementById() { return null; }, createElement() { return new Element(); }, querySelector() { return historyStatus; }};
 function savedMissionLabel(item) { return item.mission.target; }
 const state = {configuration: {}, acceptedMission: null, savedMissions: []};
 let opened = false, rendered = null;
 function renderMission(mission) { rendered = mission; }
+function guardUnresolvedAcceptance() { return false; }
 const mission = (id, target, window_start) => ({mission_id: id, selection_id: `s-${id}`,
   decision_id: `d-${id}`, target, window_start});
 const old = mission('old', 'Ancienne mission', '2026-08-01T20:00:00Z');
@@ -622,7 +623,7 @@ class Element {
   addEventListener(_name, handler) { this.handler = handler; }
 }
 const elements = new Map();
-const document = {createElement: () => new Element(), querySelector(selector) {
+const document = {getElementById: () => null, createElement: () => new Element(), querySelector(selector) {
   if (!elements.has(selector)) elements.set(selector, new Element()); return elements.get(selector);
 }};
 const ui = {savedMissionEntry: new Element(), savedMissionChoice: new Element(),
@@ -634,6 +635,7 @@ const localStorage = {getItem: () => null, setItem() { throw Error('Unexpected w
 function text(selector, value) { document.querySelector(selector).textContent = value; }
 function renderObservationLinkage() {}
 let opened = 0;
+function guardUnresolvedAcceptance() { return false; }
 function renderMission(mission) {
   state.sessions = persisted.filter(s => s.mission_id === mission.mission_id);
   assert.equal(state.sessions.length, 1);
