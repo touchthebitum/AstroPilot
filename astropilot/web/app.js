@@ -8017,7 +8017,7 @@ function projectContinuationAdvice(payload) {
   if (payload.status === "no_candidate" && !rows.some(row => row.status === "to_complete")) {
     const lines = [];
     if (completed) lines.push(missing
-      ? "Certains objectifs sont atteints ; d’autres projets ont des données à compléter."
+      ? "Certains objectifs sont atteints ; d’autres prises de vue ont des données à compléter."
       : "Tous les objectifs renseignés des projets comparés sont atteints.");
     if (missing) lines.push("Vérifiez les objectifs et le temps acquis par filtre dans Mes projets. Une valeur manquante ne signifie pas zéro.");
     return {lines, actions: ["projects"], projectLabel: missing ? "Compléter mes projets" : "Voir mes projets"};
@@ -8086,7 +8086,9 @@ function renderProjectContinuation(payload) {
   const note = document.createElement("p"); note.className = "field-note";
   note.textContent = "Vos projets sont conservés. Cette recherche n’ajoute aucun plan, séance ni crédit.";
   container.append(note); container.hidden = false;
-  ui.retry.hidden = true;
+  // Only hide the existing retry when this panel supplies its replacement.
+  // Otherwise preserve the caller’s choice (including completed-project refusals).
+  if (advice.actions.includes("refresh")) ui.retry.hidden = true;
   if (advice.actions.includes("hours")) document.querySelector("#message-edit-availability").hidden = true;
 }
 

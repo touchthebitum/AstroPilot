@@ -89,3 +89,29 @@ buttons.find(b=>b.dataset.continuationAction==='refresh').click();assert.deepEqu
 state.blocked=true;buttons[0].click();assert.equal(calls.length,3);
 renderProjectContinuation({status:'weather_refused'});assert(box.hidden);assert.equal(box.children.length,0);
 """)
+
+
+def test_unfinished_no_candidate_keeps_retry_without_automatic_request():
+    run(r"""
+const p={...base,rejected_targets:[{target:'Rosette fictive',basis:'non_positive_evaluation_score'}],project_comparison:[{project_id:'Rosette fictive',filters:[{status:'to_complete'}]}]};
+const before=JSON.stringify(p);ui.retry.hidden=false;
+renderProjectContinuation(p);
+assert.equal(ui.retry.hidden,false,'existing retry must survive without a replacement');
+assert.deepEqual(calls,[]);assert.equal(JSON.stringify(p),before);
+assert.deepEqual(projectContinuationAdvice(p).actions,['projects']);
+// Do not show a retry that the caller deliberately hid (completed/incomplete goals).
+ui.retry.hidden=true;renderProjectContinuation(base);assert.equal(ui.retry.hidden,true);
+ui.retry.hidden=false;renderProjectContinuation({...p,status:'weather_refused'});
+assert.equal(ui.retry.hidden,true,'replacement must avoid duplicate retry buttons');
+""")
+
+
+def test_one_project_with_completed_and_unknown_filters_does_not_invent_other_projects():
+    run(r"""
+base.project_comparison[0].filters=[{filter_type:'OIII',status:'completed'},{filter_type:'SII',status:'incomplete_data'}];
+const before=JSON.stringify(base);renderProjectContinuation(base);
+const text=content(nodes['#message-continuation']);
+assert.match(text,/Certains objectifs sont atteints/);assert.match(text,/d’autres prises de vue/);
+assert.doesNotMatch(text,/d’autres projets/);assert.match(text,/Compléter mes projets/);
+assert.equal(JSON.stringify(base),before);assert.deepEqual(calls,[]);
+""")

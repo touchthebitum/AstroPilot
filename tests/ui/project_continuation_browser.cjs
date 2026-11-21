@@ -46,11 +46,11 @@ const base={status:'available',decision_id:'summary-fictitious',catalog_key:'Ros
   const remaining=()=>structuredClone(base.project_comparison);
   const complete={...structuredClone(base),status:'no_candidate',project_comparison:remaining().map(p=>({...p,filters:p.filters.map(f=>({...f,status:'completed',remaining_hours:0,acquired_hours:f.target_hours}))}))};
   const missing={...structuredClone(complete),project_comparison:[{project_id:'Rosette',filters:[{filter_type:'SII',status:'incomplete_data',target_hours:3,acquired_hours:null,remaining_hours:null}]}]};
-  const mixed={...structuredClone(complete),project_comparison:[...complete.project_comparison,...missing.project_comparison]};
+  const mixed={...structuredClone(complete),project_comparison:[{project_id:'Rosette',filters:[complete.project_comparison[1].filters[0],missing.project_comparison[0].filters[0]]}]};
   const weather={...structuredClone(base),status:'weather_refused',weather_decision:{admissibility:'refused',presentation:{label:'Météo défavorable fictive',summary:'Refus explicite de cette analyse'}}};
   const short={...structuredClone(base),status:'no_productive_window',actionability_refusal:{conclusion:'no_productive_window',status:'constraints_refusal',refusal_stage:'continuous_window_too_short',best_productive_window_minutes:35,required_continuous_minutes:60}};
   const equipment={...structuredClone(base),status:'no_mission',creation_refusal:'no_eligible_acquisition_intent',acquisition_intent_assessments:[{status:'not_eligible',label:'OIII',reason_codes:['required_filter_unavailable']}]};
-  const unknown={...structuredClone(base),status:'no_candidate'};
+  const unknown={...structuredClone(base),status:'no_candidate',rejected_targets:[{target:'Rosette',basis:'non_positive_evaluation_score'}]};
   const protectedSnapshot=()=>page.evaluate(()=>JSON.stringify({configuration:state.configuration,draft:state.configurationDraft,missions:state.savedMissions,accepted:state.acceptedMission}));
   const box=page.locator('#message-continuation');
   for(const mode of ['simple','pro'])for(const width of [390,1280]){
@@ -66,12 +66,25 @@ const base={status:'available',decision_id:'summary-fictitious',catalog_key:'Ros
    assert.match(await box.innerText(),/décision météo refuse/);
    await box.locator('[data-continuation-action="refresh"]').click();await page.waitForFunction(()=>!state.requestingRecommendation);
    assert.equal(writes.length,count+1);assert.equal(await protectedSnapshot(),before);
-   for(const [data,match,absent] of [[complete,/Tous les objectifs/,/Une valeur manquante/],[missing,/Une valeur manquante/,/Tous les objectifs/],[mixed,/Certains objectifs/,/Tous les objectifs/],[short,/35 min.*60 min/,/décision météo refuse/],[equipment,/filtre requis/,/décision météo refuse/],[unknown,/motif peut varier/,/décision météo refuse/]]){
+   for(const [data,match,absent] of [[complete,/Tous les objectifs/,/Une valeur manquante/],[missing,/Une valeur manquante/,/Tous les objectifs/],[mixed,/d’autres prises de vue/,/Tous les objectifs|d’autres projets/],[short,/35 min.*60 min/,/décision météo refuse/],[equipment,/filtre requis/,/décision météo refuse/],[unknown,/motif peut varier/,/décision météo refuse/]]){
     const raw=JSON.stringify(data);await page.evaluate(d=>showTonightUnavailable(d),data);
     assert.match(await box.innerText(),match);assert.doesNotMatch(await box.innerText(),absent);assert.equal(JSON.stringify(data),raw);
     assert.equal(await page.locator('.project-tonight-summary:visible').count(),0);
     assert.match(await box.innerText(),/aucun plan, séance ni crédit/);
     const bounds=await box.evaluate(el=>({left:el.getBoundingClientRect().left,right:el.getBoundingClientRect().right,overflow:el.scrollWidth>el.clientWidth}));assert(bounds.left>=0&&bounds.right<=width&&!bounds.overflow,JSON.stringify(bounds));
+   }
+   // An unfinished project can be retried even when the new panel has no refresh action.
+   response=structuredClone(unknown);
+   assert.equal(await box.locator('[data-continuation-action="refresh"]').count(),0);
+   const beforeRetry=writes.length;
+   assert.equal(await page.locator('#message-retry').isVisible(),true);
+   await page.locator('#message-retry').click();await page.waitForFunction(()=>!state.requestingRecommendation);
+   assert.equal(writes.length,beforeRetry+1);assert.equal(await protectedSnapshot(),before);
+   assert.equal(await page.locator('#message-retry').isVisible(),true);
+   // Completed or unknown goals keep their caller-imposed no-retry state.
+   for(const data of [complete,missing,mixed]){
+    await page.evaluate(d=>showTonightUnavailable(d),data);
+    assert.equal(await page.locator('#message-retry').isVisible(),false);
    }
    let unchanged=writes.length;
    await box.locator('[data-continuation-action="projects"]').focus();await page.keyboard.press('Enter');
@@ -83,9 +96,9 @@ const base={status:'available',decision_id:'summary-fictitious',catalog_key:'Ros
    await page.evaluate(d=>showTonightUnavailable(d),mixed);
    if(out){fs.mkdirSync(out,{recursive:true});await box.screenshot({path:path.join(out,`continuation-${mode}-${width}.png`)});}
    await page.evaluate(()=>showMessage('Autre état','Message suivant'));assert.equal(await box.isVisible(),false);
-   cases.push({mode,width,completed_missing_mixed_weather_short_equipment_unknown:true,navigation_no_write:true,explicit_refresh_only:true});
+   cases.push({mode,width,completed_missing_mixed_weather_short_equipment_unknown:true,navigation_no_write:true,explicit_refresh_only:true,unfinished_refusal_retry_preserved:true,single_project_mixed_filters:true});
   }
-  assert.deepEqual(errors,[]);assert.equal(writes.length,8);assert(writes.every(w=>w.path==='/v1/tonight'));
+  assert.deepEqual(errors,[]);assert.equal(writes.length,12);assert(writes.every(w=>w.path==='/v1/tonight'));
   if(out)fs.writeFileSync(path.join(out,'verification.json'),JSON.stringify({success:true,cases,writes,errors,http_intercepted:true,no_real_weather:true,no_session_or_credit_request:true},null,2));
   console.log('PASS: Comment continuer, 4 fictitious journeys, evidence-based refusal, unknown and mixed progress, click navigation, explicit refresh, no credit or mission writes');
  }finally{await browser.close()}
