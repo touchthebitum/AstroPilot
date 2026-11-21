@@ -13,6 +13,26 @@ async function loadFilterInventoryForDiscovery(equipment) {
     if(status)status.textContent='Impossible de lire les filtres enregistrés. Réessayez avant de rechercher une cible.';
   }
 }
+// A late filter save may not take over a different search or configuration.
+function filterSearchReturnIsCurrent(owner, {allowReload=false}={}) {
+  return Boolean(owner && owner.context === state.refusedSearchResume
+    && owner.configuration === state.configuration
+    && owner.generation === state.configurationGeneration
+    && owner.viewRevision === state.viewRevision
+    && owner.equipment === state.configuration?.active_equipment_id
+    && state.view === 'equipment' && (!state.decisionSiteReloadRequired || allowReload)
+    && configurationDraftMatchesSaved());
+}
+// Inventory is profile-wide: its revision and active equipment must match the
+// configuration displayed before a refused search can resume.
+function filterInventoryMatchesConfiguration(data, configuration) {
+  return Boolean(configuration && Number.isInteger(configuration.profile_revision)
+    && configuration.profile_revision >= 0
+    && typeof configuration.active_equipment_id === 'string'
+    && configuration.active_equipment_id.length > 0
+    && data?.profile_revision === configuration.profile_revision
+    && data?.active_equipment_id === configuration.active_equipment_id);
+}
 (() => {
   const fieldset=document.querySelector('#discovery-filters');
   const summary=document.createElement('p');summary.id='wheel-inventory-summary';
@@ -23,15 +43,39 @@ async function loadFilterInventoryForDiscovery(equipment) {
   const el=(tag,text)=>{const e=document.createElement(tag);if(text)e.textContent=text;return e;};
   const field=(text,input)=>{const label=el('label',text);label.className='field';label.append(input);return label;};
   let busy=false;
+  function requestConfigurationReload(owner) {
+    state.decisionSiteReloadRequired=true;
+    dialog.replaceChildren();dialog.classList.remove('initial-filter-setup');dialog.oncancel=null;
+    const heading=el('h2','Vos réglages doivent être relus');
+    const message=el('p','Les réglages enregistrés ont changé ou n’ont pas pu être confirmés. Relisez votre configuration avant d’enregistrer les filtres ou de reprendre la recherche. Aucun filtre n’a été enregistré à cette étape.');
+    message.setAttribute('role','alert');
+    const reload=el('button','Relire et vérifier ma configuration');reload.type='button';reload.className='primary-button';
+    reload.addEventListener('click',async()=>{
+      if(!dialog.open || !reload.isConnected || !filterSearchReturnIsCurrent(owner,{allowReload:true}) || guardUnresolvedAcceptance())return;
+      dialog.close();await loadConfiguration({afterConflict:true});
+    });
+    const close=el('button','Fermer');close.type='button';close.className='secondary-button';close.addEventListener('click',()=>dialog.close());
+    dialog.append(heading,message,reload,close);dialog.showModal();
+  }
   async function show({initial=false}={}){
     if(busy)return;
     if(!state.configuration?.configured || !configurationDraftMatchesSaved()){
       alert('Enregistrez d’abord votre site et votre matériel. Les filtres seront associés à ce matériel.');return;
     }
+    const configuration = state.configuration;
+    const resume = initial && state.refusedSearchResume ? {
+      context: state.refusedSearchResume, configuration: state.configuration,
+      generation: state.configurationGeneration, viewRevision: state.viewRevision,
+      equipment: state.configuration.active_equipment_id,
+    } : null;
     busy=true;open.disabled=menu.disabled=true;
     try {
       const response=await fetch('/v1/filter-inventory',{cache:'no-store'});if(!response.ok)throw Error('read');
       const data=await response.json(),equipment=state.configuration.active_equipment_id;
+      if(resume && !filterSearchReturnIsCurrent(resume,{allowReload:true}))return;
+      if(resume && (state.decisionSiteReloadRequired || !filterInventoryMatchesConfiguration(data,configuration))){
+        requestConfigurationReload(resume);return;
+      }
       const original=data.inventories[equipment];
       const mountOf=inventory=>inventory?.wheel_name==='Filtre monté seul'?'single':inventory?.wheel_name==='Aucun filtre'?'none':'wheel';
       const variants={...(data.mount_inventories?.[equipment]||{})};
@@ -91,6 +135,7 @@ async function loadFilterInventoryForDiscovery(equipment) {
       const save=el('button',storedSingle?'Enregistrer mon filtre':'Enregistrer les filtres de cette roue');save.type='button';save.className='primary-button';
       const cancel=el('button','Fermer sans enregistrer');cancel.type='button';cancel.className='secondary-button';cancel.addEventListener('click',()=>{dialog.close();});
       save.addEventListener('click',async()=>{
+        if(resume && !filterSearchReturnIsCurrent(resume)){error.textContent='Le contexte de recherche a changé. Fermez puis rouvrez les filtres avant de continuer.';return;}
         capture();const count=Number(number.value),slots=[...values.values()].sort((a,b)=>a.position-b.position);
         if(initial&&mounting!=='none'&&!slots.length){error.textContent='Déclarez au moins un filtre, ou revenez au montage pour choisir Aucun filtre.';return;}
         if(!wheel.value.trim()||!Number.isInteger(count)||count<1||count>20||slots.some(s=>s.position>count||!s.label||s.bandwidth_nm!==undefined&&(!Number.isFinite(s.bandwidth_nm)||s.bandwidth_nm<=0||s.bandwidth_nm>1000))){error.textContent='Vérifiez le nom de la roue, les emplacements et les références renseignées.';return;}
@@ -98,10 +143,20 @@ async function loadFilterInventoryForDiscovery(equipment) {
         save.disabled=true;
         try{
           const result=await fetch('/v1/filter-inventory',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({expected_revision:data.profile_revision,equipment_id:equipment,inventory:{wheel_name:wheel.value.trim(),slot_count:count,slots}})});
-          const saved=await result.json();if(!result.ok){error.textContent=result.status===409?'Le profil a changé dans une autre fenêtre. Fermez, actualisez puis rouvrez cet écran. Aucun changement de filtres enregistré.':'Les filtres n’ont pas pu être enregistrés. Vérifiez les informations.';return;}
+          const saved=await result.json();
+          if(!result.ok && result.status===409 && resume && dialog.open && save.isConnected && filterSearchReturnIsCurrent(resume,{allowReload:true})){
+            requestConfigurationReload(resume);return;
+          }
+          if(!result.ok){error.textContent=result.status===409?'Le profil a changé dans une autre fenêtre. Fermez, actualisez puis rouvrez cet écran. Aucun changement de filtres enregistré.':'Les filtres n’ont pas pu être enregistrés. Vérifiez les informations.';return;}
           // Only advance a matching local revision; never bless unrelated stale drafts.
-          if(state.configuration.profile_revision===data.profile_revision)state.configuration.profile_revision=saved.profile_revision;
-          dialog.close();if(initial){if(renderProjects())setView('projects');return;}if(state.discoveryMode)await setDiscoveryMode(true);else await loadFilterInventoryForDiscovery(equipment);
+          if(state.configuration===configuration && state.configuration.profile_revision===data.profile_revision)state.configuration.profile_revision=saved.profile_revision;
+          if(resume && (!filterSearchReturnIsCurrent(resume) || !dialog.open || !save.isConnected || guardUnresolvedAcceptance()))return;
+          dialog.close();
+          if(resume){
+            resume.context.filterSaveConfirmation={configuration:state.configuration,revision:saved.profile_revision};
+            setView('availability');return;
+          }
+          if(initial){if(renderProjects())setView('projects');return;}if(state.discoveryMode)await setDiscoveryMode(true);else await loadFilterInventoryForDiscovery(equipment);
         }catch(error2){error.textContent='Réponse interrompue. Fermez puis rouvrez cet écran pour vérifier si les filtres ont été enregistrés.';}finally{save.disabled=false;}
       });
       dialog.append(save,cancel);
@@ -129,7 +184,7 @@ async function loadFilterInventoryForDiscovery(equipment) {
           wheel.value=restored?.wheel_name||(mounting==='single'?'Filtre monté seul':mounting==='none'?'Aucun filtre':'Ma roue à filtres');
           render();wheelField.hidden=countField.hidden=mounting!=='wheel';rows.hidden=mounting==='none';
           paged=mounting==='wheel';slotPage=1;pager.hidden=!paged;updatePage();
-          save.textContent='Enregistrer et continuer vers le choix de cible';
+          save.textContent=resume?'Enregistrer les filtres et reprendre ma recherche':'Enregistrer et continuer vers le choix de cible';
           const back=el('button','Retour au montage');back.type='button';back.className='secondary-button';dialog.append(back);
           back.addEventListener('click',()=>{capture();variants[mounting]={wheel_name:wheel.value,slot_count:Number(number.value),slots:[...values.values()]};paged=false;back.remove();for(const node of details)node.hidden=true;instructions.hidden=false;choices.hidden=next.hidden=false;title.textContent='Comment utilisez-vous vos filtres ?';});
           title.tabIndex=-1;title.focus();dialog.scrollTop=0;

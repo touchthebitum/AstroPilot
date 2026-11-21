@@ -92,3 +92,14 @@ loadTonight({mode:'all_night'}).then(()=>{
  assert.equal(state.requestingRecommendation,undefined);
 });
 """)
+
+
+def test_filter_save_confirmation_is_scoped_to_current_saved_configuration():
+    run(r"""
+returnToRefusedSearch('availability');state.configuration.profile_revision=2;
+state.refusedSearchResume.filterSaveConfirmation={configuration:state.configuration,revision:2};
+renderSearchResume();assert.match(content(nodes['#search-resume']),/matériel et vos choix de filtres sont enregistrés/);
+state.dirty=true;renderSearchResume();assert(!content(nodes['#search-resume']).includes('matériel et vos choix de filtres sont enregistrés'));
+state.dirty=false;state.configuration.profile_revision=3;renderSearchResume();assert(!content(nodes['#search-resume']).includes('matériel et vos choix de filtres sont enregistrés'));
+state.configuration={...state.configuration,profile_revision:2};renderSearchResume();assert(!content(nodes['#search-resume']).includes('matériel et vos choix de filtres sont enregistrés'));
+""")
