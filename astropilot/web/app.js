@@ -8105,11 +8105,34 @@ function renderSearchResume() {
       && filterConfirmation.revision === state.configuration.profile_revision
       && configurationDraftMatchesSaved()) lines.push("Votre matériel et vos choix de filtres sont enregistrés. Votre recherche n’a pas été relancée.");
   if (!configurationDraftMatchesSaved()) lines.push("Configuration modifiée : enregistrez vos réglages avant de relancer l’analyse.");
-  lines.push("Vérifiez vos réglages, puis relancez l’analyse avec le bouton de recherche. Le précédent refus n’a pas été réévalué.");
   for (const line of lines) {
     const p = document.createElement("p"); p.textContent = line; box.append(p);
   }
+  const action = document.createElement("p"); action.id = "search-resume-action";
+  const link = document.createElement("a");
+  link.href = "#request-recommendation";
+  link.textContent = "Aller au bouton de recherche";
+  link.addEventListener("click", event => {
+    event.preventDefault();
+    if (state.view !== "availability" || !link.isConnected) return;
+    const button = document.querySelector("#request-recommendation");
+    if (!button || !button.getClientRects().length) return;
+    button.scrollIntoView({block: "center"});
+    button.focus({preventScroll: true});
+  });
+  box.append(action, link);
   box.hidden = false;
+  refreshSearchResumeAction();
+}
+
+// The beginner adapter may rename the submit button after the summary renders.
+// Update only changed text so its presentation observer remains idempotent.
+function refreshSearchResumeAction() {
+  const action = document.querySelector("#search-resume-action");
+  const label = document.querySelector("#request-recommendation")?.textContent?.trim();
+  if (!action || !label) return;
+  const text = `Vérifiez vos réglages, puis utilisez « ${label} » ci-dessous pour réévaluer les conditions météo et votre créneau. Le précédent refus n’a pas été réévalué.`;
+  if (action.textContent !== text) action.textContent = text;
 }
 
 function renderProjectContinuation(payload) {

@@ -186,6 +186,29 @@ const base={status:'available',decision_id:'summary-fictitious',catalog_key:'Ros
    assert.match(await resume.innerText(),targeted?/Projet : Rosette/:/Comparaison de mes projets/);
    assert.match(await resume.innerText(),/20:00.*23:30/);assert.match(await resume.innerText(),/Préparation : 20 min · Flats : 5 min/);
    assert.match(await resume.innerText(),/matériel et vos choix de filtres sont enregistrés/);assert.match(await resume.innerText(),/recherche n’a pas été relancée/);
+   const submit=page.locator('#request-recommendation');
+   const expectLiveLabel=async(expected)=>{
+    await page.waitForFunction(expected=>{
+     const label=document.querySelector('#request-recommendation').textContent.trim();
+     return label===expected && document.querySelector('#search-resume-action')?.textContent.includes(`« ${label} »`);
+    },expected);
+    assert.match(await resume.innerText(),/réévaluer les conditions météo et votre créneau/);
+   };
+   await expectLiveLabel(targeted?'Vérifier mon projet':'Quel projet avancer ce soir ?');
+   await page.evaluate(()=>applyUiMode('pro'));await expectLiveLabel(targeted?'Préparer ma nuit':'Quel projet avancer ce soir ?');
+   assert.equal(await submit.innerText(),targeted?'Préparer ma nuit':'Quel projet avancer ce soir ?');
+   await page.evaluate(()=>applyUiMode('simple'));await expectLiveLabel(targeted?'Vérifier mon projet':'Quel projet avancer ce soir ?');
+   assert.equal(await submit.innerText(),targeted?'Vérifier mon projet':'Quel projet avancer ce soir ?');
+   const beforeLinkRequests=requests(),beforeLink=await snapshot();
+   const link=resume.getByRole('link',{name:'Aller au bouton de recherche',exact:true});
+   assert.equal(await link.getAttribute('href'),'#request-recommendation');
+   await link.click();assert.equal(await submit.evaluate(el=>el===document.activeElement),true);
+   await link.focus();await page.keyboard.press('Enter');
+   assert.equal(await submit.evaluate(el=>el===document.activeElement),true);
+   const buttonBounds=await submit.boundingBox();assert(buttonBounds.y>=0&&buttonBounds.y+buttonBounds.height<=1000);
+   await page.waitForTimeout(150);assert.equal(requests(),beforeLinkRequests);assert.equal(await snapshot(),beforeLink);
+   if(out){await page.screenshot({path:path.join(out,`weather-return-${mounting}-${width}.png`),fullPage:true});
+    fs.writeFileSync(path.join(out,`weather-return-${mounting}-${width}.json`),JSON.stringify({buttonLabel:await submit.innerText(),summary:await resume.innerText(),link_focuses_existing_button:true,keyboard_and_pointer:true,no_automatic_analysis:true},null,2));}
    const bounds=await resume.evaluate(el=>({left:el.getBoundingClientRect().left,right:el.getBoundingClientRect().right,overflow:el.scrollWidth>el.clientWidth}));assert(bounds.left>=0&&bounds.right<=width&&!bounds.overflow,JSON.stringify(bounds));
    if(out)await resume.screenshot({path:path.join(out,`resume-${mounting}-${width}.png`)});
    assert.equal(await page.locator('#availability-start').inputValue(),'2026-11-21T20:00');assert.equal(await page.locator('#availability-end').inputValue(),'2026-11-21T23:30');
@@ -193,10 +216,10 @@ const base={status:'available',decision_id:'summary-fictitious',catalog_key:'Ros
    response=structuredClone(mounting==='none'?refused:base);await page.locator('#request-recommendation').click();await page.waitForFunction(()=>!state.requestingRecommendation);
    assert.equal(requests(),initialRequests+2);assert.equal(await snapshot(),protectedBefore);
    const segment=writes.slice(start);assert.equal(segment.length,4);assert.equal(segment.filter(w=>w.path==='/v1/configuration').length,1);assert.equal(segment.filter(w=>w.path==='/v1/filter-inventory').length,1);
-   cases.push({mounting,width,targeted,saveLabel:expectedLabel,direct_return:true,complete_wizard_clicked:true,target_equipment_correct:true,old_equipment_inventory_unchanged:true,hours_and_20_5_preserved:true,no_automatic_search:true,counters_unchanged:true});
+   cases.push({mounting,width,targeted,saveLabel:expectedLabel,direct_return:true,complete_wizard_clicked:true,target_equipment_correct:true,old_equipment_inventory_unchanged:true,hours_and_20_5_preserved:true,no_automatic_search:true,weather_link_keyboard_and_pointer:true,live_label_simple_and_pro:true,counters_unchanged:true});
   }
   assert.deepEqual(errors,[]);assert.deepEqual(dialogs,[]);
-  if(out)fs.writeFileSync(path.join(out,'verification.json'),JSON.stringify({success:true,source_base:'046165e27d7732bc0cd56d81f9c733193ac71e40',cases,writes,errors,dialogs,http_intercepted:true,no_personal_profile:true},null,2));
+  if(out)fs.writeFileSync(path.join(out,'verification.json'),JSON.stringify({success:true,source_base:'5e2cf1202df0cc60d695ce5a91ebde918c48d474',cases,writes,errors,dialogs,http_intercepted:true,no_personal_profile:true},null,2));
   console.log('PASS: 13 scenarios, including 4 stale GET cases blocked and 2 concurrent saves rejected, explicit reload/review, 5 direct returns, ordinary configuration and cancelled late reply; actual optics/camera/filter save, selected project or comparison, 20/5 and counters preserved, no automatic search');
  }finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exitCode=1});
