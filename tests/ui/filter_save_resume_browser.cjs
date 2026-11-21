@@ -20,7 +20,7 @@ const base={status:'available',decision_id:'summary-fictitious',catalog_key:'Ros
   const page=await browser.newPage({timezoneId:'Europe/Zurich'}),writes=[],errors=[],cases=[],dialogs=[];
   const web=path.resolve(__dirname,'../../astropilot/web'),out=process.env.NIGHTMERIT_PROOF_DIR;
   const refused={...structuredClone(base),status:'no_mission',creation_refusal:'no_eligible_acquisition_intent',acquisition_intent_assessments:[{status:'not_eligible',label:'OIII',reason_codes:['required_filter_unavailable']}]};
-  let response=refused,serverConfig,inventory,revision,activeTargeted=false,delayFilter=false,releaseFilter=null;
+  let response=refused,serverConfig,inventory,revision,activeTargeted=false,delayFilter=false,releaseFilter=null,serverChange=null,changeApplied=false;
   const references=[{id:'fixture_ha',label:'Hα fictif',filter_type:'Ha',bandwidth_nm:7},{id:'fixture_oiii',label:'OIII fictif',filter_type:'OIII',bandwidth_nm:7},{id:'fixture_sii',label:'SII fictif',filter_type:'SII',bandwidth_nm:7}];
   page.on('pageerror',e=>errors.push(e.message));page.on('dialog',async d=>{dialogs.push(d.message());await d.dismiss()});
   await page.route('**/*',async route=>{
@@ -29,7 +29,12 @@ const base={status:'available',decision_id:'summary-fictitious',catalog_key:'Ros
    if(req.method()!=='GET'){
     const body=req.postDataJSON();writes.push({method:req.method(),path:url.pathname,body});
     if(url.pathname==='/v1/tonight'){assert.equal(req.method(),'POST');if(activeTargeted)assert.equal(body.selected_project_id,'Rosette');else assert.equal(body.compare_projects,true);return json(response)}
-    assert.equal(req.method(),'PUT');assert.equal(body.expected_revision,revision);
+    assert.equal(req.method(),'PUT');
+    if(url.pathname==='/v1/filter-inventory'&&serverChange==='onSave'&&!changeApplied){
+     serverConfig={...serverConfig,active_equipment_id:'fixtureA',profile_revision:++revision};changeApplied=true;
+     return json({detail:{code:'inventory_revision_conflict'}},409);
+    }
+    assert.equal(body.expected_revision,revision);
     if(url.pathname==='/v1/configuration'){
      revision++;serverConfig={...serverConfig,site:{...body.site,timezone:'Europe/Zurich'},projects:body.projects,active_equipment_id:body.equipment.preset_id,profile_revision:revision};return json(serverConfig);
     }
@@ -40,7 +45,13 @@ const base={status:'available',decision_id:'summary-fictitious',catalog_key:'Ros
    if(progressMatch){const key=progressMatch[1],id=key+'_oiii',h=key==='Rosette'?40/60:1;
     return json({project_id:key,acquisition_intents:[{acquisition_intent_id:id,filter_type:'OIII'}],acquisition_intent_targets:[{acquisition_intent_id:id,target_hours:3}],intent_progress_breakdown:[{acquisition_intent_id:id,base_seconds:h*3600,credits_us:0,effective_total_seconds:h*3600,remaining_hours:3-h}]});
    }
-   if(url.pathname==='/v1/filter-inventory'&&serverConfig)return json({profile_revision:revision,inventories:inventory,mount_inventories:{},references});
+   if(url.pathname==='/v1/configuration'&&serverConfig)return json({...serverConfig,profile_revision:revision});
+   if(url.pathname==='/v1/filter-inventory'&&serverConfig){
+    if(serverChange&&serverChange!=='onSave'&&!changeApplied){
+     serverConfig={...serverConfig,active_equipment_id:serverChange==='equipment'?'fixtureA':serverConfig.active_equipment_id,profile_revision:++revision};changeApplied=true;
+    }
+    return json({profile_revision:revision,active_equipment_id:serverConfig.active_equipment_id,inventories:inventory,mount_inventories:{},references});
+   }
    if(url.pathname==='/ui/timezone-data.js')return route.fulfill({headers:timeHeaders,contentType:'text/javascript',body:timeData});
    const file=url.pathname==='/'?'index.html':url.pathname.startsWith('/ui/')?url.pathname.slice(4):null;
    if(file&&path.basename(file)===file&&fs.existsSync(path.join(web,file)))return route.fulfill({headers:timeHeaders,contentType:file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html',body:fs.readFileSync(path.join(web,file))});
@@ -57,10 +68,13 @@ const base={status:'available',decision_id:'summary-fictitious',catalog_key:'Ros
    {mounting:'single',width:390,targeted:true}, {mounting:'single',width:1280,targeted:true},
    {mounting:'wheel',width:390}, {mounting:'wheel',width:1280},
    {mounting:'none',width:390}, {mounting:'single',width:1280,ordinary:true}, {mounting:'wheel',width:1280,late:true},
+   {mounting:'single',width:390,serverChange:'equipment'}, {mounting:'wheel',width:1280,serverChange:'equipment'},
+   {mounting:'single',width:1280,serverChange:'revision'}, {mounting:'wheel',width:390,serverChange:'revision'},
+   {mounting:'single',width:390,serverChange:'onSave'}, {mounting:'wheel',width:1280,serverChange:'onSave'},
   ];
   for(const scenario of scenarios){
    const {mounting,width,targeted=false,ordinary=false,late=false}=scenario;
-   response=structuredClone(refused);activeTargeted=targeted;delayFilter=late;releaseFilter=null;
+   response=structuredClone(refused);activeTargeted=targeted;delayFilter=late;releaseFilter=null;serverChange=scenario.serverChange||null;changeApplied=false;
    if(targeted){response.status='no_productive_window';delete response.project_comparison;response.actionability_refusal={conclusion:'no_productive_window',status:'constraints_refusal',refusal_stage:'continuous_window_too_short',best_productive_window_minutes:35,required_continuous_minutes:60};}
    revision=1;serverConfig=structuredClone(config);
    inventory={fixtureA:{wheel_name:'Filtre monté seul',slot_count:1,slots:[{position:1,label:'Hα fictif',filter_type:'Ha',bandwidth_nm:7,filter_profile_id:'fixture_ha'}]}};
@@ -91,6 +105,50 @@ const base={status:'available',decision_id:'summary-fictitious',catalog_key:'Ros
    await page.locator('#equipment-next').click();assert.match(await page.locator('#equipment-title').innerText(),/caméra/);
    await page.locator('#equipment-next').click();
    const dialog=page.locator('.wheel-inventory-dialog');await dialog.waitFor();
+
+   if(serverChange){
+    if(serverChange==='onSave'){
+     await dialog.locator(`input[name="initial-filter-mounting"][value="${mounting}"]`).check();
+     await dialog.getByRole('button',{name:'Continuer vers les filtres disponibles',exact:true}).click();
+     if(mounting==='wheel'){
+      await dialog.getByLabel('Nombre d’emplacements',{exact:true}).fill('2');await dialog.getByLabel('Nombre d’emplacements',{exact:true}).press('Tab');
+     }
+     await dialog.locator('fieldset').first().locator('select').first().selectOption('fixture_oiii');
+     if(mounting==='wheel'){
+      await dialog.getByRole('button',{name:'Emplacement suivant',exact:true}).click();
+      await dialog.locator('fieldset').nth(1).locator('select').first().selectOption('fixture_sii');
+     }
+     await dialog.getByRole('button',{name:'Enregistrer les filtres et reprendre ma recherche',exact:true}).click();
+     await dialog.getByRole('button',{name:'Relire et vérifier ma configuration',exact:true}).waitFor();
+    }
+    assert.match(await dialog.innerText(),/Vos réglages doivent être relus/);
+    assert.match(await dialog.innerText(),/Aucun filtre n’a été enregistré/);
+    assert.equal(await page.evaluate(()=>state.decisionSiteReloadRequired),true);
+    assert.equal(await page.evaluate(()=>state.configuration.profile_revision),2);
+    assert.equal(revision,3);assert.equal(requests(),initialRequests+1);
+    assert.equal(writes.slice(start).filter(w=>w.path==='/v1/filter-inventory').length,serverChange==='onSave'?1:0);
+    assert.equal(await page.evaluate(()=>state.view),'equipment');
+    if(out){fs.mkdirSync(out,{recursive:true});await dialog.screenshot({path:path.join(out,`reload-${serverChange}-${width}.png`)})}
+    await dialog.getByRole('button',{name:'Relire et vérifier ma configuration',exact:true}).click();
+    await page.waitForFunction(()=>state.view==='review');
+    assert.equal(await page.evaluate(()=>state.configuration.profile_revision),3);
+    assert.equal(await page.evaluate(()=>state.configuration.active_equipment_id),serverConfig.active_equipment_id);
+    assert.equal(await page.evaluate(()=>state.decisionSiteReloadRequired),false);
+    assert.equal(writes.slice(start).length,serverChange==='onSave'?3:2,'reloading must not write or analyse');
+    await page.locator('#save-configuration').click();await page.waitForFunction(()=>state.view==='availability'&&!state.savingConfiguration);
+    assert.equal(await page.evaluate(()=>state.configuration.profile_revision),4);
+    assert.equal(await page.evaluate(()=>state.configuration.active_equipment_id),serverConfig.active_equipment_id);
+    assert.equal(await page.locator('#availability-start').inputValue(),'2026-11-21T20:00');
+    assert.equal(await page.locator('#availability-end').inputValue(),'2026-11-21T23:30');
+    assert.equal(await page.locator('#availability-preparation-minutes').inputValue(),'20');
+    assert.equal(await page.locator('#availability-flats-minutes').inputValue(),'5');
+    assert.equal(requests(),initialRequests+1);assert.equal(await snapshot(),protectedBefore);
+    response=structuredClone(refused);await page.locator('#request-recommendation').click();await page.waitForFunction(()=>!state.requestingRecommendation);
+    assert.equal(requests(),initialRequests+2);assert.equal(await snapshot(),protectedBefore);
+    assert.equal(writes.slice(start).filter(w=>w.path==='/v1/filter-inventory').length,serverChange==='onSave'?1:0);
+    assert.equal(JSON.stringify(inventory.fixtureA),originalInventory);assert.equal(inventory.fixtureB,undefined);
+    cases.push({mounting,width,serverChange,mismatch_blocks_inventory_write_and_search:true,explicit_reload_then_review_and_save:true,client_server_equipment_and_revision_match:true,hours_and_20_5_preserved:true,counters_unchanged:true});continue;
+   }
    assert.match(await dialog.innerText(),/Comment utilisez-vous vos filtres/);
    await dialog.locator(`input[name="initial-filter-mounting"][value="${mounting}"]`).check();
    await dialog.getByRole('button',{name:'Continuer vers les filtres disponibles',exact:true}).click();
@@ -139,6 +197,6 @@ const base={status:'available',decision_id:'summary-fictitious',catalog_key:'Ros
   }
   assert.deepEqual(errors,[]);assert.deepEqual(dialogs,[]);
   if(out)fs.writeFileSync(path.join(out,'verification.json'),JSON.stringify({success:true,source_base:'046165e27d7732bc0cd56d81f9c733193ac71e40',cases,writes,errors,dialogs,http_intercepted:true,no_personal_profile:true},null,2));
-  console.log('PASS: 5 complete refusal returns, ordinary configuration preserved, cancelled late reply ignored; actual optics/camera/filter save, selected project or comparison, 20/5 and counters preserved, no automatic search');
+  console.log('PASS: 13 scenarios, including 4 stale GET cases blocked and 2 concurrent saves rejected, explicit reload/review, 5 direct returns, ordinary configuration and cancelled late reply; actual optics/camera/filter save, selected project or comparison, 20/5 and counters preserved, no automatic search');
  }finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exitCode=1});
