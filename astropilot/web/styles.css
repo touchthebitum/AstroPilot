@@ -1206,3 +1206,11 @@ html[data-ui-mode="simple"] #project-create:not([open]) { display: none; }
 .project-comparison h4 { margin-bottom: 8px; }
 
 .saved-mission-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.project-tonight-summary h3 { margin: 0 0 12px; }
+.project-tonight-choice { color: var(--ink); font-size: 18px; font-weight: 700; }
+.project-tonight-summary p { line-height: 1.6; }
+.project-comparison summary { min-height: 44px; padding: 10px 0; cursor: pointer; color: var(--ink); }
+.project-comparison summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; border-radius: 4px; }
+.project-tonight-reasons { margin: 12px 0; }
+.project-tonight-reasons ul { padding-inline-start: 22px; }

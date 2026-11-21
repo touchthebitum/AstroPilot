@@ -5113,27 +5113,121 @@ function comparisonDuration(hours) {
   return rest ? `${wholeHours} h ${String(rest).padStart(2, '0')}` : `${wholeHours} h`;
 }
 
-function renderProjectComparison(payload, parent) {
+function createTonightProjectSummary(payload, accepted = null) {
+  if (!['available', 'no_mission'].includes(payload.status)) return null;
+  const pendingChoice = pendingIntentChoice(payload);
+  // Only a matching server-confirmed mission can replace the pending display.
+  const confirmed = accepted?.decision_id === payload.decision_id
+    && accepted?.selectedCatalogKey === payload.catalog_key
+    && accepted?.mission_id && accepted.mission?.mission_id === accepted.mission_id
+    && typeof accepted.acquisitionIntentId === 'string'
+    && accepted.mission.acquisition_intent_id === accepted.acquisitionIntentId
+    && accepted.mission.decision_id === payload.decision_id
+    && payload.viable_acquisition_intent_ids?.includes(accepted.acquisitionIntentId) ? accepted : null;
+  const pending = pendingChoice && !confirmed;
+  if ((!pendingChoice && (payload.status !== 'available' || payload.target_decision_status !== 'recommended'))
+      || (payload.weather_decision?.admissibility && payload.weather_decision.admissibility !== 'admissible')
+      || ['none', 'unavailable'].includes(intentMode(payload))) return null;
+  const projects = (payload.project_comparison || []).filter(project => project.project_id === payload.catalog_key);
+  if (projects.length !== 1) return null;
+  const project = projects[0];
+  const intentId = confirmed?.acquisitionIntentId || (pending ? null : payload.selected_acquisition_intent_id);
+  const rows = intentId ? project.filters.filter(row => row.acquisition_intent_id === intentId) : [];
+  const row = rows.length === 1 ? rows[0] : null;
+  const option = intentId ? payload.acquisition_intent_options?.find(item => item.acquisition_intent_id === intentId) : null;
+  const filter = pending ? 'Filtre à confirmer' : option?.label
+    || (row ? (row.filter_type === 'Ha' ? 'Hα' : row.filter_type) : payload.selected_filter?.name || 'Filtre non renseigné');
+  const section = document.createElement('section'); section.className = 'project-tonight-summary';
+  const heading = document.createElement('h3'); heading.textContent = confirmed ? 'Plan confirmé pour ce soir' : 'Pour ce soir';
+  const choice = document.createElement('p'); choice.className = 'project-tonight-choice';
+  choice.textContent = `${readableTargetName(project.project_id)} — ${filter}`;
+  section.append(heading, choice);
+  const progress = document.createElement('p'); progress.className = 'project-tonight-progress';
+  progress.textContent = pending ? 'Choisissez puis confirmez votre filtre pour afficher le temps acquis et le reste à faire.'
+    : row ? `Objectif ${comparisonDuration(row.target_hours)} · Déjà acquis ${comparisonDuration(row.acquired_hours)} · Reste à faire ${comparisonDuration(row.remaining_hours)}`
+      : 'Avancement non renseigné pour cette prise de vue.';
+  section.append(progress);
+  const timing = document.createElement('p'); timing.className = 'project-tonight-timing';
+  if (pending) {
+    timing.textContent = 'Créneau et durée à confirmer après le choix du filtre.';
+  } else {
+    const source = confirmed?.mission || payload;
+    const start = Date.parse(source.window_start), end = Date.parse(source.window_end);
+    const zone = confirmed ? missionTimezone(source, confirmed) : windowTimezone(payload);
+    timing.textContent = Number.isFinite(start) && Number.isFinite(end) && end > start
+      ? `Créneau : ${siteDateTime(source.window_start, zone)} → ${siteDateTime(source.window_end, zone)} (${zone}).`
+      : 'Créneau à confirmer.';
+    timing.textContent += ` Durée productive estimée : ${comparisonDuration(source.recommended_hours)}.`;
+  }
+  section.append(timing);
+  const explanation = confirmed ? {information: (confirmed.mission.reasons || []).filter(reason => reason.severity !== 'warning')}
+    : payload.explanation;
+  const reasons = [...(explanation?.positives || []), ...(explanation?.information || [])]
+    .filter(reason => reason && ((typeof reason.title === 'string' && reason.title.trim())
+      || (typeof reason.value === 'string' && reason.value.trim())))
+    .map(reasonText).filter(Boolean);
+  const details = document.createElement('details'); details.className = 'project-tonight-reasons';
+  const why = document.createElement('summary'); why.textContent = 'Pourquoi cette proposition ?';
+  details.append(why);
+  const supplied = [...new Set(reasons)].slice(0, 3);
+  if (supplied.length) {
+    const list = document.createElement('ul');
+    for (const reason of supplied) {
+      const item = document.createElement('li'); item.textContent = reason; list.append(item);
+    }
+    details.append(list);
+  } else {
+    const missing = document.createElement('p');
+    missing.textContent = 'Aucune justification détaillée n’est disponible pour cette proposition.';
+    details.append(missing);
+  }
+  section.append(details);
+  const warnings = (confirmed?.mission?.reasons || []).filter(reason => reason.severity === 'warning').map(reasonText).filter(Boolean);
+  if (warnings.length) {
+    const warning = document.createElement('p'); warning.className = 'decision-warning';
+    warning.textContent = [...new Set(warnings)].join(' '); section.append(warning);
+  }
+  const note = document.createElement('p'); note.className = 'field-note';
+  note.textContent = confirmed ? 'Plan enregistré. Le temps acquis ne change pas lors de cette confirmation.'
+    : 'L’avancement concerne le projet sur plusieurs nuits. Cette recherche n’ajoute aucun plan ni crédit.';
+  section.append(note);
+  return section;
+}
+
+function renderProjectComparison(payload, parent, accepted = null) {
   parent.querySelector('.project-comparison')?.remove();
   if (!payload.project_comparison) return;
   const section = document.createElement('section'); section.className = 'project-comparison';
-  const heading = document.createElement('h3'); heading.textContent = 'Quel projet avancer ce soir ?';
+  const tonight = createTonightProjectSummary(payload, accepted);
+  let balance = section;
+  if (tonight) {
+    section.append(tonight);
+    balance = document.createElement('details'); balance.dataset.modeDisclosure = '';
+    balance.open = appliedUiMode === 'pro';
+    const summary = document.createElement('summary'); summary.textContent = 'Voir l’avancement de mes projets';
+    balance.append(summary); section.append(balance);
+  } else {
+    const heading = document.createElement('h3'); heading.textContent = 'Quel projet avancer ce soir ?';
+    section.append(heading);
+  }
   const note = document.createElement('p'); note.textContent = 'Projets enregistrés uniquement. Les conditions du ciel, le matériel et vos horaires restent déterminants. Aucun plan ni crédit ajouté par cette recherche.';
-  section.append(heading, note);
+  balance.append(note);
   for (const project of payload.project_comparison) {
     const title = document.createElement('h4'); title.textContent = readableTargetName(project.project_id);
-    section.append(title);
+    balance.append(title);
     if (!project.filters.length) {
-      const p = document.createElement('p'); p.textContent = 'Objectifs et avancement par filtre à renseigner avant comparaison.'; section.append(p);
+      const p = document.createElement('p'); p.textContent = 'Objectifs et avancement par filtre à renseigner avant comparaison.'; balance.append(p);
     }
     for (const row of project.filters) {
       const format = comparisonDuration;
       const p = document.createElement('p');
       p.textContent = `${row.filter_type === 'Ha' ? 'Hα' : row.filter_type} : objectif ${format(row.target_hours)} · acquis ${format(row.acquired_hours)} · restant ${format(row.remaining_hours)}${row.status === 'completed' ? ' · Objectif atteint' : row.status === 'incomplete_data' ? ' · Données à compléter' : ''}`;
-      section.append(p);
+      balance.append(p);
     }
   }
-  parent.append(section);
+  const essential = tonight && parent.querySelector('#decision-essential');
+  if (essential) essential.after(section);
+  else parent.append(section);
 }
 
 function renderDecision(decision) {
@@ -8302,6 +8396,9 @@ async function acceptRecommendation({
     state.savedMissions = [{...state.acceptedMission, source:"persisted"},
       ...state.savedMissions.filter(item => item.mission_id !== mission.mission_id)];
     renderSavedMissionChoices();
+    if (decision?.project_comparison && selectedCatalogKey === decision.catalog_key) {
+      renderProjectComparison(decision, document.querySelector('#decision'), state.acceptedMission);
+    }
     if (decision?.decision_id === expectedDecisionId) {
       show("decision");
       showAcceptanceStatus(
