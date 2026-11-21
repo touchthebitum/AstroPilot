@@ -157,7 +157,7 @@ assert.deepEqual(filterCardCopy({selected_filter: null}), {
 
 
 def test_saved_mission_restores_only_from_server_without_acceptance():
-    helpers = _javascript_between("function beginConfigurationOperation()", "function currentDecisionMatchesSite()") + _javascript_between("async function restoreSavedMission() {", "function invalidateAvailabilityForSiteChange(")
+    helpers = _javascript_between("function beginConfigurationOperation()", "function currentDecisionMatchesSite()") + _javascript_between("async function restoreSavedMission(", "function invalidateAvailabilityForSiteChange(")
     _run_javascript("""
 const assert = require('node:assert/strict');
 const state = {acceptedMission: null};
@@ -199,7 +199,7 @@ async function fetch(url, options) {
 
 def test_configuration_changes_invalidate_restored_mission():
     initialize = _javascript_between("function setConfigurationDraft(", "function restoreNewProjectEmptyConfirmation(")
-    initialize += _javascript_between("function initializeConfiguration(payload) {", "async function restoreSavedMission() {")
+    initialize += _javascript_between("function initializeConfiguration(payload) {", "async function restoreSavedMission(")
     save = _javascript_between("async function saveConfiguration(", "const availabilityFieldsByMode")
     _run_javascript("""
 const assert = require('node:assert/strict');

@@ -2,8 +2,100 @@
 from pathlib import Path
 import shutil
 import subprocess
+import pytest
 
 SCRIPT = Path(__file__).parents[2] / 'astropilot/web/app.js'
+
+
+def test_preparing_another_project_reconciles_the_plan_scope():
+    source = SCRIPT.read_text()
+    prepare = source[source.index('function prepareGuidedSession('):source.index('// One explicit user confirmation;')]
+    program = r'''
+const assert = require('node:assert/strict');
+const state = {savedMissionProjectId:'Rosette', selectedProjectId:'Rosette', view:'projects'};
+let blocked=false, unchanged=true, rendered=[];
+function guardUnresolvedAcceptance(){return blocked}
+function confirmDiscardProjectProgress(){return true}
+function setDiscoveryMode(){}
+function configurationDraftMatchesSaved(){return unchanged}
+function showFormError(){}
+function setView(view){state.view=view}
+function renderSavedMissionChoices(){rendered.push(state.savedMissionProjectId)}
+function saveConfiguration(){throw Error('No write expected')}
+''' + prepare + r'''
+prepareGuidedSession({projectId:'M42'});
+assert.equal(state.selectedProjectId,'M42');
+assert.equal(state.savedMissionProjectId,'M42','Preparing M42 must not keep the Rosette-only list');
+assert.deepEqual(rendered,['M42']);
+prepareGuidedSession();
+assert.equal(state.savedMissionProjectId,null,'Generic preparation returns to the global plan list');
+assert.deepEqual(rendered,['M42',null]);
+state.savedMissionProjectId='Rosette';blocked=true;
+prepareGuidedSession({projectId:'M42'});assert.equal(state.savedMissionProjectId,'Rosette');
+blocked=false;unchanged=false;
+prepareGuidedSession({projectId:'M42'});assert.equal(state.view,'projects');
+assert.equal(state.savedMissionProjectId,'Rosette','Failed draft navigation must not change the plan scope');
+'''
+    result = subprocess.run([shutil.which('node'), '-'], input=program, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize('transition,preserve', [
+    ('unchanged', True), ('accepted', True), ('accepted', False), ('cleared', True), ('partial', True),
+])
+def test_history_retry_preserves_the_live_mission_context(transition, preserve):
+    source = SCRIPT.read_text()
+    helpers = source[source.index('async function restoreSavedMission('):source.index('function invalidateAvailabilityForSiteChange(')]
+    program = r'''
+const assert=require('node:assert/strict');
+class Element {constructor(){this.value='';this.children=[];}replaceChildren(){this.children=[];}append(x){this.children.push(x);}}
+const ui={savedMissionChoice:new Element(),savedMissionEntry:new Element(),openSavedMission:new Element()};
+const status=new Element();
+const document={getElementById:()=>null,querySelector:()=>status,createElement:()=>new Element()};
+const mission=id=>({mission_id:id,selection_id:'s-'+id,decision_id:'d-'+id});
+const payload=(id,key)=>({status:'accepted',catalog_key:key,...mission(id),mission:mission(id)});
+const current=payload('server-current','M42'),saved=payload('chosen','Rosette');
+const chosen={mission_id:'chosen',selectedCatalogKey:'Rosette',source:'persisted',mission:saved.mission,acceptedSiteGeneration:7};
+const state={configuration:{},configurationGeneration:1,savedMissions:[chosen],savedMissionProjectId:'Rosette',acceptedMission:chosen};
+function configurationOperationIsCurrent(n){return n===state.configurationGeneration}
+function savedMissionLabel(p){return p.mission_id}function missionTimezone(){return 'UTC'}
+let releaseHistory;
+async function fetch(url){
+ if(url==='/v1/accepted-mission/current')return {ok:true,json:async()=>current};
+ if(url==='/v1/accepted-missions')return await new Promise(resolve=>{releaseHistory=()=>resolve({ok:process.argv[2]!=='partial',json:async()=>[current,saved]})});
+ if(url==='/v1/execution-sessions')return {ok:true,json:async()=>[]};
+ throw Error('Unexpected request');
+}
+const flush=async()=>{for(let i=0;i<20;i++)await Promise.resolve()};
+''' + helpers + r'''
+(async()=>{
+ const transition=process.argv[2];
+ if(transition==='accepted')state.acceptedMission=null;
+ const before=state.acceptedMission;
+ const pending=restoreSavedMission({preserveActiveMission:process.argv[3]==='true'});await flush();
+ assert.equal(state.acceptedMission,before,'Reading history must not clear an active mission');
+ assert.equal(typeof releaseHistory,'function');
+ let expected=before;
+ if(transition==='accepted'){
+  expected={mission_id:'new',selectedCatalogKey:'Rosette',source:'primary_recommendation',mission:mission('new'),acceptedSiteGeneration:8};
+  state.acceptedMission=expected;
+  state.savedMissions=[{...expected,source:'persisted'}];
+ }else if(transition==='cleared'){expected=null;state.acceptedMission=null;}
+ releaseHistory();await pending;
+ assert.equal(state.acceptedMission,expected,'A late catalogue read must not replace the current mission context');
+ assert.equal(state.savedMissionLoading,false);
+ if(transition==='accepted'){
+  assert.equal(state.acceptedMission.acceptedSiteGeneration,8);
+  assert(state.savedMissions.some(x=>x.mission_id==='new'),'Newly confirmed plan must survive the late read');
+ }
+ if(transition==='partial'){
+  assert.equal(state.savedMissionHistoryUnavailable,true);
+  assert(state.savedMissions.some(x=>x.mission_id==='chosen'),'Known persisted plan remains available during partial history');
+ }
+})().catch(e=>{console.error(e);process.exitCode=1});
+'''
+    result = subprocess.run([shutil.which('node'), '-', transition, str(preserve).lower()], input=program, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_project_plan_scope_empty_partial_and_stale_selection():
@@ -60,7 +152,7 @@ state.view='projects';state.viewRevision++;frames.splice(0).forEach(fn=>fn());as
 
 def test_newer_plan_read_wins_on_same_configuration():
     source = SCRIPT.read_text()
-    helpers = source[source.index('async function restoreSavedMission()'):source.index('function invalidateAvailabilityForSiteChange(')]
+    helpers = source[source.index('async function restoreSavedMission('):source.index('function invalidateAvailabilityForSiteChange(')]
     program = r'''
 const assert=require('node:assert/strict');
 class Element { constructor(){this.value='';this.children=[];}replaceChildren(){this.children=[];}append(x){this.children.push(x);} }

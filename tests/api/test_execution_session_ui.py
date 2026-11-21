@@ -331,7 +331,7 @@ def test_saved_missions_include_expired_sessions_and_open_selected_mission():
     if node is None:
         pytest.skip("Node.js is required for the dynamic UI test")
     source = SCRIPT.read_text(encoding="utf-8")
-    restore = source[source.index('function configurationOperationIsCurrent('):source.index('function installCurrentConfiguration(')] + source[source.index('async function restoreSavedMission()'):source.index('function invalidateAvailabilityForSiteChange')]
+    restore = source[source.index('function configurationOperationIsCurrent('):source.index('function installCurrentConfiguration(')] + source[source.index('async function restoreSavedMission('):source.index('function invalidateAvailabilityForSiteChange')]
     open_handler = source[source.index('ui.openSavedMission.addEventListener'):source.index('document.querySelector("#session-choice").addEventListener')]
     harness = r'''
 const assert = require('node:assert/strict');
@@ -611,7 +611,7 @@ def test_saved_mission_labels_reopen_persisted_filters_and_credits(tmp_path, mon
     source = SCRIPT.read_text(encoding="utf-8")
     helpers = source[source.index("function missionTimezone("):source.index("function clock(")]
     restore = (source[source.index("function configurationOperationIsCurrent("):source.index("function installCurrentConfiguration(")]
-               + source[source.index("async function restoreSavedMission()"):source.index("function invalidateAvailabilityForSiteChange")])
+               + source[source.index("async function restoreSavedMission("):source.index("function invalidateAvailabilityForSiteChange")])
     session_helpers = source[source.index("const SESSION_PENDING_KEY ="):source.index("async function reloadSessions")]
     open_handler = source[source.index("ui.openSavedMission.addEventListener"):source.index('document.querySelector("#session-choice").addEventListener')]
     harness = r'''

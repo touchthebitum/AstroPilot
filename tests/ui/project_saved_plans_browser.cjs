@@ -64,6 +64,19 @@ const origin='https://nightmerit.test';
    assert.equal(await page.evaluate(()=>state.acceptedMission.mission_id),'r2');assert.equal(await page.locator('#mission-dialog').evaluate(el=>el.open),true);
    await page.locator('#close-mission').click();
    if(out){fs.mkdirSync(out,{recursive:true});await page.locator('#saved-mission-entry').screenshot({path:path.join(out,`plans-${mode}-${width}.png`)});}
+   // A history retry is a read, not a new choice of active mission.
+   const active=await page.evaluate(()=>JSON.stringify(state.acceptedMission));
+   failHistory=true;await page.evaluate(()=>restoreSavedMission({preserveActiveMission:true}));
+   assert.equal(await page.evaluate(()=>JSON.stringify(state.acceptedMission)),active);
+   assert.deepEqual(await page.locator('#saved-mission-choice option').evaluateAll(es=>es.map(e=>e.value).sort()),['r1','r2']);
+   assert.match(await page.locator('#saved-mission-history-status').innerText(),/incomplète/);
+   failHistory=false;await page.locator('#saved-mission-retry').click();await page.waitForFunction(()=>!state.savedMissionLoading);
+   assert.equal(await page.evaluate(()=>JSON.stringify(state.acceptedMission)),active);
+   // Preparing a different project must also update an already scoped list.
+   await page.evaluate(()=>prepareGuidedSession({projectId:'M42'}));
+   assert.match(await page.locator('#saved-mission-heading').innerText(),/M42/);
+   assert.deepEqual(await page.locator('#saved-mission-choice option').evaluateAll(es=>es.map(e=>e.value)),['m42']);
+   await page.evaluate(()=>openProjectSavedMissions('Rosette'));
    await page.locator('#saved-mission-all').click();assert.equal(await page.locator('#saved-mission-choice option').count(),3);
    // Empty profile/project must never reuse the globally current M42 mission.
    await page.evaluate(()=>openProjectSavedMissions('M31'));

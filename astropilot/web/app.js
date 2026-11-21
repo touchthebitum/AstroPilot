@@ -6326,6 +6326,11 @@ function prepareGuidedSession({saveDraft = false, projectId} = {}) {
     return;
   }
   showFormError("");
+  const planProjectId = projectId ?? null;
+  if (state.savedMissionProjectId && state.savedMissionProjectId !== planProjectId) {
+    state.savedMissionProjectId = planProjectId;
+    renderSavedMissionChoices();
+  }
   setView("availability");
 }
 
@@ -6891,7 +6896,7 @@ function initializeConfiguration(payload) {
   restorePendingFieldObservationInventory();
 }
 
-async function restoreSavedMission() {
+async function restoreSavedMission({preserveActiveMission = false} = {}) {
   const configuration = state.configuration;
   const generation = state.configurationGeneration;
   const readGeneration = (state.savedMissionReadGeneration || 0) + 1;
@@ -6901,7 +6906,8 @@ async function restoreSavedMission() {
     && state.configuration === configuration && !state.decisionSiteReloadRequired;
   const knownMissions = [state.acceptedMission, ...(state.savedMissions || [])].filter(Boolean);
   const savedMissions = [];
-  state.acceptedMission = null;
+  if (!preserveActiveMission) state.acceptedMission = null;
+  const activeMissionAtRead = state.acceptedMission;
   state.savedMissions = [];
   state.savedMissionLoading = true;
   ui.savedMissionEntry.hidden = true;
@@ -6974,15 +6980,23 @@ async function restoreSavedMission() {
     historyUnavailable = true;
   }
   if (!isCurrent()) return;
+  // A catalogue retry must not replace a chosen or newly confirmed mission.
+  const activeMission = state.acceptedMission;
+  const locallyConfirmedMissions = state.savedMissions || [];
+  const latestKnownMissions = [...locallyConfirmedMissions, ...knownMissions];
+  const cachedPlans = preserveActiveMission && historyUnavailable
+    ? knownMissions.filter(item => item.source === "persisted") : [];
   for (const item of [...savedMissions, ...(current ? [current] : [])]) {
-    const known = knownMissions.find(previous => previous.mission_id === item.mission_id);
+    const known = latestKnownMissions.find(previous => previous.mission_id === item.mission_id);
     item.windowTimezone = missionTimezone(item.mission, known || item);
   }
-  state.savedMissions = [...new Map(savedMissions.map(item => [item.mission_id, item])).values()];
+  state.savedMissions = [...new Map([...cachedPlans, ...savedMissions, ...locallyConfirmedMissions]
+    .map(item => [item.mission_id, item])).values()];
   if (current && !state.savedMissions.some((item) => item.mission_id === current.mission_id)) {
     state.savedMissions.unshift(current);
   }
-  state.acceptedMission = current || state.savedMissions[0] || null;
+  state.acceptedMission = preserveActiveMission || activeMission !== activeMissionAtRead
+    ? activeMission : current || state.savedMissions[0] || null;
   state.savedMissionLoading = false;
   state.savedMissionHistoryUnavailable = historyUnavailable;
   renderSavedMissionChoices();
@@ -8818,7 +8832,7 @@ document.querySelector("#saved-mission-prepare").addEventListener("click", () =>
 });
 document.querySelector("#saved-mission-retry").addEventListener("click", () => {
   if (guardUnresolvedAcceptance() || state.savedMissionLoading || state.requestingRecommendation || state.savingConfiguration) return;
-  void restoreSavedMission();
+  void restoreSavedMission({preserveActiveMission: true});
 });
 ui.savedMissionChoice.addEventListener("change", renderSavedMissionAvailability);
 ui.openSavedMission.addEventListener("click", () => {
