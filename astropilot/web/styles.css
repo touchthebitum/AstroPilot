@@ -1206,3 +1206,6 @@ html[data-ui-mode="simple"] #project-create:not([open]) { display: none; }
 .project-comparison h4 { margin-bottom: 8px; }
 
 .saved-mission-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.project-tonight-summary { min-width: 0; overflow-wrap: anywhere; }
+.project-tonight-summary h3 { font-size: 1rem; margin: 0.75rem 0 0.5rem; }
+.project-tonight-summary p { margin: 0.5rem 0; }

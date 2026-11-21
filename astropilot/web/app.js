@@ -5136,6 +5136,44 @@ function renderProjectComparison(payload, parent) {
   parent.append(section);
 }
 
+function projectTonightSummary(decision) {
+  if (!Array.isArray(decision?.project_comparison)) return null;
+  const pending = pendingIntentChoice(decision);
+  if (!pending && (decision.status !== "available" || decision.target_decision_status !== "recommended")) return null;
+  const projects = decision.project_comparison.filter(project => project.project_id === decision.catalog_key);
+  if (projects.length !== 1) return null;
+  const project = projects[0];
+  const mode = intentMode(decision);
+  if (!["unique", "multiple"].includes(mode)) return null;
+  const rows = mode === "unique" && Array.isArray(project.filters)
+    ? project.filters.filter(row => row.acquisition_intent_id === decision.selected_acquisition_intent_id) : [];
+  // Join by project and exact intent, never by filter label or global progress.
+  const row = rows.length === 1 ? rows[0] : null;
+  const filter = row?.filter_type === "Ha" ? "Hα" : row?.filter_type;
+  return {
+    heading: `Pour ce soir : ${readableTargetName(project.project_id)} — ${mode === "unique" ? filter || "Filtre non renseigné" : "Filtre à confirmer"}`,
+    progress: row
+      ? `Objectif ${comparisonDuration(row.target_hours)} · Déjà acquis ${comparisonDuration(row.acquired_hours)} · Reste à faire ${comparisonDuration(row.remaining_hours)}`
+      : mode === "unique" ? "Avancement de cette prise de vue non renseigné."
+        : "Confirmez la prise de vue pour identifier l’avancement correspondant.",
+    note: "Le reste concerne votre projet sur plusieurs séances. Cette proposition n’ajoute aucune image à votre avancement.",
+  };
+}
+
+function renderProjectTonightSummary(decision) {
+  const container = document.querySelector("#project-tonight-summary");
+  if (!container) return;
+  container.replaceChildren();
+  const summary = projectTonightSummary(decision);
+  container.hidden = !summary;
+  if (!summary) return;
+  for (const [tag, value] of [["h3", summary.heading], ["p", summary.progress], ["p", summary.note]]) {
+    const element = document.createElement(tag);
+    element.textContent = value;
+    container.append(element);
+  }
+}
+
 function renderDecision(decision) {
   if (decision.project_comparison) renderProjectComparison(decision, document.querySelector('#decision'));
   else document.querySelector('#decision .project-comparison')?.remove?.();
@@ -5242,6 +5280,7 @@ function renderDecision(decision) {
   });
   setList("#risks-list", risks, "Aucun risque essentiel signalé.");
   renderIntentChoice(ui.primaryIntentChoice, decision, "primary-intent");
+  renderProjectTonightSummary(decision);
   const actionablePrimary = Boolean(
     decision.decision_id
     && decision.catalog_key

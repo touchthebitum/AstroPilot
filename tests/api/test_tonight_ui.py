@@ -1308,6 +1308,7 @@ function reasonText(value) {return value.title || value.value;}
 function renderWeatherTrust() {}
 function renderAlternatives() {}
 function renderIntentChoice() {}
+function renderProjectTonightSummary() {}
 function filterCardCopy() {return {value: "Filtre non précisé", note: "", detail: ""};}
 function intentMode() {return "legacy";}
 function intentReady() {return true;}

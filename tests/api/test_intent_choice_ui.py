@@ -491,6 +491,7 @@ function renderIntentChoice() {}
 function renderAlternatives() {}
 function restoreAcceptanceControls() {}
 function show() {}
+function renderProjectTonightSummary() {}
 function renderRecommendationConfidence() {}
 function intentReady() { return true; }
 """ + _javascript_between("function beginnerReason(", "function reasonText(") + mode + render + """
