@@ -130,6 +130,9 @@ const state = {
   decisionSiteReloadRequired: false,
   acceptedMission: null,
   savedMissions: [],
+  savedMissionProjectId: null,
+  savedMissionHistoryUnavailable: false,
+  savedMissionLoading: false,
   missionWeatherChecks: {},
   missionWeatherOrigins: {},
   pendingAcceptanceAttempt: null,
@@ -5085,7 +5088,8 @@ function resetMissionPresentation() {
 function clearAcceptedMission() {
   state.acceptedMission = null;
   // Clearing the current analysis must preserve access to persisted plans.
-  ui.savedMissionEntry.hidden = !(state.savedMissions || []).some(item => item?.mission && item.source === "persisted");
+  ui.savedMissionEntry.hidden = !state.savedMissionProjectId && !state.savedMissionHistoryUnavailable
+    && !(state.savedMissions || []).some(item => item?.mission && item.source === "persisted");
   state.acceptingRecommendation = false;
   state.acceptanceRequestOwner = null;
   state.acceptanceBlocked = false;
@@ -6322,6 +6326,11 @@ function prepareGuidedSession({saveDraft = false, projectId} = {}) {
     return;
   }
   showFormError("");
+  const planProjectId = projectId ?? null;
+  if (state.savedMissionProjectId && state.savedMissionProjectId !== planProjectId) {
+    state.savedMissionProjectId = planProjectId;
+    renderSavedMissionChoices();
+  }
   setView("availability");
 }
 
@@ -6541,22 +6550,9 @@ function renderSimpleProjects(entries) {
     note.textContent = "Vous avez suivi cette séance dans NightMerit ? Retrouvez-la pour enregistrer le temps de pose des images que vous gardez, sans les pauses ni les images rejetées.";
     const sessions = document.createElement("button");
     sessions.type = "button"; sessions.className = "secondary-button";
-    sessions.textContent = "Retrouver mes séances photo NightMerit";
+    sessions.textContent = "Retrouver les plans de ce projet";
     sessions.disabled = !saved;
-    sessions.addEventListener("click", () => {
-      prepareGuidedSession();
-      if (state.view !== "availability") return;
-      if (ui.savedMissionEntry.hidden) {
-        showAvailabilityError("Les missions enregistrées ne sont pas disponibles ici. Rechargez la page pour tenter de les relire. Ne créez pas une nouvelle session pour remplacer une session déjà réalisée.");
-        return;
-      }
-      const revision = state.viewRevision;
-      requestAnimationFrame(() => {
-        if (state.view !== "availability" || state.viewRevision !== revision || ui.savedMissionEntry.hidden) return;
-        ui.savedMissionChoice.focus();
-        ui.savedMissionEntry.scrollIntoView({block: "center"});
-      });
-    });
+    sessions.addEventListener("click", () => openProjectSavedMissions(key));
     const edit = document.createElement("button");
     edit.type = "button"; edit.className = "secondary-button";
     edit.textContent = "Renseigner mon temps de départ"; edit.disabled = !saved;
@@ -6877,6 +6873,9 @@ function initializeConfiguration(payload) {
   )) clearAcceptedMission();
   invalidateAvailabilityForSiteChange(state.configuration?.site, payload.site);
   state.configuration = payload;
+  state.savedMissionProjectId = null;
+  state.savedMissionLoading = false;
+  state.savedMissionHistoryUnavailable = false;
   const projectFeedback = document.querySelector("#project-create-feedback");
   if (projectFeedback) projectFeedback.textContent = "";
   try { localStorage.setItem(DECISION_SITE_STORAGE_KEY, decisionSiteFingerprint()); } catch (_) {}
@@ -6897,17 +6896,23 @@ function initializeConfiguration(payload) {
   restorePendingFieldObservationInventory();
 }
 
-async function restoreSavedMission() {
+async function restoreSavedMission({preserveActiveMission = false} = {}) {
   const configuration = state.configuration;
   const generation = state.configurationGeneration;
+  const readGeneration = (state.savedMissionReadGeneration || 0) + 1;
+  state.savedMissionReadGeneration = readGeneration;
   const isCurrent = () => configurationOperationIsCurrent(generation)
+    && state.savedMissionReadGeneration === readGeneration
     && state.configuration === configuration && !state.decisionSiteReloadRequired;
   const knownMissions = [state.acceptedMission, ...(state.savedMissions || [])].filter(Boolean);
   const savedMissions = [];
-  state.acceptedMission = null;
+  if (!preserveActiveMission) state.acceptedMission = null;
+  const activeMissionAtRead = state.acceptedMission;
   state.savedMissions = [];
+  state.savedMissionLoading = true;
   ui.savedMissionEntry.hidden = true;
   if (ui.openSavedMission) ui.openSavedMission.disabled = true;
+  if (state.savedMissionProjectId) renderSavedMissionChoices();
   let current = null;
   try {
     const response = await fetch("/v1/accepted-mission/current");
@@ -6953,9 +6958,11 @@ async function restoreSavedMission() {
   }
   try {
     const response = await fetch("/v1/execution-sessions");
-    if (response.ok && isCurrent()) {
+    if (!response.ok) throw new Error("saved_session_history_unavailable");
+    if (isCurrent()) {
       const sessions = await response.json();
       if (!isCurrent()) return;
+      if (!Array.isArray(sessions)) throw new Error("invalid_saved_session_history");
       const seen = new Set(savedMissions.map(item => item.mission_id));
       for (const item of sessions) {
         if (seen.has(item.mission_id)) continue;
@@ -6969,49 +6976,98 @@ async function restoreSavedMission() {
       }
     }
   } catch (_error) {
-    // The current mission can still be opened if session discovery is unavailable.
+    // Available plans remain usable, but absence cannot be claimed from a partial read.
+    historyUnavailable = true;
   }
   if (!isCurrent()) return;
+  // A catalogue retry must not replace a chosen or newly confirmed mission.
+  const activeMission = state.acceptedMission;
+  const locallyConfirmedMissions = state.savedMissions || [];
+  const latestKnownMissions = [...locallyConfirmedMissions, ...knownMissions];
+  const cachedPlans = preserveActiveMission && historyUnavailable
+    ? knownMissions.filter(item => item.source === "persisted") : [];
   for (const item of [...savedMissions, ...(current ? [current] : [])]) {
-    const known = knownMissions.find(previous => previous.mission_id === item.mission_id);
+    const known = latestKnownMissions.find(previous => previous.mission_id === item.mission_id);
     item.windowTimezone = missionTimezone(item.mission, known || item);
   }
-  state.savedMissions = [...new Map(savedMissions.map(item => [item.mission_id, item])).values()];
+  state.savedMissions = [...new Map([...cachedPlans, ...savedMissions, ...locallyConfirmedMissions]
+    .map(item => [item.mission_id, item])).values()];
   if (current && !state.savedMissions.some((item) => item.mission_id === current.mission_id)) {
     state.savedMissions.unshift(current);
   }
-  state.acceptedMission = current || state.savedMissions[0] || null;
-  const historyStatus = document.querySelector("#saved-mission-history-status");
-  historyStatus.hidden = !historyUnavailable;
-  historyStatus.textContent = historyUnavailable
-    ? "Certains plans enregistrés n’ont pas pu être chargés. Rechargez la page pour réessayer." : "";
+  state.acceptedMission = preserveActiveMission || activeMission !== activeMissionAtRead
+    ? activeMission : current || state.savedMissions[0] || null;
+  state.savedMissionLoading = false;
+  state.savedMissionHistoryUnavailable = historyUnavailable;
   renderSavedMissionChoices();
-  if (historyUnavailable) ui.savedMissionEntry.hidden = false;
+}
+
+function savedMissionsForProject() {
+  return (state.savedMissions || []).filter(item => item?.mission && item.source === "persisted"
+    && (!state.savedMissionProjectId || item.selectedCatalogKey === state.savedMissionProjectId));
 }
 
 function renderSavedMissionChoices() {
+  const previous = ui.savedMissionChoice.value;
+  const plans = savedMissionsForProject();
   ui.savedMissionChoice.replaceChildren();
-  for (const item of state.savedMissions) {
+  for (const item of plans) {
     const option = document.createElement("option");
     option.value = item.mission_id;
     option.textContent = savedMissionLabel(item);
     ui.savedMissionChoice.append(option);
   }
-  if (state.acceptedMission) {
-    ui.savedMissionChoice.value = state.acceptedMission.mission_id;
-    ui.savedMissionEntry.hidden = false;
+  const preferred = [previous, state.acceptedMission?.mission_id].find(id => plans.some(item => item.mission_id === id));
+  ui.savedMissionChoice.value = preferred || plans[0]?.mission_id || "";
+  ui.savedMissionChoice.disabled = !plans.length;
+  ui.savedMissionEntry.hidden = !state.savedMissionProjectId && !plans.length
+    && !state.savedMissionLoading && !state.savedMissionHistoryUnavailable;
+  const heading = document.getElementById("saved-mission-heading");
+  if (heading) heading.textContent = state.savedMissionProjectId
+    ? `Plans de ${readableTargetName(state.savedMissionProjectId)}` : "Plans de séance enregistrés";
+  const status = document.querySelector("#saved-mission-history-status");
+  status.hidden = !state.savedMissionLoading && !state.savedMissionHistoryUnavailable && Boolean(plans.length);
+  status.textContent = state.savedMissionLoading ? "Lecture des plans enregistrés…"
+    : state.savedMissionHistoryUnavailable
+      ? "Certains plans n’ont pas pu être chargés. La liste peut être incomplète. Réessayez la lecture."
+      : state.savedMissionProjectId ? "Aucun plan enregistré pour ce projet." : "Aucun plan enregistré.";
+  for (const [id, hidden] of [
+    ["saved-mission-all", !state.savedMissionProjectId],
+    ["saved-mission-prepare", !state.savedMissionProjectId || plans.length > 0 || state.savedMissionLoading || state.savedMissionHistoryUnavailable],
+    ["saved-mission-retry", !state.savedMissionHistoryUnavailable || state.savedMissionLoading],
+  ]) {
+    const button = document.getElementById(id);
+    if (button) button.hidden = hidden;
   }
   renderSavedMissionAvailability();
 }
 
 function renderSavedMissionAvailability() {
   if (!ui.openSavedMission) return;
-  const selected = state.savedMissions.find(item => item.mission_id === ui.savedMissionChoice.value);
-  ui.openSavedMission.disabled = !selected?.mission || selected.source !== "persisted";
-  if (ui.savedMissionTarget) {
-    ui.savedMissionTarget.textContent = selected?.mission && selected.source === "persisted"
-      ? savedMissionLabel(selected) : "";
-  }
+  const selected = savedMissionsForProject().find(item => item.mission_id === ui.savedMissionChoice.value);
+  ui.openSavedMission.disabled = !selected;
+  if (ui.savedMissionTarget) ui.savedMissionTarget.textContent = selected ? savedMissionLabel(selected) : "";
+}
+
+function openProjectSavedMissions(projectId) {
+  if (!Object.hasOwn(state.configuration?.projects || {}, projectId)
+      || state.requestingRecommendation || state.savingConfiguration) return;
+  const previousViewRevision = state.viewRevision;
+  prepareGuidedSession({projectId});
+  // A draft or uncertain write may have prevented navigation, even from availability.
+  if (state.view !== "availability" || state.viewRevision === previousViewRevision) return;
+  state.savedMissionProjectId = projectId;
+  renderSavedMissionChoices();
+  const details = document.getElementById("beginner-saved-missions");
+  if (details) { details.hidden = false; details.open = true; }
+  const revision = state.viewRevision;
+  requestAnimationFrame(() => {
+    if (state.view !== "availability" || state.viewRevision !== revision || state.savedMissionProjectId !== projectId) return;
+    const focus = ui.savedMissionChoice.disabled
+      ? document.querySelector("#saved-mission-history-status") : ui.savedMissionChoice;
+    focus.focus();
+    ui.savedMissionEntry.scrollIntoView({block: "center"});
+  });
 }
 
 function invalidateAvailabilityForSiteChange(previousSite, nextSite) {
@@ -8764,10 +8820,24 @@ ui.openMission.addEventListener("click", () => acceptRecommendation({
   triggerButton: ui.openMission,
   selectedTarget: state.currentDecision?.target,
 }));
+document.querySelector("#saved-mission-all").addEventListener("click", () => {
+  if (guardUnresolvedAcceptance()) return;
+  state.savedMissionProjectId = null;
+  renderSavedMissionChoices();
+  if (!ui.savedMissionChoice.disabled) ui.savedMissionChoice.focus();
+});
+document.querySelector("#saved-mission-prepare").addEventListener("click", () => {
+  const projectId = state.savedMissionProjectId;
+  if (projectId && Object.hasOwn(state.configuration?.projects || {}, projectId)) prepareGuidedSession({projectId});
+});
+document.querySelector("#saved-mission-retry").addEventListener("click", () => {
+  if (guardUnresolvedAcceptance() || state.savedMissionLoading || state.requestingRecommendation || state.savingConfiguration) return;
+  void restoreSavedMission({preserveActiveMission: true});
+});
 ui.savedMissionChoice.addEventListener("change", renderSavedMissionAvailability);
 ui.openSavedMission.addEventListener("click", () => {
-  const selected = state.savedMissions.find((item) => item.mission_id === ui.savedMissionChoice.value);
-  if (!selected?.mission || selected.source !== "persisted") return;
+  const selected = savedMissionsForProject().find(item => item.mission_id === ui.savedMissionChoice.value);
+  if (!selected || guardUnresolvedAcceptance()) return;
   state.acceptedMission = selected;
   renderMission(state.acceptedMission.mission);
   ui.mission.showModal();

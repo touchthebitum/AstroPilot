@@ -157,7 +157,7 @@ assert.deepEqual(filterCardCopy({selected_filter: null}), {
 
 
 def test_saved_mission_restores_only_from_server_without_acceptance():
-    helpers = _javascript_between("function beginConfigurationOperation()", "function currentDecisionMatchesSite()") + _javascript_between("async function restoreSavedMission() {", "function invalidateAvailabilityForSiteChange(")
+    helpers = _javascript_between("function beginConfigurationOperation()", "function currentDecisionMatchesSite()") + _javascript_between("async function restoreSavedMission(", "function invalidateAvailabilityForSiteChange(")
     _run_javascript("""
 const assert = require('node:assert/strict');
 const state = {acceptedMission: null};
@@ -165,7 +165,7 @@ const entry = {hidden: true};
 const choice = {value: '', children: [], replaceChildren() { this.children = []; },
   append(item) { this.children.push(item); }};
 const ui = {savedMissionEntry: entry, savedMissionTarget: {textContent: ''}, savedMissionChoice: choice};
-const document = {querySelector() { return {hidden: true, textContent: ''}; }, createElement() { return {value: '', textContent: ''}; }};
+const document = {getElementById() { return null; }, querySelector() { return {hidden: true, textContent: ''}; }, createElement() { return {value: '', textContent: ''}; }};
 let calls = [];
 let changeConfiguration = false;
 let payload = {status: 'accepted', mission_id: 'mission-1', selection_id: 'selection-1',
@@ -199,7 +199,7 @@ async function fetch(url, options) {
 
 def test_configuration_changes_invalidate_restored_mission():
     initialize = _javascript_between("function setConfigurationDraft(", "function restoreNewProjectEmptyConfirmation(")
-    initialize += _javascript_between("function initializeConfiguration(payload) {", "async function restoreSavedMission() {")
+    initialize += _javascript_between("function initializeConfiguration(payload) {", "async function restoreSavedMission(")
     save = _javascript_between("async function saveConfiguration(", "const availabilityFieldsByMode")
     _run_javascript("""
 const assert = require('node:assert/strict');
@@ -298,7 +298,7 @@ clearAcceptedMission = () => {invalidations++; clearCurrentAnalysis();};
 
 
 def test_reopening_saved_mission_does_not_post_acceptance():
-    listener = _javascript_between('ui.openSavedMission.addEventListener("click", () => {', 'document.querySelector("#session-choice").addEventListener(')
+    listener = _javascript_between('function savedMissionsForProject()', 'function renderSavedMissionChoices()') + _javascript_between('ui.openSavedMission.addEventListener("click", () => {', 'document.querySelector("#session-choice").addEventListener(')
     _run_javascript("""
 const assert = require('node:assert/strict');
 let openSavedMission;
@@ -308,6 +308,7 @@ const state = {acceptedMission: saved, savedMissions: [saved]};
 const ui = {openSavedMission: {addEventListener(event, callback) { openSavedMission = callback; }},
   savedMissionChoice: {value: 'saved'}, mission: {showModal() { shown++; }}};
 function renderMission(mission) { assert.equal(mission, saved.mission); }
+function guardUnresolvedAcceptance() { return false; }
 function fetch() { throw new Error('reopening must not make a request'); }
 """ + listener + """
 openSavedMission();
@@ -686,7 +687,7 @@ async function exerciseUniqueAndLegacy() {
 
 
 def test_saved_mission_button_availability_and_visual_states():
-    helpers = _javascript_between('function renderSavedMissionAvailability()', 'function invalidateAvailabilityForSiteChange(')
+    helpers = _javascript_between('function savedMissionsForProject()', 'function renderSavedMissionChoices()') + _javascript_between('function renderSavedMissionAvailability()', 'function invalidateAvailabilityForSiteChange(')
     _run_javascript("""
 const assert = require('node:assert/strict');
 const ui = {openSavedMission: {disabled: false}, savedMissionChoice: {value: ''}};

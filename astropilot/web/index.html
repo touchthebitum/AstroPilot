@@ -334,11 +334,16 @@
             <button id="discovery-review-equipment" class="secondary-button" type="button" hidden>Revoir mon matériel</button>
           </fieldset>
           <div id="saved-mission-entry" class="saved-mission-entry" hidden>
-            <div><strong>Plans de séance enregistrés</strong><p id="saved-mission-target"></p>
+            <div><strong id="saved-mission-heading">Plans de séance enregistrés</strong><p id="saved-mission-target"></p>
               <label for="saved-mission-choice">Choisir un plan de séance</label>
               <select id="saved-mission-choice"></select>
-              <p id="saved-mission-history-status" role="status" hidden></p></div>
-            <button class="mission-button" id="open-saved-mission" type="button" disabled>Ouvrir ce plan</button>
+              <p id="saved-mission-history-status" role="status" tabindex="-1" hidden></p></div>
+            <div class="saved-mission-actions">
+              <button class="mission-button" id="open-saved-mission" type="button" disabled>Ouvrir ce plan</button>
+              <button class="secondary-button" id="saved-mission-all" type="button" hidden>Voir tous mes plans</button>
+              <button class="secondary-button" id="saved-mission-prepare" type="button" hidden>Préparer une séance sur ce projet</button>
+              <button class="secondary-button" id="saved-mission-retry" type="button" hidden>Réessayer la lecture des plans</button>
+            </div>
           </div>
           <fieldset class="availability-modes">
             <legend>Ma disponibilité</legend>

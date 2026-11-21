@@ -331,7 +331,7 @@ def test_saved_missions_include_expired_sessions_and_open_selected_mission():
     if node is None:
         pytest.skip("Node.js is required for the dynamic UI test")
     source = SCRIPT.read_text(encoding="utf-8")
-    restore = source[source.index('function configurationOperationIsCurrent('):source.index('function installCurrentConfiguration(')] + source[source.index('async function restoreSavedMission()'):source.index('function invalidateAvailabilityForSiteChange')]
+    restore = source[source.index('function configurationOperationIsCurrent('):source.index('function installCurrentConfiguration(')] + source[source.index('async function restoreSavedMission('):source.index('function invalidateAvailabilityForSiteChange')]
     open_handler = source[source.index('ui.openSavedMission.addEventListener'):source.index('document.querySelector("#session-choice").addEventListener')]
     harness = r'''
 const assert = require('node:assert/strict');
@@ -344,11 +344,12 @@ class Element {
 const ui = {savedMissionEntry: new Element(), savedMissionChoice: new Element(),
   savedMissionTarget: new Element(), openSavedMission: new Element(), mission: {showModal() { opened = true; }}};
 const historyStatus = new Element();
-const document = {createElement() { return new Element(); }, querySelector() { return historyStatus; }};
+const document = {getElementById() { return null; }, createElement() { return new Element(); }, querySelector() { return historyStatus; }};
 function savedMissionLabel(item) { return item.mission.target; }
 const state = {configuration: {}, acceptedMission: null, savedMissions: []};
 let opened = false, rendered = null;
 function renderMission(mission) { rendered = mission; }
+function guardUnresolvedAcceptance() { return false; }
 const mission = (id, target, window_start) => ({mission_id: id, selection_id: `s-${id}`,
   decision_id: `d-${id}`, target, window_start});
 const old = mission('old', 'Ancienne mission', '2026-08-01T20:00:00Z');
@@ -610,7 +611,7 @@ def test_saved_mission_labels_reopen_persisted_filters_and_credits(tmp_path, mon
     source = SCRIPT.read_text(encoding="utf-8")
     helpers = source[source.index("function missionTimezone("):source.index("function clock(")]
     restore = (source[source.index("function configurationOperationIsCurrent("):source.index("function installCurrentConfiguration(")]
-               + source[source.index("async function restoreSavedMission()"):source.index("function invalidateAvailabilityForSiteChange")])
+               + source[source.index("async function restoreSavedMission("):source.index("function invalidateAvailabilityForSiteChange")])
     session_helpers = source[source.index("const SESSION_PENDING_KEY ="):source.index("async function reloadSessions")]
     open_handler = source[source.index("ui.openSavedMission.addEventListener"):source.index('document.querySelector("#session-choice").addEventListener')]
     harness = r'''
@@ -622,7 +623,7 @@ class Element {
   addEventListener(_name, handler) { this.handler = handler; }
 }
 const elements = new Map();
-const document = {createElement: () => new Element(), querySelector(selector) {
+const document = {getElementById: () => null, createElement: () => new Element(), querySelector(selector) {
   if (!elements.has(selector)) elements.set(selector, new Element()); return elements.get(selector);
 }};
 const ui = {savedMissionEntry: new Element(), savedMissionChoice: new Element(),
@@ -634,6 +635,7 @@ const localStorage = {getItem: () => null, setItem() { throw Error('Unexpected w
 function text(selector, value) { document.querySelector(selector).textContent = value; }
 function renderObservationLinkage() {}
 let opened = 0;
+function guardUnresolvedAcceptance() { return false; }
 function renderMission(mission) {
   state.sessions = persisted.filter(s => s.mission_id === mission.mission_id);
   assert.equal(state.sessions.length, 1);
