@@ -11,7 +11,7 @@ def test_analysis_wait_bounds_body_and_ignores_late_replies(tmp_path):
     if not node:
         pytest.skip('Node required for actual UI deadline logic')
     source = (Path(__file__).parents[2] / 'astropilot/web/app.js').read_text()
-    function = source[source.index('async function loadTonight('):source.index('document.querySelector("#site-next").addEventListener')]
+    function = source[source.index('function analysisFailureMessage('):source.index('document.querySelector("#site-next").addEventListener')]
     program = r'''
 const assert=require('node:assert/strict');
 let timers=new Map(),sequence=0;
@@ -26,6 +26,7 @@ let requests=0,rendered=[],clears=0,lastSignal,transport,lastBody;
 // Weather rendering is exercised by saved-plan weather tests.
 function saveMissionWeatherCheck() {}
 function guardUnresolvedAcceptance(){return false;}
+function configurationDraftMatchesSaved(){return true;}
 function decisionSiteFingerprint(){return 'retained';}
 function showAvailabilityError(value){state.error=value;}
 function setView(view){state.view=view;state.viewRevision++;}
@@ -52,7 +53,7 @@ const response=id=>({ok:true,json:async()=>({status:'available',decision_id:id})
  assert.equal(state.requestingRecommendation,false);assert.match(state.error,/90 secondes/);
  assert.deepEqual(state.availability,availability);assert.equal(clears,0);
  assert.equal(ui.recommendationSubmit.disabled,false);assert.equal(ui.refresh.disabled,false);
- assert.equal(timers.size,0);
+ assert.equal(timers.size,0);assert.match(state.error,/Aucun nouveau résultat/);assert(!state.error.includes('refus précédent'));
  // A new response succeeds; the abandoned old response must not replace it.
  state.selectedProjectId='M42';
  transport=async()=>response('new');await loadTonight(availability);
@@ -68,7 +69,9 @@ const response=id=>({ok:true,json:async()=>({status:'available',decision_id:id})
  release(response('late'));await flush();assert.deepEqual(rendered,['new']);assert.equal(clears,2);
  // The same deadline includes a body that never finishes decoding.
  let releaseBody;transport=async()=>({ok:true,json:()=>new Promise(r=>releaseBody=r)});
+ state.refusedSearchResume={};
  const body=loadTonight(availability);await flush();fire(90000);await body;
+ assert.match(state.error,/Le refus précédent n’a pas été réévalué/);
  releaseBody({status:'available',decision_id:'late-body'});await flush();
  assert.deepEqual(rendered,['new']);assert.equal(timers.size,0);
  // Leaving the screen prevents the delayed notice or timeout from navigating back.
