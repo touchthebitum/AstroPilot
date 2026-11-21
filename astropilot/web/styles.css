@@ -1219,3 +1219,7 @@ html[data-ui-mode="simple"] #project-create:not([open]) { display: none; }
 .project-continuation h3 { margin-top: 0; }
 .project-continuation p { line-height: 1.6; }
 .project-continuation button { min-height: 44px; white-space: normal; }
+
+.search-resume { margin-block: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; }
+.search-resume h3 { margin-top: 0; }
+.search-resume p { line-height: 1.6; overflow-wrap: anywhere; }
