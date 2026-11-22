@@ -721,6 +721,20 @@
         </div>
       </dialog>
 
+      <dialog id="manual-start-dialog" aria-labelledby="manual-start-title" aria-describedby="manual-start-explanation manual-start-reason">
+        <h2 id="manual-start-title">Météo non confirmée</h2>
+        <p id="manual-start-plan"></p>
+        <p id="manual-start-reason" role="status"></p>
+        <p id="manual-start-date" class="hint"></p>
+        <p id="manual-start-refusal" hidden></p>
+        <p id="manual-start-explanation">Vous allez déclarer le début d’une séance dans NightMerit. Les conditions de ce plan ne sont pas confirmées. NightMerit ne commande pas votre matériel et ne vérifie pas que les prises de vue ont commencé. Cette déclaration ne change pas le résultat météo et n’ajoute aucun temps acquis.</p>
+        <div class="manual-start-actions">
+          <button class="secondary-button" id="manual-start-cancel" type="button" autofocus>Annuler</button>
+          <button class="secondary-button" id="manual-start-recheck" type="button">Revérifier la météo</button>
+          <button class="primary-button" id="manual-start-confirm" type="button">Déclarer un démarrage manuel</button>
+        </div>
+      </dialog>
+
       <dialog class="observation-dialog" id="saved-observations-dialog" aria-labelledby="saved-observations-title">
         <div class="observation-surface">
           <header class="observation-heading"><h2 id="saved-observations-title">Mes observations</h2><button class="secondary-button" id="saved-observations-close" type="button">Fermer</button></header>
