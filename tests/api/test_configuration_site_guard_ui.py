@@ -47,6 +47,8 @@ const wizardStates = ["site", "equipment", "projects", "review"];
 function requestAnimationFrame(callback) {callback();}
 function invalidateOutcomeHistory() {}
 let opened = 0, rendered = 0, queue = [];
+// No manual-start dialog is open in these configuration/acceptance races.
+const manualStartUI = {pending: null};
 const ui = {availabilityTimezoneWarning: element(), addObservationMessage: element(), addObservationDecision: element(),
   configurationLoading: element(), configurationError: element(), availability: element(), availabilityError: element(),
   loading: element(), message: element(), pendingAcceptance: element(), decision: element(),
