@@ -6928,13 +6928,17 @@ function addSimpleDurationFields(section, mode, manual, update, locked, advanced
   enter.type = "button"; enter.className = "secondary-button";
   enter.textContent = "Renseigner une durée totale connue";
   enter.disabled = locked;
+  let reflectedSeconds = null, reflectedHours = null, reflectedMinutes = null;
   const reflect = () => {
     fields.hidden = mode.value !== "manual";
     enter.hidden = mode.value !== "unknown";
     const seconds = Number(manual.querySelector("input").value);
     const known = manual.querySelector("input").value !== "" && Number.isFinite(seconds) && seconds >= 0;
     h.value = known ? Math.floor(seconds / 3600) : "";
-    m.value = known ? Number(((seconds % 3600) / 60).toFixed(6)) : "";
+    m.value = known ? (seconds % 3600) / 60 : "";
+    reflectedSeconds = known ? seconds : null;
+    reflectedHours = known ? Number(h.value) : null;
+    reflectedMinutes = known ? Number(m.value) : null;
     info.textContent = locked ? "Ce temps est conservé et verrouillé car des séances ont déjà été ajoutées au projet. Pour ajouter une nouvelle séance, retrouvez sa session NightMerit depuis Mes projets."
       : mode.value === "detailed" ? "Ce temps est calculé à partir du nombre de poses conservées et de leur durée."
       : mode.value === "unknown" ? "Ce temps n’est pas encore renseigné. Si vous commencez sans images, cliquez sur « Renseigner une durée totale connue », puis saisissez 0 heure et 0 minute."
@@ -6945,7 +6949,11 @@ function addSimpleDurationFields(section, mode, manual, update, locked, advanced
     const wholeHours = Number(h.value), extraMinutes = Number(m.value);
     original.value = h.value !== "" && m.value !== "" && Number.isInteger(wholeHours) && wholeHours >= 0
       && Number.isFinite(extraMinutes) && extraMinutes >= 0 && extraMinutes < 60
-      ? wholeHours * 3600 + extraMinutes * 60 : "";
+      ? reflectedSeconds !== null && extraMinutes === reflectedMinutes
+        // An unchanged minutes field must not round-trip fractional seconds.
+        ? wholeHours === reflectedHours ? reflectedSeconds
+          : wholeHours * 3600 + (reflectedSeconds % 3600)
+        : wholeHours * 3600 + extraMinutes * 60 : "";
     update();
   };
   h.addEventListener("input", change); m.addEventListener("input", change);

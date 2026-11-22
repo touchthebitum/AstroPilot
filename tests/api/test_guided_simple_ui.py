@@ -53,6 +53,16 @@ assert.equal(Number(a.h.value),1);
 assert.equal(Number(a.m.value),(1800.5/60));
 a.mode.listeners.change();
 assert.equal(Number(a.manual.value),5400.5,'a view refresh must not round or overwrite seconds');
+a.h.value='2';a.h.listeners.input();
+assert.equal(Number(a.manual.value),9000.5,'editing only hours must preserve fractional seconds');
+const precise=make(5400.123456789123);
+precise.m.listeners.input();
+assert.equal(Number(precise.manual.value),5400.123456789123,'unchanged input events must preserve the exact stored seconds');
+precise.h.value='2';precise.h.listeners.input();
+assert.equal(Number(precise.manual.value),9000.123456789123,'hour-only edits preserve the original seconds remainder');
+precise.h.value='1';precise.h.listeners.input();
+assert.equal(Number(precise.manual.value),5400.123456789123,'returning to the original hours preserves exact duration');
+
 a.h.value='2';a.m.value='15';a.m.listeners.input();
 assert.equal(Number(a.manual.value),8100);
 a.m.value='60';a.m.listeners.input();assert.equal(a.manual.value,'','invalid minutes must not become a duration');
