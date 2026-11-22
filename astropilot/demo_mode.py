@@ -58,14 +58,15 @@ def simulated_weather(lat: float, lon: float, zone_name: str):
     return replace(snapshot, provider=PROVIDER)
 
 
-def main(*, port: int = 18831, open_browser: bool = True) -> None:
+def main(*, port: int = 18831, open_browser: bool = True, isolated_candidate: bool = False) -> None:
     import os
     import socket
     import threading
     import webbrowser
     import uvicorn
 
-    if type(port) is not int or port not in (18831, 18837, 18841):
+    if type(port) is not int or (port not in (18831, 18837, 18841)
+            and not (isolated_candidate is True and 20000 <= port <= 65535)):
         raise SystemExit('Port de démonstration non autorisé.')
     raw = os.environ.get('ASTROPILOT_DATA_DIR', '')
     if not raw or not Path(raw).is_absolute():

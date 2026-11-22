@@ -3,6 +3,15 @@ import sys
 
 
 def main():
+    if sys.argv[1:2] and sys.argv[1] in {
+        "--isolated-test-server", "--isolated-demo-server",
+        "--isolated-data-transfer", "--isolated-demo-transfer",
+    }:
+        if len(sys.argv) != 3:
+            raise SystemExit("Un port isolé explicite est obligatoire.")
+        from astropilot.isolated_runtime import main as isolated_main
+        isolated_main(sys.argv[1], sys.argv[2])
+        return 0
     if sys.argv[1:] == ["--demo-isolated-test-18841"]:
         from astropilot.demo_mode import main as demo_main
         demo_main(port=18841, open_browser=False)
