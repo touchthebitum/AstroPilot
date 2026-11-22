@@ -4106,6 +4106,7 @@ function setView(view) {
   ui.configurationError.hidden = view !== "configuration_error";
   ui.onboarding.hidden = !wizardVisible;
   ui.availability.hidden = !["availability", "review"].includes(view);
+  ui.availabilityError.hidden = view !== "availability" || !ui.availabilityError.textContent;
   document.querySelector("#review-step").hidden = !["review", "availability"].includes(view) || !state.configurationDraft?.site;
   document.querySelector("#review-configuration-actions").hidden = view !== "review";
   if (["review", "availability"].includes(view) && state.configurationDraft?.site) renderReview();
@@ -8603,6 +8604,10 @@ async function acceptRecommendation({
   }
 }
 
+function analysisFailureMessage(reason, afterRefusal) {
+  return `${afterRefusal ? "La relance" : "L’analyse"} n’a pas abouti. Aucun nouveau résultat n’a été obtenu. ${afterRefusal ? "Le refus précédent n’a pas été réévalué. " : ""}Vos horaires et vos réglages sont conservés. ${reason}`;
+}
+
 async function loadTonight(availability) {
   if (guardUnresolvedAcceptance()) return;
   if (state.decisionSiteReloadRequired) {
@@ -8640,6 +8645,7 @@ async function loadTonight(availability) {
     && availability.preparation_minutes === missionOperationalMinutes(candidateRecheck.accepted.mission).preparation
     && availability.flats_minutes === missionOperationalMinutes(candidateRecheck.accepted.mission).flats
       ? structuredClone(candidateRecheck) : null;
+  const afterRefusal = Boolean(state.refusedSearchResume);
   state.requestingRecommendation = true;
   state.refusedSearchResume = null;
   state.availability = { ...availability };
@@ -8728,7 +8734,10 @@ async function loadTonight(availability) {
         return;
       }
       const [title, body] = normalizeError(response, payload);
-      showAvailabilityError(`${title} ${body}`);
+      const weatherFailure = response.status === 503
+        && ["weather_unavailable", "weather_invalid", "weather_insufficient", "weather_stale"].includes(payload?.detail?.code);
+      showAvailabilityError(weatherFailure
+        ? analysisFailureMessage(`${title} ${body}`, afterRefusal) : `${title} ${body}`);
       setView("availability");
       return;
     }
@@ -8754,9 +8763,9 @@ async function loadTonight(availability) {
   } catch (_error) {
     if (!isCurrent()) return;
     saveMissionWeatherCheck(recheck, null);
-    showAvailabilityError(deadlineExceeded
-      ? "L’analyse n’a pas répondu après 90 secondes. Vos horaires sont conservés ; réessayez dans un instant."
-      : "Connexion impossible. Vos horaires sont conservés ; réessayez dans un instant.");
+    showAvailabilityError(analysisFailureMessage(deadlineExceeded
+      ? "L’analyse n’a pas répondu après 90 secondes. Réessayez dans un instant."
+      : "Connexion impossible. Réessayez dans un instant.", afterRefusal));
     setView("availability");
   } finally {
     clearTimeout(slowTimer);

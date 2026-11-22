@@ -48,7 +48,7 @@ function requestAnimationFrame(callback) {callback();}
 function invalidateOutcomeHistory() {}
 let opened = 0, rendered = 0, queue = [];
 const ui = {availabilityTimezoneWarning: element(), addObservationMessage: element(), addObservationDecision: element(),
-  configurationLoading: element(), configurationError: element(), availability: element(),
+  configurationLoading: element(), configurationError: element(), availability: element(), availabilityError: element(),
   loading: element(), message: element(), pendingAcceptance: element(), decision: element(),
   editAvailability: element(), editConfiguration: element(), recommendationSubmit: element(), refresh: element(), configurationRecover: element(), configurationRecoveryConfirm: element(),
   configurationRecoveryConfirmation: element(), onboarding: element(),
