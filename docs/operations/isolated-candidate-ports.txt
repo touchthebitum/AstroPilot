@@ -1,0 +1,20 @@
+CANDIDAT MAC — PORTS ISOLÉS EXPLICITES
+
+Modes opt-in du binaire :
+  --isolated-test-server PORT : application, fournisseur habituel.
+  --isolated-demo-server PORT : profil fictif et fournisseur simulé.
+  --isolated-data-transfer PORT : sauvegarde/restauration du profil explicite.
+  --isolated-demo-transfer PORT : assistant pour profil de démonstration.
+
+PORT est un entier ASCII de 20000 à 65535. ASTROPILOT_DATA_DIR doit être
+un chemin absolu dédié. Les modes serveur et assistant réservent leur port
+avant toute initialisation des données ; un port occupé est refusé, sans
+recherche de propriétaire, requête HTTP, arrêt ou réutilisation du service.
+Ils n’ouvrent pas de navigateur automatiquement. Le lanceur du kit candidat
+choisit le profil et ouvre sa propre URL après vérification de l’identité.
+Les anciens modes et ports restent inchangés.
+
+Le mode test-server utilise le fournisseur habituel et ne doit donc être
+exercé sans collecte que derrière une fixture locale et un blocage réseau
+sortant. Le kit de démonstration utilise demo-server, jamais test-server.
+Une météo simulée ne valide aucune décision d’observation réelle.
