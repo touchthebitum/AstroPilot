@@ -74,8 +74,9 @@ def test_explicit_demo_runtime_identifies_fictitious_copy_without_managed_sessio
     monkeypatch.setenv('NIGHTMERIT_COPY_KIND', 'personal')
     import astropilot.demo_mode as demo_mode
     monkeypatch.setattr(demo_mode, '_active', True)
-    app = create_transfer_app(directory=tmp_path / 'fictitious', demo=True) if assistant else create_app()
+    app = create_transfer_app(directory=tmp_path / 'fictitious', origin='http://testserver', demo=True) if assistant else create_app()
     response = TestClient(app).get('/ui/copy-identity.js')
+    assert response.status_code == 200
     identity = json.loads(response.text.split('=', 1)[1].split(';\n', 1)[0])
     assert identity == {'kind': 'demonstration', 'label': 'Essai fictif — météo simulée',
                         'name': 'Démonstration locale — données fictives uniquement'}

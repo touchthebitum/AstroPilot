@@ -1,4 +1,4 @@
-"""Copy provenance is launcher metadata, never inferred from weather or profile data."""
+"""Copy identity uses launcher metadata or explicit demo runtime, never forecast or profile data."""
 import json
 import os
 from pathlib import Path
