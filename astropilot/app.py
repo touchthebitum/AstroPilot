@@ -2147,7 +2147,8 @@ def create_app(
     from astropilot.launcher_context import LaunchSession, DIAGNOSTIC_ROUTES, blocked_response
     launch_session = LaunchSession.from_environment()
     from astropilot.copy_identity import capture_copy_identity, identity_script
-    copy_identity = capture_copy_identity(launch_session)
+    from astropilot.demo_mode import context as demo_context
+    copy_identity = capture_copy_identity(launch_session, demonstration=demo_context()["enabled"])
     resolved_service = None
     guardian_adapter = None
     renewal_enabled = (os.environ.get("ASTROPILOT_GUARDIAN_EXPLICIT_RENEWAL") == "1"

@@ -6158,6 +6158,38 @@ function progressInput(label, value, field, type = "number") {
   return wrapper;
 }
 
+function projectGoalInput(targetHours) {
+  const wrapper = document.createElement("fieldset");
+  wrapper.dataset.goalDuration = "true";
+  const legend = document.createElement("legend");
+  legend.textContent = "Objectif total sur plusieurs nuits";
+  // Preserve the exact stored value until the user edits the visible duration.
+  const canonical = document.createElement("input");
+  canonical.type = "hidden"; canonical.dataset.field = "target_hours";
+  canonical.value = targetHours ?? "";
+  const known = Number.isFinite(targetHours) && targetHours > 0;
+  let whole = known ? Math.floor(targetHours) : "";
+  let remainder = known ? Number(((targetHours - whole) * 60).toFixed(6)) : "";
+  if (remainder === 60) { whole += 1; remainder = 0; }
+  const hours = progressInput("Heures ", whole, "goal_hours");
+  const minutes = progressInput("Minutes ", remainder, "goal_minutes");
+  const h = hours.querySelector("input"), m = minutes.querySelector("input");
+  h.step = "1"; m.max = "59.999999";
+  const update = () => {
+    if (h.value === "" && m.value === "") canonical.value = "";
+    else {
+      const hv = Number(h.value), mv = Number(m.value);
+      canonical.value = h.value !== "" && m.value !== "" && Number.isInteger(hv) && hv >= 0
+        && Number.isFinite(mv) && mv >= 0 && mv < 60 ? hv + mv / 60 : "NaN";
+    }
+    canonical.dispatchEvent(new Event("input", {bubbles: true}));
+  };
+  h.addEventListener("input", update); m.addEventListener("input", update);
+  const fields = document.createElement("div"); fields.className = "form-grid two-columns";
+  fields.append(hours, minutes); wrapper.append(canonical, legend, fields);
+  return wrapper;
+}
+
 async function openProjectProgress(projectId, { discardConfirmed = false, discoveryIntentId = null } = {}) {
   if (!discardConfirmed && !confirmDiscardProjectProgress()) return;
   const editor = document.querySelector("#project-progress-editor");
@@ -6260,10 +6292,10 @@ function renderProjectProgressEditor(message = "") {
       const frames = progressInput("Poses acquises ", progress?.acquired_frames, "acquired_frames");
       const exposure = progressInput("Secondes par pose ", progress?.exposure_seconds, "exposure_seconds");
       const manual = progressInput("Durée acquise (secondes) ", progress?.acquired_duration_manual, "acquired_duration_manual");
-      const hours = progressInput("Objectif total sur plusieurs nuits (heures) ", target?.target_hours, "target_hours");
+      const hours = projectGoalInput(target?.target_hours);
       const goalSummary = document.createElement("p");
       goalSummary.dataset.proOnly = "true";
-      const updateGoalSummary = () => {goalSummary.textContent = hours.querySelector("input").value !== "" ? `Votre objectif total : ${hours.querySelector("input").value} h, sur une ou plusieurs nuits.` : "Indiquez votre objectif total pour ce filtre.";};
+      const updateGoalSummary = () => {goalSummary.textContent = hours.querySelector("input").value !== "" ? `Votre objectif total : ${progressDuration(Number(hours.querySelector("input").value) * 3600)}, sur une ou plusieurs nuits.` : "Indiquez votre objectif total pour ce filtre.";};
       hours.querySelector("input").addEventListener("input", updateGoalSummary);
       updateGoalSummary();
       const computed = document.createElement("output");
@@ -6902,7 +6934,7 @@ function addSimpleDurationFields(section, mode, manual, update, locked, advanced
     const seconds = Number(manual.querySelector("input").value);
     const known = manual.querySelector("input").value !== "" && Number.isFinite(seconds) && seconds >= 0;
     h.value = known ? Math.floor(seconds / 3600) : "";
-    m.value = known ? (seconds % 3600) / 60 : "";
+    m.value = known ? Number(((seconds % 3600) / 60).toFixed(6)) : "";
     info.textContent = locked ? "Ce temps est conservé et verrouillé car des séances ont déjà été ajoutées au projet. Pour ajouter une nouvelle séance, retrouvez sa session NightMerit depuis Mes projets."
       : mode.value === "detailed" ? "Ce temps est calculé à partir du nombre de poses conservées et de leur durée."
       : mode.value === "unknown" ? "Ce temps n’est pas encore renseigné. Si vous commencez sans images, cliquez sur « Renseigner une durée totale connue », puis saisissez 0 heure et 0 minute."

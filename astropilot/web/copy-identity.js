@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   const identity = globalThis.NightMeritCopyIdentity || {};
-  const labels = {personal:'Personnel', fictitious:'Essai fictif'};
+  const labels = {personal:'Personnel', fictitious:'Essai fictif', demonstration:'Essai fictif — météo simulée'};
   const kind = Object.prototype.hasOwnProperty.call(labels, identity.kind) ? identity.kind : 'unidentified';
   const label = labels[kind] || 'Copie non identifiée';
   function render() {
@@ -9,7 +9,7 @@
     const style = document.createElement('style');
     style.textContent = `
 #copy-identity-banner { position:sticky; top:0; z-index:900; display:flex; align-items:center; gap:.7rem; flex-wrap:wrap; width:100%; box-sizing:border-box; margin:0; padding:.55rem max(1rem,env(safe-area-inset-left)); background:#112536; color:#f2f7fc; border-bottom:2px solid #69b8f5; font:14px/1.45 system-ui,sans-serif; }
-#copy-identity-banner[data-copy-kind="fictitious"] { background:#302513; border-color:#ffd17a; }
+#copy-identity-banner[data-copy-kind="fictitious"], #copy-identity-banner[data-copy-kind="demonstration"] { background:#302513; border-color:#ffd17a; }
 #copy-identity-banner[data-copy-kind="unidentified"] { background:#302323; border-color:#f4aaaa; }
 #copy-identity-banner .copy-kind { flex-shrink:0; font-weight:750; }
 #copy-identity-banner .copy-name { min-width:0; flex:1 1 12rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; color:#dce6ef; }
