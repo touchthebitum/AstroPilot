@@ -435,8 +435,9 @@ function renderSession() {
   choice.value = session?.execution.execution_id || "";
   const intentId = session?.acquisition_intent_id || state.acceptedMission?.acquisitionIntentId;
   text("#session-intent", `Intent de la mission : ${intentId || "non défini"}`);
+  const blockingSession = state.sessions.find(item => ["in_progress", "unconfirmed"].includes(item.execution?.status));
   document.querySelector("#session-start").hidden = state.missionConditionsReady === false
-    || (!session && state.sessions.some(item => ["in_progress", "unconfirmed"].includes(item.execution.status)))
+    || Boolean(blockingSession)
     || Boolean(session) && (!knownStatus || status === "in_progress" || status === "unconfirmed");
   document.querySelector("#session-start").textContent = status === "not_started"
     ? "Démarrer cette séance photo" : "Démarrer une nouvelle séance photo";
@@ -466,7 +467,12 @@ function renderSession() {
               : evidence
                 ? "La durée utilisable est enregistrée, mais pas encore ajoutée au projet. Vérifiez les valeurs, puis cliquez sur « Ajouter cette durée à mon avancement »."
                 : "Séance photo terminée : renseignez ci-dessous le temps de pose des images utilisables de cette séance. Si aucune image n’est utilisable, n’ajoutez aucune durée au projet.";
-  text("#session-next-step", nextStep);
+  const startGuidance = blockingSession && blockingSession !== session
+    ? blockingSession.execution.status === "in_progress"
+      ? "Une autre séance de ce plan est en cours. Sélectionnez-la dans la liste des séances pour la reprendre ou la terminer avant de démarrer une nouvelle séance."
+      : "Une autre séance de ce plan reste non confirmée. Sélectionnez-la dans la liste des séances et vérifiez son état avant de démarrer une nouvelle séance."
+    : "";
+  text("#session-next-step", [startGuidance, nextStep].filter(Boolean).join(" "));
   document.querySelector("#session-credit").hidden = status !== "completed" || !evidence || Boolean(session.credit);
   document.querySelector("#session-apply-credit").disabled = state.sessionBusy || status !== "completed";
   if (status === "completed" && evidence && !session.credit) {

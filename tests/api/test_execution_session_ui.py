@@ -441,6 +441,24 @@ for (const [status, evidence, credit, primary] of [
   assert.equal(document.querySelector('#session-start').hidden, ['in_progress','unconfirmed','unknown'].includes(status));
   assert.equal(document.querySelector('#session-close-actions').hidden, status !== 'in_progress');
 }
+// A historical selection must not offer a silent no-op while another session blocks starts.
+for (const historicalStatus of ['completed', 'interrupted', 'not_started']) {
+  for (const blockingStatus of ['in_progress', 'unconfirmed']) {
+    selected.execution.status = historicalStatus;
+    const other = state.sessions[1];
+    other.execution.status = blockingStatus;
+    const before = JSON.stringify(state.sessions);
+    renderSession();
+    assert.equal(document.querySelector('#session-start').hidden, true);
+    assert.match(document.querySelector('#session-next-step').textContent,
+      blockingStatus === 'in_progress' ? /autre séance.*en cours.*Sélectionnez-la/s : /autre séance.*non confirmée.*Sélectionnez-la/s);
+    assert.equal(JSON.stringify(state.sessions), before, 'presentation must preserve sessions and credits');
+    other.execution.status = 'completed';
+    renderSession();
+    assert.equal(document.querySelector('#session-start').hidden, false, 'start returns when no session blocks it');
+    assert.doesNotMatch(document.querySelector('#session-next-step').textContent, /Une autre séance/);
+  }
+}
 assert.equal(sessionStatus('completed'), 'Terminée');
 assert.equal(sessionStatus('interrupted'), 'Interrompue');
 assert.doesNotMatch(document.querySelector('#session-credit-preview').textContent, /intent|sh2|ha/i);
