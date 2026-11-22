@@ -196,8 +196,10 @@ const storage = new Map();
 const localStorage = {getItem: key => storage.get(key) || null,
   setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key)};
 const crypto = {randomUUID: () => 'new-id'};
-const state = {acceptedMission: {mission_id: 'mission-1', acquisitionIntentId: 'ha'},
-  sessions: [], activeSessionId: null, sessionBusy: false};
+const ui = {mission:{open:true}};
+function decisionSiteFingerprint(){return 'fictitious-site';}
+const state = {acceptedMission: {mission_id: 'mission-1', acquisitionIntentId: 'ha', mission:{}},
+  missionConditionsReady:true, missionWeatherChecks:{}, sessions: [], activeSessionId: null, sessionBusy: false};
 let status = 409, lost = false, writes = 0;
 let canonical = {execution: {execution_id: 'execution-1', mission_id: 'mission-1', status: 'not_started',
   actual_start: null}, acquisition_intent_id: 'ha', evidence: [], credit: null,
@@ -219,7 +221,7 @@ async function fetch(url, options) {
   assert.match(sessionRefusalMessage({status:503,code:'intent_progress_persistence_unavailable'}), /Enregistrement de la progression non confirmé/);
   assert.doesNotMatch(sessionRefusalMessage({status:503,code:'intent_progress_persistence_unavailable'}), /incohérentes/);
   const actions = [
-    {name: 'start', command: startSession, sessionStatus: 'not_started'},
+    {name: 'start', command: id => startSession(id, captureManualStart()), sessionStatus: 'not_started'},
     {name: 'complete', command: (id) => closeSession(id, 'completed'), sessionStatus: 'in_progress'},
     {name: 'interrupt', command: (id) => closeSession(id, 'interrupted'), sessionStatus: 'in_progress'},
     {name: 'credit', command: creditSession, sessionStatus: 'completed', evidence: true},
@@ -438,6 +440,24 @@ for (const [status, evidence, credit, primary] of [
   assert.equal(document.querySelector('#session-credit').hidden, status !== 'completed' || !evidence || credit);
   assert.equal(document.querySelector('#session-start').hidden, ['in_progress','unconfirmed','unknown'].includes(status));
   assert.equal(document.querySelector('#session-close-actions').hidden, status !== 'in_progress');
+}
+// A historical selection must not offer a silent no-op while another session blocks starts.
+for (const historicalStatus of ['completed', 'interrupted', 'not_started']) {
+  for (const blockingStatus of ['in_progress', 'unconfirmed']) {
+    selected.execution.status = historicalStatus;
+    const other = state.sessions[1];
+    other.execution.status = blockingStatus;
+    const before = JSON.stringify(state.sessions);
+    renderSession();
+    assert.equal(document.querySelector('#session-start').hidden, true);
+    assert.match(document.querySelector('#session-next-step').textContent,
+      blockingStatus === 'in_progress' ? /autre séance.*en cours.*Sélectionnez-la/s : /autre séance.*non confirmée.*Sélectionnez-la/s);
+    assert.equal(JSON.stringify(state.sessions), before, 'presentation must preserve sessions and credits');
+    other.execution.status = 'completed';
+    renderSession();
+    assert.equal(document.querySelector('#session-start').hidden, false, 'start returns when no session blocks it');
+    assert.doesNotMatch(document.querySelector('#session-next-step').textContent, /Une autre séance/);
+  }
 }
 assert.equal(sessionStatus('completed'), 'Terminée');
 assert.equal(sessionStatus('interrupted'), 'Interrompue');

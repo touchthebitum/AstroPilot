@@ -18,7 +18,10 @@ def test_guardian_copy_and_explicit_wiring():
     assert source.count('addEventListener("click", confirmGuardianRenewal)') == 1
     assert source.count('confirmGuardianRenewal') == 2, 'only the explicit click invokes renewal'
     assert source.count('confirmation: "USER_CONFIRMS_ACQUISITION_CONTINUES"') == 1
-    for selector in ['#session-start', '#session-complete', '#session-interrupt']:
+    assert 'document.querySelector("#session-start").addEventListener("click", requestManualStart)' in source
+    manual_command = source[source.index('async function runManualStart('):source.index('async function startSession(')]
+    assert 'sessionCommand(' in manual_command and '{transition: true}' in manual_command
+    for selector in ['#session-complete', '#session-interrupt']:
         binding = next(line for line in source.splitlines() if f'document.querySelector("{selector}").addEventListener' in line)
         assert '{transition: true}' in binding
 
@@ -43,7 +46,10 @@ const performance = {now: () => ticks};
 let keys = 0;
 const crypto = {randomUUID: () => `00000000-0000-4000-8000-${String(++keys).padStart(12,'0')}`};
 const item = {execution:{execution_id:'exact',status:'in_progress',actual_start:'2026-10-09T17:00:00Z'}, evidence:[]};
-const state = {activeSessionId:'exact', sessions:[item], acceptedMission:{mission_id:'mission'},sessionBusy:false};
+const ui = {mission:{open:true}};
+function decisionSiteFingerprint(){return 'fictitious-site';}
+const state = {activeSessionId:'exact', sessions:[item], acceptedMission:{mission_id:'mission',mission:{}},
+  missionConditionsReady:true,missionWeatherChecks:{},sessionBusy:false};
 let canonical = {schema_version:'guardian-explicit-renewal-v1',execution_id:'exact',
   guardian_mode_enabled:true,owner_instance_id:'owner',owned_here:true,renewal_eligible:true,
   confirmation_kind:'USER_ASSERTION',confirmed_at:'2026-10-09T17:00:00Z',
@@ -134,7 +140,7 @@ def test_guardian_ui_transport_and_session_integration():
     for(const action of ['start','completed','interrupted']) {
       item.execution.status=action==='start'?'not_started':'in_progress';
       const count=requests.length;
-      if(action==='start') await startSession('mission');else await closeSession('mission',action);
+      if(action==='start') await startSession('mission',captureManualStart());else await closeSession('mission',action);
       const commands=requests.slice(count).filter(x=>x.options.method==='POST');
       assert.equal(commands.length,1,'exactly one transition');
       assert.equal(commands[0].url,'/v1/execution-transitions');
@@ -148,7 +154,7 @@ def test_guardian_ui_transport_and_session_integration():
   await readGuardianRenewal();assert.equal(document.querySelector('#guardian-renewal').hidden,true);
   mode='read-failed';item.execution.status='not_started';
   const count=requests.filter(x=>x.options.method==='POST').length;
-  await assert.rejects(()=>startSession('mission'));
+  await assert.rejects(()=>startSession('mission',captureManualStart()));
   assert.equal(requests.filter(x=>x.options.method==='POST').length,count,'unknown mode never guessed');
   const error=await sessionHttpError({status:503,json:async()=>({
     code:'guardian_attestation_publication_failed',execution_commit:'committed',guardian_publication:'failed'})});
@@ -219,7 +225,7 @@ function reset(status='in_progress', enabled=true) {
   guardianUI.readAt=0;guardianUI.pending=false;guardianUI.uncertain=false;
   guardianUI.message='Confirmation utilisateur acceptée.';
 }
-const run = action => sessionCommand(action === 'start' ? startSession : m=>closeSession(m,action),{transition:true});
+const run = action => sessionCommand(action === 'start' ? m=>startSession(m,captureManualStart()) : m=>closeSession(m,action),{transition:true});
 (async()=>{
   for (const enabled of [true,false]) for (const action of ['start','completed','interrupted']) {
     reset(action === 'start' ? 'not_started' : 'in_progress',enabled);

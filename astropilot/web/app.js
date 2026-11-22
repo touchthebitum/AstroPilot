@@ -435,8 +435,9 @@ function renderSession() {
   choice.value = session?.execution.execution_id || "";
   const intentId = session?.acquisition_intent_id || state.acceptedMission?.acquisitionIntentId;
   text("#session-intent", `Intent de la mission : ${intentId || "non défini"}`);
+  const blockingSession = state.sessions.find(item => ["in_progress", "unconfirmed"].includes(item.execution?.status));
   document.querySelector("#session-start").hidden = state.missionConditionsReady === false
-    || (!session && state.sessions.some(item => ["in_progress", "unconfirmed"].includes(item.execution.status)))
+    || Boolean(blockingSession)
     || Boolean(session) && (!knownStatus || status === "in_progress" || status === "unconfirmed");
   document.querySelector("#session-start").textContent = status === "not_started"
     ? "Démarrer cette séance photo" : "Démarrer une nouvelle séance photo";
@@ -466,7 +467,12 @@ function renderSession() {
               : evidence
                 ? "La durée utilisable est enregistrée, mais pas encore ajoutée au projet. Vérifiez les valeurs, puis cliquez sur « Ajouter cette durée à mon avancement »."
                 : "Séance photo terminée : renseignez ci-dessous le temps de pose des images utilisables de cette séance. Si aucune image n’est utilisable, n’ajoutez aucune durée au projet.";
-  text("#session-next-step", nextStep);
+  const startGuidance = blockingSession && blockingSession !== session
+    ? blockingSession.execution.status === "in_progress"
+      ? "Une autre séance de ce plan est en cours. Sélectionnez-la dans la liste des séances pour la reprendre ou la terminer avant de démarrer une nouvelle séance."
+      : "Une autre séance de ce plan reste non confirmée. Sélectionnez-la dans la liste des séances et vérifiez son état avant de démarrer une nouvelle séance."
+    : "";
+  text("#session-next-step", [startGuidance, nextStep].filter(Boolean).join(" "));
   document.querySelector("#session-credit").hidden = status !== "completed" || !evidence || Boolean(session.credit);
   document.querySelector("#session-apply-credit").disabled = state.sessionBusy || status !== "completed";
   if (status === "completed" && evidence && !session.credit) {
@@ -550,6 +556,8 @@ async function sessionCommand(command, { transition = false } = {}) {
       sessionMessage(state.sessionWriteUncertain
         ? "État relu après une réponse incertaine. Vérifiez la session avant de poursuivre."
         : state.sessionWriteAttempted && error?.status ? sessionRefusalMessage(error)
+        : error?.message === "manual_start_context_changed"
+          ? "Le contexte du plan ou de la séance a changé. Réexaminez le plan avant de déclarer un démarrage."
         : "Lecture ou reprise échouée. État actuel relu ; vérifiez avant de poursuivre.", {error: true});
     } catch (_readError) {
       sessionMessage(state.sessionWriteAttempted && error?.status
@@ -602,24 +610,131 @@ function sessionRefusalMessage(error) {
   return `Action refusée par le serveur (${error.status}). État actuel relu.`;
 }
 
-async function startSession(missionId) {
+// A manual declaration is not weather clearance or a hardware command.
+const manualStartUI = {pending: null};
+
+function manualStartWeather(accepted = state.acceptedMission) {
+  const check = state.missionWeatherChecks[accepted?.mission_id];
+  const trust = check?.trust;
+  const age = trust && Number.isFinite(check.receivedAt)
+    ? (performance.now() - check.receivedAt) / 60000 + (trust.snapshot_age_minutes ?? Infinity) : Infinity;
+  const expired = age > (trust?.maximum_age_minutes ?? 90);
+  const sameSite = check?.siteFingerprint === decisionSiteFingerprint() && !state.decisionSiteReloadRequired;
+  const simulated = /simul|fixture|demo/i.test(trust?.provider || "");
+  const confirmed = check?.status === "favorable" && sameSite && Number.isFinite(age)
+    && Number.isFinite(trust?.maximum_age_minutes ?? 90) && !expired && !simulated
+    && trust?.validation_status === "validated" && trust?.freshness_status === "fresh";
+  const reason = !check ? "Aucune vérification disponible pour cette ouverture de NightMerit."
+    : check.failed ? "La dernière vérification n’a pas abouti. Aucun nouveau résultat météo n’a été obtenu."
+    : !sameSite ? "Le site a changé : cette vérification ne confirme pas le site actuel."
+    : expired && trust ? "Cette vérification météo a vieilli : les conditions restent à revérifier."
+    : check.summary || "Le statut météo ne permet pas de confirmer ce plan.";
+  return {confirmed, reason, check, refused: sameSite ? check?.lastRefusal : null};
+}
+
+function manualStartAllowed() {
+  const status = currentSession()?.execution?.status;
+  return Boolean(state.acceptedMission?.mission && state.missionConditionsReady && ui.mission.open
+    && !state.requestingRecommendation && !state.sessionWriteUncertain && !state.decisionSiteReloadRequired
+    && (!status || ["not_started", "completed", "interrupted"].includes(status))
+    && !state.sessions.some(item => ["in_progress", "unconfirmed"].includes(item.execution?.status)));
+}
+
+function manualStartContext() {
+  return JSON.stringify({mission: state.acceptedMission, site: decisionSiteFingerprint(),
+    configurationGeneration: state.configurationGeneration, siteGeneration: state.decisionSiteGeneration,
+    revision: state.configuration?.profile_revision, draft: state.configurationDraft,
+    selectedProject: state.selectedProjectId, acceptance: state.pendingAcceptanceAttempt,
+    acceptanceBlocked: state.acceptanceBlocked, view: state.view, viewRevision: state.viewRevision,
+    weather: manualStartWeather()});
+}
+
+function captureManualStart() {
+  return {context: manualStartContext(), session: JSON.stringify(currentSession() || null),
+    selectedId: state.activeSessionId, unconfirmed: !manualStartWeather().confirmed};
+}
+
+function requireManualStartContext(attempt, {createdId = null} = {}) {
+  const session = currentSession();
+  const selectionMatches = createdId
+    ? state.activeSessionId === createdId && session?.execution?.execution_id === createdId
+      && session.execution.status === "not_started"
+    : state.activeSessionId === attempt.selectedId && JSON.stringify(session || null) === attempt.session;
+  if (!manualStartAllowed() || manualStartContext() !== attempt.context || !selectionMatches) {
+    throw new Error("manual_start_context_changed");
+  }
+}
+
+function closeManualStart() {
+  manualStartUI.pending = null;
+  const dialog = document.querySelector("#manual-start-dialog");
+  if (dialog.open) dialog.close();
+  if (ui.mission.open) document.querySelector("#session-start").focus();
+}
+
+function requestManualStart() {
+  if (state.sessionBusy || guardianUI.pending || !manualStartAllowed() || guardUnresolvedAcceptance()) return;
+  const attempt = captureManualStart();
+  if (!attempt.unconfirmed) { void runManualStart(attempt); return; }
+  const weather = manualStartWeather();
+  const accepted = state.acceptedMission;
+  const zone = missionTimezone(accepted.mission, accepted);
+  manualStartUI.pending = attempt;
+  text("#manual-start-title", weather.refused ? "Dernière vérification défavorable" : "Météo non confirmée");
+  text("#manual-start-plan", savedMissionLabel(accepted));
+  text("#manual-start-reason", weather.reason);
+  text("#manual-start-date", weather.check?.checkedAt
+    ? `Vérification du ${missionDateTimeLabel(weather.check.checkedAt, zone)}.`
+    : "Aucune date de vérification disponible.");
+  text("#manual-start-refusal", weather.refused
+    ? `${weather.refused.reason} Vérification du ${missionDateTimeLabel(weather.refused.checkedAt, zone)}. ${weather.check?.failed ? "Ce refus n’a pas été réévalué. " : ""}Le refus et son motif restent conservés. Déclarer une séance manuelle ne signifie pas que NightMerit recommande de photographier.` : "");
+  document.querySelector("#manual-start-refusal").hidden = !weather.refused;
+  document.querySelector("#manual-start-recheck").disabled = state.sessions.some(item =>
+    ["in_progress", "unconfirmed"].includes(item.execution?.status));
+  document.querySelector("#manual-start-dialog").showModal();
+  document.querySelector("#manual-start-cancel").focus();
+}
+
+async function runManualStart(attempt) {
+  let startedId = null;
+  // sessionCommand retains canonical rereads, concurrency and Guardian checks.
+  await sessionCommand(async missionId => {
+    requireManualStartContext(attempt);
+    startedId = await startSession(missionId, attempt);
+  }, {transition: true});
+  if (attempt.unconfirmed && startedId && manualStartContext() === attempt.context
+      && currentSession()?.execution?.execution_id === startedId
+      && currentSession()?.execution?.status === "in_progress" && !state.sessionWriteUncertain) {
+    sessionMessage("Début de séance déclaré. La météo reste non confirmée. Aucun temps de pose ajouté.", {success: true});
+  }
+}
+
+async function startSession(missionId, attempt) {
+  requireManualStartContext(attempt);
+
   let session = currentSession();
   if (session?.execution.status !== "not_started") {
     const pending = JSON.parse(localStorage.getItem(SESSION_PENDING_KEY) || "null");
     const executionId = pending?.mission_id === missionId ? pending.execution_id : crypto.randomUUID();
     localStorage.setItem(SESSION_PENDING_KEY, JSON.stringify({ mission_id: missionId, execution_id: executionId }));
     const lookup = await sessionFetch(`/v1/executions/${encodeURIComponent(executionId)}/session`);
+    requireManualStartContext(attempt);
     if (lookup.status === 404) await postSession("/v1/executions", { execution_id: executionId, mission_id: missionId });
     else if (!lookup.ok) throw await sessionHttpError(lookup);
     await reloadSessions({ selectId: executionId, readGuardian: false });
     session = currentSession();
+    requireManualStartContext(attempt, {createdId: executionId});
   }
   if (session?.execution.status === "not_started") {
+    const headers = await guardianTransitionHeaders(session.execution.execution_id);
+    requireManualStartContext(attempt, {createdId: session.execution.execution_id});
     await postSession("/v1/execution-transitions", {
       execution_id: session.execution.execution_id, mission_id: missionId,
       status: "in_progress", actual_start: new Date().toISOString(), actual_end: null, actual_duration: null,
-    }, await guardianTransitionHeaders(session.execution.execution_id));
+    }, headers);
+    return session.execution.execution_id;
   }
+  return null;
 }
 
 async function closeSession(missionId, status) {
@@ -4089,6 +4204,7 @@ function updateSelectedProjectContext() {
 }
 
 function setView(view) {
+  if (manualStartUI.pending) closeManualStart();
   const guidanceDialog = document.querySelector("#altitude-guidance-dialog");
   if (guidanceDialog?.open) guidanceDialog.close();
   const guidanceButton = document.querySelector("#availability-altitude-guidance");
@@ -4538,9 +4654,19 @@ async function loadSavedMissionWeatherOrigin(accepted) {
 function saveMissionWeatherCheck(recheck, payload) {
   if (!recheck?.accepted) return;
   const accepted = recheck.accepted;
-  const previous = state.missionWeatherChecks[accepted.mission_id]?.trust || state.missionWeatherOrigins[accepted.mission_id];
+  const previousCheck = state.missionWeatherChecks[accepted.mission_id];
+  const previous = previousCheck?.trust || state.missionWeatherOrigins[accepted.mission_id];
+  const summary = NightMeritSavedPlanWeather.summarize(accepted, payload, previous);
+  const checkedAt = new Date().toISOString();
+  const assessment = payload?.acquisition_intent_assessments?.find(item =>
+    item.acquisition_intent_id === (accepted.acquisitionIntentId || accepted.mission.acquisition_intent_id));
+  const reason = payload?.weather_decision?.presentation?.summary || assessment?.explanation
+    || "Le motif détaillé du dernier refus n’est pas disponible.";
+  const lastRefusal = summary.status === "refused"
+    ? {reason: typeof reason === "string" ? reason : "Le motif détaillé du dernier refus n’est pas disponible.", checkedAt}
+    : !payload && previousCheck?.siteFingerprint === recheck.siteFingerprint ? previousCheck.lastRefusal : null;
   state.missionWeatherChecks[accepted.mission_id] = {
-    ...NightMeritSavedPlanWeather.summarize(accepted, payload, previous),
+    ...summary, checkedAt, lastRefusal, failed: !payload,
     siteFingerprint: recheck.siteFingerprint, receivedAt: performance.now(),
   };
 }
@@ -9143,7 +9269,26 @@ document.querySelector("#guardian-refresh").addEventListener("click", refreshGua
 const guardianVisualTimer = setInterval(renderGuardianRenewal, 1000);
 // Node-based browser harnesses should not be kept alive by a visual timer.
 guardianVisualTimer?.unref?.();
-document.querySelector("#session-start").addEventListener("click", () => sessionCommand(startSession, {transition: true}));
+document.querySelector("#session-start").addEventListener("click", requestManualStart);
+document.querySelector("#manual-start-cancel").addEventListener("click", closeManualStart);
+document.querySelector("#manual-start-dialog").addEventListener("cancel", event => {
+  event.preventDefault(); closeManualStart();
+});
+document.querySelector("#manual-start-dialog").addEventListener("close", () => { manualStartUI.pending = null; });
+document.querySelector("#manual-start-recheck").addEventListener("click", () => {
+  const attempt = manualStartUI.pending;
+  closeManualStart();
+  if (!attempt || manualStartContext() !== attempt.context) {
+    sessionMessage("Le plan a changé. Rouvrez-le avant de vérifier la météo.", {error: true}); return;
+  }
+  void checkMissionConditions();
+});
+document.querySelector("#manual-start-confirm").addEventListener("click", () => {
+  const attempt = manualStartUI.pending;
+  if (!attempt || state.sessionBusy || guardianUI.pending) return;
+  closeManualStart();
+  void runManualStart(attempt);
+});
 document.querySelector("#session-complete").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "completed"), {transition: true}));
 document.querySelector("#session-interrupt").addEventListener("click", () => sessionCommand((missionId) => closeSession(missionId, "interrupted"), {transition: true}));
 for (const id of ["session-duration-method", "session-retained-frames", "session-frame-seconds", "session-hours", "session-minutes", "session-seconds"]) {

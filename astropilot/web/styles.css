@@ -1223,3 +1223,12 @@ html[data-ui-mode="simple"] #project-create:not([open]) { display: none; }
 .search-resume { margin-block: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; }
 .search-resume h3 { margin-top: 0; }
 .search-resume p { line-height: 1.6; overflow-wrap: anywhere; }
+
+/* Manual declaration: keep the warning readable above the open plan. */
+#manual-start-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; padding: 24px; overflow: auto; color: var(--ink); background: var(--night-soft); border: 1px solid var(--line-bright); border-radius: var(--radius); }
+#manual-start-dialog::backdrop { background: rgba(1, 6, 12, .82); }
+#manual-start-dialog p { overflow-wrap: anywhere; }
+.manual-start-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+.manual-start-actions button { white-space: normal; max-width: 100%; }
+#manual-start-dialog :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+@media (max-width: 600px) { .manual-start-actions { flex-direction: column; } .manual-start-actions button { width: 100%; } }

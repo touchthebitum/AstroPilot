@@ -1,0 +1,36 @@
+NightMerit — démarrage manuel avec météo non confirmée
+Branche feat/manual-start-weather-20261122 ; base deea1317170a92704a173bd12029c5e4342884f3.
+
+Implémentation destinée à la prochaine version, non livrée.
+Validation ciblée du 22 novembre : 174 tests automatisés réussis, zéro échec ou
+cas ignoré, après adaptation de quatre anciens tests au contexte explicite.
+Recettes distinctes : dix parcours navigateur, douze scénarios de protection,
+puis trois profils sur le serveur réel de la branche avec stockage durable et
+Guardian activé. Météo exclusivement synthétique ; aucune collecte réelle.
+Ces résultats ne sont pas additionnés comme une suite unique. La suite complète,
+la CI sur commit et le kit Mac compilé restent à vérifier ; V01–V11 ne sont pas
+déclarés tous satisfaits. Les preuves datées restent dans le dossier de fiabilité.
+
+Le démarrage d'une séance enregistrée passe par une confirmation lorsque sa
+vérification météo n'est pas réelle, favorable, fraîche et applicable au site.
+Une archive n'accorde pas de confirmation. Les contrôles en mémoire conservent
+le dernier refus applicable et sa date après une panne de revérification, sans
+écriture de profil ou nouvelle attestation persistante.
+
+Annuler/Échap n'écrivent rien ; le focus initial est sur Annuler. Revérifier
+prépare le parcours existant sans appel météo automatique. Déclarer un démarrage
+manuel appelle la commande existante après la relecture canonique et les gardes
+Guardian. Le contexte est comparé avant les écritures et après les attentes
+réseau pertinentes. La création/transition utilise toujours les routes existantes.
+Un changement de contexte abandonne la commande ; une création déjà acceptée
+par le serveur ne peut être annulée par une vérification locale ultérieure.
+Les messages existants de réponse incertaine et de persistance restent prioritaires.
+Le suivi d'une séance en cours, la clôture, l'interruption et le crédit ne sont
+pas soumis au nouveau dialogue. Déclarer ne commande pas l'ASIAIR/la monture et
+ne confirme ni la météo ni un temps acquis. Aucun verrou météo serveur ajouté.
+
+Avant toute livraison : compléter la couverture et la recette isolée,
+notamment absence/péremption/refus-panne/simulation/favorable, annulation,
+revérification sans analyse automatique, changement de contexte, réponses perdues,
+double clic, erreurs de lecture, Guardian, OIII/SII et accessibilité mobile/clavier.
+Pas de nouveau kit, publication, fusion ou transfert de profil pour cette étape.
