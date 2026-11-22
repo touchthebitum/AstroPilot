@@ -57,7 +57,7 @@ const origin='https://nightmerit.test';
  });
  await page.goto(origin);await page.waitForFunction(()=>state.view==='configuration_error');
  const writes=()=>requests.filter(r=>r.method!=='GET');
- for(const width of [390,1280])for(const action of ['double-click','lost-create','lost-transition','changed-context-pending','guardian-refusal','favorable']){
+ for(const width of [390,1280])for(const action of ['double-click','lost-create','lost-transition','changed-context-pending','guardian-refusal','favorable','other-in-progress','other-unconfirmed']){
   sessions=[];scenario=action;lossDelivered=false;lookupGate=null;releaseLookup=null;
   if(action==='changed-context-pending'){
    lookupGate=new Promise(resolve=>{releaseLookup=resolve;});
@@ -71,6 +71,31 @@ const origin='https://nightmerit.test';
    setView('availability');state.acceptedMission=structuredClone(accepted);state.savedMissions=[structuredClone(accepted)];state.missionWeatherChecks={};state.missionWeatherOrigins={};renderMission(accepted.mission);ui.mission.showModal();
   },{config,accepted});
   await page.waitForFunction(()=>state.missionConditionsReady);
+  if(action.startsWith('other-')) {
+   const start=writes().length;
+   for(const historicalStatus of ['completed','interrupted']) {
+    await page.evaluate(({historicalStatus,blockingStatus})=>{
+     const session=(id,status)=>({mission_id:state.acceptedMission.mission_id,execution:{execution_id:id,status,actual_start:null},evidence:[],credit:null,session_credit_seconds:0});
+     state.sessions=[session('historical',historicalStatus),session('blocking',blockingStatus)];
+     state.activeSessionId='historical';renderSession();
+    },{historicalStatus,blockingStatus:action==='other-in-progress'?'in_progress':'unconfirmed'});
+    const before=await page.evaluate(()=>JSON.stringify({sessions:state.sessions,projects:state.configuration.projects}));
+    assert.equal(await page.locator('#session-start').isVisible(),false);
+    assert.match(await page.locator('#session-next-step').innerText(),action==='other-in-progress'?/autre séance.*en cours.*Sélectionnez-la/s:/autre séance.*non confirmée.*Sélectionnez-la/s);
+    await page.evaluate(()=>requestManualStart());
+    assert.equal(await page.locator('#manual-start-dialog').isVisible(),false);
+    assert.equal(writes().length,start);
+    assert.equal(await page.evaluate(()=>JSON.stringify({sessions:state.sessions,projects:state.configuration.projects})),before);
+    await page.locator('#session-choice').selectOption('blocking');
+    assert.equal(await page.locator('#session-start').isVisible(),false);
+    assert.equal(await page.locator('#session-close-actions').isVisible(),action==='other-in-progress');
+    await page.locator('#session-choice').selectOption('historical');
+    assert.match(await page.locator('#session-next-step').innerText(),/Une autre séance/);
+   }
+   await page.screenshot({path:path.join(proof,`result-${action}-${width}.png`),fullPage:true});
+   results.push({width,action,pass:true,historical_statuses:['completed','interrupted'],writes:0,no_credit:true,counters:{OIII_minutes:40,SII_minutes:25}});
+   continue;
+  }
   if(action==='favorable')await page.evaluate(()=>{
    // Synthetic forecast with a production provider name to exercise that branch.
    // This is not real Open-Meteo data and causes no provider request.
