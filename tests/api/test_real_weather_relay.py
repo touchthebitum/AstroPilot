@@ -125,7 +125,8 @@ def test_absolute_deadline_and_sanitized_audit():
                              deadline=.02, audit=lambda **v: audit.append(v))
     with pytest.raises(relay.RelayError, match="unavailable"):
         state.execute(REQUEST)
-    assert any(v["category"] == "relay_absolute_timeout" for v in audit)
+    assert expired.is_set()
+    assert audit[-1]["category"] == "relay_unavailable"
     assert "SECRET" not in json.dumps(audit) and "46.7508" not in json.dumps(audit)
 
 
@@ -197,14 +198,19 @@ def test_rpc_snapshot_reuses_ingress_and_requires_a_new_explicit_request(local_h
         assert len(calls) == 1
 
 
-def test_absolute_timeout_ends_only_the_helper_process():
+@pytest.mark.parametrize("blocked_phase", ["fetch", "audit"])
+def test_absolute_timeout_ends_only_the_helper_process_even_with_blocked_audit(blocked_phase):
     import subprocess
     import sys
     script = '''from astropilot.weather_relay import RelayState
 import time
-state=RelayState('a'*64,'b'*64,fetch=lambda _:time.sleep(10),deadline=.05)
+def fetch(_):
+    if BLOCKED_PHASE == 'fetch':time.sleep(10)
+    return dict(payload={},retrieved_at_utc='2026-11-23T10:00:00+00:00')
+state=RelayState('a'*64,'b'*64,fetch=fetch,audit=lambda **_:time.sleep(10),deadline=.05)
 state.execute(dict(request_id='timeout',latitude=46.7508,longitude=6.5495,timezone='Europe/Zurich'))
 '''
+    script = "BLOCKED_PHASE=" + repr(blocked_phase) + "\n" + script
     result = subprocess.run([sys.executable, "-c", script], timeout=3, capture_output=True)
     assert result.returncode == 124
 

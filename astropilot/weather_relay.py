@@ -125,7 +125,8 @@ class RelayState:
             # this helper process; the launcher never automatically restarts it.
             started = monotonic()
             def expired():
-                self.audit(category="relay_absolute_timeout", operations=len(self.seen))
+                # Never wait for logging on this kill path. Exit code 124 is
+                # authoritative even when the journal cannot be written.
                 self.expire()
             timer = threading.Timer(self.deadline, expired)
             timer.daemon = True
@@ -143,8 +144,11 @@ class RelayState:
                 category = "relay_unavailable"
                 raise RelayError(category) from error
             finally:
-                timer.cancel()
-                self.audit(category=category, operations=len(self.seen), duration_ms=round((monotonic() - started) * 1000))
+                try:
+                    # Keep the deadline armed through synchronous journal I/O.
+                    self.audit(category=category, operations=len(self.seen), duration_ms=round((monotonic() - started) * 1000))
+                finally:
+                    timer.cancel()
         finally:
             self.gate.release()
 

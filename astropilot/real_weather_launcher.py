@@ -92,6 +92,7 @@ class RealWeatherKit:
                 raise LaunchError("real_weather_path_redirected")
         self.children = []
         self.stopping = False
+        self._runtime_fd = None
         self.opener = build_opener(ProxyHandler({}))
 
     def validate_contents(self):
@@ -121,15 +122,66 @@ class RealWeatherKit:
     @contextmanager
     def locked(self):
         import fcntl
-        self.runtime.mkdir(mode=0o700, exist_ok=True)
-        if self.runtime.stat().st_uid != os.getuid() or stat.S_IMODE(self.runtime.stat().st_mode) != 0o700:
-            raise LaunchError("real_weather_runtime_permissions_invalid")
-        fd = os.open(self.runtime / "launcher.lock", os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        root_fd = os.open(self.root, directory_flags)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            yield
+            info = os.fstat(root_fd)
+            if [info.st_dev, info.st_ino] != self.identity:
+                raise LaunchError("real_weather_root_invalid")
+            try:
+                os.mkdir("runtime", mode=0o700, dir_fd=root_fd)
+            except FileExistsError:
+                pass
+            runtime_fd = os.open("runtime", directory_flags, dir_fd=root_fd)
         finally:
-            os.close(fd)
+            os.close(root_fd)
+        try:
+            info = os.fstat(runtime_fd)
+            if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+                raise LaunchError("real_weather_runtime_permissions_invalid")
+            fd = os.open("launcher.lock", os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=runtime_fd)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                previous = self._runtime_fd
+                self._runtime_fd = runtime_fd
+                try:
+                    yield
+                finally:
+                    self._runtime_fd = previous
+            finally:
+                os.close(fd)
+        finally:
+            os.close(runtime_fd)
+
+    def cleanup_process_record(self, session):
+        """Remove only our record in the directory held by our launcher lock.
+
+        A moved copy must not resolve its old path into a replacement copy.
+        Unreadable, redirected or foreign-session records are left untouched.
+        """
+        if self._runtime_fd is None:
+            return False
+        try:
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+            fd = os.open("processes.json", flags, dir_fd=self._runtime_fd)
+            with os.fdopen(fd, "rb") as stream:
+                opened = os.fstat(stream.fileno())
+                if not stat.S_ISREG(opened.st_mode) or opened.st_size > 16384:
+                    return False
+                from astropilot.weather_relay import decode
+                record = decode(stream.read(16385))
+            if (not isinstance(record, dict) or record.get("root_identity") != self.identity
+                    or record.get("session_id") != session["session_id"]
+                    or not isinstance(record.get("supervisor"), dict)
+                    or record["supervisor"].get("pid") != os.getpid()):
+                return False
+            current = os.stat("processes.json", dir_fd=self._runtime_fd, follow_symlinks=False)
+            if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+                return False
+            os.unlink("processes.json", dir_fd=self._runtime_fd)
+            return True
+        except (OSError, ValueError):
+            return False
 
     def session(self):
         return {"session_id": secrets.token_hex(32), "kit_directory": str(self.root),
@@ -315,9 +367,7 @@ class RealWeatherKit:
                         break
                 finally:
                     self.terminate_children()
-                    path = self.runtime / "processes.json"
-                    if path.exists():
-                        path.unlink()
+                    self.cleanup_process_record(session)
                     for sig, handler in old_signals.items():
                         signal.signal(sig, handler)
             finally:

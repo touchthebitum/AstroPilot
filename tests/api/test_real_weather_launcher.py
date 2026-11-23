@@ -91,6 +91,69 @@ def test_stop_checks_all_process_identities_before_signalling(tmp_path, monkeypa
     with pytest.raises(launcher.LaunchError, match="identity_changed"): instance.stop()
 
 
+def owned_record(instance, session):
+    return dict(root_identity=instance.identity, session_id=session["session_id"],
+                supervisor=dict(pid=os.getpid()), children=[])
+
+
+def fictitious_profile(root, monkeypatch):
+    from fastapi.testclient import TestClient
+    from astropilot.app import create_app
+    from test_configuration_api import configuration_payload
+    profile = root / "DONNEES-FICTIVES/profil"
+    with monkeypatch.context() as env:
+        env.setenv("ASTROPILOT_DATA_DIR", str(profile))
+        result = TestClient(create_app()).put("/v1/configuration", json=configuration_payload(
+            projects={"Rosette": {"hours": 0, "target_hours": 3}}))
+        assert result.status_code == 200, result.text
+    return (profile / "user_profile.json").read_bytes()
+
+
+def test_moved_copy_cleanup_preserves_replacement_copy_and_profiles(tmp_path, monkeypatch):
+    original = kit(tmp_path)
+    a = launcher.RealWeatherKit(original)
+    profile_a = fictitious_profile(original, monkeypatch)
+    with a.locked():
+        session_a = a.session()
+        launcher._private_json(a.runtime / "processes.json", owned_record(a, session_a))
+        moved = tmp_path / "Moved fictitious copy"
+        original.rename(moved)
+        replacement = kit(tmp_path)
+        b = launcher.RealWeatherKit(replacement)
+        profile_b = fictitious_profile(replacement, monkeypatch)
+        with b.locked():
+            session_b = b.session()
+            launcher._private_json(b.runtime / "processes.json", owned_record(b, session_b))
+            record_b = (b.runtime / "processes.json").read_bytes()
+            assert a.cleanup_process_record(session_a) is True
+            assert (b.runtime / "processes.json").read_bytes() == record_b
+            assert not (moved / "runtime/processes.json").exists()
+            assert (moved / "DONNEES-FICTIVES/profil/user_profile.json").read_bytes() == profile_a
+            assert (replacement / "DONNEES-FICTIVES/profil/user_profile.json").read_bytes() == profile_b
+
+
+@pytest.mark.parametrize("kind", ["other_session", "other_root", "other_supervisor", "invalid_json", "symlink"])
+def test_cleanup_leaves_unowned_or_unreadable_record_untouched(tmp_path, kind):
+    instance = launcher.RealWeatherKit(kit(tmp_path))
+    with instance.locked():
+        session = instance.session()
+        record = owned_record(instance, session)
+        path = instance.runtime / "processes.json"
+        if kind == "other_session": record["session_id"] = "foreign-session"
+        if kind == "other_root": record["root_identity"] = [0, 0]
+        if kind == "other_supervisor": record["supervisor"]["pid"] += 1
+        if kind == "invalid_json": path.write_text("{incomplete")
+        elif kind == "symlink":
+            target = tmp_path / "foreign-record.json"
+            target.write_text(json.dumps(record))
+            path.symlink_to(target)
+        else: launcher._private_json(path, record)
+        before = path.read_bytes()
+        assert instance.cleanup_process_record(session) is False
+        assert path.read_bytes() == before
+        assert path.is_symlink() == (kind == "symlink")
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="Mac OS network enforcement")
 def test_os_policy_denies_other_loopback_port():
     # Only our two freshly reserved sockets, never existing instances or upstream.
