@@ -6440,6 +6440,10 @@ async function saveProjectProgress() {
       }
       progress.push({ acquisition_intent_id: id, acquired_frames: frames, exposure_seconds: seconds });
     } else if (mode === "manual") {
+      if (section.dataset.durationPrecisionLoss === "true") {
+        feedback.textContent = "Ces heures feraient perdre de la précision aux fractions de seconde. Aucune modification enregistrée ; choisissez d’autres heures ou annulez.";
+        return;
+      }
       const duration = Number(value("acquired_duration_manual"));
       if (value("acquired_duration_manual") === "" || !Number.isFinite(duration) || duration < 0) {
         feedback.textContent = `Corrigez la durée de ${id}.`;
@@ -6949,8 +6953,13 @@ function addSimpleDurationFields(section, mode, manual, update, locked, advanced
   enter.type = "button"; enter.className = "secondary-button";
   enter.textContent = "Renseigner une durée totale connue";
   enter.disabled = locked;
+  const precisionNote = document.createElement("p");
+  precisionNote.role = "alert"; precisionNote.className = "error";
+  precisionNote.textContent = "Ces heures ne permettent pas de conserver exactement les fractions de seconde. La durée enregistrée est conservée. Choisissez d’autres heures ou annulez cette modification.";
+  precisionNote.hidden = true;
   let reflectedSeconds = null, reflectedHours = null, reflectedMinutes = null;
   const reflect = () => {
+    section.dataset.durationPrecisionLoss = "false"; precisionNote.hidden = true;
     fields.hidden = mode.value !== "manual";
     enter.hidden = mode.value !== "unknown";
     const seconds = Number(manual.querySelector("input").value);
@@ -6968,13 +6977,15 @@ function addSimpleDurationFields(section, mode, manual, update, locked, advanced
   const original = manual.querySelector("input");
   const change = () => {
     const wholeHours = Number(h.value), extraMinutes = Number(m.value);
-    original.value = h.value !== "" && m.value !== "" && Number.isInteger(wholeHours) && wholeHours >= 0
-      && Number.isFinite(extraMinutes) && extraMinutes >= 0 && extraMinutes < 60
-      ? reflectedSeconds !== null && extraMinutes === reflectedMinutes
-        // An unchanged minutes field must not round-trip fractional seconds.
-        ? wholeHours === reflectedHours ? reflectedSeconds
-          : durationWithWholeHours(reflectedSeconds, wholeHours)
-        : wholeHours * 3600 + extraMinutes * 60 : "";
+    const valid = h.value !== "" && m.value !== "" && Number.isInteger(wholeHours) && wholeHours >= 0
+      && Number.isFinite(extraMinutes) && extraMinutes >= 0 && extraMinutes < 60;
+    const next = valid ? reflectedSeconds !== null && extraMinutes === reflectedMinutes
+      ? wholeHours === reflectedHours ? reflectedSeconds : durationWithWholeHours(reflectedSeconds, wholeHours)
+      : wholeHours * 3600 + extraMinutes * 60 : null;
+    const precisionLoss = valid && !Number.isFinite(next);
+    section.dataset.durationPrecisionLoss = precisionLoss ? "true" : "false";
+    precisionNote.hidden = !precisionLoss;
+    original.value = precisionLoss ? reflectedSeconds : next ?? "";
     update();
   };
   h.addEventListener("input", change); m.addEventListener("input", change);
@@ -6982,7 +6993,7 @@ function addSimpleDurationFields(section, mode, manual, update, locked, advanced
   enter.addEventListener("click", () => {mode.value = "manual"; update(); reflect();});
   for (const child of [mode, manual]) child.dataset.proOnly = "true";
   for (const child of [heading, info, example, fields, enter]) child.dataset.simpleOnly = "true";
-  wrapper.append(summary, heading, info, example, ...advanced, fields, enter);
+  wrapper.append(summary, heading, info, example, ...advanced, fields, precisionNote, enter);
   section.append(wrapper); reflect();
 }
 
