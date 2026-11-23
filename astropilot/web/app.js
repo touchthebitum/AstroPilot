@@ -6158,8 +6158,8 @@ function progressInput(label, value, field, type = "number") {
   return wrapper;
 }
 
-function durationWithWholeHours(seconds, wholeHours) {
-  if (!Number.isFinite(seconds) || seconds < 0 || !Number.isSafeInteger(wholeHours) || wholeHours < 0) return NaN;
+function valueWithWholeUnits(value, wholeUnits, unitsPerWhole) {
+  if (!Number.isFinite(value) || value < 0 || !Number.isSafeInteger(wholeUnits) || wholeUnits < 0) return NaN;
   // Work with the decimal value received from JSON, not a binary remainder.
   const decimal = value => {
     const [coefficient, exponent = "0"] = String(value).toLowerCase().split("e");
@@ -6168,8 +6168,9 @@ function durationWithWholeHours(seconds, wholeHours) {
     if (scale < 0) { units *= 10n ** BigInt(-scale); scale = 0; }
     return {units, scale};
   };
-  const source = decimal(seconds), factor = 10n ** BigInt(source.scale);
-  const units = BigInt(wholeHours) * 3600n * factor + source.units % (3600n * factor);
+  const source = decimal(value), factor = 10n ** BigInt(source.scale);
+  const size = BigInt(unitsPerWhole) * factor;
+  const units = BigInt(wholeUnits) * size + source.units % size;
   const digits = String(units).padStart(source.scale + 1, "0");
   const result = Number(source.scale ? `${digits.slice(0, -source.scale)}.${digits.slice(-source.scale)}` : digits);
   if (!Number.isFinite(result)) return NaN;
@@ -6177,6 +6178,10 @@ function durationWithWholeHours(seconds, wholeHours) {
   // The numeric API cannot represent every decimal after a large hour change.
   // Refuse a lossy edit instead of silently changing the fractional seconds.
   return restored.units * factor === units * 10n ** BigInt(restored.scale) ? result : NaN;
+}
+
+function durationWithWholeHours(seconds, wholeHours) {
+  return valueWithWholeUnits(seconds, wholeHours, 3600);
 }
 
 function projectGoalInput(targetHours) {
@@ -6189,25 +6194,33 @@ function projectGoalInput(targetHours) {
   canonical.type = "hidden"; canonical.dataset.field = "target_hours";
   canonical.value = targetHours ?? "";
   const known = Number.isFinite(targetHours) && targetHours > 0;
-  let whole = known ? Math.floor(targetHours) : "";
-  let remainder = known ? Number(((targetHours - whole) * 60).toFixed(6)) : "";
-  if (remainder === 60) { whole += 1; remainder = 0; }
+  const whole = known ? Math.floor(targetHours) : "";
+  const remainder = known ? Math.min(59.999999, Number(((targetHours - whole) * 60).toFixed(6))) : "";
   const hours = progressInput("Heures ", whole, "goal_hours");
   const minutes = progressInput("Minutes ", remainder, "goal_minutes");
   const h = hours.querySelector("input"), m = minutes.querySelector("input");
   h.step = "1"; m.max = "59.999999";
+  const precisionNote = document.createElement("p");
+  precisionNote.role = "alert"; precisionNote.className = "error";
+  precisionNote.textContent = "Ces heures feraient perdre de la précision à l’objectif. Sa valeur enregistrée est conservée ; choisissez d’autres heures ou annulez.";
+  precisionNote.hidden = true;
   const update = () => {
-    if (h.value === "" && m.value === "") canonical.value = "";
-    else {
-      const hv = Number(h.value), mv = Number(m.value);
-      canonical.value = h.value !== "" && m.value !== "" && Number.isInteger(hv) && hv >= 0
-        && Number.isFinite(mv) && mv >= 0 && mv < 60 ? hv + mv / 60 : "NaN";
-    }
+    const hv = Number(h.value), mv = Number(m.value);
+    const valid = h.value !== "" && m.value !== "" && Number.isInteger(hv) && hv >= 0
+      && Number.isFinite(mv) && mv >= 0 && mv < 60;
+    const next = valid ? known && mv === remainder
+      ? hv === whole ? targetHours : valueWithWholeUnits(targetHours, hv, 1)
+      : hv + mv / 60 : NaN;
+    const precisionLoss = valid && !Number.isFinite(next);
+    canonical.dataset.precisionLoss = precisionLoss ? "true" : "false";
+    precisionNote.hidden = !precisionLoss;
+    canonical.value = h.value === "" && m.value === "" ? ""
+      : precisionLoss ? targetHours : valid ? next : "NaN";
     canonical.dispatchEvent(new Event("input", {bubbles: true}));
   };
   h.addEventListener("input", update); m.addEventListener("input", update);
   const fields = document.createElement("div"); fields.className = "form-grid two-columns";
-  fields.append(hours, minutes); wrapper.append(canonical, legend, fields);
+  fields.append(hours, minutes); wrapper.append(legend, canonical, fields, precisionNote);
   return wrapper;
 }
 
@@ -6452,6 +6465,10 @@ async function saveProjectProgress() {
       progress.push({ acquisition_intent_id: id, acquired_duration_manual: duration });
     }
     if (value("target_hours") !== "") {
+      if (section.querySelector('[data-field="target_hours"]').dataset.precisionLoss === "true") {
+        feedback.textContent = "Ces heures feraient perdre de la précision à l’objectif. Aucune modification enregistrée ; choisissez d’autres heures ou annulez.";
+        return;
+      }
       const targetHours = Number(value("target_hours"));
       if (!Number.isFinite(targetHours) || targetHours <= 0) {
         feedback.textContent = `Corrigez l’objectif de ${id}.`;

@@ -74,3 +74,62 @@ def test_demo_refuses_other_ports_before_creating_profile(tmp_path,monkeypatch):
     monkeypatch.setenv('ASTROPILOT_DATA_DIR',str(root))
     with pytest.raises(SystemExit,match='non autorisé'):demo_mode.main(port=8000)
     assert not root.exists()
+
+
+def test_transfer_to_demo_recreates_identity_after_early_application_import(tmp_path, monkeypatch):
+    import json
+    import re
+    import socket
+    import uvicorn
+    from fastapi.testclient import TestClient
+    import astropilot.app as app_module
+    from astropilot.profile_transfer_app import main as transfer_main
+
+    root = tmp_path / 'fictitious'
+    root.mkdir()
+    (root / demo_mode.MARKER).write_text(json.dumps({'schema': 'nightmerit.demo.v1'}))
+    marker_before = (root / demo_mode.MARKER).read_bytes()
+    monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(root))
+    monkeypatch.delenv('ASTROPILOT_LAUNCH_SESSION', raising=False)
+    early_app = app_module.create_app()
+    monkeypatch.setattr(app_module, 'app', early_app)
+    assert not demo_mode.context()['enabled']
+    with TestClient(early_app) as client:
+        early_identity = json.loads(client.get('/ui/copy-identity.js').text.split('=', 1)[1].split(';\n', 1)[0])
+        assert early_identity['kind'] == 'unidentified'
+
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', 0))
+        port = probe.getsockname()[1]
+    if not 20000 <= port <= 65535:
+        pytest.skip('System assigned port outside isolated candidate range')
+    origin = f'http://127.0.0.1:{port}'
+    phases = []
+
+    class Server:
+        def __init__(self, config):
+            self.app = config.app
+            self.should_exit = False
+
+        def run(self, sockets):
+            with TestClient(self.app, base_url=origin) as client:
+                identity = json.loads(client.get('/ui/copy-identity.js').text.split('=', 1)[1].split(';\n', 1)[0])
+                assert identity['kind'] == 'demonstration'
+                if not phases:
+                    assert not demo_mode.context()['enabled']
+                    token = re.search(r'const token="([^"]+)"', client.get('/').text).group(1)
+                    reply = client.post('/transfer/open', headers={'X-NightMerit-Transfer': token, 'Origin': origin})
+                    assert reply.status_code == 202
+                    assert self.should_exit
+                    phases.append('assistant')
+                else:
+                    assert self.app is not early_app
+                    assert demo_mode.context()['enabled']
+                    assert client.get('/v1/demo-context').json()['weather'] == 'simulated'
+                    phases.append('application')
+
+    monkeypatch.setattr(uvicorn, 'Server', Server)
+    transfer_main(port=port, open_browser=False, demo=True, isolated_candidate=True)
+    assert phases == ['assistant', 'application']
+    assert (root / demo_mode.MARKER).read_bytes() == marker_before
+    assert not (root / 'user_profile.json').exists()

@@ -82,7 +82,10 @@ def main(*, port: int = 18831, open_browser: bool = True, isolated_candidate: bo
         listener.bind(('127.0.0.1', port))
         listener.listen(128)
         prepare_profile(Path(raw))
-        from astropilot.app import app
+        # The transfer assistant may already have imported the module singleton
+        # before demo activation. Capture runtime identity after activation.
+        from astropilot.app import create_app
+        app = create_app()
         server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=port))
         def open_when_ready():
             import time as clock

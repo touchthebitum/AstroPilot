@@ -134,6 +134,25 @@ f.goal_minutes.value='45';f.goal_minutes.dispatchEvent(new Event('input'));asser
 f.goal_minutes.value='60';f.goal_minutes.dispatchEvent(new Event('input'));assert(Number.isNaN(Number(f.target_hours.value)));
 const unknown=inspect(undefined);assert.equal(unknown.target_hours.value,'');assert.equal(unknown.goal_hours.value,'');
 const fine=1.123456789123;assert.equal(inspect(fine).target_hours.value,fine);
+const editable=inspect(fine);
+editable.goal_hours.dispatchEvent(new Event('input'));assert.equal(editable.target_hours.value,fine);
+editable.goal_minutes.dispatchEvent(new Event('input'));assert.equal(editable.target_hours.value,fine);
+let goal=fine;
+for(let i=0;i<4;i++) {
+ const forward=inspect(JSON.parse(JSON.stringify(goal)));
+ forward.goal_hours.value='2';forward.goal_hours.dispatchEvent(new Event('input'));
+ assert.equal(Number(forward.target_hours.value),2.123456789123);
+ const back=inspect(JSON.parse(JSON.stringify(Number(forward.target_hours.value))));
+ back.goal_hours.value='1';back.goal_hours.dispatchEvent(new Event('input'));
+ goal=JSON.parse(JSON.stringify(Number(back.target_hours.value)));assert.equal(goal,fine);
+}
+const boundary=inspect(1.9999999999);
+assert.equal(Number(boundary.goal_hours.value),1,'display must not carry rounded minutes into another canonical hour');
+boundary.goal_hours.dispatchEvent(new Event('input'));assert.equal(Number(boundary.target_hours.value),1.9999999999);
+const unrepresentable=inspect(1.1234567891234567);
+unrepresentable.goal_hours.value='2';unrepresentable.goal_hours.dispatchEvent(new Event('input'));
+assert.equal(Number(unrepresentable.target_hours.value),1.1234567891234567);
+assert.equal(unrepresentable.target_hours.dataset.precisionLoss,'true');
 const exact=inspect(3);assert.equal(Number(exact.goal_hours.value),3);assert.equal(Number(exact.goal_minutes.value),0);
 '''
     result = subprocess.run([shutil.which('node'), '-e', functions + program], capture_output=True, text=True)
