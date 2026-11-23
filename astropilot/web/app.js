@@ -6158,6 +6158,27 @@ function progressInput(label, value, field, type = "number") {
   return wrapper;
 }
 
+function durationWithWholeHours(seconds, wholeHours) {
+  if (!Number.isFinite(seconds) || seconds < 0 || !Number.isSafeInteger(wholeHours) || wholeHours < 0) return NaN;
+  // Work with the decimal value received from JSON, not a binary remainder.
+  const decimal = value => {
+    const [coefficient, exponent = "0"] = String(value).toLowerCase().split("e");
+    const [integer, fraction = ""] = coefficient.split(".");
+    let units = BigInt(integer + fraction), scale = fraction.length - Number(exponent);
+    if (scale < 0) { units *= 10n ** BigInt(-scale); scale = 0; }
+    return {units, scale};
+  };
+  const source = decimal(seconds), factor = 10n ** BigInt(source.scale);
+  const units = BigInt(wholeHours) * 3600n * factor + source.units % (3600n * factor);
+  const digits = String(units).padStart(source.scale + 1, "0");
+  const result = Number(source.scale ? `${digits.slice(0, -source.scale)}.${digits.slice(-source.scale)}` : digits);
+  if (!Number.isFinite(result)) return NaN;
+  const restored = decimal(result);
+  // The numeric API cannot represent every decimal after a large hour change.
+  // Refuse a lossy edit instead of silently changing the fractional seconds.
+  return restored.units * factor === units * 10n ** BigInt(restored.scale) ? result : NaN;
+}
+
 function projectGoalInput(targetHours) {
   const wrapper = document.createElement("fieldset");
   wrapper.dataset.goalDuration = "true";
@@ -6952,7 +6973,7 @@ function addSimpleDurationFields(section, mode, manual, update, locked, advanced
       ? reflectedSeconds !== null && extraMinutes === reflectedMinutes
         // An unchanged minutes field must not round-trip fractional seconds.
         ? wholeHours === reflectedHours ? reflectedSeconds
-          : wholeHours * 3600 + (reflectedSeconds % 3600)
+          : durationWithWholeHours(reflectedSeconds, wholeHours)
         : wholeHours * 3600 + extraMinutes * 60 : "";
     update();
   };

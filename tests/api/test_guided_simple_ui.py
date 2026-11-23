@@ -62,6 +62,24 @@ precise.h.value='2';precise.h.listeners.input();
 assert.equal(Number(precise.manual.value),9000.123456789123,'hour-only edits preserve the original seconds remainder');
 precise.h.value='1';precise.h.listeners.input();
 assert.equal(Number(precise.manual.value),5400.123456789123,'returning to the original hours preserves exact duration');
+// A save returns JSON and recreates the editor; keep that boundary in the regression.
+let persisted=5400.123456789123;
+for(let cycle=0;cycle<4;cycle++) {
+ const forward=make(JSON.parse(JSON.stringify(persisted)));
+ forward.h.value='2';forward.h.listeners.input();
+ assert.equal(Number(forward.manual.value),9000.123456789123);
+ const backward=make(JSON.parse(JSON.stringify(Number(forward.manual.value))));
+ backward.h.value='1';backward.h.listeners.input();
+ persisted=JSON.parse(JSON.stringify(Number(backward.manual.value)));
+ assert.equal(persisted,5400.123456789123,'save/readback/hour round-trip must preserve the decimal fraction');
+}
+for(const seconds of [5400.5,5400.125,5400.123456,5400.123456789123]) {
+ assert.equal(durationWithWholeHours(durationWithWholeHours(seconds,2),1),seconds);
+}
+assert.equal(durationWithWholeHours(durationWithWholeHours(1e-7,1),0),1e-7);
+assert(Number.isNaN(durationWithWholeHours(5400.123456789123,1000000000000)),
+ 'reject hour edits that the numeric API cannot represent without losing fractional seconds');
+
 
 a.h.value='2';a.m.value='15';a.m.listeners.input();
 assert.equal(Number(a.manual.value),8100);
