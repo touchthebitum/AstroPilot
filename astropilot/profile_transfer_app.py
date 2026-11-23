@@ -40,7 +40,7 @@ def create_transfer_app(directory=None, *, origin="http://127.0.0.1:8000",
     initial_version = canonical_version()
     launch_session = LaunchSession.from_environment()
     from astropilot.copy_identity import capture_copy_identity, identity_script
-    copy_identity = capture_copy_identity(launch_session)
+    copy_identity = capture_copy_identity(launch_session, demonstration=demo)
     root = Path(directory) if directory is not None else get_user_data_dir()
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     token = secrets.token_urlsafe(32)

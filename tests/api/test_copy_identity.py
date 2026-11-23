@@ -65,3 +65,19 @@ def test_every_page_keeps_identity_outside_screen_navigation():
     assert 'document.body.prepend(banner)' in script
     assert 'textContent' in script and 'innerHTML' not in script
     assert 'fetch(' not in script and 'localStorage' not in script
+
+
+@pytest.mark.parametrize("assistant", [False, True])
+def test_explicit_demo_runtime_identifies_fictitious_copy_without_managed_session(monkeypatch, tmp_path, assistant):
+    monkeypatch.delenv('ASTROPILOT_LAUNCH_SESSION', raising=False)
+    monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(tmp_path / 'fictitious'))
+    monkeypatch.setenv('NIGHTMERIT_COPY_KIND', 'personal')
+    import astropilot.demo_mode as demo_mode
+    monkeypatch.setattr(demo_mode, '_active', True)
+    app = create_transfer_app(directory=tmp_path / 'fictitious', origin='http://testserver', demo=True) if assistant else create_app()
+    response = TestClient(app).get('/ui/copy-identity.js')
+    assert response.status_code == 200
+    identity = json.loads(response.text.split('=', 1)[1].split(';\n', 1)[0])
+    assert identity == {'kind': 'demonstration', 'label': 'Essai fictif — météo simulée',
+                        'name': 'Démonstration locale — données fictives uniquement'}
+    assert not (tmp_path / 'fictitious' / 'user_profile.json').exists()

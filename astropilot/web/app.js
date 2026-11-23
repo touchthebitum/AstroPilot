@@ -6158,6 +6158,72 @@ function progressInput(label, value, field, type = "number") {
   return wrapper;
 }
 
+function valueWithWholeUnits(value, wholeUnits, unitsPerWhole) {
+  if (!Number.isFinite(value) || value < 0 || !Number.isSafeInteger(wholeUnits) || wholeUnits < 0) return NaN;
+  // Work with the decimal value received from JSON, not a binary remainder.
+  const decimal = value => {
+    const [coefficient, exponent = "0"] = String(value).toLowerCase().split("e");
+    const [integer, fraction = ""] = coefficient.split(".");
+    let units = BigInt(integer + fraction), scale = fraction.length - Number(exponent);
+    if (scale < 0) { units *= 10n ** BigInt(-scale); scale = 0; }
+    return {units, scale};
+  };
+  const source = decimal(value), factor = 10n ** BigInt(source.scale);
+  const size = BigInt(unitsPerWhole) * factor;
+  const units = BigInt(wholeUnits) * size + source.units % size;
+  const digits = String(units).padStart(source.scale + 1, "0");
+  const result = Number(source.scale ? `${digits.slice(0, -source.scale)}.${digits.slice(-source.scale)}` : digits);
+  if (!Number.isFinite(result)) return NaN;
+  const restored = decimal(result);
+  // The numeric API cannot represent every decimal after a large hour change.
+  // Refuse a lossy edit instead of silently changing the fractional seconds.
+  return restored.units * factor === units * 10n ** BigInt(restored.scale) ? result : NaN;
+}
+
+function durationWithWholeHours(seconds, wholeHours) {
+  return valueWithWholeUnits(seconds, wholeHours, 3600);
+}
+
+function projectGoalInput(targetHours) {
+  const wrapper = document.createElement("fieldset");
+  wrapper.dataset.goalDuration = "true";
+  const legend = document.createElement("legend");
+  legend.textContent = "Objectif total sur plusieurs nuits";
+  // Preserve the exact stored value until the user edits the visible duration.
+  const canonical = document.createElement("input");
+  canonical.type = "hidden"; canonical.dataset.field = "target_hours";
+  canonical.value = targetHours ?? "";
+  const known = Number.isFinite(targetHours) && targetHours > 0;
+  const whole = known ? Math.floor(targetHours) : "";
+  const remainder = known ? Math.min(59.999999, Number(((targetHours - whole) * 60).toFixed(6))) : "";
+  const hours = progressInput("Heures ", whole, "goal_hours");
+  const minutes = progressInput("Minutes ", remainder, "goal_minutes");
+  const h = hours.querySelector("input"), m = minutes.querySelector("input");
+  h.step = "1"; m.max = "59.999999";
+  const precisionNote = document.createElement("p");
+  precisionNote.role = "alert"; precisionNote.className = "error";
+  precisionNote.textContent = "Ces heures feraient perdre de la précision à l’objectif. Sa valeur enregistrée est conservée ; choisissez d’autres heures ou annulez.";
+  precisionNote.hidden = true;
+  const update = () => {
+    const hv = Number(h.value), mv = Number(m.value);
+    const valid = h.value !== "" && m.value !== "" && Number.isInteger(hv) && hv >= 0
+      && Number.isFinite(mv) && mv >= 0 && mv < 60;
+    const next = valid ? known && mv === remainder
+      ? hv === whole ? targetHours : valueWithWholeUnits(targetHours, hv, 1)
+      : hv + mv / 60 : NaN;
+    const precisionLoss = valid && !Number.isFinite(next);
+    canonical.dataset.precisionLoss = precisionLoss ? "true" : "false";
+    precisionNote.hidden = !precisionLoss;
+    canonical.value = h.value === "" && m.value === "" ? ""
+      : precisionLoss ? targetHours : valid ? next : "NaN";
+    canonical.dispatchEvent(new Event("input", {bubbles: true}));
+  };
+  h.addEventListener("input", update); m.addEventListener("input", update);
+  const fields = document.createElement("div"); fields.className = "form-grid two-columns";
+  fields.append(hours, minutes); wrapper.append(legend, canonical, fields, precisionNote);
+  return wrapper;
+}
+
 async function openProjectProgress(projectId, { discardConfirmed = false, discoveryIntentId = null } = {}) {
   if (!discardConfirmed && !confirmDiscardProjectProgress()) return;
   const editor = document.querySelector("#project-progress-editor");
@@ -6260,10 +6326,10 @@ function renderProjectProgressEditor(message = "") {
       const frames = progressInput("Poses acquises ", progress?.acquired_frames, "acquired_frames");
       const exposure = progressInput("Secondes par pose ", progress?.exposure_seconds, "exposure_seconds");
       const manual = progressInput("Durée acquise (secondes) ", progress?.acquired_duration_manual, "acquired_duration_manual");
-      const hours = progressInput("Objectif total sur plusieurs nuits (heures) ", target?.target_hours, "target_hours");
+      const hours = projectGoalInput(target?.target_hours);
       const goalSummary = document.createElement("p");
       goalSummary.dataset.proOnly = "true";
-      const updateGoalSummary = () => {goalSummary.textContent = hours.querySelector("input").value !== "" ? `Votre objectif total : ${hours.querySelector("input").value} h, sur une ou plusieurs nuits.` : "Indiquez votre objectif total pour ce filtre.";};
+      const updateGoalSummary = () => {goalSummary.textContent = hours.querySelector("input").value !== "" ? `Votre objectif total : ${progressDuration(Number(hours.querySelector("input").value) * 3600)}, sur une ou plusieurs nuits.` : "Indiquez votre objectif total pour ce filtre.";};
       hours.querySelector("input").addEventListener("input", updateGoalSummary);
       updateGoalSummary();
       const computed = document.createElement("output");
@@ -6387,6 +6453,10 @@ async function saveProjectProgress() {
       }
       progress.push({ acquisition_intent_id: id, acquired_frames: frames, exposure_seconds: seconds });
     } else if (mode === "manual") {
+      if (section.dataset.durationPrecisionLoss === "true") {
+        feedback.textContent = "Ces heures feraient perdre de la précision aux fractions de seconde. Aucune modification enregistrée ; choisissez d’autres heures ou annulez.";
+        return;
+      }
       const duration = Number(value("acquired_duration_manual"));
       if (value("acquired_duration_manual") === "" || !Number.isFinite(duration) || duration < 0) {
         feedback.textContent = `Corrigez la durée de ${id}.`;
@@ -6395,6 +6465,10 @@ async function saveProjectProgress() {
       progress.push({ acquisition_intent_id: id, acquired_duration_manual: duration });
     }
     if (value("target_hours") !== "") {
+      if (section.querySelector('[data-field="target_hours"]').dataset.precisionLoss === "true") {
+        feedback.textContent = "Ces heures feraient perdre de la précision à l’objectif. Aucune modification enregistrée ; choisissez d’autres heures ou annulez.";
+        return;
+      }
       const targetHours = Number(value("target_hours"));
       if (!Number.isFinite(targetHours) || targetHours <= 0) {
         feedback.textContent = `Corrigez l’objectif de ${id}.`;
@@ -6896,13 +6970,22 @@ function addSimpleDurationFields(section, mode, manual, update, locked, advanced
   enter.type = "button"; enter.className = "secondary-button";
   enter.textContent = "Renseigner une durée totale connue";
   enter.disabled = locked;
+  const precisionNote = document.createElement("p");
+  precisionNote.role = "alert"; precisionNote.className = "error";
+  precisionNote.textContent = "Ces heures ne permettent pas de conserver exactement les fractions de seconde. La durée enregistrée est conservée. Choisissez d’autres heures ou annulez cette modification.";
+  precisionNote.hidden = true;
+  let reflectedSeconds = null, reflectedHours = null, reflectedMinutes = null;
   const reflect = () => {
+    section.dataset.durationPrecisionLoss = "false"; precisionNote.hidden = true;
     fields.hidden = mode.value !== "manual";
     enter.hidden = mode.value !== "unknown";
     const seconds = Number(manual.querySelector("input").value);
     const known = manual.querySelector("input").value !== "" && Number.isFinite(seconds) && seconds >= 0;
     h.value = known ? Math.floor(seconds / 3600) : "";
     m.value = known ? (seconds % 3600) / 60 : "";
+    reflectedSeconds = known ? seconds : null;
+    reflectedHours = known ? Number(h.value) : null;
+    reflectedMinutes = known ? Number(m.value) : null;
     info.textContent = locked ? "Ce temps est conservé et verrouillé car des séances ont déjà été ajoutées au projet. Pour ajouter une nouvelle séance, retrouvez sa session NightMerit depuis Mes projets."
       : mode.value === "detailed" ? "Ce temps est calculé à partir du nombre de poses conservées et de leur durée."
       : mode.value === "unknown" ? "Ce temps n’est pas encore renseigné. Si vous commencez sans images, cliquez sur « Renseigner une durée totale connue », puis saisissez 0 heure et 0 minute."
@@ -6911,9 +6994,15 @@ function addSimpleDurationFields(section, mode, manual, update, locked, advanced
   const original = manual.querySelector("input");
   const change = () => {
     const wholeHours = Number(h.value), extraMinutes = Number(m.value);
-    original.value = h.value !== "" && m.value !== "" && Number.isInteger(wholeHours) && wholeHours >= 0
-      && Number.isFinite(extraMinutes) && extraMinutes >= 0 && extraMinutes < 60
-      ? wholeHours * 3600 + extraMinutes * 60 : "";
+    const valid = h.value !== "" && m.value !== "" && Number.isInteger(wholeHours) && wholeHours >= 0
+      && Number.isFinite(extraMinutes) && extraMinutes >= 0 && extraMinutes < 60;
+    const next = valid ? reflectedSeconds !== null && extraMinutes === reflectedMinutes
+      ? wholeHours === reflectedHours ? reflectedSeconds : durationWithWholeHours(reflectedSeconds, wholeHours)
+      : wholeHours * 3600 + extraMinutes * 60 : null;
+    const precisionLoss = valid && !Number.isFinite(next);
+    section.dataset.durationPrecisionLoss = precisionLoss ? "true" : "false";
+    precisionNote.hidden = !precisionLoss;
+    original.value = precisionLoss ? reflectedSeconds : next ?? "";
     update();
   };
   h.addEventListener("input", change); m.addEventListener("input", change);
@@ -6921,7 +7010,7 @@ function addSimpleDurationFields(section, mode, manual, update, locked, advanced
   enter.addEventListener("click", () => {mode.value = "manual"; update(); reflect();});
   for (const child of [mode, manual]) child.dataset.proOnly = "true";
   for (const child of [heading, info, example, fields, enter]) child.dataset.simpleOnly = "true";
-  wrapper.append(summary, heading, info, example, ...advanced, fields, enter);
+  wrapper.append(summary, heading, info, example, ...advanced, fields, precisionNote, enter);
   section.append(wrapper); reflect();
 }
 

@@ -53,6 +53,38 @@ assert.equal(Number(a.h.value),1);
 assert.equal(Number(a.m.value),(1800.5/60));
 a.mode.listeners.change();
 assert.equal(Number(a.manual.value),5400.5,'a view refresh must not round or overwrite seconds');
+a.h.value='2';a.h.listeners.input();
+assert.equal(Number(a.manual.value),9000.5,'editing only hours must preserve fractional seconds');
+const precise=make(5400.123456789123);
+precise.m.listeners.input();
+assert.equal(Number(precise.manual.value),5400.123456789123,'unchanged input events must preserve the exact stored seconds');
+precise.h.value='2';precise.h.listeners.input();
+assert.equal(Number(precise.manual.value),5400.123456789123,'a lossy hour edit must keep the original duration');
+assert.equal(precise.section.dataset.durationPrecisionLoss,'true');
+assert.ok(precise.section.all().some(x=>x.role==='alert' && !x.hidden));
+precise.h.value='1';precise.h.listeners.input();
+assert.equal(Number(precise.manual.value),5400.123456789123,'returning to the original hours preserves exact duration');
+// A save returns JSON and recreates the editor; keep that boundary in the regression.
+let persisted=5400.123456789123;
+for(let cycle=0;cycle<4;cycle++) {
+ const forward=make(JSON.parse(JSON.stringify(persisted)));
+ forward.h.value='0';forward.h.listeners.input();
+ assert.equal(Number(forward.manual.value),1800.123456789123);
+ assert.equal(forward.section.dataset.durationPrecisionLoss,'false');
+ const backward=make(JSON.parse(JSON.stringify(Number(forward.manual.value))));
+ backward.h.value='1';backward.h.listeners.input();
+ persisted=JSON.parse(JSON.stringify(Number(backward.manual.value)));
+ assert.equal(persisted,5400.123456789123,'save/readback/hour round-trip must preserve the decimal fraction');
+}
+for(const seconds of [5400.5,5400.125,5400.123456]) {
+ assert.equal(durationWithWholeHours(durationWithWholeHours(seconds,2),1),seconds);
+}
+assert.equal(durationWithWholeHours(durationWithWholeHours(1e-7,1),0),1e-7);
+assert(Number.isNaN(durationWithWholeHours(5400.123456789123,2)), 'the previously failing 1-to-2-hour edit cannot silently discard its decimal fraction');
+assert(Number.isNaN(durationWithWholeHours(5400.123456789123,1000000000000)),
+ 'reject hour edits that the numeric API cannot represent without losing fractional seconds');
+
+
 a.h.value='2';a.m.value='15';a.m.listeners.input();
 assert.equal(Number(a.manual.value),8100);
 a.m.value='60';a.m.listeners.input();assert.equal(a.manual.value,'','invalid minutes must not become a duration');
