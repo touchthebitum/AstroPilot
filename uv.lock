@@ -102,7 +102,7 @@ provides-extras = ["packaging", "test"]
 
 [[package]]
 name = "astropy"
-version = "7.2.3"
+version = "7.2.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "astropy-iers-data" },
@@ -112,16 +112,16 @@ dependencies = [
     { name = "pyerfa" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6e/18/5223c55246f6536ba59da1e04cdfe6f45dfcea5a06f6729cc163ea43051c/astropy-7.2.3.tar.gz", hash = "sha256:1deab51837331aabb4fa25a72e9b8a28754990896794832a38ad89810dd9b568", size = 7114963, upload-time = "2026-10-15T21:42:43.473Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1e/af/afc7af7e0492f0ac3360198d21d611457103cdd61239798fe0ebfcd2a03d/astropy-7.2.4.tar.gz", hash = "sha256:88451384542a3549140ee44f2de4cfca9f27800a2f75ac83bbee7fa4f6a5b72f", size = 7132167, upload-time = "2026-11-17T22:45:50.322Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/24/2e/e6f94a5cb070c0cdc73c99802a8758b8d4dbdea5158a77c9292fda3ec40a/astropy-7.2.3-cp311-abi3-macosx_10_9_x86_64.whl", hash = "sha256:722ac871627899dcf5eb6a8a8374887abb9d15234075607a3d0c5ee44c067091", size = 6502678, upload-time = "2026-10-15T21:42:22.42Z" },
-    { url = "https://files.pythonhosted.org/packages/f7/0a/23ba81f70ab8d0b0f897cbc729dc559f3ebac01d242f25a0074badf4b865/astropy-7.2.3-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:292b442ecba854b9b529e05f1e7b25754ca39da1a270c6a88ac125622d7247f8", size = 6488742, upload-time = "2026-10-15T21:42:25.218Z" },
-    { url = "https://files.pythonhosted.org/packages/10/16/eae64625555963003739b6aa6e5ff223fb2a1e3ca807593ae92da3f12f4d/astropy-7.2.3-cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:78e0abac1120f8b882521c788ee0f9db6000a98842a15ea58d5f9a746950078c", size = 9825737, upload-time = "2026-10-15T21:42:27.789Z" },
-    { url = "https://files.pythonhosted.org/packages/e0/ab/ff4056a3bdd1c4b4d69b968a0ab9d235aa55f4f3005b3bb882ec434efec5/astropy-7.2.3-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b5c11f668eccebfb7dfcd2103702e38d92850257caf9c227beee38be2d545cad", size = 9835890, upload-time = "2026-10-15T21:42:30.232Z" },
-    { url = "https://files.pythonhosted.org/packages/02/6c/1db7eebe43d59b672e0889892c3b8f9b8e67ec6c1a19d4b33ec552627ff9/astropy-7.2.3-cp311-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:928c2198ea9d7c9f9034e1ea460538f64ff2ddc23dd60dd723b305a42c29140c", size = 9792094, upload-time = "2026-10-15T21:42:33.243Z" },
-    { url = "https://files.pythonhosted.org/packages/4b/21/8ff0ed859d977af48207101832183ba08c2ce3a6063c9c6c40eae26147be/astropy-7.2.3-cp311-abi3-win32.whl", hash = "sha256:e000a3633f4f10ce374690bedf8f411ae29ef317b878814856c166f7dd251b7f", size = 6271575, upload-time = "2026-10-15T21:42:36.714Z" },
-    { url = "https://files.pythonhosted.org/packages/e2/42/130f3bbb83325a114fe54370c4b31938d2f396e7308477112b8dc824d1b6/astropy-7.2.3-cp311-abi3-win_amd64.whl", hash = "sha256:139adb9e427682981429baa88f96cf6da1c5d41e6184371b453b5aed8a6587cc", size = 6394982, upload-time = "2026-10-15T21:42:38.945Z" },
-    { url = "https://files.pythonhosted.org/packages/bc/6a/01a1b57148625b7b51ac81b7ab69e6e64189ca728529402d365eaaec6d54/astropy-7.2.3-cp311-abi3-win_arm64.whl", hash = "sha256:71d0c225dca0a10c63f423c1fc239e1e76f012a39017b70843c40a20eab68a5f", size = 6283080, upload-time = "2026-10-15T21:42:41.27Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/ce/b18a08f7bd8b954fb700f77fff93b92fb299a8ec41eff04c05ba8f996189/astropy-7.2.4-cp311-abi3-macosx_10_9_x86_64.whl", hash = "sha256:1b360cc55f6858903a7ab26681ad21cd466af2ee68771809c4bb253c8c4a49a0", size = 6515395, upload-time = "2026-11-17T22:45:31.247Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/32/979c87bc4fd79bb6a9e076a868b62ea6c48eb0295b93f394a9a4d906511d/astropy-7.2.4-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:5f282be6f0f4d59a1d384f751721644bd742ff9e68a7c50aeb612f1e30c479ee", size = 6501261, upload-time = "2026-11-17T22:45:33.882Z" },
+    { url = "https://files.pythonhosted.org/packages/4c/46/bf48b955a02737aff6cf619fb8e0959247201687b86ff5b824b9c9c21964/astropy-7.2.4-cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ed46571f4306841cc47557210ff51998331e8f0e2577832ba057b490f59780fe", size = 9828980, upload-time = "2026-11-17T22:45:35.993Z" },
+    { url = "https://files.pythonhosted.org/packages/30/83/56b2d9904955315aca35e921eecc8307d330c7191b705cd4837b31a083d1/astropy-7.2.4-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:287f55c012e81dd8e54b3c8b0772133e9543005c661fda096f38ce5671d6581e", size = 9838883, upload-time = "2026-11-17T22:45:38.998Z" },
+    { url = "https://files.pythonhosted.org/packages/0e/f2/e0216153e6c6ed3b53617f416936187596f152b8c7b68a3e16b1cd414939/astropy-7.2.4-cp311-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:f9c1539b1be7fd9f9019989aea6d579b6b3777928c2e223f087eabc7bfd3dbef", size = 9797704, upload-time = "2026-11-17T22:45:42.157Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/00/e024ecec1d512e2e382f1c587f641c37b146116a37b4ddefc0523f1dbab6/astropy-7.2.4-cp311-abi3-win32.whl", hash = "sha256:f3db4b59981b3c64262d111aa7241c450537bb61009f07634a57e5f1cb659279", size = 6285295, upload-time = "2026-11-17T22:45:44.406Z" },
+    { url = "https://files.pythonhosted.org/packages/46/93/7bd639b242f3c0d4e770d615daa0e8f3601590c37d6bdc1b5818d3fce140/astropy-7.2.4-cp311-abi3-win_amd64.whl", hash = "sha256:fa852bd23482a74f80892c94afdca3c883220eda417cbfe6d934a2d50182b3b0", size = 6409266, upload-time = "2026-11-17T22:45:46.396Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/23/34008c3fe15d302093a847aa659a5f3912dbeee28471707421d89381b2b4/astropy-7.2.4-cp311-abi3-win_arm64.whl", hash = "sha256:012851d33255667cdb9d890aae44ce07bd57344d30414027d5b36e53b657ca00", size = 6299908, upload-time = "2026-11-17T22:45:48.349Z" },
 ]
 
 [[package]]
