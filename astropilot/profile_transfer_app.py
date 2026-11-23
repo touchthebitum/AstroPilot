@@ -233,7 +233,8 @@ def reserve_listener(port=8000):
         raise
 
 
-def main(*, port=8000, open_browser=True, demo=False, isolated_candidate=False):
+def main(*, port=8000, open_browser=True, demo=False, isolated_candidate=False,
+         reserved_socket=None, application_runner=None):
     import uvicorn
     from astropilot.file_lock import exclusive_file_lock
     # Reserve before opening a browser. Never hand off to or stop another copy.
@@ -244,7 +245,9 @@ def main(*, port=8000, open_browser=True, demo=False, isolated_candidate=False):
     if demo and port not in {18831, 18841} and not isolated_port_allowed:
         raise ValueError("Demo transfer requires an isolated demo port")
     origin = f"http://127.0.0.1:{port}"
-    listener = reserve_listener() if port == 8000 else reserve_listener(port=port)
+    listener = reserved_socket if reserved_socket is not None else (reserve_listener() if port == 8000 else reserve_listener(port=port))
+    if reserved_socket is not None and listener.getsockname() != ('127.0.0.1', port):
+        raise ValueError('Reserved listener identity mismatch')
     launch_requested = threading.Event()
     try:
         def open_application():
@@ -275,6 +278,9 @@ def main(*, port=8000, open_browser=True, demo=False, isolated_candidate=False):
     finally:
         listener.close()
     if launch_requested.is_set():
+        if application_runner is not None:
+            application_runner()
+            return
         # Keep the same process, executable and data environment, after both
         # the assistant listener and its exclusive profile lock are released.
         if demo:

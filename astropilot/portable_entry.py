@@ -3,6 +3,16 @@ import sys
 
 
 def main():
+    if sys.argv[1:2] == ["--real-weather-component"]:
+        if len(sys.argv) != 4:
+            raise SystemExit("Explicit component and reserved socket required")
+        from astropilot.real_weather_runtime import main as component_main
+        return component_main(sys.argv[2], sys.argv[3])
+    if sys.argv[1:2] == ["--real-weather-kit"]:
+        if len(sys.argv) != 4:
+            raise SystemExit("Explicit kit and action required")
+        from astropilot.real_weather_launcher import main as kit_main
+        return kit_main(sys.argv[2], sys.argv[3])
     if sys.argv[1:2] and sys.argv[1] in {
         "--isolated-test-server", "--isolated-demo-server",
         "--isolated-data-transfer", "--isolated-demo-transfer",

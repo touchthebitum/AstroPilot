@@ -40,6 +40,7 @@ from astropilot.guardian_renewal_api import (GuardianRenewalAdapter, RenewalRequ
 from astropilot.persistence_diagnostics import HEADER as PERSISTENCE_DIAGNOSTIC_HEADER, log_credit_persistence
 from decision.services.intent_progress_credit import IntentProgressPersistenceError
 from astropilot.weather_diagnostics import HEADER as WEATHER_DIAGNOSTIC_HEADER, log_weather, weather_diagnostic_context
+from astropilot.real_weather_context import explicit_weather_request
 from astropilot.analysis_diagnostics import AnalysisTimings, HEADER as ANALYSIS_DIAGNOSTIC_HEADER
 from astropilot.guardian_api import GuardianEvaluateRequest, GuardianEvaluateResponse, evaluate as evaluate_guardian
 from decision.runners.guardian_runner import GuardianRunner
@@ -3195,7 +3196,7 @@ def create_app(
         response.headers[WEATHER_DIAGNOSTIC_HEADER] = weather_diagnostic_id
         diagnostic_headers = {WEATHER_DIAGNOSTIC_HEADER: weather_diagnostic_id}
         try:
-            with timings.measure("weather"), weather_diagnostic_context(weather_diagnostic_id):
+            with timings.measure("weather"), weather_diagnostic_context(weather_diagnostic_id), explicit_weather_request(weather_diagnostic_id):
                 weather = weather_provider(
                     location["latitude"],
                     location["longitude"],
