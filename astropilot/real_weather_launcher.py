@@ -153,30 +153,84 @@ class RealWeatherKit:
         finally:
             os.close(runtime_fd)
 
-    def cleanup_process_record(self, session):
-        """Remove only our record in the directory held by our launcher lock.
-
-        A moved copy must not resolve its old path into a replacement copy.
-        Unreadable, redirected or foreign-session records are left untouched.
-        """
+    def owned_process_record(self, session):
+        """Read only our session record through the locked directory descriptor."""
         if self._runtime_fd is None:
-            return False
+            return None
         try:
             flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
             fd = os.open("processes.json", flags, dir_fd=self._runtime_fd)
             with os.fdopen(fd, "rb") as stream:
                 opened = os.fstat(stream.fileno())
                 if not stat.S_ISREG(opened.st_mode) or opened.st_size > 16384:
-                    return False
+                    return None
                 from astropilot.weather_relay import decode
                 record = decode(stream.read(16385))
             if (not isinstance(record, dict) or record.get("root_identity") != self.identity
                     or record.get("session_id") != session["session_id"]
                     or not isinstance(record.get("supervisor"), dict)
                     or record["supervisor"].get("pid") != os.getpid()):
+                return None
+            return record, opened
+        except (OSError, ValueError):
+            return None
+
+    def process_record_unchanged(self, opened):
+        current = os.stat("processes.json", dir_fd=self._runtime_fd, follow_symlinks=False)
+        return (current.st_dev, current.st_ino) == (opened.st_dev, opened.st_ino)
+
+    def retire_exited_relays(self, session):
+        # Only Popen objects created by this supervisor can confirm termination.
+        exited = {child.pid for role, child in self.children
+                  if role == "relay" and child.poll() is not None}
+        if not exited:
+            return False
+        owned = self.owned_process_record(session)
+        if owned is None:
+            return False
+        record, opened = owned
+        children = record.get("children")
+        if not isinstance(children, list) or any(not isinstance(item, dict) for item in children):
+            return False
+        remaining = [item for item in children
+                     if not (item.get("role") == "relay" and item.get("pid") in exited)]
+        if remaining == children:
+            return False
+        # Never resolve the old kit path after a move: both the temporary file
+        # and its atomic replacement belong to the directory we still lock.
+        temporary = ".launch-" + secrets.token_hex(16)
+        created = False
+        try:
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                         0o600, dir_fd=self._runtime_fd)
+            created = True
+            with os.fdopen(fd, "w") as stream:
+                json.dump({**record, "children": remaining}, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            if not self.process_record_unchanged(opened):
                 return False
-            current = os.stat("processes.json", dir_fd=self._runtime_fd, follow_symlinks=False)
-            if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+            os.replace(temporary, "processes.json", src_dir_fd=self._runtime_fd, dst_dir_fd=self._runtime_fd)
+            return True
+        finally:
+            if created:
+                try:
+                    os.unlink(temporary, dir_fd=self._runtime_fd)
+                except FileNotFoundError:
+                    pass
+
+    def cleanup_process_record(self, session):
+        """Remove only our record in the directory held by our launcher lock.
+
+        A moved copy must not resolve its old path into a replacement copy.
+        Unreadable, redirected or foreign-session records are left untouched.
+        """
+        owned = self.owned_process_record(session)
+        if owned is None:
+            return False
+        _, opened = owned
+        try:
+            if not self.process_record_unchanged(opened):
                 return False
             os.unlink("processes.json", dir_fd=self._runtime_fd)
             return True
@@ -358,9 +412,7 @@ class RealWeatherKit:
                             # A dead relay must not remain a zombie whose changed
                             # ps identity would prevent the normal stop action.
                             # Keep the application open; never restart the relay.
-                            for role, owned in self.children:
-                                if role == "relay":
-                                    owned.poll()
+                            self.retire_exited_relays(session)
                             time.sleep(NAP)
                         if self.stopping:
                             break

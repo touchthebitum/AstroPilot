@@ -205,6 +205,8 @@ def test_supervisor_reaps_exited_relay_while_application_remains_open(
         if spawned["relay"].returncode is not None:
             assert spawned["relay"].returncode == relay_exit
             assert spawned["application"].poll() is None
+            tracked = json.loads((instance.runtime / "processes.json").read_text())
+            assert [item["role"] for item in tracked["children"]] == ["application"]
             instance.stopping = True
 
     monkeypatch.setattr(instance, "spawn", spawn)
@@ -214,3 +216,135 @@ def test_supervisor_reaps_exited_relay_while_application_remains_open(
     assert set(spawned) == {"relay", "application"}
     assert all(child.poll() is not None for child in spawned.values())
     assert not (instance.runtime / "processes.json").exists()
+
+
+def tracked_children():
+    return [dict(pid=101, role="relay", process_identity="old --real-weather-component relay"),
+            dict(pid=102, role="application", process_identity="ours --real-weather-component application")]
+
+
+def fake_relay(instance, returncode=124):
+    from types import SimpleNamespace
+    instance.children = [("relay", SimpleNamespace(pid=101, poll=lambda: returncode))]
+
+
+@pytest.mark.parametrize("relay_exit", [0, 124])
+def test_retired_relay_pid_reuse_stops_only_our_supervisor(tmp_path, monkeypatch, relay_exit):
+    instance = launcher.RealWeatherKit(kit(tmp_path))
+    with instance.locked():
+        session = instance.session()
+        record = owned_record(instance, session)
+        record.update(children=tracked_children(), supervisor=dict(pid=os.getpid(), process_identity="our supervisor"))
+        launcher._private_json(instance.runtime / "processes.json", record)
+        fake_relay(instance, relay_exit)
+        assert instance.retire_exited_relays(session) is True
+        after = json.loads((instance.runtime / "processes.json").read_text())
+        assert after == {**record, "children": [record["children"][1]]}
+        assert (instance.runtime / "processes.json").stat().st_mode & 0o777 == 0o600
+        assert instance.retire_exited_relays(session) is False
+        calls = []
+        def identity(pid):
+            assert pid != 101, "Retired PID, now foreign, must never be probed"
+            return "our supervisor" if pid == os.getpid() else record["children"][1]["process_identity"]
+        monkeypatch.setattr(launcher, "_process", identity)
+        monkeypatch.setattr(launcher.os, "kill", lambda pid, sig: calls.append((pid, sig)))
+        instance.stop()
+        assert calls == [(os.getpid(), launcher.signal.SIGTERM)]
+        assert not list(instance.runtime.glob(".launch-*"))
+
+
+def test_live_relay_is_never_retired(tmp_path):
+    instance = launcher.RealWeatherKit(kit(tmp_path))
+    with instance.locked():
+        session = instance.session()
+        record = {**owned_record(instance, session), "children": tracked_children()}
+        launcher._private_json(instance.runtime / "processes.json", record)
+        before = (instance.runtime / "processes.json").read_bytes()
+        fake_relay(instance, None)
+        assert instance.retire_exited_relays(session) is False
+        assert (instance.runtime / "processes.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("kind", ["other_session", "other_root", "other_supervisor", "invalid_json", "symlink"])
+def test_retirement_preserves_unowned_records(tmp_path, kind):
+    instance = launcher.RealWeatherKit(kit(tmp_path))
+    with instance.locked():
+        session = instance.session()
+        record = {**owned_record(instance, session), "children": tracked_children()}
+        path = instance.runtime / "processes.json"
+        if kind == "other_session": record["session_id"] = "foreign-session"
+        if kind == "other_root": record["root_identity"] = [0, 0]
+        if kind == "other_supervisor": record["supervisor"]["pid"] += 1
+        if kind == "invalid_json": path.write_text("{incomplete")
+        elif kind == "symlink":
+            target = tmp_path / "foreign.json"
+            target.write_text(json.dumps(record))
+            path.symlink_to(target)
+        else: launcher._private_json(path, record)
+        before = path.read_bytes()
+        fake_relay(instance)
+        assert instance.retire_exited_relays(session) is False
+        assert path.read_bytes() == before
+        assert path.is_symlink() == (kind == "symlink")
+        assert not list(instance.runtime.glob(".launch-*"))
+
+
+def test_moved_copy_retirement_preserves_replacement_and_both_profiles(tmp_path, monkeypatch):
+    original = kit(tmp_path)
+    a = launcher.RealWeatherKit(original)
+    profile_a = fictitious_profile(original, monkeypatch)
+    with a.locked():
+        session_a = a.session()
+        record_a = {**owned_record(a, session_a), "children": tracked_children()}
+        launcher._private_json(a.runtime / "processes.json", record_a)
+        moved = tmp_path / "Moved fictitious copy"
+        original.rename(moved)
+        replacement = kit(tmp_path)
+        b = launcher.RealWeatherKit(replacement)
+        profile_b = fictitious_profile(replacement, monkeypatch)
+        with b.locked():
+            session_b = b.session()
+            launcher._private_json(b.runtime / "processes.json", owned_record(b, session_b))
+            before_b = (b.runtime / "processes.json").read_bytes()
+            fake_relay(a)
+            assert a.retire_exited_relays(session_a) is True
+            assert json.loads((moved / "runtime/processes.json").read_text()) == {
+                **record_a, "children": [record_a["children"][1]]}
+            assert (b.runtime / "processes.json").read_bytes() == before_b
+            assert (moved / "DONNEES-FICTIVES/profil/user_profile.json").read_bytes() == profile_a
+            assert (replacement / "DONNEES-FICTIVES/profil/user_profile.json").read_bytes() == profile_b
+            assert not list((moved / "runtime").glob(".launch-*"))
+
+
+def test_retirement_does_not_overwrite_record_replaced_during_write(tmp_path, monkeypatch):
+    instance = launcher.RealWeatherKit(kit(tmp_path))
+    with instance.locked():
+        session = instance.session()
+        path = instance.runtime / "processes.json"
+        launcher._private_json(path, {**owned_record(instance, session), "children": tracked_children()})
+        fake_relay(instance)
+        replacement = {"foreign": "replacement must be preserved"}
+        unchanged = instance.process_record_unchanged
+        def replace_before_check(opened):
+            launcher._private_json(path, replacement)
+            return unchanged(opened)
+        monkeypatch.setattr(instance, "process_record_unchanged", replace_before_check)
+        assert instance.retire_exited_relays(session) is False
+        assert json.loads(path.read_text()) == replacement
+        assert not list(instance.runtime.glob(".launch-*"))
+
+
+def test_retirement_preserves_unowned_temporary_file(tmp_path, monkeypatch):
+    instance = launcher.RealWeatherKit(kit(tmp_path))
+    with instance.locked():
+        session = instance.session()
+        path = instance.runtime / "processes.json"
+        launcher._private_json(path, {**owned_record(instance, session), "children": tracked_children()})
+        before = path.read_bytes()
+        fake_relay(instance)
+        monkeypatch.setattr(launcher.secrets, "token_hex", lambda _: "collision")
+        foreign = instance.runtime / ".launch-collision"
+        foreign.write_bytes(b"must remain untouched")
+        with pytest.raises(FileExistsError): instance.retire_exited_relays(session)
+        assert foreign.read_bytes() == b"must remain untouched"
+        assert path.read_bytes() == before
