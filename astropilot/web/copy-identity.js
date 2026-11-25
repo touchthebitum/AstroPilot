@@ -3,7 +3,8 @@
   const identity = globalThis.NightMeritCopyIdentity || {};
   const labels = {personal:'Personnel', fictitious:'Essai fictif', demonstration:'Essai fictif — météo simulée'};
   const kind = Object.prototype.hasOwnProperty.call(labels, identity.kind) ? identity.kind : 'unidentified';
-  const label = labels[kind] || 'Copie non identifiée';
+  const label = kind === 'fictitious' && identity.weather_mode === 'real'
+    ? 'Essai fictif — prévisions réelles' : labels[kind] || 'Copie non identifiée';
   function render() {
     if (document.getElementById('copy-identity-banner')) return;
     const style = document.createElement('style');

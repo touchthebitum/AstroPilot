@@ -364,6 +364,19 @@ def fetch_weather(lat: float, lon: float) -> WeatherSnapshot | None:
 
     location_time = LocationTimeResolver.resolve(lat, lon)
     timezone_name = location_time.timezone_name
+    from astropilot.real_weather_context import current as real_weather_context
+    if real_weather_context() is not None:
+        from astropilot.weather_relay import fetch_from_relay, RelayError
+        started = perf_counter()
+        try:
+            return fetch_from_relay(lat, lon, timezone_name)
+        except (RelayError, ValueError) as exc:
+            # In this explicit mode there is no direct-network or demo fallback.
+            # Ingress failures keep their existing error category and refusal.
+            if isinstance(exc, WeatherIngressError):
+                raise
+            log_weather("weather_fetch_failed", category="relay_unavailable", started=started)
+            return None
     from astropilot.demo_mode import context as demo_context, simulated_weather
     if demo_context()["enabled"]:
         return simulated_weather(lat, lon, timezone_name)

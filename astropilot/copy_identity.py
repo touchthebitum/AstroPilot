@@ -9,6 +9,13 @@ COPY_LABELS = {'personal': 'Personnel', 'fictitious': 'Essai fictif'}
 
 def capture_copy_identity(session, *, demonstration=False):
     kind = os.environ.get(COPY_KIND_ENV) if session else None
+    from astropilot.real_weather_context import current
+    real = current()
+    if (session is not None and kind == 'fictitious' and real is not None
+            and real.session_id == session.session_id and not demonstration):
+        return {'kind': 'fictitious', 'weather_mode': 'real',
+                'label': 'Essai fictif — prévisions réelles',
+                'name': Path(session.kit_directory).name}
     # Explicit runtime mode, not inferred from forecast content or restored files.
     if session is None and demonstration is True:
         return {'kind': 'demonstration', 'label': 'Essai fictif — météo simulée',
