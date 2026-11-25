@@ -170,3 +170,47 @@ else: raise AssertionError('Unpermitted port accessible')
 """
         subprocess.run(["/usr/bin/sandbox-exec", "-p", policy, sys.executable, "-c", script,
                         str(port), str(denied.getsockname()[1])], check=True, timeout=10)
+
+
+@pytest.mark.parametrize("relay_exit", [0, 124])
+def test_supervisor_reaps_exited_relay_while_application_remains_open(
+        tmp_path, monkeypatch, relay_exit):
+    instance = launcher.RealWeatherKit(kit(tmp_path))
+    instance.profile.mkdir(parents=True)
+    monkeypatch.setattr(launcher.sys, "platform", "darwin")
+    monkeypatch.setattr(instance, "validate_contents", lambda: None)
+    monkeypatch.setattr(instance, "ready", lambda child, role, *_: "owned " + role)
+    monkeypatch.setattr(launcher, "_process", lambda pid: "owned supervisor")
+    spawned = {}
+    real_sleep = launcher.time.sleep
+    real_reserve = launcher.reserve
+    monkeypatch.setattr(launcher, "reserve", lambda _: real_reserve(0))
+
+    def spawn(role, listener, *_):
+        assert role not in spawned, "Exited relay must never be restarted"
+        code = "import sys; sys.exit(%d)" % relay_exit if role == "relay" else "import time; time.sleep(60)"
+        child = subprocess.Popen([sys.executable, "-c", code])
+        spawned[role] = child
+        instance.children.append((role, child))
+        listener.close()
+        return child, dict(role=role, pid=child.pid)
+
+    ticks = 0
+    def tick(_):
+        nonlocal ticks
+        ticks += 1
+        assert ticks < 200, "Exited relay was never reaped while application stayed open"
+        real_sleep(.01)
+        # Inspect returncode without polling here: only the supervisor may reap.
+        if spawned["relay"].returncode is not None:
+            assert spawned["relay"].returncode == relay_exit
+            assert spawned["application"].poll() is None
+            instance.stopping = True
+
+    monkeypatch.setattr(instance, "spawn", spawn)
+    from types import SimpleNamespace
+    monkeypatch.setattr(launcher, "time", SimpleNamespace(sleep=tick, monotonic=launcher.time.monotonic))
+    instance.run("start-only")
+    assert set(spawned) == {"relay", "application"}
+    assert all(child.poll() is not None for child in spawned.values())
+    assert not (instance.runtime / "processes.json").exists()

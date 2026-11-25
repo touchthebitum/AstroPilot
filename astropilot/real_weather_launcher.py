@@ -354,6 +354,13 @@ class RealWeatherKit:
                         if action in {"start", "data"}:
                             subprocess.run(["/usr/bin/open", "http://127.0.0.1:%d/" % self.settings["application_port"]], check=True)
                         while child.poll() is None and not self.stopping:
+                            # Reap only relay processes spawned by this supervisor.
+                            # A dead relay must not remain a zombie whose changed
+                            # ps identity would prevent the normal stop action.
+                            # Keep the application open; never restart the relay.
+                            for role, owned in self.children:
+                                if role == "relay":
+                                    owned.poll()
                             time.sleep(NAP)
                         if self.stopping:
                             break
