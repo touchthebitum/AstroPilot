@@ -99,7 +99,12 @@ def main(*, port: int = 18831, open_browser: bool = True, isolated_candidate: bo
         if open_browser:
             threading.Thread(target=open_when_ready, daemon=True).start()
         print('DEMONSTRATION : profil fictif et météo simulée. Ctrl+C pour arrêter.', flush=True)
-        server.run(sockets=[listener])
+        try:
+            server.run(sockets=[listener])
+        except KeyboardInterrupt:
+            # Uvicorn re-raises Ctrl+C after completing its shutdown. Treat
+            # this explicit demo stop as normal instead of a PyInstaller error.
+            pass
     except (OSError, ValueError) as exc:
         raise SystemExit(f'Démonstration non démarrée : {exc}') from None
     finally:

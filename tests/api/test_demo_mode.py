@@ -76,6 +76,64 @@ def test_demo_refuses_other_ports_before_creating_profile(tmp_path,monkeypatch):
     assert not root.exists()
 
 
+@pytest.mark.parametrize('server_error', [KeyboardInterrupt, RuntimeError, SystemExit])
+def test_demo_only_swallows_server_keyboard_interrupt(tmp_path, monkeypatch, server_error):
+    import socket
+    import uvicorn
+    import astropilot.app as app_module
+
+    root = tmp_path / 'fictitious'
+    monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(root))
+    closed = []
+
+    class Listener:
+        def setsockopt(self, *args): pass
+        def bind(self, address): assert address == ('127.0.0.1', 18837)
+        def listen(self, backlog): pass
+        def close(self): closed.append(True)
+
+    listener = Listener()
+
+    class Server:
+        def __init__(self, config): pass
+        def run(self, sockets):
+            assert sockets == [listener]
+            raise server_error('server stopped')
+
+    monkeypatch.setattr(socket, 'socket', lambda *args, **kwargs: listener)
+    monkeypatch.setattr(app_module, 'create_app', lambda: object())
+    monkeypatch.setattr(uvicorn, 'Server', Server)
+    if server_error is KeyboardInterrupt:
+        assert demo_mode.main(port=18837, open_browser=False) is None
+    else:
+        with pytest.raises(server_error, match='server stopped'):
+            demo_mode.main(port=18837, open_browser=False)
+    assert closed == [True]
+    assert (root / demo_mode.MARKER).is_file()
+
+
+def test_demo_does_not_swallow_interrupt_before_server_run(tmp_path, monkeypatch):
+    import socket
+
+    monkeypatch.setenv('ASTROPILOT_DATA_DIR', str(tmp_path / 'fictitious'))
+    closed = []
+
+    class Listener:
+        def setsockopt(self, *args): pass
+        def bind(self, address): pass
+        def listen(self, backlog): pass
+        def close(self): closed.append(True)
+
+    def interrupted_profile(root):
+        raise KeyboardInterrupt('profile interrupted')
+
+    monkeypatch.setattr(socket, 'socket', lambda *args, **kwargs: Listener())
+    monkeypatch.setattr(demo_mode, 'prepare_profile', interrupted_profile)
+    with pytest.raises(KeyboardInterrupt, match='profile interrupted'):
+        demo_mode.main(port=18837, open_browser=False)
+    assert closed == [True]
+
+
 def test_transfer_to_demo_recreates_identity_after_early_application_import(tmp_path, monkeypatch):
     import json
     import re
