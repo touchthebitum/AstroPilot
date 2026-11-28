@@ -1,4 +1,6 @@
 "use strict";
+// Bound once by session-context.js; unmanaged development keeps legacy storage.
+const localStorage = globalThis.NightMeritStorage || globalThis.localStorage;
 if (!globalThis.NightMeritTime) {
   const notice = document.createElement('p');
   notice.setAttribute('role', 'alert');
@@ -54,7 +56,9 @@ function initializeUiMode() {
     try { localStorage.setItem(UI_MODE_KEY, mode); } catch (_) {}
   });
   window.addEventListener("storage", event => {
-    if (event.storageArea && event.storageArea !== localStorage) return;
+    if (!globalThis.NightMeritStorageEvent && event.storageArea && event.storageArea !== localStorage) return;
+    event = globalThis.NightMeritStorageEvent ? globalThis.NightMeritStorageEvent(event) : event;
+    if (!event) return;
     if (event.key === UI_MODE_KEY || event.key === null) applyUiMode(event.newValue);
   });
 }
@@ -829,7 +833,7 @@ const PENDING_FIELD_OBSERVATION_VERSION = 2;
 const FIELD_OBSERVATION_LOCK_KEY = "astropilot.fieldObservationLock";
 const FIELD_OBSERVATION_LOCK_VERSION = 2;
 const FIELD_OBSERVATION_PENDING_PREFIX = "astropilot.pendingFieldObservation.";
-const FIELD_OBSERVATION_WEB_LOCK_NAME = "astropilot.fieldObservationLock.acquire";
+const FIELD_OBSERVATION_WEB_LOCK_NAME = "astropilot.fieldObservationLock.acquire" + (globalThis.NightMeritStorageNamespace || "");
 let fieldObservationOperationGeneration = 0;
 let activeFieldObservationOperation = null;
 
@@ -1129,6 +1133,8 @@ function invalidateCurrentDecisionForSiteChange() {
   syncFieldObservationContext(); // Preserve draft, pending payload and UUID; block the old editor.
 }
 async function handleDecisionSiteStorageEvent(event) {
+  event = globalThis.NightMeritStorageEvent ? globalThis.NightMeritStorageEvent(event) : event;
+  if (!event) return;
   if (event.key !== DECISION_SITE_STORAGE_KEY && event.key !== null) return;
   if (state.configuration && event.key !== null && event.newValue === decisionSiteFingerprint()
       && !state.decisionSiteReloadRequired
@@ -1893,7 +1899,7 @@ function webLocksAvailable() {
 
 // Separate origin storage: localStorage.clear() cannot erase this recovery journal.
 // Every read/write and publication is serialized by the same mandatory Web Lock.
-const FIELD_OBSERVATION_RECOVERY_DB = "fieldObservationRecovery";
+const FIELD_OBSERVATION_RECOVERY_DB = "fieldObservationRecovery" + (globalThis.NightMeritStorageNamespace || "");
 let fieldObservationRecoveryJournal = null;
 let fieldObservationRecoveryResolved = new Set();
 let fieldObservationRecoveryRetired = new Set();
@@ -4071,6 +4077,8 @@ async function abandonFieldObservationLock() {
 }
 
 function handleFieldObservationStorageEvent(event) {
+  event = globalThis.NightMeritStorageEvent ? globalThis.NightMeritStorageEvent(event) : event;
+  if (!event) return;
   const lock = state.fieldObservationLock;
   const watchedKeys = lock?.status === "multiple_pending"
     ? lock.entries.map((entry) => entry.key) : [lock?.key];

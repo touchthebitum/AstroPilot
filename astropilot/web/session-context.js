@@ -8,17 +8,40 @@
   const diagnostic = new Set(['/v1/launcher-context', '/v1/runtime-identity', '/v1/data-context']);
   let storageBlocked = false;
   const scopeKey = 'nightmerit.browser-kit-scope.v1';
+  // Keep the legacy owner's data in place. A different extraction gets its own
+  // namespace, including recovery journals, instead of adopting or deleting it.
+  const namespaceRoot = 'nightmerit.copy-storage.v1:';
   try {
-    const previous = localStorage.getItem(scopeKey);
-    if (previous && previous !== binding.storage_scope) storageBlocked = true;
-    else localStorage.setItem(scopeKey, binding.storage_scope);
+    const storage = browser.localStorage;
+    const previous = storage.getItem(scopeKey);
+    if (!previous) storage.setItem(scopeKey, binding.storage_scope);
+    const prefix = previous && previous !== binding.storage_scope
+      ? `${namespaceRoot}${binding.storage_scope}:` : '';
+    const keys = () => Array.from({length:storage.length}, (_, i) => storage.key(i))
+      .filter(key => key !== null && (prefix ? key.startsWith(prefix)
+        : key !== scopeKey && !key.startsWith(namespaceRoot)));
+    globalThis.NightMeritStorageNamespace = prefix;
+    globalThis.NightMeritStorage = Object.freeze({
+      getItem: key => storage.getItem(prefix + key),
+      setItem: (key, value) => storage.setItem(prefix + key, value),
+      removeItem: key => storage.removeItem(prefix + key),
+      key: index => { const key = keys()[index]; return key === undefined ? null : key.slice(prefix.length); },
+      get length() { return keys().length; },
+    });
+    globalThis.NightMeritStorageEvent = event => {
+      if (event.storageArea && event.storageArea !== storage) return null;
+      if (event.key === null) return event; // Origin-wide clear still fails closed.
+      if (prefix ? !event.key.startsWith(prefix)
+          : event.key === scopeKey || event.key.startsWith(namespaceRoot)) return null;
+      return {key:event.key.slice(prefix.length), newValue:event.newValue, oldValue:event.oldValue};
+    };
   } catch (_) { storageBlocked = true; }
   function changed() {
     const show = () => {
       let notice = document.querySelector('#kit-session-changed-notice');
       if (!notice) { notice = document.createElement('p'); notice.id = 'kit-session-changed-notice'; notice.setAttribute('role', 'alert'); document.body.prepend(notice); }
       notice.textContent = storageBlocked
-        ? 'Cette fenêtre contient l’état d’une autre copie ou ne peut pas conserver son identité. Fermez cet onglet et ouvrez la bonne copie avec son propre lanceur ; aucune donnée ne doit être réinitialisée.'
+        ? 'Cette fenêtre ne peut pas conserver son identité dans le navigateur. Fermez cet onglet et ouvrez la bonne copie avec son propre lanceur ; aucune donnée ne doit être réinitialisée.'
         : 'Cette page appartient à une ancienne session ou à une autre copie. Rechargez-la puis vérifiez le dossier dans « Version et données » avant de continuer.';
     };
     if (document.body) show(); else document.addEventListener('DOMContentLoaded', show, {once:true});

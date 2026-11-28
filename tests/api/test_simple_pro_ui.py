@@ -21,7 +21,8 @@ const document = {documentElement:{dataset:{}}, querySelector: () => select,
  getElementById: id => labels[id] ||= {}, querySelectorAll: selector => selector === "[data-mode-disclosure]" ? details : []};
 const window = {addEventListener: (name, fn) => windowListeners[name] = fn};
 let saved = null;
-const localStorage = {getItem: () => saved, setItem: (key,value) => {writes.push([key,value]); saved=value;}};
+// Browser Storage is a window property, not a second application lexical binding.
+globalThis.localStorage = {getItem: () => saved, setItem: (key,value) => {writes.push([key,value]); saved=value;}};
 '''
     checks = r'''
 initializeUiMode();
