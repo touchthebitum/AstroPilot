@@ -16,6 +16,7 @@ from time import monotonic
 from zoneinfo import ZoneInfo
 
 URL = "https://api.open-meteo.com/v1/forecast"
+LOCATION_URL = "https://geocoding-api.open-meteo.com/v1/search"
 MAX_REQUEST = 4096
 MAX_RESPONSE = 1024 * 1024
 MAX_OPERATIONS = 512
@@ -66,20 +67,46 @@ def validate_request(value):
     return value
 
 
+def validate_location_request(value):
+    if not isinstance(value, dict) or set(value) != {"request_id", "name"}:
+        raise RelayError("relay_invalid_request")
+    identifier, name = value["request_id"], value["name"]
+    if (not isinstance(identifier, str) or re.fullmatch("[A-Za-z0-9_-]{1,128}", identifier) is None
+            or not isinstance(name, str) or not 2 <= len(name.strip()) <= 100
+            or any(ord(char) < 32 or ord(char) == 127 for char in name)):
+        raise RelayError("relay_invalid_request")
+    return value
+
+
+def fetch_location_upstream(value):
+    result = _fetch_json(LOCATION_URL, {"name": value["name"].strip(), "count": 8,
+                                      "language": "fr", "format": "json"})
+    from astropilot.location_search import clean_locations
+    try:
+        clean_locations(result["payload"])
+    except (ValueError, TypeError) as error:
+        raise RelayError("relay_invalid_location_response") from error
+    return result
+
+
 def fetch_upstream(value):
     """No environment credentials, redirects, retries or caller-selected URL."""
-    import requests
     params = {"latitude": value["latitude"], "longitude": value["longitude"],
               "timezone": value["timezone"], "forecast_days": 7,
               "temperature_unit": "celsius", "wind_speed_unit": "kmh",
               "precipitation_unit": "mm", "timeformat": "unixtime",
               "hourly": ",".join(HOURLY)}
+    return _fetch_json(URL, params)
+
+
+def _fetch_json(url, params):
+    import requests
     try:
         with requests.Session() as client:
             client.trust_env = False
             # Requests' default adapters do not retry; make that contract explicit.
             client.mount("https://", requests.adapters.HTTPAdapter(max_retries=0))
-            with client.get(URL, params=params, timeout=(5, 15), verify=True,
+            with client.get(url, params=params, timeout=(5, 15), verify=True,
                             allow_redirects=False, stream=True) as response:
                 if 300 <= response.status_code < 400:
                     raise RelayError("relay_redirect_refused")
@@ -103,16 +130,24 @@ def fetch_upstream(value):
 
 
 class RelayState:
-    def __init__(self, token, session_id, *, fetch=fetch_upstream, expire=None, deadline=DEADLINE, audit=None):
+    def __init__(self, token, session_id, *, fetch=fetch_upstream, fetch_locations=fetch_location_upstream, expire=None, deadline=DEADLINE, audit=None):
         self.token, self.session_id, self.fetch = token, session_id, fetch
+        self.fetch_locations = fetch_locations
         self.expire = expire if expire is not None else lambda: os._exit(124)
         self.deadline = deadline
         self.gate = threading.Lock()
         self.seen = set()
         self.audit = audit if audit is not None else lambda **_: None
 
-    def execute(self, value):
-        validate_request(value)
+    def execute(self, value, *, operation="forecast"):
+        if operation == "forecast":
+            validate_request(value)
+            fetch = self.fetch
+        elif operation == "locations":
+            validate_location_request(value)
+            fetch = self.fetch_locations
+        else:
+            raise RelayError("relay_invalid_request")
         if not self.gate.acquire(blocking=False):
             raise RelayError("relay_busy")
         try:
@@ -133,7 +168,7 @@ class RelayState:
             timer.start()
             category = "validated_transport"
             try:
-                result = self.fetch(value)
+                result = fetch(value)
                 if len(json.dumps(result, allow_nan=False).encode()) > MAX_RESPONSE + 2048:
                     raise RelayError("relay_response_too_large")
                 return result
@@ -177,7 +212,7 @@ def relay_server(listener, state):
             self.connection.settimeout(5)
             expected_host = "127.0.0.1:%s" % self.server.server_address[1]
             auth = self.headers.get_all("Authorization", [])
-            if (self.path != "/forecast" or self.headers.get("Host") != expected_host
+            if (self.path not in {"/forecast", "/locations"} or self.headers.get("Host") != expected_host
                     or self.headers.get("Origin") is not None or len(auth) != 1
                     or not hmac.compare_digest(auth[0].encode("utf-8"), ("Bearer " + state.token).encode("ascii"))):
                 self.reply(403, {"error": "relay_access_refused"})
@@ -194,8 +229,9 @@ def relay_server(listener, state):
                 raw = self.rfile.read(length)
                 if len(raw) != length:
                     raise RelayError("relay_invalid_request")
-                value = validate_request(decode(raw))
-                result = state.execute(value)
+                value = decode(raw)
+                operation = "forecast" if self.path == "/forecast" else "locations"
+                result = state.execute(value, operation=operation)
                 self.reply(200, {**result, "request_id": value["request_id"]})
             except RelayError as error:
                 category = str(error)
@@ -220,17 +256,14 @@ def relay_server(listener, state):
     return server
 
 
-def fetch_from_relay(latitude, longitude, timezone_name):
+def _request_relay(route, data):
     from urllib.request import Request, ProxyHandler, HTTPRedirectHandler, build_opener
-    from astropilot.real_weather_context import current, consume_request
-    from decision.weather.weather_ingress import validate_weather_payload
+    from astropilot.real_weather_context import current
     context = current()
     if context is None or context.relay_port is None:
         raise RelayError("relay_unavailable")
-    identifier = consume_request()
-    data = {"request_id": identifier, "latitude": latitude, "longitude": longitude, "timezone": timezone_name}
-    validate_request(data)
-    request = Request("http://127.0.0.1:%s/forecast" % context.relay_port,
+    identifier = data["request_id"]
+    request = Request("http://127.0.0.1:%s/%s" % (context.relay_port, route),
                       data=json.dumps(data).encode(), headers={"Content-Type": "application/json",
                       "Authorization": "Bearer " + context.relay_token})
     class NoRedirect(HTTPRedirectHandler):
@@ -253,5 +286,23 @@ def fetch_from_relay(latitude, longitude, timezone_name):
             raise ValueError()
     except (TypeError, ValueError) as error:
         raise RelayError("relay_invalid_timestamp") from error
+    return value, retrieved
+
+
+def fetch_locations_from_relay(name):
+    import secrets
+    data = {"request_id": "location-" + secrets.token_hex(16), "name": name}
+    validate_location_request(data)
+    value, _ = _request_relay("locations", data)
+    return value["payload"]
+
+
+def fetch_from_relay(latitude, longitude, timezone_name):
+    from astropilot.real_weather_context import consume_request
+    from decision.weather.weather_ingress import validate_weather_payload
+    identifier = consume_request()
+    data = {"request_id": identifier, "latitude": latitude, "longitude": longitude, "timezone": timezone_name}
+    validate_request(data)
+    value, retrieved = _request_relay("forecast", data)
     return validate_weather_payload(value["payload"], requested_latitude=latitude,
         requested_longitude=longitude, requested_timezone=timezone_name, retrieved_at_utc=retrieved)
