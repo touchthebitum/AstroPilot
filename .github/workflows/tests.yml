@@ -205,6 +205,8 @@ jobs:
           $env:BROWSER_NATIVE_HOME=$env:HOME
           $env:NODE_BINARY=(Get-Command node -ErrorAction Stop).Source
           $env:NIGHT_CHAIN_PROOF=Join-Path $env:RUNNER_TEMP 'night-chain-proof'
+          node --test scripts/ci/night_chain/devtools_port.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Browser debugger readiness regression failed' }
           node scripts/ci/night_chain/browser_environment.test.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Browser environment isolation regression failed' }
           uv run --locked --no-sync python scripts/ci/night_chain/run.py

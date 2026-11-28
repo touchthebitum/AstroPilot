@@ -4,6 +4,7 @@ const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_pro
 const http=require('node:http'),assert=require('node:assert/strict');
 const {timeHeaders,timeData}=require('./timezone_fixture.cjs');
 const {browserEnvironment}=require('../../scripts/ci/night_chain/browser_environment.cjs');
+const {readDebuggerPort}=require('../../scripts/ci/night_chain/devtools_port.cjs');
 const root=process.env.CASE_ROOT,proof=process.env.CASE_PROOF,chrome=process.env.CHROME_BINARY;
 assert(root&&proof&&chrome&&fs.existsSync(chrome));
 const web=path.resolve(__dirname,'../../astropilot/web');
@@ -43,8 +44,7 @@ const deadline=setTimeout(()=>{console.error('Analysis browser deadline');stop()
    '--disable-background-networking','--remote-debugging-port=0','--user-data-dir='+profile,'about:blank'],
    {stdio:['ignore',log,log],env:browserEnvironment(process.env)});
   let spawnError;child.on('error',e=>spawnError=e);
-  await waitFor(()=>{if(spawnError)throw spawnError;return fs.existsSync(path.join(profile,'DevToolsActivePort'));},'debugger');
-  const port=fs.readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').split('\n')[0];
+  const port=await waitFor(()=>{if(spawnError)throw spawnError;return readDebuggerPort(path.join(profile,'DevToolsActivePort'));},'debugger');
   const tab=await(await fetch('http://127.0.0.1:'+port+'/json/new?about:blank',{method:'PUT'})).json();
   ws=new WebSocket(tab.webSocketDebuggerUrl);
   await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});
