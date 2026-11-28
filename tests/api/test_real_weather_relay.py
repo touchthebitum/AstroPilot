@@ -32,11 +32,11 @@ def local_http(monkeypatch):
 
 
 @contextmanager
-def running(fetch):
+def running(fetch, **options):
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen()
-    state = relay.RelayState("a" * 64, "b" * 64, fetch=fetch)
+    state = relay.RelayState("a" * 64, "b" * 64, fetch=fetch, **options)
     server = relay.relay_server(listener, state)
     thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": .01}, daemon=True)
     thread.start()
@@ -237,3 +237,108 @@ def test_real_fictitious_identity_does_not_load_weather_or_profile(tmp_path, mon
     assert identity["label"] == "Essai fictif — prévisions réelles"
     assert identity["weather_mode"] == "real" and identity["kind"] == "fictitious"
     assert not profile.exists()
+
+
+LOCATION_REQUEST = {"request_id": "location-1", "name": "Buttes"}
+LOCATION_PAYLOAD = {"results": [{"name": "Buttes", "admin1": "Neuchâtel", "country": "Suisse",
+                                 "latitude": 46.8883, "longitude": 6.5525}]}
+
+
+@pytest.mark.parametrize("change", [{"url": "https://example.com"}, {"name": "x"},
+    {"name": " " * 10}, {"name": "x" * 101}, {"name": 123}, {"name": "Buttes\n"},
+    {"request_id": "bad/id"}, {"latitude": 46.8}])
+def test_location_rpc_rejects_invalid_input_without_consuming_budget(change):
+    state = relay.RelayState("a" * 64, "b" * 64,
+                             fetch_locations=lambda _: pytest.fail("upstream reached"))
+    with pytest.raises(relay.RelayError):
+        state.execute({**LOCATION_REQUEST, **change}, operation="locations")
+    assert not state.seen
+
+
+@pytest.mark.parametrize("options", [{"token": "wrong"}, {"origin": "https://example.com"}])
+def test_locations_rpc_has_same_authentication_boundary(local_http, options):
+    with running(lambda _: pytest.fail("forecast reached"),
+                 fetch_locations=lambda _: pytest.fail("geocoder reached")) as (port, state):
+        with pytest.raises(HTTPError) as error:
+            post(port, LOCATION_REQUEST, route="/locations", **options)
+        assert error.value.code == 403 and not state.seen
+
+
+def test_location_search_uses_relay_without_saving_or_consuming_analysis(local_http, monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    from astropilot.app import create_app
+    calls = []
+    def fetch(value):
+        calls.append(value)
+        return {"payload": LOCATION_PAYLOAD, "retrieved_at_utc": "2026-11-28T12:00:00+00:00"}
+    with running(lambda _: pytest.fail("forecast reached"), fetch_locations=fetch) as (port, _):
+        monkeypatch.setattr(context, "_runtime", context.RealWeatherContext("b" * 64, port, "a" * 64))
+        monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path / "profile"))
+        monkeypatch.setattr("astropilot.location_search.requests.get", lambda *_a, **_k: pytest.fail("direct geocoding"))
+        with context.explicit_weather_request("analysis-still-available"):
+            response = TestClient(create_app()).get("/v1/locations?name=Buttes")
+            assert context.consume_request() == "analysis-still-available"
+        assert response.status_code == 200
+        assert response.json()["results"] == [{"label": "Buttes — Neuchâtel — Suisse",
+                                               "latitude": 46.8883, "longitude": 6.5525}]
+        assert len(calls) == 1 and calls[0]["name"] == "Buttes"
+        assert not list(tmp_path.rglob("user_profile.json"))
+
+
+def test_location_failure_does_not_fall_back_or_retry(local_http, monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    from astropilot.app import create_app
+    calls = []
+    def fail(value):
+        calls.append(value)
+        raise relay.RelayError("relay_tls_error")
+    with running(lambda _: pytest.fail("forecast reached"), fetch_locations=fail) as (port, state):
+        monkeypatch.setattr(context, "_runtime", context.RealWeatherContext("b" * 64, port, "a" * 64))
+        monkeypatch.setenv("ASTROPILOT_DATA_DIR", str(tmp_path / "profile"))
+        monkeypatch.setattr("astropilot.location_search.requests.get", lambda *_a, **_k: pytest.fail("direct fallback"))
+        response = TestClient(create_app()).get("/v1/locations?name=Buttes")
+        assert response.status_code == 503
+        assert len(calls) == 1 and len(state.seen) == 1
+        assert not list(tmp_path.rglob("user_profile.json"))
+
+
+def test_location_and_forecast_share_budget_and_busy_gate(monkeypatch):
+    calls = []
+    state = relay.RelayState("a" * 64, "b" * 64,
+        fetch_locations=lambda value: calls.append(value) or {"payload": LOCATION_PAYLOAD})
+    state.execute(LOCATION_REQUEST, operation="locations")
+    with pytest.raises(relay.RelayError, match="already_consumed"):
+        state.execute(LOCATION_REQUEST, operation="locations")
+    with state.gate:
+        with pytest.raises(relay.RelayError, match="busy"):
+            state.execute({**LOCATION_REQUEST, "request_id": "new"}, operation="locations")
+    monkeypatch.setattr(relay, "MAX_OPERATIONS", 1)
+    with pytest.raises(relay.RelayError, match="operation_limit"):
+        state.execute(REQUEST)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("status,body,category", [(302, b"{}", "redirect_refused"),
+    (500, b"{}", "http_error"), (200, b"[]", "invalid_json"),
+    (200, b'{"results":"bad"}', "invalid_location_response"),
+    (200, b"x" * (relay.MAX_RESPONSE + 1), "response_too_large")])
+def test_location_upstream_is_fixed_tls_verified_and_bounded(monkeypatch, status, body, category):
+    import requests
+    class Response:
+        status_code = status
+        def __enter__(self): return self
+        def __exit__(self, *_): pass
+        def iter_content(self, size): yield body
+    class Client:
+        def __enter__(self): return self
+        def __exit__(self, *_): pass
+        def mount(self, prefix, adapter): assert adapter.max_retries.total == 0
+        def get(self, url, **kwargs):
+            assert url == relay.LOCATION_URL and not self.trust_env
+            assert kwargs["verify"] and not kwargs["allow_redirects"]
+            assert kwargs["timeout"] == (5, 15) and kwargs["stream"]
+            assert kwargs["params"] == {"name": "Buttes", "count": 8, "language": "fr", "format": "json"}
+            return Response()
+    monkeypatch.setattr(requests, "Session", Client)
+    with pytest.raises(relay.RelayError, match=category):
+        relay.fetch_location_upstream(LOCATION_REQUEST)
